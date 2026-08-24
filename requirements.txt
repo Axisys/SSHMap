@@ -1,0 +1,11 @@
+# SSH Map (NodeVisualSSH) v0.8.3 — зависимости для запуска
+# Установка: pip install -r requirements.txt
+
+PySide6>=6.5        # GUI framework (Qt 6): QGraphicsScene/View, QThread
+paramiko>=3.0       # SSH-клиент (подключения и интерактивный терминал)
+keyring>=24.0       # Системное хранилище паролей (Credential Manager)
+pyte>=0.8.0         # ANSI-эмуляция терминала v0.8 (modules/terminal_screen.py — жёсткая зависимость)
+
+# Опционально — backend keyring под Windows (без него пароль не переживёт перезапуск):
+# pywin32
+# Альтернатива: keyrings-cryptunprotect-backend

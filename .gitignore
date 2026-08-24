@@ -1,0 +1,51 @@
+# AUDIT v0.8.3 (средняя #11, #7): игнор артефактов сборки и тестовых временных файлов
+
+# Виртуальное окружение
+venv/
+env/
+ENV/
+
+# Файлы Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Избыточная документация
+AUDIT.md
+DESIGN.md
+DOCUMENTATION.md
+
+# Секреты и конфигурации
+.env
+*.key
+config_secret.json
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Временные файлы smoke-тестов
+_tmp_testdata/
+_audit_i18n.txt
+_audit_reg81.txt
+_audit_reg83.txt
+_audit_smoke.txt
+
+# Логи приложения
+*.log
+
+# Данные карт: содержат топологию/хосты реальной сети — не публиковать
+server_map1.json
+*.sshmap.json
+
+# Профили SSH (на случай запуска из корня проекта)
+.sshmap_profiles.json
+
+# Артефакты сборки / инструменты
+build/
+dist/
+*.egg-info/
+.pytest_cache/
