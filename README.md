@@ -9,7 +9,6 @@
 ## 1. Запуск и тесты
 
 ```bash
-cd F:/PythonAI/sshmap
 pip install PySide6 paramiko keyring pyte   # все зависимости из requirements.txt
 python main.py                              # запуск GUI
 
@@ -74,7 +73,7 @@ tests/                       # smoke_test.py, regression_v081/v083/v091.py, chec
   "connections": [{"source_id": "...", "target_id": "...", "label": "", "type": "ssh"}],
   "notes":  [{"id": "...", "text": "", "x": 0.0, "y": 0.0, "width": 240.0, "height": 160.0}],
   "groups": [{"id": "...", "name": "", "x": 0.0, "y": 0.0, "width": 480.0, "height": 320.0}],
-  "background": {"path": "C:/schemes/dc.png", "x": 0.0, "y": 0.0, "width": 1920.0, "height": 1080.0},
+  "background": {"path": "/path/to/background.png", "x": 0.0, "y": 0.0, "width": 1920.0, "height": 1080.0},
   "zoom": 1.0, "center_x": 0.0, "center_y": 0.0
 }
 ```
