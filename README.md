@@ -9,7 +9,6 @@
 ## 1. Запуск и тесты
 
 ```bash
-cd F:/PythonAI/sshmap
 pip install PySide6 paramiko keyring pyte   # все зависимости из requirements.txt
 python main.py                              # запуск GUI
 
@@ -46,19 +45,22 @@ modules/
 ├── terminal_screen.py       # TerminalScreen: pyte.Screen(120x32)+ByteStream, feed под threading.Lock
 ├── host_key_policy.py       # SshKnownHostsPolicy: ~/.sshmap/known_hosts; изменённый ключ → BadHostKeyException (MITM)
 ├── external_terminal.py     # (v0.8.2) системный терминал ОС; настройки ~/.sshmap_settings.json; пароль НЕ в argv
-├── undo_commands.py         # (v0.8.3) 7 QUndoCommand: MoveNode(merge), AddRemoveNode(+стрелки), AddRemoveConnection,
-│                            #   AddRemoveNote, EditTextNote(дебаунс 600мс), EditConnection, EditNodeData
+├── undo_commands.py         # (v0.8.3) 10 QUndoCommand: MoveNode(merge), MoveGroup, ResizeGroup, EditGroupName,
+│                            #   AddRemoveNode(+стрелки), AddRemoveConnection, AddRemoveNote,
+│                            #   EditTextNote(дебаунс 600мс), EditConnection, EditNodeData
 └── logger.py                # setup_logging()/get_logger(__name__)
-storage/project.py           # save_project/load_project — JSON версии "0.9" (+ ключ "background")
+storage/project.py           # save_project/load_project — JSON версии "0.9" (VERSION_FORMAT из version.py; + ключ "background")
 services/
 ├── credential_manager.py    # keyring-абстракция (синглтон get_credential_manager()); graceful fallback без keyring
-└── status_checker.py        # StatusChecker: QTimer разводит раунды, пробы в _ProbeThread; probe_ssh() → online/warn/offline
+├── status_checker.py        # StatusChecker: QTimer разводит раунды, пробы в _ProbeThread; probe_ssh() → online/warn/offline
+└── system_info_collector.py # SystemInfoCollector (v0.9): автосбор ОС/CPU/RAM/диск Linux-сервера одной exec_command-сессией
+version.py                   # единая точка версий: APP_VERSION="0.9.1", VERSION_FORMAT="0.9"
 dialogs/                     # AddServerDialog, SSHConnectDialog (+кнопка внешнего терминала),
                              # ConnectionDialog/EditConnectionDialog, ProfileManagerDialog
 ui/main_window.py            # MainWindow (~1950 строк): контроллер; undo_stack (QUndoStack), dirty по canUndo()+baseline;
-                             #   экспорт карты в PNG/JPEG (v0.9.1), установка/удаление фона
+                             #   экспорт карты в PNG/JPEG (v0.9.1), установка/удаление фона, «Собрать информацию» (v0.9)
 i18n/                        # t(key,**kwargs); en.json/ru.json/zh.json — 241 ключ, наборы идентичны; ru — дефолт
-tests/                       # smoke_test.py, regression_v081/v083/v091.py, check_i18n_keys.py
+tests/                       # smoke_test.py (256), regression_v081/v083/v091.py, smoke_collapse.py, check_i18n_keys.py
 ```
 
 ---
@@ -74,7 +76,7 @@ tests/                       # smoke_test.py, regression_v081/v083/v091.py, chec
   "connections": [{"source_id": "...", "target_id": "...", "label": "", "type": "ssh"}],
   "notes":  [{"id": "...", "text": "", "x": 0.0, "y": 0.0, "width": 240.0, "height": 160.0}],
   "groups": [{"id": "...", "name": "", "x": 0.0, "y": 0.0, "width": 480.0, "height": 320.0}],
-  "background": {"path": "C:/schemes/dc.png", "x": 0.0, "y": 0.0, "width": 1920.0, "height": 1080.0},
+  "background": {"path": "/path/to/background.png", "x": 0.0, "y": 0.0, "width": 1920.0, "height": 1080.0},
   "zoom": 1.0, "center_x": 0.0, "center_y": 0.0
 }
 ```
@@ -89,17 +91,17 @@ tests/                       # smoke_test.py, regression_v081/v083/v091.py, chec
 
 ## 4. Ключевые поведения (важно для модификации кода)
 
-### Undo/Redo (v0.8.3)
-- Любое изменение сцены делается через `MainWindow._push_command(cmd)`; сцена меняется **только** внутри `redo()/undo()` команды — `QUndoStack.push()` сам вызывает redo.
-- Dirty-маркер: `self._dirty = undo_stack.canUndo() or self._undo_baseline_dirty`; `_do_save()` вызывает `_reset_undo_stack()` (новая baseline). `_undo_baseline_dirty` покрывает dirty-причины вне undo (статусы, группы).
-- В undo НЕ входят: статусы узлов, перемещение/resize групп, координаты при загрузке.
-- Перетаскивание узла: MapView ловит release, эмитит `node_drag_committed(node, old, new)` → CmdMoveNode.
-
 ### Статусы (v0.7.1)
 `probe_ssh(host, port)`: TCP открыт + SSH-баннер → `online`; порт открыт без баннера → `warn`; иначе `offline`. Пробы только в `_ProbeThread` (не на GUI-потоке). `start_status_checks()` вызывается из main.py один раз после `show()`.
 
 ### Терминал (v0.8)
 Сырые байты SSH → `TerminalScreen.feed()` (pyte, под lock) → QTimer ~30 FPS → HTML в QPlainTextEdit. Известный хост пиннится в `~/.sshmap/known_hosts`.
+
+### Undo/Redo (v0.8.3)
+- Любое изменение сцены делается через `MainWindow._push_command(cmd)`; сцена меняется **только** внутри `redo()/undo()` команды — `QUndoStack.push()` сам вызывает redo.
+- Dirty-маркер: `self._dirty = undo_stack.canUndo() or self._undo_baseline_dirty`; `_do_save()` вызывает `_reset_undo_stack()` (новая baseline). `_undo_baseline_dirty` покрывает dirty-причины вне undo (статусы, фон).
+- В undo НЕ входят: статусы узлов, координаты при загрузке, геометрия фона. Группы (move/resize/переименование) — входят (CmdMoveGroup/CmdResizeGroup/CmdEditGroupName).
+- Перетаскивание узла: MapView ловит release, эмитит `node_drag_committed(node, old, new)` → CmdMoveNode.
 
 ### Безопасность
 Пароли: только keyring (профили `"profile:{id}"`, серверы по server_id). При недоступном keyring приложение работает, но пароли не переживают перезапуск. Внешний терминал: пароль вводит ssh-клиент ОС, никогда не argv.
@@ -135,14 +137,25 @@ ru (дефолт) / en / zh. Правило: новый ключ добавля�
 
 **Реализовано полностью:** карта (узлы/Безье-связи 6 типов/заметки/группы), статусы online/warn/offline, терминал на pyte (vim/htop работают), внешний системный терминал, undo/redo, автосбор информации о Linux-сервере (v0.9), профили + keyring, i18n ru/en/zh, контекстные меню всех объектов, fit/zoom/центрирование, экспорт карты в PNG/JPEG и фоновое изображение с drag/resize (v0.9.1).
 
-**Известные ограничения:** undo не покрывает группы и геометрию фона; фоновое изображение хранится путём (при переносе проекта на другую машину файл нужно переносить вместе с картой).
+**Известные ограничения:** undo не покрывает статусы узлов и геометрию фона; фоновое изображение хранится путём (при переносе проекта на другую машину файл нужно переносить вместе с картой); язык интерфейса сейчас выбирается программно (UI-переключатель — в v1.1).
 
 **Roadmap (по приоритету):**
 1. **v0.9.2**: горячие клавиши + палитра команд Ctrl+K (fuzzy-поиск по действиям и серверам).
 2. **v0.9.3**: дублирование узла (Ctrl+D) + мультивыделение + групповые операции.
 3. **v0.9.4**: теги/цветные метки серверов (prod/staging/dev) + фильтр.
 4. **v0.9.5**: экспорт карты в draw.io (`.drawio`, mxGraph XML через ElementTree, без новых зависимостей); фон отдельным слоем; импорт — опционально, только своих файлов. Предусловие: модель данных после v0.9.4.
-5. **v0.10**: jump host (ProxyJump) + agent forwarding; импорт из ~/.ssh/config; поиск Ctrl+F.
-6. **v1.0**: доработки дизайна (DESIGN.md). **v1.x**: SFTP-браузер. **v2.0**: Prometheus-метрики.
+5. **v0.9.6**: контекстное меню в сайдбаре (ПКМ по серверу в дереве: SSH / внешний терминал / редактировать / копировать IP·hostname / ping / собрать информацию / показать на карте / удалить).
+6. **v0.9.7**: автосохранение (~/.sshmap/autosave/) + кольцевые бэкапы при каждом save; восстановление при старте.
+7. **v0.9.8**: экспорт/импорт профилей SSH (без паролей, слияние по имени).
+8. **v0.10**: jump host (ProxyJump) + agent forwarding; импорт из ~/.ssh/config; поиск Ctrl+F.
+9. **v1.0**: доработки дизайна. **v1.1**: диалог настроек (шрифты UI и терминала, сетка/FPS терминала, интервалы StatusChecker, автосохранение, язык интерфейса). **v1.x**: SFTP-браузер. **v2.0**: Prometheus-метрики.
 
 ---
+
+## 8. Лицензия и безопасность
+
+- Пароли никогда не покидают машину: keyring ОС (Windows Credential Manager / GNOME Keyring / macOS Keychain); в JSON проекта пароль не пишется никогда.
+- known_hosts-пиннинг (`~/.sshmap/known_hosts`): смена ключа хоста → отказ подключения (защита от MITM).
+- Внешний системный терминал: пароль вводится ssh-клиенту ОС интерактивно, никогда не передаётся в argv.
+
+*(Пункт о лицензии заполните при публикации: добавьте файл LICENSE и строку здесь.)*
