@@ -245,5 +245,13 @@
   "palette.placeholder": "Введите команду или имя сервера...",
   "palette.hint": "Enter — выполнить, Up/Down — навигация, Esc — закрыть",
   "palette.kind_server": "Сервер",
-  "msg.select_server_edit": "Выделите сервер на карте для редактирования."
+  "msg.select_server_edit": "Выделите сервер на карте для редактирования.",
+  "ctx.duplicate_server": "Дублировать сервер",
+  "edit.duplicate": "Дублировать сервер",
+  "edit.connect_selected": "Соединить выделенные",
+  "edit.delete_selected": "Удалить выделенные",
+  "status.server_duplicated": "Создана копия: {alias}",
+  "msg.confirm_delete_many": "Удалить выделенные серверы ({count})?\nКаждый будет проверен на запущенные SSH-сессии.",
+  "status.servers_deleted_multi": "Удалено серверов: {count}",
+  "status.connections_created_multi": "Создано связей: {count}"
 }

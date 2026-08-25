@@ -156,6 +156,21 @@ def build_ssh_args(host: str, user: str, port: int = 22,
     return args
 
 
+def _sh_quote(s: str) -> str:
+    """Экранирование одного аргумента для bash -c '...' (POSIX single-quote).
+
+    v0.9.4-fix: пути к ключу с пробелами/кавычками ломали shell-команду,
+    собранную конкатенацией. Используется ТОЛЬКО для Linux/macOS-веток,
+    где команда передаётся строкой в `bash -c`.
+    """
+    return "'" + s.replace("'", "'\"'\"'") + "'"
+
+
+def _shell_join(args: List[str]) -> str:
+    """Склеить argv в безопасную sh-строку."""
+    return " ".join(_sh_quote(a) for a in args)
+
+
 def build_command(terminal: str, host: str, user: str, port: int = 22,
                   key_path: Optional[str] = None,
                   jump: Optional[str] = None) -> List[str]:
@@ -185,12 +200,16 @@ def build_command(terminal: str, host: str, user: str, port: int = 22,
         ssh_exe = _which("ssh") or "ssh"
         return ["conhost.exe", "cmd.exe", "/c", ssh_exe] + ssh_args[1:]
     if terminal == "open_terminal":  # macOS
-        script = " ".join(ssh_args)
-        return ["open", "-a", "Terminal", "bash", "-c",
-                f"{script}; exec bash"]
+        # v0.9.4-fix: `open -a Terminal bash -c ...` не работает — open так
+        # аргументы не передаёт. Корректный способ — osascript: открываем
+        # Terminal.app и выполняем в нём команду (окно переживает разрыв
+        # сессии за счёт `exec bash`).
+        script = f"{_shell_join(ssh_args)}; exec bash"
+        return ["osascript", "-e",
+                'tell application "Terminal" to do script ' + _sh_quote(script)]
     # Linux-семейство: gnome-terminal/konsole/xfce4-terminal/alacritty/kitty/
     # x-terminal-emulator
-    shell_cmd = f"{' '.join(ssh_args)}; exec bash"
+    shell_cmd = f"{_shell_join(ssh_args)}; exec bash"
     if terminal in ("gnome-terminal", "konsole", "xfce4-terminal",
                     "x-terminal-emulator", "alacritty", "kitty"):
         exe = _which(terminal) or terminal

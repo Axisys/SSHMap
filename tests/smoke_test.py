@@ -6,6 +6,24 @@
 """
 import json, os, re, sys, tempfile, py_compile, traceback
 
+# v0.9.4-fix: на консоли cp1251 (типичная русская Windows) print имени проверки
+# с «→» падал с UnicodeEncodeError и убивал весь прогон. UTF-8 + replace —
+# отчёт доезжает до пользователя на любой кодировке консоли.
+try:
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+except Exception:
+    pass  # старый Python без reconfigure — живём как раньше
+
+# v0.9.4-fix: изоляция HOME на время всего процесса теста. Тесты пишут
+# ~/.sshmap/config.json и ~/.sshmap_settings.json; в песочницах/CI запись
+# в реальный home запрещена или нежелательна — теперь весь ввод-вывод идёт
+# во временную директорию (до импорта модулей приложения!).
+if os.environ.get("SSHMAP_TEST_NO_HOME_ISOLATION") != "1":
+    _test_home = tempfile.mkdtemp(prefix="sshmap_test_home_")
+    os.environ["HOME"] = _test_home
+    os.environ["USERPROFILE"] = _test_home
+
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # корень проекта (родитель tests/)
 sys.path.insert(0, ROOT)

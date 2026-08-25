@@ -21,6 +21,7 @@ from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QLabel, QFormLayout, QLineEdit, QSpinBox,
     QPushButton, QHBoxLayout, QFileDialog, QMessageBox, QComboBox,
 )
+from PySide6.QtCore import QCoreApplication, QEventLoop as _QEL  # v0.9.4-fix: неблокирующее закрытие
 
 
 class SSHConnectDialog(QDialog):
@@ -375,11 +376,25 @@ class SSHConnectDialog(QDialog):
         """
         worker = getattr(self, "_ssh_worker", None)
         if worker is not None:
-            if worker.isRunning() and not worker.wait(30000):
-                try:
-                    from modules.logger import get_logger as _get_log
-                    _get_log(__name__).warning("SSHWorker did not finish before dialog close")
-                except Exception:
-                    pass
+            # v0.9.4-fix: раньше wait(30000) замораживал GUI до 30 c при закрытии
+            # окна во время подключения. Внутренние сетевые таймауты worker'а
+            # (socket 5 c / paramiko 15 c) гарантируют скорое завершение, поэтому
+            # ждём максимум 2 c с обработкой событий (GUI остаётся отзывчивым),
+            # дальше — requestInterruption + короткие добивочные циклы.
+            if worker.isRunning():
+                deadline_ms = 2000
+                while worker.isRunning() and deadline_ms > 0:
+                    QCoreApplication.processEvents(_QEL.AllEvents, 50)
+                    worker.wait(50)
+                    deadline_ms -= 50
+                if worker.isRunning():
+                    try:
+                        from modules.logger import get_logger as _get_log
+                        _get_log(__name__).warning(
+                            "SSHWorker still running at dialog close; "
+                            "detaching (internal timeouts will finish it)")
+                    except Exception:
+                        pass
+                    worker.setParent(None)  # отвязать от диалога: QObject переживёт закрытие окна
         event.accept()
 

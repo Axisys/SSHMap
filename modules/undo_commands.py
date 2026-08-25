@@ -80,6 +80,36 @@ class CmdMoveNode(_MapCommand):
         self._apply(self._old)
 
 
+# ── MoveNodes: перемещение нескольких выделенных узлов (v0.9.3) ──
+
+class CmdMoveNodes(_MapCommand):
+    """v0.9.3: перемещение НЕСКОЛЬКИХ выделенных узлов одним жестом.
+
+    Один жест группового drag'а → одна undo-команда (а не N отдельных
+    CmdMoveNode). moves — список (node, old_pos, new_pos); узлы хранятся
+    ссылками, позиции — копиями QPointF. Слияния нет: жест порождает ровно
+    одну команду.
+    """
+
+    def __init__(self, win, moves):
+        super().__init__(win, "Move servers")
+        self._moves = [(node, QPointF(old), QPointF(new)) for node, old, new in moves]
+
+    def _apply(self, use_old: bool):
+        for node, old, new in self._moves:
+            try:
+                if node.scene() is not None:
+                    node.setPos(old if use_old else new)
+            except RuntimeError:
+                pass  # Qt teardown — item уничтожен
+
+    def redo(self):
+        self._apply(False)
+
+    def undo(self):
+        self._apply(True)
+
+
 # ── MoveGroup: перемещение группы (merge перетаскивания одним жестом) ──
 # AUDIT v0.8.3 (#6): раньше перемещение/resize/переименование групп шли только
 # в dirty-маркер — Ctrl+Z после сдвига группы ничего не откатывал.
@@ -201,19 +231,46 @@ class CmdAddRemoveNode(_MapCommand):
         self._data = data          # единый ServerData (id стабилен между undo/redo)
         self._mode = mode
         self._arrows = list(arrows or [])  # (source_id, target_id, label, ctype)
+        # v0.9.4-fix (орфанные пароли): при удалении узла пароль удаляется из
+        # keyring; чтобы Ctrl+Z мог его вернуть, заранее читаем его в память.
+        self._stashed_password: Optional[str] = None
+        if mode == "remove":
+            try:
+                from services.credential_manager import get_credential_manager
+                self._stashed_password = get_credential_manager().load_password(data.id)
+            except Exception:
+                self._stashed_password = None
+
+    def _delete_keyring_password(self):
+        try:
+            from services.credential_manager import get_credential_manager
+            get_credential_manager().delete_password(self._data.id)
+        except Exception:
+            pass
+
+    def _restore_keyring_password(self):
+        if self._stashed_password:
+            try:
+                from services.credential_manager import get_credential_manager
+                get_credential_manager().save_password(self._data.id, self._stashed_password)
+            except Exception:
+                pass
 
     def redo(self):
         if self._mode == "add":
             self._scene.add_server(self._data)
         else:
             self._scene.remove_server(self._data.id)
+            self._delete_keyring_password()
         self._refresh()
 
     def undo(self):
         if self._mode == "add":
             self._scene.remove_server(self._data.id)
+            self._delete_keyring_password()
         else:
             self._scene.add_server(self._data)
+            self._restore_keyring_password()
             for src, tgt, lbl, ctype in self._arrows:
                 if (self._scene.has_node(src) and self._scene.has_node(tgt)
                         and not self._scene.has_connection(src, tgt)):
@@ -256,6 +313,38 @@ class CmdAddRemoveConnection(_MapCommand):
                 self._scene.remove_connection(arrow)
         else:
             self._scene.add_connection(self._src, self._tgt, self._label, self._ctype)
+        self._refresh()
+
+
+# ── ConnectSelected: связи между всеми выделенными узлами (v0.9.3) ──
+
+class CmdConnectSelected(_MapCommand):
+    """v0.9.3: создать полный граф связей между выделенными узлами одной
+    операцией (пары (source_id, target_id) уже отфильтрованы точкой входа).
+    Undo удаляет все созданные стрелки, redo восстанавливает их."""
+
+    def __init__(self, win, scene, pairs):
+        super().__init__(win, "Connect servers")
+        self._scene = scene
+        self._pairs = list(pairs)
+
+    def _apply(self, present: bool):
+        for src, tgt in self._pairs:
+            has = self._scene.has_connection(src, tgt)
+            if present and not has:
+                self._scene.add_connection(src, tgt)
+            elif not present and has:
+                for a in self._scene.arrows():
+                    if a.source.data.id == src and a.target.data.id == tgt:
+                        self._scene.remove_connection(a)
+                        break
+
+    def redo(self):
+        self._apply(True)
+        self._refresh()
+
+    def undo(self):
+        self._apply(False)
         self._refresh()
 
 

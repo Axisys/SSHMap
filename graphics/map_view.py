@@ -59,6 +59,9 @@ class MapView(QGraphicsView):
     zoomChanged = Signal(float)       # UI polish: текущий зум — для % в статус-баре
     # v0.8.3: завершён жест перетаскивания узла (node, old_scene_pos, new_scene_pos)
     node_drag_committed = Signal(object, object, object)
+    # v0.9.3: завершён жест ГРУППОВОГО перетаскивания — список
+    # [(node, old_pos: QPointF, new_pos: QPointF)] для одной undo-команды
+    nodes_drag_committed = Signal(list)
 
     def __init__(self, scene: "MapScene", parent=None):
         super().__init__(scene, parent)
@@ -76,6 +79,14 @@ class MapView(QGraphicsView):
         # v0.8.3: активный жест перемещения узла (для undo-команды CmdMoveNode)
         self._move_drag_node: Optional[ServerNode] = None
         self._move_drag_old = None  # QPointF — позиция до начала жеста
+
+        # ── v0.9.3: мультивыделение + групповой drag ──────────────
+        # Рамка выделения (Ctrl+ЛКМ по пустому месту): QGraphicsRectItem в сцене.
+        self._rubber_select_item = None          # QGraphicsRectItem рамки
+        self._rubber_select_origin = None        # QPointF стартовой точки сцены
+        self._rubber_saved_selection = []        # выделение на старте Ctrl+драга
+        # Групповой drag: позиции всех выделенных узлов до жеста
+        self._group_drag_olds = []               # [(node, QPointF), ...]
 
     # UI polish: допустимый диапазон зума (общий для колеса, fit и восстановления).
     ZOOM_MIN = 0.1
@@ -261,6 +272,23 @@ class MapView(QGraphicsView):
                 self._move_drag_node = node
                 from PySide6.QtCore import QPointF
                 self._move_drag_old = QPointF(node.pos())
+                # v0.9.3: если узел уже входит в мультивыделение — это ГРУППОВОЙ
+                # drag (двигаются все выделенные). Позиции до жеста — для undo.
+                if node.isSelected() and len([i for i in self.scene().selectedItems()
+                                              if isinstance(i, ServerNode)]) > 1:
+                    self._group_drag_olds = [
+                        (n, QPointF(n.pos()))
+                        for n in self.scene().selectedItems()
+                        if isinstance(n, ServerNode)
+                    ]
+                else:
+                    self._group_drag_olds = []
+            # v0.9.3: Ctrl+ЛКМ по пустому месту → рамка выделения (rubber band).
+            elif bool(event.modifiers() & Qt.ControlModifier):
+                from PySide6.QtWidgets import QGraphicsRectItem
+                self._start_rubber_select(scene_pos,
+                                          event.modifiers() & Qt.ShiftModifier)
+                return  # панораму не стартуем
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event: QMouseEvent):
@@ -270,9 +298,17 @@ class MapView(QGraphicsView):
             p0 = edge_point(src_rect, src_rect.center(), scene_pos)
             path, _, _ = build_curve(p0, scene_pos)
             self._rubber_band.setPath(path)
+        # v0.9.3: обновление рамки выделения
+        elif self._rubber_select_item is not None:
+            scene_pos = self.mapToScene(event.position().toPoint())
+            self._update_rubber_select(scene_pos)
         super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event: QMouseEvent):
+        # v0.9.3: рамка выделения завершена — фиксируем выделение
+        if self._rubber_select_item is not None and event.button() == Qt.LeftButton:
+            self._finish_rubber_select()
+            return  # нажатие не передавалось в Qt — отпускание тоже забираем
         if (self._connect_source is not None and event.button() == Qt.LeftButton):
             source = self._connect_source
             scene_pos = self.mapToScene(event.position().toPoint())
@@ -300,13 +336,30 @@ class MapView(QGraphicsView):
                     new = node.pos()
                     if old is not None and (abs(new.x() - old.x()) > 0.5
                                             or abs(new.y() - old.y()) > 0.5):
-                        self.node_drag_committed.emit(node, old, QPointF(new))
+                        # v0.9.3: групповой drag → ОДНА команда на все выделенные;
+                        # одиночный drag → прежний сигнал с одним узлом.
+                        olds = getattr(self, "_group_drag_olds", [])
+                        self._group_drag_olds = []
+                        moved = [(n, o, QPointF(n.pos())) for n, o in olds
+                                 if n.scene() is not None]
+                        if len(moved) > 1 and any(
+                                abs(n.pos().x() - o.x()) > 0.5 or abs(n.pos().y() - o.y()) > 0.5
+                                for n, o, _ in moved):
+                            self.nodes_drag_committed.emit(moved)
+                        elif abs(new.x() - old.x()) > 0.5 or abs(new.y() - old.y()) > 0.5:
+                            self.node_drag_committed.emit(node, old, QPointF(new))
                 except RuntimeError:
                     pass  # Qt teardown — жест не завершён штатно, команды не будет
+            else:
+                self._group_drag_olds = []
             self.setDragMode(QGraphicsView.ScrollHandDrag)
         super().mouseReleaseEvent(event)
 
     def keyPressEvent(self, event: QKeyEvent):
+        if self._rubber_select_item is not None:
+            # Esc во время рамки выделения — отмена без изменения выделения
+            self._finish_rubber_select()
+            return
         if self._connect_source is not None:
             # Любая клавиша во время drag-режима (в т.ч. Esc/Delete) — отмена drag'а;
             # удаление узлов здесь намеренно НЕ выполняем.
@@ -383,6 +436,48 @@ class MapView(QGraphicsView):
                 pass  # legacy-биндинг без globalPosition() — ниже event.globalPos()
         return event.globalPos()
 
+    # ── v0.9.3: рамка выделения (Ctrl+ЛКМ по пустому месту) ─────────
+
+    def _start_rubber_select(self, scene_pos, additive: bool = False):
+        """Начать рисование рамки выделения. Shift добавляет к текущему
+        выделению, без Shift — заменяет его."""
+        from PySide6.QtWidgets import QGraphicsRectItem
+        self._rubber_select_origin = scene_pos
+        self._rubber_saved_selection = list(self.scene().selectedItems()) \
+            if additive else []
+        pen = QPen(QColor("#38bdf8"), 0)  # cosmetic pen — толщина не зависит от зума
+        self._rubber_select_item = QGraphicsRectItem()
+        self._rubber_select_item.setPen(pen)
+        self._rubber_select_item.setBrush(QBrush(QColor(56, 189, 248, 30)))
+        self._rubber_select_item.setZValue(200)
+        self.scene().addItem(self._rubber_select_item)
+        self.setCursor(Qt.CrossCursor)
+
+    def _update_rubber_select(self, scene_pos):
+        """Обновить геометрию рамки + live-выделение пересекаемых узлов."""
+        origin = self._rubber_select_origin
+        rect = QRectF(origin, scene_pos).normalized()
+        self._rubber_select_item.setRect(rect)
+        # live: подсвечиваем узлы под рамкой прямо во время драга
+        base_ids = {id(n) for n in getattr(self, "_rubber_saved_selection", [])}
+        for item in self.scene().items():
+            if isinstance(item, ServerNode):
+                hit = rect.intersects(item.sceneBoundingRect())
+                want = hit or (id(item) in base_ids)
+                if item.isSelected() != want:
+                    item.setSelected(want)
+
+    def _finish_rubber_select(self):
+        """Убрать рамку; итоговое выделение уже установлено в _update_rubber_select."""
+        if self._rubber_select_item is not None:
+            sc = self._rubber_select_item.scene()
+            if sc is not None:
+                sc.removeItem(self._rubber_select_item)
+            self._rubber_select_item = None
+        self._rubber_select_origin = None
+        self._rubber_saved_selection = []
+        self.unsetCursor()
+
     def contextMenuEvent(self, event):
         """ПКМ: пустое место — добавить заметку/сервер; объект — действия над ним."""
         scene = self.scene()
@@ -452,10 +547,39 @@ class MapView(QGraphicsView):
                 act_ping = menu.addAction(_t("ctx.ping"))
                 act_ping.triggered.connect(lambda _=False, n=win_node: self.window()._ping_node(n))
             menu.addSeparator()
+            if hasattr(win, "_duplicate_node"):
+                # v0.9.3: дублирование узла (копия полей + keyring-пароль под новым id)
+                act_dup = menu.addAction(_t("ctx.duplicate_server"))
+                act_dup.triggered.connect(
+                    lambda _=False, n=win_node: self.window()._duplicate_node(n))
             if hasattr(win, "_remove_node_guarded"):
                 act_delnode = menu.addAction(_t("ctx.delete_server"))
                 act_delnode.triggered.connect(
                     lambda _=False, n=win_node: self.window()._remove_node_guarded(n))
+
+        # ── v0.9.3: групповые операции над мультивыделением ─────────
+        if node is not None and hasattr(win, "selected_nodes"):
+            try:
+                multi = len([i for i in scene.selectedItems()
+                             if isinstance(i, ServerNode)]) > 1
+            except RuntimeError:
+                multi = False
+            if multi:
+                menu.addSeparator()
+                if hasattr(win, "_connect_selected_nodes"):
+                    act_conn = menu.addAction(_t("edit.connect_selected"))
+                    def _conn_sel(checked=False):  # checked — bool из triggered
+                        w = self.window()
+                        if hasattr(w, "_connect_selected_nodes"):
+                            w._connect_selected_nodes()
+                    act_conn.triggered.connect(_conn_sel)
+                if hasattr(win, "_delete_selected_nodes"):
+                    act_delmulti = menu.addAction(_t("edit.delete_selected"))
+                    def _del_sel(checked=False):
+                        w = self.window()
+                        if hasattr(w, "_delete_selected_nodes"):
+                            w._delete_selected_nodes()
+                    act_delmulti.triggered.connect(_del_sel)
 
         # ── v0.7.3: контекстное меню стрелки (связи) ───────────────
         if arrow is not None and node is None:

@@ -245,5 +245,13 @@
   "palette.placeholder": "Type a command or server name...",
   "palette.hint": "Enter — run, Up/Down — navigate, Esc — close",
   "palette.kind_server": "Server",
-  "msg.select_server_edit": "Select a server on the map to edit it."
+  "msg.select_server_edit": "Select a server on the map to edit it.",
+  "ctx.duplicate_server": "Duplicate server",
+  "edit.duplicate": "Duplicate server",
+  "edit.connect_selected": "Connect selected servers",
+  "edit.delete_selected": "Delete selected servers",
+  "status.server_duplicated": "Duplicated: {alias}",
+  "msg.confirm_delete_many": "Delete {count} selected servers?\nEach will be checked for running SSH sessions.",
+  "status.servers_deleted_multi": "Deleted servers: {count}",
+  "status.connections_created_multi": "Created connections: {count}"
 }

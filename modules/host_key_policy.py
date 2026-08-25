@@ -11,7 +11,9 @@
 
 Класс реализует интерфейс политики paramiko через duck typing (`missing_host_key`,
 `check`) и импортирует paramiko лениво в методах: модуль можно импортировать даже
-там, где paramiko ещё не нужен (headless-тесты).
+там, где paramiko ещё не нужен (headless-тесты). Исключение — блок совместимости
+ниже: он импортирует только субмодуль known_hosts-хранилища (без полного
+`import paramiko`) и нужен на уровне модуля для выбора имени класса.
 """
 
 import base64
@@ -20,6 +22,7 @@ import os
 
 # Совместимость paramiko: до 5.x включительно модуль назывался paramiko.host_keys,
 # в paramiko 5.0+ переименован в paramiko.hostkeys (старое имя удалено).
+# Примечание: это НЕ ленивый `import paramiko` — тянет лишь субмодуль hostkeys.
 try:
     import paramiko.hostkeys as _pk_hostkeys
 except ImportError:  # paramiko <= 4.x

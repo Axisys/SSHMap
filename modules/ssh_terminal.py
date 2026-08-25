@@ -202,12 +202,17 @@ class SSHTerminalTextEdit(QPlainTextEdit):
                 self.terminal_thread.send_data(b'\x03')
                 return
             elif key == Qt.Key_V:
-                # v0.9.3 fix: вставка из буфера в канал SSH (раньше виджет был
-                # read-only и Ctrl+V просто не работал).
+                # v0.9.4-fix: вставка через bracketed paste — многострочный
+                # буфер приходит в shell ЕДИНЫМ вставленным блоком, а не
+                # построчным вводом (раньше каждая строка немедленно
+                # исполнялась удалённой shell). Терминалы без поддержки
+                # просто проигнорируют обёртку и получат сырой текст.
                 clipboard = QApplication.clipboard()
                 if clipboard.text():
                     try:
-                        self.terminal_thread.send_data(clipboard.text().encode('utf-8'))
+                        payload = clipboard.text().replace('\r\n', '\n').replace('\r', '\n')
+                        self.terminal_thread.send_data(
+                            b'\x1b[200~' + payload.encode('utf-8') + b'\x1b[201~')
                     except Exception:
                         pass
                     return

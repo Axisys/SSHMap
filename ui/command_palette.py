@@ -24,10 +24,15 @@ from PySide6.QtWidgets import (
 )
 
 try:
-    # Пакетный запуск (из корня проекта)
-    from i18n import translate as _translate
+    # Пакетный запуск (из корня проекта).
+    # v0.9.4-fix: i18n экспортирует t(), а не translate() — прежний импорт
+    # молча падал и палитра показывала сырые ключи вместо переводов.
+    from i18n import t as _translate
 except Exception:  # pragma: no cover - плоский запуск
-    _translate = None
+    try:
+        from .i18n import t as _translate  # пакетный запуск как подпакета
+    except Exception:
+        _translate = None
 
 
 def _t(key: str) -> str:

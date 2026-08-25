@@ -1,4 +1,4 @@
-# SSH Map (NodeVisualSSH) — v0.9.2
+# SSH Map (NodeVisualSSH) — v0.9.3
 
 Десктопное приложение (Python + PySide6): интерактивная карта IT-инфраструктуры с прямым SSH-подключением к узлам. Slogan: *"Draw your infrastructure. Organize it. Connect to it."*
 
@@ -12,10 +12,13 @@
 pip install PySide6 paramiko keyring pyte   # все зависимости из requirements.txt
 python main.py                              # запуск GUI
 
-# Тесты без pytest (все должны завершаться EXIT=0):
+# Тесты без pytest (все должны завершаться EXIT=0).
+# Тесты изолированы: пишут во временный HOME, UTF-8 stdout ставится сами —
+# на cp1251-консолях и в CI дополнительное окружение не требуется:
 QT_QPA_PLATFORM=offscreen python tests/smoke_test.py        # 272 проверки
 QT_QPA_PLATFORM=offscreen python tests/regression_v083.py   # 34 проверки (undo/redo)
 QT_QPA_PLATFORM=offscreen python tests/regression_v081.py   # 22 проверки
+QT_QPA_PLATFORM=offscreen python tests/regression_v093.py   # 21 проверка (дублирование + мультивыделение)
 QT_QPA_PLATFORM=offscreen python tests/regression_v091.py   # 28 проверок (экспорт + фон)
 QT_QPA_PLATFORM=offscreen python tests/check_i18n_keys.py   # паритет i18n-ключей (exit 0 = ок)
 ```
@@ -33,7 +36,8 @@ models/
 └── profile.py               # Profile; CRUD; JSON ~/.sshmap_profiles.json (пароли в keyring, префикс "profile:{id}")
 graphics/
 ├── map_scene.py             # MapScene: _nodes/_arrows/_notes/_groups; resync_group_members (геометрическое членство)
-├── map_view.py              # MapView: зум 0.1–5.0, панорамирование, Shift+drag связи, ctx-меню, node_drag_committed (v0.8.3)
+├── map_view.py              # MapView: зум 0.1–5.0, панорамирование, Shift+drag связи, ctx-меню,
+│                            #   node_drag_committed (v0.8.3), мультивыделение Ctrl+клик/рамкой + nodes_drag_committed (v0.9.3)
 ├── server_node.py           # ServerNode: карточка со статусом online/warn/offline (#22c55e/#facc15/#ef4444)
 ├── connection_arrow.py      # ConnectionArrow: кубическая Безье, 6 типов связей, hit-зона ~10px через contains()
 ├── sticky_note.py           # StickyNote: QGraphicsProxyWidget+QTextEdit, ручной drag/resize/edit
@@ -45,8 +49,9 @@ modules/
 ├── terminal_screen.py       # TerminalScreen: pyte.Screen(120x32)+ByteStream, feed под threading.Lock
 ├── host_key_policy.py       # SshKnownHostsPolicy: ~/.sshmap/known_hosts; изменённый ключ → BadHostKeyException (MITM)
 ├── external_terminal.py     # (v0.8.2) системный терминал ОС; настройки ~/.sshmap_settings.json; пароль НЕ в argv
-├── undo_commands.py         # (v0.8.3) 10 QUndoCommand: MoveNode(merge), MoveGroup, ResizeGroup, EditGroupName,
-│                            #   AddRemoveNode(+стрелки), AddRemoveConnection, AddRemoveNote,
+├── undo_commands.py         # (v0.8.3+) 12 QUndoCommand: MoveNode(merge), MoveNodes(групповой drag, v0.9.3),
+│                            #   MoveGroup, ResizeGroup, EditGroupName, AddRemoveNode(+стрелки),
+│                            #   AddRemoveConnection, ConnectSelected(v0.9.3), AddRemoveNote,
 │                            #   EditTextNote(дебаунс 600мс), EditConnection, EditNodeData
 └── logger.py                # setup_logging()/get_logger(__name__)
 storage/project.py           # save_project/load_project — JSON версии "0.9" (VERSION_FORMAT из version.py; + ключ "background")
@@ -54,14 +59,15 @@ services/
 ├── credential_manager.py    # keyring-абстракция (синглтон get_credential_manager()); graceful fallback без keyring
 ├── status_checker.py        # StatusChecker: QTimer разводит раунды, пробы в _ProbeThread; probe_ssh() → online/warn/offline
 └── system_info_collector.py # SystemInfoCollector (v0.9): автосбор ОС/CPU/RAM/диск Linux-сервера одной exec_command-сессией
-version.py                   # единая точка версий: APP_VERSION="0.9.2", VERSION_FORMAT="0.9"
+version.py                   # единая точка версий: APP_VERSION="0.9.3", VERSION_FORMAT="0.9"
 dialogs/                     # AddServerDialog, SSHConnectDialog (+кнопка внешнего терминала),
                              # ConnectionDialog/EditConnectionDialog, ProfileManagerDialog
-ui/main_window.py            # MainWindow (~2050 строк): контроллер; undo_stack (QUndoStack), dirty по canUndo()+baseline;
+ui/main_window.py            # MainWindow (~2200 строк): контроллер; undo_stack (QUndoStack), dirty по canUndo()+baseline;
+                             #   дублирование узла Ctrl+D (keyring-пароль под новым id), групповые операции (v0.9.3)
                              #   экспорт карты в PNG/JPEG (v0.9.1), установка/удаление фона, «Собрать информацию» (v0.9)
 ui/command_palette.py        # (v0.9.2) CommandPalette: Ctrl+K, fuzzy-поиск по действиям меню и серверам
-i18n/                        # t(key,**kwargs); en.json/ru.json/zh.json — 246 ключей, наборы идентичны; ru — дефолт
-tests/                       # smoke_test.py (272), regression_v081/v083/v091.py, smoke_collapse.py, check_i18n_keys.py
+i18n/                        # t(key,**kwargs); en.json/ru.json/zh.json — 255 ключей, наборы идентичны; ru — дефолт
+tests/                       # smoke_test.py (272), regression_v081/v083/v091/v093.py, smoke_collapse.py, check_i18n_keys.py
 ```
 
 ---
@@ -103,9 +109,11 @@ tests/                       # smoke_test.py (272), regression_v081/v083/v091.py
 - Dirty-маркер: `self._dirty = undo_stack.canUndo() or self._undo_baseline_dirty`; `_do_save()` вызывает `_reset_undo_stack()` (новая baseline). `_undo_baseline_dirty` покрывает dirty-причины вне undo (статусы, фон).
 - В undo НЕ входят: статусы узлов, координаты при загрузке, геометрия фона. Группы (move/resize/переименование) — входят (CmdMoveGroup/CmdResizeGroup/CmdEditGroupName).
 - Перетаскивание узла: MapView ловит release, эмитит `node_drag_committed(node, old, new)` → CmdMoveNode.
+- Групповой drag (v0.9.3): если тянется уже выделенный узел и выделено >1 — двигаются ВСЕ выделенные; одна команда CmdMoveNodes на жест.
 
 ### Горячие клавиши + палитра команд (v0.9.2)
-- Хоткеи: Ctrl+N/O/S — проект; Ctrl+Z/Y(+Shift) — undo/redo; Ctrl+Shift+A/G/C — сервер/группа/связь; Ctrl+I — свойства; **Ctrl+Enter** — SSH к выделенному узлу; **Ctrl+E** — редактировать узел; **Ctrl+Shift+N** — заметка в центре видимой области; Delete — удалить выделенное; Ctrl+Shift+F — вписать карту.
+- Хоткеи: Ctrl+N/O/S — проект; Ctrl+Z/Y(+Shift) — undo/redo; Ctrl+Shift+A/G/C — сервер/группа/связь; Ctrl+I — свойства; **Ctrl+Enter** — SSH к выделенному узлу; **Ctrl+E** — редактировать узел; **Ctrl+D** — дублировать узел (v0.9.3); **Ctrl+Shift+N** — заметка в центре видимой области; Delete — удалить выделенное; Ctrl+Shift+F — вписать карту.
+- Мультивыделение (v0.9.3): Ctrl+клик по узлу добавляет к выделению (нативный Qt), **Ctrl+drag по пустому месту** — рамка выделения (Shift+Ctrl добавляет к текущему); групповой drag двигает все выделенные; ПКМ при мультивыделении → «Соединить выделенные» / «Удалить выделенные» (одно подтверждение, guarded для каждого).
 - **Ctrl+K** — палитра команд (`ui/command_palette.py`): fuzzy-поиск (subsequence-скоринг, без зависимостей) по всем QAction меню + по серверам проекта; выбор сервера → выделение узла + centerOn. Enter/Up/Down/Esc.
 
 ### Безопасность
@@ -140,12 +148,11 @@ ru (дефолт) / en / zh. Правило: новый ключ добавля�
 
 ## 7. Состояние и roadmap
 
-**Реализовано полностью:** карта (узлы/Безье-связи 6 типов/заметки/группы), статусы online/warn/offline, терминал на pyte (vim/htop работают), внешний системный терминал, undo/redo, автосбор информации о Linux-сервере (v0.9), профили + keyring, i18n ru/en/zh, контекстные меню всех объектов, fit/zoom/центрирование, экспорт карты в PNG/JPEG и фоновое изображение с drag/resize (v0.9.1), горячие клавиши и палитра команд Ctrl+K (v0.9.2).
+**Реализовано полностью:** карта (узлы/Безье-связи 6 типов/заметки/группы), статусы online/warn/offline, терминал на pyte (vim/htop работают), внешний системный терминал, undo/redo, автосбор информации о Linux-сервере (v0.9), профили + keyring, i18n ru/en/zh, контекстные меню всех объектов, fit/zoom/центрирование, экспорт карты в PNG/JPEG и фоновое изображение с drag/resize (v0.9.1), горячие клавиши и палитра команд Ctrl+K (v0.9.2), дублирование узла Ctrl+D с копированием keyring-пароля под новым id и мультивыделение (Ctrl+клик, рамка, групповой drag, соединить/удалить выделенные) (v0.9.3).
 
 **Известные ограничения:** undo не покрывает статусы узлов и геометрию фона; фоновое изображение хранится путём (при переносе проекта на другую машину файл нужно переносить вместе с картой); язык интерфейса выбирается через меню «Помощь → Язык» (с v0.6.3, с персистентностью в ~/.sshmap/config.json); в v1.1 планируется перенос переключателя в диалог настроек.
 
 **Roadmap (по приоритету):**
-1. **v0.9.3**: дублирование узла (Ctrl+D) + мультивыделение + групповые операции.
 2. **v0.9.4**: теги/цветные метки серверов (prod/staging/dev) + фильтр.
 3. **v0.9.5**: экспорт карты в draw.io (`.drawio`, mxGraph XML через ElementTree, без новых зависимостей); фон отдельным слоем; импорт — опционально, только своих файлов. Предусловие: модель данных после v0.9.4.
 4. **v0.9.6**: контекстное меню в сайдбаре (ПКМ по серверу в дереве: SSH / внешний терминал / редактировать / копировать IP·hostname / ping / собрать информацию / показать на карте / удалить).

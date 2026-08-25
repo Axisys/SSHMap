@@ -124,6 +124,8 @@ class MainWindow(QMainWindow):
         self._project_file: Optional[str] = None
         self._dirty = False  # Флаг несохранённых изменений (маркер " [*]" в заголовке)
         self._terminal_windows: List[SSHTerminalWindow] = []
+        # v0.9.4-fix: id узлов с активной SSH-сессией (для сброса индикатора)
+        self._ssh_connected_nodes: set = set()
         self._ping_thread = None   # v0.7.3: ping-поток (AUDIT v0.7.2 #8: guard против затирания)
         self._dns_thread = None    # AUDIT v0.7.2 (#6): поток обратного DNS для copy-hostname
         self._menu_i18n: List[tuple] = []  # (widget: QMenu|QAction, key) — для повторного перевода
@@ -390,6 +392,7 @@ class MainWindow(QMainWindow):
         # Перемещение узла: MapView сообщает о завершении жеста → команда MoveNode
         try:
             self.view.node_drag_committed.connect(self._commit_node_move)
+            self.view.nodes_drag_committed.connect(self._commit_nodes_move)  # v0.9.3
         except Exception:  # noqa: BLE001 — без сигнала перемещение просто не попадёт в undo
             pass
 
@@ -457,6 +460,14 @@ class MainWindow(QMainWindow):
         """v0.8.3: завершён жест перетаскивания узла → команда CmdMoveNode."""
         from modules.undo_commands import CmdMoveNode
         self._push_command(CmdMoveNode(self, node, old_pos, new_pos))
+        self._mark_dirty()
+
+    def _commit_nodes_move(self, moves):
+        """v0.9.3: завершён групповой drag → ОДНА команда CmdMoveNodes."""
+        from modules.undo_commands import CmdMoveNodes
+        if not moves:
+            return
+        self._push_command(CmdMoveNodes(self, moves))
         self._mark_dirty()
 
     def _on_stack_changed(self):
@@ -536,6 +547,16 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event):
         """Ask to save on exit if there are unsaved changes."""
+        # v0.9.4-fix: остановка фоновых QThread выполняется при ЛЮБОМ выходе.
+        # Раньше вызов стоял только в конце «чистого» выхода: все три ветки
+        # диалога делали ранний return до шатдауна, и при несохранённых
+        # изменениях (самый частый случай) работающие SystemInfoCollector /
+        # ping / DNS-потоки уничтожались вместе с QObject →
+        # «QThread: Destroyed while thread is still running».
+        # Потоки останавливаем ДО диалога — он может держать окно открытым
+        # сколько угодно, а фоновая работа к моменту закрытия уже не нужна.
+        self._shutdown_background_threads()
+
         if self._has_unsaved_changes:
             reply = QMessageBox.question(
                 self, 
@@ -557,11 +578,6 @@ class MainWindow(QMainWindow):
                 event.ignore()
                 return
 
-        # v0.9.3 fix: остановка всех фоновых QThread перед закрытием окна.
-        # Раньше закрывались только StatusChecker (destroyed → shutdown()); при
-        # активном сборе информации, ping/DNS или SSH-сессии Qt уничтожал QObject
-        # под работающим потоком → «QThread: Destroyed while thread is still running».
-        self._shutdown_background_threads()
         event.accept()
 
     def _shutdown_background_threads(self):
@@ -752,6 +768,11 @@ class MainWindow(QMainWindow):
         self._add_menu_action(edit_menu, "ctx.edit_server", self._edit_selected_node, "Ctrl+E")
         self._add_menu_action(edit_menu, "ctx.add_note", self._add_note_at_view_center, "Ctrl+Shift+N")
         self._add_menu_action(edit_menu, "edit.delete", self._delete_selected, "Delete")
+        # v0.9.3: дублирование + групповые операции мультивыделения
+        self._add_menu_action(edit_menu, "edit.duplicate", self._duplicate_selected_node, "Ctrl+D")
+        edit_menu.addSeparator()
+        self._add_menu_action(edit_menu, "edit.connect_selected", self._connect_selected_nodes)
+        self._add_menu_action(edit_menu, "edit.delete_selected", self._delete_selected_nodes)
 
         # Profile menu
         profile_menu = menubar.addMenu(self.t("menu.profile") if self._i18n_available else "Профиль")
@@ -922,11 +943,15 @@ class MainWindow(QMainWindow):
     def _sync_selection_state(self):
         try:
             selected_node = self.scene.get_selected_node()
-            selected_id = selected_node.data.id if selected_node else None
-
+            # v0.9.3: мультивыделение — подсветка рамки у КАЖДОГО выделенного
+            # узла, а не только первого из selectedItems().
             for node in self.scene.nodes():
-                node.set_selected(node is selected_node)
+                try:
+                    node.set_selected(node.isSelected())
+                except RuntimeError:
+                    pass  # Qt teardown — отдельный item уничтожен
 
+            selected_id = selected_node.data.id if selected_node else None
             self.tree.blockSignals(True)
             try:
                 self.tree.setCurrentItem(None)
@@ -954,19 +979,27 @@ class MainWindow(QMainWindow):
         try:
             dlg = SSHConnectDialog(node.data, self)
             if dlg.exec() == QDialog.Accepted:
-                # Ensure credentials are up to date from dialog
-                node.data.user = dlg.user_edit.text().strip()
-                node.data.key_path = dlg.key_path_edit.text().strip()
-                node.data.ssh_port = dlg.port_edit.value()
-                # v0.9.3 fix: правки user/key_path/ssh_port из диалога — тоже данные
-                # проекта; без _mark_dirty() они терялись молча при выходе без Ctrl+S.
-                self._mark_dirty()
+                # v0.9.4-fix: правки user/key_path/ssh_port из диалога идут через
+                # undo-стек и помечают проект dirty (раньше писались напрямую в
+                # node.data — терялись при выходе без Ctrl+S и не откатывались).
+                from modules.undo_commands import CmdEditNodeData
+                old_data = copy.deepcopy(node.data)
+                new_data = copy.deepcopy(node.data)
+                new_data.user = dlg.user_edit.text().strip()
+                new_data.key_path = dlg.key_path_edit.text().strip()
+                new_data.ssh_port = dlg.port_edit.value()
+                if (old_data.user, old_data.key_path, old_data.ssh_port) != \
+                        (new_data.user, new_data.key_path, new_data.ssh_port):
+                    self._push_command(CmdEditNodeData(self, node, old_data, new_data))
+                else:
+                    self._mark_dirty()
                 # AUDIT v0.7.2 (средняя #7): пароль НЕ храним в модели — передаём его
                 # напрямую терминальному окну ниже; сам диалог уже записал его в keyring
                 # (_on_worker_success), так что ничего не теряется при сохранении проекта.
 
                 node.update_appearance()
                 node.set_ssh_connected(True)
+                self._ssh_connected_nodes.add(node.data.id)  # v0.9.4-fix: сброс индикатора при закрытии терминала
                 if self.log:
                     self.log.info("SSH connected", extra={"alias": node.data.alias, "host": node.data.host})
                 self.statusBar().showMessage(self.t("status.ssh_connected", alias=node.data.alias))
@@ -1114,6 +1147,21 @@ class MainWindow(QMainWindow):
 
     def _forget_terminal_window(self, window):
         self._terminal_windows = [w for w in self._terminal_windows if w is not window]
+        # v0.9.4-fix: терминал закрыт → гасим зелёную SSH-точку узла
+        # (раньше индикатор горел вечно после первого подключения).
+        try:
+            sid = getattr(getattr(window, "server_data", None), "id", None)
+            if sid:
+                self._ssh_connected_nodes.discard(sid)
+                node = self.scene.get_node(sid) if hasattr(self.scene, "get_node") else None
+                if node is not None and not any(
+                    getattr(w, "server_data", None) is not None
+                    and getattr(w, "server_data").id == sid
+                    for w in self._terminal_windows
+                ):
+                    node.set_ssh_connected(False)
+        except RuntimeError:
+            pass  # C++-объект уже уничтожен при teardown — нормально
 
     def _add_server(self, at_scene_pos=None):
         """Создать сервер (атрибут `at_scene_pos` — точка клика из контекстного меню)."""
@@ -1223,6 +1271,144 @@ class MainWindow(QMainWindow):
                                     self.t("msg.select_server_edit"))
             return
         self._edit_node(node)
+
+    # ── v0.9.3: дублирование узла + мультивыделение/групповые операции ──
+
+    def _duplicate_node(self, node: "ServerNode", offset: float = 40.0):
+        """Ctrl+D / ПКМ: копия узла (все поля, кроме id) со смещением.
+
+        Пароль в JSON не хранится — он лежит в keyring по server_id, поэтому
+        для копии загружаем пароль исходника и сохраняем под НОВЫМ id.
+        Возвращает новый ServerNode или None (узел не найден).
+        """
+        if node is None or node.scene() is None:
+            return None
+        import copy as _copy
+        data = _copy.deepcopy(node.data)
+        data.x = float(node.data.x) + offset
+        data.y = float(node.data.y) + offset
+        # новый уникальный id
+        import uuid as _uuid
+        while True:
+            new_id = str(_uuid.uuid4())[:8]
+            if not self.scene.has_node(new_id):
+                break
+        data.id = new_id
+        # v0.9.3: пароль из keyring по server_id нового узла (задача #1)
+        try:
+            from services.credential_manager import get_credential_manager
+            cm = get_credential_manager()
+            pw = cm.load_password(node.data.id)
+            if pw:
+                cm.save_password(new_id, pw)
+        except Exception:  # noqa: BLE001 — keyring недоступен: копия без пароля
+            pass
+        from modules.undo_commands import CmdAddRemoveNode
+        self._push_command(CmdAddRemoveNode(self, self.scene, data, "add"))
+        new_node = self.scene.get_node(new_id)
+        self.refresh_sidebar()
+        self._sync_status_targets()
+        self.statusBar().showMessage(
+            self.t("status.server_duplicated", alias=data.alias)
+            if self._i18n_available else f"Duplicated: {data.alias}")
+        self._mark_dirty()  # ← unsaved changes
+        return new_node
+
+    def _duplicate_selected_node(self):
+        """Ctrl+D: продублировать выделенный узел; новый узел становится выделенным."""
+        node = self.scene.get_selected_node()
+        if not node:
+            QMessageBox.information(self, self.t("msg.info_title"),
+                                    self.t("msg.select_server_edit"))
+            return None
+        new_node = self._duplicate_node(node)
+        if new_node is not None:
+            self._select_node(new_node)
+        return new_node
+
+    def selected_nodes(self) -> list:
+        """v0.9.3: все выделенные узлы карты (в порядке сцены)."""
+        try:
+            return [i for i in self.scene.selectedItems() if isinstance(i, ServerNode)]
+        except RuntimeError:
+            return []
+
+    def _delete_selected_nodes(self):
+        """v0.9.3: удалить ВСЕ выделенные узлы (каждый через guarded-путь)."""
+        nodes = self.selected_nodes()
+        if not nodes:
+            QMessageBox.information(self, self.t("msg.info_title"),
+                                    self.t("msg.select_server_edit"))
+            return False
+        # одно подтверждение на всю группу
+        reply = QMessageBox.question(
+            self,
+            self.t("dialog.confirm_delete") if self._i18n_available else "Подтверждение",
+            self.t("msg.confirm_delete_many").format(count=len(nodes))
+            if self._i18n_available else f"Удалить серверы ({len(nodes)})?",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No
+        )
+        if reply != QMessageBox.Yes:
+            return False
+        deleted = 0
+        for node in list(nodes):
+            if node.scene() is None:
+                continue  # уже удалён вместе со своей стрелкой ранее в цикле
+            if not self._ensure_worker_done(node.data.id):
+                continue
+            alias = node.data.alias
+            arrows = [
+                (a.source.data.id, a.target.data.id, a.label_text, a.connection_type)
+                for a in self.scene.arrows()
+                if a.source is node or a.target is node
+            ]
+            from modules.undo_commands import CmdAddRemoveNode
+            self._push_command(CmdAddRemoveNode(self, self.scene, node.data, "remove", arrows))
+            deleted += 1
+            if self.log:
+                self.log.info("Server deleted (multi)",
+                              extra={"alias": alias, "host": node.data.host})
+        if deleted:
+            self.refresh_sidebar()
+            self._sync_status_targets()
+            self.statusBar().showMessage(
+                self.t("status.servers_deleted_multi", count=deleted)
+                if self._i18n_available else f"Deleted {deleted} servers")
+            self._mark_dirty()  # ← unsaved changes
+        return True
+
+    def _connect_selected_nodes(self):
+        """v0.9.3: создать связи между всеми парами выделенных узлов (полный граф).
+
+        Каждый узел соединяется с каждым (без петель и дублей); тип связи —
+        по умолчанию, метка пустая. Undo откатывает всё одной командой.
+        """
+        nodes = self.selected_nodes()
+        if len(nodes) < 2:
+            QMessageBox.information(self, self.t("msg.info_title"),
+                                    self.t("validation.min_servers"))
+            return False
+        ids = [n.data.id for n in nodes]
+        created = []
+        for i in range(len(ids)):
+            for j in range(i + 1, len(ids)):
+                src, tgt = ids[i], ids[j]
+                if self.scene.has_connection(src, tgt):
+                    continue
+                arrow = self.scene.add_connection(src, tgt)
+                if arrow is not None:
+                    created.append((src, tgt))
+        if not created:
+            return False
+        from modules.undo_commands import CmdConnectSelected
+        self._push_command(CmdConnectSelected(self, self.scene, created))
+        self._update_counts_label()
+        self.statusBar().showMessage(
+            self.t("status.connections_created_multi", count=len(created))
+            if self._i18n_available else f"Created {len(created)} connections")
+        self._mark_dirty()  # ← unsaved changes
+        return True
 
     def _add_note_at_view_center(self):
         """Ctrl+Shift+N: заметка в центре видимой области карты."""
