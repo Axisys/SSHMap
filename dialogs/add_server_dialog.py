@@ -152,6 +152,10 @@ class AddServerDialog(QDialog):
         self.disk = QLineEdit()
         self.ip = QLineEdit()
         self.comment = QLineEdit()
+        # v0.9.4: теги — ввод через запятую («prod, web»); парсинг в get_data()
+        self.tags_edit = QLineEdit()
+        self.tags_edit.setPlaceholderText(
+            self.t("server.tags_hint") if self._i18n_available else "prod, staging, dev")
 
         layout.addRow(self.t("server.os"), self.os_name)
         layout.addRow(self.t("server.cpu"), self.cpu)
@@ -159,6 +163,7 @@ class AddServerDialog(QDialog):
         layout.addRow(self.t("server.disk"), self.disk)
         layout.addRow(self.t("server.ip"), self.ip)
         layout.addRow(self.t("server.comment"), self.comment)
+        layout.addRow(self.t("server.tags") if self._i18n_available else "Tags:", self.tags_edit)
 
         main_layout.addLayout(layout)
 
@@ -235,6 +240,7 @@ class AddServerDialog(QDialog):
         self.disk.setText(d.disk)
         self.ip.setText(d.ip)
         self.comment.setText(d.comment)
+        self.tags_edit.setText(", ".join(getattr(d, "tags", None) or []))  # v0.9.4
 
         # Try to match current user against loaded profiles and auto-select
         self._ensure_profiles_loaded()
@@ -262,4 +268,15 @@ class AddServerDialog(QDialog):
             disk=self.disk.text(),
             ip=self.ip.text(),
             comment=self.comment.text(),
+            tags=self._parse_tags(),  # v0.9.4
         )
+
+    def _parse_tags(self) -> list:
+        """v0.9.4: строку «prod, web» → ['prod', 'web'] (дубликаты/пустые долой)."""
+        seen, out = set(), []
+        for part in self.tags_edit.text().split(","):
+            tag = part.strip()
+            if tag and tag.lower() not in seen:
+                seen.add(tag.lower())
+                out.append(tag)
+        return out

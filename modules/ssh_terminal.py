@@ -362,7 +362,6 @@ class SSHTerminalWindow(QMainWindow):
         doc = self.edit.document()
         doc.clear()
         cursor = QTextCursor(doc)
-        font_metrics_char_w = 1
         for y, line_html in enumerate(html_lines):
             if y > 0:
                 cursor.insertBlock()

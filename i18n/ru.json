@@ -253,5 +253,8 @@
   "status.server_duplicated": "Создана копия: {alias}",
   "msg.confirm_delete_many": "Удалить выделенные серверы ({count})?\nКаждый будет проверен на запущенные SSH-сессии.",
   "status.servers_deleted_multi": "Удалено серверов: {count}",
-  "status.connections_created_multi": "Создано связей: {count}"
+  "status.connections_created_multi": "Создано связей: {count}",
+  "server.tags": "Теги:",
+  "server.tags_hint": "prod, staging, dev",
+  "filter.all_tags": "Все теги"
 }

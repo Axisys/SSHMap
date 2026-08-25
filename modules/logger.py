@@ -52,7 +52,7 @@ def setup_logging(level: int = logging.DEBUG) -> logging.Logger:
     file_handler.setFormatter(file_formatter)
     root_logger.addHandler(file_handler)
 
-    # ── Console handler (DEBUG level only) ────────────────────
+    # ── Console handler (WARNING+: только предупреждения и ошибки) ──
     console_handler = logging.StreamHandler(sys.stdout)
     console_handler.setLevel(logging.WARNING)  # Only warnings+errors on console
     console_formatter = logging.Formatter(

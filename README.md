@@ -1,4 +1,4 @@
-# SSH Map (NodeVisualSSH) — v0.9.3
+# SSH Map (NodeVisualSSH) — v0.9.4
 
 Десктопное приложение (Python + PySide6): интерактивная карта IT-инфраструктуры с прямым SSH-подключением к узлам. Slogan: *"Draw your infrastructure. Organize it. Connect to it."*
 
@@ -19,6 +19,7 @@ QT_QPA_PLATFORM=offscreen python tests/smoke_test.py        # 272 проверк
 QT_QPA_PLATFORM=offscreen python tests/regression_v083.py   # 34 проверки (undo/redo)
 QT_QPA_PLATFORM=offscreen python tests/regression_v081.py   # 22 проверки
 QT_QPA_PLATFORM=offscreen python tests/regression_v093.py   # 21 проверка (дублирование + мультивыделение)
+QT_QPA_PLATFORM=offscreen python tests/regression_v094.py   # 23 проверки (теги серверов)
 QT_QPA_PLATFORM=offscreen python tests/regression_v091.py   # 28 проверок (экспорт + фон)
 QT_QPA_PLATFORM=offscreen python tests/check_i18n_keys.py   # паритет i18n-ключей (exit 0 = ок)
 ```
@@ -59,15 +60,15 @@ services/
 ├── credential_manager.py    # keyring-абстракция (синглтон get_credential_manager()); graceful fallback без keyring
 ├── status_checker.py        # StatusChecker: QTimer разводит раунды, пробы в _ProbeThread; probe_ssh() → online/warn/offline
 └── system_info_collector.py # SystemInfoCollector (v0.9): автосбор ОС/CPU/RAM/диск Linux-сервера одной exec_command-сессией
-version.py                   # единая точка версий: APP_VERSION="0.9.3", VERSION_FORMAT="0.9"
+version.py                   # единая точка версий: APP_VERSION="0.9.4", VERSION_FORMAT="0.9"
 dialogs/                     # AddServerDialog, SSHConnectDialog (+кнопка внешнего терминала),
                              # ConnectionDialog/EditConnectionDialog, ProfileManagerDialog
 ui/main_window.py            # MainWindow (~2200 строк): контроллер; undo_stack (QUndoStack), dirty по canUndo()+baseline;
                              #   дублирование узла Ctrl+D (keyring-пароль под новым id), групповые операции (v0.9.3)
                              #   экспорт карты в PNG/JPEG (v0.9.1), установка/удаление фона, «Собрать информацию» (v0.9)
 ui/command_palette.py        # (v0.9.2) CommandPalette: Ctrl+K, fuzzy-поиск по действиям меню и серверам
-i18n/                        # t(key,**kwargs); en.json/ru.json/zh.json — 255 ключей, наборы идентичны; ru — дефолт
-tests/                       # smoke_test.py (272), regression_v081/v083/v091/v093.py, smoke_collapse.py, check_i18n_keys.py
+i18n/                        # t(key,**kwargs); en.json/ru.json/zh.json — 258 ключей, наборы идентичны; ru — дефолт
+tests/                       # smoke_test.py (272), regression_v081/v083/v091/v093/v094.py, smoke_collapse.py, check_i18n_keys.py
 ```
 
 ---
@@ -79,7 +80,8 @@ tests/                       # smoke_test.py (272), regression_v081/v083/v091/v0
   "version": "0.9",
   "servers":  [{"id": "710602ee", "alias": "...", "host": "...", "user": "...",
                 "x": 0.0, "y": 0.0, "cpu": "", "ram": "", "disk": "", "ip": "",
-                "comment": "", "ssh_port": 22, "key_path": ""}],
+                "comment": "", "ssh_port": 22, "key_path": "",
+                "os_name": "", "cpu_model": "", "tags": ["prod", "dev"]}],
   "connections": [{"source_id": "...", "target_id": "...", "label": "", "type": "ssh"}],
   "notes":  [{"id": "...", "text": "", "x": 0.0, "y": 0.0, "width": 240.0, "height": 160.0}],
   "groups": [{"id": "...", "name": "", "x": 0.0, "y": 0.0, "width": 480.0, "height": 320.0}],
@@ -92,6 +94,7 @@ tests/                       # smoke_test.py (272), regression_v081/v083/v091/v0
 - `password` **никогда** не сериализуется — только keyring (`server_data_to_dict()` исключает).
 - Типы связей: `ssh|vpn|http|database|nfs|kubernetes`; неизвестный/отсутствующий тип → `ssh`. Поле `version` при загрузке не валидируется (файлы 0.6+ читаются).
 - Членство в группах **не хранится** — вычисляется из геометрии (центр карточки внутри верхней группы, эксклюзивно).
+- `tags` — массив строк у записи сервера (v0.9.4); отсутствует или не массив в старых JSON → пустой список (`server_data_from_dict` нормализует).
 - `background` хранит **путь** к изображению (файл НЕ встраивается в JSON); отсутствующий файл при загрузке игнорируется с warning. Геометрия фона в undo не входит.
 
 ---
@@ -148,18 +151,17 @@ ru (дефолт) / en / zh. Правило: новый ключ добавля�
 
 ## 7. Состояние и roadmap
 
-**Реализовано полностью:** карта (узлы/Безье-связи 6 типов/заметки/группы), статусы online/warn/offline, терминал на pyte (vim/htop работают), внешний системный терминал, undo/redo, автосбор информации о Linux-сервере (v0.9), профили + keyring, i18n ru/en/zh, контекстные меню всех объектов, fit/zoom/центрирование, экспорт карты в PNG/JPEG и фоновое изображение с drag/resize (v0.9.1), горячие клавиши и палитра команд Ctrl+K (v0.9.2), дублирование узла Ctrl+D с копированием keyring-пароля под новым id и мультивыделение (Ctrl+клик, рамка, групповой drag, соединить/удалить выделенные) (v0.9.3).
+**Реализовано полностью:** карта (узлы/Безье-связи 6 типов/заметки/группы), статусы online/warn/offline, терминал на pyte (vim/htop работают), внешний системный терминал, undo/redo, автосбор информации о Linux-сервере (v0.9), профили + keyring, i18n ru/en/zh, контекстные меню всех объектов, fit/zoom/центрирование, экспорт карты в PNG/JPEG и фоновое изображение с drag/resize (v0.9.1), горячие клавиши и палитра команд Ctrl+K (v0.9.2), дублирование узла Ctrl+D с копированием keyring-пароля под новым id и мультивыделение (Ctrl+клик, рамка, групповой drag, соединить/удалить выделенные) (v0.9.3), теги/цветные метки серверов: цветная полоска на карточке, фильтр по тегам в сайдбаре с затемнением несовпадающих узлов на карте, поиск по тегам (v0.9.4).
 
 **Известные ограничения:** undo не покрывает статусы узлов и геометрию фона; фоновое изображение хранится путём (при переносе проекта на другую машину файл нужно переносить вместе с картой); язык интерфейса выбирается через меню «Помощь → Язык» (с v0.6.3, с персистентностью в ~/.sshmap/config.json); в v1.1 планируется перенос переключателя в диалог настроек.
 
 **Roadmap (по приоритету):**
-2. **v0.9.4**: теги/цветные метки серверов (prod/staging/dev) + фильтр.
-3. **v0.9.5**: экспорт карты в draw.io (`.drawio`, mxGraph XML через ElementTree, без новых зависимостей); фон отдельным слоем; импорт — опционально, только своих файлов. Предусловие: модель данных после v0.9.4.
-4. **v0.9.6**: контекстное меню в сайдбаре (ПКМ по серверу в дереве: SSH / внешний терминал / редактировать / копировать IP·hostname / ping / собрать информацию / показать на карте / удалить).
-5. **v0.9.7**: автосохранение (~/.sshmap/autosave/) + кольцевые бэкапы при каждом save; восстановление при старте.
-6. **v0.9.8**: экспорт/импорт профилей SSH (без паролей, слияние по имени).
-7. **v0.10**: jump host (ProxyJump) + agent forwarding; импорт из ~/.ssh/config; поиск Ctrl+F.
-8. **v1.0**: доработки дизайна. **v1.1**: диалог настроек (шрифты UI и терминала, сетка/FPS терминала, интервалы StatusChecker, автосохранение, язык интерфейса). **v1.x**: SFTP-браузер. **v2.0**: Prometheus-метрики.
+2. **v0.9.5**: экспорт карты в draw.io (`.drawio`, mxGraph XML через ElementTree, без новых зависимостей); фон отдельным слоем; импорт — опционально, только своих файлов. Предусловие: модель данных после v0.9.4.
+3. **v0.9.6**: контекстное меню в сайдбаре (ПКМ по серверу в дереве: SSH / внешний терминал / редактировать / копировать IP·hostname / ping / собрать информацию / показать на карте / удалить).
+4. **v0.9.7**: автосохранение (~/.sshmap/autosave/) + кольцевые бэкапы при каждом save; восстановление при старте.
+5. **v0.9.8**: экспорт/импорт профилей SSH (без паролей, слияние по имени).
+6. **v0.10**: jump host (ProxyJump) + agent forwarding; импорт из ~/.ssh/config; поиск Ctrl+F.
+7. **v1.0**: доработки дизайна. **v1.1**: диалог настроек (шрифты UI и терминала, сетка/FPS терминала, интервалы StatusChecker, автосохранение, язык интерфейса). **v1.x**: SFTP-браузер. **v2.0**: Prometheus-метрики.
 
 ---
 

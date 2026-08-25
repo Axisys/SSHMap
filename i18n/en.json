@@ -253,5 +253,8 @@
   "status.server_duplicated": "Duplicated: {alias}",
   "msg.confirm_delete_many": "Delete {count} selected servers?\nEach will be checked for running SSH sessions.",
   "status.servers_deleted_multi": "Deleted servers: {count}",
-  "status.connections_created_multi": "Created connections: {count}"
+  "status.connections_created_multi": "Created connections: {count}",
+  "server.tags": "Tags:",
+  "server.tags_hint": "prod, staging, dev",
+  "filter.all_tags": "All tags"
 }

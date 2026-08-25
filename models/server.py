@@ -27,6 +27,14 @@ class ServerData:
     # SystemInfoCollector'ом; хранятся в JSON (server_data_to_dict через asdict).
     os_name: str = ""     #PRETTY_NAME из /etc/os-release, напр. "Ubuntu 24.04 LTS"
     cpu_model: str = ""   # модель CPU из /proc/cpuinfo
+    # v0.9.4: теги/роли окружений (prod/staging/dev/...). Список строк; хранится в
+    # JSON как массив "tags" (server_data_to_dict через asdict). Backward-compat:
+    # старые JSON без ключа читаются пустым списком (server_data_from_dict).
+    tags: "list | None" = None
+
+    def __post_init__(self):
+        if self.tags is None:
+            self.tags = []
 
 
 def server_data_from_dict(raw: dict) -> ServerData:
@@ -61,6 +69,11 @@ def server_data_from_dict(raw: dict) -> ServerData:
     # v0.9: строковые поля автосбора — отсутствуют в старых JSON → пустая строка
     data.setdefault('os_name', '')
     data.setdefault('cpu_model', '')
+    # v0.9.4: теги — отсутствуют в старых JSON → пустой список; приводим к list[str]
+    raw_tags = data.get('tags')
+    if not isinstance(raw_tags, (list, tuple)):
+        raw_tags = [] if raw_tags in (None, "") else [str(raw_tags)]
+    data['tags'] = [str(t).strip() for t in raw_tags if str(t).strip()]
     return ServerData(**data)
 
 

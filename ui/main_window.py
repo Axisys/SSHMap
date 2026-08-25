@@ -61,13 +61,14 @@ from PySide6.QtCore import Qt, QRectF, QSize, QTimer, QPointF
 from PySide6.QtGui import (
     QMouseEvent,
     QIcon, QPixmap, QPainter, QBrush,  # ревью-фикс v0.8.0 (#3): маркеры статусов в сайдбаре
+    QColor,  # v0.9.4: цветные точки тегов в комбобоксе фильтра (DecorationRole)
     QUndoStack,  # v0.8.3: undo/redo
 )
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QHBoxLayout, QVBoxLayout, QSplitter,
     QLabel, QLineEdit, QPushButton, QTreeWidget, QTreeWidgetItem,
     QTextEdit, QToolBar, QMessageBox, QDialog, QFileDialog, QMenu,
-    QApplication,
+    QApplication, QComboBox,
 )
 
 try:  # v0.8.3: undo/redo-команды карты
@@ -350,6 +351,13 @@ class MainWindow(QMainWindow):
         self.search_edit.textChanged.connect(self.refresh_sidebar)
         sb_layout.addWidget(self.search_edit)
 
+        # ── v0.9.4: фильтр по тегам ───────────────────────────
+        # Элементы: [0] = «Все теги» (фильтр выключен), далее — уникальные теги
+        # всех серверов карты; перестраивается в refresh_sidebar (без сброса выбора).
+        self.tag_filter = QComboBox()
+        self.tag_filter.currentIndexChanged.connect(self._on_tag_filter_changed)
+        sb_layout.addWidget(self.tag_filter)
+
         # ── Server tree ───────────────────────────────────────
         self.tree = QTreeWidget()
         self.tree.setHeaderHidden(True)
@@ -518,7 +526,7 @@ class MainWindow(QMainWindow):
         """Сброс стека и baseline (new/open/save/load)."""
         self.undo_stack.clear()
         self._note_committed.clear()
-        for note in getattr(self.scene, "_notes", []):
+        for note in self.scene.notes():
             self._note_committed[note.note_id] = note.text()
         self._undo_baseline_dirty = False
 
@@ -1898,14 +1906,20 @@ class MainWindow(QMainWindow):
     def refresh_sidebar(self):
         self.tree.clear()
         query = self.search_edit.text().strip().lower() if hasattr(self, 'search_edit') else ""
+        # v0.9.4: активный тег-фильтр ("" = выключен)
+        active_tag = self._active_tag_filter()
         for node in self.scene.nodes():
             haystack = " ".join([
                 node.data.alias,
                 node.data.host,
                 node.data.ip,
                 node.data.comment,
+                # v0.9.4: поиск ищет и по тегам
+                " ".join(getattr(node.data, "tags", None) or []),
             ]).lower()
             if query and query not in haystack:
+                continue
+            if active_tag and active_tag not in (getattr(node.data, "tags", None) or []):
                 continue
 
             item = QTreeWidgetItem()
@@ -1913,10 +1927,87 @@ class MainWindow(QMainWindow):
             item.setData(0, Qt.UserRole, node.data.id)
             # Ревью-фикс v0.8.0 (#3): цветной маркер статуса узла (online/warn/offline/не проверен)
             self._apply_status_marker(item, node.status, node.data.host or "")
+            # v0.9.4: подпись тегов серым в конце строки
+            tags = getattr(node.data, "tags", None) or []
+            if tags:
+                item.setText(0, item.text(0) + f"  [{', '.join(tags[:3])}]")
+                item.setForeground(0, self.palette().windowText())
             self.tree.addTopLevelItem(item)
 
+        self._sync_tag_filter_items()
+        self._apply_map_tag_dimming()
         self._sync_selection_state()
         self._update_counts_label()  # UI polish: счётчики в статус-баре следят за составом
+
+    # ── v0.9.4: фильтр по тегам (сайдбар + затемнение на карте) ──
+
+    def _active_tag_filter(self) -> str:
+        """Выбранный в комбобоксе тег или \"\" («Все теги»)."""
+        combo = getattr(self, "tag_filter", None)
+        if combo is None or not hasattr(combo, "currentData"):
+            return ""
+        data = combo.currentData()
+        return str(data) if data else ""
+
+    def _on_tag_filter_changed(self, *_a):
+        """Смена тега в фильтре → перерисовать дерево и пересчитать затемнение."""
+        if hasattr(self, "tree"):
+            self.refresh_sidebar()
+
+    def _sync_tag_filter_items(self):
+        """Перестроить список уникальных тегов в комбобоксе, сохраняя выбор.
+
+        Вызовется из refresh_sidebar — сигнал currentIndexChanged при этом не должен
+        зациклить пересборку (блокируем сигналы на время заполнения).
+        """
+        combo = getattr(self, "tag_filter", None)
+        if combo is None:
+            return
+        all_tags = sorted({
+            t.strip()
+            for n in self.scene.nodes()
+            for t in (getattr(n.data, "tags", None) or [])
+            if t and t.strip()
+        }, key=str.lower)
+        current = self._active_tag_filter()
+        combo.blockSignals(True)
+        try:
+            from i18n import t as __t  # noqa: PLC0415 — ленивый импорт как в остальном UI
+            try:
+                all_label = __t("filter.all_tags")
+            except Exception:
+                all_label = "All tags"
+            combo.clear()
+            combo.addItem(all_label, "")
+            for tag in all_tags:
+                color = ServerNode.tag_color(tag).name()
+                combo.addItem(f"● {tag}", tag)
+                combo.setItemData(combo.count() - 1, QColor(color), Qt.DecorationRole)
+            idx = combo.findData(current) if current else 0
+            combo.setCurrentIndex(idx if idx >= 0 else 0)
+        except RuntimeError:
+            pass  # Qt teardown
+        finally:
+            combo.blockSignals(False)
+
+    def _apply_map_tag_dimming(self):
+        """Затемнить карточки узлов, не подходящих под активный тег-фильтр.
+
+        Узлы с совпадающим (или любым, если фильтр пуст) тегом — полная яркость.
+        Стрелки не трогаем: связи между затемнёнными узлами читаются по контексту.
+        """
+        active = self._active_tag_filter()
+        try:
+            nodes = list(self.scene.nodes())
+        except (AttributeError, RuntimeError):
+            return
+        for node in nodes:
+            tags = getattr(node.data, "tags", None) or []
+            matched = (not active) or active in tags
+            try:
+                node.set_dimmed(not matched)
+            except (AttributeError, RuntimeError):
+                pass
 
     # ── Ревью-фикс v0.8.0 (#3): маркеры статусов узлов в дереве сайдбара ──
 
@@ -2266,7 +2357,7 @@ class MainWindow(QMainWindow):
                 zoom=self.view.zoom,  # AUDIT v0.7.2 (низкая #19): публичное свойство
                 center_x=center.x(),
                 center_y=center.y(),
-                notes=getattr(self.scene, "_notes", None),  # v0.7.2: массив заметок
+                notes=self.scene.notes(),  # v0.7.2: массив заметок (публичный итератор)
                 groups=self.scene.groups(),  # v0.8.1: массив групп (кластеры)
                 background=self.scene.background(),  # v0.9.1: фон-изображение
             )

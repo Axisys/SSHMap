@@ -345,9 +345,23 @@ class SSHConnectDialog(QDialog):
             try:
                 from ..services.credential_manager import get_credential_manager
                 cm = get_credential_manager()
-                cm.save_password(self.server_data.id, password_from_ui)
+                # v0.9.4-fix: результат проверяется — выровнено с _do_save, где
+                # тихая потеря пароля предупреждается. save_password возвращает
+                # False при недоступном keyring (NoKeyringError и т.п. ловятся там).
+                saved_ok = bool(cm.save_password(self.server_data.id, password_from_ui))
             except Exception as e:
-                pass  # credential manager failure is non-critical
+                saved_ok = False  # credential manager failure is non-critical
+                try:
+                    from modules.logger import get_logger
+                    get_logger(__name__).warning(f"keyring save failed: {e}")
+                except Exception:
+                    pass
+            if not saved_ok:
+                # Тот же i18n-ключ, что в _do_save (паритет поведения)
+                QMessageBox.warning(
+                    self,
+                    self.t("msg.error_title"),
+                    self.t("msg.credentials_save_failed", alias=self.server_data.alias))
 
         QMessageBox.information(
             self,

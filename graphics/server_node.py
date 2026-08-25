@@ -83,6 +83,38 @@ class ServerNode(QGraphicsItemGroup):
         "offline": QColor("#ef4444"),  # красный: недоступен
     }
 
+    # v0.9.4: цвета тегов/ролей окружений. Известные роли — фиксированные цвета;
+    # произвольные теги — детерминированный цвет из палитры по хэшу имени.
+    TAG_PALETTE = [
+        QColor("#22c55e"), QColor("#3b82f6"), QColor("#a855f7"),
+        QColor("#f97316"), QColor("#06b6d4"), QColor("#ec4899"),
+    ]
+    TAG_COLORS = {
+        "prod":    QColor("#ef4444"),  # красный — боевое окружение
+        "staging": QColor("#facc15"),  # жёлтый — предпрод
+        "dev":     QColor("#22c55e"),  # зелёный — разработка
+        "test":    QColor("#a855f7"),  # фиолетовый — тестовый контур
+        "backup":  QColor("#06b6d4"),  # голубой — бэкап-реплика
+        "dmz":     QColor("#f97316"),  # оранжевый — демилитаризованная зона
+    }
+    # Полоска тегов на карточке: вертикальные сегменты вдоль левого края.
+    TAG_STRIP_WIDTH = 5.0
+
+    @staticmethod
+    def tag_color(tag: str) -> QColor:
+        """Цвет тега: известная роль — свой цвет, прочие — по хэшу из палитры.
+
+        zlib.crc32, а не hash(): hash() строк солёный per-process — цвета
+        произвольных тегов менялись бы от запуска к запуску.
+        """
+        import zlib
+        key = (tag or "").strip().lower()
+        c = ServerNode.TAG_COLORS.get(key)
+        if c is not None:
+            return QColor(c)
+        h = zlib.crc32(key.encode("utf-8"))
+        return QColor(ServerNode.TAG_PALETTE[h % len(ServerNode.TAG_PALETTE)])
+
     def __init__(self, data: ServerData, parent=None):
         super().__init__(parent)
         self.data = data
@@ -101,6 +133,8 @@ class ServerNode(QGraphicsItemGroup):
         self.setPos(data.x, data.y)
 
         self._ssh_worker: Optional[SSHWorker] = None
+        # v0.9.4: сегменты полоски тегов (создаются лениво в _rebuild_tag_strip)
+        self._tag_segments: list = []
         # v0.7.1: пульс-анимация смены статуса — fade-out оверлея (opacity 1 -> 0).
         # Вариант QPropertyAnimation(target=QGraphicsItem) в PySide6 6.11 не работает:
         # у C++ QGraphicsItem* нет метаобъектной интроспекции свойств ("non-existing
@@ -108,6 +142,9 @@ class ServerNode(QGraphicsItemGroup):
         self._pulse_anim: Optional[QVariantAnimation] = None
 
         self._build_appearance()
+        # v0.9.4: полоска тегов при создании (update_appearance может не сменить
+        # геометрию и не вызвать _rebuild_frame_paths)
+        self._rebuild_tag_strip()
 
     def _build_appearance(self):
         # UI polish: «тень» под карточкой — узкая полоска ниже нижнего края.
@@ -232,6 +269,39 @@ class ServerNode(QGraphicsItemGroup):
                                            height + self.SHADOW_BOTTOM - 5, r + 2))
         # Пульс следует за фоном (v0.7.1) — та же скруглённая рамка
         self._pulse.setPath(self._rounded(0, 0, width, height, r))
+
+        # v0.9.4: полоска тегов вдоль левого края (пересобрать сегменты)
+        if getattr(self, "_tag_segments", None) is not None:
+            self._rebuild_tag_strip()
+
+    def _rebuild_tag_strip(self):
+        """v0.9.4: вертикальная полоска из цветных сегментов по data.tags.
+
+        Сегменты делят высоту карточки поровну (макс. 4 видимых тега — дальше
+        полоска теряет читаемость); рисуется поверх фона (z=-0.8), под контентом.
+        """
+        tags = (getattr(self.data, "tags", None) or [])[:4]
+        n_needed = len(tags)
+        while len(self._tag_segments) < n_needed:
+            from PySide6.QtWidgets import QGraphicsRectItem
+            item = QGraphicsRectItem(self)
+            item.setPen(QPen(Qt.PenStyle.NoPen))
+            item.setZValue(-0.8)
+            self._tag_segments.append(item)
+        h_total = max(float(self._current_height), 1.0)
+        seg_h = h_total / n_needed if n_needed else 0.0
+        for i, item in enumerate(self._tag_segments):
+            if i < n_needed:
+                item.setRect(0.0, i * seg_h, self.TAG_STRIP_WIDTH, seg_h + 0.01)
+                item.setBrush(QBrush(ServerNode.tag_color(tags[i])))
+                item.show()
+            else:
+                item.hide()
+
+    def refresh_tags(self):
+        """v0.9.4: публичная точка обновления полоски после правки data.tags."""
+        self._rebuild_tag_strip()
+        self.update()
 
     def _state_pen(self):
         if self._selected:
@@ -533,6 +603,22 @@ class ServerNode(QGraphicsItemGroup):
         opacity = 0.55 if self._status == "offline" else 1.0
         for item in (self._icon, self._glyph, self._alias, self._host_label, self._info):
             item.setOpacity(opacity)
+
+    # ── v0.9.4: затемнение узла тег-фильтром ──
+
+    DIM_OPACITY = 0.25  # несовпадающие с фильтром узлы — едва различимы
+
+    def set_dimmed(self, dimmed: bool):
+        """Тег-фильтр: полупрозрачная карточка у несовпадающих узлов (и обратное).
+
+        В отличие от offline-затемнения (контент) здесь приглушается ВЕСЬ item —
+        так несовпадающие узлы уходят на второй план целиком. Выделение сохраняется.
+        """
+        dimmed = bool(dimmed)
+        if getattr(self, "_dimmed", False) == dimmed:
+            return
+        self._dimmed = dimmed
+        self.setOpacity(self.DIM_OPACITY if dimmed else 1.0)
 
     def set_ssh_connected(self, connected: bool):
         """Установить статус SSH подключения."""

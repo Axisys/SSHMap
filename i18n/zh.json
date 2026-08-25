@@ -253,5 +253,8 @@
   "status.server_duplicated": "已复制：{alias}",
   "msg.confirm_delete_many": "确定删除所选的 {count} 台服务器吗？\n将逐一检查是否有正在运行的 SSH 会话。",
   "status.servers_deleted_multi": "已删除服务器：{count}",
-  "status.connections_created_multi": "已创建连接：{count}"
+  "status.connections_created_multi": "已创建连接：{count}",
+  "server.tags": "标签：",
+  "server.tags_hint": "prod, staging, dev",
+  "filter.all_tags": "所有标签"
 }

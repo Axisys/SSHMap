@@ -471,6 +471,9 @@ class CmdEditNodeData(_MapCommand):
                 return
             self._node.data = data
             self._node.update_appearance()
+            # v0.9.4: теги могли измениться — полоска пересобирается (update_appearance
+            # трогает её только при смене геометрии)
+            self._node.refresh_tags()
             # host/порт могли измениться — статус больше неактуален (паттерн диалога)
             self._node.reset_status()
         except RuntimeError:

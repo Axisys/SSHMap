@@ -63,6 +63,11 @@ class MapScene(QGraphicsScene):
         """Все стрелки-связи (копия списка)."""
         return list(self._arrows)
 
+    def notes(self) -> List["StickyNote"]:
+        """Все sticky-заметки (копия списка) — AUDIT-фикс: публичный итератор
+        вместо обращений к _notes извне (как nodes()/arrows()/groups())."""
+        return list(self._notes)
+
     def get_node(self, node_id: str) -> Optional[ServerNode]:
         """Узел по id или None."""
         return self._nodes.get(node_id)

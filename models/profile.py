@@ -90,8 +90,14 @@ def save_profiles(profiles: List[Profile]) -> None:
         d = asdict(p)
         d.pop("password", None)  # пароль живёт только в keyring, а не в JSON
         data.append(d)
-    with open(_profiles_path(), "w", encoding="utf-8") as f:
+    # v0.9.4-fix: атомарная запись (tmp + fsync + os.replace) — как в storage/project.py;
+    # крах посреди прямого open/write рвал файл профилей целиком.
+    tmp_path = _profiles_path() + ".tmp"
+    with open(tmp_path, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(tmp_path, _profiles_path())
 
 
 def add_profile(name: str, user: str, password: str = "") -> Profile:
