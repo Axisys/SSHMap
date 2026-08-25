@@ -15,6 +15,7 @@ __pycache__/
 AUDIT.md
 DESIGN.md
 DOCUMENTATION.md
+STATEMENT.md
 
 # Секреты и конфигурации
 .env
