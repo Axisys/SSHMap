@@ -1,4 +1,5 @@
 import json
+import os
 from typing import Dict, TYPE_CHECKING
 
 try:
@@ -111,8 +112,15 @@ def save_project(
             'groups': groups_list,  # v0.8.1: [{id, name, x, y, width, height}, ...]
             'background': background_dict,  # v0.9.1: {path, x, y, width, height} | null
         }
-        with open(path, 'w', encoding='utf-8') as f:
+        # v0.9.3 fix: атомарная запись (tmp-файл + fsync + os.replace) — по образцу
+        # save_config() из i18n. Крах/обрыв питания посреди записи больше не рвёт
+        # единственный файл с картой: replace либо происходит целиком, либо нет.
+        tmp_path = path + '.tmp'
+        with open(tmp_path, 'w', encoding='utf-8') as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp_path, path)
 
         if log:
             log.info("Project saved", extra={

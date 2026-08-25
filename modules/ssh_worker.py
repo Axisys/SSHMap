@@ -103,7 +103,8 @@ class SSHWorker(QThread):
                 pass
             self.success.emit(t("ssh.socket_test_ok", host=self.host, port=self.port))
         except socket.timeout:
-            self.error.emit(f"Connection timed out for {self.host}:{self.port}")
+            # v0.9.3 fix: раньше здесь уходила хардкод-английская строка мимо i18n.
+            self.error.emit(t("ssh.socket_timeout", host=self.host, port=self.port))
         except OSError as e:
             msg = t("ssh.connection_failed", host=self.host, port=self.port)
             # Fallback if translation unavailable (returns [key])

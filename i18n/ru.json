@@ -149,6 +149,7 @@
   "error.empty_host": "У сервера не указан host.",
   "error.no_user": "Укажите пользователя SSH.",
   "ssh.socket_test_ok": "✓ Соединение с {host}:{port} успешно",
+  "ssh.socket_timeout": "Истекло время ожидания подключения к {host}:{port}",
   "ssh.connection_failed": "Не удалось подключиться к {host}:{port}",
   "ssh.auth_failed": "Ошибка аутентификации",
   "ssh.ssh_error": "СШ ошибка: {message}",
@@ -239,5 +240,10 @@
   "status.background_set": "Фоновое изображение установлено.",
   "status.background_removed": "Фоновое изображение убрано.",
   "msg.export_failed": "Не удалось экспортировать карту: {error}",
-  "msg.background_failed": "Не удалось загрузить изображение: {error}"
+  "msg.background_failed": "Не удалось загрузить изображение: {error}",
+  "palette.title": "Палитра команд",
+  "palette.placeholder": "Введите команду или имя сервера...",
+  "palette.hint": "Enter — выполнить, Up/Down — навигация, Esc — закрыть",
+  "palette.kind_server": "Сервер",
+  "msg.select_server_edit": "Выделите сервер на карте для редактирования."
 }

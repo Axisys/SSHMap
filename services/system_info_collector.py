@@ -113,13 +113,11 @@ def parse_ram_bytes(text: str):
             continue
         first = token.split()[0]
         if first.isdigit():
-            n = int(first)
-            # meminfo даёт килобайты («MemTotal:  16094 kB» → парсится как «16094 kB»,
-            # но grep-строка начинается с 'M', сюда попадает только число из free -b
-            # и чистое число-килобайт из второй колонки meminfo).
-            if "meminfo" in text.lower() and len(token.split()) > 1:
-                pass  # кБ — обработано ниже
-            return n
+            # meminfo даёт килобайты («MemTotal:  16094 kB»), но grep-строка
+            # начинается с 'M', сюда попадает только число из free -b и чистое
+            # число-килобайт из второй колонки meminfo; кБ-случай обрабатывает
+            # fallback ниже (MemTotal → *1024).
+            return int(first)
     # fallback: "MemTotal:  16394256 kB"
     import re
     m = re.search(r"MemTotal:\s+(\d+)\s*kB", text)
@@ -198,6 +196,12 @@ class SystemInfoCollector(QThread):
         super().__init__(parent)
         self.data = data
         self.password = password or ""
+
+    # v0.9.3 fix: коллектор одноразовый (без cancel-флага внутри run), поэтому
+    # «остановка» — это просто ограниченное ожидание естественного завершения
+    # (_TIMEOUT_S на канал + парсинг; см. _shutdown_background_threads в MainWindow).
+    def stop(self):
+        self.wait(int((_TIMEOUT_S + 2) * 1000))
 
     def run(self):  # noqa: C901 — плоская цепочка шагов с ранними выходами
         sid = self.data.id

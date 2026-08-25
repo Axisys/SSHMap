@@ -13,6 +13,14 @@ import json
 import os
 import sys
 
+# v0.9.3 fix: на консоли cp1251 (типичная русская Windows) print деталей FAIL
+# с «→» падал с UnicodeEncodeError и убивал весь прогон. UTF-8 + replace —
+# отчёт о провале доезжает до пользователя на любой кодировке консоли.
+try:
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+except (AttributeError, ValueError):
+    pass  # не-Python3.7+ поток или уже переориентирован (pytest capture)
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from PySide6.QtWidgets import QApplication

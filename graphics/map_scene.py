@@ -156,8 +156,10 @@ class MapScene(QGraphicsScene):
                                 if a.source == node or a.target == node]
             for a in arrows_to_remove:
                 self.removeItem(a)
+                getattr(a, 'deleteLater', lambda: None)()  # v0.9.3 fix: убираем C++-объект (иначе утечка до конца сессии)
                 self._arrows.remove(a)
             self.removeItem(node)
+            getattr(node, 'deleteLater', lambda: None)()  # v0.9.3 fix: карточка+тень+пульс+тексты — иначе живут вечно
             del self._nodes[node_id]
 
     def add_connection(self, source_id: str, target_id: str, label: str = "",
@@ -189,6 +191,7 @@ class MapScene(QGraphicsScene):
         """
         if arrow in self._arrows:
             self.removeItem(arrow)
+            getattr(arrow, 'deleteLater', lambda: None)()  # v0.9.3 fix: C++-объект не должен жить до смерти сцены (deleteLater доступен у QObject-наследников)
             self._arrows.remove(arrow)
             return True
         return False
@@ -224,6 +227,7 @@ class MapScene(QGraphicsScene):
         for i, n in enumerate(self._notes):
             if n.note_id == note_id:
                 self.removeItem(n)
+                getattr(n, 'deleteLater', lambda: None)()  # v0.9.3 fix: QTextEdit внутри заметки — тяжёлый C++-объект
                 del self._notes[i]
                 return
 
@@ -266,6 +270,7 @@ class MapScene(QGraphicsScene):
         if group in self._groups:
             group.clear_members()  # один сигнал, без N пересигналов
             self.removeItem(group)
+            getattr(group, 'deleteLater', lambda: None)()  # v0.9.3 fix: рамка+заголовок группы — тоже C++-объекты
             self._groups.remove(group)
             # Узел, чей центр был в этой группе, может оказаться под рамкой другой
             # (нижележащей) группы — инвариант восстанавливаем.
@@ -403,6 +408,7 @@ class MapScene(QGraphicsScene):
             sc_item = self._background.scene()
             if sc_item is not None:
                 self.removeItem(self._background)
+            getattr(self._background, 'deleteLater', lambda: None)()  # v0.9.3 fix: pixmap не должен висеть до смерти сцены
             self._background = None
 
     def render_to_pixmap(self, scale: float = 2.0, padding: float = 60.0,

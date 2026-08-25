@@ -19,7 +19,7 @@ from PySide6.QtCore import Qt, QThread, Signal, QTimer
 from PySide6.QtGui import QFont, QTextCursor, QColor, QTextCharFormat, QTextBlockFormat, QFontDatabase
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QLabel, QPlainTextEdit,
-    QPushButton, QHBoxLayout, QMessageBox,
+    QPushButton, QHBoxLayout, QMessageBox, QApplication,
 )
 
 
@@ -194,7 +194,24 @@ class SSHTerminalTextEdit(QPlainTextEdit):
 
         if mod & Qt.KeyboardModifier.ControlModifier:
             if key == Qt.Key_C:
+                # v0.9.3 fix: стандартное поведение терминалов — Ctrl+C шлёт SIGINT
+                # только когда нет выделения; при выделении копируем в буфер.
+                if self.textCursor().hasSelection():
+                    self.copy()
+                    return
                 self.terminal_thread.send_data(b'\x03')
+                return
+            elif key == Qt.Key_V:
+                # v0.9.3 fix: вставка из буфера в канал SSH (раньше виджет был
+                # read-only и Ctrl+V просто не работал).
+                clipboard = QApplication.clipboard()
+                if clipboard.text():
+                    try:
+                        self.terminal_thread.send_data(clipboard.text().encode('utf-8'))
+                    except Exception:
+                        pass
+                    return
+                event.ignore()
                 return
             elif key == Qt.Key_D:
                 self.terminal_thread.send_data(b'\x04')

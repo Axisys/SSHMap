@@ -556,7 +556,67 @@ class MainWindow(QMainWindow):
             else:
                 event.ignore()
                 return
+
+        # v0.9.3 fix: остановка всех фоновых QThread перед закрытием окна.
+        # Раньше закрывались только StatusChecker (destroyed → shutdown()); при
+        # активном сборе информации, ping/DNS или SSH-сессии Qt уничтожал QObject
+        # под работающим потоком → «QThread: Destroyed while thread is still running».
+        self._shutdown_background_threads()
         event.accept()
+
+    def _shutdown_background_threads(self):
+        """Остановить коллекторы, ping/DNS-потоки и терминальные сессии.
+
+        Паттерн взят у StatusChecker: stop() + ограниченный wait() — никогда
+        не блокируем GUI-поток дольше пары секунд на поток.
+        """
+        threads = []
+
+        # Автосбор системной информации (SystemInfoCollector)
+        for coll in getattr(self, "_info_collectors", {}).values():
+            stop = getattr(coll, "stop", None) or getattr(coll, "request_stop", None)
+            if callable(stop):
+                try:
+                    stop()
+                except Exception:
+                    pass
+            if hasattr(coll, "isRunning"):
+                threads.append(coll)
+
+        # Ping и обратный DNS
+        for attr in ("_ping_thread", "_dns_thread"):
+            th = getattr(self, attr, None)
+            if th is not None and hasattr(th, "isRunning") and th.isRunning():
+                stop = getattr(th, "stop", None)
+                if callable(stop):
+                    try:
+                        stop()
+                    except Exception:
+                        pass
+                threads.append(th)
+
+        # Терминальные окна: их closeEvent сам делает thread.stop()+wait();
+        # здесь только ждём остаток, если окно ещё не закрыто пользователем.
+        terminal_waits = []
+        for w in list(getattr(self, "_terminal_windows", [])):
+            try:
+                if w.isVisible():
+                    w.close_terminal()
+                th = getattr(w, "terminal_thread", None)
+                if th is not None and hasattr(th, "isRunning") and th.isRunning():
+                    terminal_waits.append(th)
+            except Exception:
+                pass
+
+        total_wait_ms = 2000
+        per_thread = max(total_wait_ms // max(len(threads) + len(terminal_waits), 1), 200)
+        deadline = __import__("time").monotonic() + total_wait_ms / 1000.0
+        for th in threads + terminal_waits:
+            remaining = int(max(deadline - __import__("time").monotonic(), 0.05) * 1000)
+            try:
+                th.wait(min(per_thread, remaining))
+            except Exception:
+                pass
 
     @property
     def _has_unsaved_changes(self) -> bool:
@@ -687,6 +747,10 @@ class MainWindow(QMainWindow):
         self._add_menu_action(edit_menu, "edit.add_group", self._add_group_at, "Ctrl+Shift+G")  # v0.8.1: группы узлов
         self._add_menu_action(edit_menu, "edit.add_connection", self._add_connection, "Ctrl+Shift+C")
         self._add_menu_action(edit_menu, "edit.properties", self._show_properties, "Ctrl+I")
+        # v0.9.2: горячие клавиши частых действий над выделенным узлом
+        self._add_menu_action(edit_menu, "ctx.ssh_connect", self._connect_ssh_to_selected, "Ctrl+Return")
+        self._add_menu_action(edit_menu, "ctx.edit_server", self._edit_selected_node, "Ctrl+E")
+        self._add_menu_action(edit_menu, "ctx.add_note", self._add_note_at_view_center, "Ctrl+Shift+N")
         self._add_menu_action(edit_menu, "edit.delete", self._delete_selected, "Delete")
 
         # Profile menu
@@ -734,6 +798,25 @@ class MainWindow(QMainWindow):
             except Exception as e:
                 if self.log:
                     self.log.warning(f"i18n lang menu error: {e}")
+
+        # v0.9.2: палитра команд (Ctrl+K) — fuzzy-поиск по действиям и серверам.
+        self._setup_command_palette()
+
+    def _setup_command_palette(self):
+        """v0.9.2: создать палитру команд и хоткей Ctrl+K."""
+        try:
+            from ui.command_palette import CommandPalette
+        except ImportError:  # плоский запуск из корня проекта
+            from command_palette import CommandPalette
+        self._command_palette = CommandPalette(self, self)
+
+        from PySide6.QtGui import QShortcut, QKeySequence
+        self._palette_shortcut = QShortcut(QKeySequence("Ctrl+K"), self)
+        self._palette_shortcut.activated.connect(self._open_command_palette)
+
+    def _open_command_palette(self):
+        if getattr(self, "_command_palette", None) is not None:
+            self._command_palette.open_palette()
 
     def _iter_server_nodes(self):
         """Все ServerNode сцены (для collapse/expand all)."""
@@ -875,6 +958,9 @@ class MainWindow(QMainWindow):
                 node.data.user = dlg.user_edit.text().strip()
                 node.data.key_path = dlg.key_path_edit.text().strip()
                 node.data.ssh_port = dlg.port_edit.value()
+                # v0.9.3 fix: правки user/key_path/ssh_port из диалога — тоже данные
+                # проекта; без _mark_dirty() они терялись молча при выходе без Ctrl+S.
+                self._mark_dirty()
                 # AUDIT v0.7.2 (средняя #7): пароль НЕ храним в модели — передаём его
                 # напрямую терминальному окну ниже; сам диалог уже записал его в keyring
                 # (_on_worker_success), так что ничего не теряется при сохранении проекта.
@@ -1126,6 +1212,21 @@ class MainWindow(QMainWindow):
         """Редактирование узла (контекстное меню / двойной клик)."""
         if node is not None:
             self._on_node_double_click_direct(node)
+
+    # ── v0.9.2: хоткеи частых действий над выделенным узлом ─────
+
+    def _edit_selected_node(self):
+        """Ctrl+E: редактировать выделенный на карте сервер."""
+        node = self.scene.get_selected_node()
+        if not node:
+            QMessageBox.information(self, self.t("msg.info_title"),
+                                    self.t("msg.select_server_edit"))
+            return
+        self._edit_node(node)
+
+    def _add_note_at_view_center(self):
+        """Ctrl+Shift+N: заметка в центре видимой области карты."""
+        self._add_note_at()
 
     def _copy_node_info(self, node: "ServerNode", what: str = "ip"):
         """Скопировать IP или hostname узла в буфер обмена (v0.7.3).
@@ -1793,17 +1894,35 @@ class MainWindow(QMainWindow):
             self._connect_group_signals(grp)
 
         for s in raw.get('servers', []):
-            # Единый путь десериализации: сохраняет key_path и корректно
-            # игнорирует лишние ключи (AUDIT.md, средняя #5).
-            server_data = server_data_from_dict(s)
+            # v0.9.3 fix: per-record try/except, как у notes/groups выше и как
+            # обещано в доках — одна битая запись не роняет загрузку всего проекта.
+            if not isinstance(s, dict):
+                continue  # битая запись — пропускаем без падения загрузки
+            try:
+                # Единый путь десериализации: сохраняет key_path и корректно
+                # игнорирует лишние ключи (AUDIT.md, средняя #5).
+                server_data = server_data_from_dict(s)
+            except (TypeError, ValueError, KeyError) as e:
+                if self.log:
+                    self.log.warning("Skipping broken server record on load", extra={"error": str(e)})
+                continue
             self.scene.add_server(server_data)
 
         for c in raw.get('connections', []):
-            ctype = c.get("type", DEFAULT_CONNECTION_TYPE)  # v0.6: нет поля type → SSH
-            self.scene.add_connection(
-                c["source_id"], c["target_id"],
-                c.get("label", ""), ctype,
-            )
+            # v0.9.3 fix: та же защита, что у servers — отсутствие source_id/target_id
+            # в одной записи не должно убивать весь проект.
+            if not isinstance(c, dict):
+                continue  # битая запись — пропускаем без падения загрузки
+            try:
+                ctype = c.get("type", DEFAULT_CONNECTION_TYPE)  # v0.6: нет поля type → SSH
+                self.scene.add_connection(
+                    c["source_id"], c["target_id"],
+                    c.get("label", ""), ctype,
+                )
+            except KeyError as e:
+                if self.log:
+                    self.log.warning("Skipping broken connection record on load", extra={"error": str(e)})
+                continue
 
         # v0.7.1: после загрузки проекта узлы попадают в план периодических
         # проверок; немедленный раунд запускает _open_project (user path), а не

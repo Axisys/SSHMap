@@ -179,8 +179,11 @@ def build_command(terminal: str, host: str, user: str, port: int = 22,
         ssh_exe = _which("ssh") or "ssh"
         return ["cmd.exe", "/c", "start", "", ssh_exe] + ssh_args[1:]
     if terminal == "conhost":
+        # v0.9.3 fix: голый `conhost.exe ssh ...` не работает — conhost требует
+        # команду через /c (иначе окно мигает и умирает). Запускаем как
+        # `conhost cmd /c ssh ...`; ветка остаётся последним fallback'ом.
         ssh_exe = _which("ssh") or "ssh"
-        return ["conhost.exe", ssh_exe] + ssh_args[1:]
+        return ["conhost.exe", "cmd.exe", "/c", ssh_exe] + ssh_args[1:]
     if terminal == "open_terminal":  # macOS
         script = " ".join(ssh_args)
         return ["open", "-a", "Terminal", "bash", "-c",

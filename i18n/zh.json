@@ -149,6 +149,7 @@
   "error.empty_host": "服务器主机为空。",
   "error.no_user": "输入SSH用户。",
   "ssh.socket_test_ok": "✓ 成功连接到 {host}:{port}",
+  "ssh.socket_timeout": "连接 {host}:{port} 超时",
   "ssh.connection_failed": "无法连接到 {host}:{port}",
   "ssh.auth_failed": "身份验证失败",
   "ssh.ssh_error": "SSH 错误: {message}",
@@ -239,5 +240,10 @@
   "status.background_set": "背景图片已设置。",
   "status.background_removed": "背景图片已移除。",
   "msg.export_failed": "导出地图失败：{error}",
-  "msg.background_failed": "加载图片失败：{error}"
+  "msg.background_failed": "加载图片失败：{error}",
+  "palette.title": "命令面板",
+  "palette.placeholder": "输入命令或服务器名称...",
+  "palette.hint": "Enter — 执行，Up/Down — 导航，Esc — 关闭",
+  "palette.kind_server": "服务器",
+  "msg.select_server_edit": "请先在地图上选择要编辑的服务器。"
 }
