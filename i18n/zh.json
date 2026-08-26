@@ -234,9 +234,11 @@
   "status.info_collected": "已采集 {alias} 的系统信息",
   "status.info_failed": "系统信息采集失败：{error}",
   "file.export_png": "导出地图为图片...",
+  "file.export_drawio": "导出为 drawio...",
   "view.set_background": "设置背景图片...",
   "view.remove_background": "移除背景图片",
   "status.export_ok": "地图已导出。",
+  "status.export_drawio_ok": "地图已导出为 drawio。",
   "status.background_set": "背景图片已设置。",
   "status.background_removed": "背景图片已移除。",
   "msg.export_failed": "导出地图失败：{error}",
@@ -256,5 +258,9 @@
   "status.connections_created_multi": "已创建连接：{count}",
   "server.tags": "标签：",
   "server.tags_hint": "prod, staging, dev",
-  "filter.all_tags": "所有标签"
+  "filter.all_tags": "所有标签",
+  "file.import_servers": "从TXT导入服务器...",
+  "msg.import_servers_result": "已导入：{added} 个新服务器，{skipped} 个跳过（已在地图上或重复行）。",
+  "msg.import_servers_failed": "导入服务器失败：{error}",
+  "status.servers_imported": "已导入服务器：{count}"
 }

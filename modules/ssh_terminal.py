@@ -277,6 +277,11 @@ class SSHTerminalWindow(QMainWindow):
         super().__init__(parent)
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
 
+        # BUGFIX v0.9.5.5: сохраняем server_data на окне — _forget_terminal_window()
+        # в MainWindow читает getattr(window, "server_data", None), чтобы погасить
+        # зелёную SSH-точку узла при закрытии терминала.
+        self.server_data = server_data
+
         t = get_translator()
         self.setWindowTitle(t("terminal.window_title", alias=server_data.alias, host=server_data.host))
         self.resize(800, 600)

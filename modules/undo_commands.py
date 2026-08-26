@@ -278,6 +278,79 @@ class CmdAddRemoveNode(_MapCommand):
         self._refresh()
 
 
+# ── AddRemoveNodeBatch: пачка узлов одной командой (v0.9.5.5, импорт из TXT) ──
+
+class CmdAddRemoveNodeBatch(_MapCommand):
+    """Добавление/удаление НЕСКОЛЬКИХ узлов как один шаг undo/redo.
+
+    Используется массовым импортом серверов (services.host_importer):
+    Ctrl+Z откатывает всю импортированную пачку разом.
+    """
+
+    def __init__(self, win, scene, data_list, mode: str = "add"):
+        super().__init__(win, f"Import {len(data_list)} servers" if mode == "add"
+                         else f"Delete {len(data_list)} servers")
+        self._scene = scene
+        self._data_list = list(data_list)
+        self._mode = mode
+        # v0.9.4-fix-стиль: при remove заранее прячем keyring-пароли для undo
+        self._stashed_passwords: List[Tuple[str, Optional[str]]] = []
+        if mode == "remove":
+            try:
+                from services.credential_manager import get_credential_manager
+                cm = get_credential_manager()
+                for d in self._data_list:
+                    self._stashed_passwords.append((d.id, cm.load_password(d.id)))
+            except Exception:
+                pass
+
+    def _delete_passwords(self):
+        try:
+            from services.credential_manager import get_credential_manager
+            cm = get_credential_manager()
+            for d in self._data_list:
+                cm.delete_password(d.id)
+        except Exception:
+            pass
+
+    def _restore_passwords(self):
+        try:
+            from services.credential_manager import get_credential_manager
+            cm = get_credential_manager()
+            for sid, pwd in self._stashed_passwords:
+                if pwd:
+                    cm.save_password(sid, pwd)
+        except Exception:
+            pass
+
+    def redo(self):
+        for d in self._data_list:
+            if self._mode == "add":
+                if not self._scene.has_node(d.id):
+                    self._scene.add_server(d)
+            else:
+                if self._scene.has_node(d.id):
+                    self._scene.remove_server(d.id)
+        if self._mode == "add":
+            # Паролей у импортированных нет; delete — no-op, вызов для симметрии
+            self._delete_passwords()
+        self._refresh()
+
+    def undo(self):
+        for d in self._data_list:
+            if self._mode == "add":
+                if self._scene.has_node(d.id):
+                    self._scene.remove_server(d.id)
+            else:
+                if not self._scene.has_node(d.id):
+                    self._scene.add_server(d)
+        if self._mode == "add":
+            self._delete_passwords()
+        else:
+            self._restore_passwords()
+        self._refresh()
+
+
 # ── AddRemoveConnection: создание/удаление связи ────────────────
 
 class CmdAddRemoveConnection(_MapCommand):

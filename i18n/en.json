@@ -234,9 +234,11 @@
   "status.info_collected": "System info collected for {alias}",
   "status.info_failed": "Info collection failed: {error}",
   "file.export_png": "Export Map as Image...",
+  "file.export_drawio": "Export to drawio...",
   "view.set_background": "Set Background Image...",
   "view.remove_background": "Remove Background Image",
   "status.export_ok": "Map exported.",
+  "status.export_drawio_ok": "Map exported to drawio.",
   "status.background_set": "Background image set.",
   "status.background_removed": "Background image removed.",
   "msg.export_failed": "Failed to export map: {error}",
@@ -256,5 +258,9 @@
   "status.connections_created_multi": "Created connections: {count}",
   "server.tags": "Tags:",
   "server.tags_hint": "prod, staging, dev",
-  "filter.all_tags": "All tags"
+  "filter.all_tags": "All tags",
+  "file.import_servers": "Import Servers from TXT...",
+  "msg.import_servers_result": "Imported: {added} new, {skipped} skipped (already on map or duplicate lines).",
+  "msg.import_servers_failed": "Failed to import servers: {error}",
+  "status.servers_imported": "Servers imported: {count}"
 }

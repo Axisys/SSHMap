@@ -1,4 +1,4 @@
-# SSH Map (NodeVisualSSH) — v0.9.4
+# SSH Map (NodeVisualSSH) — v0.9.5
 
 Десктопное приложение (Python + PySide6): интерактивная карта IT-инфраструктуры с прямым SSH-подключением к узлам. Slogan: *"Draw your infrastructure. Organize it. Connect to it."*
 
@@ -21,6 +21,7 @@ QT_QPA_PLATFORM=offscreen python tests/regression_v081.py   # 22 проверк�
 QT_QPA_PLATFORM=offscreen python tests/regression_v093.py   # 21 проверка (дублирование + мультивыделение)
 QT_QPA_PLATFORM=offscreen python tests/regression_v094.py   # 23 проверки (теги серверов)
 QT_QPA_PLATFORM=offscreen python tests/regression_v091.py   # 28 проверок (экспорт + фон)
+QT_QPA_PLATFORM=offscreen python tests/smoke_v095_drawio.py # экспорт в draw.io (v0.9.5)
 QT_QPA_PLATFORM=offscreen python tests/check_i18n_keys.py   # паритет i18n-ключей (exit 0 = ок)
 ```
 
@@ -56,19 +57,21 @@ modules/
 │                            #   EditTextNote(дебаунс 600мс), EditConnection, EditNodeData
 └── logger.py                # setup_logging()/get_logger(__name__)
 storage/project.py           # save_project/load_project — JSON версии "0.9" (VERSION_FORMAT из version.py; + ключ "background")
+storage/export_drawio.py     # (v0.9.5) экспорт карты в .drawio (mxGraph XML, ElementTree, без новых зависимостей)
 services/
-├── credential_manager.py    # keyring-абстракция (синглтон get_credential_manager()); graceful fallback без keyring
+├── credential_manager.py    # keyring-абстракция (синглтон get_credential_manager()); v0.9.5.5: только проверенный бэкенд (Windows — wincred, иначе — отказ от записи)
+├── host_importer.py         # (v0.9.5.5) массовый импорт серверов из TXT: parse_hosts_file, is_ip_address, resolve_host
 ├── status_checker.py        # StatusChecker: QTimer разводит раунды, пробы в _ProbeThread; probe_ssh() → online/warn/offline
 └── system_info_collector.py # SystemInfoCollector (v0.9): автосбор ОС/CPU/RAM/диск Linux-сервера одной exec_command-сессией
-version.py                   # единая точка версий: APP_VERSION="0.9.4", VERSION_FORMAT="0.9"
+version.py                   # единая точка версий: APP_VERSION="0.9.5", VERSION_FORMAT="0.9"
 dialogs/                     # AddServerDialog, SSHConnectDialog (+кнопка внешнего терминала),
                              # ConnectionDialog/EditConnectionDialog, ProfileManagerDialog
 ui/main_window.py            # MainWindow (~2200 строк): контроллер; undo_stack (QUndoStack), dirty по canUndo()+baseline;
                              #   дублирование узла Ctrl+D (keyring-пароль под новым id), групповые операции (v0.9.3)
-                             #   экспорт карты в PNG/JPEG (v0.9.1), установка/удаление фона, «Собрать информацию» (v0.9)
+                             #   экспорт карты в PNG/JPEG (v0.9.1), экспорт в drawio (v0.9.5), установка/удаление фона, «Собрать информацию» (v0.9)
 ui/command_palette.py        # (v0.9.2) CommandPalette: Ctrl+K, fuzzy-поиск по действиям меню и серверам
-i18n/                        # t(key,**kwargs); en.json/ru.json/zh.json — 258 ключей, наборы идентичны; ru — дефолт
-tests/                       # smoke_test.py (272), regression_v081/v083/v091/v093/v094.py, smoke_collapse.py, check_i18n_keys.py
+i18n/                        # t(key,**kwargs); en.json/ru.json/zh.json — 264 ключа, наборы идентичны; ru — дефолт
+tests/                       # smoke_test.py (272), regression_v081/v083/v091/v093/v094.py, smoke_v095_drawio.py, smoke_collapse.py, check_i18n_keys.py
 ```
 
 ---
@@ -122,6 +125,10 @@ tests/                       # smoke_test.py (272), regression_v081/v083/v091/v0
 ### Безопасность
 Пароли: только keyring (профили `"profile:{id}"`, серверы по server_id). При недоступном keyring приложение работает, но пароли не переживают перезапуск. Внешний терминал: пароль вводит ssh-клиент ОС, никогда не argv.
 
+**Ограничения (честно, v0.9.5.5):**
+- **TOFU при первом подключении:** ключ хоста, которого нет в `~/.sshmap/known_hosts`, принимается автоматически (отпечаток показывается в логе). Это стандартное поведение paramiko-клиентов, но это **не** полная защита от MITM на самом первом подключении: защита срабатывает на *смене* уже зафиксированного ключа. Для критичных хостов сверяйте отпечаток первого подключения по доверенному каналу.
+- **Windows / keyring:** принимается только системный бэкенд Windows Credential Manager (`keyrings.win.*`, т.е. требуется pywin32 — раскомментируйте его в requirements.txt). Plaintext-файловые fallback-бэкенды (`keyrings.alt.file`) отвергаются: пароли не будут сохранены, а не уехают в открытый файл. На Linux/macOS отвергаются бэкенды `keyrings.alt.*`. Если безопасный бэкенд недоступен — приложение работает, но пароли не сохраняются между запусками.
+
 ---
 
 ## 5. Нюансы PySide6 / Qt 6.11 (обязательные знания)
@@ -151,12 +158,11 @@ ru (дефолт) / en / zh. Правило: новый ключ добавля�
 
 ## 7. Состояние и roadmap
 
-**Реализовано полностью:** карта (узлы/Безье-связи 6 типов/заметки/группы), статусы online/warn/offline, терминал на pyte (vim/htop работают), внешний системный терминал, undo/redo, автосбор информации о Linux-сервере (v0.9), профили + keyring, i18n ru/en/zh, контекстные меню всех объектов, fit/zoom/центрирование, экспорт карты в PNG/JPEG и фоновое изображение с drag/resize (v0.9.1), горячие клавиши и палитра команд Ctrl+K (v0.9.2), дублирование узла Ctrl+D с копированием keyring-пароля под новым id и мультивыделение (Ctrl+клик, рамка, групповой drag, соединить/удалить выделенные) (v0.9.3), теги/цветные метки серверов: цветная полоска на карточке, фильтр по тегам в сайдбаре с затемнением несовпадающих узлов на карте, поиск по тегам (v0.9.4).
+**Реализовано полностью:** карта (узлы/Безье-связи 6 типов/заметки/группы), статусы online/warn/offline, терминал на pyte (vim/htop работают), внешний системный терминал, undo/redo, автосбор информации о Linux-сервере (v0.9), профили + keyring, i18n ru/en/zh, контекстные меню всех объектов, fit/zoom/центрирование, экспорт карты в PNG/JPEG и фоновое изображение с drag/resize (v0.9.1), горячие клавиши и палитра команд Ctrl+K (v0.9.2), дублирование узла Ctrl+D с копированием keyring-пароля под новым id и мультивыделение (Ctrl+клик, рамка, групповой drag, соединить/удалить выделенные) (v0.9.3), теги/цветные метки серверов: цветная полоска на карточке, фильтр по тегам в сайдбаре с затемнением несовпадающих узлов на карте, поиск по тегам (v0.9.4), экспорт карты в draw.io `.drawio` — узлы/связи/группы-контейнеры/стикеры/фон отдельным слоем; файл открывается в diagrams.net и VS Code-плагине (v0.9.5).
 
 **Известные ограничения:** undo не покрывает статусы узлов и геометрию фона; фоновое изображение хранится путём (при переносе проекта на другую машину файл нужно переносить вместе с картой); язык интерфейса выбирается через меню «Помощь → Язык» (с v0.6.3, с персистентностью в ~/.sshmap/config.json); в v1.1 планируется перенос переключателя в диалог настроек.
 
 **Roadmap (по приоритету):**
-2. **v0.9.5**: экспорт карты в draw.io (`.drawio`, mxGraph XML через ElementTree, без новых зависимостей); фон отдельным слоем; импорт — опционально, только своих файлов. Предусловие: модель данных после v0.9.4.
 3. **v0.9.6**: контекстное меню в сайдбаре (ПКМ по серверу в дереве: SSH / внешний терминал / редактировать / копировать IP·hostname / ping / собрать информацию / показать на карте / удалить).
 4. **v0.9.7**: автосохранение (~/.sshmap/autosave/) + кольцевые бэкапы при каждом save; восстановление при старте.
 5. **v0.9.8**: экспорт/импорт профилей SSH (без паролей, слияние по имени).
@@ -169,5 +175,5 @@ ru (дефолт) / en / zh. Правило: новый ключ добавля�
 
 - MIT License
 - Пароли никогда не покидают машину: keyring ОС (Windows Credential Manager / GNOME Keyring / macOS Keychain); в JSON проекта пароль не пишется никогда.
-- known_hosts-пиннинг (`~/.sshmap/known_hosts`): смена ключа хоста → отказ подключения (защита от MITM).
+- known_hosts-пиннинг (`~/.sshmap/known_hosts`): смена ключа хоста → отказ подключения (защита от MITM). Первое подключение — TOFU: новый ключ принимается автоматически (отпечаток логируется).
 - Внешний системный терминал: пароль вводится ssh-клиенту ОС интерактивно, никогда не передаётся в argv.
