@@ -370,6 +370,9 @@ class MainWindow(QMainWindow):
         # Кэш иконок точек по статусу ("", "online", "warn", "offline")
         self._status_dot_icons = {}
 
+        # v0.9.6: контекстное меню дерева серверов (ПКМ по строке сайдбара)
+        self._setup_tree_context_menu()
+
         # ── Buttons (always created here, i18n applied below) ─
         _connect_buttons()
 
@@ -2044,6 +2047,105 @@ class MainWindow(QMainWindow):
         node_id = item.data(0, Qt.UserRole)
         if node_id and self.scene.has_node(node_id):
             self._select_node(self.scene.get_node(node_id), center=True)
+
+    # ── v0.9.6: контекстное меню дерева серверов (сайдбар) ───────────────
+
+    def _setup_tree_context_menu(self):
+        """v0.9.6: ПКМ по строке дерева — меню действий узла (hidden until click).
+
+        Политика CustomContextMenu + сигнал customContextMenuRequested — штатный
+        путь Qt для QTreeWidget (у виджета нет переопределяемого contextMenuEvent
+        без перехвата событий viewport'а; сигнал несёт позицию в координатах дерева,
+        itemAt(pos) даёт строку).
+        """
+        self.tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.tree.customContextMenuRequested.connect(self._on_sidebar_context_menu)
+
+    def _on_sidebar_context_menu(self, pos):
+        """v0.9.6 (ROADMAP #1–#2): ПКМ по серверу в дереве — действия узла.
+
+        Состав и порядок — по ROADMAP v0.9.6: Подключиться SSH, Внешний терминал,
+        Редактировать, Скопировать IP, Copy Hostname, Ping, Собрать информацию,
+        Показать на карте (центрирование + акцент), Удалить (guarded-путь).
+        i18n — переиспользование ключей ctx.* карты; новый только ctx.reveal_on_map.
+        «Карточные» действия сознательно НЕ дублируются (ROADMAP #2): drag-связь и
+        свернуть/развернуть плашку живут только в контексте карты, где они имеют смысл.
+        """
+        item = self.tree.itemAt(pos)
+        if item is None:
+            return  # клик мимо строк — меню не показываем (пустая область дерева)
+        node_id = item.data(0, Qt.UserRole)
+        if not node_id or not self.scene.has_node(node_id):
+            return  # строка без узла (или узел исчез) — действий нет
+        node = self.scene.get_node(node_id)
+
+        menu = QMenu(self)
+
+        act_ssh = menu.addAction(self.t("ctx.ssh_connect"))
+        def _ssh(checked=False, n=node):  # checked — bool из QAction.triggered
+            self._select_node(n)          # диалог берёт выделенный узел (паттерн MapView)
+            self._connect_ssh_to_selected()
+        act_ssh.triggered.connect(_ssh)
+
+        act_ext = menu.addAction(self.t("ctx.ssh_external"))
+        def _ssh_ext(checked=False, n=node):  # checked — bool из QAction.triggered
+            self._select_node(n)
+            self._connect_ssh_external(n)
+        act_ext.triggered.connect(_ssh_ext)
+
+        menu.addSeparator()
+
+        act_edit = menu.addAction(self.t("ctx.edit_server"))
+        act_edit.triggered.connect(lambda _=False, n=node: self._edit_node(n))
+
+        menu.addSeparator()
+
+        act_ip = menu.addAction(self.t("ctx.copy_ip"))
+        act_ip.triggered.connect(lambda _=False, n=node: self._copy_node_info(n, "ip"))
+        act_host = menu.addAction(self.t("ctx.copy_hostname"))
+        act_host.triggered.connect(
+            lambda _=False, n=node: self._copy_node_info(n, "hostname"))
+        act_ping = menu.addAction(self.t("ctx.ping"))
+        act_ping.triggered.connect(lambda _=False, n=node: self._ping_node(n))
+        act_info = menu.addAction(self.t("ctx.collect_info"))
+        act_info.triggered.connect(
+            lambda _=False, n=node: self._collect_node_info(n))
+
+        menu.addSeparator()
+
+        act_reveal = menu.addAction(self.t("ctx.reveal_on_map"))
+        act_reveal.triggered.connect(
+            lambda _=False, n=node: self._reveal_node_on_map(n))
+
+        menu.addSeparator()
+
+        act_del = menu.addAction(self.t("ctx.delete_server"))
+        # guarded-путь (ROADMAP #1): подтверждение + ожидание SSHWorker — тот же,
+        # что кнопка «Удалить», Delete-клавиша и контекстное меню карты.
+        act_del.triggered.connect(lambda _=False, n=node: self._remove_node_guarded(n))
+
+        try:
+            menu.exec(self.tree.mapToGlobal(pos))
+        except Exception as e:  # noqa: BLE001 — GUI-компонент не должен ронять приложение
+            if self.log:
+                self.log.warning(f"sidebar context menu exec failed: {e}")
+
+    def _reveal_node_on_map(self, node: "ServerNode"):
+        """v0.9.6 (ROADMAP #1): «Показать на карте» — центрирование + акцент.
+
+        Выбор узла (строка дерева и рамка карты синхронизируются через
+        _sync_selection_state), centerOn — готовый путь _select_node(center=True);
+        акцент — рамка-вспышка ServerNode.reveal_flash (паттерн пульса set_status).
+        """
+        if node is None or node.scene() is None:
+            return  # узел удалён, пока меню было открыто
+        self._select_node(node, center=True)
+        flash = getattr(node, "reveal_flash", None)
+        if callable(flash):
+            try:
+                flash()
+            except Exception:  # noqa: BLE001 — акцент косметика; навигация уже сработала
+                pass
 
     def refresh_sidebar(self):
         self.tree.clear()

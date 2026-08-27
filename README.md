@@ -1,4 +1,4 @@
-# SSH Map (NodeVisualSSH) — v0.9.5.5
+# SSH Map (NodeVisualSSH) — v0.9.6
 
 Десктопное приложение (Python + PySide6): интерактивная карта IT-инфраструктуры с прямым SSH-подключением к узлам. Slogan: *"Draw your infrastructure. Organize it. Connect to it."*
 
@@ -25,6 +25,7 @@ QT_QPA_PLATFORM=offscreen python tests/regression_v094.py         # 23 пров�
 QT_QPA_PLATFORM=offscreen python tests/regression_v094b.py        # 9 проверок (keyring fail-бэкенд, атомарная запись)
 QT_QPA_PLATFORM=offscreen python tests/smoke_v095_drawio.py       # экспорт в draw.io (round-trip XML)
 QT_QPA_PLATFORM=offscreen python tests/regression_v0955_keyring.py # keyring-валидация (15–18 проверок, зависит от бэкенда)
+QT_QPA_PLATFORM=offscreen python tests/regression_v096_sidebar_ctx.py # контекстное меню сайдбара v0.9.6 (~20 проверок)
 QT_QPA_PLATFORM=offscreen python tests/check_i18n_keys.py         # паритет i18n-ключей (exit 0 = ок)
 ```
 
@@ -67,15 +68,15 @@ services/
 ├── host_importer.py         # массовый импорт серверов из TXT: parse_hosts_file, is_ip_address, resolve_host
 ├── status_checker.py        # StatusChecker: QTimer разводит раунды, пробы в _ProbeThread; probe_ssh() → online/warn/offline
 └── system_info_collector.py # SystemInfoCollector: автосбор ОС/CPU/RAM/диск Linux-сервера одной exec_command-сессией
-version.py                   # единая точка версий: APP_VERSION="0.9.5.5", VERSION_FORMAT="0.9"
+version.py                   # единая точка версий: APP_VERSION="0.9.6", VERSION_FORMAT="0.9"
 dialogs/                     # AddServerDialog, SSHConnectDialog (+кнопка внешнего терминала),
                              # ConnectionDialog/EditConnectionDialog, ProfileManagerDialog
 ui/main_window.py            # MainWindow (~2300 строк): контроллер; undo_stack (QUndoStack), dirty по canUndo()+baseline;
                              #   дублирование узла Ctrl+D (keyring-пароль под новым id), групповые операции
                              #   экспорт карты в PNG/JPEG, экспорт в drawio, установка/удаление фона, «Собрать информацию»
 ui/command_palette.py        # CommandPalette: Ctrl+K, fuzzy-поиск по действиям меню и серверам
-i18n/                        # t(key,**kwargs); en.json/ru.json/zh.json — 264 ключа, наборы идентичны; ru — дефолт
-tests/                       # smoke_test.py (272), regression_v081/v083/v091/v093/v094/v094b/v0955_keyring.py, smoke_collapse.py, smoke_v095_drawio.py, check_i18n_keys.py
+i18n/                        # t(key,**kwargs); en.json/ru.json/zh.json — 265 ключей, наборы идентичны; ru — дефолт
+tests/                       # smoke_test.py (272), regression_v081/v083/v091/v093/v094/v094b/v0955_keyring/v096_sidebar_ctx.py, smoke_collapse.py, smoke_v095_drawio.py, check_i18n_keys.py
 ```
 
 ---
@@ -162,12 +163,11 @@ ru (дефолт) / en / zh. Правило: новый ключ добавля�
 
 ## 7. Состояние и roadmap
 
-**Реализовано полностью:** карта (узлы/Безье-связи 6 типов/заметки/группы), статусы online/warn/offline, терминал на pyte (vim/htop работают), внешний системный терминал, undo/redo, автосбор информации о Linux-сервере, профили + keyring, i18n ru/en/zh, контекстные меню всех объектов, fit/zoom/центрирование, экспорт карты в PNG/JPEG и фоновое изображение с drag/resize, горячие клавиши и палитра команд Ctrl+K, дублирование узла Ctrl+D с копированием keyring-пароля под новым id и мультивыделение (Ctrl+клик, рамка, групповой drag, соединить/удалить выделенные), теги/цветные метки серверов: цветная полоска на карточке, фильтр по тегам в сайдбаре с затемнением несовпадающих узлов на карте, поиск по тегам, экспорт карты в draw.io `.drawio` — узлы/связи/группы-контейнеры/стикеры/фон отдельным слоем; файл открывается в diagrams.net и VS Code-плагине; массовый импорт серверов из TXT.
+**Реализовано полностью:** карта (узлы/Безье-связи 6 типов/заметки/группы), статусы online/warn/offline, терминал на pyte (vim/htop работают), внешний системный терминал, undo/redo, автосбор информации о Linux-сервере, профили + keyring, i18n ru/en/zh, контекстные меню всех объектов, fit/zoom/центрирование, экспорт карты в PNG/JPEG и фоновое изображение с drag/resize, горячие клавиши и палитра команд Ctrl+K, дублирование узла Ctrl+D с копированием keyring-пароля под новым id и мультивыделение (Ctrl+клик, рамка, групповой drag, соединить/удалить выделенные), теги/цветные метки серверов: цветная полоска на карточке, фильтр по тегам в сайдбаре с затемнением несовпадающих узлов на карте, поиск по тегам, экспорт карты в draw.io `.drawio` — узлы/связи/группы-контейнеры/стикеры/фон отдельным слоем; файл открывается в diagrams.net и VS Code-плагине; массовый импорт серверов из TXT, один undo-командой).
 
 **Известные ограничения:** undo не покрывает статусы узлов и геометрию фона; фоновое изображение хранится путём (при переносе проекта на другую машину файл нужно переносить вместе с картой); язык интерфейса выбирается через меню «Помощь → Язык» (с персистентностью в ~/.sshmap/config.json); в v1.1 планируется перенос переключателя в диалог настроек.
 
 **Roadmap (по приоритету, детали — в ROADMAP.md):**
-1. **v0.9.6**: контекстное меню в сайдбаре (ПКМ по серверу в дереве: SSH / внешний терминал / редактировать / копировать IP·hostname / ping / собрать информацию / показать на карте / удалить).
 2. **v0.9.7**: автосохранение (~/.sshmap/autosave/) + кольцевые бэкапы при каждом save; восстановление при старте.
 3. **v0.9.8**: поиск по карте (Ctrl+F) — подсветка совпадений, переход с центрированием и рамкой-акцентом, затемнение несовпавших.
 4. **v1.0**: Терминал v1 — сеточный рендерер на QPainter (runs, исправленный цветовой движок: `brown`/256/truecolor), полная клавиатура + AltGr-guard, выделение мышью и копирование, resize PTY, скроллбэк через `pyte.HistoryScreen`.

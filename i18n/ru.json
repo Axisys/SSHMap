@@ -262,5 +262,6 @@
   "file.import_servers": "Импортировать серверы из TXT...",
   "msg.import_servers_result": "Импортировано: {added} новых, {skipped} пропущено (уже на карте или дубли строк).",
   "msg.import_servers_failed": "Не удалось импортировать серверы: {error}",
-  "status.servers_imported": "Серверов импортировано: {count}"
+  "status.servers_imported": "Серверов импортировано: {count}",
+  "ctx.reveal_on_map": "Показать на карте"
 }

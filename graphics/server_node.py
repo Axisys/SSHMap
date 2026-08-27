@@ -68,6 +68,11 @@ class ServerNode(QGraphicsItemGroup):
     COLOR_BORDER = QColor("#3b82f6")
     COLOR_SELECTED = QColor("#f59e0b")
     COLOR_HOVER = QColor("#60a5fa")
+    # v0.9.6: акцент «Показать на карте» (сайдбар) — рамка-вспышка. Голубой,
+    # отличимый от янтарного выделения (#f59e0b): узел уже выделен, и вспышка
+    # должна читаться как отдельный сигнал «тут он». Тот же #38bdf8, что у рамки
+    # rectangle-выделения MapView — единый акцент приложения.
+    REVEAL_COLOR = QColor("#38bdf8")
     COLOR_TEXT = QColor("#e2e8f0")
     COLOR_LABEL = QColor("#94a3b8")
     # UI polish: «тень» под карточкой и серый цвет точек-индикаторов до проверки.
@@ -651,8 +656,18 @@ class ServerNode(QGraphicsItemGroup):
         self._apply_content_opacity()
 
         # Статическая рамка + пульс (fade-out оверлея: opacity 1 -> 0)
-        self._pulse.setPen(QPen(color, 3))
         self._apply_visual_state()
+        self._start_pulse(color)
+
+    def _start_pulse(self, color: QColor):
+        """v0.7.1/v0.9.6: запуск fade-out оверлея рамки заданного цвета.
+
+        Общий путь для пульса смены статуса (set_status) и акцента «Показать на
+        карте» (reveal_flash). Оверлей _pulse следует геометрии карточки
+        (_rebuild_frame_paths перестраивает его path), поэтому свёрнутый/развёрнутый
+        режим поддерживается без дополнительной работы.
+        """
+        self._pulse.setPen(QPen(color, 3))
         if self._pulse_anim is None:
             from PySide6.QtCore import QEasingCurve
             anim = QVariantAnimation()
@@ -660,9 +675,11 @@ class ServerNode(QGraphicsItemGroup):
             anim.setStartValue(1.0)
             anim.setEndValue(0.0)
             anim.setEasingCurve(QEasingCurve.Type.OutQuad)
+
             def _on_value(v, item=self._pulse):
                 item.setOpacity(float(v))
                 self.update()
+
             anim.valueChanged.connect(_on_value)
             anim.finished.connect(self._pulse.hide)
             self._pulse_anim = anim  # ссылка держит анимацию в живых (no-parent binding)
@@ -671,6 +688,18 @@ class ServerNode(QGraphicsItemGroup):
         anim = self._pulse_anim
         anim.stop()
         anim.start()
+
+    def reveal_flash(self):
+        """v0.9.6: акцент «Показать на карте» из сайдбара — рамка-вспышка (900 мс).
+
+        Тот же паттерн, что пульс set_status (готовый оверлей + QVariantAnimation),
+        но цветом REVEAL_COLOR и БЕЗ изменения статуса: reveal — навигационный
+        сигнал, а не результат пробы доступности.
+        """
+        try:
+            self._start_pulse(self.REVEAL_COLOR)
+        except RuntimeError:
+            pass  # Qt teardown: C++ item уничтожен, вызов пришёл из живого Python
 
     @property
     def status(self) -> str:

@@ -262,5 +262,6 @@
   "file.import_servers": "Import Servers from TXT...",
   "msg.import_servers_result": "Imported: {added} new, {skipped} skipped (already on map or duplicate lines).",
   "msg.import_servers_failed": "Failed to import servers: {error}",
-  "status.servers_imported": "Servers imported: {count}"
+  "status.servers_imported": "Servers imported: {count}",
+  "ctx.reveal_on_map": "Show on Map"
 }

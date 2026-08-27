@@ -262,5 +262,6 @@
   "file.import_servers": "从TXT导入服务器...",
   "msg.import_servers_result": "已导入：{added} 个新服务器，{skipped} 个跳过（已在地图上或重复行）。",
   "msg.import_servers_failed": "导入服务器失败：{error}",
-  "status.servers_imported": "已导入服务器：{count}"
+  "status.servers_imported": "已导入服务器：{count}",
+  "ctx.reveal_on_map": "在地图上显示"
 }
