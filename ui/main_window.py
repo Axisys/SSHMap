@@ -754,9 +754,13 @@ class MainWindow(QMainWindow):
         self._add_menu_action(file_menu, "file.open", self._open_project, "Ctrl+O")
         self._add_menu_action(file_menu, "file.save", self._save_project, "Ctrl+S")
         self._add_menu_action(file_menu, "file.save_as", self._save_project_as)
+        # v0.9.5.5: массовый импорт серверов из текстового файла
+        self._add_menu_action(file_menu, "file.import_servers", self._import_servers_from_txt)
         # v0.9.1: экспорт карты в изображение (PNG/JPEG)
         file_menu.addSeparator()
         self._add_menu_action(file_menu, "file.export_png", self._export_map_image)
+        # v0.9.5: экспорт карты в drawio (.drawio)
+        self._add_menu_action(file_menu, "file.export_drawio", self._export_map_drawio)
         file_menu.addSeparator()
         self._add_menu_action(file_menu, "file.exit", self.close)
 
@@ -932,6 +936,11 @@ class MainWindow(QMainWindow):
                     self.log.info("Server updated", extra={"alias": new_data.alias})
                 self.statusBar().showMessage(self.t("status.server_updated", alias=new_data.alias))
                 self._mark_dirty()  # ← unsaved changes
+                # v0.9.5.6: «Подключиться по SSH» из свойств — данные уже
+                # применены к узлу (CmdEditNodeData), открываем SSH-диалог
+                # с предзаполненным паролем из полей свойств.
+                if getattr(dlg, "_connect_after_accept", False):
+                    self._run_ssh_connect(node, prefill_password=dlg.password.text())
         except Exception as e:
             if self.log:
                 self.log.exception(f"Error updating server {node.data.alias}")
@@ -980,56 +989,68 @@ class MainWindow(QMainWindow):
         """Connect via SSH to selected server."""
         node = self.scene.get_selected_node()
         if not node:
-            QMessageBox.information(self, self.t("msg.info_title"), 
+            QMessageBox.information(self, self.t("msg.info_title"),
                                   self.t("msg.select_server_ssh"))
             return
-
         try:
-            dlg = SSHConnectDialog(node.data, self)
-            if dlg.exec() == QDialog.Accepted:
-                # v0.9.4-fix: правки user/key_path/ssh_port из диалога идут через
-                # undo-стек и помечают проект dirty (раньше писались напрямую в
-                # node.data — терялись при выходе без Ctrl+S и не откатывались).
-                from modules.undo_commands import CmdEditNodeData
-                old_data = copy.deepcopy(node.data)
-                new_data = copy.deepcopy(node.data)
-                new_data.user = dlg.user_edit.text().strip()
-                new_data.key_path = dlg.key_path_edit.text().strip()
-                new_data.ssh_port = dlg.port_edit.value()
-                if (old_data.user, old_data.key_path, old_data.ssh_port) != \
-                        (new_data.user, new_data.key_path, new_data.ssh_port):
-                    self._push_command(CmdEditNodeData(self, node, old_data, new_data))
-                else:
-                    self._mark_dirty()
-                # AUDIT v0.7.2 (средняя #7): пароль НЕ храним в модели — передаём его
-                # напрямую терминальному окну ниже; сам диалог уже записал его в keyring
-                # (_on_worker_success), так что ничего не теряется при сохранении проекта.
-
-                node.update_appearance()
-                node.set_ssh_connected(True)
-                self._ssh_connected_nodes.add(node.data.id)  # v0.9.4-fix: сброс индикатора при закрытии терминала
-                if self.log:
-                    self.log.info("SSH connected", extra={"alias": node.data.alias, "host": node.data.host})
-                self.statusBar().showMessage(self.t("status.ssh_connected", alias=node.data.alias))
-
-                # v0.9: автосбор данных о сервере после успешного подключения
-                # (пароль из диалога ещё не потерян; НЕ через StatusChecker —
-                # тот работает без аутентификации по дизайну)
-                if getattr(node.data, "os_name", "") == "" and \
-                        hasattr(dlg, "password_edit"):
-                    self._collect_node_info(
-                        node, password=dlg.password_edit.text(), auto=True)
-
-                # Open interactive terminal (пароль — явно, см. AUDIT v0.7.2 средняя #7)
-                terminal_window = SSHTerminalWindow(
-                    node.data, self, password=dlg.password_edit.text())
-                terminal_window.destroyed.connect(lambda *_: self._forget_terminal_window(terminal_window))
-                self._terminal_windows.append(terminal_window)
-                terminal_window.show()
+            self._run_ssh_connect(node)
         except Exception as e:
             if self.log:
                 self.log.exception(f"SSH connect error for {node.data.alias}")
             QMessageBox.critical(self, self.t("msg.ssh_error"), self.t("msg.connect_failed", error=str(e)))
+
+    def _run_ssh_connect(self, node: "ServerNode", prefill_password: str = ""):
+        """v0.9.5.6: SSH-диалог → при успехе: обновить данные узла, индикатор,
+        автосбор информации и терминальное окно.
+
+        Общий путь для «Подключиться по SSH» из тулбара/контекста (prefill="")
+        и из диалога свойств сервера (prefill_password — пароль из полей свойств,
+        чтобы пользователь не вставлял его повторно).
+        """
+        dlg = SSHConnectDialog(node.data, self)
+        if prefill_password:
+            dlg.password_edit.setText(prefill_password)
+        if dlg.exec() != QDialog.Accepted:
+            return
+        # v0.9.4-fix: правки user/key_path/ssh_port из диалога идут через
+        # undo-стек и помечают проект dirty (раньше писались напрямую в
+        # node.data — терялись при выходе без Ctrl+S и не откатывались).
+        from modules.undo_commands import CmdEditNodeData
+        old_data = copy.deepcopy(node.data)
+        new_data = copy.deepcopy(node.data)
+        new_data.user = dlg.user_edit.text().strip()
+        new_data.key_path = dlg.key_path_edit.text().strip()
+        new_data.ssh_port = dlg.port_edit.value()
+        if (old_data.user, old_data.key_path, old_data.ssh_port) != \
+                (new_data.user, new_data.key_path, new_data.ssh_port):
+            self._push_command(CmdEditNodeData(self, node, old_data, new_data))
+        else:
+            self._mark_dirty()
+        # AUDIT v0.7.2 (средняя #7): пароль НЕ храним в модели — передаём его
+        # напрямую терминальному окну ниже; сам диалог уже записал его в keyring
+        # (_on_worker_success), так что ничего не теряется при сохранении проекта.
+
+        node.update_appearance()
+        node.set_ssh_connected(True)
+        self._ssh_connected_nodes.add(node.data.id)  # v0.9.4-fix: сброс индикатора при закрытии терминала
+        if self.log:
+            self.log.info("SSH connected", extra={"alias": node.data.alias, "host": node.data.host})
+        self.statusBar().showMessage(self.t("status.ssh_connected", alias=node.data.alias))
+
+        # v0.9: автосбор данных о сервере после успешного подключения
+        # (пароль из диалога ещё не потерян; НЕ через StatusChecker —
+        # тот работает без аутентификации по дизайну)
+        if getattr(node.data, "os_name", "") == "" and \
+                hasattr(dlg, "password_edit"):
+            self._collect_node_info(
+                node, password=dlg.password_edit.text(), auto=True)
+
+        # Open interactive terminal (пароль — явно, см. AUDIT v0.7.2 средняя #7)
+        terminal_window = SSHTerminalWindow(
+            node.data, self, password=dlg.password_edit.text())
+        terminal_window.destroyed.connect(lambda *_: self._forget_terminal_window(terminal_window))
+        self._terminal_windows.append(terminal_window)
+        terminal_window.show()
 
     # ── v0.9: автосбор данных о сервере (Linux) ───────────────────
 
@@ -1201,10 +1222,105 @@ class MainWindow(QMainWindow):
                     self.log.info("Server added", extra={"alias": data.alias, "host": data.host})
                 self.statusBar().showMessage(self.t("status.server_added", alias=data.alias))
                 self._mark_dirty()  # ← unsaved changes
+                # v0.9.5.6: «Подключиться по SSH» из диалога добавления — узел
+                # уже создан, сразу открываем SSH-диалог (пароль предзаполнен).
+                if getattr(dlg, "_connect_after_accept", False):
+                    self._run_ssh_connect(node, prefill_password=dlg.password.text())
         except Exception as e:
             if self.log:
                 self.log.exception(f"Error adding server {getattr(data, 'alias', '?')}")
             QMessageBox.critical(self, self.t("msg.error_title"), self.t("msg.add_failed", error=str(e)))
+
+    def _import_servers_from_txt(self):
+        """v0.9.5.5: массовый импорт серверов из текстового файла.
+
+        Формат: по одному хосту в строке (IP или DNS-имя), '#'/'//' — комментарии.
+        IP → host=IP; имя → резолвим в IP (поле `ip`), host остаётся именем.
+        Дубликаты (уже на карте или повтор в файле) пропускаются. Один узел undo —
+        вся пачка добавляется/откатывается одной командой CmdAddRemoveNodeBatch.
+        """
+        import socket as _socket
+        from PySide6.QtWidgets import QFileDialog
+
+        path, _ = QFileDialog.getOpenFileName(
+            self, self.t("file.import_servers"), "",
+            "Text files (*.txt);;All files (*)")
+        if not path:
+            return
+        try:
+            with open(path, "r", encoding="utf-8", errors="replace") as f:
+                text = f.read()
+        except OSError as e:
+            QMessageBox.critical(self, self.t("msg.error_title"),
+                                 self.t("msg.import_servers_failed", error=str(e)))
+            return
+
+        from services.host_importer import parse_hosts_file, is_ip_address, resolve_host
+        entries, file_dups = parse_hosts_file(text), []
+        # Дедупликация строк файла (без учёта регистра)
+        seen, unique_entries = set(), []
+        for e in entries:
+            if e.lower() in seen:
+                continue
+            seen.add(e.lower())
+            unique_entries.append(e)
+
+        # Хосты/IP, уже присутствующие на карте — тоже дубликаты
+        existing = set()
+        for node in self.scene.nodes():
+            d = node.data
+            existing.add((d.host or "").lower())
+            if d.ip:
+                existing.add(d.ip.lower())
+
+        added_data, skipped = [], len(file_dups)
+        for entry in unique_entries:
+            if entry.lower() in existing:
+                skipped += 1
+                continue
+            import uuid as _uuid
+            if is_ip_address(entry):
+                host, ip = entry, entry
+            else:
+                host, ip = entry, resolve_host(entry) or ""
+                QApplication.processEvents()  # UI не замирает при длинном резолве
+            from models.server import ServerData
+            data = ServerData(
+                id=str(_uuid.uuid4())[:8],
+                alias=entry,
+                host=host,
+                user="",
+                password="",
+                ip=ip,
+            )
+            added_data.append(data)
+            existing.add(entry.lower())
+
+        if not added_data:
+            QMessageBox.information(self, self.t("msg.info_title"),
+                                    self.t("msg.import_servers_result", added=0, skipped=skipped))
+            return
+
+        # Раскладка импортированных узлов сеткой от центра видимой области
+        center = self.view.mapToScene(self.view.viewport().rect().center())
+        col_w, row_h, cols = ServerNode.MIN_NODE_WIDTH + 30, ServerNode.MIN_NODE_HEIGHT + 30, 6
+        for i, data in enumerate(added_data):
+            r, c = divmod(i, cols)
+            data.x = center.x() - 90 + c * col_w
+            data.y = center.y() - 65 + r * row_h
+
+        from modules.undo_commands import CmdAddRemoveNodeBatch
+        self._push_command(CmdAddRemoveNodeBatch(self, self.scene, added_data, "add"))
+        self.refresh_sidebar()
+        self._sync_status_targets()
+        self._mark_dirty()
+        if self.log:
+            self.log.info(f"Imported {len(added_data)} servers from {path}")
+        self.statusBar().showMessage(
+            self.t("status.servers_imported", count=len(added_data)), 5000)
+        QMessageBox.information(self, self.t("msg.success_title"),
+                                self.t("msg.import_servers_result",
+                                       added=len(added_data), skipped=skipped))
 
     def _add_connection(self, default_source_id=None, default_target_id=None):
         """Создать связь: диалог с выбором узлов, метки и типа (v0.7).
@@ -1493,8 +1609,13 @@ class MainWindow(QMainWindow):
                     def _t(key, **kw):
                         return key.format(**kw) if kw else key
                 count_flag = "-n" if _platform_mod.system() == "Windows" else "-c"
-                timeout_flag = "-w" if _platform_mod.system() == "Windows" else "-W"
-                cmd = ["ping", count_flag, "3", timeout_flag, "3000", self._host]
+                # AUDIT v0.9.5.5 (безопасность #4): -w/-W — миллисекунды на Windows,
+                # секунды на Linux; таймаут 3 с в обоих случаях. На Linux "--" перед
+                # хостом, чтобы хост вида "-x" не съелся как флаг.
+                if _platform_mod.system() == "Windows":
+                    cmd = ["ping", count_flag, "3", "-w", "3000", self._host]
+                else:
+                    cmd = ["ping", "-c", "3", "-W", "3", "--", self._host]
                 try:
                     proc = _subprocess_mod.run(
                         cmd, capture_output=True, timeout=15,
@@ -1778,6 +1899,27 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage(self.t("status.export_ok"))
             if self.log:
                 self.log.info("Map exported", extra={"file": path})
+        except Exception as e:  # noqa: BLE001
+            QMessageBox.critical(
+                self, self.t("msg.error_title"),
+                self.t("msg.export_failed", error=str(e)))
+
+    def _export_map_drawio(self):
+        """Экспорт карты в draw.io (.drawio) — v0.9.5 #1–#4."""
+        from storage.export_drawio import export_scene_to_drawio
+        path, _ = QFileDialog.getSaveFileName(
+            self, self.t("file.export_drawio"), "",
+            "draw.io Diagrams (*.drawio)")
+        if not path:
+            return
+        if not path.lower().endswith(".drawio"):
+            path += ".drawio"
+        try:
+            cells = export_scene_to_drawio(self.scene, path)
+            self.statusBar().showMessage(self.t("status.export_drawio_ok"))
+            if self.log:
+                self.log.info(
+                    "Map exported to drawio", extra={"file": path, "cells": cells})
         except Exception as e:  # noqa: BLE001
             QMessageBox.critical(
                 self, self.t("msg.error_title"),

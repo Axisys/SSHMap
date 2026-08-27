@@ -97,6 +97,7 @@ class SshKnownHostsPolicy:
         except (TypeError, ValueError):
             self.port = 22
         self._store = None            # ленивая paramiko.host_keys.HostKeys
+        self._load_failed = False     # True, если файл есть, но не загрузился
         self.accepted_new_key = False  # True: в этой сессии принят ключ нового хоста
         self.last_fingerprint = ""     # его отпечаток (для сообщения пользователю)
 
@@ -113,11 +114,17 @@ class SshKnownHostsPolicy:
         if self._store is None:
             store = _pk_hostkeys.HostKeys()
             path = get_known_hosts_path()
+            self._load_failed = False
             try:
                 store.load(path)
+            except FileNotFoundError:
+                # Файла ещё нет — нормальный первый запуск, пустое хранилище ок.
+                pass
             except Exception as e:
-                # файла ещё нет или он повреждён — работаем с пустым хранилищем,
-                # но старое содержимое НЕ затираем до первой успешной save().
+                # AUDIT v0.9.5.5 (безопасность #2): файл ЕСТЬ, но повреждён —
+                # работаем в памяти с пустым хранилищем, но save_store() запрещён,
+                # иначе первое же TOFU-добавление затрёт все зафиксированные ключи.
+                self._load_failed = True
                 log = _log()
                 if log:
                     log.warning(f"known_hosts file not loaded from {path}: {e}")
@@ -126,6 +133,15 @@ class SshKnownHostsPolicy:
 
     def save_store(self) -> bool:
         """Сохранить known_hosts на диск. False при ошибке (соединение не роняем)."""
+        if self._load_failed:
+            # Не затираем повреждённый файл: пусть пользователь восстановит его вручную.
+            log = _log()
+            if log:
+                log.error(
+                    "Refusing to overwrite known_hosts: the file failed to load "
+                    "(possibly corrupted). Fix or remove the file manually."
+                )
+            return False
         try:
             path = get_known_hosts_path()
             os.makedirs(os.path.dirname(path), exist_ok=True)

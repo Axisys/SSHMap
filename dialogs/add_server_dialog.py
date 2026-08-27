@@ -43,6 +43,9 @@ class AddServerDialog(QDialog):
 
         self.setMinimumWidth(420)
         self._data = edit_data
+        # v0.9.5.6: True после клика «Подключиться по SSH» — данные сохраняются
+        # (как по ОК), а MainWindow затем открывает SSH-диалог.
+        self._connect_after_accept = False
         
         # ── Profile data (loaded lazily, cached in instance) ──
         # Each entry: {"id": str, "name": str} — password fetched from keyring on demand
@@ -167,10 +170,21 @@ class AddServerDialog(QDialog):
 
         main_layout.addLayout(layout)
 
+        # v0.9.5.6: кнопка «Подключиться по SSH» — слева; ОК/Отмена — справа
+        # (QDialogButtonBox сохраняет стандартный порядок).
+        btn_row = QHBoxLayout()
+        self.ssh_connect_btn = QPushButton(
+            self.t("ssh.connect") if self._i18n_available else "Подключиться по SSH")
+        self.ssh_connect_btn.clicked.connect(self._on_connect_ssh)
+
         btns = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         btns.accepted.connect(self._on_ok)
         btns.rejected.connect(self.reject)
-        main_layout.addWidget(btns)
+
+        btn_row.addWidget(self.ssh_connect_btn)
+        btn_row.addStretch()
+        btn_row.addWidget(btns)
+        main_layout.addLayout(btn_row)
 
     def _on_ok(self):
         """Валидация перед закрытием: host обязателен."""
@@ -178,6 +192,19 @@ class AddServerDialog(QDialog):
             from PySide6.QtWidgets import QMessageBox
             QMessageBox.warning(self, self.t("msg.error_title"), self.t("validation.empty_host"))
             return
+        self.accept()
+
+    def _on_connect_ssh(self):
+        """v0.9.5.6: «Подключиться по SSH» — сохранить данные и открыть SSH-диалог.
+
+        Валидация та же, что у ОК (host обязателен); флаг _connect_after_accept
+        читает MainWindow после accept() — он и запускает подключение.
+        """
+        if not self.host.text().strip():
+            from PySide6.QtWidgets import QMessageBox
+            QMessageBox.warning(self, self.t("msg.error_title"), self.t("validation.empty_host"))
+            return
+        self._connect_after_accept = True
         self.accept()
 
     def _on_profile_changed(self, index: int):
@@ -231,7 +258,7 @@ class AddServerDialog(QDialog):
         self.alias.setText(d.alias)
         self.host.setText(d.host)
         self.user.setText(d.user)
-        self.password.setText(d.password)  # loaded from server JSON (plain text for server creds)
+        self.password.setText(d.password)  # пароль загружается через CredentialManager (keyring), в JSON не хранится
         self.port.setValue(d.ssh_port or 22)
         self.key_path.setText(d.key_path or "")
         self.os_name.setText(d.os_name)  # v0.9

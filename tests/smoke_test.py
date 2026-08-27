@@ -198,6 +198,75 @@ else:
     check("no-keyring: password kept in memory (audit #12)", nd.password == "NodePass999", f"pw={nd.password!r}")
     check("no-keyring warning shown to user", len(w) >= 1, str(boxes))
 
+# cleanup: при is_available=True выше тест записал тестовые пароли в РЕАЛЬНОЕ
+# системное хранилище — удаляем, чтобы прогоны не копили записи «sshmap:snode00N».
+if cm.is_available:
+    try:
+        cm.delete_password("snode001")
+        cm.delete_password("snode002")
+    except Exception:
+        pass
+
+# ── 6a. v0.9.5.6: SSH-диалог (keyring save через плоский импорт, без success-окна)
+# и «Подключиться по SSH» в диалоге свойств ──
+print("== v0.9.5.6 ssh dialog fixes ==")
+from PySide6.QtWidgets import QDialog as _QDialog
+from dialogs.ssh_connect_dialog import SSHConnectDialog
+from dialogs.add_server_dialog import AddServerDialog
+
+cdlg = SSHConnectDialog(ServerData(id="snode010", alias="web-x",
+                                   host="10.0.0.7", user="root"), win)
+cdlg.password_edit.setText("ConnectPw456")
+class _FakeWorker:
+    test_only = False
+cdlg._ssh_worker = _FakeWorker()
+
+# v0.9.5.6: success-info-окно УБРАНО — патчим information() и убеждаемся,
+# что _on_worker_success его не вызывает (иначе был бы лишний кликабельный блок)
+_info_calls = []
+_orig_info = MW.QMessageBox.information
+MW.QMessageBox.information = staticmethod(lambda *a, **k: _info_calls.append(a))
+_boxes_before = len(boxes)
+try:
+    cdlg._on_worker_success("connected ok")
+finally:
+    MW.QMessageBox.information = _orig_info
+
+check("connect dialog: accepted without modal success box",
+      cdlg.result() == _QDialog.Accepted and len(_info_calls) == 0,
+      f"info_calls={len(_info_calls)}")
+if cm.is_available:
+    check("connect dialog: password saved to keyring (flat import fallback)",
+          cm.load_password("snode010") == "ConnectPw456")
+    check("connect dialog: no save-failure warning",
+          not [b for b in boxes[_boxes_before:] if b[0] == "warning"],
+          str(boxes[_boxes_before:]))
+    try:
+        cm.delete_password("snode010")
+    except Exception:
+        pass
+else:
+    check("connect dialog (no keyring): save-failure warning shown",
+          len([b for b in boxes[_boxes_before:] if b[0] == "warning"]) >= 1)
+
+# «Подключиться по SSH» в диалоге свойств: слева, с валидацией host
+adlg = AddServerDialog(win)
+check("properties dialog: 'Connect via SSH' button exists",
+      getattr(adlg, "ssh_connect_btn", None) is not None)
+adlg.host.setText("")
+adlg.ssh_connect_btn.click()
+check("properties dialog: connect with empty host rejected",
+      adlg.result() != _QDialog.Accepted and adlg._connect_after_accept is False)
+adlg.host.setText("10.0.0.9")
+adlg.ssh_connect_btn.click()
+check("properties dialog: connect click accepted + flag set",
+      adlg.result() == _QDialog.Accepted and adlg._connect_after_accept is True)
+adlg2 = AddServerDialog(win)
+adlg2.host.setText("10.0.0.8")
+adlg2._on_ok()
+check("properties dialog: OK still works, no connect flag",
+      adlg2.result() == _QDialog.Accepted and adlg2._connect_after_accept is False)
+
 # open project round-trip (audit #5: key_path restored)
 win2 = MW.MainWindow()
 raw = json.load(open(path, encoding="utf-8"))

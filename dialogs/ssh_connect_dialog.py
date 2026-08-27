@@ -343,7 +343,16 @@ class SSHConnectDialog(QDialog):
         password_from_ui = self.password_edit.text()
         if password_from_ui and self.server_data.id:
             try:
-                from ..services.credential_manager import get_credential_manager
+                # BUGFIX v0.9.5.6: двойной импорт (относительный + плоский) —
+                # при запуске «python main.py» пакет dialogs top-level, и
+                # «from ..services» падал ImportError, который ловил внешний
+                # except Exception → ложное «keyring save failed» + предупреждение
+                # пользователю (подключение при этом шло). Фолбэк — как у всех
+                # остальных импортов этого файла.
+                try:
+                    from ..services.credential_manager import get_credential_manager
+                except ImportError:
+                    from services.credential_manager import get_credential_manager
                 cm = get_credential_manager()
                 # v0.9.4-fix: результат проверяется — выровнено с _do_save, где
                 # тихая потеря пароля предупреждается. save_password возвращает
@@ -363,12 +372,9 @@ class SSHConnectDialog(QDialog):
                     self.t("msg.error_title"),
                     self.t("msg.credentials_save_failed", alias=self.server_data.alias))
 
-        QMessageBox.information(
-            self,
-            self.t("msg.success_title"),
-            f"{self.t('ssh.connected_ok')}\n\n{self.t('server.host')}: {self.server_data.host}\n"
-            f"{self.t('server.user')}: {self.server_data.user}"
-        )
+        # v0.9.5.6: окно «Успех / SSH подключение установлено» УБРАНО — лишний
+        # клик раздражал; подтверждение подключения — само терминальное окно,
+        # а детали уже в status_label (message) и в статус-баре MainWindow.
         self.accept()
 
     def _on_worker_error(self, message: str):

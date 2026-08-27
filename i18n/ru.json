@@ -234,9 +234,11 @@
   "status.info_collected": "Информация о системе собрана: {alias}",
   "status.info_failed": "Не удалось собрать информацию: {error}",
   "file.export_png": "Экспортировать карту в изображение...",
+  "file.export_drawio": "Экспортировать в drawio...",
   "view.set_background": "Установить фоновое изображение...",
   "view.remove_background": "Убрать фоновое изображение",
   "status.export_ok": "Карта экспортирована.",
+  "status.export_drawio_ok": "Карта экспортирована в drawio.",
   "status.background_set": "Фоновое изображение установлено.",
   "status.background_removed": "Фоновое изображение убрано.",
   "msg.export_failed": "Не удалось экспортировать карту: {error}",
@@ -256,5 +258,9 @@
   "status.connections_created_multi": "Создано связей: {count}",
   "server.tags": "Теги:",
   "server.tags_hint": "prod, staging, dev",
-  "filter.all_tags": "Все теги"
+  "filter.all_tags": "Все теги",
+  "file.import_servers": "Импортировать серверы из TXT...",
+  "msg.import_servers_result": "Импортировано: {added} новых, {skipped} пропущено (уже на карте или дубли строк).",
+  "msg.import_servers_failed": "Не удалось импортировать серверы: {error}",
+  "status.servers_imported": "Серверов импортировано: {count}"
 }

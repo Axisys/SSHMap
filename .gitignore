@@ -13,9 +13,12 @@ __pycache__/
 
 # Избыточная документация
 AUDIT.md
+CHANGELOG.md
 DESIGN.md
 DOCUMENTATION.md
+ROADMAP.md
 STATEMENT.md
+TERMINAL.md
 
 # Секреты и конфигурации
 .env
@@ -40,6 +43,7 @@ _audit_smoke.txt
 
 # Данные карт: содержат топологию/хосты реальной сети — не публиковать
 server_map1.json
+server_map1.drawio
 *.sshmap.json
 
 # Профили SSH (на случай запуска из корня проекта)
