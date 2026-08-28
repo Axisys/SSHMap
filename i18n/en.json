@@ -281,5 +281,11 @@
   "status.restored": "Restored: {source}",
   "status.autosaved": "Autosaved at {time}",
   "msg.restore_failed": "Failed to restore: {error}",
-  "msg.open_project_first": "Open a project first (File → Open)."
+  "msg.open_project_first": "Open a project first (File → Open).",
+  "view.find_on_map": "Find on Map…",
+  "search.map_placeholder": "Search map: alias / host / IP…",
+  "search.count": "{cur} / {total}",
+  "search.no_results": "No matches",
+  "hint.map_search": "Enter — next match, Shift+Enter — previous, Esc — close",
+  "status.no_matches": "No matches for «{query}»"
 }

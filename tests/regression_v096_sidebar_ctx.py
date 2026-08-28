@@ -132,9 +132,10 @@ try:
           all(langs[c].get("ctx.reveal_on_map", "").strip() for c in ("en", "ru", "zh")),
           str({c: langs[c].get("ctx.reveal_on_map") for c in ("en", "ru", "zh")}))
     # v0.9.7: +18 ключей автосохранения/бэкапов (file.restore_autosave … msg.open_project_first)
-    check("key sets identical across en/ru/zh (283 keys each)",
+    # v0.9.8: +6 ключей поиска по карте (view.find_on_map … status.no_matches)
+    check("key sets identical across en/ru/zh (289 keys each)",
           set(langs["en"]) == set(langs["ru"]) == set(langs["zh"])
-          and all(len(d) == 283 for d in langs.values()),
+          and all(len(d) == 289 for d in langs.values()),
           str({c: len(d) for c, d in langs.items()}))
     _sidebar_keys = ["ctx.ssh_connect", "ctx.ssh_external", "ctx.edit_server",
                      "ctx.copy_ip", "ctx.copy_hostname", "ctx.ping",

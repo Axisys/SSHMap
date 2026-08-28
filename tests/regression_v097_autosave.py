@@ -335,9 +335,9 @@ new_keys = ["file.restore_autosave", "file.backups", "dialog.autosave_found",
             "status.autosaved", "msg.restore_failed", "msg.open_project_first"]
 missing = [k for k in new_keys if any(not langs[c].get(k, "").strip() for c in ("en", "ru", "zh"))]
 check("18 новых ключей v0.9.7 есть и не пусты в en/ru/zh", not missing, str(missing))
-check("наборы ключей идентичны en/ru/zh (283 на язык)",
+check("наборы ключей идентичны en/ru/zh (289 на язык)",
       set(langs["en"]) == set(langs["ru"]) == set(langs["zh"])
-      and all(len(d) == 283 for d in langs.values()),
+      and all(len(d) == 289 for d in langs.values()),
       str({c: len(d) for c, d in langs.items()}))
 
 # Cleanup: сначала dirty=False — иначе closeEvent уйдёт в диалог сохранения.

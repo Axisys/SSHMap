@@ -155,7 +155,12 @@ class CommandPalette(QDialog):
                 cmds.append((text, "action", lambda a=act: a.trigger()))
 
         bar = self.mw.menuBar()
-        for top in bar.actions():
+        # v0.9.8 bugfix (PySide6 6.11): держим обёртки верхних QAction в списке до конца
+        # обхода — когда Python-обёртка QAction с прикреплённым QMenu умирает, PySide6
+        # уничтожает за ней C++-меню (MainWindow._qaction_guard — тот же guard глобально;
+        # здесь локальная страховка на случай окна без него).
+        tops = list(bar.actions())
+        for top in tops:
             child = top.menu()
             if child is not None:
                 walk(child)

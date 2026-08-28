@@ -443,6 +443,9 @@ class MainWindow(QMainWindow):
         splitter.addWidget(self.view)
         splitter.setSizes([250, 950])
 
+        # v0.9.8: поиск по карте (Ctrl+F) — плавающая строка поверх canvas
+        self._setup_map_search()
+
         # Status bar
         if self._i18n_available:
             try:
@@ -839,6 +842,9 @@ class MainWindow(QMainWindow):
         # UI polish: «Вписать карту» — fitInView по содержимому (Ctrl+Shift+F: F одной
         # клавишей конфликтовал бы с вводом в поле поиска сайдбара)
         self._add_menu_action(view_menu, "view.fit_map", self._fit_to_content, "Ctrl+Shift+F")
+        # v0.9.8: поиск по карте (Ctrl+F) — строка поиска поверх canvas; тот же аргумент
+        # про Ctrl, что у fit_map (голая F занята вводом в поля поиска)
+        self._add_menu_action(view_menu, "view.find_on_map", self._toggle_map_search, "Ctrl+F")
         # v0.8.4 (DESIGN.md §D): массовое сворачивание — половина ценности фичи
         # для больших карт.
         view_menu.addSeparator()
@@ -874,6 +880,24 @@ class MainWindow(QMainWindow):
 
         # v0.9.2: палитра команд (Ctrl+K) — fuzzy-поиск по действиям и серверам.
         self._setup_command_palette()
+
+        # ── v0.9.8 bugfix (PySide6 6.11, shiboken): guard на QActions с меню ──
+        # Эмпирически проверено (пробы regression_v098, offscreen И native Windows):
+        # когда Python-обёртка QAction, у которого ПРИКРЕПЛЕНО QMenu, умирает
+        # (GC временного объекта из menubar.actions()/act.menu()), PySide6 уничтожает
+        # за ней C++-объект QMenu со всем содержимым. Без guard'а открытие палитры
+        # команд (Ctrl+K) или смена языка убивали ВСЕ меню, кроме последнего
+        # (палитра ходит по menubar.actions() временными обёртками). PySide6 кэширует
+        # обёртки (повторный доступ — тот же объект), поэтому постоянное хранение
+        # всех таких QAction в self._qaction_guard делает их бессмертными, а значит
+        # и прикреплённые QMenu живут. Это латает и _switch_language, и палитру,
+        # и любой будущий код, обходящий меню через action.menu().
+        guard = []
+        for w, _key in self._menu_i18n:
+            if isinstance(w, QMenu):
+                guard.extend(list(w.actions()))
+        guard.extend(list(menubar.actions()))  # заголовки верхнего уровня (File/Edit/…)
+        self._qaction_guard = guard
 
     def _setup_command_palette(self):
         """v0.9.2: создать палитру команд и хоткей Ctrl+K."""
@@ -932,18 +956,33 @@ class MainWindow(QMainWindow):
                 # Переводим меню/тулбар/подписи по зарегистрированным ключам
                 self._apply_ui_translations()
 
+                # v0.9.8: панель поиска по карте — плейсхолдер и счётчик на новом языке
+                _map_bar = getattr(self, "map_search", None)
+                if _map_bar is not None:
+                    try:
+                        _map_bar.retranslate()
+                    except Exception:  # noqa: BLE001 — панель косметика при teardown
+                        pass
+
                 # Заголовок окна (с учётом файла проекта и маркера [*])
                 self._update_window_title()
 
-                # Отмечаем активный язык в подменю Язык
-                menubar = self.menuBar()
-                for action in menubar.actions():
-                    menu = action.menu() if hasattr(action, "menu") else None
-                    if menu is None:
-                        continue
-                    for sub in menu.actions():
-                        if sub.data() is not None:
-                            sub.setChecked(sub.data() == language_code)
+                # Отмечаем активный язык в подменю Язык.
+                # v0.9.8 bugfix: НЕ обходим через action.menu() — см. _qaction_guard выше:
+                # временные Python-обёртки QAction с прикреплённым QMenu роняли C++-меню
+                # (PySide6 6.11). Подменю берём напрямую из i18n-реестра — безопасно.
+                lang_menu = None
+                for w, k in self._menu_i18n:
+                    if k == "lang.menu":
+                        lang_menu = w
+                        break
+                if lang_menu is not None:
+                    try:
+                        for sub in list(lang_menu.actions()):
+                            if sub.data() is not None:
+                                sub.setChecked(sub.data() == language_code)
+                    except RuntimeError:
+                        pass  # Qt teardown — подменю уже уничтожено, отмечать нечего
 
                 if self.log:
                     self.log.info(f"Language switched to {language_code}")
@@ -2216,7 +2255,7 @@ class MainWindow(QMainWindow):
             self.tree.addTopLevelItem(item)
 
         self._sync_tag_filter_items()
-        self._apply_map_tag_dimming()
+        self._apply_map_dimming()  # v0.9.8: затемнение = тег-фильтр И поиск по карте
         self._sync_selection_state()
         self._update_counts_label()  # UI polish: счётчики в статус-баре следят за составом
 
@@ -2271,24 +2310,188 @@ class MainWindow(QMainWindow):
         finally:
             combo.blockSignals(False)
 
-    def _apply_map_tag_dimming(self):
-        """Затемнить карточки узлов, не подходящих под активный тег-фильтр.
+    def _apply_map_dimming(self):
+        """v0.9.4/v0.9.8: затемнение + подсветка активных фильтров на карте.
 
-        Узлы с совпадающим (или любым, если фильтр пуст) тегом — полная яркость.
+        Узел «горит» только если проходит ВСЕ активные фильтры (та же семантика,
+        что в сайдбаре — refresh_sidebar применяет query и тег одновременно):
+        - v0.9.4 тег-фильтр: узлы без выбранного тега затемнены;
+        - v0.9.8 поиск по карте (Ctrl+F): несовпавшие с запросом затемнены,
+          совпавшие — акцентная рамка (ServerNode.set_search_match).
         Стрелки не трогаем: связи между затемнёнными узлами читаются по контексту.
         """
         active = self._active_tag_filter()
+        query = (getattr(self, "_map_search_query", "") or "").strip().lower()
         try:
             nodes = list(self.scene.nodes())
         except (AttributeError, RuntimeError):
             return
         for node in nodes:
             tags = getattr(node.data, "tags", None) or []
-            matched = (not active) or active in tags
+            tag_ok = (not active) or active in tags
+            if query:
+                haystack = " ".join([
+                    node.data.alias, node.data.host, node.data.ip, node.data.comment,
+                ]).lower()
+                match_ok = query in haystack
+            else:
+                match_ok = True
             try:
-                node.set_dimmed(not matched)
+                node.set_dimmed(not (tag_ok and match_ok))
+                node.set_search_match(bool(query) and match_ok)
             except (AttributeError, RuntimeError):
                 pass
+
+    # Backward-compat: имя v0.9.4 (внешний код/тесты могли обращаться к нему)
+    _apply_map_tag_dimming = _apply_map_dimming
+
+    # ── v0.9.8: поиск по карте (Ctrl+F) — ROADMAP v0.9.8 ────────────────
+
+    def _setup_map_search(self):
+        """v0.9.8: создать плавающую строку поиска поверх canvas + состояние.
+
+        Панель — дочерний виджет MapView (плавает над viewport, не мешает сцене).
+        Хоткей Ctrl+F даёт пункт меню «Вид → Поиск по карте…» (QAction-шорткат) —
+        отдельный QShortcut с той же последовательностью создал бы ambiguous shortcut.
+        Логика поиска живёт здесь: совпадение/затемнение/центрирование — единый путь.
+        """
+        try:
+            from ui.map_search_bar import MapSearchBar
+        except ImportError:  # плоский запуск из корня проекта
+            from map_search_bar import MapSearchBar
+
+        # Состояние (пусто до первого запроса)
+        self._map_search_query = ""
+        self._map_search_matches = []
+        self._map_search_index = -1
+
+        self.map_search = MapSearchBar(self.view)
+        self.map_search.query_changed.connect(self._on_map_search_query)
+        self.map_search.next_requested.connect(lambda: self._map_search_step(+1))
+        self.map_search.prev_requested.connect(lambda: self._map_search_step(-1))
+        self.map_search.close_requested.connect(self._close_map_search)
+        try:  # переставить панель при resize окна (она вне layout, child of view)
+            self.view.resized.connect(self._position_map_search_bar)
+        except Exception:  # noqa: BLE001 — косметика позиционирования, поиск не роняем
+            pass
+
+    def _toggle_map_search(self):
+        """v0.9.8: Ctrl+F / «Вид → Поиск по карте…» — открыть или закрыть панель."""
+        if self.map_search.isVisible():
+            self._close_map_search()
+        else:
+            self._open_map_search()
+
+    def _open_map_search(self):
+        """v0.9.8: показать панель, поставить в верхний центр viewport, фокус на ввод.
+
+        Если в поле остался запрос (закрыли Esc, текст сохранился — как в браузере),
+        оживляем его заново: пересчёт совпадений/счётчика по актуальной сцене.
+        Иначе Enter ссылался бы на очищенный self._map_search_query, а панель
+        показывала старый текст и счётчик — рассинхрон.
+        """
+        self.map_search.show()
+        self.map_search.raise_()
+        self._position_map_search_bar()
+        if self.map_search.query.strip():
+            self._on_map_search_query(self.map_search.query)
+        self.map_search.focus_input()
+        self.statusBar().showMessage(self.t("hint.map_search"))
+
+    def _close_map_search(self):
+        """v0.9.8: закрыть панель и снять состояние поиска (затемнение + рамки).
+
+        Тег-фильтр при этом остаётся активным — _apply_map_dimming пересчитает
+        затемнение по нему (query уже очищен выше).
+        """
+        if getattr(self, "map_search", None) is not None:
+            self.map_search.hide()
+        self._map_search_query = ""
+        self._map_search_matches = []
+        self._map_search_index = -1
+        self._apply_map_dimming()
+        try:
+            self.statusBar().showMessage(self.t("status.ready"))
+        except Exception:  # noqa: BLE001 — статус-бар косметика при teardown
+            pass
+
+    def _position_map_search_bar(self):
+        """v0.9.8: панель в верхнем центре viewport (child of view, вне layout)."""
+        bar = getattr(self, "map_search", None)
+        if bar is None or not bar.isVisible():
+            return
+        vp = self.view.viewport()
+        w = min(bar.PREFERRED_WIDTH, max(vp.width() - 16, bar.MIN_WIDTH))
+        x = max(8, (vp.width() - w) // 2)
+        h = max(bar.sizeHint().height(), 30)
+        bar.setGeometry(int(x), 10, int(w), int(h))
+
+    def _map_search_nodes(self, query: str):
+        """v0.9.8: узлы, совпадающие с запросом (alias/host/ip/comment — как в сайдбаре)."""
+        q = (query or "").strip().lower()
+        if not q:
+            return []
+        try:
+            nodes = list(self.scene.nodes())
+        except (AttributeError, RuntimeError):
+            return []
+        out = []
+        for node in nodes:
+            d = node.data
+            haystack = " ".join([d.alias, d.host, d.ip, d.comment]).lower()
+            if q in haystack:
+                out.append(node)
+        return out
+
+    def _on_map_search_query(self, query: str):
+        """v0.9.8: текст запроса изменился — пересчитать совпадения и затемнение.
+
+        Счётчик указывает на ПЕРВЫЙ результат (паттерн браузерного поиска);
+        центрирование/выделение — только по Enter (ROADMAP #2).
+        """
+        self._map_search_query = query or ""
+        matches = self._map_search_nodes(query)
+        self._map_search_matches = matches
+        self._map_search_index = 0 if matches else -1
+        self._apply_map_dimming()
+        self.map_search.set_count(self._map_search_index + 1, len(matches))
+
+    def _map_search_step(self, direction: int):
+        """v0.9.8: Enter/Shift+Enter — переход между результатами (с зацикливанием).
+
+        Выбор узла (строка сайдбара следует за выделением через _sync_selection_state),
+        центрирование view.centerOn и рамка-вспышка reveal_flash — тот же готовый путь,
+        что «Показать на карте» v0.9.6 (паттерн пульса set_status). Совпадения
+        пересчитываются свежими: узлы могли добавиться/удалиться с момента запроса.
+        """
+        matches = self._map_search_nodes(self._map_search_query)
+        if not matches:
+            q = (self._map_search_query or "").strip()
+            try:
+                self.statusBar().showMessage(self.t("status.no_matches", query=q))
+            except Exception:  # noqa: BLE001 — сбой форматирования не критичен
+                self.statusBar().showMessage(f"No matches: {q}")
+            return
+        n = len(matches)
+        base = self._map_search_index if 0 <= self._map_search_index < n else -1
+        idx = (base + direction) % n
+        self._map_search_matches = matches
+        self._map_search_index = idx
+        node = matches[idx]
+        self._select_node(node, center=True)
+        flash = getattr(node, "reveal_flash", None)
+        if callable(flash):
+            try:
+                flash()
+            except Exception:  # noqa: BLE001 — акцент косметика; навигация уже сработала
+                pass
+        self.map_search.set_count(idx + 1, n)
+
+    def _close_map_search_if_open(self):
+        """v0.9.8: закрыть поиск при смене проекта (старый запрос к новым узлам неактуален)."""
+        bar = getattr(self, "map_search", None)
+        if bar is not None and bar.isVisible():
+            self._close_map_search()
 
     # ── Ревью-фикс v0.8.0 (#3): маркеры статусов узлов в дереве сайдбара ──
 
@@ -2418,6 +2621,7 @@ class MainWindow(QMainWindow):
         self._dirty = False
         self._reset_undo_stack()  # v0.8.3: новый проект — чистый undo-стек
         self.refresh_sidebar()
+        self._close_map_search_if_open()  # v0.9.8: смена контекста — поиск закрываем
         self._sync_status_targets()  # v0.7.1: сцена пуста — план проверок пуст
         self._update_window_title()
         if self.log:
@@ -2608,6 +2812,7 @@ class MainWindow(QMainWindow):
                     self.t("msg.passwords_from_keyring_load_failed"))
 
             self.refresh_sidebar()
+            self._close_map_search_if_open()  # v0.9.8: новый проект — поиск закрываем
             self._project_file = path
             self._dirty = False
             self._reset_undo_stack()  # v0.8.3: загрузка — новая точка отсчёта undo

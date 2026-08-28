@@ -19,9 +19,12 @@ for code in ("en", "ru", "zh"):
         langs[code] = set(json.load(f).keys())
 
 # t('key') / .t("key") — \b matches before 't' in both forms; plus __t('key')
+# и _t('key') (v0.9.8: безопасный i18n-хук graphics/* и ui/map_search_bar.py —
+# без него ключи этих модулей были невидимы проверке).
 pats = [
     re.compile(r"""\bt\(\s*['"]([a-zA-Z][a-zA-Z0-9_.]*)['"]"""),
     re.compile(r"""(?<![\w])__t\(\s*['"]([a-zA-Z][a-zA-Z0-9_.]*)['"]"""),
+    re.compile(r"""(?<![\w])_t\(\s*['"]([a-zA-Z][a-zA-Z0-9_.]*)['"]"""),
 ]
 
 used = {}

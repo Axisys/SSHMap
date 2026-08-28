@@ -281,5 +281,11 @@
   "status.restored": "Восстановлено: {source}",
   "status.autosaved": "Автосохранение в {time}",
   "msg.restore_failed": "Не удалось восстановить: {error}",
-  "msg.open_project_first": "Сначала откройте проект (Файл → Открыть)."
+  "msg.open_project_first": "Сначала откройте проект (Файл → Открыть).",
+  "view.find_on_map": "Поиск по карте…",
+  "search.map_placeholder": "Поиск по карте: alias / host / IP…",
+  "search.count": "{cur} / {total}",
+  "search.no_results": "Нет совпадений",
+  "hint.map_search": "Enter — следующее совпадение, Shift+Enter — предыдущее, Esc — закрыть",
+  "status.no_matches": "Нет совпадений для «{query}»"
 }

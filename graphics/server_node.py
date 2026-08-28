@@ -73,6 +73,10 @@ class ServerNode(QGraphicsItemGroup):
     # должна читаться как отдельный сигнал «тут он». Тот же #38bdf8, что у рамки
     # rectangle-выделения MapView — единый акцент приложения.
     REVEAL_COLOR = QColor("#38bdf8")
+    # v0.9.8: поиск по карте (Ctrl+F) — статическая рамка совпавших узлов.
+    # Тот же #38bdf8 (единый акцент): совпадения читаются мгновенно, а текущий
+    # результат поиска дополнительно выделен янтарём (#f59e0b) + вспышка reveal_flash.
+    SEARCH_MATCH_COLOR = QColor("#38bdf8")
     COLOR_TEXT = QColor("#e2e8f0")
     COLOR_LABEL = QColor("#94a3b8")
     # UI polish: «тень» под карточкой и серый цвет точек-индикаторов до проверки.
@@ -130,6 +134,8 @@ class ServerNode(QGraphicsItemGroup):
         self._hover = False
         # v0.7.1: статус доступности (online/warn/offline) — "" пока не проверен
         self._status = ""
+        # v0.9.8: поиск по карте (Ctrl+F) — True, если узел совпадает с активным запросом
+        self._search_matched = False
 
         self.setFlag(QGraphicsItem.ItemIsMovable, True)
         self.setFlag(QGraphicsItem.ItemIsSelectable, True)
@@ -311,6 +317,10 @@ class ServerNode(QGraphicsItemGroup):
     def _state_pen(self):
         if self._selected:
             return QPen(self.COLOR_SELECTED, 3)
+        # v0.9.8: совпадение поиска по карте — акцентная рамка (ниже выделения:
+        # текущий результат поиска одновременно выделен и «горит» янтарём).
+        if self._search_matched:
+            return QPen(self.SEARCH_MATCH_COLOR, 3)
         if self._hover:
             color = QColor(self.COLOR_HOVER)
             color.setAlpha(160)
@@ -624,6 +634,26 @@ class ServerNode(QGraphicsItemGroup):
             return
         self._dimmed = dimmed
         self.setOpacity(self.DIM_OPACITY if dimmed else 1.0)
+
+    # ── v0.9.8: поиск по карте (Ctrl+F) — подсветка совпадений ──
+
+    def set_search_match(self, matched: bool):
+        """v0.9.8: поиск по карте — акцентная рамка у совпавшего узла (и снятие её).
+
+        Подсветка — статический pen в _state_pen (приоритет: выделение > совпадение
+        > hover > статус). Отдельно от reveal_flash (кратковременный оверлей-вспышка)
+        и set_dimmed (opacity всего item у несовпадающих). No-op при том же значении.
+        """
+        matched = bool(matched)
+        if self._search_matched == matched:
+            return
+        self._search_matched = matched
+        self._apply_visual_state()
+
+    @property
+    def search_matched(self) -> bool:
+        """v0.9.8: узел совпадает с активным запросом поиска по карте."""
+        return self._search_matched
 
     def set_ssh_connected(self, connected: bool):
         """Установить статус SSH подключения."""

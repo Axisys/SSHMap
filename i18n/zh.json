@@ -281,5 +281,11 @@
   "status.restored": "已恢复：{source}",
   "status.autosaved": "自动保存于 {time}",
   "msg.restore_failed": "恢复失败：{error}",
-  "msg.open_project_first": "请先打开一个项目（文件 → 打开）。"
+  "msg.open_project_first": "请先打开一个项目（文件 → 打开）。",
+  "view.find_on_map": "在地图上查找…",
+  "search.map_placeholder": "地图搜索：alias / host / IP…",
+  "search.count": "{cur} / {total}",
+  "search.no_results": "无匹配项",
+  "hint.map_search": "Enter — 下一项，Shift+Enter — 上一项，Esc — 关闭",
+  "status.no_matches": "没有匹配项：「{query}」"
 }
