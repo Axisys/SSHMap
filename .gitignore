@@ -33,6 +33,7 @@ config_secret.json
 
 # Временные файлы smoke-тестов
 _tmp_testdata/
+_tmp_testdata_v097/
 _audit_i18n.txt
 _audit_reg81.txt
 _audit_reg83.txt

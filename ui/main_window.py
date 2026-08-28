@@ -180,6 +180,24 @@ class MainWindow(QMainWindow):
             if self.log:
                 self.log.warning(f"StatusChecker unavailable: {e}")
 
+        # ── v0.9.7: автосохранение (ROADMAP #1) ────────────────────────
+        # QTimer по интервалу из ~/.sshmap/config.json (autosave_interval_sec,
+        # дефолт 60 c; autosave_enabled — вкл/выкл). Тик пишет автосохранение
+        # ТОЛЬКО при dirty и при установленном файле проекта (новый несохранённый
+        # проект восстанавливать некому — см. _autosave_tick). Интервал живёт до
+        # перезапуска; диалог настроек появится в v1.1 (ROADMAP).
+        self._autosave_timer = QTimer(self)
+        try:
+            from storage.autosave import get_autosave_settings as _get_as
+            _as_cfg = _get_as()
+        except Exception:  # noqa: BLE001 — дефолты важнее, модуль опционален
+            _as_cfg = {"enabled": True, "interval_sec": 60}
+        self._autosave_enabled = bool(_as_cfg.get("enabled", True))
+        self._autosave_timer.setInterval(int(_as_cfg.get("interval_sec", 60)) * 1000)
+        self._autosave_timer.timeout.connect(self._autosave_tick)
+        if self._autosave_enabled:
+            self._autosave_timer.start()
+
     def start_status_checks(self):
         """v0.7.1: запустить периодические проверки статусов (вызывается один раз)."""
         checker = getattr(self, "_status_checker", None)
@@ -239,6 +257,12 @@ class MainWindow(QMainWindow):
         if self._dirty:
             title += " [*]"
         self.setWindowTitle(title)
+        # v0.9.7: восстановление из автосохранения/бэкапов имеет смысл только для
+        # открытого файла проекта (методы сами гвардятся — это UX-подсказка).
+        for act in (getattr(self, "act_restore_autosave", None),
+                    getattr(self, "act_backups", None)):
+            if act is not None:
+                act.setEnabled(bool(self._project_file))
 
     def _register_i18n(self, widget, key: str):
         """Запомнить виджет (QMenu/QAction) и ключ перевода для повторного применения."""
@@ -558,6 +582,13 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event):
         """Ask to save on exit if there are unsaved changes."""
+        # v0.9.7: автосохранение останавливается ДО диалога — во время решения
+        # пользователя (Save/Discard/Cancel) запись в ~/.sshmap/autosave не нужна.
+        try:
+            self._autosave_timer.stop()
+        except Exception:  # noqa: BLE001 — teardown-устойчивость (RuntimeError C++ объекта)
+            pass
+
         # v0.9.4-fix: остановка фоновых QThread выполняется при ЛЮБОМ выходе.
         # Раньше вызов стоял только в конце «чистого» выхода: все три ветки
         # диалога делали ранний return до шатдауна, и при несохранённых
@@ -757,6 +788,12 @@ class MainWindow(QMainWindow):
         self._add_menu_action(file_menu, "file.open", self._open_project, "Ctrl+O")
         self._add_menu_action(file_menu, "file.save", self._save_project, "Ctrl+S")
         self._add_menu_action(file_menu, "file.save_as", self._save_project_as)
+        # v0.9.7: автосохранение + кольцевой буфер бэкапов (ROADMAP v0.9.7 #2/#3) —
+        # включённость ведёт _update_window_title (нужен открытый файл проекта).
+        self.act_restore_autosave = self._add_menu_action(
+            file_menu, "file.restore_autosave", self._restore_from_autosave)
+        self.act_backups = self._add_menu_action(
+            file_menu, "file.backups", self._show_backups_dialog)
         # v0.9.5.5: массовый импорт серверов из текстового файла
         self._add_menu_action(file_menu, "file.import_servers", self._import_servers_from_txt)
         # v0.9.1: экспорт карты в изображение (PNG/JPEG)
@@ -2497,9 +2534,39 @@ class MainWindow(QMainWindow):
             self, self.t("file.open"), "", "JSON Files (*.json *.sshmap)")
         if not path:
             return
+        self._load_project_at(path)
+
+    def _load_project_at(self, path: str, skip_autosave_prompt: bool = False) -> bool:
+        """v0.9.7: общий путь загрузки (Файл→Открыть и восстановление из бэкапа/autosave).
+
+        ROADMAP v0.9.7 #3: если автосохранение СВЕЖЕЕ файла на диске — предложить
+        восстановить его ПЕРЕД загрузкой (ответ «Да» подменяет содержимое файла).
+        skip_autosave_prompt — путь явного восстановления (пользователь уже выбрал
+        источник; повторный промпт о более свежем autosave был бы дезориентирующим).
+        """
         try:
             from storage.project import load_project as _load_project
             raw = _load_project(path)
+
+            # v0.9.7 #3: автосохранение новее файла → предложение восстановить
+            if not skip_autosave_prompt:
+                try:
+                    from storage import autosave as _as_mod
+                    if _as_mod.autosave_is_newer(path):
+                        auto_raw = _as_mod.read_autosave(path)
+                        if auto_raw is not None:
+                            from datetime import datetime as _dt
+                            ts = _dt.fromtimestamp(_as_mod.autosave_mtime(path)).strftime(
+                                "%Y-%m-%d %H:%M:%S")
+                            reply = QMessageBox.question(
+                                self, self.t("dialog.autosave_found"),
+                                self.t("msg.autosave_newer", time=ts),
+                                QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes)
+                            if reply == QMessageBox.Yes:
+                                raw = auto_raw  # загружаем автосохранение вместо файла
+                except Exception as e:  # noqa: BLE001 — проверка опциональна, открытие не роняем
+                    if self.log:
+                        self.log.warning(f"Autosave check failed: {e}")
 
             server_count = len(raw.get('servers', []))
             conn_count = len(raw.get('connections', []))
@@ -2549,8 +2616,10 @@ class MainWindow(QMainWindow):
 
             if self.log:
                 self.log.info("Project loaded", extra={"file": path, "servers": server_count})
+            return True
         except Exception as e:
             QMessageBox.critical(self, self.t("msg.error_title"), self.t("msg.load_failed", error=str(e)))
+            return False
 
     def _save_project(self) -> bool:
         """Сохранить текущий проект. Возвращает True, если сохранение удалось."""
@@ -2568,13 +2637,29 @@ class MainWindow(QMainWindow):
             self._project_file = path
         return saved
 
+    def _serialize_project_data(self) -> dict:
+        """v0.9.7: текущая сцена → dict проекта JSON (общий для save и автосохранения).
+
+        Сериализатор — storage.project.serialize_scene (формат один; паролей в
+        нём нет: server_data_to_dict их вырезает, ключи — в keyring).
+        """
+        from storage.project import serialize_scene as _serialize
+        center = self.view.mapToScene(
+            self.view.viewport().rect().center())  # AUDIT v0.7.2 (низкая #19): публичное свойство zoom ниже
+        return _serialize(
+            nodes={n.data.id: n for n in self.scene.nodes()},
+            arrows=self.scene.arrows(),
+            zoom=self.view.zoom,
+            center_x=center.x(),
+            center_y=center.y(),
+            notes=self.scene.notes(),  # v0.7.2: массив заметок (публичный итератор)
+            groups=self.scene.groups(),  # v0.8.1: массив групп (кластеры)
+            background=self.scene.background(),  # v0.9.1: фон-изображение
+        )
+
     def _do_save(self, path: str) -> bool:
         """Сохранить проект в файл. Пароли уходят в keyring (JSON — только без них)."""
-        from storage.project import save_project as _save_project_fn
         try:
-            center = self.view.mapToScene(
-                self.view.viewport().rect().center())
-
             server_count = self.scene.node_count()
             arrow_count = self.scene.arrow_count()
 
@@ -2594,17 +2679,22 @@ class MainWindow(QMainWindow):
                     else:
                         unsaved_aliases.append(getattr(node.data, 'alias', sid))
 
-            _save_project_fn(
-                path=path,
-                nodes={n.data.id: n for n in self.scene.nodes()},
-                arrows=self.scene.arrows(),
-                zoom=self.view.zoom,  # AUDIT v0.7.2 (низкая #19): публичное свойство
-                center_x=center.x(),
-                center_y=center.y(),
-                notes=self.scene.notes(),  # v0.7.2: массив заметок (публичный итератор)
-                groups=self.scene.groups(),  # v0.8.1: массив групп (кластеры)
-                background=self.scene.background(),  # v0.9.1: фон-изображение
-            )
+            data = self._serialize_project_data()
+
+            # v0.9.7 #2: кольцевой буфер бэкапов — ДОС перезаписи файла: версия
+            # «до сохранения» уходит в слот 1 (откат на предыдущие версии). Сбой
+            # бэкапа НЕ блокирует сохранение (страховка, а не условие).
+            if os.path.isfile(path):
+                try:
+                    from storage import autosave as _as_mod
+                    _n_backups = _as_mod.get_autosave_settings()["backup_count"]
+                    _as_mod.rotate_backups(path, _n_backups)
+                except Exception as e:  # noqa: BLE001 — см. выше: страховка не роняет save
+                    if self.log:
+                        self.log.warning(f"Backup rotation failed: {e}")
+
+            from storage.project import write_project_json as _write_json
+            _write_json(path, data)
 
             # Сброс маркера несохранённых изменений (AUDIT.md, средняя #7)
             self._dirty = False
@@ -2642,4 +2732,119 @@ class MainWindow(QMainWindow):
                 self.log.exception(f"Failed to save project {path}")
             QMessageBox.critical(self, self.t("msg.error_title"), self.t("msg.save_failed", error=str(e)))
             return False
+
+    # ── v0.9.7: автосохранение + бэкапы (ROADMAP v0.9.7) ─────────────────────
+
+    def _autosave_tick(self):
+        """v0.9.7 #1: тик таймера — автосохранение только при dirty и открытом файле.
+
+        Новый несохранённый проект (_project_file is None) НЕ автосохраняется:
+        восстановить его было бы не на какой файл (ROADMAP #3 привязана к «открытому
+        файлу»). Пароли в автосохранение не попадают — serialize_scene идёт через
+        server_data_to_dict, который их вырезает (см. models/server.py).
+        """
+        if not self._dirty or not self._project_file:
+            return
+        try:
+            from storage import autosave as _as_mod
+            data = self._serialize_project_data()
+            path = _as_mod.write_autosave(self._project_file, data)
+            if self.log:
+                self.log.info("Autosaved", extra={"file": path})
+            try:
+                from datetime import datetime
+                ts = datetime.now().strftime("%H:%M:%S")
+                self.statusBar().showMessage(self.t("status.autosaved", time=ts))
+            except Exception:  # noqa: BLE001 — статус-бар не критичен для автосохранения
+                pass
+        except Exception as e:  # noqa: BLE001 — автосохранение страховка, сбой молчим в лог
+            if self.log:
+                self.log.warning(f"Autosave failed: {e}")
+
+    def _restore_from_autosave(self):
+        """v0.9.7 #3 (ручной путь): восстановить последнее автосохранение поверх проекта."""
+        if not self._project_file:
+            QMessageBox.information(
+                self, self.t("msg.info_title"), self.t("msg.open_project_first"))
+            return
+        from storage import autosave as _as_mod
+        src = _as_mod.autosave_path_for(self._project_file)
+        if not os.path.isfile(src):
+            QMessageBox.information(
+                self, self.t("dialog.backups"), self.t("backups.empty"))
+            return
+        self._restore_from_source(src, self.t("backups.autosave"))
+
+    def _backup_items(self) -> list:
+        """v0.9.7 #2: строки для диалога бэкапов — автосохранение + слоты кольца (свежие первыми)."""
+        if not self._project_file:
+            return []
+        from storage import autosave as _as_mod
+        items = []
+        auto_path = _as_mod.autosave_path_for(self._project_file)
+        if os.path.isfile(auto_path):
+            try:
+                st = os.stat(auto_path)
+                items.append({
+                    "label": self.t("backups.autosave"),
+                    "path": auto_path, "mtime": st.st_mtime, "size": st.st_size,
+                })
+            except OSError:
+                pass
+        for b in _as_mod.list_backups(self._project_file):
+            items.append({
+                "label": self.t("backups.backup", n=b["slot"]),
+                "path": b["path"], "mtime": b["mtime"], "size": b["size"],
+            })
+        return items
+
+    def _show_backups_dialog(self):
+        """v0.9.7 #2: диалог с кольцевым буфером бэкапов (+ последнее автосохранение)."""
+        if not self._project_file:
+            QMessageBox.information(
+                self, self.t("msg.info_title"), self.t("msg.open_project_first"))
+            return
+        items = self._backup_items()
+        if not items:
+            QMessageBox.information(
+                self, self.t("dialog.backups"), self.t("backups.empty"))
+            return
+        try:
+            from dialogs.backups_dialog import BackupsDialog
+        except ImportError:  # flat-раскладка без пакета (паттерн main_window)
+            from backups_dialog import BackupsDialog
+        dlg = BackupsDialog(items, parent=self)
+        dlg.restore_requested.connect(self._restore_from_source)
+        dlg.exec()
+
+    def _restore_from_source(self, src_path: str, label: str):
+        """v0.9.7 #2/#3: единый путь восстановления — бэкап/автосохранение → файл проекта.
+
+        Подтверждение (с предупреждением о несохранённых правках при dirty) →
+        атомарная копия в файл проекта → повторная загрузка через _load_project_at
+        (та же логика, что Файл→Открыть: undo-стек, dirty, ключи keyring, статусы).
+        """
+        if not self._project_file:
+            return
+        msg = (self.t("msg.confirm_restore_dirty") if self._dirty
+               else self.t("msg.confirm_restore"))
+        reply = QMessageBox.question(
+            self, self.t("dialog.backups"), msg,
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes)
+        if reply != QMessageBox.Yes:
+            return
+        try:
+            from storage import autosave as _as_mod
+            _as_mod.restore_to_project(src_path, self._project_file)
+            ok = self._load_project_at(self._project_file, skip_autosave_prompt=True)
+            if not ok:
+                return  # ошибка уже показана (msg.load_failed)
+            self.statusBar().showMessage(self.t("status.restored", source=label))
+            if self.log:
+                self.log.info("Project restored", extra={"source": src_path})
+        except Exception as e:  # noqa: BLE001 — пользователь должен увидеть причину
+            if self.log:
+                self.log.exception(f"Failed to restore from {src_path}")
+            QMessageBox.critical(
+                self, self.t("msg.error_title"), self.t("msg.restore_failed", error=str(e)))
 
