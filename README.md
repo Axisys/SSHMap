@@ -1,4 +1,4 @@
-# SSH Map (NodeVisualSSH) — v0.9.8
+# SSH Map (NodeVisualSSH) — v0.9.9.7
 
 Десктопное приложение (Python + PySide6): интерактивная карта IT-инфраструктуры с прямым SSH-подключением к узлам. Slogan: *"Draw your infrastructure. Organize it. Connect to it."*
 
@@ -12,24 +12,20 @@
 pip install PySide6 paramiko keyring pyte   # все зависимости из requirements.txt
 python main.py                              # запуск GUI
 
-# Тесты без pytest (все должны завершаться EXIT=0).
+# installable-идентичность (pyproject.toml) — установка как пакета:
+pipx install .                            # или pip install . → команда sshmap (entry point main:main)
+
+# Тесты без pytest: тематические файлы test_*.py + единый раннер.
 # Тесты изолированы: пишут во временный HOME, UTF-8 stdout ставится сами —
 # на cp1251-консолях и в CI дополнительное окружение не требуется:
-QT_QPA_PLATFORM=offscreen python tests/smoke_test.py              # 279 проверок
-QT_QPA_PLATFORM=offscreen python tests/regression_v081.py         # 22 проверки (ревью-фиксы v0.8.1)
-QT_QPA_PLATFORM=offscreen python tests/regression_v083.py         # 34 проверки (undo/redo)
-QT_QPA_PLATFORM=offscreen python tests/smoke_collapse.py          # 12 проверок (сворачивание плашек v0.8.4)
-QT_QPA_PLATFORM=offscreen python tests/regression_v091.py         # 28 проверок (экспорт + фон)
-QT_QPA_PLATFORM=offscreen python tests/regression_v093.py         # 21 проверка (дублирование + мультивыделение)
-QT_QPA_PLATFORM=offscreen python tests/regression_v094.py         # 23 проверки (теги серверов)
-QT_QPA_PLATFORM=offscreen python tests/regression_v094b.py        # 9 проверок (keyring fail-бэкенд, атомарная запись)
-QT_QPA_PLATFORM=offscreen python tests/smoke_v095_drawio.py       # экспорт в draw.io (round-trip XML)
-QT_QPA_PLATFORM=offscreen python tests/regression_v0955_keyring.py # keyring-валидация (15–18 проверок, зависит от бэкенда)
-QT_QPA_PLATFORM=offscreen python tests/regression_v096_sidebar_ctx.py # контекстное меню сайдбара v0.9.6 (~20 проверок)
-QT_QPA_PLATFORM=offscreen python tests/regression_v097_autosave.py  # автосохранение + кольцевой буфер бэкапов v0.9.7 (45 проверок)
-QT_QPA_PLATFORM=offscreen python tests/regression_v098_map_search.py # поиск по карте Ctrl+F v0.9.8 + PySide6-menu guard (56 проверок)
-QT_QPA_PLATFORM=offscreen python tests/check_i18n_keys.py         # паритет i18n-ключей (exit 0 = ок)
+python tests/run_all.py              # ВСЁ (33 файла): таблица результатов + единый exit code (0 ⇔ всё зелёное)
+python tests/run_all.py keyring      # фильтр по подстроке в имени файла
+python tests/test_tags.py            # один файл (из корня проекта)
 ```
+
+Карта сьюта — что какой `test_*.py` покрывает и откуда пришёл, конвенции: `tests/INDEX.md`.
+Обвязка `tests/_common.py`: HOME-изоляция (песочница для `~/.sshmap/*`), offscreen,
+faulthandler-таймаут 180 c; каждый файл завершается exit 0 = ALL PASS.
 
 Требования: Python 3.10+, Windows/Linux/macOS. Логи: `~/.sshmap/logs/sshmap.log` (RotatingFileHandler 5MB × 3).
 
@@ -39,6 +35,7 @@ QT_QPA_PLATFORM=offscreen python tests/check_i18n_keys.py         # парите
 
 ```
 main.py                      # точка входа: setup_logging() → QApplication → MainWindow → start_status_checks()
+pyproject.toml               # installable-идентичность (имя/версия/deps из version.py и requirements.txt, entry point sshmap = main:main) — сверка tests/test_pyproject.py
 models/
 ├── server.py                # ServerData dataclass; server_data_from_dict/to_dict (password исключается)
 └── profile.py               # Profile; CRUD; JSON ~/.sshmap_profiles.json (пароли в keyring, префикс "profile:{id}")
@@ -64,25 +61,29 @@ modules/
 │                            #   EditConnection, EditNodeData
 └── logger.py                # setup_logging()/get_logger(__name__)
 storage/project.py           # save_project/load_project + serialize_scene()/write_project_json() — JSON версии (VERSION_FORMAT из version.py; + ключ "background")
-storage/autosave.py          # v0.9.7: автосохранение ~/.sshmap/autosave/<key>.json + кольцевой буфер бэкапов ~/.sshmap/backups/<key>_NNN.json (без Qt, атомарные записи)
+storage/autosave.py          # автосохранение ~/.sshmap/autosave/<key>.json + кольцевой буфер бэкапов ~/.sshmap/backups/<key>_NNN.json (без Qt, атомарные записи)
 storage/export_drawio.py     # экспорт карты в .drawio (mxGraph XML, ElementTree, без новых зависимостей)
 services/
 ├── credential_manager.py    # keyring-абстракция (синглтон get_credential_manager()): только проверенный бэкенд (Windows — wincred, иначе — отказ от записи)
+├── diagnostics.py           # v0.9.9.3: PingThread + ReverseDnsThread — ping и обратный DNS вне GUI-потока (перенесено из ui/main_window.py)
 ├── host_importer.py         # массовый импорт серверов из TXT: parse_hosts_file, is_ip_address, resolve_host
 ├── status_checker.py        # StatusChecker: QTimer разводит раунды, пробы в _ProbeThread; probe_ssh() → online/warn/offline
 └── system_info_collector.py # SystemInfoCollector: автосбор ОС/CPU/RAM/диск Linux-сервера одной exec_command-сессией
-version.py                   # единая точка версий: APP_VERSION="0.9.8", VERSION_FORMAT="0.9"
+version.py                   # единая точка версий: APP_VERSION="0.9.9.7", VERSION_FORMAT="0.9"
 dialogs/                     # AddServerDialog, SSHConnectDialog (+кнопка внешнего терминала),
-                             # ConnectionDialog/EditConnectionDialog, ProfileManagerDialog,
-                              # BackupsDialog (v0.9.7 — бэкапы + автосохранение, откат)
-ui/main_window.py            # MainWindow (~3000 строк): контроллер; undo_stack (QUndoStack), dirty по canUndo()+baseline;
+                             #   ConnectionDialog/EditConnectionDialog, ProfileManagerDialog,
+                             #   BackupsDialog (бэкапы + автосохранение, откат)
+ui/main_window.py            # MainWindow: контроллер; undo_stack (QUndoStack), dirty по canUndo()+baseline;
                              #   дублирование узла Ctrl+D (keyring-пароль под новым id), групповые операции
-                             #   экспорт карты в PNG/JPEG, экспорт в drawio, установка/удаление фона, «Собрать информацию»
-                              #   поиск по карте Ctrl+F (v0.9.8), _qaction_guard — guard на QActions с прикреплённым QMenu
-ui/map_search_bar.py         # v0.9.8: MapSearchBar — плавающая строка поиска поверх canvas (Enter/Shift+Enter/Esc, счётчик k/N)
+                             #   экспорт карты в PNG/JPEG/PDF, экспорт в drawio, установка/удаление фона, «Собрать информацию»
+                             #   поиск по карте Ctrl+F, _qaction_guard — guard на QActions с прикреплённым QMenu;
+                             #   сайдбар-кластер вынесен в ui/sidebar.py (MainWindow — фасад)
+ui/sidebar.py                # SidebarPanel(QWidget) — кнопки, заголовок, поиск, тег-фильтр, дерево с маркерами
+                             #   статусов, контекстное меню строки; i18n через колбэк + retranslate
+ui/map_search_bar.py         # MapSearchBar — плавающая строка поиска поверх canvas (Enter/Shift+Enter/Esc, счётчик k/N)
 ui/command_palette.py        # CommandPalette: Ctrl+K, fuzzy-поиск по действиям меню и серверам
-i18n/                        # t(key,**kwargs); en.json/ru.json/zh.json — 289 ключей, наборы идентичны; ru — дефолт
-tests/                       # smoke_test.py (279), regression_v081/v083/v091/v093/v094/v094b/v0955_keyring/v096_sidebar_ctx/v097_autosave/v098_map_search.py, smoke_collapse.py, smoke_v095_drawio.py, check_i18n_keys.py
+i18n/                        # t(key,**kwargs); en.json/ru.json/zh.json — 304 ключа, наборы идентичны; ru — дефолт
+tests/                       # тематический сьют без pytest: 32 × test_*.py + _common.py (обвязка), run_all.py (единый раннер), check_i18n_keys.py; карта — tests/INDEX.md
 ```
 
 ---
@@ -129,7 +130,7 @@ tests/                       # smoke_test.py (279), regression_v081/v083/v091/v0
 - Групповой drag: если тянется уже выделенный узел и выделено >1 — двигаются ВСЕ выделенные; одна команда CmdMoveNodes на жест.
 
 ### Горячие клавиши + палитра команд
-- Хоткеи: Ctrl+N/O/S — проект; Ctrl+Z/Y(+Shift) — undo/redo; Ctrl+Shift+A/G/C — сервер/группа/связь; Ctrl+I — свойства; **Ctrl+Enter** — SSH к выделенному узлу; **Ctrl+E** — редактировать узел; **Ctrl+D** — дублировать узел; **Ctrl+Shift+N** — заметка в центре видимой области; Delete — удалить выделенное; Ctrl+Shift+F — вписать карту; **Ctrl+F** — поиск по карте (v0.9.8: строка поиска поверх canvas, Enter/Shift+Enter — переход между совпадениями с центрированием и рамкой-акцентом, Esc — закрыть).
+- Хоткеи: Ctrl+N/O/S — проект; Ctrl+Z/Y(+Shift) — undo/redo; Ctrl+Shift+A/G/C — сервер/группа/связь; Ctrl+I — свойства; **Ctrl+Enter** — SSH к выделенному узлу; **Ctrl+E** — редактировать узел; **Ctrl+D** — дублировать узел; **Ctrl+Shift+N** — заметка в центре видимой области; Delete — удалить выделенное; Ctrl+Shift+F — вписать карту; **Ctrl+F** — поиск по карте (строка поиска поверх canvas, Enter/Shift+Enter — переход между совпадениями с центрированием и рамкой-акцентом, Esc — закрыть).
 - Мультивыделение: Ctrl+клик по узлу добавляет к выделению (нативный Qt), **Ctrl+drag по пустому месту** — рамка выделения (Shift+Ctrl добавляет к текущему); групповой drag двигает все выделенные; ПКМ при мультивыделении → «Соединить выделенные» / «Удалить выделенные» (одно подтверждение, guarded для каждого).
 - **Ctrl+K** — палитра команд (`ui/command_palette.py`): fuzzy-поиск (subsequence-скоринг, без зависимостей) по всем QAction меню + по серверам проекта; выбор сервера → выделение узла + centerOn. Enter/Up/Down/Esc.
 
@@ -154,7 +155,7 @@ tests/                       # smoke_test.py (279), regression_v081/v083/v091/v0
 | QGraphicsProxyWidget «съедает» мышь | Drag StickyNote/NodeGroup обрабатывается вручную; MapView временно переключает dragMode в NoDrag |
 | strokeToFill/strokedPath QPainterPath | Не пробиндованы в PySide6 → hit-зона стрелки через свой contains() с сэмплированием кривой |
 | focusIn/focusOut сигналы QWidget | В Qt6 их нет → eventFilter |
-| Смерть Python-обёртки QAction с прикреплённым QMenu (v0.9.8) | PySide6 6.11 уничтожает за ней C++-QMenu (проверено offscreen И native): временные обёртки из `menubar.actions()`/`act.menu()` убивали ВСЕ меню, кроме последнего — при открытии палитры Ctrl+K и смене языка. Лечение: постоянное хранение таких QAction (`MainWindow._qaction_guard`) + не ходить через `action.menu()` там, где есть прямой путь (реестр `_menu_i18n`) |
+| Смерть Python-обёртки QAction с прикреплённым QMenu | PySide6 6.11 уничтожает за ней C++-QMenu (проверено offscreen И native): временные обёртки из `menubar.actions()`/`act.menu()` убивали ВСЕ меню, кроме последнего — при открытии палитры Ctrl+K и смене языка. Лечение: постоянное хранение таких QAction (`MainWindow._qaction_guard`) + не ходить через `action.menu()` там, где есть прямой путь (реестр `_menu_i18n`) |
 
 ---
 
@@ -170,16 +171,36 @@ ru (дефолт) / en / zh. Правило: новый ключ добавля�
 
 ## 7. Состояние и roadmap
 
-**Реализовано полностью:** карта (узлы/Безье-связи 6 типов/заметки/группы), статусы online/warn/offline, терминал на pyte (vim/htop работают), внешний системный терминал, undo/redo, автосбор информации о Linux-сервере, профили + keyring, i18n ru/en/zh, контекстные меню всех объектов, fit/zoom/центрирование, экспорт карты в PNG/JPEG и фоновое изображение с drag/resize, горячие клавиши и палитра команд Ctrl+K, дублирование узла Ctrl+D с копированием keyring-пароля под новым id и мультивыделение (Ctrl+клик, рамка, групповой drag, соединить/удалить выделенные), теги/цветные метки серверов: цветная полоска на карточке, фильтр по тегам в сайдбаре с затемнением несовпадающих узлов на карте, поиск по тегам, экспорт карты в draw.io `.drawio` — узлы/связи/группы-контейнеры/стикеры/фон отдельным слоем; файл открывается в diagrams.net и VS Code-плагине; массовый импорт серверов из TXT, один undo-командой), контекстное меню дерева серверов сайдбара + «Показать на карте», автосохранение проекта (~/.sshmap/autosave/, только при dirty) + кольцевой буфер бэкапов при каждом save (~/.sshmap/backups/, откат через «Файл → Бэкапы…» / «Восстановить из автосохранения…») и предложение восстановления из автосохранения при открытии файла, поиск по карте (Ctrl+F): строка поиска поверх canvas с подсветкой совпадений (alias/host/ip/comment), переход Enter/Shift+Enter с центрированием и рамкой-акцентом, затемнение несовпавших узлов (комбинируется с тег-фильтром по И).
+**Реализовано полностью:**
+- карта (узлы/Безье-связи 6 типов/заметки/группы)
+- статусы online/warn/offline
+- терминал на pyte
+- внешний системный терминал
+- undo/redo
+- автосбор информации о Linux-сервере
+- профили + keyring
+- перевод приложения i18n ru/en/zh
+- контекстные меню всех объектов
+- fit/zoom/центрирование
+- экспорт карты в PNG/JPEG/PDF и фоновое изображение с drag/resize
+- горячие клавиши и палитра команд Ctrl+K
+- дублирование узла Ctrl+D с копированием keyring-пароля под новым id
+- мультивыделение (Ctrl+клик, рамка, групповой drag, соединить/удалить выделенные)
+- теги/цветные метки серверов: цветная полоска на карточке
+- фильтр по тегам в сайдбаре с затемнением несовпадающих узлов на карте, поиск по тегам
+- экспорт карты в draw.io `.drawio` — узлы/связи/группы-контейнеры/стикеры/фон отдельным слоем; файл открывается в diagrams.net и VS Code-плагине 
+- массовый импорт серверов из TXT
+- контекстное меню дерева серверов сайдбара + «Показать на карте»
+- автосохранение проекта (~/.sshmap/autosave/) + кольцевой буфер бэкапов при каждом save (~/.sshmap/backups/, откат через «Файл → Бэкапы…» / «Восстановить из автосохранения…») и предложение восстановления из автосохранения при открытии файла
+- поиск по карте (Ctrl+F): строка поиска поверх canvas с подсветкой совпадений (alias/host/ip/comment), переход Enter/Shift+Enter с центрированием и рамкой-акцентом, затемнение несовпавших узлов (комбинируется с тег-фильтром по И)
 
 **Известные ограничения:** undo не покрывает статусы узлов и геометрию фона; фоновое изображение хранится путём (при переносе проекта на другую машину файл нужно переносить вместе с картой); язык интерфейса выбирается через меню «Помощь → Язык» (с персистентностью в ~/.sshmap/config.json); в v1.1 планируется перенос переключателя в диалог настроек.
 
 **Roadmap (по приоритету, детали — в ROADMAP.md):**
-1. **v0.9.9.x**: серия из семи небольших шагов подготовки к 1.0 — selection sync без `blockSignals` (закрытие замечания CHANGELOG), UI внешнего терминала (пресеты + сброс к умолчанию), гигиена `main_window.py` (фаза 0: `services/diagnostics.py`; фаза 1: `ui/sidebar.py`), `tests/run_all.py`, `pyproject.toml`, PDF-экспорт карты (опционально).
-2. **v1.0**: Терминал v1 — сеточный рендерер на QPainter (runs, исправленный цветовой движок: `brown`/256/truecolor), полная клавиатура + AltGr-guard, выделение мышью и копирование, resize PTY, скроллбэк через `pyte.HistoryScreen`.
-3. **v1.1**: диалог настроек (шрифты UI и терминала, палитра/размер шрифта/глубина истории терминала, интервалы StatusChecker, автосохранение, язык интерфейса) + SFTP-вкладка в окне терминала (тот же transport, один worker с очередью, прогресс и отмена).
-4. **v1.2**: полировка карты (анимированный поток по связям, плавные перелёты камеры, центральная тема `ui/theme.py`) + опции терминала (табы сессий, выделение слова/строки).
-5. Бэклог (без версии): импорт из ~/.ssh/config, экспорт/импорт профилей, Prometheus-метрики, интеграции Docker/K8s·Proxmox·WoL·SNMP, мини-карта и другие «большого уровня».
+- **v1.0**: Терминал v1 — сеточный рендерер на QPainter (runs, исправленный цветовой движок: `brown`/256/truecolor), полная клавиатура + AltGr-guard, выделение мышью и копирование, resize PTY, скроллбэк через `pyte.HistoryScreen`.
+- **v1.1**: диалог настроек (шрифты UI и терминала, палитра/размер шрифта/глубина истории терминала, интервалы StatusChecker, автосохранение, язык интерфейса) + SFTP-вкладка в окне терминала (тот же transport, один worker с очередью, прогресс и отмена).
+- **v1.2**: полировка карты (анимированный поток по связям, плавные перелёты камеры, центральная тема `ui/theme.py`) + опции терминала (табы сессий, выделение слова/строки).
+- Бэклог (без версии): импорт из ~/.ssh/config, экспорт/импорт профилей, Prometheus-метрики, интеграции Docker/K8s·Proxmox·WoL·SNMP, мини-карта и другие «большого уровня».
 
 ---
 

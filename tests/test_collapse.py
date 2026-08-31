@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""v0.8.4 (DESIGN.md §D): smoke-тесты сворачивания плашек серверов.
+"""Сворачивание плашек серверов v0.8.4 (DESIGN.md §D) (бывш. tests/smoke_collapse.py).
 
 Проверяются пункты, заявленные в дизайне:
   1. toggle_collapsed меняет boundingRect (высота → COLLAPSED_HEIGHT и обратно);
@@ -7,40 +7,22 @@
   3. старый JSON без ключа collapsed → узел развёрнут;
   4. update_appearance идемпотентен в обоих режимах;
   5. mousePressEvent по шеврону переключает режим (QTest.mousePress — вывод v0.7.3).
-Запуск: python tests/smoke_collapse.py
+
+Запуск: python tests/test_collapse.py   (из корня проекта) или python tests/run_all.py
 """
 import json
-import os
-import sys
 
-# v0.9.3 fix: на консоли cp1251 (типичная русская Windows) print деталей FAIL
-# с «→» падал с UnicodeEncodeError и убивал весь прогон. UTF-8 + replace —
-# отчёт о провале доезжает до пользователя на любой кодировке консоли.
-try:
-    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-except (AttributeError, ValueError):
-    pass  # не-Python3.7+ поток или уже переориентирован (pytest capture)
+from _common import bootstrap, check, finish
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+ROOT, WORK = bootstrap()  # ДО импортов модулей приложения (HOME-изоляция и faulthandler внутри)
 
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QGraphicsSceneMouseEvent
 from PySide6.QtCore import QPointF, Qt
-from PySide6.QtTest import QTest
 
-app = QApplication.instance() or QApplication(sys.argv)
+app = QApplication.instance() or QApplication([])
 
 from models.server import ServerData, server_data_from_dict, server_data_to_dict
-try:
-    from graphics.server_node import ServerNode
-except ImportError:
-    from graphics.server_node import ServerNode
-
-_results = []
-
-
-def check(name, cond, detail=""):
-    _results.append((name, bool(cond), detail))
-    print(f"[{'PASS' if cond else 'FAIL'}] {name}" + (f" — {detail}" if detail and not cond else ""))
+from graphics.server_node import ServerNode
 
 
 # ── 1. toggle меняет boundingRect ────────────────────────────────────────────
@@ -87,7 +69,6 @@ check("update_appearance идемпотентен (свёрнут)",
 # ── 5. клик по шеврону: синтетический QGraphicsSceneMouseEvent ───────────────
 # (вывод v0.7.3: мышиный ввод в тестах; QTest.mousePress принимает только QWidget,
 # для QGraphicsItem собираем событие вручную)
-from PySide6.QtWidgets import QGraphicsSceneMouseEvent
 
 def _press_at(item, local: QPointF):
     """Синтетический клик: QTest.mousePress принимает только QWidget, а
@@ -105,7 +86,7 @@ def _press_at(item, local: QPointF):
 
 node3 = ServerNode(ServerData(id="t4", alias="srv", user="u", host="10.0.0.8"))
 before = node3.data.collapsed
-ev = _press_at(node3, node3.chevron_rect().center())
+_press_at(node3, node3.chevron_rect().center())
 check("клик по шеврону переключает режим",
       node3.data.collapsed != before)  # isAccepted() у синтетического события ненадёжен
 _press_at(node3, node3.chevron_rect().center())
@@ -114,9 +95,4 @@ check("повторный клик возвращает режим", node3.data.
 _press_at(node3, QPointF(60, 60))
 check("клик мимо шеврона не переключает режим", node3.data.collapsed == before)
 
-# ── итоги ─────────────────────────────────────────────────────────────────────
-failed = [n for n, ok, _ in _results if not ok]
-print(f"\n{len(_results) - len(failed)}/{len(_results)} passed")
-if failed:
-    print("FAILED:", *failed, sep="\n  ")
-    sys.exit(1)
+finish()

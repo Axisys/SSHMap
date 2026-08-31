@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """Регрессия v0.9.5.5 (безопасность #1): keyring-бэкенд — валидация и гард.
 
-Запуск: python tests/regression_v0955_keyring.py
+Запуск: python tests/test_keyring_validation.py или python tests/run_all.py
 
 Проверяет:
   1. plaintext-бэкенд (keyrings.alt.*) отклоняется на Windows И на Linux —
@@ -16,33 +16,14 @@
 import os
 import sys
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from _common import bootstrap, check, finish
 
-try:
-    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
-except Exception:
-    pass
-
-os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+ROOT, WORK = bootstrap()  # ДО импортов модулей приложения (HOME-изоляция и faulthandler внутри)
 
 import keyring
 
 from services import credential_manager as CM_MOD
 from services.credential_manager import CredentialManager
-
-PASS = 0
-FAIL = 0
-
-
-def check(name, cond, detail=""):
-    global PASS, FAIL
-    if cond:
-        PASS += 1
-        print(f"  ok: {name}")
-    else:
-        FAIL += 1
-        print(f"FAIL: {name} {detail}")
 
 
 def _make_fake(module_name, cls_name="FakeKeyring"):
@@ -117,8 +98,8 @@ def main():
     else:
         print("  (real backend rejected on this host — round-trip skipped)")
 
-    print(f"\nregression_v0955_keyring: {PASS} passed / {FAIL} failed")
-    return 0 if FAIL == 0 else 1
+    finish()
+    return 0
 
 
 if __name__ == "__main__":

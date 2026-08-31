@@ -6,31 +6,14 @@
   merge перемещений узла одним жестом,
   dirty-маркер, привязанный к индексу undo-стека (save = новая точка отсчёта).
 
-Запуск:  python tests/regression_v083.py   (из корня проекта)
+Запуск:  python tests/test_undo_redo.py   (из корня проекта) или python tests/run_all.py
 """
 import os
 import sys
 
-# v0.9.4-fix: UTF-8 stdout на cp1251-консолях
-try:
-    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
-except Exception:
-    pass
+from _common import bootstrap, check, finish
 
-os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
-ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, ROOT)
-
-import faulthandler
-faulthandler.dump_traceback_later(180, exit=True)
-
-PASS, FAIL = [], []
-
-
-def check(name, cond, detail=""):
-    (PASS if cond else FAIL).append((name, detail))
-    print(("  ok  " if cond else "  FAIL ") + name + (f" — {detail}" if detail and not cond else ""))
+ROOT, WORK = bootstrap()  # ДО импортов модулей приложения (HOME-изоляция и faulthandler внутри)
 
 
 from PySide6.QtCore import QPointF
@@ -201,8 +184,4 @@ w3.undo_stack.undo()  # затем возвращается узел
 check("LIFO undo returns both objects", nb.data.id in w3.scene._nodes)
 
 # ── итог ──
-print(f"\n===== {len(PASS)} passed, {len(FAIL)} failed =====")
-if FAIL:
-    for name, detail in FAIL:
-        print("FAILED:", name, detail)
-sys.exit(1 if FAIL else 0)
+finish()

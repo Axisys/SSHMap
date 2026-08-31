@@ -8,7 +8,7 @@ ROADMAP v0.9.7:
   #3 Восстановление при открытии: если autosave свежее файла — предложение
      восстановить (до подмены содержимого).
 
-Запуск:  python tests/regression_v097_autosave.py   (из корня проекта)
+Запуск:  python tests/test_autosave_backups.py   (из корня проекта) или python tests/run_all.py
 """
 import json
 import os
@@ -16,30 +16,9 @@ import sys
 import tempfile
 import time as _time
 
-# Изоляция HOME ДО импорта модулей приложения (паттерн smoke_test): i18n пишет
-# ~/.sshmap/config.json, storage.autosave — ~/.sshmap/autosave|backups.
-_test_home = tempfile.mkdtemp(prefix="sshmap_test_home_")
-os.environ["HOME"] = _test_home
-os.environ["USERPROFILE"] = _test_home
+from _common import bootstrap, check, finish
 
-os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
-ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, ROOT)
-
-import faulthandler
-faulthandler.dump_traceback_later(180, exit=True)  # завис (модалка offscreen) — дамп и выход
-
-try:
-    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
-except Exception:
-    pass
-
-PASS, FAIL = [], []
-
-def check(name, cond, detail=""):
-    (PASS if cond else FAIL).append((name, detail))
-    print(("  ok  " if cond else "  FAIL ") + name + (f" — {detail}" if detail and not cond else ""))
+ROOT, WORK = bootstrap()  # ДО импортов модулей приложения (HOME-изоляция и faulthandler внутри)
 
 from PySide6.QtWidgets import QApplication, QMessageBox
 
@@ -335,9 +314,11 @@ new_keys = ["file.restore_autosave", "file.backups", "dialog.autosave_found",
             "status.autosaved", "msg.restore_failed", "msg.open_project_first"]
 missing = [k for k in new_keys if any(not langs[c].get(k, "").strip() for c in ("en", "ru", "zh"))]
 check("18 новых ключей v0.9.7 есть и не пусты в en/ru/zh", not missing, str(missing))
-check("наборы ключей идентичны en/ru/zh (289 на язык)",
+# v0.9.9.2: +13 ключей UI внешнего терминала (ssh_ext.section … ssh_ext.preset.kitty)
+# v0.9.9.7: +2 ключа PDF-экспорта (file.export_pdf, status.export_pdf_ok)
+check("наборы ключей идентичны en/ru/zh (304 на язык)",
       set(langs["en"]) == set(langs["ru"]) == set(langs["zh"])
-      and all(len(d) == 289 for d in langs.values()),
+      and all(len(d) == 304 for d in langs.values()),
       str({c: len(d) for c, d in langs.items()}))
 
 # Cleanup: сначала dirty=False — иначе closeEvent уйдёт в диалог сохранения.
@@ -348,10 +329,4 @@ for w in (win, win2, win3, win_ns):
     except Exception:
         pass
 
-print()
-if FAIL:
-    print(f"FAILURES ({len(FAIL)}):")
-    for name, detail in FAIL:
-        print(f"  - {name}: {detail}")
-    sys.exit(1)
-print(f"ALL PASS ({len(PASS)})")
+finish()

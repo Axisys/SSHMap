@@ -1,0 +1,46 @@
+# SSH Map (NodeVisualSSH) — installable-идентичность для 1.0 (ROADMAP v0.9.9.6).
+#
+# Минимальный набор: имя, версия, зависимости, entry point — открывает
+# `pipx install .` / `pip install .` и PyInstaller без переделок.
+# Единая точка истины версии — version.py (APP_VERSION): значение ниже обязано
+# совпадать с ней; deps обязаны соответствовать requirements.txt — сверяет
+# tests/test_pyproject.py (часть сьюта, python tests/run_all.py).
+
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sshmap"                  # нормализованный APP_NAME из version.py ("SSH Map") — сверяет tests/test_pyproject.py
+version = "0.9.9.7"              # ОБЯЗАН совпадать с APP_VERSION в version.py — сверяет tests/test_pyproject.py
+description = "SSH Map (NodeVisualSSH): visual infrastructure map with direct SSH connections to nodes"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    # ОБЯЗАНЫ соответствовать requirements.txt (набор имя+пин) — сверяет tests/test_pyproject.py
+    "PySide6>=6.5",     # GUI framework (Qt 6): QGraphicsScene/View, QThread
+    "paramiko>=3.0",    # SSH-клиент (подключения и интерактивный терминал)
+    "keyring>=24.0",    # Системное хранилище паролей (Credential Manager)
+    "pyte>=0.8.0",      # ANSI-эмуляция терминала v0.8 (modules/terminal_screen.py — жёсткая зависимость)
+]
+
+[project.scripts]
+sshmap = "main:main"             # консольный entry point → существующая main() в main.py (QApplication + MainWindow)
+
+# Flat layout: 8 топ-пакетов + 2 модуля в корне — автообнаружение здесь не
+# сработает, поэтому список явный. tests/ и _tmp_testdata*/ в дистрибутив НЕ входят.
+[tool.setuptools]
+py-modules = ["main", "version"]
+packages = [
+    "dialogs",
+    "graphics",
+    "i18n",
+    "models",
+    "modules",
+    "services",
+    "storage",
+    "ui",
+]
+
+[tool.setuptools.package-data]
+i18n = ["*.json"]                # переводы en/ru/zh — часть дистрибутива

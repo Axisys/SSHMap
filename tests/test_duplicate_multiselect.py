@@ -1,40 +1,20 @@
 # -*- coding: utf-8 -*-
 """Регрессия v0.9.3: дублирование узла + мультивыделение + групповой drag.
 
-Запуск: python tests/regression_v093.py
-Без pytest: собственный мини-раннер, как regression_v081.py/v091.py.
+Запуск: python tests/test_duplicate_multiselect.py или python tests/run_all.py
+Без pytest: общая обвязка tests/_common.py.
 """
 import os
 import sys
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from _common import bootstrap, check, finish
 
-# v0.9.4-fix: UTF-8 stdout на cp1251-консолях (печать «→» в FAIL-деталях)
-try:
-    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
-except Exception:
-    pass
-
-os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+ROOT, WORK = bootstrap()  # ДО импортов модулей приложения (HOME-изоляция и faulthandler внутри)
 
 from PySide6.QtCore import QPointF
 from PySide6.QtWidgets import QApplication
 
 app = QApplication.instance() or QApplication([])
-
-PASS = 0
-FAIL = 0
-
-
-def check(name, cond):
-    global PASS, FAIL
-    if cond:
-        PASS += 1
-        print(f"  ok: {name}")
-    else:
-        FAIL += 1
-        print(f"FAIL: {name}")
 
 
 class _FakeWin:
@@ -152,8 +132,8 @@ def main():
     add_cmd.undo()
     check("duplicate removed via undo", not scene.has_node("ccc33333"))
 
-    print(f"\nregression_v093: {PASS} passed / {FAIL} failed")
-    return 0 if FAIL == 0 else 1
+    finish()
+    return 0
 
 
 if __name__ == "__main__":

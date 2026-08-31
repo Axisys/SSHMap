@@ -1,40 +1,21 @@
 # -*- coding: utf-8 -*-
 """Регрессия v0.9.4: теги/цветные метки серверов.
 
-Запуск: python tests/regression_v094.py
-Без pytest: собственный мини-раннер, как regression_v081/v091/v093.py.
+Запуск: python tests/test_tags.py или python tests/run_all.py
+Без pytest: общая обвязка tests/_common.py.
 """
 import json
 import os
 import sys
 import tempfile
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from _common import bootstrap, check, finish
 
-try:
-    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
-except Exception:
-    pass
-
-os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+ROOT, WORK = bootstrap()  # ДО импортов модулей приложения (HOME-изоляция и faulthandler внутри)
 
 from PySide6.QtWidgets import QApplication
 
 app = QApplication.instance() or QApplication([])
-
-PASS = 0
-FAIL = 0
-
-
-def check(name, cond):
-    global PASS, FAIL
-    if cond:
-        PASS += 1
-        print(f"  ok: {name}")
-    else:
-        FAIL += 1
-        print(f"FAIL: {name}")
 
 
 def main():
@@ -141,8 +122,8 @@ def main():
     finally:
         os.unlink(path)
 
-    print(f"\nregression_v094: {PASS} passed / {FAIL} failed")
-    return 0 if FAIL == 0 else 1
+    finish()
+    return 0
 
 
 if __name__ == "__main__":

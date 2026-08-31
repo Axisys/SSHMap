@@ -442,3 +442,63 @@ class MapScene(QGraphicsScene):
         self.render(painter, target=QRectF(pixmap.rect()), source=src)
         painter.end()
         return pixmap
+
+    # ── v0.9.9.7: PDF-экспорт карты (поверх render_to_pixmap) ───────────────
+
+    def render_to_pdf(self, path: str, scale: float = 2.0) -> int:
+        """Отрендерить карту целиком в PDF-файл (v0.9.9.7): одна страница на всю карту.
+
+        Поверх готового `render_to_pixmap`: отрендеренный pixmap растягивается на
+        страницу PDF с сохранением пропорций. Страница — кастомного размера под
+        пропорции карты (длинная сторона 1200 pt ≈ 42 см, нулевые поля), поэтому
+        карта занимает страницу целиком, без «полос» A4.
+
+        PDF-устройство: `QPdfWriter` (QtGui; Qt 6.11+/PySide6 6.11 — замена
+        `QPdfPrinter`, упомянутого в CHANGELOG v0.9.1) с fallback'ом на
+        `QPdfPrinter` для старых Qt 6.x (тот же API, файл задаётся
+        setOutputFileName). Новых зависимостей нет.
+
+        Возвращает размер файла в байтах. Бросает ValueError (null-pixmap) или
+        OSError (устройство не стартовало / файл не создан).
+        """
+        import os
+
+        from PySide6.QtCore import QMarginsF, QRectF, QSizeF
+        from PySide6.QtGui import QPageLayout, QPageSize, QPainter
+
+        try:  # Qt 6.11+ (PySide6 6.11): QPdfPrinter заменён на QPdfWriter
+            from PySide6.QtGui import QPdfWriter as _PdfDevice
+            device = _PdfDevice(path)
+        except ImportError:  # старые Qt 6.x — исходный план ROADMAP v0.9.9.7
+            from PySide6.QtGui import QPdfPrinter as _PdfDevice
+            device = _PdfDevice()
+            device.setOutputFileName(path)
+
+        pixmap = self.render_to_pixmap(scale=scale)
+        if pixmap.isNull():
+            raise ValueError("render_to_pixmap returned a null pixmap")
+
+        k = 1200.0 / max(float(pixmap.width()), float(pixmap.height()))
+        page_size = QSizeF(max(float(pixmap.width()) * k, 1.0),
+                           max(float(pixmap.height()) * k, 1.0))
+        layout = QPageLayout(
+            QPageSize(page_size, QPageSize.Unit.Point),
+            QPageLayout.Orientation.Landscape if pixmap.width() >= pixmap.height()
+            else QPageLayout.Orientation.Portrait,
+            QMarginsF())  # нулевые поля: карта занимает всю страницу
+        device.setPageLayout(layout)
+
+        painter = QPainter(device)
+        if not painter.isActive():
+            raise OSError(f"cannot start painting on PDF device: {path}")
+        try:
+            painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
+            painter.drawPixmap(
+                QRectF(0.0, 0.0, page_size.width(), page_size.height()),
+                pixmap, pixmap.rect())
+        finally:
+            painter.end()
+
+        if not os.path.isfile(path):
+            raise OSError(f"PDF file was not created: {path}")
+        return os.path.getsize(path)

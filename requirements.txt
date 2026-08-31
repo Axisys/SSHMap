@@ -1,4 +1,4 @@
-# SSH Map (NodeVisualSSH) v0.9.8 — зависимости для запуска
+# SSH Map (NodeVisualSSH) v0.9.9.7 — зависимости для запуска
 # Установка: pip install -r requirements.txt
 
 PySide6>=6.5        # GUI framework (Qt 6): QGraphicsScene/View, QThread

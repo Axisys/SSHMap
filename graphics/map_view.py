@@ -62,6 +62,9 @@ class MapView(QGraphicsView):
     # v0.9.3: завершён жест ГРУППОВОГО перетаскивания — список
     # [(node, old_pos: QPointF, new_pos: QPointF)] для одной undo-команды
     nodes_drag_committed = Signal(list)
+    # v0.9.9.1: изменился размер вида (плавающие панели поверх viewport —
+    # строка поиска — переставляются при ресайзе окна / драге сплиттера)
+    resized = Signal()
 
     def __init__(self, scene: "MapScene", parent=None):
         super().__init__(scene, parent)
@@ -109,6 +112,12 @@ class MapView(QGraphicsView):
         self.resetTransform()
         self._zoom = 1.0
         self._notify_zoom()
+
+    def resizeEvent(self, event):
+        """v0.9.9.1: уведомить о смене размера — плавающие панели поверх viewport
+        (строка поиска) переставляются при ресайзе окна и драге сплиттера."""
+        super().resizeEvent(event)
+        self.resized.emit()
 
     def wheelEvent(self, event: QWheelEvent):
         delta = event.angleDelta().y()

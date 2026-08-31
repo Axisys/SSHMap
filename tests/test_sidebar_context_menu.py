@@ -10,58 +10,18 @@ ROADMAP v0.9.6:
      итерирует scene.nodes()), условие задачи не выполнено — меню для них не нужны.
   #4 i18n: все ключи переиспользованы из ctx.*; новый только ctx.reveal_on_map × en/ru/zh.
 
-Запуск:  python tests/regression_v096_sidebar_ctx.py   (из корня проекта)
+Запуск:  python tests/test_sidebar_context_menu.py   (из корня проекта) или python tests/run_all.py
 """
 import os, sys, json, tempfile, traceback
 
-# Изоляция HOME ДО импорта модулей приложения (паттерн smoke_test): i18n пишет
-# ~/.sshmap/config.json при set_language; в песочницах запись в реальный home запрещена.
-_test_home = tempfile.mkdtemp(prefix="sshmap_test_home_")
-os.environ["HOME"] = _test_home
-os.environ["USERPROFILE"] = _test_home
+from _common import bootstrap, check, finish, wait_until
 
-os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
-ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, ROOT)
-
-import faulthandler
-faulthandler.dump_traceback_later(180, exit=True)  # завис (модалка offscreen) — дамп и выход
-
-try:
-    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
-except Exception:
-    pass
-
-PASS, FAIL = [], []
-
-def check(name, cond, detail=""):
-    (PASS if cond else FAIL).append((name, detail))
-    print(("  ok  " if cond else "  FAIL ") + name + (f" — {detail}" if detail and not cond else ""))
+ROOT, WORK = bootstrap()  # ДО импортов модулей приложения (HOME-изоляция и faulthandler внутри)
 
 from PySide6.QtCore import Qt, QPoint, QTimer, QEventLoop
 from PySide6.QtWidgets import QApplication, QDialog, QMessageBox, QMenu
 
 app = QApplication(sys.argv)
-
-
-def wait_until(cond, timeout_ms=3000, tick_ms=50):
-    """Настоящий event loop до cond() или дедлайна (паттерн regression_v081)."""
-    loop = QEventLoop()
-    ticks = {"n": 0}
-
-    def _tick():
-        if not cond() and ticks["n"] * tick_ms < timeout_ms:
-            ticks["n"] += 1
-        elif loop.isRunning():
-            loop.quit()
-
-    tmr = QTimer()
-    tmr.setInterval(tick_ms)
-    tmr.timeout.connect(_tick)
-    tmr.start()
-    loop.exec()
-    tmr.stop()
 
 
 from i18n import t as it
@@ -133,9 +93,11 @@ try:
           str({c: langs[c].get("ctx.reveal_on_map") for c in ("en", "ru", "zh")}))
     # v0.9.7: +18 ключей автосохранения/бэкапов (file.restore_autosave … msg.open_project_first)
     # v0.9.8: +6 ключей поиска по карте (view.find_on_map … status.no_matches)
-    check("key sets identical across en/ru/zh (289 keys each)",
+    # v0.9.9.2: +13 ключей UI внешнего терминала (ssh_ext.section … ssh_ext.preset.kitty)
+    # v0.9.9.7: +2 ключа PDF-экспорта (file.export_pdf, status.export_pdf_ok)
+    check("key sets identical across en/ru/zh (304 keys each)",
           set(langs["en"]) == set(langs["ru"]) == set(langs["zh"])
-          and all(len(d) == 289 for d in langs.values()),
+          and all(len(d) == 304 for d in langs.values()),
           str({c: len(d) for c, d in langs.items()}))
     _sidebar_keys = ["ctx.ssh_connect", "ctx.ssh_external", "ctx.edit_server",
                      "ctx.copy_ip", "ctx.copy_hostname", "ctx.ping",
@@ -369,10 +331,4 @@ try:
 except Exception:
     pass
 
-print()
-if FAIL:
-    print(f"FAILURES ({len(FAIL)}):")
-    for name, detail in FAIL:
-        print(f"  - {name}: {detail}")
-    sys.exit(1)
-print(f"ALL PASS ({len(PASS)})")
+finish()

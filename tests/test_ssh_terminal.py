@@ -13,23 +13,13 @@
   #4 fingerprint «unavailable»/неверный SHA256 — paramiko>=5 asbytes() возвращает
                               сырые wire-байты, а не base64.
 
-Запуск:  python tests/regression_v081.py   (из корня проекта)
+Запуск:  python tests/test_ssh_terminal.py   (из корня проекта) или python tests/run_all.py
 """
 import os, sys, hashlib, traceback
 
-os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
-ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, ROOT)
+from _common import bootstrap, check, finish
 
-import faulthandler
-# диагностика: если что-то зависнет (модалка offscreen и т.п.) — дамп стеков и выход
-faulthandler.dump_traceback_later(180, exit=True)
-
-PASS, FAIL = [], []
-
-def check(name, cond, detail=""):
-    (PASS if cond else FAIL).append((name, detail))
-    print(("  ok  " if cond else "  FAIL ") + name + (f" — {detail}" if detail and not cond else ""))
+ROOT, WORK = bootstrap()  # ДО импортов модулей приложения (HOME-изоляция и faulthandler внутри)
 
 from PySide6.QtCore import Qt, QPointF, QTimer, QEventLoop
 from PySide6.QtGui import QKeyEvent, QContextMenuEvent
@@ -370,10 +360,4 @@ check("fingerprint '<unavailable>' only when nothing usable",
       fingerprint(_DeadKey()) == "<fingerprint unavailable>")
 
 # ════════════════════════════════════════════════════════════
-print()
-if FAIL:
-    print(f"FAILURES ({len(FAIL)}):")
-    for name, detail in FAIL:
-        print(f"  - {name}: {detail}")
-    sys.exit(1)
-print(f"ALL PASS ({len(PASS)})")
+finish()

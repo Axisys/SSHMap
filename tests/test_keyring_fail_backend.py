@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """Регрессия v0.9.4b: keyring fail-бэкенд + замечания ревью.
 
-Запуск: python tests/regression_v094b.py
+Запуск: python tests/test_keyring_fail_backend.py или python tests/run_all.py
 Проверяет поведение CredentialManager на fail-бэкенде (keyring 25.x бросает
 NoKeyringError из set/get на машинах без хранилища) и атомарную запись профилей.
 """
@@ -10,30 +10,11 @@ import os
 import sys
 import tempfile
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from _common import bootstrap, check, finish
 
-try:
-    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
-except Exception:
-    pass
-
-os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+ROOT, WORK = bootstrap()  # ДО импортов модулей приложения (HOME-изоляция и faulthandler внутри)
 
 import keyring
-
-PASS = 0
-FAIL = 0
-
-
-def check(name, cond):
-    global PASS, FAIL
-    if cond:
-        PASS += 1
-        print(f"  ok: {name}")
-    else:
-        FAIL += 1
-        print(f"FAIL: {name}")
 
 
 class _FailBackend(keyring.backend.KeyringBackend):
@@ -112,8 +93,8 @@ def main():
     from models.server import ServerData
     check("tags default [] via __post_init__", ServerData(id="x", alias="a", host="h", user="u").tags == [])
 
-    print(f"\nregression_v094b: {PASS} passed / {FAIL} failed")
-    return 0 if FAIL == 0 else 1
+    finish()
+    return 0
 
 
 if __name__ == "__main__":

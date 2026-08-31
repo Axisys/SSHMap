@@ -11,7 +11,7 @@ __pycache__/
 *$py.class
 *.so
 
-# Избыточная документация
+# Избыточная в подробностях документация, все основное в README.md
 AUDIT.md
 CHANGELOG.md
 DESIGN.md
@@ -19,6 +19,7 @@ DOCUMENTATION.md
 ROADMAP.md
 STATEMENT.md
 TERMINAL.md
+FEATURES_REVIEW.md
 
 # Секреты и конфигурации
 .env
@@ -34,10 +35,6 @@ config_secret.json
 # Временные файлы smoke-тестов
 _tmp_testdata/
 _tmp_testdata_v097/
-_audit_i18n.txt
-_audit_reg81.txt
-_audit_reg83.txt
-_audit_smoke.txt
 
 # Логи приложения
 *.log

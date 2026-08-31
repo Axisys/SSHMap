@@ -1,43 +1,23 @@
 # -*- coding: utf-8 -*-
 """Регрессия v0.9.1: экспорт карты в изображение + фон-изображение.
 
-Запуск: python tests/regression_v091.py
-Без pytest: собственный мини-раннер, как regression_v081.py.
+Запуск: python tests/test_export_background.py или python tests/run_all.py
+Без pytest: общая обвязка tests/_common.py.
 """
 import json
 import os
 import sys
 import tempfile
 
-# v0.9.4-fix: UTF-8 stdout на cp1251-консолях
-try:
-    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
-except Exception:
-    pass
+from _common import bootstrap, check, finish
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
-os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+ROOT, WORK = bootstrap()  # ДО импортов модулей приложения (HOME-изоляция и faulthandler внутри)
 
 from PySide6.QtCore import QPointF
 from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import QApplication
 
 app = QApplication.instance() or QApplication([])
-
-PASS = 0
-FAIL = 0
-
-
-def check(name, cond):
-    global PASS, FAIL
-    if cond:
-        PASS += 1
-        print(f"  ok: {name}")
-    else:
-        FAIL += 1
-        print(f"FAIL: {name}")
 
 
 def make_test_image(path: str, w=320, h=200):
@@ -152,8 +132,8 @@ def main():
     win.close()
     del win
 
-    print(f"\n{PASS} passed / {FAIL} failed")
-    return 1 if FAIL else 0
+    finish()
+    return 0
 
 
 if __name__ == "__main__":

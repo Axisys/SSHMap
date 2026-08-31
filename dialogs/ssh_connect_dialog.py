@@ -1,5 +1,6 @@
 
 
+import sys
 from typing import Optional, List, Dict
 
 try:
@@ -48,7 +49,7 @@ class SSHConnectDialog(QDialog):
                 return key.format(**kwargs) if kwargs else key
             self.t = _noop
         
-        self.resize(420, 360)
+        self.resize(420, 430)  # v0.9.9.2: + секция «Внешний терминал»
         self.server_data = server_data
         self._ssh_worker: Optional[SSHWorker] = None
         # Profiles cached without passwords — fetched from keyring on demand
@@ -161,6 +162,43 @@ class SSHConnectDialog(QDialog):
 
         layout.addLayout(form_layout)
 
+        # ── v0.9.9.2: внешний терминал — пресет + сброс к умолчанию ──────────
+        # Пресет сохраняется в ~/.sshmap_settings.json (load/save из модуля) и
+        # применяется при каждом запуске: detect_terminal() читает конфиг.
+        try:
+            from ..modules import external_terminal as _ext_term_mod
+        except ImportError:  # плоский запуск из корня проекта
+            from modules import external_terminal as _ext_term_mod
+        self._ext_term_mod = _ext_term_mod
+
+        ext_section = QFormLayout()
+        ext_title = QLabel(self.t("ssh_ext.section"))
+        ext_title.setStyleSheet("font-weight: bold; color: #e2e8f0;")
+        ext_section.addRow("", ext_title)
+
+        self.ext_terminal_combo = QComboBox()
+        _choices = (_ext_term_mod.TERMINAL_CHOICES_WINDOWS if sys.platform == "win32"
+                    else _ext_term_mod.TERMINAL_CHOICES_LINUX)
+        for _tid in _choices:
+            # i18n-метка пресета; при отсутствии ключа t() сам вернёт en/ключ.
+            self.ext_terminal_combo.addItem(self.t(f"ssh_ext.preset.{_tid}"), _tid)
+        _cur = _ext_term_mod.load_external_terminal_setting()
+        _idx = next((i for i in range(self.ext_terminal_combo.count())
+                     if self.ext_terminal_combo.itemData(i) == _cur), 0)
+        self.ext_terminal_combo.setCurrentIndex(_idx)
+
+        self.ext_terminal_reset_btn = QPushButton(self.t("ssh_ext.reset"))
+        ext_hbox = QHBoxLayout()
+        ext_hbox.addWidget(self.ext_terminal_combo, 1)
+        ext_hbox.addWidget(self.ext_terminal_reset_btn)
+        ext_section.addRow(self.t("ssh_ext.preset_label"), ext_hbox)
+
+        # Подключаем сохранение ПОСЛЕ установки начального индекса — чтобы просто
+        # открытие диалога не писало в файл (эхо currentIndexChanged на init).
+        self.ext_terminal_combo.currentIndexChanged.connect(self._on_ext_terminal_changed)
+        self.ext_terminal_reset_btn.clicked.connect(self._reset_ext_terminal)
+        layout.addLayout(ext_section)
+
         # ── Buttons ──
         btn_layout = QHBoxLayout()
         self.connect_btn = QPushButton(self.t("ssh.connect"))
@@ -226,6 +264,26 @@ class SSHConnectDialog(QDialog):
                 self.profile_combo.addItem(prof["name"])
             if old_current > 0 and old_current - 1 < len(self._profiles):
                 self.profile_combo.setCurrentIndex(old_current)
+
+    def _on_ext_terminal_changed(self, index: int):
+        """v0.9.9.2: пресет внешнего терминала — сохранить сразу (merge-запись).
+
+        Сохранённый id подхватит detect_terminal() при следующем запуске —
+        и из этого диалога, и из ctx-меню MainWindow.
+        """
+        tid = self.ext_terminal_combo.itemData(index)
+        if tid and getattr(self, "_ext_term_mod", None) is not None:
+            self._ext_term_mod.save_external_terminal_setting(tid)
+
+    def _reset_ext_terminal(self):
+        """v0.9.9.2: «Сбросить к умолчанию» — готовый откат на auto."""
+        for i in range(self.ext_terminal_combo.count()):
+            if self.ext_terminal_combo.itemData(i) == "auto":
+                self.ext_terminal_combo.setCurrentIndex(i)  # fire save при смене
+                break
+        # Явная запись — идемпотентный откат, даже если combo уже стоял на auto.
+        if getattr(self, "_ext_term_mod", None) is not None:
+            self._ext_term_mod.save_external_terminal_setting("auto")
 
     def _select_key_file(self):
         path, _ = QFileDialog.getOpenFileName(

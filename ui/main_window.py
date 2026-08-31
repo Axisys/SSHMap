@@ -56,28 +56,28 @@ except ImportError:
         def get_icon(name):  # noqa: N802 — заглушка с той же сигнатурой
             return None
 
+try:  # v0.9.9.4: сайдбар-кластер (дерево, тег-фильтр, статус-маркеры, контекстное меню)
+    from .sidebar import SidebarPanel
+except ImportError:
+    from sidebar import SidebarPanel
+
 
 from PySide6.QtCore import Qt, QRectF, QSize, QTimer, QPointF
 from PySide6.QtGui import (
     QMouseEvent,
-    QIcon, QPixmap, QPainter, QBrush,  # ревью-фикс v0.8.0 (#3): маркеры статусов в сайдбаре
-    QColor,  # v0.9.4: цветные точки тегов в комбобоксе фильтра (DecorationRole)
     QUndoStack,  # v0.8.3: undo/redo
 )
 from PySide6.QtWidgets import (
-    QMainWindow, QWidget, QHBoxLayout, QVBoxLayout, QSplitter,
-    QLabel, QLineEdit, QPushButton, QTreeWidget, QTreeWidgetItem,
+    QMainWindow, QWidget, QHBoxLayout, QSplitter,
+    QLabel, QTreeWidgetItem,  # QTreeWidgetItem — аннотации слотов дерева (v0.9.9.4: дерево в ui/sidebar.py)
     QTextEdit, QToolBar, QMessageBox, QDialog, QFileDialog, QMenu,
-    QApplication, QComboBox,
+    QApplication,
 )
 
 try:  # v0.8.3: undo/redo-команды карты
     from ..modules import undo_commands as _uc
 except ImportError:
     from modules import undo_commands as _uc
-from PySide6.QtCore import QThread, Signal as QtSignal  # v0.7.3: ping-поток
-import platform as _platform_mod  # v0.7.3: ping-флаги по ОС
-import subprocess as _subprocess_mod  # v0.7.3: системный ping
 
 
 def _is_scene_point(value) -> bool:
@@ -277,9 +277,15 @@ class MainWindow(QMainWindow):
                 widget.setTitle(self.t(key))
             else:
                 widget.setText(self.t(key))
-        if self._sidebar_title is not None:
-            self._sidebar_title.setText(self.t("server.title"))
-        self.search_edit.setPlaceholderText(self.t("search.placeholder"))
+        # v0.9.9.4: строки сайдбара (кнопки, заголовок, плейсхолдер, «Все теги») —
+        # реестр панели; retranslate через i18n-колбэк (регрессия на баг v0.9.2:
+        # раньше эти строки не обновлялись при смене языка).
+        panel = getattr(self, "sidebar", None)
+        if panel is not None:
+            try:
+                panel.retranslate()
+            except RuntimeError:
+                pass  # Qt teardown — панель уже уничтожена
         self.statusBar().showMessage(self.t("status.ready"))
 
     @property
@@ -302,122 +308,62 @@ class MainWindow(QMainWindow):
         splitter = QSplitter(Qt.Horizontal)
         layout.addWidget(splitter)
 
-        # Side panel — always created, i18n applied where available
-        self.sidebar = QWidget()
-        sb_layout = QVBoxLayout(self.sidebar)
-        sb_layout.setContentsMargins(8, 8, 8, 8)
+        # Side panel — v0.9.9.4: сайдбар-кластер (кнопки, заголовок, поиск,
+        # тег-фильтр, дерево с маркерами статусов, контекстное меню) вынесен в
+        # ui/sidebar.py (SidebarPanel). MainWindow остаётся фасадом: self.tree /
+        # self.tag_filter / self.search_edit / self.btn_* — ссылки на виджеты
+        # панели; публичный API и все слоты окна не изменились.
+        self.sidebar = SidebarPanel(
+            translate_fn=self.t if self._i18n_available else None,
+            actions={
+                # Контекстное меню строки (ROADMAP v0.9.6): «сначала выделить,
+                # потом действие» — как в исходных замыканиях _on_sidebar_context_menu.
+                "ssh": lambda n: (self._select_node(n), self._connect_ssh_to_selected()),
+                "external": lambda n: (self._select_node(n), self._connect_ssh_external(n)),
+                "edit": lambda n: self._edit_node(n),
+                "copy_ip": lambda n: self._copy_node_info(n, "ip"),
+                "copy_hostname": lambda n: self._copy_node_info(n, "hostname"),
+                "ping": lambda n: self._ping_node(n),
+                "collect_info": lambda n: self._collect_node_info(n),
+                "reveal": lambda n: self._reveal_node_on_map(n),
+                "delete": lambda n: self._remove_node_guarded(n),
+            },
+            show_title=self._i18n_available,  # раньше метка создавалась только при i18n
+        )
 
-        def _connect_buttons():
-            """Create side-panel buttons and add them to the layout.
+        # Фасадные ссылки на виджеты панели (публичный API MainWindow — тесты)
+        self.tree = self.sidebar.tree
+        self.tag_filter = self.sidebar.tag_filter
+        self.search_edit = self.sidebar.search_edit
+        self.btn_add = self.sidebar.btn_add
+        self.btn_connect = self.sidebar.btn_connect
+        self.btn_connect_ssh = self.sidebar.btn_connect_ssh
+        self.btn_props = self.sidebar.btn_props
+        self.btn_delete = self.sidebar.btn_delete
+        self._sidebar_title = self.sidebar.title_label  # None без i18n (как раньше)
 
-            UI polish: векторные иконки (ui/icons.py) вместо эмодзи в тексте —
-            кроссплатформенно и единый стиль с тулбаром; высота унифицирована.
-            """
-            self.btn_add = QPushButton("Добавить сервер")
-            _set_btn_icon(self.btn_add, "add_server")
-            self.btn_add.clicked.connect(self._add_server)
-            sb_layout.addWidget(self.btn_add)
-
-            self.btn_connect = QPushButton("Добавить связь")
-            _set_btn_icon(self.btn_connect, "connection")
-            self.btn_connect.clicked.connect(self._add_connection)
-            sb_layout.addWidget(self.btn_connect)
-
-            self.btn_connect_ssh = QPushButton("SSH Подключение")
-            _set_btn_icon(self.btn_connect_ssh, "ssh")
-            self.btn_connect_ssh.clicked.connect(self._connect_ssh_to_selected)
-            sb_layout.addWidget(self.btn_connect_ssh)
-
-            self.btn_props = QPushButton("Свойства")
-            _set_btn_icon(self.btn_props, "properties")
-            self.btn_props.clicked.connect(self._show_properties)
-            sb_layout.addWidget(self.btn_props)
-
-            self.btn_delete = QPushButton("Удалить")
-            _set_btn_icon(self.btn_delete, "delete")
-            self.btn_delete.clicked.connect(self._delete_selected)
-            sb_layout.addWidget(self.btn_delete)
-
-            for _b in (self.btn_add, self.btn_connect, self.btn_connect_ssh,
-                       self.btn_props, self.btn_delete):
-                _b.setMinimumHeight(34)  # UI polish: ровные кнопки сайдбара
-
-        def _set_btn_icon(btn, name):
-            """UI polish: векторная иконка на кнопке (no-op без ui/icons)."""
-            try:
-                icon = get_icon(name)
-                if icon is not None and not icon.isNull():
-                    btn.setIcon(icon)
-                    btn.setIconSize(QSize(18, 18))
-            except Exception:  # noqa: BLE001 — иконка косметика, не роняем сайдбар
-                pass
-
-        # ── Server title label ────────────────────────────────
-        if self._i18n_available:
-            try:
-                from i18n import t as __t
-                self._sidebar_title = QLabel(__t("server.title"))
-                sb_layout.addWidget(self._sidebar_title)
-            except Exception:
-                pass
-
-        # ── Search field ──────────────────────────────────────
-        self.search_edit = QLineEdit()
-        if self._i18n_available:
-            try:
-                from i18n import t as __t
-                self.search_edit.setPlaceholderText(__t("search.placeholder"))
-            except Exception:
-                pass
-        else:
-            self.search_edit.setPlaceholderText("Поиск по alias / host / IP...")
-
+        # События панели — слоты окна (те же, что до v0.9.9.4)
         self.search_edit.textChanged.connect(self.refresh_sidebar)
-        sb_layout.addWidget(self.search_edit)
-
-        # ── v0.9.4: фильтр по тегам ───────────────────────────
-        # Элементы: [0] = «Все теги» (фильтр выключен), далее — уникальные теги
-        # всех серверов карты; перестраивается в refresh_sidebar (без сброса выбора).
-        self.tag_filter = QComboBox()
         self.tag_filter.currentIndexChanged.connect(self._on_tag_filter_changed)
-        sb_layout.addWidget(self.tag_filter)
-
-        # ── Server tree ───────────────────────────────────────
-        self.tree = QTreeWidget()
-        self.tree.setHeaderHidden(True)
         self.tree.itemClicked.connect(self._on_tree_item_clicked)
         self.tree.itemDoubleClicked.connect(self._on_tree_item_double_click)
-        # Ревью-фикс v0.8.0 (#3): цветные маркеры статусов в дереве (16×16 — ровно
-        # под pixmap точки; единый размер не зависит от стиля/платформы).
-        self.tree.setIconSize(QSize(16, 16))
-        sb_layout.addWidget(self.tree)
-        # Кэш иконок точек по статусу ("", "online", "warn", "offline")
-        self._status_dot_icons = {}
+        # v0.9.6: контекстное меню дерева серверов (ПКМ по строке сайдбара);
+        # политику CustomContextMenu выставляет сама панель при конструировании.
+        self.tree.customContextMenuRequested.connect(self._on_sidebar_context_menu)
 
-        # v0.9.6: контекстное меню дерева серверов (ПКМ по строке сайдбара)
-        self._setup_tree_context_menu()
-
-        # ── Buttons (always created here, i18n applied below) ─
-        _connect_buttons()
-
-        # ── Apply i18n labels to buttons if available ─────────
-        if self._i18n_available:
-            try:
-                from i18n import t as __t
-                # Эмодзи/префиксы уже содержатся в самих значениях перевода,
-                # добавлять их здесь повторно нельзя (было «- - 添加连接» и т.п.)
-                self.btn_add.setText(__t("btn.add_server"))
-                self.btn_connect.setText(__t("btn.add_connection"))
-                self.btn_connect_ssh.setText(__t("btn.connect_ssh"))
-                self.btn_props.setText(__t("btn.properties"))
-                self.btn_delete.setText(__t("btn.delete"))
-            except Exception:
-                pass  # keep Russian fallback labels already set above
+        # Кнопки панели → слоты окна
+        self.sidebar.add_server_clicked.connect(self._add_server)
+        self.sidebar.add_connection_clicked.connect(self._add_connection)
+        self.sidebar.connect_ssh_clicked.connect(self._connect_ssh_to_selected)
+        self.sidebar.show_properties_clicked.connect(self._show_properties)
+        self.sidebar.delete_selected_clicked.connect(self._delete_selected)
 
         splitter.addWidget(self.sidebar)
 
         # Map canvas
         self.scene = MapScene()
+        # v0.9.9.1: reentry-guard синхронизации выделения (вместо blockSignals — см. _select_node)
+        self._selection_syncing = False
         self.scene.selectionChanged.connect(self._sync_selection_state)
         self.view = MapView(self.scene, self)
 
@@ -804,6 +750,8 @@ class MainWindow(QMainWindow):
         self._add_menu_action(file_menu, "file.export_png", self._export_map_image)
         # v0.9.5: экспорт карты в drawio (.drawio)
         self._add_menu_action(file_menu, "file.export_drawio", self._export_map_drawio)
+        # v0.9.9.7: экспорт карты в PDF (QPdfWriter поверх render_to_pixmap)
+        self._add_menu_action(file_menu, "file.export_pdf", self._export_map_pdf)
         file_menu.addSeparator()
         self._add_menu_action(file_menu, "file.exit", self.close)
 
@@ -1026,17 +974,27 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, self.t("msg.error_title"), self.t("msg.update_failed", error=str(e)))
 
     def _select_node(self, node: ServerNode, center: bool = False):
-        self.scene.blockSignals(True)
+        # v0.9.9.1: reentry-guard вместо scene.blockSignals — остальные слоты
+        # selectionChanged продолжают работать во время программной смены; эхо-
+        # обработчик сразу возвращается по флагу, а явная синхронизация ниже
+        # идемпотентна (полный пересчёт состояния, «дерево = выделению сцены»).
+        self._selection_syncing = True
         try:
             self.scene.clearSelection()
             node.setSelected(True)
         finally:
-            self.scene.blockSignals(False)
+            self._selection_syncing = False
         self._sync_selection_state()
         if center:
             self.view.centerOn(node)
 
     def _sync_selection_state(self):
+        # v0.9.9.1: reentry-guard — пока идёт программная смена выделения, эхо
+        # собственных сигналов возвращается сразу (без рекурсии); явный вызов
+        # после смены делает полный идемпотентный пересчёт, поэтому внешнее
+        # изменение в окне синхронизации не теряется — следующее выравнивание сходится.
+        if getattr(self, "_selection_syncing", False):
+            return
         try:
             selected_node = self.scene.get_selected_node()
             # v0.9.3: мультивыделение — подсветка рамки у КАЖДОГО выделенного
@@ -1048,16 +1006,15 @@ class MainWindow(QMainWindow):
                     pass  # Qt teardown — отдельный item уничтожен
 
             selected_id = selected_node.data.id if selected_node else None
-            self.tree.blockSignals(True)
-            try:
-                self.tree.setCurrentItem(None)
-                for i in range(self.tree.topLevelItemCount()):
-                    item = self.tree.topLevelItem(i)
-                    if item.data(0, Qt.UserRole) == selected_id:
-                        self.tree.setCurrentItem(item)
-                        break
-            finally:
-                self.tree.blockSignals(False)
+            # v0.9.9.1: без tree.blockSignals — синхронизация идемпотентна по
+            # состоянию (полный пересчёт, а не «применить дельту»), поэтому эхо
+            # во время выравнивания безвредно, а чужие слоты дерева не подавляются.
+            self.tree.setCurrentItem(None)
+            for i in range(self.tree.topLevelItemCount()):
+                item = self.tree.topLevelItem(i)
+                if item.data(0, Qt.UserRole) == selected_id:
+                    self.tree.setCurrentItem(item)
+                    break
         except RuntimeError:
             # PySide6/Qt teardown при выходе из процесса: C++-объект сцены уже
             # уничтожен, а сигнал selectionChanged доехал до живого Python-слота.
@@ -1622,6 +1579,7 @@ class MainWindow(QMainWindow):
 
         AUDIT v0.7.2 (средняя #6): обратный DNS (gethostbyaddr) выполняется в отдельном
         потоке — при недоступном резолвере GUI-поток раньше замерзал на таймауте DNS.
+        v0.9.9.3: поток вынесен в services/diagnostics.py (ReverseDnsThread).
         """
         if node is None:
             return
@@ -1634,24 +1592,9 @@ class MainWindow(QMainWindow):
 
         if what == "hostname":
             host = node.data.host
+            from services.diagnostics import ReverseDnsThread  # v0.9.9.3: был вложенным классом
 
-            class _ReverseDnsThread(QThread):
-                """Обратный DNS вне GUI-потока (AUDIT v0.7.2, средняя #6)."""
-                resolved = QtSignal(str)
-
-                def __init__(self, host_):
-                    super().__init__()
-                    self._host = host_
-
-                def run(self):
-                    import socket as _socket
-                    try:
-                        name = _socket.gethostbyaddr(self._host)[0]
-                    except Exception:
-                        name = self._host  # DNS не отдал имя — копируем сам host
-                    self.resolved.emit(name)
-
-            thread = _ReverseDnsThread(host)
+            thread = ReverseDnsThread(host)
 
             def _on_dns_done(name):
                 if getattr(self, "_dns_thread", None) is thread:
@@ -1670,44 +1613,10 @@ class MainWindow(QMainWindow):
         """Ping узла в отдельном потоке без блокировки GUI (v0.7.3).
 
         Windows: `ping -n 3`, POSIX: `ping -c 3`. Результат — в статус-бар.
+        v0.9.9.3: поток вынесен в services/diagnostics.py (PingThread).
         """
         if node is None:
             return
-
-        class _PingThread(QThread):
-            finished_ping = QtSignal(bool, str)
-
-            def __init__(self, host):
-                super().__init__()
-                self._host = host
-
-            def run(self):
-                try:
-                    from i18n import t as _t
-                except Exception:
-                    def _t(key, **kw):
-                        return key.format(**kw) if kw else key
-                count_flag = "-n" if _platform_mod.system() == "Windows" else "-c"
-                # AUDIT v0.9.5.5 (безопасность #4): -w/-W — миллисекунды на Windows,
-                # секунды на Linux; таймаут 3 с в обоих случаях. На Linux "--" перед
-                # хостом, чтобы хост вида "-x" не съелся как флаг.
-                if _platform_mod.system() == "Windows":
-                    cmd = ["ping", count_flag, "3", "-w", "3000", self._host]
-                else:
-                    cmd = ["ping", "-c", "3", "-W", "3", "--", self._host]
-                try:
-                    proc = _subprocess_mod.run(
-                        cmd, capture_output=True, timeout=15,
-                        creationflags=getattr(_subprocess_mod, "CREATE_NO_WINDOW", 0)
-                        if _platform_mod.system() == "Windows" else 0)
-                    ok = proc.returncode == 0
-                    key = "status.ping_ok" if ok else "status.ping_failed"
-                    msg = _t(key, host=self._host)
-                    out = proc.stdout.decode(errors="replace")[-400:] if not ok else ""
-                    self.finished_ping.emit(ok, msg + ("\n" + out if out else ""))
-                except Exception as exc:
-                    self.finished_ping.emit(False, _t("status.ping_failed", host=self._host)
-                                            + f" ({exc})")
 
         # AUDIT v0.7.2 (средняя #8): не затираем ещё работающий ping — повторный запрос
         # игнорируем (раньше ссылка перезаписывалась, а старый поток оставался orphan'ом).
@@ -1715,7 +1624,8 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage(self.t("status.ping_running", host=node.data.host))
             return
 
-        ping_thread = _PingThread(node.data.host)
+        from services.diagnostics import PingThread  # v0.9.9.3: был вложенным классом
+        ping_thread = PingThread(node.data.host)
 
         def _on_ping_done(ok, text):
             if ok:
@@ -2004,6 +1914,25 @@ class MainWindow(QMainWindow):
                 self, self.t("msg.error_title"),
                 self.t("msg.export_failed", error=str(e)))
 
+    def _export_map_pdf(self):
+        """Экспорт карты в PDF (v0.9.9.7): открытая сцена → файл одним действием."""
+        path, _ = QFileDialog.getSaveFileName(
+            self, self.t("file.export_pdf"), "", "PDF Documents (*.pdf)")
+        if not path:
+            return
+        if not path.lower().endswith(".pdf"):
+            path += ".pdf"
+        try:
+            size = self.scene.render_to_pdf(path)
+            self.statusBar().showMessage(self.t("status.export_pdf_ok"))
+            if self.log:
+                self.log.info(
+                    "Map exported to PDF", extra={"file": path, "bytes": size})
+        except Exception as e:  # noqa: BLE001
+            QMessageBox.critical(
+                self, self.t("msg.error_title"),
+                self.t("msg.export_failed", error=str(e)))
+
     def _set_background_image(self):
         """Выбрать и установить фоновое изображение карты (v0.9.1 #2/#3)."""
         path, _ = QFileDialog.getOpenFileName(
@@ -2125,27 +2054,20 @@ class MainWindow(QMainWindow):
             self._select_node(self.scene.get_node(node_id), center=True)
 
     # ── v0.9.6: контекстное меню дерева серверов (сайдбар) ───────────────
-
-    def _setup_tree_context_menu(self):
-        """v0.9.6: ПКМ по строке дерева — меню действий узла (hidden until click).
-
-        Политика CustomContextMenu + сигнал customContextMenuRequested — штатный
-        путь Qt для QTreeWidget (у виджета нет переопределяемого contextMenuEvent
-        без перехвата событий viewport'а; сигнал несёт позицию в координатах дерева,
-        itemAt(pos) даёт строку).
-        """
-        self.tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
-        self.tree.customContextMenuRequested.connect(self._on_sidebar_context_menu)
+    # v0.9.9.4: состав пунктов, разделители и i18n-подписи — в панели
+    # (SidebarPanel.fill_context_menu); объект QMenu создаётся здесь (модульная
+    # глобальная main_window — тестовый шов подмены), exec тоже на окне.
 
     def _on_sidebar_context_menu(self, pos):
         """v0.9.6 (ROADMAP #1–#2): ПКМ по серверу в дереве — действия узла.
 
-        Состав и порядок — по ROADMAP v0.9.6: Подключиться SSH, Внешний терминал,
-        Редактировать, Скопировать IP, Copy Hostname, Ping, Собрать информацию,
-        Показать на карте (центрирование + акцент), Удалить (guarded-путь).
-        i18n — переиспользование ключей ctx.* карты; новый только ctx.reveal_on_map.
-        «Карточные» действия сознательно НЕ дублируются (ROADMAP #2): drag-связь и
-        свернуть/развернуть плашку живут только в контексте карты, где они имеют смысл.
+        Состав и порядок — по ROADMAP v0.9.6 (SidebarPanel.CONTEXT_MENU_ITEMS):
+        Подключиться SSH, Внешний терминал, Редактировать, Скопировать IP,
+        Copy Hostname, Ping, Собрать информацию, Показать на карте
+        (центрирование + акцент), Удалить (guarded-путь). i18n — переиспользование
+        ключей ctx.* карты; новый только ctx.reveal_on_map. «Карточные» действия
+        сознательно НЕ дублируются (ROADMAP #2): drag-связь и свернуть/развернуть
+        плашку живут только в контексте карты, где они имеют смысл.
         """
         item = self.tree.itemAt(pos)
         if item is None:
@@ -2155,50 +2077,8 @@ class MainWindow(QMainWindow):
             return  # строка без узла (или узел исчез) — действий нет
         node = self.scene.get_node(node_id)
 
-        menu = QMenu(self)
-
-        act_ssh = menu.addAction(self.t("ctx.ssh_connect"))
-        def _ssh(checked=False, n=node):  # checked — bool из QAction.triggered
-            self._select_node(n)          # диалог берёт выделенный узел (паттерн MapView)
-            self._connect_ssh_to_selected()
-        act_ssh.triggered.connect(_ssh)
-
-        act_ext = menu.addAction(self.t("ctx.ssh_external"))
-        def _ssh_ext(checked=False, n=node):  # checked — bool из QAction.triggered
-            self._select_node(n)
-            self._connect_ssh_external(n)
-        act_ext.triggered.connect(_ssh_ext)
-
-        menu.addSeparator()
-
-        act_edit = menu.addAction(self.t("ctx.edit_server"))
-        act_edit.triggered.connect(lambda _=False, n=node: self._edit_node(n))
-
-        menu.addSeparator()
-
-        act_ip = menu.addAction(self.t("ctx.copy_ip"))
-        act_ip.triggered.connect(lambda _=False, n=node: self._copy_node_info(n, "ip"))
-        act_host = menu.addAction(self.t("ctx.copy_hostname"))
-        act_host.triggered.connect(
-            lambda _=False, n=node: self._copy_node_info(n, "hostname"))
-        act_ping = menu.addAction(self.t("ctx.ping"))
-        act_ping.triggered.connect(lambda _=False, n=node: self._ping_node(n))
-        act_info = menu.addAction(self.t("ctx.collect_info"))
-        act_info.triggered.connect(
-            lambda _=False, n=node: self._collect_node_info(n))
-
-        menu.addSeparator()
-
-        act_reveal = menu.addAction(self.t("ctx.reveal_on_map"))
-        act_reveal.triggered.connect(
-            lambda _=False, n=node: self._reveal_node_on_map(n))
-
-        menu.addSeparator()
-
-        act_del = menu.addAction(self.t("ctx.delete_server"))
-        # guarded-путь (ROADMAP #1): подтверждение + ожидание SSHWorker — тот же,
-        # что кнопка «Удалить», Delete-клавиша и контекстное меню карты.
-        act_del.triggered.connect(lambda _=False, n=node: self._remove_node_guarded(n))
+        menu = QMenu(self)  # v0.9.9.4: панель наполняет, окно создаёт и показывает
+        self.sidebar.fill_context_menu(menu, node)
 
         try:
             menu.exec(self.tree.mapToGlobal(pos))
@@ -2224,37 +2104,12 @@ class MainWindow(QMainWindow):
                 pass
 
     def refresh_sidebar(self):
-        self.tree.clear()
+        """v0.9.9.4-фасад: строки дерева (поиск + тег-фильтр + маркеры статусов)
+        и список тегов — SidebarPanel; затемнение/выделение/счётчики — окно."""
         query = self.search_edit.text().strip().lower() if hasattr(self, 'search_edit') else ""
-        # v0.9.4: активный тег-фильтр ("" = выключен)
-        active_tag = self._active_tag_filter()
-        for node in self.scene.nodes():
-            haystack = " ".join([
-                node.data.alias,
-                node.data.host,
-                node.data.ip,
-                node.data.comment,
-                # v0.9.4: поиск ищет и по тегам
-                " ".join(getattr(node.data, "tags", None) or []),
-            ]).lower()
-            if query and query not in haystack:
-                continue
-            if active_tag and active_tag not in (getattr(node.data, "tags", None) or []):
-                continue
-
-            item = QTreeWidgetItem()
-            item.setText(0, f"{node.data.alias}  ({node.data.host})")
-            item.setData(0, Qt.UserRole, node.data.id)
-            # Ревью-фикс v0.8.0 (#3): цветной маркер статуса узла (online/warn/offline/не проверен)
-            self._apply_status_marker(item, node.status, node.data.host or "")
-            # v0.9.4: подпись тегов серым в конце строки
-            tags = getattr(node.data, "tags", None) or []
-            if tags:
-                item.setText(0, item.text(0) + f"  [{', '.join(tags[:3])}]")
-                item.setForeground(0, self.palette().windowText())
-            self.tree.addTopLevelItem(item)
-
-        self._sync_tag_filter_items()
+        nodes = self.scene.nodes()
+        self.sidebar.refresh_rows(nodes, query)
+        self.sidebar.sync_tag_filter_items(nodes)
         self._apply_map_dimming()  # v0.9.8: затемнение = тег-фильтр И поиск по карте
         self._sync_selection_state()
         self._update_counts_label()  # UI polish: счётчики в статус-баре следят за составом
@@ -2273,42 +2128,6 @@ class MainWindow(QMainWindow):
         """Смена тега в фильтре → перерисовать дерево и пересчитать затемнение."""
         if hasattr(self, "tree"):
             self.refresh_sidebar()
-
-    def _sync_tag_filter_items(self):
-        """Перестроить список уникальных тегов в комбобоксе, сохраняя выбор.
-
-        Вызовется из refresh_sidebar — сигнал currentIndexChanged при этом не должен
-        зациклить пересборку (блокируем сигналы на время заполнения).
-        """
-        combo = getattr(self, "tag_filter", None)
-        if combo is None:
-            return
-        all_tags = sorted({
-            t.strip()
-            for n in self.scene.nodes()
-            for t in (getattr(n.data, "tags", None) or [])
-            if t and t.strip()
-        }, key=str.lower)
-        current = self._active_tag_filter()
-        combo.blockSignals(True)
-        try:
-            from i18n import t as __t  # noqa: PLC0415 — ленивый импорт как в остальном UI
-            try:
-                all_label = __t("filter.all_tags")
-            except Exception:
-                all_label = "All tags"
-            combo.clear()
-            combo.addItem(all_label, "")
-            for tag in all_tags:
-                color = ServerNode.tag_color(tag).name()
-                combo.addItem(f"● {tag}", tag)
-                combo.setItemData(combo.count() - 1, QColor(color), Qt.DecorationRole)
-            idx = combo.findData(current) if current else 0
-            combo.setCurrentIndex(idx if idx >= 0 else 0)
-        except RuntimeError:
-            pass  # Qt teardown
-        finally:
-            combo.blockSignals(False)
 
     def _apply_map_dimming(self):
         """v0.9.4/v0.9.8: затемнение + подсветка активных фильтров на карте.
@@ -2370,10 +2189,10 @@ class MainWindow(QMainWindow):
         self.map_search.next_requested.connect(lambda: self._map_search_step(+1))
         self.map_search.prev_requested.connect(lambda: self._map_search_step(-1))
         self.map_search.close_requested.connect(self._close_map_search)
-        try:  # переставить панель при resize окна (она вне layout, child of view)
-            self.view.resized.connect(self._position_map_search_bar)
-        except Exception:  # noqa: BLE001 — косметика позиционирования, поиск не роняем
-            pass
+        # Переставить панель при resize окна (она вне layout, child of view).
+        # v0.9.9.1: сигнал MapView.resized добавлен — раньше connect падал в
+        # AttributeError и молча глотался try/except (панель оставалась на старом x).
+        self.view.resized.connect(self._position_map_search_bar)
 
     def _toggle_map_search(self):
         """v0.9.8: Ctrl+F / «Вид → Поиск по карте…» — открыть или закрыть панель."""
@@ -2494,50 +2313,15 @@ class MainWindow(QMainWindow):
             self._close_map_search()
 
     # ── Ревью-фикс v0.8.0 (#3): маркеры статусов узлов в дереве сайдбара ──
-
-    def _status_dot_icon(self, status: str) -> QIcon:
-        """Цветная точка для строки дерева — та же палитра, что у точек на карточках."""
-        icon = self._status_dot_icons.get(status)
-        if icon is not None:
-            return icon
-        color = ServerNode.STATUS_COLORS.get(status, ServerNode.COLOR_DOT_IDLE)
-        pm = QPixmap(16, 16)
-        pm.fill(Qt.GlobalColor.transparent)
-        painter = QPainter(pm)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(QBrush(color))
-        painter.drawEllipse(3, 3, 10, 10)
-        painter.end()
-        icon = QIcon(pm)
-        self._status_dot_icons[status] = icon
-        return icon
-
-    def _apply_status_marker(self, item: QTreeWidgetItem, status: str, host: str = "") -> None:
-        """Поставить на строку дерева точку статуса + tooltip (i18n node.status.*)."""
-        item.setIcon(0, self._status_dot_icon(status))
-        if status and status in ServerNode.STATUS_COLORS:
-            try:
-                tip = self.t(f"node.status.{status}", host=host or "")
-            except Exception:
-                tip = f"{status}: {host}"
-            # i18n вернул «ключ» (нет перевода) — показываем статус без ключа
-            item.setToolTip(0, tip if not tip.startswith("[") else f"{status}: {host}")
-        else:
-            item.setToolTip(0, "")  # не проверялся — подсказки нет
+    # v0.9.9.4: иконки точек и маркеры строк — SidebarPanel (apply_status_marker /
+    # update_status_marker); окно передаёт панели актуальный статус узла.
 
     def _update_sidebar_status_marker(self, server_id: str) -> None:
         """Обновить маркер строки на месте (без полного пересбора дерева)."""
         node = self.scene.get_node(server_id)
         if node is None:
             return  # узла уже нет — статус никому не нужен
-        for i in range(self.tree.topLevelItemCount()):
-            item = self.tree.topLevelItem(i)
-            if item.data(0, Qt.UserRole) == server_id:
-                self._apply_status_marker(item, node.status, node.data.host or "")
-                return
-        # Строки нет (например, отфильтрована поиском) — следующий refresh_sidebar
-        # построит её с актуальным маркером.
+        self.sidebar.update_status_marker(server_id, node.status, node.data.host or "")
 
     def _center_view(self):
         """UI polish: центрировать по содержимому карты, а не по началу координат.

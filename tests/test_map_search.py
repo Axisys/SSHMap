@@ -9,59 +9,19 @@ ROADMAP v0.9.8:
   #3 Несовпавшие ноды затемняются (set_dimmed, DIM_OPACITY) — совпадения читаются
      мгновенно; тег-фильтр и поиск комбинируются И (семантика сайдбара).
 
-Запуск:  python tests/regression_v098_map_search.py   (из корня проекта)
+Запуск:  python tests/test_map_search.py   (из корня проекта) или python tests/run_all.py
 """
 import os, sys, json, tempfile, traceback
 
-# Изоляция HOME ДО импорта модулей приложения (паттерн smoke_test): i18n пишет
-# ~/.sshmap/config.json при set_language; в песочницах запись в реальный home запрещена.
-_test_home = tempfile.mkdtemp(prefix="sshmap_test_home_")
-os.environ["HOME"] = _test_home
-os.environ["USERPROFILE"] = _test_home
+from _common import bootstrap, check, finish, wait_until
 
-os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
-ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, ROOT)
-
-import faulthandler
-faulthandler.dump_traceback_later(180, exit=True)  # завис (модалка offscreen) — дамп и выход
-
-try:
-    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
-except Exception:
-    pass
-
-PASS, FAIL = [], []
-
-def check(name, cond, detail=""):
-    (PASS if cond else FAIL).append((name, detail))
-    print(("  ok  " if cond else "  FAIL ") + name + (f" — {detail}" if detail and not cond else ""))
+ROOT, WORK = bootstrap()  # ДО импортов модулей приложения (HOME-изоляция и faulthandler внутри)
 
 from PySide6.QtCore import Qt, QTimer, QEventLoop
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QMenu
 
 app = QApplication(sys.argv)
-
-
-def wait_until(cond, timeout_ms=3000, tick_ms=50):
-    """Настоящий event loop до cond() или дедлайна (паттерн regression_v081)."""
-    loop = QEventLoop()
-    ticks = {"n": 0}
-
-    def _tick():
-        if not cond() and ticks["n"] * tick_ms < timeout_ms:
-            ticks["n"] += 1
-        elif loop.isRunning():
-            loop.quit()
-
-    tmr = QTimer()
-    tmr.setInterval(tick_ms)
-    tmr.timeout.connect(_tick)
-    tmr.start()
-    loop.exec()
-    tmr.stop()
 
 
 from i18n import t as it, set_language as _set_lang
@@ -91,7 +51,7 @@ app.processEvents()
 bar = win.map_search
 line = bar._line
 
-# ══ i18n: 6 новых ключей × en/ru/zh, наборы идентичны (289 на язык) ══
+# ══ i18n: 6 новых ключей × en/ru/zh, наборы идентичны (304 на язык; +13 в v0.9.9.2, +2 в v0.9.9.7) ══
 print("== i18n ==")
 langs = {}
 for code in ("en", "ru", "zh"):
@@ -101,9 +61,9 @@ new_keys = ["view.find_on_map", "search.map_placeholder", "search.count",
             "search.no_results", "hint.map_search", "status.no_matches"]
 missing = [k for k in new_keys if any(not langs[c].get(k, "").strip() for c in ("en", "ru", "zh"))]
 check("6 новых ключей v0.9.8 есть и не пусты в en/ru/zh", not missing, str(missing))
-check("key sets identical across en/ru/zh (289 keys each)",
+check("key sets identical across en/ru/zh (304 keys each)",
       set(langs["en"]) == set(langs["ru"]) == set(langs["zh"])
-      and all(len(d) == 289 for d in langs.values()),
+      and all(len(d) == 304 for d in langs.values()),
       str({c: len(d) for c, d in langs.items()}))
 
 # ══ MapSearchBar: клавиатура (Enter / Shift+Enter / Esc) и счётчик ══
@@ -166,6 +126,31 @@ check("input focused with all text selected after open",
 check("status bar shows the navigation hint",
       win.statusBar().currentMessage() == it("hint.map_search"),
       f"msg={win.statusBar().currentMessage()!r}")
+
+# ══ v0.9.9.1 fix: при ресайзе окна панель возвращается в центр (MapView.resized) ══
+# До v0.9.9.1 connect view.resized падал в AttributeError и глотался try/except —
+# после сужения окна панель оставалась на старом x (240 вместо ~40 при vp 500).
+print("== resize reposition (v0.9.9.1 fix) ==")
+x_before = bar.geometry().x()
+check("bar centered before resize (baseline x=240 at vp 900)", x_before == 240, f"x={x_before}")
+view.resize(500, 700); app.processEvents()
+geo_r = bar.geometry(); vp_r = view.viewport().rect()
+w_r = min(bar.PREFERRED_WIDTH, max(vp_r.width() - 16, bar.MIN_WIDTH))
+x_expected = max(8, (vp_r.width() - w_r) // 2)
+check("bar re-centered after viewport resize (no longer stuck at old x)",
+      geo_r.x() == x_expected and geo_r.y() == 10,
+      f"x={geo_r.x()} expected={x_expected} vp_w={vp_r.width()}")
+check("position actually changed on resize", x_before != geo_r.x(),
+      f"before={x_before} after={geo_r.x()}")
+# «Рост обратно» ограничивает окно/сплиттер (offscreen) — проверяем динамический
+# центр по фактическому viewport, а не жёсткие 240.
+view.resize(900, 700); app.processEvents()
+vp_back = view.viewport().rect()
+w_back = min(bar.PREFERRED_WIDTH, max(vp_back.width() - 16, bar.MIN_WIDTH))
+x_back_expected = max(8, (vp_back.width() - w_back) // 2)
+check("bar re-centered again when viewport grows back",
+      bar.geometry().x() == x_back_expected and bar.geometry().y() == 10,
+      f"x={bar.geometry().x()} expected={x_back_expected} vp_w={vp_back.width()}")
 
 # ══ #1/#3: запрос "web" — подсветка 1 совпадения, остальные затемнены ══
 print("== query 'web' ==")
@@ -410,10 +395,4 @@ try:
 except Exception:
     pass
 
-print()
-if FAIL:
-    print(f"FAILURES ({len(FAIL)}):")
-    for name, detail in FAIL:
-        print(f"  - {name}: {detail}")
-    sys.exit(1)
-print(f"ALL PASS ({len(PASS)})")
+finish()
