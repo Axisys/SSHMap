@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Сворачивание плашек серверов v0.8.4 (DESIGN.md §D) (бывш. tests/smoke_collapse.py).
+"""Сворачивание плашек серверов v0.8.4 (бывш. DESIGN.md §D) (бывш. tests/smoke_collapse.py).
 
 Проверяются пункты, заявленные в дизайне:
   1. toggle_collapsed меняет boundingRect (высота → COLLAPSED_HEIGHT и обратно);

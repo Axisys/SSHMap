@@ -275,8 +275,13 @@ class DrawioExporter:
                 parent_id=LAYER_MAP)
 
     # ── вывод ────────────────────────────────────────────────────────
-    def to_xml_bytes(self) -> bytes:
-        tree = self.build()
+    def to_xml_bytes(self, root_el: Optional[ET.Element] = None) -> bytes:
+        """Сериализовать модель в байты XML. root_el — готовое дерево build()
+        (v1.0-fix audit #7: экспорт считает ячейки по тому же дереву, не строя дважды);
+        без аргумента — строит сам."""
+        if root_el is None:
+            root_el = self.build()
+        tree = root_el
         ET.indent(tree, space="  ")
         xml = ET.tostring(tree, encoding="unicode")
         # Плейсхолдер переноса строки → drawio-сущность &#xa;
@@ -297,12 +302,19 @@ def type_color_safe(ctype: str) -> str:
 
 
 def export_scene_to_drawio(scene, path: str, dark: bool = True) -> int:
-    """Экспортировать сцену в .drawio файл. Возвращает число ячеек (диагностика)."""
+    """Экспортировать сцену в .drawio файл. Возвращает число ячеек (диагностика).
+
+    v1.0-fix (audit #7): раньше возвращался _cell_seq — он инкрементировался только
+    для групп и узлов без data.id, т.е. лог «cells» считал на деле группы. Теперь —
+    реальное число mxCell в файле (включая структурные: корневые "0"/"1" и 3 слоя).
+    """
     exporter = DrawioExporter(scene, dark=dark)
-    data = exporter.to_xml_bytes()
+    root = exporter.build()
+    cells = sum(1 for _ in root.iter("mxCell"))
+    data = exporter.to_xml_bytes(root)
     with open(path, "wb") as fh:
         fh.write(data)
-    return exporter._cell_seq
+    return cells
 
 
 def load_drawio_structure(path: str) -> Optional[dict]:

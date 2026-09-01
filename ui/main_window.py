@@ -327,6 +327,10 @@ class MainWindow(QMainWindow):
                 "collect_info": lambda n: self._collect_node_info(n),
                 "reveal": lambda n: self._reveal_node_on_map(n),
                 "delete": lambda n: self._remove_node_guarded(n),
+                # v1.0RC4: Быстрый запуск — подменю первым пунктом (выше SSH);
+                # ключи опциональные (вне CONTEXT_MENU_ITEMS) — см. SidebarPanel.
+                "ql_entry": lambda n, e: self._run_quick_launch_entry(n, e),
+                "ql_configure": lambda n: self._open_quick_launch_dialog(n),
             },
             show_title=self._i18n_available,  # раньше метка создавалась только при i18n
         )
@@ -558,7 +562,7 @@ class MainWindow(QMainWindow):
             )
             if reply == QMessageBox.Save:
                 # Закрываемся только если сохранение реально удалось —
-                # иначе данные терялись бы молча (см. AUDIT.md, критичная #1).
+                # иначе данные терялись бы молча (бывш. AUDIT.md, критичная #1 — см. CHANGELOG.md).
                 saved = self._save_project()
                 event.accept() if saved else event.ignore()
                 return
@@ -793,7 +797,7 @@ class MainWindow(QMainWindow):
         # v0.9.8: поиск по карте (Ctrl+F) — строка поиска поверх canvas; тот же аргумент
         # про Ctrl, что у fit_map (голая F занята вводом в поля поиска)
         self._add_menu_action(view_menu, "view.find_on_map", self._toggle_map_search, "Ctrl+F")
-        # v0.8.4 (DESIGN.md §D): массовое сворачивание — половина ценности фичи
+        # v0.8.4 (бывш. DESIGN.md §D): массовое сворачивание — половина ценности фичи
         # для больших карт.
         view_menu.addSeparator()
         self._add_menu_action(view_menu, "view.collapse_all", self._collapse_all_servers)
@@ -1035,13 +1039,58 @@ class MainWindow(QMainWindow):
                 self.log.exception(f"SSH connect error for {node.data.alias}")
             QMessageBox.critical(self, self.t("msg.ssh_error"), self.t("msg.connect_failed", error=str(e)))
 
-    def _run_ssh_connect(self, node: "ServerNode", prefill_password: str = ""):
+    def _spawn_terminal_window(self, node: "ServerNode", password: str = None,
+                               initial_command: str = ""):
+        """v1.0RC4: создание терминального окна + учёт (единый путь).
+
+        Вынесен из _run_ssh_connect (v0.9.5.6), чтобы «Быстрый запуск» с командой
+        мог открыть терминал БЕЗ SSH-диалога (пароль уже в keyring / key auth):
+        индикатор подключения, трекинг окна (_terminal_windows/_forget_terminal_window)
+        и show() — ровно как штатный путь подключения.
+        """
+        node.update_appearance()
+        node.set_ssh_connected(True)
+        self._ssh_connected_nodes.add(node.data.id)  # v0.9.4-fix: сброс индикатора при закрытии терминала
+        terminal_window = SSHTerminalWindow(
+            node.data, self, password=password, initial_command=initial_command)
+        terminal_window.destroyed.connect(lambda *_: self._forget_terminal_window(terminal_window))
+        self._terminal_windows.append(terminal_window)
+        terminal_window.show()
+        return terminal_window
+
+    def _apply_ssh_dialog_fields(self, node_id: str, user: str, key_path: str, ssh_port: int):
+        """v1.0-fix (audit #2): применить user/key/port из SSH-диалога к узлу через
+        undo-стек + dirty-маркер (единый путь).
+
+        Используется штатным подключением (_run_ssh_connect) и «Открыть во внешнем
+        терминале» (SSHConnectDialog._open_external): раньше последний писал напрямую
+        в node.data — Ctrl+Z не откатывал, при закрытии без Ctrl+S изменения сгорали
+        без диалога «сохранить?», карточка не перерисовывала строку SSH:<порт>.
+        """
+        from modules.undo_commands import CmdEditNodeData
+        node = self.scene.get_node(node_id)
+        if node is None:
+            return
+        old_data = copy.deepcopy(node.data)
+        new_data = copy.deepcopy(node.data)
+        new_data.user = user
+        new_data.key_path = key_path
+        new_data.ssh_port = ssh_port
+        if (old_data.user, old_data.key_path, old_data.ssh_port) != \
+                (new_data.user, new_data.key_path, new_data.ssh_port):
+            self._push_command(CmdEditNodeData(self, node, old_data, new_data))
+        else:
+            self._mark_dirty()
+
+    def _run_ssh_connect(self, node: "ServerNode", prefill_password: str = "",
+                         initial_command: str = ""):
         """v0.9.5.6: SSH-диалог → при успехе: обновить данные узла, индикатор,
         автосбор информации и терминальное окно.
 
         Общий путь для «Подключиться по SSH» из тулбара/контекста (prefill="")
         и из диалога свойств сервера (prefill_password — пароль из полей свойств,
-        чтобы пользователь не вставлял его повторно).
+        чтобы пользователь не вставлял его повторно). v1.0RC4: initial_command —
+        первая команда для терминала (Быстрый запуск с командой без keyring-пароля).
         """
         dlg = SSHConnectDialog(node.data, self)
         if prefill_password:
@@ -1051,24 +1100,17 @@ class MainWindow(QMainWindow):
         # v0.9.4-fix: правки user/key_path/ssh_port из диалога идут через
         # undo-стек и помечают проект dirty (раньше писались напрямую в
         # node.data — терялись при выходе без Ctrl+S и не откатывались).
-        from modules.undo_commands import CmdEditNodeData
-        old_data = copy.deepcopy(node.data)
-        new_data = copy.deepcopy(node.data)
-        new_data.user = dlg.user_edit.text().strip()
-        new_data.key_path = dlg.key_path_edit.text().strip()
-        new_data.ssh_port = dlg.port_edit.value()
-        if (old_data.user, old_data.key_path, old_data.ssh_port) != \
-                (new_data.user, new_data.key_path, new_data.ssh_port):
-            self._push_command(CmdEditNodeData(self, node, old_data, new_data))
-        else:
-            self._mark_dirty()
+        # v1.0-fix (audit #2): единый хелпер _apply_ssh_dialog_fields — им же
+        # пользуется «Открыть во внешнем терминале».
+        self._apply_ssh_dialog_fields(
+            node.data.id, dlg.user_edit.text().strip(),
+            dlg.key_path_edit.text().strip(), dlg.port_edit.value())
         # AUDIT v0.7.2 (средняя #7): пароль НЕ храним в модели — передаём его
         # напрямую терминальному окну ниже; сам диалог уже записал его в keyring
         # (_on_worker_success), так что ничего не теряется при сохранении проекта.
 
-        node.update_appearance()
-        node.set_ssh_connected(True)
-        self._ssh_connected_nodes.add(node.data.id)  # v0.9.4-fix: сброс индикатора при закрытии терминала
+        # v1.0RC4: индикатор подключения + трекинг окна — в _spawn_terminal_window
+        # (единый путь для штатного подключения и Быстрого запуска с командой).
         if self.log:
             self.log.info("SSH connected", extra={"alias": node.data.alias, "host": node.data.host})
         self.statusBar().showMessage(self.t("status.ssh_connected", alias=node.data.alias))
@@ -1081,12 +1123,10 @@ class MainWindow(QMainWindow):
             self._collect_node_info(
                 node, password=dlg.password_edit.text(), auto=True)
 
-        # Open interactive terminal (пароль — явно, см. AUDIT v0.7.2 средняя #7)
-        terminal_window = SSHTerminalWindow(
-            node.data, self, password=dlg.password_edit.text())
-        terminal_window.destroyed.connect(lambda *_: self._forget_terminal_window(terminal_window))
-        self._terminal_windows.append(terminal_window)
-        terminal_window.show()
+        # Open interactive terminal (пароль — явно, см. AUDIT v0.7.2 средняя #7;
+        # v1.0RC4: initial_command — первая команда Быстрого запуска, если была)
+        self._spawn_terminal_window(
+            node, password=dlg.password_edit.text(), initial_command=initial_command)
 
     # ── v0.9: автосбор данных о сервере (Linux) ───────────────────
 
@@ -1210,6 +1250,118 @@ class MainWindow(QMainWindow):
             self.log.info("SSH launched in external terminal",
                           extra={"alias": data.alias, "host": data.host})
 
+    # ── v1.0RC4: Быстрый запуск (ссылки/команды на сервер) ───────────────
+
+    def _open_quick_launch_dialog(self, node=None):
+        """Настройка пунктов Быстрого запуска для сервера.
+
+        Точки входа: подменю «Быстрый запуск → Настроить…» (ПКМ по строке
+        сайдбара / узлу карты) и кнопка в свойствах сервера (AddServerDialog).
+        Изменения — через undo-стек (CmdEditNodeData), как любая правка данных.
+        """
+        if node is None:
+            node = self.scene.get_selected_node()
+        if not node:
+            QMessageBox.information(self, self.t("msg.info_title"),
+                                    self.t("msg.properties_select"))
+            return
+        try:
+            from ..dialogs.quick_launch_dialog import QuickLaunchDialog
+        except ImportError:
+            from dialogs.quick_launch_dialog import QuickLaunchDialog
+        dlg = QuickLaunchDialog(self, server_data=node.data)
+        if dlg.exec() != QDialog.Accepted:
+            return
+        old_data = copy.deepcopy(node.data)
+        new_data = copy.deepcopy(node.data)
+        new_data.quick_launch = [dict(e) for e in dlg.get_entries()]
+        if old_data.quick_launch != new_data.quick_launch:
+            from modules.undo_commands import CmdEditNodeData
+            self._push_command(CmdEditNodeData(self, node, old_data, new_data))
+            self.refresh_sidebar()
+            self._mark_dirty()  # ← unsaved changes
+        if self.log:
+            self.log.info("Quick launch updated",
+                          extra={"alias": node.data.alias,
+                                 "entries": len(new_data.quick_launch)})
+
+    def _run_quick_launch_entry(self, node, entry):
+        """Выполнить пункт Быстрого запуска.
+
+        type="url"     → браузер по умолчанию (webbrowser);
+        type="command" → первая команда в SSH-терминале сервера.
+        """
+        if node is None or not isinstance(entry, dict):
+            return
+        etype = str(entry.get("type", "url")).strip().lower()
+        value = str(entry.get("value", "")).strip()
+        name = str(entry.get("name") or value)
+        if not value:
+            return
+        try:
+            if etype == "command":
+                self._quick_launch_command(node, value, name)
+            else:
+                self._quick_launch_url(value, name)
+        except Exception as e:  # noqa: BLE001 — сбой пункта не роняет меню
+            if self.log:
+                self.log.exception(f"Quick launch failed for {node.data.alias}")
+            QMessageBox.critical(self, self.t("msg.error_title"),
+                                 self.t("msg.ql_open_failed", error=str(e)))
+
+    def _quick_launch_url(self, url: str, name: str):
+        """URL-пункт — открыть в браузере по умолчанию (stdlib webbrowser)."""
+        import webbrowser
+        try:
+            ok = webbrowser.open(url)
+        except Exception as e:  # noqa: BLE001
+            if self.log:
+                self.log.error(f"Quick launch URL failed: {e}")
+            QMessageBox.warning(self, self.t("msg.error_title"),
+                                self.t("msg.ql_open_failed", error=str(e)))
+            return
+        if not ok:
+            QMessageBox.warning(self, self.t("msg.error_title"),
+                                self.t("msg.ql_no_browser"))
+            return
+        try:
+            self.statusBar().showMessage(self.t("status.ql_opened", name=name), 4000)
+        except Exception:
+            pass
+        if self.log:
+            # v1.0-fix: в extra нельзя ключ "name" — это встроенный атрибут
+            # LogRecord (имя логгера), makeRecord() падает KeyError; отсюда
+            # ложный "Quick launch failed" после успешного открытия URL.
+            self.log.info("Quick launch URL opened", extra={"ql_name": name, "url": url})
+
+    def _quick_launch_command(self, node, cmd: str, name: str):
+        """Command-пункт — первая команда в SSH-терминале сервера.
+
+        Пароль уже в keyring (или key auth) → терминал открывается напрямую,
+        без диалога; учётных данных нет вообще — штатный SSH-диалог, и после
+        подключения та же команда отправляется в терминал (initial_command).
+        """
+        data = node.data
+        pwd = ""
+        try:
+            from services.credential_manager import get_credential_manager
+            pwd = get_credential_manager().load_password(data.id) or ""
+        except Exception:  # noqa: BLE001 — keyring недоступен: путь через диалог
+            pwd = ""
+        if pwd or (data.key_path or "").strip():
+            self._spawn_terminal_window(node, password=pwd or None, initial_command=cmd)
+            try:
+                self.statusBar().showMessage(
+                    self.t("status.ql_command", name=name, alias=data.alias), 5000)
+            except Exception:
+                pass
+        else:
+            self._run_ssh_connect(node, prefill_password="", initial_command=cmd)
+        if self.log:
+            # v1.0-fix: тот же KeyError — ключ "name" зарезервирован LogRecord.
+            self.log.info("Quick launch command started",
+                          extra={"alias": data.alias, "ql_name": name})
+
     def _forget_terminal_window(self, window):
         self._terminal_windows = [w for w in self._terminal_windows if w is not window]
         # v0.9.4-fix: терминал закрыт → гасим зелёную SSH-точку узла
@@ -1230,7 +1382,7 @@ class MainWindow(QMainWindow):
 
     def _add_server(self, at_scene_pos=None):
         """Создать сервер (атрибут `at_scene_pos` — точка клика из контекстного меню)."""
-        data = None  # чтобы except-ветка не падала на несуществующей переменной (AUDIT.md)
+        data = None  # чтобы except-ветка не падала на несуществующей переменной (бывш. AUDIT.md)
         try:
             dlg = AddServerDialog(self)
             if dlg.exec() == QDialog.Accepted:
@@ -2446,7 +2598,7 @@ class MainWindow(QMainWindow):
                 continue  # битая запись — пропускаем без падения загрузки
             try:
                 # Единый путь десериализации: сохраняет key_path и корректно
-                # игнорирует лишние ключи (AUDIT.md, средняя #5).
+                # игнорирует лишние ключи (бывш. AUDIT.md, средняя #5 — см. CHANGELOG.md).
                 server_data = server_data_from_dict(s)
             except (TypeError, ValueError, KeyError) as e:
                 if self.log:
@@ -2461,14 +2613,19 @@ class MainWindow(QMainWindow):
                 continue  # битая запись — пропускаем без падения загрузки
             try:
                 ctype = c.get("type", DEFAULT_CONNECTION_TYPE)  # v0.6: нет поля type → SSH
-                self.scene.add_connection(
-                    c["source_id"], c["target_id"],
-                    c.get("label", ""), ctype,
-                )
+                src_id, tgt_id = c["source_id"], c["target_id"]
+                arrow = self.scene.add_connection(src_id, tgt_id, c.get("label", ""), ctype)
             except KeyError as e:
                 if self.log:
                     self.log.warning("Skipping broken connection record on load", extra={"error": str(e)})
                 continue
+            # v1.0-fix (audit #9): add_connection возвращает None и для дубля, и для
+            # неизвестных id узлов — раньше битые ссылки отбрасывались без следа;
+            # теперь warning в лог (дубль — штатный случай, не логируем).
+            if arrow is None and not self.scene.has_connection(src_id, tgt_id):
+                if self.log:
+                    self.log.warning("Skipping connection with unknown node id on load",
+                                     extra={"source_id": str(src_id), "target_id": str(tgt_id)})
 
         # v0.7.1: после загрузки проекта узлы попадают в план периодических
         # проверок; немедленный раунд запускает _open_project (user path), а не
@@ -2528,7 +2685,8 @@ class MainWindow(QMainWindow):
         """v0.9.7: общий путь загрузки (Файл→Открыть и восстановление из бэкапа/autosave).
 
         ROADMAP v0.9.7 #3: если автосохранение СВЕЖЕЕ файла на диске — предложить
-        восстановить его ПЕРЕД загрузкой (ответ «Да» подменяет содержимое файла).
+        восстановить его ПЕРЕД загрузкой (ответ «Да» подменяет только загружаемое в
+        память содержимое; файл на диске меняется лишь при последующем сохранении).
         skip_autosave_prompt — путь явного восстановления (пользователь уже выбрал
         источник; повторный промпт о более свежем autosave был бы дезориентирующим).
         """
@@ -2654,7 +2812,7 @@ class MainWindow(QMainWindow):
 
             # Save non-empty passwords to keyring BEFORE clearing.
             # Результат проверяем: если keyring недоступен, пароль НЕ сбрасываем —
-            # иначе он тихо сгорал (AUDIT.md, средняя #12).
+            # иначе он тихо сгорал (бывш. AUDIT.md, средняя #12 — см. CHANGELOG.md).
             from services.credential_manager import get_credential_manager as _get_cm
             cm = _get_cm()
             unsaved_aliases = []
@@ -2685,7 +2843,7 @@ class MainWindow(QMainWindow):
             from storage.project import write_project_json as _write_json
             _write_json(path, data)
 
-            # Сброс маркера несохранённых изменений (AUDIT.md, средняя #7)
+            # Сброс маркера несохранённых изменений (бывш. AUDIT.md, средняя #7 — см. CHANGELOG.md)
             self._dirty = False
             self._reset_undo_stack()  # v0.8.3: сохранение — новая точка отсчёта undo
             self._update_window_title()

@@ -51,7 +51,7 @@ app.processEvents()
 bar = win.map_search
 line = bar._line
 
-# ══ i18n: 6 новых ключей × en/ru/zh, наборы идентичны (304 на язык; +13 в v0.9.9.2, +2 в v0.9.9.7) ══
+# ══ i18n: 6 новых ключей × en/ru/zh, наборы идентичны (326 на язык; +13 в v0.9.9.2, +2 в v0.9.9.7, +22 в v1.0RC4) ══
 print("== i18n ==")
 langs = {}
 for code in ("en", "ru", "zh"):
@@ -61,9 +61,9 @@ new_keys = ["view.find_on_map", "search.map_placeholder", "search.count",
             "search.no_results", "hint.map_search", "status.no_matches"]
 missing = [k for k in new_keys if any(not langs[c].get(k, "").strip() for c in ("en", "ru", "zh"))]
 check("6 новых ключей v0.9.8 есть и не пусты в en/ru/zh", not missing, str(missing))
-check("key sets identical across en/ru/zh (304 keys each)",
+check("key sets identical across en/ru/zh (326 keys each)",
       set(langs["en"]) == set(langs["ru"]) == set(langs["zh"])
-      and all(len(d) == 304 for d in langs.values()),
+      and all(len(d) == 326 for d in langs.values()),
       str({c: len(d) for c, d in langs.items()}))
 
 # ══ MapSearchBar: клавиатура (Enter / Shift+Enter / Esc) и счётчик ══

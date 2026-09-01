@@ -69,7 +69,7 @@ finish()                          # сводка + exit code
 | `test_autosave_backups.py` | regression_v097_autosave | автосохранение + кольцевой буфер бэкапов: project_key, кольцо N=3, restore, конфиг-дефолты/клампы, тики dirty/clean/no-file, open-промпт, BackupsDialog, откат на слот |
 | `test_map_search.py` | regression_v098_map_search | поиск по карте Ctrl+F: панель, совпадения alias/host/ip/comment, подсветка/затемнение (И с тег-фильтром), Enter/Shift+Enter навигация, счётчик k/N, retranslate, закрытие при смене проекта; PySide6-menu guard; resize-перестановка панели (v0.9.9.1) |
 | `test_selection_sync.py` | regression_v0991_selection_sync | selection sync без blockSignals: reentry-guard, внешние слоты работают во время программной смены, идемпотентный пересчёт, MapView.resized |
-| `test_ext_terminal_dialog.py` | regression_v0992_ext_terminal_ui | v0.9.9.2 UI внешнего терминала: i18n 302 ключа × en/ru/zh, состав комбобокса по платформе, сохранение пресета сразу, «Сбросить к умолчанию», detect_terminal уважает пресет |
+| `test_ext_terminal_dialog.py` | regression_v0992_ext_terminal_ui | v0.9.9.2 UI внешнего терминала: i18n 326 ключа × en/ru/zh (пinned), состав комбобокса по платформе, сохранение пресета сразу, «Сбросить к умолчанию», detect_terminal уважает пресет |
 
 ### Новые в серии v0.9.9.x (без предшественника)
 
@@ -79,6 +79,26 @@ finish()                          # сводка + exit code
 | `test_sidebar_panel.py` | v0.9.9.4 ui/sidebar.py: фасад MainWindow (панель встроена, win.tree/tag_filter/search_edit/btn_* — виджеты панели, методы окна), сигналы кнопок → слоты окна, гигиена main_window.py, refresh через фасад (строки/маркеры/поиск/тег-фильтр + AND-затемнение), unit-уровень (translate_fn=None, ValueError на недостающий колбэк, fill_context_menu 9+4), регрессия бага v0.9.2: retranslate при смене языка ru→en→ru |
 | `test_pyproject.py` | v0.9.9.6 pyproject.toml (без установки): парсится (tomllib/tomli); имя ↔ APP_NAME из version.py (нормализация «SSH Map» → sshmap); версия == APP_VERSION; deps ↔ requirements.txt (набор имя+пин); entry point sshmap = main:main → существующая top-level `def main` в main.py (ast, без импорта) + модуль в сборке ([tool.setuptools]); [build-system] присутствует |
 | `test_pdf_export.py` | v0.9.9.7 PDF-экспорт карты: MapScene.render_to_pdf (QPdfWriter, offscreen, без парсинга содержимого) — существование/размер > 1 KB/заголовок %PDF/%%EOF, возвращённое значение == размеру на диске; пустая сцена (fallback-rect) + портретная карта (portrait-страница); привязка MainWindow (_export_map_pdf, i18n-реестр меню «Файл»); i18n 2 ключа × en/ru/zh + идентичность наборов (304) |
+
+### Новые в v1.0RC (Терминал v1)
+
+| файл | покрывает |
+|---|---|
+| `test_terminal_colors.py` | v1.0RC1 цветовой движок + посячейный холст: resolve_color headless (brown/brightbrown → yellow/br_yellow, hex-passthrough 256/truecolor, опечатка pyte bfightmagenta, default-fallback, структура палитр black…white + br_* × 4); E2E через pyte (SGR 33/93/38;5;196/38;2;… → Char → resolve_color — путь `ls --color`); кэш форматов (hit/различие/лимит→clear, TERMINAL.md §5.1); рендер runs offscreen (split_row_runs — чистая функция: широкие глифы/заглушки, пиксельные цвета ячеек SGR 31/33/93/41/256/truecolor, блок-курсор через свап + cursor.hidden ESC[?25l/h, счётчик drawText — runs а не по-символьно); интеграция (SSHTerminalWindow → TerminalWidget, render() помечен DEPRECATED) |
+| `test_terminal_input.py` | v1.0RC2 клавиатура + выделение/копирование: selection_cells без GUI (однострочное/многострочное/инвертированные границы/зажим колонок + regression на ошибку черновика №4 — координаты (row,col), построчный порядок); клавиатура offscreen (F1–F12 xterm-последовательности SS3/CSI, PageUp/Down/Home/End/Delete, базовый набор RC1, Ctrl+C без выделения → \x03, Ctrl+D/Z, AltGr-guard Ctrl+Alt → ничего, thread=None — без исключений); bracketed paste Ctrl+V (многострочный буфер со смешанными EOL — единый блок \x1b[200~…\x1b[201~, пустой буфер → ничего); мышь/копирование (drag в обе стороны, мульти-строчное копирование в буфер, Ctrl+C при выделении → канал не получает байты, простой клик → сброс + SIGINT, clamp за сетью); рендер подсветки offscreen (пиксели оверлея + stats) |
+| `test_terminal_scroll.py` | v1.0RC3 resize PTY + скроллбэк + dirty-рендер: HistoryScreen headless (ввод только \r\n — факт №10: рост истории, страница = ceil(lines×ratio), авто-возврат к live при новом выводе, границы no-op, лимит глубины); resize-guard offscreen (фейковый channel считает resize_pty: 10 событий с одной сеткой → ровно 1 вызов PTY; invoke_shell 120×32 до первого resizeEvent; серия быстрых смен → один вызов с последними размерами; закрытый канал → guard); клавиатура (Ctrl+Shift+PgUp/PgDn → скроллбэк ДО голых PageUp/Down, голые PgUp/PgDn и Shift+PgUp без Ctrl → \x1b[5~/\x1b[6~ в shell, AltGr-guard); колесо (вверх/вниз/no-op на границах, thread=None — локально); dirty-рендер (нет _render_timer/_dirty, E2E через окно, paintEvent прошёл); мигание курсора (QTimer: show/hide, реальное переключение фазы, пиксели фаз); кнопка «Закрыть терминал» убрана (нет QPushButton, close_terminal() сохранён) |
+
+### Новые в v1.0RC4
+
+| файл | покрывает |
+|---|---|
+| `test_quick_launch.py` | v1.0RC4 Быстрый запуск: модель (дефолт [], порядок, старые JSON → [], sanitize битых записей/типов, round-trip без пароля); QuickLaunchDialog (prefill таблицы, валидация name/value/http(s)-схемы/дубликата, добавление url+command, удаление строки, пустой диалог нового сервера); AddServerDialog (кнопка «Быстрый запуск…», quick_launch переживает правку других полей, подхват результата QuickLaunchDialog); E2E сайдбар (подменю ПЕРВЫМ пунктом выше SSH, состав Webmin/K9S/«Настроить…», URL → webbrowser.open с точным URL); E2E карта (синтетический QContextMenuEvent: подменю первым, command-пункт → терминал с initial_command="k9s" при key auth); SSHTerminalWindow с фейковым потоком (до connected_signal байты не уходят, после — ровно b"k9s\n", повторный emit не дублирует, окно без команды сигнал игнорирует); настройка из подменю (undo восстанавливает список, _do_save пишет quick_launch в JSON, перезагрузка восстанавливает); v1.0-fix §7b: KeyError "name" in LogRecord — логирование успеха URL/команды без extra-коллизии с LogRecord.name; i18n 22 ключа × en/ru/zh + паритет 326 |
+
+### Новые в v1.0 (финал)
+
+| файл | покрывает |
+|---|---|
+| `test_terminal_acceptance.py` | v1.0 финал — полный acceptance всех RC одним прогоном без сети: состояние релиза (APP_VERSION == "1.0", pyproject-сверка, TerminalScreen.render() на месте и DEPRECATED — удаление не раньше v1.2, i18n-паритет 326); bash (промпт + ls --color через окно: SGR 34/93/256/truecolor → пиксельные чернила холста, ввод только \r\n); vim (ESC[?25l/h — курсор скрыт/виден по пустой строке, SGR 41-фон, known limitation: режима 1049 нет — экран не восстанавливается); htop (повторяющиеся полноэкранные фреймы ESC[2J, dirty-рендер без таймера); копирование (выделение мышью → буфер, Ctrl+C при выделении = копирование/в канал ничего, без выделения = \x03, Ctrl+V = bracketed paste единым блоком); конфиг задачи 9 (load_terminal_settings: дефолты/валидные/битые/явный 0; окно: nord → фон #2e3440, Consolas 12, глубина истории 50, неизвестная палитра → default, без конфига → скроллбэк включён 1000) |
 
 ### Отдельные смоуки (перенесены на _common.py)
 
@@ -105,8 +125,9 @@ finish()                          # сводка + exit code
    `QGraphicsSceneMouseEvent` для QGraphicsItem (вывод v0.7.3, см. test_collapse.py).
 3. **i18n-пину ключей:** при добавлении i18n-ключей в код обновить числовой пин
    «N ключей» в файлах, которые его проверяют (test_sidebar_context_menu /
-   test_autosave_backups / test_map_search / test_ext_terminal_dialog) — иначе сьют
-   упадёт на следующем релизе. `check_i18n_keys.py` ловит сами пропуски.
+   test_autosave_backups / test_map_search / test_ext_terminal_dialog /
+   test_pdf_export / test_quick_launch) — иначе сьют упадёт на следующем релизе.
+   `check_i18n_keys.py` ловит сами пропуски.
 4. **HOME-изоляция обязательна** для всех тестов, пишущих в `~/.sshmap*`
    (bootstrap делает это сам); реальный home пользователя не трогать.
 5. **Не трогать:** публичный API MainWindow, undo-стек, keyring-путь паролей,

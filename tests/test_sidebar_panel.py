@@ -155,7 +155,15 @@ panel_ctx = SB.SidebarPanel(translate_fn=_t, actions={k: (lambda n, _k=k: _calls
                                    for k in ("ssh", "external", "edit", "copy_ip",
                                              "copy_hostname", "ping", "collect_info",
                                              "reveal", "delete")}, show_title=False)
-fake_node = ServerData(id="sp7c", alias="ctx", host="10.30.0.9", user="u")
+# Контракт fill_context_menu/refresh_rows: node — обёртка с .data (в продакшене это
+# ServerNode из сцены: MainWindow._on_sidebar_context_menu передаёт scene.get_node()).
+# Голый ServerData сюда не передаётся — фейк повторяет контракт, а не его подмножество.
+class _FakeNode:
+    def __init__(self, data):
+        self.data = data
+
+
+fake_node = _FakeNode(ServerData(id="sp7c", alias="ctx", host="10.30.0.9", user="u"))
 menu = QMenu()
 panel_ctx.fill_context_menu(menu, fake_node)
 _actions = [a for a in menu.actions() if not a.isSeparator()]
@@ -169,6 +177,72 @@ check("fill_context_menu: action order + i18n labels per ROADMAP v0.9.6",
       [a.text() for a in _actions] == _expected, str([a.text() for a in _actions]))
 _actions[3].trigger()  # ctx.copy_ip
 check("context menu action triggers its callback with the node", _calls == ["copy_ip"], str(_calls))
+
+# ══ v1.0RC4: подменю «Быстрый запуск» первым пунктом (ql_entry/ql_configure) ══
+print("== v1.0RC4 quick launch submenu ==")
+
+_ql_calls = []
+panel_ql = SB.SidebarPanel(translate_fn=_t, actions={k: (lambda n, _k=k: None) for k in
+                                   ("ssh", "external", "edit", "copy_ip", "copy_hostname",
+                                    "ping", "collect_info", "reveal", "delete")},
+                          show_title=False)
+# Опциональные колбэки вне CONTEXT_MENU_ITEMS — панель без них меню не меняет.
+panel_ql._actions["ql_entry"] = lambda n, e: _ql_calls.append(("entry", n.data.id, dict(e)))
+panel_ql._actions["ql_configure"] = lambda n: _ql_calls.append(("configure", n.data.id))
+
+fake_node_ql = _FakeNode(ServerData(id="sp7d", alias="ql-ctx", host="10.30.0.10", user="u",
+                                    quick_launch=[
+                                        {"type": "url", "name": "Webmin", "value": "http://10.30.0.10:10000/"},
+                                        {"type": "command", "name": "K9S", "value": "k9s"}]))
+menu_ql = QMenu()
+panel_ql.fill_context_menu(menu_ql, fake_node_ql)
+# PySide6 6.11/shiboken (тот же баг, что _qaction_guard v0.9.8 в main_window.py):
+# временные Python-обёртки QAction с прикреплённым QMenu + GC роняют C++-меню —
+# action/подменю держим живыми ссылками (кэширование обёрток: повторный доступ
+# возвращает тот же объект, см. tests/test_map_search.py «ВАЖНО» на строке ~95).
+first = menu_ql.actions()[0]
+ql_sub = first.menu()
+check("quick launch: submenu is the FIRST item (above SSH)",
+      ql_sub is not None and first.text() == _t("ctx.quick_launch"),
+      f"first={first.text()!r} has_sub={ql_sub is not None}")
+if ql_sub is not None:
+    _ql_sub_actions = list(ql_sub.actions())
+    ql_items = [a.text() for a in _ql_sub_actions if not a.isSeparator()]
+    check("quick launch: entries + separator + 'Configure…'",
+          ql_items == ["Webmin", "K9S", _t("ql.configure")]
+          and sum(1 for a in _ql_sub_actions if a.isSeparator()) == 1, str(ql_items))
+    # Триггер пункта — колбэк получает (node, entry)
+    ql_sub.actions()[0].trigger()
+    check("quick launch: entry triggers ql_entry(node, entry)",
+          _ql_calls == [("entry", "sp7d", {"type": "url", "name": "Webmin",
+                                            "value": "http://10.30.0.10:10000/"})], str(_ql_calls))
+    # «Настроить…» ищем ПО ТЕКСТУ: индекс нестабилен — между пунктами разделитель
+    # (раньше actions()[2] указывал на разделитель, и триггер молча не срабатывал).
+    _cfg_act = next((a for a in ql_sub.actions() if a.text() == _t("ql.configure")), None)
+    if _cfg_act is not None:
+        _cfg_act.trigger()
+    check("quick launch: 'Configure…' triggers ql_configure(node)",
+          _ql_calls[-1] == ("configure", "sp7d"), str(_ql_calls))
+
+# Узел БЕЗ пунктов: подменю есть, внутри только «Настроить…» (discoverability)
+fake_node_empty = _FakeNode(ServerData(id="sp7e", alias="ql-empty", host="10.30.0.11", user="u"))
+menu_ql2 = QMenu()
+panel_ql.fill_context_menu(menu_ql2, fake_node_empty)
+first2 = menu_ql2.actions()[0]
+sub2 = first2.menu()
+check("quick launch: empty node → submenu with only 'Configure…'",
+      sub2 is not None and [a.text() for a in sub2.actions() if not a.isSeparator()] == [_t("ql.configure")],
+      str([a.text() for a in (sub2.actions() if sub2 else [])]))
+
+# Панель БЕЗ ql-колбэков: меню как в v0.9.6 (backward-compat): подменю нет,
+# первым идёт SSH; с ql-колбэками — подменю + разделитель перед SSH.
+_ql_texts = [a.text() for a in menu.actions()]              # без ql-колбэков (меню panel_ctx)
+check("quick launch: panel without ql callbacks keeps the v0.9.6 menu",
+      _ql_texts[0] == _t("ctx.ssh_connect"), str(_ql_texts[:3]))
+_ql_texts2 = [a for a in menu_ql2.actions() if not a.isSeparator()]
+check("quick launch: with ql callbacks — submenu first, then SSH",
+      _ql_texts2[0].text() == _t("ctx.quick_launch") and _ql_texts2[1].text() == _t("ctx.ssh_connect"),
+      str([a.text() for a in _ql_texts2[:3]]))
 
 # ══ 4. РЕГРЕССИЯ БАГА v0.9.2: строки сайдбара переживают смену языка ═══════
 print("== v0.9.9.4 sidebar panel: retranslate on language switch ==")

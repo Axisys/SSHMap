@@ -341,7 +341,12 @@ class SidebarPanel(QWidget):
         `menu` создаёт MainWindow (QMenu — модульная глобальная main_window; так
         сохраняется тестовый шов подмены класса меню), parent/показ тоже на окне.
         Каждый пункт подключён к колбэку из self._actions: callable(node).
+
+        v1.0RC4: первым пунктом — подменю «Быстрый запуск» (если потребитель
+        передал колбэки ql_entry/ql_configure; без них меню — как в v0.9.6,
+        backward-compat для старых вызывающих кодов).
         """
+        self._fill_quick_launch(menu, node)
         for entry in CONTEXT_MENU_ITEMS:
             if entry is None:
                 menu.addSeparator()
@@ -351,3 +356,49 @@ class SidebarPanel(QWidget):
             callback = self._actions[action_key]
             # checked — bool из QAction.triggered; колбэку передаём только узел.
             act.triggered.connect(lambda checked=False, n=node, cb=callback: cb(n))
+
+    def _fill_quick_launch(self, menu, node) -> None:
+        """v1.0RC4: подменю «Быстрый запуск» — ПЕРВЫЙ пункт меню (выше SSH).
+
+        Состав: пункты server.data.quick_launch (ссылки/команды), затем разделитель
+        и «Настроить…». Без пунктов — только «Настроить…» (фича остаётся
+        discoverable). Колбэки из self._actions (опциональные, вне CONTEXT_MENU_ITEMS):
+          * "ql_entry"     — callable(node, entry): открыть ссылку/отправить команду;
+          * "ql_configure" — callable(node): диалог настройки.
+        Если ни одного нет — подменю не строится (старые потребители без изменений).
+        """
+        cb_entry = self._actions.get("ql_entry")
+        cb_config = self._actions.get("ql_configure")
+        if cb_entry is None and cb_config is None:
+            return  # потребитель не знает о Быстром запуске — меню как в v0.9.6
+        entries = list(getattr(node.data, "quick_launch", None) or [])
+        sub = menu.addMenu(self._tr("ctx.quick_launch"))
+        # v1.0RC4-fix (PySide6 6.11/shiboken — тот же баг, что _qaction_guard в
+        # main_window.py v0.9.8): локальная обёртка sub умирает при возврате из
+        # метода, а MainWindow показывает меню лишь ПОСЛЕ возврата (menu.exec).
+        # Когда Python-обёртка QAction с прикреплённым QMenu умирает (GC), PySide6
+        # уничтожает за ней C++-подменю — пункт «Быстрый запуск» исчезал из меню
+        # или падал RuntimeError'ом. Держим ссылки (QAction + QMenu) на обёртке
+        # родительского меню: живут ровно столько, сколько само эфемерное меню.
+        _guard = getattr(menu, "_sshmap_ql_guard", None)
+        if _guard is None:
+            _guard = menu._sshmap_ql_guard = []
+        _ql_action = next((a for a in menu.actions() if a.menu() is sub), None)
+        if _ql_action is not None:
+            _guard.append(_ql_action)
+        _guard.append(sub)
+        for e in entries:
+            if cb_entry is None:
+                break  # только настройка доступна — пункты не показываем
+            name = str(e.get("name") or e.get("value") or "?")
+            act = sub.addAction(name)
+            # checked — bool из QAction.triggered; замыкаем и узел, и пункт.
+            act.triggered.connect(
+                lambda checked=False, n=node, en=e, cb=cb_entry: cb(n, en))
+        if entries:
+            sub.addSeparator()
+        if cb_config is not None:
+            act_cfg = sub.addAction(self._tr("ql.configure"))
+            act_cfg.triggered.connect(
+                lambda checked=False, n=node, cb=cb_config: cb(n))
+        menu.addSeparator()  # Быстрый запуск отделён от «боевого» меню (как на карте)

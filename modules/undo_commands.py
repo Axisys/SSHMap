@@ -484,15 +484,36 @@ class CmdEditTextNote(_MapCommand):
         self._old = old_text
         self._new = new_text
 
-    def _apply(self, value: str):
+    def _resolve_note(self):
+        """v1.0-fix (audit #8): исходный C++-объект мог быть уничтожен — в последовательности
+        «создать → поправить текст → удалить» undo удаления восстанавливает НОВУЮ заметку
+        с тем же id, а self._note указывает на старый мёртвый объект. Тогда ищем текущую
+        заметку по id — иначе undo/redo тихо no-op'ились (RuntimeError глотался) и правка
+        текста терялась."""
         try:
             if self._note.scene() is not None:
-                self._note.set_text(value)
+                return self._note
+        except RuntimeError:
+            pass  # C++-объект уже удалён
+        scene = getattr(self._win, "scene", None)
+        if scene is None or not self._note_id:
+            return None
+        try:
+            return scene.get_note_by_id(self._note_id)
+        except Exception:  # noqa: BLE001 — сцена тоже может уничтожаться
+            return None
+
+    def _apply(self, value: str):
+        note = self._resolve_note()
+        if note is None:
+            return  # живой заметки с этим id нет — применять некуда
+        try:
+            note.set_text(value)
             committed = getattr(self._win, "_note_committed", None)
             if committed is not None and self._note_id:
                 committed[self._note_id] = value
         except RuntimeError:
-            pass
+            pass  # уничтожена между _resolve_note и set_text (гонка WA_DeleteOnClose)
 
     def redo(self):
         self._apply(self._new)

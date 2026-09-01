@@ -316,9 +316,10 @@ missing = [k for k in new_keys if any(not langs[c].get(k, "").strip() for c in (
 check("18 новых ключей v0.9.7 есть и не пусты в en/ru/zh", not missing, str(missing))
 # v0.9.9.2: +13 ключей UI внешнего терминала (ssh_ext.section … ssh_ext.preset.kitty)
 # v0.9.9.7: +2 ключа PDF-экспорта (file.export_pdf, status.export_pdf_ok)
-check("наборы ключей идентичны en/ru/zh (304 на язык)",
+# v1.0RC4: +22 ключа Быстрого запуска (ctx.quick_launch … msg.ql_open_failed)
+check("наборы ключей идентичны en/ru/zh (326 на язык)",
       set(langs["en"]) == set(langs["ru"]) == set(langs["zh"])
-      and all(len(d) == 304 for d in langs.values()),
+      and all(len(d) == 326 for d in langs.values()),
       str({c: len(d) for c, d in langs.items()}))
 
 # Cleanup: сначала dirty=False — иначе closeEvent уйдёт в диалог сохранения.

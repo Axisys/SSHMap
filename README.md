@@ -1,8 +1,9 @@
-# SSH Map (NodeVisualSSH) — v0.9.9.7
+# SSH Map (NodeVisualSSH) — v1.0
 
-Десктопное приложение (Python + PySide6): интерактивная карта IT-инфраструктуры с прямым SSH-подключением к узлам. Slogan: *"Draw your infrastructure. Organize it. Connect to it."*
+Десктопное приложение (Python + PySide6): интерактивная карта IT-инфраструктуры с прямым SSH-подключением к узлам.
+Slogan: *"Draw your infrastructure. Organize it. Connect to it."*
 
-Единый источник истины для версии — `version.py` (APP_VERSION); подробная история изменений — в CHANGELOG.md, план будущих версий — в ROADMAP.md (при расхождениях приоритет у кода).
+Единый источник истины для версии — `version.py` (APP_VERSION);
 
 ---
 
@@ -18,7 +19,7 @@ pipx install .                            # или pip install . → коман�
 # Тесты без pytest: тематические файлы test_*.py + единый раннер.
 # Тесты изолированы: пишут во временный HOME, UTF-8 stdout ставится сами —
 # на cp1251-консолях и в CI дополнительное окружение не требуется:
-python tests/run_all.py              # ВСЁ (33 файла): таблица результатов + единый exit code (0 ⇔ всё зелёное)
+python tests/run_all.py              # ВСЁ (38 файлов): таблица результатов + единый exit code (0 ⇔ всё зелёное)
 python tests/run_all.py keyring      # фильтр по подстроке в имени файла
 python tests/test_tags.py            # один файл (из корня проекта)
 ```
@@ -37,7 +38,8 @@ faulthandler-таймаут 180 c; каждый файл завершается 
 main.py                      # точка входа: setup_logging() → QApplication → MainWindow → start_status_checks()
 pyproject.toml               # installable-идентичность (имя/версия/deps из version.py и requirements.txt, entry point sshmap = main:main) — сверка tests/test_pyproject.py
 models/
-├── server.py                # ServerData dataclass; server_data_from_dict/to_dict (password исключается)
+├── server.py                # ServerData dataclass; server_data_from_dict/to_dict (password исключается);
+│                            #   quick_launch — список пунктов Быстрого запуска + sanitize_quick_launch
 └── profile.py               # Profile; CRUD; JSON ~/.sshmap_profiles.json (пароли в keyring, префикс "profile:{id}")
 graphics/
 ├── map_scene.py             # MapScene: _nodes/_arrows/_notes/_groups; resync_group_members (геометрическое членство)
@@ -50,8 +52,11 @@ graphics/
 └── background_image.py      # BackgroundImage: фон-изображение z=-10, drag/resize за угол
 modules/
 ├── ssh_worker.py            # SSHWorker (одноразовый QThread); реестр get_active_worker/wait_for_worker
-├── ssh_terminal.py          # SSHTerminalThread + SSHTerminalWindow + TextEdit; QTimer 33мс HTML-рендер
-├── terminal_screen.py       # TerminalScreen: pyte.Screen(120x32)+ByteStream, feed под threading.Lock
+├── ssh_terminal.py          # SSHTerminalThread + SSHTerminalWindow (dirty-рендер без таймера — _on_output→update(); resize PTY: guard по сетке + дебаунс ~150 мс; кнопка «Закрыть терминал» убрана);
+│                            #   connected_signal (после invoke_shell) + initial_command — первая команда Быстрого запуска в shell;
+│                            #   load_terminal_settings() — ключи terminal_palette/terminal_font/terminal_font_size/terminal_history_lines из ~/.sshmap/config.json (дефолты = текущее поведение)
+├── terminal_widget.py       # TerminalWidget — посячейный холст QWidget+QPainter: runs, кэш форматов, блок-курсор (+cursor.hidden), широкие глифы; полная клавиатура (F1–F12/PgUp/PgDn/Home/End/Delete, Ctrl+C/D/Z, bracketed paste, AltGr-guard) + выделение мышью (selection_cells, координаты (row,col)) и копирование; скроллбэк колесом/Ctrl+Shift+PgUp/PgDn (голые PgUp/PgDn — в shell) + QTimer мигания курсора
+├── terminal_screen.py       # TerminalScreen: pyte.HistoryScreen(120x32)+ByteStream, feed под threading.Lock; PALETTES+resolve_color (TERMINAL.md §5.1), snapshot(); скроллбэк scroll_up/scroll_down/at_bottom (авто-возврат к live встроен в pyte); render() — deprecated
 ├── host_key_policy.py       # SshKnownHostsPolicy: ~/.sshmap/known_hosts; изменённый ключ → BadHostKeyException (MITM)
 ├── external_terminal.py     # системный терминал ОС; настройки ~/.sshmap_settings.json; пароль НЕ в argv
 ├── undo_commands.py         # 13 QUndoCommand: MoveNode(merge), MoveNodes(групповой drag),
@@ -65,14 +70,14 @@ storage/autosave.py          # автосохранение ~/.sshmap/autosave/<
 storage/export_drawio.py     # экспорт карты в .drawio (mxGraph XML, ElementTree, без новых зависимостей)
 services/
 ├── credential_manager.py    # keyring-абстракция (синглтон get_credential_manager()): только проверенный бэкенд (Windows — wincred, иначе — отказ от записи)
-├── diagnostics.py           # v0.9.9.3: PingThread + ReverseDnsThread — ping и обратный DNS вне GUI-потока (перенесено из ui/main_window.py)
+├── diagnostics.py           # PingThread + ReverseDnsThread — ping и обратный DNS вне GUI-потока (перенесено из ui/main_window.py)
 ├── host_importer.py         # массовый импорт серверов из TXT: parse_hosts_file, is_ip_address, resolve_host
 ├── status_checker.py        # StatusChecker: QTimer разводит раунды, пробы в _ProbeThread; probe_ssh() → online/warn/offline
 └── system_info_collector.py # SystemInfoCollector: автосбор ОС/CPU/RAM/диск Linux-сервера одной exec_command-сессией
-version.py                   # единая точка версий: APP_VERSION="0.9.9.7", VERSION_FORMAT="0.9"
-dialogs/                     # AddServerDialog, SSHConnectDialog (+кнопка внешнего терминала),
+version.py                   # единая точка версий: APP_VERSION="1.0", VERSION_FORMAT="0.9"
+dialogs/                     # AddServerDialog (+кнопка «Быстрый запуск…»), SSHConnectDialog (+кнопка внешнего терминала),
                              #   ConnectionDialog/EditConnectionDialog, ProfileManagerDialog,
-                             #   BackupsDialog (бэкапы + автосохранение, откат)
+                             #   BackupsDialog (бэкапы + автосохранение, откат), QuickLaunchDialog (Быстрый запуск)
 ui/main_window.py            # MainWindow: контроллер; undo_stack (QUndoStack), dirty по canUndo()+baseline;
                              #   дублирование узла Ctrl+D (keyring-пароль под новым id), групповые операции
                              #   экспорт карты в PNG/JPEG/PDF, экспорт в drawio, установка/удаление фона, «Собрать информацию»
@@ -82,8 +87,8 @@ ui/sidebar.py                # SidebarPanel(QWidget) — кнопки, заго�
                              #   статусов, контекстное меню строки; i18n через колбэк + retranslate
 ui/map_search_bar.py         # MapSearchBar — плавающая строка поиска поверх canvas (Enter/Shift+Enter/Esc, счётчик k/N)
 ui/command_palette.py        # CommandPalette: Ctrl+K, fuzzy-поиск по действиям меню и серверам
-i18n/                        # t(key,**kwargs); en.json/ru.json/zh.json — 304 ключа, наборы идентичны; ru — дефолт
-tests/                       # тематический сьют без pytest: 32 × test_*.py + _common.py (обвязка), run_all.py (единый раннер), check_i18n_keys.py; карта — tests/INDEX.md
+i18n/                        # t(key,**kwargs); en.json/ru.json/zh.json — 326 ключей, наборы идентичны; ru — дефолт
+tests/                       # тематический сьют без pytest: 37 × test_*.py + _common.py (обвязка), run_all.py (единый раннер), check_i18n_keys.py; карта — tests/INDEX.md
 ```
 
 ---
@@ -96,7 +101,9 @@ tests/                       # тематический сьют без pytest: 
   "servers":  [{"id": "710602ee", "alias": "...", "host": "...", "user": "...",
                 "x": 0.0, "y": 0.0, "cpu": "", "ram": "", "disk": "", "ip": "",
                 "comment": "", "ssh_port": 22, "key_path": "",
-                "os_name": "", "cpu_model": "", "tags": ["prod", "dev"]}],
+                "os_name": "", "cpu_model": "", "tags": ["prod", "dev"],
+                "quick_launch": [{"type": "url", "name": "Webmin", "value": "http://host:10000/"},
+                                 {"type": "command", "name": "K9S", "value": "k9s"}]}],
   "connections": [{"source_id": "...", "target_id": "...", "label": "", "type": "ssh"}],
   "notes":  [{"id": "...", "text": "", "x": 0.0, "y": 0.0, "width": 240.0, "height": 160.0}],
   "groups": [{"id": "...", "name": "", "x": 0.0, "y": 0.0, "width": 480.0, "height": 320.0}],
@@ -110,6 +117,7 @@ tests/                       # тематический сьют без pytest: 
 - Типы связей: `ssh|vpn|http|database|nfs|kubernetes`; неизвестный/отсутствующий тип → `ssh`. Поле `version` при загрузке не валидируется (файлы 0.6+ читаются).
 - Членство в группах **не хранится** — вычисляется из геометрии (центр карточки внутри верхней группы, эксклюзивно).
 - `tags` — массив строк у записи сервера; отсутствует или не массив в старых JSON → пустой список (`server_data_from_dict` нормализует).
+- `quick_launch` — массив пунктов Быстрого запуска `{"type": "url"|"command", "name", "value"}`; отсутствует в старых JSON → пустой список, битые записи отбрасываются (`sanitize_quick_launch`). URL открывается в браузере по умолчанию, команда — первая команда в SSH-терминале.
 - `background` хранит **путь** к изображению (файл НЕ встраивается в JSON); отсутствующий файл при загрузке игнорируется с warning. Геометрия фона в undo не входит.
 
 ---
@@ -120,7 +128,7 @@ tests/                       # тематический сьют без pytest: 
 `probe_ssh(host, port)`: TCP открыт + SSH-баннер → `online`; порт открыт без баннера → `warn`; иначе `offline`. Пробы только в `_ProbeThread` (не на GUI-потоке). `start_status_checks()` вызывается из main.py один раз после `show()`.
 
 ### Терминал
-Сырые байты SSH → `TerminalScreen.feed()` (pyte, под lock) → QTimer ~30 FPS → HTML в QPlainTextEdit. Известный хост пиннится в `~/.sshmap/known_hosts`.
+Сырые байты SSH → `TerminalScreen.feed()` (pyte.HistoryScreen, под lock) → посячейный холст `TerminalWidget` (QWidget+QPainter: runs, цветовой движок `resolve_color`, блок-курсор с миганием). Dirty-рендер без таймера: `_on_output` → `widget.update()` напрямую (queued signal уже в GUI-потоке). Resize PTY — только при реальной смене сетки + дебаунс ~150 мс перед `channel.resize_pty` (начальный `invoke_shell` 120×32, первый resizeEvent синхронизирует с окном). Скроллбэк — готовый `pyte.HistoryScreen`: колесо мыши и Ctrl+Shift+PageUp/PageDown, авто-возврат к live-строке при новом выводе; **голые PageUp/PageDown остаются форвардом в shell** (`\x1b[5~`/`\x1b[6~` — пейджинг less/man). Клавиатура — полная таблица: F1–F12, Home/End/Delete, стрелки, явные Ctrl+C→`\x03` / Ctrl+D→`\x04` (Ctrl+C при выделении копирует в буфер), bracketed paste Ctrl+V (единый блок), AltGr-guard (Ctrl+Alt не уходит как управляющие коды). Выделение мышью — координаты всегда `(row, col)` (`selection_cells()`), копирование мульти-строчного текста. Окно закрывается штатным крестиком (кнопка «Закрыть терминал» убрана). Известный хост пиннится в `~/.sshmap/known_hosts`. Настройки терминала: опциональные ключи `~/.sshmap/config.json` — `terminal_palette` (`default|nord|dracula|tokyo_night`, неизвестная → default), `terminal_font` (семейство, пусто → системный моноширинный), `terminal_font_size` (pt 6–72, иначе 10), `terminal_history_lines` (глубина скроллбэка HistoryScreen; дефолт 1000 — включён, явный 0 — отключён); применяются при создании окна (`load_terminal_settings()`).
 
 ### Undo/Redo
 - Любое изменение сцены делается через `MainWindow._push_command(cmd)`; сцена меняется **только** внутри `redo()/undo()` команды — `QUndoStack.push()` сам вызывает redo.
@@ -193,11 +201,11 @@ ru (дефолт) / en / zh. Правило: новый ключ добавля�
 - контекстное меню дерева серверов сайдбара + «Показать на карте»
 - автосохранение проекта (~/.sshmap/autosave/) + кольцевой буфер бэкапов при каждом save (~/.sshmap/backups/, откат через «Файл → Бэкапы…» / «Восстановить из автосохранения…») и предложение восстановления из автосохранения при открытии файла
 - поиск по карте (Ctrl+F): строка поиска поверх canvas с подсветкой совпадений (alias/host/ip/comment), переход Enter/Shift+Enter с центрированием и рамкой-акцентом, затемнение несовпавших узлов (комбинируется с тег-фильтром по И)
+- **Быстрый запуск**: per-server список ссылок/команд — подменю «Быстрый запуск» ПЕРВЫМ пунктом контекстного меню (ПКМ в списке серверов и на карте, выше «Подключиться по SSH»); URL открывается в браузере по умолчанию, команда отправляется первой командой в SSH-терминал сервера; настройка — кнопка «Быстрый запуск…» в свойствах сервера и «Настроить…» из подменю; хранится в JSON проекта (`quick_launch`), изменения через undo
 
 **Известные ограничения:** undo не покрывает статусы узлов и геометрию фона; фоновое изображение хранится путём (при переносе проекта на другую машину файл нужно переносить вместе с картой); язык интерфейса выбирается через меню «Помощь → Язык» (с персистентностью в ~/.sshmap/config.json); в v1.1 планируется перенос переключателя в диалог настроек.
 
 **Roadmap (по приоритету, детали — в ROADMAP.md):**
-- **v1.0**: Терминал v1 — сеточный рендерер на QPainter (runs, исправленный цветовой движок: `brown`/256/truecolor), полная клавиатура + AltGr-guard, выделение мышью и копирование, resize PTY, скроллбэк через `pyte.HistoryScreen`.
 - **v1.1**: диалог настроек (шрифты UI и терминала, палитра/размер шрифта/глубина истории терминала, интервалы StatusChecker, автосохранение, язык интерфейса) + SFTP-вкладка в окне терминала (тот же transport, один worker с очередью, прогресс и отмена).
 - **v1.2**: полировка карты (анимированный поток по связям, плавные перелёты камеры, центральная тема `ui/theme.py`) + опции терминала (табы сессий, выделение слова/строки).
 - Бэклог (без версии): импорт из ~/.ssh/config, экспорт/импорт профилей, Prometheus-метрики, интеграции Docker/K8s·Proxmox·WoL·SNMP, мини-карта и другие «большого уровня».

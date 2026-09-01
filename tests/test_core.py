@@ -1,7 +1,7 @@
 """Ядро сьюта (бывш. smoke_test.py §1–5): compile, i18n, models, ANSI, profiles/keyring.
 
 Часть сьюта, разбитого из smoke_test.py v0.6–v0.9.2 (см. INDEX.md).
-Проверяет ключевые пункты AUDIT.md: компиляцию всех модулей, i18n-паритет en/ru/zh
+Проверяет ключевые пункты бывш. AUDIT.md (расшифровка — в CHANGELOG.md): компиляцию всех модулей, i18n-паритет en/ru/zh
 + fallback на английский, models.server (from_dict robustness / to_dict без пароля),
 ANSI-очистку терминала, профили без паролей в JSON + семантику keyring update(None).
 

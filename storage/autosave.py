@@ -207,8 +207,11 @@ def rotate_backups(project_path: str, max_count: int = DEFAULT_BACKUP_COUNT) -> 
         src = backup_path_for(project_path, slot - 1)
         if os.path.isfile(src):
             _atomic_copy(src, backup_path_for(project_path, slot))
-    # Остатки за пределами нового max_count (уменьшение N в конфиге)
-    for slot in range(max_count + 1, max_count + 64):
+    # Остатки за пределами нового max_count (уменьшение N в конфиге).
+    # v1.0-fix (audit #5): сканируем до жёсткого лимита _MAX_BACKUPS, а не фиксированное
+    # окно в 63 слота — раньше при уменьшении backup_count (напр. 100 → 1) слоты за
+    # max_count+63 оставались на диске навсегда.
+    for slot in range(max_count + 1, _MAX_BACKUPS + 1):
         extra = backup_path_for(project_path, slot)
         if os.path.isfile(extra):
             try:

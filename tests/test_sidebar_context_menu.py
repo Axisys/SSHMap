@@ -95,9 +95,10 @@ try:
     # v0.9.8: +6 ключей поиска по карте (view.find_on_map … status.no_matches)
     # v0.9.9.2: +13 ключей UI внешнего терминала (ssh_ext.section … ssh_ext.preset.kitty)
     # v0.9.9.7: +2 ключа PDF-экспорта (file.export_pdf, status.export_pdf_ok)
-    check("key sets identical across en/ru/zh (304 keys each)",
+    # v1.0RC4: +22 ключа Быстрого запуска (ctx.quick_launch … msg.ql_open_failed)
+    check("key sets identical across en/ru/zh (326 keys each)",
           set(langs["en"]) == set(langs["ru"]) == set(langs["zh"])
-          and all(len(d) == 304 for d in langs.values()),
+          and all(len(d) == 326 for d in langs.values()),
           str({c: len(d) for c, d in langs.items()}))
     _sidebar_keys = ["ctx.ssh_connect", "ctx.ssh_external", "ctx.edit_server",
                      "ctx.copy_ip", "ctx.copy_hostname", "ctx.ping",
@@ -105,7 +106,7 @@ try:
     check("all sidebar menu keys exist in every language",
           all(k in langs[c] for k in _sidebar_keys for c in ("en", "ru", "zh")))
 
-    # ══ #1. Состав и порядок меню (ROADMAP v0.9.6, пункт 1) ══
+    # ══ #1. Состав и порядок меню (ROADMAP v0.9.6, пункт 1; v1.0RC4: +Быстрый запуск) ══
     print("== menu composition ==")
     menu = _ctx_row(item1)
     check("context menu captured on right-click of a tree row", menu is not None)
@@ -113,12 +114,22 @@ try:
         actions = [a for a in menu.actions()]
         non_sep = [a.text() for a in actions if a.isSeparator() is False]
         n_sep = sum(1 for a in actions if a.isSeparator())
-        expected_order = [it(k) for k in _sidebar_keys]
-        check("menu has exactly the 9 ROADMAP actions",
-              len(non_sep) == 9, f"got {len(non_sep)}: {non_sep}")
-        check("action order matches ROADMAP (ssh → external → edit → copy ip/host → ping → info → reveal → delete)",
+        # v1.0RC4: первым пунктом — подменю «Быстрый запуск» (у sb6a пунктов нет →
+        # в нём только «Настроить…»), затем разделитель и 9 ROADMAP-действий.
+        expected_order = [it("ctx.quick_launch")] + [it(k) for k in _sidebar_keys]
+        check("menu has the Quick Launch submenu + the 9 ROADMAP actions",
+              len(non_sep) == 10, f"got {len(non_sep)}: {non_sep}")
+        check("action order: quick launch FIRST, then ROADMAP (ssh → … → delete)",
               non_sep == expected_order, f"got={non_sep} want={expected_order}")
-        check("menu grouped by 4 separators", n_sep == 4, f"separators={n_sep}")
+        check("menu grouped by 5 separators (4 ROADMAP + 1 after Quick Launch)",
+              n_sep == 5, f"separators={n_sep}")
+        # Подменю: у узла без пунктов — только «Настроить…»
+        ql_sub = next((a.menu() for a in actions if a.text() == it("ctx.quick_launch")), None)
+        check("Quick Launch submenu exists as the first item", ql_sub is not None, str(non_sep[:2]))
+        if ql_sub:
+            ql_items = [a.text() for a in ql_sub.actions() if not a.isSeparator()]
+            check("empty quick launch → submenu holds only 'Configure…'",
+                  ql_items == [it("ql.configure")], str(ql_items))
 
         # ══ #2. «Карточные» действия НЕ дублируются в списке ══
         forbidden = {it("ctx.collapse_server"), it("ctx.expand_server"),

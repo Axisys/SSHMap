@@ -515,6 +515,33 @@ class MapView(QGraphicsView):
         # ── v0.7.3: контекстное меню узла ──────────────────────────
         if node is not None:
             win_node = node  # локальная ссылка для замыканий
+            # v1.0RC4: Быстрый запуск — ПЕРВЫЙ пункт (выше «Подключиться по SSH»).
+            # Подменю: пункты node.data.quick_launch + разделитель + «Настроить…».
+            # Без пунктов — только «Настроить…» (discoverability). Паттерн hasattr —
+            # как у остальных действий: MapView не знает о MainWindow.
+            if hasattr(win, "_run_quick_launch_entry") or \
+                    hasattr(win, "_open_quick_launch_dialog"):
+                ql_entries = list(getattr(win_node.data, "quick_launch", None) or [])
+                ql_sub = menu.addMenu(_t("ctx.quick_launch"))
+                for e in ql_entries:
+                    if not hasattr(win, "_run_quick_launch_entry"):
+                        break
+                    act_ql = ql_sub.addAction(str(e.get("name") or e.get("value") or "?"))
+                    def _ql(checked=False, n=win_node, en=e):  # checked — bool из triggered
+                        w = self.window()
+                        if hasattr(w, "_run_quick_launch_entry"):
+                            w._run_quick_launch_entry(n, en)
+                    act_ql.triggered.connect(_ql)
+                if ql_entries:
+                    ql_sub.addSeparator()
+                if hasattr(win, "_open_quick_launch_dialog"):
+                    act_qc = ql_sub.addAction(_t("ql.configure"))
+                    def _ql_cfg(checked=False, n=win_node):  # checked — bool из triggered
+                        w = self.window()
+                        if hasattr(w, "_open_quick_launch_dialog"):
+                            w._open_quick_launch_dialog(n)
+                    act_qc.triggered.connect(_ql_cfg)
+                menu.addSeparator()  # Быстрый запуск отделён от «боевого» меню узла
             if hasattr(win, "_connect_ssh_to_selected"):
                 act_ssh = menu.addAction(_t("ctx.ssh_connect"))
                 # v0.8.1: первый параметр — bool `checked` из QAction.triggered; без него
@@ -541,7 +568,7 @@ class MapView(QGraphicsView):
                 act_info = menu.addAction(_t("ctx.collect_info"))
                 act_info.triggered.connect(
                     lambda _=False, n=win_node: self.window()._collect_node_info(n))
-            # v0.8.4 (DESIGN.md §D): свернуть/развернуть плашку
+            # v0.8.4 (бывш. DESIGN.md §D): свернуть/развернуть плашку
             if hasattr(win_node, "toggle_collapsed"):
                 act_col = menu.addAction(
                     _t("ctx.expand_server") if getattr(win_node.data, "collapsed", False)
@@ -673,13 +700,17 @@ class MapView(QGraphicsView):
             try:
                 menu.exec(self._event_global_point(event))
             except Exception as e:  # noqa: BLE001 — GUI-компонент не должен ронять приложение
-                import sys
-                print(f"[map_view] contextMenuEvent: menu.exec failed: {e}", file=sys.stderr)
+                # v1.0-fix (audit #11): логгер вместо print в stderr, как во всём остальном коде.
+                try:
+                    from modules.logger import get_logger
+                    get_logger(__name__).error(f"contextMenuEvent: menu.exec failed: {e}")
+                except Exception:  # noqa: BLE001 — сбой логгера не должен ломать контекстное меню
+                    pass
         else:
             super().contextMenuEvent(event)
 
     def _toggle_and_mark(self, node):
-        """v0.8.4 (DESIGN.md §D): toggle_collapsed + пометить проект изменённым."""
+        """v0.8.4 (бывш. DESIGN.md §D): toggle_collapsed + пометить проект изменённым."""
         node.toggle_collapsed()
         w = self.window()
         if hasattr(w, "_mark_dirty"):

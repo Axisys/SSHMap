@@ -359,18 +359,31 @@ class SSHConnectDialog(QDialog):
         except ImportError:
             from modules import external_terminal as _ext
 
+        user = self.user_edit.text().strip()
+        key_path = self.key_path_edit.text().strip()
+        port = self.port_edit.value()
+
         # Запомнить введённые user/key/port в данных сервера, как это делает
         # обычное подключение после успеха — чтобы ctx-меню и следующий запуск
         # использовали актуальные значения.
-        self.server_data.user = self.user_edit.text().strip()
-        self.server_data.key_path = self.key_path_edit.text().strip()
-        self.server_data.ssh_port = self.port_edit.value()
+        # v1.0-fix (audit #2): через undo-стек + dirty-маркер (хелпер MainWindow),
+        # а не прямой записью в node.data: раньше Ctrl+Z не откатывал, при закрытии
+        # без Ctrl+S изменения сгорали без диалога «сохранить?», и карточка не
+        # перерисовывала строку SSH:<порт>.
+        win = self.parent()
+        if win is not None and hasattr(win, "_apply_ssh_dialog_fields"):
+            win._apply_ssh_dialog_fields(self.server_data.id, user, key_path, port)
+        else:
+            # Нет родителя-MainWindow (headless-тесты) — прямой записью, как раньше.
+            self.server_data.user = user
+            self.server_data.key_path = key_path
+            self.server_data.ssh_port = port
 
         ok, err = _ext.connect_external(
             host=host,
-            user=self.server_data.user,
-            port=self.server_data.ssh_port,
-            key_path=self.server_data.key_path or None,
+            user=user,
+            port=port,
+            key_path=key_path or None,
         )
         if not ok:
             if err == "no_ssh_client":

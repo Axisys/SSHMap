@@ -32,7 +32,7 @@ class ServerNode(QGraphicsItemGroup):
 
     MIN_NODE_WIDTH = 180
     MIN_NODE_HEIGHT = 130
-    # v0.8.4 (DESIGN.md §D): высота свёрнутой плашки — одна строка:
+    # v0.8.4 (бывш. DESIGN.md §D): высота свёрнутой плашки — одна строка:
     # [иконка] alias @host … [●статус][SSH-точка][▾шеврон]
     COLLAPSED_HEIGHT = 46
     # Ревью-фикс v0.8.0 (#4): потолок ширины карточки — длинный alias/host/comment
@@ -243,7 +243,7 @@ class ServerNode(QGraphicsItemGroup):
         # UI polish: декоративная «кнопка SSH» (🔒) удалена — она не кликалась и
         # вводила в заблуждение; подключение SSH — по двойному клику / ПКМ-меню.
 
-        # v0.8.4 (DESIGN.md §D): шеврон сворачивания в правом верхнем углу.
+        # v0.8.4 (бывш. DESIGN.md §D): шеврон сворачивания в правом верхнем углу.
         # Позиция/геометрия выставляются в update_appearance() под текущий режим.
         self._chevron = QGraphicsPathItem(self)
         self._chevron.setPen(QPen(self.COLOR_LABEL, 1.8))
@@ -351,7 +351,7 @@ class ServerNode(QGraphicsItemGroup):
         длинным полем, всё равно остаётся шире MIN — зато видимая информация
         максимальна и геометрия детерминирована для любого шрифта/платформы.
 
-        v0.8.4 (DESIGN.md §D): при data.collapsed рисуется одна строка — скрываются
+        v0.8.4 (бывш. DESIGN.md §D): при data.collapsed рисуется одна строка — скрываются
         _info/_info_bg/_host_label, alias объединяется с host («alias @host»), высота —
         COLLAPSED_HEIGHT. Точки-индикаторы остаются видимыми (самое ценное в свёрнутом
         виде). prepareGeometryChange() обязателен до смены размера.
@@ -477,7 +477,7 @@ class ServerNode(QGraphicsItemGroup):
         if self.scene():
             self.scene().update_connections_for_node(self)
 
-    # ── v0.8.4 (DESIGN.md §D): сворачивание плашки в одну строку ─────────────
+    # ── v0.8.4 (бывш. DESIGN.md §D): сворачивание плашки в одну строку ─────────────
 
     def _chevron_path(self, down: bool) -> QPainterPath:
         """Глиф шеврона: ▾ (свёрнут — можно развернуть) / ▴ (развёрнут)."""
@@ -707,11 +707,20 @@ class ServerNode(QGraphicsItemGroup):
             anim.setEasingCurve(QEasingCurve.Type.OutQuad)
 
             def _on_value(v, item=self._pulse):
-                item.setOpacity(float(v))
-                self.update()
+                try:
+                    item.setOpacity(float(v))
+                    self.update()
+                except RuntimeError:
+                    pass  # Qt teardown: узел удалён во время пульса, C++-item уже нет
+
+            def _on_finished(item=self._pulse):
+                try:
+                    item.hide()
+                except RuntimeError:
+                    pass  # Qt teardown — см. _on_value выше
 
             anim.valueChanged.connect(_on_value)
-            anim.finished.connect(self._pulse.hide)
+            anim.finished.connect(_on_finished)
             self._pulse_anim = anim  # ссылка держит анимацию в живых (no-parent binding)
         self._pulse.show()
         self._pulse.setOpacity(1.0)

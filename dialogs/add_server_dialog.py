@@ -2,9 +2,9 @@ import uuid
 from typing import Optional, List
 
 try:
-    from ..models.server import ServerData
+    from ..models.server import ServerData, sanitize_quick_launch
 except ImportError:
-    from models.server import ServerData
+    from models.server import ServerData, sanitize_quick_launch
 
 try:
     from ..models.profile import load_profiles, get_profile_by_id
@@ -46,6 +46,11 @@ class AddServerDialog(QDialog):
         # v0.9.5.6: True после клика «Подключиться по SSH» — данные сохраняются
         # (как по ОК), а MainWindow затем открывает SSH-диалог.
         self._connect_after_accept = False
+        # v1.0RC4: Быстрый запуск — текущий список пунктов (источник правды для
+        # get_data()); инициализируется из edit_data, иначе правка ДРУГИХ полей
+        # сервера обнуляла бы настроенные пункты (ServerData.quick_launch).
+        self._quick_launch_entries = [dict(e) for e in sanitize_quick_launch(
+            getattr(edit_data, "quick_launch", None))] if edit_data is not None else []
         
         # ── Profile data (loaded lazily, cached in instance) ──
         # Each entry: {"id": str, "name": str} — password fetched from keyring on demand
@@ -113,6 +118,15 @@ class AddServerDialog(QDialog):
             except Exception:
                 pass
         profile_section.addRow("", combo_hbox)
+
+        # v1.0RC4: Быстрый запуск — под кнопкой «Управление профилями…» (решение
+        # по названию: кнопка повторяет имя пункта контекстного меню, а не
+        # абстрактное «Настройка» — 1:1 с подменю «Быстрый запуск»).
+        btn_quick_launch = QPushButton(
+            (self.t("ql.configure_button") if self._i18n_available
+             else "Быстрый запуск…"))  # UI polish: без эмодзи
+        btn_quick_launch.clicked.connect(self._open_quick_launch)
+        profile_section.addRow("", btn_quick_launch)
 
         main_layout.addLayout(profile_section)
 
@@ -245,6 +259,21 @@ class AddServerDialog(QDialog):
             if old_current > 0 and old_current - 1 < len(self._profiles):
                 self.profile_combo.setCurrentIndex(old_current)
 
+    def _open_quick_launch(self):
+        """v1.0RC4: открыть диалог настройки Быстрого запуска для этого сервера.
+
+        Работает и при добавлении нового сервера (edit_data=None — пустой список);
+        результат хранится в self._quick_launch_entries и уходит в get_data().
+        """
+        try:
+            from ..dialogs.quick_launch_dialog import QuickLaunchDialog
+        except ImportError:
+            from dialogs.quick_launch_dialog import QuickLaunchDialog
+
+        dlg = QuickLaunchDialog(self, server_data=self._data)
+        if dlg.exec() == QDialog.Accepted:
+            self._quick_launch_entries = [dict(e) for e in dlg.get_entries()]
+
     def _select_key_file(self):
         """Open file dialog to select SSH key."""
         path, _ = QFileDialog.getOpenFileName(
@@ -288,6 +317,10 @@ class AddServerDialog(QDialog):
             ssh_port=self.port.value(),
             x=self._data.x if self._data else 0,
             y=self._data.y if self._data else 0,
+            # v1.0-fix (audit #1): collapsed раньше не передавался — в новом ServerData
+            # он всегда был False, и любая правка через «Свойства» (даже без изменения
+            # ни одного поля) молча разворачивала свёрнутый узел.
+            collapsed=self._data.collapsed if self._data else False,
             os_name=self.os_name.text(),  # v0.9
             cpu_model=getattr(self._data, "cpu_model", "") if self._data else "",
             cpu=self.cpu.text(),
@@ -296,6 +329,7 @@ class AddServerDialog(QDialog):
             ip=self.ip.text(),
             comment=self.comment.text(),
             tags=self._parse_tags(),  # v0.9.4
+            quick_launch=[dict(e) for e in self._quick_launch_entries],  # v1.0RC4
         )
 
     def _parse_tags(self) -> list:

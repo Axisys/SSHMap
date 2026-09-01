@@ -15,13 +15,7 @@
 
 import ipaddress
 import socket
-from typing import List, Optional, Tuple
-
-# Локальный импорт модели (пакетный или плоский запуск)
-try:
-    from models.server import ServerData
-except ImportError:
-    from .models.server import ServerData  # type: ignore
+from typing import List, Optional
 
 
 def parse_hosts_file(text: str) -> List[str]:
@@ -59,43 +53,9 @@ def resolve_host(hostname: str) -> Optional[str]:
         return None
 
 
-def build_server_data(entry: str) -> ServerData:
-    """Собрать ServerData для одной строки файла (без добавления на карту)."""
-    import uuid
-
-    resolved_ip = ""
-    if is_ip_address(entry):
-        host = entry
-        resolved_ip = entry
-    else:
-        host = entry
-        resolved_ip = resolve_host(entry) or ""
-
-    alias = entry  # псевдоним = строка из файла; пользователь переименует
-    return ServerData(
-        id=str(uuid.uuid4())[:8],
-        alias=alias,
-        host=host,
-        user="",           # пользователь настроит после импорта
-        password="",
-        ip=resolved_ip,
-    )
-
-
-def import_from_text(text: str) -> Tuple[List[ServerData], List[str]]:
-    """Полный цикл: текст файла → (список ServerData, список дубликатов).
-
-    Дубликаты: повторные строки внутри файла И записи, чей host уже есть
-    в existing_hosts. Резолв выполняется только для новых уникальных имён.
-    """
-    entries = parse_hosts_file(text)
-    seen = set()
-    unique = []
-    duplicates = []
-    for e in entries:
-        if e.lower() in seen:
-            duplicates.append(e)
-        else:
-            seen.add(e.lower())
-            unique.append(e)
-    return unique, duplicates
+# v1.0-fix (audit #14): удалены мёртвые build_server_data() и import_from_text() —
+# нигде не вызывались (фактический импорт в MainWindow._import_servers собирает
+# ServerData инлайном: там же дедупликация по существующим узлам карты и
+# processEvents при длинном резолве), а аннотация/докстринг import_from_text
+# расходились с кодом. Оставлены реально используемые parse_hosts_file /
+# is_ip_address / resolve_host.

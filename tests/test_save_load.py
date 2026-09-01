@@ -1,7 +1,7 @@
 """Save/load проекта headless + keyring-пароли (бывш. smoke_test.py §6 «main window»).
 
 Часть сьюта, разбитого из smoke_test.py v0.6–v0.9.2 (см. INDEX.md).
-Критические пункты AUDIT.md: round-trip сохранения/загрузки проекта в offscreen-MainWindow,
+Критические пункты бывш. AUDIT.md (расшифровка — в CHANGELOG.md): round-trip сохранения/загрузки проекта в offscreen-MainWindow,
 [*]-маркер dirty, password → keyring при save (audit #1), key_path в JSON (audit #5),
 сброс [*] после save (audit #7), восстановление key_path при загрузке (audit #5),
 защита от дублирующихся связей A→B (audit #43).

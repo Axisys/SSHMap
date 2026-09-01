@@ -54,7 +54,7 @@ def edge_point(rect: QRectF, center: QPointF, toward: QPointF) -> QPointF:
     """Точка пересечения луча (из `center` в сторону `toward`) с границей rect.
 
     Используется для «стрелки от края к краю»: пучок выходит из границы узла,
-    а не из его центра (AUDIT.md / док §7 проблема #7).
+    а не из его центра (бывш. AUDIT.md / док §7, проблема #7).
     """
     dx = toward.x() - center.x()
     dy = toward.y() - center.y()

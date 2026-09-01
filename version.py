@@ -14,6 +14,6 @@ VERSION_FORMAT хранит версию ФОРМАТА JSON проекта (м�
 реальном изменении схемы; формат не обязан совпадать с релизом).
 """
 
-APP_VERSION = "0.9.9.7"      # релиз приложения (лог старта, заголовок окна) — v0.9.9.7: PDF-экспорт карты (MapScene.render_to_pdf, QPdfWriter поверх render_to_pixmap), пункт меню «Файл», tests/test_pdf_export.py
+APP_VERSION = "1.0"          # релиз приложения (лог старта, заголовок окна) — v1.0: Терминал v1 завершён (RC1–RC4 + финал): посячейный холст QWidget+QPainter, полная клавиатура + выделение/копирование, resize PTY, скроллбэк pyte.HistoryScreen, Быстрый запуск; финал: ключи terminal_* в ~/.sshmap/config.json (UI — v1.1) + полный acceptance tests/test_terminal_acceptance.py
 APP_NAME = "SSH Map"         # базовое имя (заголовок окна)
 VERSION_FORMAT = "0.9"       # версия формата JSON проекта (+ "background", storage/project.py)

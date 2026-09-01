@@ -93,7 +93,9 @@ check("delivered arg is bytes (not str)", bool(received) and isinstance(received
       f"type={type(received[0]).__name__ if received else 'n/a'}")
 
 # ════════════════════════════════════════════════════════════
-# #3b. E2E: SSHTerminalWindow рендерит байты в документ (до фикса — пустой экран)
+# #3b. E2E: SSHTerminalWindow рендерит байты в экран (до фикса — пустой экран).
+#      v1.0RC1: окно использует посячейный холст TerminalWidget (не QPlainTextEdit);
+#      проверка — через widget.visible_text() (текст pyte-сетки).
 # ════════════════════════════════════════════════════════════
 import modules.ssh_terminal as ST
 
@@ -108,10 +110,10 @@ try:
     tdata = ServerData(id="termw1", alias="T", host="127.0.0.1", user="u")
     w3 = ST.SSHTerminalWindow(tdata, None)
     w3.show()
-    # ждём, пока render-таймер (33 мс) перерисует экран после emit из потока
-    wait_until(lambda: "hello" in w3.edit.toPlainText(), timeout_ms=1500)
+    # ждём, пока render-таймер (33 мс) перерисует холст после emit из потока
+    wait_until(lambda: "hello" in w3.widget.visible_text(), timeout_ms=1500)
     check("terminal window renders streamed bytes into the screen",
-          "hello" in w3.edit.toPlainText(), f"text={w3.edit.toPlainText()!r}"[:200])
+          "hello" in w3.widget.visible_text(), f"text={w3.widget.visible_text()!r}"[:200])
 finally:
     try:
         w3.close()

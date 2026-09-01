@@ -12,12 +12,10 @@ __pycache__/
 *.so
 
 # Избыточная в подробностях документация, все основное в README.md
-AUDIT.md
 CHANGELOG.md
-DESIGN.md
+CHANGELOG_HISTORY.md
 DOCUMENTATION.md
 ROADMAP.md
-STATEMENT.md
 TERMINAL.md
 FEATURES_REVIEW.md
 
