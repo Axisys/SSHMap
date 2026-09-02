@@ -45,11 +45,12 @@ def get_translator():
 
 
 # ── v1.0 финал (ROADMAP задача 9): ключи terminal_* из ~/.sshmap/config.json ───
-# Все четыре ключа ОПЦИОНАЛЬНЫ, дефолты = текущее поведение (конфиг без ключей —
+# Все ключи ОПЦИОНАЛЬНЫ, дефолты = текущее поведение (конфиг без ключей —
 # вид ровно как в RC4): палитра "default", системный моноширинный pt 10, глубина
 # HistoryScreen DEFAULT_HISTORY_LINES=1000 (скроллбэк ВКЛЮЧЁН — поведение RC3;
-# явный 0 — пользователь сознательно отключил скроллбэк). UI для ключей — v1.1
-# (диалог настроек); здесь они читаются при создании окна терминала.
+# явный 0 — пользователь сознательно отключил скроллбэк), закрытие сессии —
+# сразу (v1.1: terminal_close_behavior). UI для ключей — v1.1 (диалог настроек);
+# здесь они читаются при создании окна терминала.
 def load_terminal_settings():
     """Читает и валидирует terminal_* ключи из ~/.sshmap/config.json.
 
@@ -57,11 +58,14 @@ def load_terminal_settings():
       {"palette": str | None,     # None — не задан; неизвестное имя → окно держит "default"
        "font_family": str,        # "" — не задан (системный моноширинный)
        "font_size": int | None,   # None — не задан (pt 10)
-       "history_lines": int}      # глубина deque-истории HistoryScreen (0 = выкл.)
+       "history_lines": int,      # глубина deque-истории HistoryScreen (0 = выкл.)
+       "close_behavior": str,     # v1.1: "close" (дефолт) | "ask" — поведение закрытия
+       "max_open": int}           # v1.1.1: лимит своих открытых терминалов (дефолт 4)
     Невалидные значения (чужой тип, вне диапазона) → дефолт. Никогда не бросает.
     """
     defaults = {"palette": None, "font_family": "", "font_size": None,
-                "history_lines": DEFAULT_HISTORY_LINES}
+                "history_lines": DEFAULT_HISTORY_LINES, "close_behavior": "close",
+                "max_open": 4}
     try:
         from i18n import load_config
     except Exception:
@@ -83,6 +87,16 @@ def load_terminal_settings():
     v = cfg.get("terminal_history_lines")
     if isinstance(v, int) and not isinstance(v, bool) and 0 <= v <= 1_000_000:
         defaults["history_lines"] = v     # отрицательное/переполнение → дефолт 1000
+
+    v = cfg.get("terminal_close_behavior")
+    if isinstance(v, str) and v.strip().lower() in ("close", "ask"):
+        defaults["close_behavior"] = v.strip().lower()  # битое/чужее → "close" (дефолт)
+
+    # v1.1.1 (ROADMAP пункт 3): лимит своих открытых терминалов — дефолт 4;
+    # при достижении MainWindow предлагает закрыть старейшую сессию, а не отказывает.
+    v = cfg.get("terminal_max_open")
+    if isinstance(v, int) and not isinstance(v, bool) and 1 <= v <= 32:
+        defaults["max_open"] = v     # битое/вне диапазона → 4 (дефолт)
 
     return defaults
 
@@ -380,6 +394,8 @@ class SSHTerminalWindow(QMainWindow):
         # v1.0 финал (ROADMAP задача 9): terminal_* ключи из ~/.sshmap/config.json —
         # все опциональны, дефолты = текущее поведение (вид RC4). UI — v1.1.
         term_cfg = load_terminal_settings()
+        # v1.1 (ROADMAP задача 3): поведение закрытия сессии — используется в closeEvent.
+        self._close_behavior = term_cfg["close_behavior"]
 
         # v0.8: pyte-экран — сетка 120x32, та же геометрия, что у invoke_shell;
         # глубина скроллбэка HistoryScreen — terminal_history_lines (дефолт 1000).
@@ -542,6 +558,29 @@ class SSHTerminalWindow(QMainWindow):
         self.close()
 
     def closeEvent(self, event):
+        # v1.1 (ROADMAP задача 3): поведение закрытия сессии — terminal_close_behavior.
+        # "ask": активная сессия (SSH-поток ещё работает) → подтверждение; отмена =
+        # окно живёт (event.ignore). "close" (дефолт, как в v1.0) и уже завершённая
+        # сессия — без диалога. Теardown-устойчивость: RuntimeError C++-объектов не
+        # должен блокировать закрытие.
+        try:
+            # v1.1.1 (ROADMAP пункт 3): закрытие по лимиту своих терминалов —
+            # MainWindow ставит флаг _force_close, чтобы уже подтверждённое
+            # пользователем решение («закрыть старейшую») не спрашивали повторно.
+            if getattr(self, "_close_behavior", "close") == "ask" \
+                    and not getattr(self, "_force_close", False):
+                _thread = getattr(self, "terminal_thread", None)
+                if _thread is not None and _thread.isRunning():
+                    t = get_translator()
+                    reply = QMessageBox.question(
+                        self, t("msg.close_session_title"), t("msg.confirm_close_session"),
+                        QMessageBox.Close | QMessageBox.Cancel, QMessageBox.Close)
+                    if reply != QMessageBox.Close:
+                        event.ignore()
+                        return
+        except RuntimeError:
+            pass  # Qt teardown — закрываем без вопросов (как раньше)
+
         # AUDIT v0.7.2 (средняя #10): окно имеет WA_DeleteOnClose — C++-объект будет
         # уничтожен сразу после этого события. Сигналы ещё работающего потока могли бы
         # приехать в удалённый объект (RuntimeError/crash на некоторых билдах Qt).

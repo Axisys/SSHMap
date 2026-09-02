@@ -31,7 +31,40 @@ STATUS_WARN = "warn"        # жёлтый: порт открыт, но нет �
 STATUS_OFFLINE = "offline"  # красный: недоступен
 
 DEFAULT_INTERVAL_MS = 30_000   # интервал периодических проверок
+DEFAULT_INTERVAL_SEC = 30      # то же, в секундах — дефолт ключа status_interval_sec (v1.1)
 PROBE_TIMEOUT_S = 3.0          # таймаут одной пробы (подключение + баннер)
+
+
+def get_status_settings() -> dict:
+    """v1.1 (ROADMAP задача 4): читать настройки статусов из ~/.sshmap/config.json.
+
+    Источник — i18n.load_config() (никогда не падает, {} на ошибку). Возвращает:
+        {"interval_sec": int, "probe_timeout_sec": float}
+    Ключи ОПЦИОНАЛЬНЫ, дефолты = текущее поведение v1.0 (30 c / 3.0 c):
+        status_interval_sec      — период раундов (кламп 5..86400 c);
+        status_probe_timeout_sec — таймаут одной пробы (кламп 0.2..60 c).
+    Битые значения (не-число, bool) → дефолт. Никогда не бросает.
+    """
+    cfg: dict = {}
+    try:
+        from i18n import load_config
+        cfg = load_config() or {}
+    except Exception:  # noqa: BLE001 — конфиг опционален, дефолты важнее
+        pass
+
+    def _num(value, default: float) -> float:
+        try:
+            if isinstance(value, bool):
+                return float(default)
+            return float(value)
+        except (TypeError, ValueError):
+            return float(default)
+
+    interval = int(_num(cfg.get("status_interval_sec"), DEFAULT_INTERVAL_SEC))
+    interval = max(5, min(interval, 86400))
+    timeout = _num(cfg.get("status_probe_timeout_sec"), PROBE_TIMEOUT_S)
+    timeout = max(0.2, min(timeout, 60.0))
+    return {"interval_sec": interval, "probe_timeout_sec": timeout}
 
 
 def probe_ssh(host: str, port: int, timeout: float = PROBE_TIMEOUT_S) -> str:
@@ -116,8 +149,29 @@ class StatusChecker(QObject):
         return self._interval
 
     @property
+    def probe_timeout(self) -> float:
+        """v1.1: таймаут одной пробы (сек) — для наглядности в тестах/диалоге."""
+        return self._probe_timeout
+
+    @property
     def is_busy(self) -> bool:
         return self._busy
+
+    def set_interval(self, ms: int):
+        """v1.1 (ROADMAP задача 4): сменить интервал раундов на лету (диалог «Статусы»).
+
+        Кламп как в конструкторе (не чаще раза в 5 c). Работает и во время
+        активного таймера — QTimer.setInterval перезапускает отсчёт.
+        """
+        self._interval = max(5000, int(ms))
+        try:
+            self._timer.setInterval(self._interval)
+        except RuntimeError:
+            pass  # Qt teardown — C++-объект таймера уже уничтожен
+
+    def set_probe_timeout(self, seconds: float):
+        """v1.1 (ROADMAP задача 4): сменить таймаут пробы (действует со следующего раунда)."""
+        self._probe_timeout = max(0.2, float(seconds))
 
     def set_servers(self, servers):
         """Обновить список целей. `servers` — итерируемое (id, host, port)."""

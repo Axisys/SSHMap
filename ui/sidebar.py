@@ -60,12 +60,15 @@ CONTEXT_MENU_ITEMS = (
 )
 
 # Кнопки панели: (атрибут, иконка, i18n-ключ) — порядок как в исходном _setup_ui.
+# v1.1: 6-я кнопка «Настройки» (хаб, ROADMAP v1.1 задача 2) — векторная шестерёнка
+# из ui/icons.py; retranslate() ниже обходит _BUTTONS — новый кортеж подхватывается.
 _BUTTONS = (
     ("btn_add", "add_server", "btn.add_server", "Добавить сервер"),
     ("btn_connect", "connection", "btn.add_connection", "Добавить связь"),
     ("btn_connect_ssh", "ssh", "btn.connect_ssh", "SSH Подключение"),
     ("btn_props", "properties", "btn.properties", "Свойства"),
     ("btn_delete", "delete", "btn.delete", "Удалить"),
+    ("btn_settings", "settings", "btn.settings", "Настройки"),
 )
 
 
@@ -75,6 +78,7 @@ class SidebarPanel(QWidget):
     Сигналы (MainWindow подключает свои слоты):
         add_server_clicked / add_connection_clicked / connect_ssh_clicked /
         show_properties_clicked / delete_selected_clicked — клики кнопок;
+        settings_clicked — клик кнопки «Настройки» (v1.1, хаб настроек);
     события дерева (itemClicked/itemDoubleClicked/customContextMenuRequested)
     доступны напрямую на self.tree.
     """
@@ -84,6 +88,7 @@ class SidebarPanel(QWidget):
     connect_ssh_clicked = Signal()
     show_properties_clicked = Signal()
     delete_selected_clicked = Signal()
+    settings_clicked = Signal()  # v1.1: кнопка ⚙ «Настройки» (6-я в _BUTTONS)
 
     def __init__(self, translate_fn=None, actions=None, show_title: bool = True,
                  parent=None):
@@ -166,6 +171,7 @@ class SidebarPanel(QWidget):
         self.btn_connect_ssh.clicked.connect(self.connect_ssh_clicked)
         self.btn_props.clicked.connect(self.show_properties_clicked)
         self.btn_delete.clicked.connect(self.delete_selected_clicked)
+        self.btn_settings.clicked.connect(self.settings_clicked)  # v1.1: хаб настроек
 
     # ── i18n (колбэк + retranslate — регрессия на баг v0.9.2) ─────────────────
 
@@ -206,6 +212,22 @@ class SidebarPanel(QWidget):
             pass  # Qt teardown — виджеты уже уничтожены
 
     # ── Кнопки ─────────────────────────────────────────────────────────────────
+
+    def set_buttons_visible(self, visible: bool) -> None:
+        """v1.1.1 (ROADMAP пункт 5): show/hide блока кнопок сайдбара.
+
+        Ключ ui_show_sidebar_buttons (дефолт True — поведение v1.1). Layout сам
+        перестраивается: скрытые кнопки занимают ноль места, дерево/поиск растут.
+        Весь сайдбар прячется отдельно (MainWindow: пункт меню «Вид → Сайдбар»);
+        этот метод трогает только кнопочный блок.
+        """
+        for attr, _icon, _key, _ru in _BUTTONS:
+            btn = getattr(self, attr, None)
+            if btn is not None:
+                try:
+                    btn.setVisible(bool(visible))
+                except RuntimeError:
+                    pass  # Qt teardown — виджет уже уничтожен
 
     def _set_btn_icon(self, btn, name):
         """UI polish: векторная иконка на кнопке (no-op без ui/icons)."""

@@ -28,6 +28,12 @@ from i18n import t as it, set_language as _set_lang
 from models.server import ServerData
 import ui.main_window as MW
 
+# Геометрический baseline (vp=900 → x=240) зашит под РУССКИЙ сайдбар: minSizeHint
+# кнопки «Добавить сервер» = 280 px, на английском («Add Server») — 232 px и viewport
+# шире (931). С v1.1.1 язык по умолчанию — en (ROADMAP пункт 2), поэтому ru ставим
+# явно ДО создания окна (распределение QSplitter фиксируется при первом layout).
+_set_lang("ru")
+
 win = MW.MainWindow()
 win.show(); app.processEvents()
 view = win.view
@@ -51,7 +57,7 @@ app.processEvents()
 bar = win.map_search
 line = bar._line
 
-# ══ i18n: 6 новых ключей × en/ru/zh, наборы идентичны (326 на язык; +13 в v0.9.9.2, +2 в v0.9.9.7, +22 в v1.0RC4) ══
+# ══ i18n: 6 новых ключей × en/ru/zh, наборы идентичны (373 на язык; +13 в v0.9.9.2, +2 в v0.9.9.7, +22 в v1.0RC4, +33 в v1.1) ══
 print("== i18n ==")
 langs = {}
 for code in ("en", "ru", "zh"):
@@ -61,9 +67,9 @@ new_keys = ["view.find_on_map", "search.map_placeholder", "search.count",
             "search.no_results", "hint.map_search", "status.no_matches"]
 missing = [k for k in new_keys if any(not langs[c].get(k, "").strip() for c in ("en", "ru", "zh"))]
 check("6 новых ключей v0.9.8 есть и не пусты в en/ru/zh", not missing, str(missing))
-check("key sets identical across en/ru/zh (326 keys each)",
+check("key sets identical across en/ru/zh (373 keys each)",
       set(langs["en"]) == set(langs["ru"]) == set(langs["zh"])
-      and all(len(d) == 326 for d in langs.values()),
+      and all(len(d) == 373 for d in langs.values()),
       str({c: len(d) for c, d in langs.items()}))
 
 # ══ MapSearchBar: клавиатура (Enter / Shift+Enter / Esc) и счётчик ══

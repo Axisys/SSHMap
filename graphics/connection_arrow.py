@@ -30,6 +30,35 @@ def _t(key: str, **kwargs) -> str:
             return tpl
 
 
+def _show_type_on_label() -> bool:
+    """v1.1.1 (ROADMAP пункт 6): опция «всегда показывать тип на плашке связи».
+
+    Ключ ui_show_connection_type из ~/.sshmap/config.json (дефолт False — поведение
+    v1.1: на плашке только метка, тип несёт цвет). Удобно для экспорта PNG/PDF,
+    где цвет менее заметен. Читается при каждом перерисовывании текста метки —
+    после ОК в диалоге настроек MainWindow вызывает refresh_label() на стрелках.
+    """
+    try:
+        from i18n import load_config
+        v = load_config().get("ui_show_connection_type")
+        return bool(v) if isinstance(v, bool) else False
+    except Exception:
+        return False
+
+
+def label_display_text(ctype: str, label: str) -> str:
+    """Текст плашки связи с учётом опции «тип на плашке» (v1.1.1).
+
+    Опция выключена — только метка (как в v1.1). Включена — «SSH · <метка>»;
+    без метки — сам тип («SSH»), чтобы на экспорте тип был виден у каждой связи.
+    """
+    text = (label or "").strip()
+    if not _show_type_on_label():
+        return text
+    type_name = _t(f"connection.type.{ctype}")
+    return f"{type_name} · {text}" if text else type_name
+
+
 # ── Типы связей (v0.7): id → базовый цвет стрелки ────────────────
 # SSH сохраняет зелёный цвет v0.6 и остаётся типом по умолчанию —
 # старые проекты без поля "type" загружаются как SSH-связи.
@@ -140,8 +169,8 @@ class ConnectionArrow(QGraphicsPathItem):
         self._label_bg.setPen(QPen(Qt.PenStyle.NoPen))
         self._label_bg.setBrush(QBrush(QColor(2, 6, 23, 190)))
 
-        # Текст метки
-        self._label = QGraphicsTextItem(label, self)
+        # Текст метки (v1.1.1: с учётом опции «тип на плашке» — label_display_text)
+        self._label = QGraphicsTextItem(label_display_text(ctype, label), self)
         self._label.setFont(QFont("Consolas", 9))
 
         self._apply_visual_state()
@@ -275,10 +304,16 @@ class ConnectionArrow(QGraphicsPathItem):
         self._base_color = type_color(ctype)
         self.setToolTip(_t(f"connection.type.{ctype}"))
         self._apply_visual_state()
+        # v1.1.1: тип на плашке мог появиться/измениться — пересобираем текст метки
+        self.refresh_label()
 
     def set_label(self, text: str):
         self.label_text = text
-        self._label.setPlainText(text)
+        self.refresh_label()
+
+    def refresh_label(self):
+        """v1.1.1: пересобрать текст плашки (опция «тип на плашке») и геометрию."""
+        self._label.setPlainText(label_display_text(self.connection_type, self.label_text))
         self.update_position()
 
     def hoverEnterEvent(self, event):

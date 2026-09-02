@@ -64,6 +64,7 @@ except ImportError:
 
 from PySide6.QtCore import Qt, QRectF, QSize, QTimer, QPointF
 from PySide6.QtGui import (
+    QFont,      # v1.1.1: шрифт UI из конфига (QApplication.setFont)
     QMouseEvent,
     QUndoStack,  # v0.8.3: undo/redo
 )
@@ -160,14 +161,28 @@ class MainWindow(QMainWindow):
                 if self.log:
                     self.log.warning(f"i18n UI update error: {e}")
 
+        # ── v1.1.1: сохранённые UI-опции при старте (шрифты, кнопки сайдбара,
+        #    режим двойного клика) — те же методы, что применение по ОК в диалоге ──
+        self._node_double_click_mode = "properties"  # дефолт до чтения конфига
+        try:
+            self._apply_ui_options_from_config()
+        except Exception as e:
+            if self.log:
+                self.log.warning(f"Apply UI options at startup failed: {e}")
+
         # ── v0.7.1: фоновая проверка статусов узлов (online/warn/offline) ──
-        # Пробы идут в отдельном потоке — GUI не блокируется; интервал 30 c.
+        # Пробы идут в отдельном потоке — GUI не блокируется.
+        # v1.1 (ROADMAP задача 4): интервал/таймаут — из ~/.sshmap/config.json
+        # (status_interval_sec / status_probe_timeout_sec; дефолты 30 c / 3.0 c =
+        # поведение v1.0); на лету меняются из диалога настроек (_apply_settings_from_dialog).
         self._status_checker = None
         try:
             from services.status_checker import StatusChecker as _StatusChecker, \
-                DEFAULT_INTERVAL_MS as _STATUS_INTERVAL
+                get_status_settings as _get_status_cfg
+            _st_cfg = _get_status_cfg()
             self._status_checker = _StatusChecker(
-                interval_ms=_STATUS_INTERVAL, parent=self)
+                interval_ms=int(_st_cfg["interval_sec"]) * 1000,
+                probe_timeout=float(_st_cfg["probe_timeout_sec"]), parent=self)
             self._status_checker.status_changed.connect(self._on_node_status_changed)
             # При уничтожении окна — остановить таймер и дождаться текущего раунда,
             # чтобы поток-проба не был убит на ходу вместе с родителем.
@@ -344,6 +359,7 @@ class MainWindow(QMainWindow):
         self.btn_connect_ssh = self.sidebar.btn_connect_ssh
         self.btn_props = self.sidebar.btn_props
         self.btn_delete = self.sidebar.btn_delete
+        self.btn_settings = self.sidebar.btn_settings  # v1.1: кнопка ⚙ «Настройки» (6-я)
         self._sidebar_title = self.sidebar.title_label  # None без i18n (как раньше)
 
         # События панели — слоты окна (те же, что до v0.9.9.4)
@@ -361,6 +377,8 @@ class MainWindow(QMainWindow):
         self.sidebar.connect_ssh_clicked.connect(self._connect_ssh_to_selected)
         self.sidebar.show_properties_clicked.connect(self._show_properties)
         self.sidebar.delete_selected_clicked.connect(self._delete_selected)
+        # v1.1: кнопка ⚙ «Настройки» внизу сайдбара → диалог настроек (хаб)
+        self.sidebar.settings_clicked.connect(self._open_settings_dialog)
 
         splitter.addWidget(self.sidebar)
 
@@ -797,6 +815,15 @@ class MainWindow(QMainWindow):
         # v0.9.8: поиск по карте (Ctrl+F) — строка поиска поверх canvas; тот же аргумент
         # про Ctrl, что у fit_map (голая F занята вводом в поля поиска)
         self._add_menu_action(view_menu, "view.find_on_map", self._toggle_map_search, "Ctrl+F")
+        # v1.1.1 (пункт 5): показать/скрыть ВЕСЬ сайдбар — один виджет в QSplitter;
+        # пункт меню — способ вернуть его. Кнопочный блок прячется отдельно
+        # (настройка ui_show_sidebar_buttons, чекбокс во вкладке «Общие»).
+        self.act_show_sidebar = view_menu.addAction(
+            self.t("view.toggle_sidebar") if self._i18n_available else "Сайдбар")
+        self.act_show_sidebar.setCheckable(True)
+        self.act_show_sidebar.setChecked(True)
+        self.act_show_sidebar.triggered.connect(self._toggle_sidebar)
+        self._register_i18n(self.act_show_sidebar, "view.toggle_sidebar")
         # v0.8.4 (бывш. DESIGN.md §D): массовое сворачивание — половина ценности фичи
         # для больших карт.
         view_menu.addSeparator()
@@ -806,6 +833,15 @@ class MainWindow(QMainWindow):
         view_menu.addSeparator()
         self._add_menu_action(view_menu, "view.set_background", self._set_background_image)
         self._add_menu_action(view_menu, "view.remove_background", self._remove_background_image)
+
+        # v1.1 (ROADMAP задача 2): диалог настроек (хаб) — пункт «Настройки» МЕЖДУ
+        # «Вид» и «Помощь». Пункт — QAction ВНУТРИ меню (не голое действие на menubar):
+        # палитра команд (Ctrl+K) обходит все QAction меню и подхватит его автоматически.
+        settings_menu = menubar.addMenu(
+            self.t("menu.settings") if self._i18n_available else "Настройки")
+        self._register_i18n(settings_menu, "menu.settings")
+        self.act_settings = self._add_menu_action(
+            settings_menu, "settings.open", self._open_settings_dialog)
 
         # Help menu
         help_menu = menubar.addMenu(self.t("menu.help") if self._i18n_available else "Помощь")
@@ -894,6 +930,19 @@ class MainWindow(QMainWindow):
     def _expand_all_servers(self):
         self._set_all_collapsed(False)
 
+    def _toggle_sidebar(self, checked: bool = True):
+        """v1.1.1 (пункт 5): показать/скрыть весь сайдбар (один виджет в QSplitter).
+
+        QAction checkable — состояние пункта = видимость панели; скрытый сайдбар
+        не теряет данные (поиск/тег-фильтр/дерево живут, refresh_sidebar работает).
+        """
+        panel = getattr(self, "sidebar", None)
+        if panel is not None:
+            try:
+                panel.setVisible(bool(checked))
+            except RuntimeError:
+                pass  # Qt teardown — панель уже уничтожена
+
     def _switch_language(self, language_code: str):
         """Switch application language and re-apply to all UI elements."""
         try:
@@ -945,10 +994,143 @@ class MainWindow(QMainWindow):
             if self.log:
                 self.log.exception(f"Error switching language to {language_code}")
 
+    # ── v1.1: диалог настроек (хаб) — ROADMAP v1.1, задачи 1–7 ────────────────
+    # ── v1.1.1: опции вокруг хаба — применение на лету без перезапуска ────────
+
+    def _apply_ui_options_from_config(self):
+        """v1.1.1: применить ui_* опции из config.json (старт и после ОК в диалоге).
+
+        * Шрифт UI — QApplication.setFont (семейство/размер; пусто/0 = системный);
+          применяется к виджетам без перезапуска (Qt пересчитывает шрифты, не
+          установленные явно на каждом виджете).
+        * Блок кнопок сайдбара — SidebarPanel.set_buttons_visible (layout сам
+          перестроится); весь сайдбар прячется отдельно — пункт меню «Вид».
+        * Режим двойного клика по узлу — кэш self._node_double_click_mode
+          ("properties" дефолт | "connect" → _run_ssh_connect).
+        """
+        try:
+            from ui.settings_dialog import load_ui_settings as _load_ui
+        except ImportError:  # плоский запуск из корня проекта
+            from settings_dialog import load_ui_settings as _load_ui
+        ui_cfg = _load_ui()
+
+        family = ui_cfg["font_family"]
+        size = ui_cfg["font_size"]
+        if family or size is not None:
+            try:
+                app = QApplication.instance()
+                if app is not None:
+                    f = QFont(app.font())
+                    if family:
+                        f.setFamily(family)
+                    if size is not None:
+                        f.setPointSize(int(size))
+                    app.setFont(f)
+            except Exception as e:  # noqa: BLE001 — шрифт не роняет старт/применение
+                if self.log:
+                    self.log.warning(f"Apply UI font failed: {e}")
+
+        panel = getattr(self, "sidebar", None)
+        if panel is not None:
+            try:
+                panel.set_buttons_visible(ui_cfg["show_sidebar_buttons"])
+            except RuntimeError:
+                pass  # Qt teardown — панель уже уничтожена
+
+        self._node_double_click_mode = ui_cfg["node_double_click"]
+
+    def _open_settings_dialog(self):
+        """v1.1: открыть диалог настроек (QTabWidget-хаб) — меню «Настройки» и кнопка ⚙."""
+        try:
+            from ui.settings_dialog import SettingsDialog
+        except ImportError:  # плоский запуск из корня проекта
+            from settings_dialog import SettingsDialog
+        dlg = SettingsDialog(self)
+        # Сигналы диалога → слоты окна (диалог не знает о MainWindow — паттерн sidebar.py):
+        # applied — применить автосохранение/статусы на лету; language_changed — тот же
+        # путь, что у пункта «Помощь → Язык» (set_language + полный retranslate UI).
+        dlg.applied.connect(self._apply_settings_from_dialog)
+        dlg.language_changed.connect(self._switch_language)
+        dlg.exec()
+
+    def _apply_settings_from_dialog(self):
+        """v1.1: применить сохранённые настройки на лету (после ОК в диалоге).
+
+        * Автосохранение — QTimer прямо сейчас (интервал + старт/стоп по enabled);
+        * Статусы — StatusChecker.set_interval/set_probe_timeout (следующий раунд);
+        * v1.1.1: шрифт UI (QApplication.setFont), шрифт открытых окон терминала
+          (widget.set_font — без перезапуска), кнопки сайдбара, режим двойного
+          клика, перерисовка плашек связей (опция «тип на плашке»);
+        * Терминал (палитра/история/поведение закрытия) и внешний терминал
+          читают конфиг при следующем создании окна/запуске — действия не нужно.
+        """
+        try:
+            from storage.autosave import get_autosave_settings as _get_as
+            _as_cfg = _get_as()
+            self._autosave_enabled = bool(_as_cfg.get("enabled", True))
+            self._autosave_timer.setInterval(int(_as_cfg["interval_sec"]) * 1000)
+            if self._autosave_enabled:
+                self._autosave_timer.start()
+            else:
+                self._autosave_timer.stop()
+        except Exception as e:  # noqa: BLE001 — таймер не должен ронять применение
+            if self.log:
+                self.log.warning(f"Apply autosave settings failed: {e}")
+        checker = getattr(self, "_status_checker", None)
+        if checker is not None:
+            try:
+                from services.status_checker import get_status_settings as _get_st
+                _st_cfg = _get_st()
+                checker.set_interval(int(_st_cfg["interval_sec"]) * 1000)
+                checker.set_probe_timeout(float(_st_cfg["probe_timeout_sec"]))
+            except Exception as e:  # noqa: BLE001 — статусы не должны ронять применение
+                if self.log:
+                    self.log.warning(f"Apply status settings failed: {e}")
+
+        # v1.1.1 (пункт 1): шрифт UI + кнопки сайдбара + режим двойного клика
+        try:
+            self._apply_ui_options_from_config()
+        except Exception as e:  # noqa: BLE001 — опции не должны ронять применение
+            if self.log:
+                self.log.warning(f"Apply UI options failed: {e}")
+
+        # v1.1.1 (пункт 1): шрифт терминала — в УЖЕ ОТКРЫТЫЕ окна без перезапуска
+        try:
+            from modules.ssh_terminal import load_terminal_settings as _load_ts
+        except ImportError:
+            from ..modules.ssh_terminal import load_terminal_settings as _load_ts
+        term_cfg = _load_ts()
+        if term_cfg["font_family"] or term_cfg["font_size"] is not None:
+            for w in list(getattr(self, "_terminal_windows", [])):
+                try:
+                    w.widget.set_font(
+                        family=term_cfg["font_family"],
+                        size=term_cfg["font_size"] if term_cfg["font_size"] is not None else 10)
+                except (RuntimeError, AttributeError):
+                    pass  # Qt teardown / окно без widget — пропускаем
+
+        # v1.1.1 (пункт 6): опция «тип на плашке» — перерисовать метки связей сцены
+        try:
+            for arrow in list(getattr(self.scene, "_arrows", [])):
+                arrow.refresh_label()
+        except Exception:  # noqa: BLE001 — плашки косметика при teardown
+            pass
+
+        try:
+            self.statusBar().showMessage(self.t("status.settings_saved"))
+        except Exception:  # noqa: BLE001 — teardown-устойчивость
+            pass
+
     # ─────────────────────────────────────────────
 
     def _on_node_double_click_direct(self, node: ServerNode):
         """Handle double-click on a node."""
+        # v1.1.1 (пункт 4): режим из ключа ui_node_double_click — "connect" сразу
+        # открывает диалог входа SSH (быстрее дублирует чекбокс «Подключиться по
+        # SSH» в свойствах, тот не ломается); дефолт "properties" — поведение v1.1.
+        if getattr(self, "_node_double_click_mode", "properties") == "connect":
+            self._run_ssh_connect(node)
+            return
         try:
             dlg = AddServerDialog(self, edit_data=node.data)
             if dlg.exec() == QDialog.Accepted:
@@ -1047,7 +1229,32 @@ class MainWindow(QMainWindow):
         мог открыть терминал БЕЗ SSH-диалога (пароль уже в keyring / key auth):
         индикатор подключения, трекинг окна (_terminal_windows/_forget_terminal_window)
         и show() — ровно как штатный путь подключения.
+
+        v1.1.1 (пункт 3): лимит своих терминалов (terminal_max_open, дефолт 4) —
+        при достижении НЕ отказ: предложение закрыть СТАРЕЙШУЮ сессию / отмена.
+        Возвращает None, если пользователь отменил (вызывающий код не должен
+        сообщать об «открытом» терминале).
         """
+        try:
+            from modules.ssh_terminal import load_terminal_settings as _load_ts
+        except ImportError:
+            from ..modules.ssh_terminal import load_terminal_settings as _load_ts
+        max_open = _load_ts()["max_open"]
+        if len(self._terminal_windows) >= max_open and self._terminal_windows:
+            oldest = self._terminal_windows[0]  # порядок создания — порядок списка
+            alias = getattr(getattr(oldest, "server_data", None), "alias", "?")
+            reply = QMessageBox.question(
+                self, self.t("msg.terminal_limit_title"),
+                self.t("msg.terminal_limit_close_oldest", limit=max_open, alias=alias),
+                QMessageBox.Close | QMessageBox.Cancel, QMessageBox.Cancel)
+            if reply != QMessageBox.Close:
+                return None  # отмена — новый терминал не открываем
+            try:
+                oldest._force_close = True  # «ask»-поведение не спрашивает повторно
+                oldest.close_terminal()
+            except Exception:  # noqa: BLE001 — окно могло уже исчезнуть (teardown)
+                pass
+            self._forget_terminal_window(oldest)  # сразу из реестра (destroyed ещё в пути)
         node.update_appearance()
         node.set_ssh_connected(True)
         self._ssh_connected_nodes.add(node.data.id)  # v0.9.4-fix: сброс индикатора при закрытии терминала
@@ -1349,12 +1556,15 @@ class MainWindow(QMainWindow):
         except Exception:  # noqa: BLE001 — keyring недоступен: путь через диалог
             pwd = ""
         if pwd or (data.key_path or "").strip():
-            self._spawn_terminal_window(node, password=pwd or None, initial_command=cmd)
-            try:
-                self.statusBar().showMessage(
-                    self.t("status.ql_command", name=name, alias=data.alias), 5000)
-            except Exception:
-                pass
+            # v1.1.1: None — пользователь отменил по лимиту терминалов; статус
+            # «команда отправлена» в этом случае был бы ложным.
+            if self._spawn_terminal_window(
+                    node, password=pwd or None, initial_command=cmd) is not None:
+                try:
+                    self.statusBar().showMessage(
+                        self.t("status.ql_command", name=name, alias=data.alias), 5000)
+                except Exception:
+                    pass
         else:
             self._run_ssh_connect(node, prefill_password="", initial_command=cmd)
         if self.log:

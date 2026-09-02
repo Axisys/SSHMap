@@ -6,7 +6,7 @@
     пустые/мусорные входы без crash; bytes_to_gb («8 gb», zero/negative → '');
   * INFO_BATCH содержит все секции + маркер END;
   * модель: новые поля os_name/cpu_model + backward-compat старых JSON, round-trip collapsed;
-  * версия формата JSON = 0.9 (единая точка истины version.py), APP_VERSION 1.0.x (с v1.0RC1);
+  * версия формата JSON = 0.9 (единая точка истины version.py), APP_VERSION 1.1.x (с v1.1; раньше 1.0.x с v1.0RC1);
   * i18n-ключи v0.9 во всех трёх языках;
   * SystemInfoCollector: сигналы info_ready/info_failed, хранение data+password;
   * MainWindow: точки входа _collect_node_info/_on_info_ready/_on_info_failed.
@@ -92,12 +92,12 @@ _d2 = server_data_from_dict({"id": "t2", "alias": "B", "host": "h2", "user": "u"
                              "os_name": "Alpine", "collapsed": True})
 check("round-trip os_name/collapsed", _d2.os_name == "Alpine" and _d2.collapsed is True)
 
-# Версия формата JSON — 0.9 (единая точка истины version.py); APP_VERSION — серия v1.0
-# (переход к 1.0 выполнен в v1.0RC1: Терминал v1; формат JSON при этом НЕ меняется)
+# Версия формата JSON — 0.9 (единая точка истины version.py); APP_VERSION — серия v1.1
+# (1.0 выполнен в v1.0RC1: Терминал v1; 1.1 — диалог настроек; формат JSON НЕ меняется)
 import version as _ver_mod
 check("VERSION_FORMAT bumped to 0.9", getattr(_ver_mod, "VERSION_FORMAT", "") == "0.9",
       getattr(_ver_mod, "VERSION_FORMAT", "?"))
-check("APP_VERSION is 1.0.x (v1.0RC1+)", getattr(_ver_mod, "APP_VERSION", "").startswith("1.0"),
+check("APP_VERSION is 1.1.x (v1.1+)", getattr(_ver_mod, "APP_VERSION", "").startswith("1.1"),
       getattr(_ver_mod, "APP_VERSION", "?"))
 
 # i18n: ключи v0.9 во всех трёх языках

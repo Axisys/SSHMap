@@ -12,12 +12,11 @@ __pycache__/
 *.so
 
 # Избыточная в подробностях документация, все основное в README.md
+AUDIT.md
 CHANGELOG.md
 CHANGELOG_HISTORY.md
 DOCUMENTATION.md
 ROADMAP.md
-TERMINAL.md
-FEATURES_REVIEW.md
 
 # Секреты и конфигурации
 .env
@@ -32,7 +31,7 @@ config_secret.json
 
 # Временные файлы smoke-тестов
 _tmp_testdata/
-_tmp_testdata_v097/
+_tmp_testdata_v097
 
 # Логи приложения
 *.log

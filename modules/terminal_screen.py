@@ -18,8 +18,16 @@ v1.0RC3: pyte.Screen → pyte.HistoryScreen (TERMINAL.md §5.4) — готовы
 scroll_down()/at_bottom() — под тем же lock'ом, что и feed(). Остальной API
 (feed/resize/snapshot/render) без изменений — duck-typing.
 
+v1.1.2RC3 (AUDIT U3): application_cursor_keys() — состояние DECCKM (приватный
+режим 1) под тем же lock'ом, что и feed(): TerminalWidget по нему выбирает
+последовательности стрелок (SS3 \x1bOA… при mc/vim/htop, CSI \x1b[A… в обычном
+режиме). Проверенный факт pyte 0.8.2: приватные режимы хранятся в screen.mode
+со сдвигом влево на 5 бит (set_mode(private=True): mode << 5) — DECCKM это 32,
+а НЕ 1 (проверено прогоном на установленной версии).
+
 Headless-friendly: сам класс Screen не требует Qt — тестируется без GUI.
-Потокобезопасность: feed() из SSH-потока, snapshot()/render()/cursor из GUI-потока.
+Потокобезопасность: feed() из SSH-потока, snapshot()/render()/cursor/
+application_cursor_keys из GUI-потока.
 """
 
 import threading
@@ -226,6 +234,28 @@ class TerminalScreen:
         with self._lock:
             h = self.screen.history
             return h.position, h.size
+
+    # ── v1.1.2RC3 (AUDIT U3): состояние DECCKM для ввода ────────────────────
+    def application_cursor_keys(self):
+        """Включён ли DECCKM (Application Cursor Keys Mode, приватный режим 1)?
+
+        Полноэкранные TUI (mc/vim/htop) при запуске шлют smkx \\x1b[?1h и дальше
+        ОЖИДАЮТ стрелки в SS3-форме (\\x1bOA…\\x1bOD), а не CSI (\\x1b[A…).
+        TerminalWidget по этому флагу выбирает последовательность для стрелок
+        и Home/End (AUDIT U3: «в mc не работают стрелки»).
+
+        ВАЖНО (проверено прогоном на установленной pyte 0.8.2): приватные режимы
+        хранятся в screen.mode со сдвигом влево на 5 бит — set_mode(private=True)
+        делает mode << 5. DECCKM это **32**, а не 1: каноническая из интернета
+        проверка «1 in screen.mode» никогда не срабатывает (после \\x1b[?1h в
+        режиме {224, 800} появляется 32; по умолчанию включены DECAWM=7<<5=224
+        и DECTCEM=25<<5=800). pyte.modes константы DECCKM в 0.8.2 нет.
+
+        Читается под тем же lock'ом, что и feed(): SSH-поток может менять режимы
+        параллельно с GUI-потоком (smkx/rmkx приходят в выводе приложения).
+        """
+        with self._lock:
+            return (1 << 5) in self.screen.mode
 
     # ── рендер для GUI-потока ──────────────────────────
     def snapshot(self):

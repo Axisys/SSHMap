@@ -69,7 +69,7 @@ finish()                          # сводка + exit code
 | `test_autosave_backups.py` | regression_v097_autosave | автосохранение + кольцевой буфер бэкапов: project_key, кольцо N=3, restore, конфиг-дефолты/клампы, тики dirty/clean/no-file, open-промпт, BackupsDialog, откат на слот |
 | `test_map_search.py` | regression_v098_map_search | поиск по карте Ctrl+F: панель, совпадения alias/host/ip/comment, подсветка/затемнение (И с тег-фильтром), Enter/Shift+Enter навигация, счётчик k/N, retranslate, закрытие при смене проекта; PySide6-menu guard; resize-перестановка панели (v0.9.9.1) |
 | `test_selection_sync.py` | regression_v0991_selection_sync | selection sync без blockSignals: reentry-guard, внешние слоты работают во время программной смены, идемпотентный пересчёт, MapView.resized |
-| `test_ext_terminal_dialog.py` | regression_v0992_ext_terminal_ui | v0.9.9.2 UI внешнего терминала: i18n 326 ключа × en/ru/zh (пinned), состав комбобокса по платформе, сохранение пресета сразу, «Сбросить к умолчанию», detect_terminal уважает пресет |
+| `test_ext_terminal_dialog.py` | regression_v0992_ext_terminal_ui | v0.9.9.2 UI внешнего терминала: i18n 359 ключа × en/ru/zh (пinned), состав комбобокса по платформе, сохранение пресета сразу, «Сбросить к умолчанию», detect_terminal уважает пресет |
 
 ### Новые в серии v0.9.9.x (без предшественника)
 
@@ -92,13 +92,31 @@ finish()                          # сводка + exit code
 
 | файл | покрывает |
 |---|---|
-| `test_quick_launch.py` | v1.0RC4 Быстрый запуск: модель (дефолт [], порядок, старые JSON → [], sanitize битых записей/типов, round-trip без пароля); QuickLaunchDialog (prefill таблицы, валидация name/value/http(s)-схемы/дубликата, добавление url+command, удаление строки, пустой диалог нового сервера); AddServerDialog (кнопка «Быстрый запуск…», quick_launch переживает правку других полей, подхват результата QuickLaunchDialog); E2E сайдбар (подменю ПЕРВЫМ пунктом выше SSH, состав Webmin/K9S/«Настроить…», URL → webbrowser.open с точным URL); E2E карта (синтетический QContextMenuEvent: подменю первым, command-пункт → терминал с initial_command="k9s" при key auth); SSHTerminalWindow с фейковым потоком (до connected_signal байты не уходят, после — ровно b"k9s\n", повторный emit не дублирует, окно без команды сигнал игнорирует); настройка из подменю (undo восстанавливает список, _do_save пишет quick_launch в JSON, перезагрузка восстанавливает); v1.0-fix §7b: KeyError "name" in LogRecord — логирование успеха URL/команды без extra-коллизии с LogRecord.name; i18n 22 ключа × en/ru/zh + паритет 326 |
+| `test_quick_launch.py` | v1.0RC4 Быстрый запуск: модель (дефолт [], порядок, старые JSON → [], sanitize битых записей/типов, round-trip без пароля); QuickLaunchDialog (prefill таблицы, валидация name/value/http(s)-схемы/дубликата, добавление url+command, удаление строки, пустой диалог нового сервера); AddServerDialog (кнопка «Быстрый запуск…», quick_launch переживает правку других полей, подхват результата QuickLaunchDialog); E2E сайдбар (подменю ПЕРВЫМ пунктом выше SSH, состав Webmin/K9S/«Настроить…», URL → webbrowser.open с точным URL); E2E карта (синтетический QContextMenuEvent: подменю первым, command-пункт → терминал с initial_command="k9s" при key auth); SSHTerminalWindow с фейковым потоком (до connected_signal байты не уходят, после — ровно b"k9s\n", повторный emit не дублирует, окно без команды сигнал игнорирует); настройка из подменю (undo восстанавливает список, _do_save пишет quick_launch в JSON, перезагрузка восстанавливает); v1.0-fix §7b: KeyError "name" in LogRecord — логирование успеха URL/команды без extra-коллизии с LogRecord.name; i18n 22 ключа × en/ru/zh + паритет 359 |
 
 ### Новые в v1.0 (финал)
 
 | файл | покрывает |
 |---|---|
-| `test_terminal_acceptance.py` | v1.0 финал — полный acceptance всех RC одним прогоном без сети: состояние релиза (APP_VERSION == "1.0", pyproject-сверка, TerminalScreen.render() на месте и DEPRECATED — удаление не раньше v1.2, i18n-паритет 326); bash (промпт + ls --color через окно: SGR 34/93/256/truecolor → пиксельные чернила холста, ввод только \r\n); vim (ESC[?25l/h — курсор скрыт/виден по пустой строке, SGR 41-фон, known limitation: режима 1049 нет — экран не восстанавливается); htop (повторяющиеся полноэкранные фреймы ESC[2J, dirty-рендер без таймера); копирование (выделение мышью → буфер, Ctrl+C при выделении = копирование/в канал ничего, без выделения = \x03, Ctrl+V = bracketed paste единым блоком); конфиг задачи 9 (load_terminal_settings: дефолты/валидные/битые/явный 0; окно: nord → фон #2e3440, Consolas 12, глубина истории 50, неизвестная палитра → default, без конфига → скроллбэк включён 1000) |
+| `test_terminal_acceptance.py` | v1.0 финал — полный acceptance всех RC одним прогоном без сети: состояние релиза (APP_VERSION == "1.1.1" после бампа v1.1.1, pyproject-сверка, TerminalScreen.render() на месте и DEPRECATED — удаление не раньше v1.2, i18n-паритет 373: +33 в v1.1, +14 в v1.1.1); bash (промпт + ls --color через окно: SGR 34/93/256/truecolor → пиксельные чернила холста, ввод только \r\n); vim (ESC[?25l/h — курсор скрыт/виден по пустой строке, SGR 41-фон, known limitation: режима 1049 нет — экран не восстанавливается); htop (повторяющиеся полноэкранные фреймы ESC[2J, dirty-рендер без таймера); копирование (выделение мышью → буфер, Ctrl+C при выделении = копирование/в канал ничего, без выделения = \x03, Ctrl+V = bracketed paste единым блоком); конфиг задачи 9 + v1.1 + v1.1.1 (load_terminal_settings: дефолты/валидные/битые/явный 0, в т.ч. terminal_close_behavior — trim/"ask", битое → "close"; v1.1.1: terminal_max_open — дефолт 4, кламп 1..32, str/99 → дефолт; окно: nord → фон #2e3440, Consolas 12, глубина истории 50, неизвестная палитра → default, без конфига → скроллбэк включён 1000) |
+
+### Новые в v1.1
+
+| файл | покрывает |
+|---|---|
+| `test_settings_dialog.py` | v1.1 диалог настроек (хаб): i18n (+33 ключа, паритет 373 с учётом v1.1.1), векторная иконка шестерёнки (`_DRAWERS["settings"]`), 6-я кнопка ⚙ сайдбара (кортеж в `_BUTTONS`, сигнал `settings_clicked`); миграция external_terminal (legacy `~/.sshmap_settings.json` → config.json: копирование, приоритет конфига, best-effort-удаление); StatusChecker (`get_status_settings()` клампы/битые значения, `set_interval()`/`set_probe_timeout()`); terminal_close_behavior (фейковый поток + patched QMessageBox.question: "ask" + живая сессия → подтверждение, Отмена держит окно, "close"/завершённая сессия — без диалога); SettingsDialog (порядок 6 вкладок, диапазоны виджетов, prefill из конфига, `collect()` ровно 17 ключей = v1.1:10 + v1.1.1:7 + типы, OK → merge-запись + `applied()`, Cancel no-op); вкладка языка (немедленный `language_changed` + retranslate через `i18n.set_language`; сценарий ru→en — с v1.1.1 дефолтный язык en, стартовая точка ставится явно); точки входа MainWindow (меню «Настройки» между «Вид»/«Помощь», act_settings в actions меню, автоподхват CommandPalette, кнопка сайдбара открывает диалог, live-применение: StatusChecker 45 s / 2.5 s + таймер автосохранения stop/start) |
+
+### Новые в v1.1.1 (опции вокруг хаба)
+
+| файл | покрывает |
+|---|---|
+| `test_settings_options.py` | v1.1.1 тематический тест релиза (ROADMAP v1.1.1, 50 проверок): i18n (+14 ключей, паритет 359→373); дефолтный язык en — новый пользователь (без config.json) vs существующий (сохранённый ru через `get_last_language`), `i18n._default_language == "en"`; шрифты — валидатор `load_ui_settings()` (дефолты/trim/битые типы/0=системный/вне диапазона), поля «Общих»/«Терминала»/«Карта» + prefill, live-применение (`QApplication.setFont` без перезапуска + `widget.set_font()` в открытое окно; без ключей — не меняется); лимит своих терминалов — `terminal_max_open` (дефолт 4): ниже лимита без диалога, на лимите QMessageBox «закрыть старейшую» (Close → `close_terminal`+`_force_close` старейшей + новое окно; Cancel → None, реестр не тронут), `terminal_max_open=2` из конфига; двойной клик по узлу — `ui_node_double_click` properties/connect/битое→properties, кэш `_node_double_click_mode`, "connect" → `_run_ssh_connect`; кнопки сайдбара — `set_buttons_visible(False/True)` (6 кнопок), конфиг через `_apply_settings_from_dialog()` (дерево/поиск при этом видны), меню «Вид → Сайдбар» (PySide6 6.11: `trigger()` = клик — сам инвертирует checked и эмитит triggered с новым состоянием); плашка связи — `label_display_text` (выкл → только метка, вкл → «SSH · <метка>», без метки → тип), E2E стрелка + `refresh_label()` без пересоздания, maxLength 20 + подсказка `connection.label_hint`, старая 30-символьная метка НЕ обрезана (`_LabelLineEdit` — Qt setMaxLength обрезает существующий текст); состояние релиза (APP_VERSION == "1.1.1", pyproject) |
+
+### Новые в серии v1.1.2 (RC)
+
+| файл | покрывает |
+|---|---|
+| `test_rc3_terminal_window.py` | v1.1.2RC3 (U3 — реализовано досрочно, до RC3-выпуска): стрелки в mc — DECCKM/SS3. Факт pyte 0.8.2: приватные режимы в screen.mode со сдвигом <<5 — DECCKM = 32, а не 1 (каноническая проверка «1 in screen.mode» не работает), дефолтный mode {224, 800} = DECAWM+DECTCEM; `TerminalScreen.application_cursor_keys()` под lock (smkx \x1b[?1h → True, rmkx \x1b[?1l → False, составная \x1b[?1;25h); клавиатура offscreen: DECCKM off → CSI \x1b[A/B/C/D + \x1b[H/\x1b[F (регрессия v1.0RC2), DECCKM on → SS3 \x1bOA/OB/OD/OC + \x1bOH/\x1bOF; не зависят от режима: PageUp/Down/Delete (CSI ~), F1–F4 (SS3 — обычное кодирование), F5, Enter/Backspace; цикл smkx/rmkx — последовательность следует за выводом приложения; thread=None + DECCKM on — без исключений; потокобезопасность: feed из SSH-потока параллельно с чтением режима. Секции N7/U2 добавятся по мере реализации RC3 |
 
 ### Отдельные смоуки (перенесены на _common.py)
 
@@ -126,8 +144,9 @@ finish()                          # сводка + exit code
 3. **i18n-пину ключей:** при добавлении i18n-ключей в код обновить числовой пин
    «N ключей» в файлах, которые его проверяют (test_sidebar_context_menu /
    test_autosave_backups / test_map_search / test_ext_terminal_dialog /
-   test_pdf_export / test_quick_launch) — иначе сьют упадёт на следующем релизе.
-   `check_i18n_keys.py` ловит сами пропуски.
+   test_pdf_export / test_quick_launch / test_settings_dialog /
+   test_settings_options / test_terminal_acceptance) — иначе сьют упадёт на
+   следующем релизе. `check_i18n_keys.py` ловит сами пропуски.
 4. **HOME-изоляция обязательна** для всех тестов, пишущих в `~/.sshmap*`
    (bootstrap делает это сам); реальный home пользователя не трогать.
 5. **Не трогать:** публичный API MainWindow, undo-стек, keyring-путь паролей,

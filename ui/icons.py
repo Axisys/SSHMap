@@ -222,6 +222,45 @@ def _draw_redo(p):
     p.drawPath(head)
 
 
+def _draw_settings(p):
+    """Шестерёнка (настройки, v1.1): контур из 8 зубцов + центральное кольцо.
+
+    Полигон считается аналитически (cos/sin в экранных координатах, y вниз):
+    на каждом зубце два узла на внешнем радиусе, между зубцами — один на
+    внутреннем; Qt-конвенции углов arcTo не используются (прямые сегменты).
+    Геометрия подобрана под 20×20: при мелких радиусах/широких зубцах контур
+    «залипает» в блин (проверено рендером) — глубокие впадины + узкие зубцы.
+    """
+    import math
+    cx, cy = 10.0, 10.0
+    r_out, r_in = 8.0, 5.0
+    tooth_half = math.radians(9.0)   # полуширина зубца (узкие зубцы — впадины читаются)
+    pts = []
+    for i in range(8):
+        base = math.radians(i * 45.0)
+        a_start = base - tooth_half
+        a_end = base + tooth_half
+        a_valley = base + math.radians(45.0 - 9.0)  # конец впадины = старт след. зубца
+        pts.append((cx + r_out * math.cos(a_start), cy + r_out * math.sin(a_start)))
+        pts.append((cx + r_out * math.cos(a_end), cy + r_out * math.sin(a_end)))
+        pts.append((cx + r_in * math.cos(a_valley), cy + r_in * math.sin(a_valley)))
+    path = QPainterPath()
+    path.moveTo(pts[0][0], pts[0][1])
+    for x, y in pts[1:]:
+        path.lineTo(x, y)
+    path.closeSubpath()
+    # Шестерёнка чуть жирнее базового контура (1.6): на 20×20 тонкий штрих
+    # скругляет впадины и зубцы перестают читаться.
+    pen = QPen(QColor(ICON_COLOR), 1.8)
+    pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+    pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+    p.setPen(pen)
+    p.drawPath(path)
+    hub = QPainterPath()
+    hub.addEllipse(QPointF(cx, cy), 2.3, 2.3)
+    p.drawPath(hub)
+
+
 _DRAWERS = {
     "new": _draw_new,
     "open": _draw_open,
@@ -235,6 +274,7 @@ _DRAWERS = {
     "center": _draw_center,
     "undo": _draw_undo,
     "redo": _draw_redo,
+    "settings": _draw_settings,  # v1.1: шестерёнка — кнопка/пункт «Настройки»
 }
 
 

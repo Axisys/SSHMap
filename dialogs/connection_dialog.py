@@ -15,6 +15,60 @@ from PySide6.QtWidgets import (
 )
 
 
+class _LabelLineEdit(QLineEdit):
+    """QLineEdit с лимитом ВВОДА, который не обрезает уже установленный текст.
+
+    v1.1.1 (ROADMAP пункт 6): Qt setMaxLength() ОБРЕЗАЕТ текущий текст при установке
+    лимита (проверено на PySide6 6.11: оба порядка — setText→setMaxLength и
+    setMaxLength→setText дают обрезку), и старые проекты с метками длиннее 20 символов
+    теряли хвост в EditConnectionDialog («лимит только на ввод» — старые метки читаются
+    без изменений). Поэтому лимит держит guard на textChanged: программный setText
+    (загрузка старой метки) проходит как есть, пользовательский ввод, выводящий текст
+    за max(лимит, длина при загрузке), обрезается хвостом. maxLength() отчитывает
+    установленное значение.
+    """
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._input_max = 16777215   # дефолт Qt — без лимита
+        self._loaded_len = 0         # длина текста при программном setText (старая метка)
+        self._guarding = False
+        self.textChanged.connect(self._enforce_input_limit)
+        # Текст из КОНСТРУКТОРА прошёл до подключения textChanged — считаем его
+        # загруженной (старой) меткой, иначе guard обрежет ввод по лимиту, а не
+        # по её длине.
+        self._loaded_len = len(self.text())
+
+    def setMaxLength(self, n: int):
+        """Запомнить лимит ввода, не обрезая существующий текст (Qt это делает)."""
+        self._input_max = max(0, int(n))
+
+    def maxLength(self) -> int:
+        return self._input_max
+
+    def setText(self, text: str):
+        # Программная установка (загрузка старой метки) — не под лимит ввода;
+        # guard-флаг: textChanged от super().setText() долетает ДО обновления
+        # _loaded_len и без флага обрезал бы саму загружаемую метку.
+        self._guarding = True
+        super().setText(text)
+        self._loaded_len = len(text)
+        self._guarding = False
+
+    def _enforce_input_limit(self, text: str):
+        if self._guarding:
+            return
+        ceiling = max(self._input_max, self._loaded_len)
+        if len(text) <= ceiling:
+            return
+        # Избыток от ввода (печать/вставка) — обрезаем хвост; курсор — в пределах допустимого.
+        self._guarding = True
+        cur = min(self.cursorPosition(), ceiling)
+        super().setText(text[:ceiling])
+        self.setCursorPosition(cur)
+        self._guarding = False
+
+
 class ConnectionDialog(QDialog):
     """Диалог создания связи между двумя узлами.
 
@@ -49,6 +103,11 @@ class ConnectionDialog(QDialog):
         self.source = QComboBox()
         self.target = QComboBox()
         self.label = QLineEdit()
+        # v1.1.1 (ROADMAP пункт 6): лимит 20 символов — только на ВВОД (новый диалог);
+        # подсказка в i18n (connection.label_hint).
+        self.label.setMaxLength(20)
+        if self._i18n_available:
+            self.label.setPlaceholderText(self.t("connection.label_hint"))
 
         # Тип связи (v0.7): порядок = порядок объявления в CONNECTION_TYPES
         self.type_combo = QComboBox()
@@ -136,7 +195,14 @@ class EditConnectionDialog(QDialog):
         self.target = QLineEdit(tgt_text)
         self.target.setReadOnly(True)
 
-        self.label = QLineEdit(getattr(arrow, "label_text", "") or "")
+        # v1.1.1 (ROADMAP пункт 6): лимит 20 символов — только на ВВОД. _LabelLineEdit:
+        # Qt setMaxLength() сразу обрезает существующий текст (проверено PySide6 6.11),
+        # поэтому старые проекты с длинными метками читаются без изменений, а лимит
+        # держит guard на вводе (см. класс).
+        self.label = _LabelLineEdit(getattr(arrow, "label_text", "") or "")
+        self.label.setMaxLength(20)
+        if self._i18n_available:
+            self.label.setPlaceholderText(self.t("connection.label_hint"))
         self.type_combo = QComboBox()
         for cid in CONNECTION_TYPES:
             display = self.t(f"connection.type.{cid}") if self._i18n_available else cid

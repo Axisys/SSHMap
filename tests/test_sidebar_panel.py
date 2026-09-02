@@ -247,7 +247,9 @@ check("quick launch: with ql callbacks — submenu first, then SSH",
 # ══ 4. РЕГРЕССИЯ БАГА v0.9.2: строки сайдбара переживают смену языка ═══════
 print("== v0.9.9.4 sidebar panel: retranslate on language switch ==")
 
-# Базовые строки на текущем языке (ru по умолчанию в изолированном HOME)
+# Базовые строки на русском: с v1.1.1 язык по умолчанию — en (новые пользователи),
+# поэтому ru ставим явно полным путём окна (заодно проверяем retranslate до baseline).
+win._switch_language("ru")
 btn_ru = win.btn_add.text()
 title_ru = win._sidebar_title.text()
 ph_ru = win.search_edit.placeholderText()

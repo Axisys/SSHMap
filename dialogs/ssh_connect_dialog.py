@@ -163,8 +163,9 @@ class SSHConnectDialog(QDialog):
         layout.addLayout(form_layout)
 
         # ── v0.9.9.2: внешний терминал — пресет + сброс к умолчанию ──────────
-        # Пресет сохраняется в ~/.sshmap_settings.json (load/save из модуля) и
-        # применяется при каждом запуске: detect_terminal() читает конфиг.
+        # Пресет сохраняется в едином ~/.sshmap/config.json (load/save из модуля,
+        # v1.1: миграция из legacy ~/.sshmap_settings.json) и применяется при
+        # каждом запуске: detect_terminal() читает конфиг.
         try:
             from ..modules import external_terminal as _ext_term_mod
         except ImportError:  # плоский запуск из корня проекта

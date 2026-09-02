@@ -41,6 +41,15 @@ v1.0RC3 — скроллбэк + dirty-рендер:
   _on_output → widget.update() напрямую, 30 FPS-таймер не нужен.
 
 Потоки: paintEvent и snapshot() — GUI-поток; feed() из SSH-потока под lock'ом
+v1.1.2RC3 — стрелки по состоянию DECCKM (AUDIT U3: «в mc не работают стрелки»):
+стрелки и Home/End шлются в SS3 (\x1bOA…\x1bOD, \x1bOH/\x1bOF), когда приложение
+включило Application Cursor Keys Mode (smkx \x1b[?1h — mc/vim/htop делают это
+при запуске), и в CSI (\x1b[A…\x1b[D, \x1b[H/\x1b[F) в обычном режиме. Состояние
+читается с tscreen.application_cursor_keys() (pyte 0.8.2: DECCKM = 32 в
+screen.mode — приватные режимы хранятся со сдвигом <<5; каноническая проверка
+«1 in screen.mode» не работает).
+
+Потоки: paintEvent и snapshot() — GUI-поток; feed() из SSH-потока под lock'ом
 TerminalScreen — race посреди кадра исключён.
 """
 
@@ -388,8 +397,13 @@ class TerminalWidget(QWidget):
         * голые PageUp/PageDown → \\x1b[5~/\\x1b[6~ — форвард в shell (семантика
           v1.0RC2 сохраняется: пейджинг less/man работает, конвенция Windows
           Terminal/GNOME/xterm);
-        * Home/End/Delete — та же семантика, что у старого SSHTerminalTextEdit
-          (\\x1b[H / \\x1b[F / \\x1b[3~ — «семантика текущего кода сохраняется»);
+        * стрелки Left/Right/Up/Down и Home/End — по состоянию DECCKM (v1.1.2RC3,
+          AUDIT U3): обычный режим → CSI (\\x1b[D/C/A/B, \\x1b[H/\\x1b[F), Application
+          Cursor Keys Mode (smkx \\x1b[?1h — mc/vim/htop) → SS3 (\\x1bOD/OC/OA/OB,
+          \\x1bOH/\\x1bOF); выбор — _cursor_key_seq() от tscreen.application_cursor_keys();
+        * Home/End/Delete — базовая семантика старого SSHTerminalTextEdit
+          (CSI \\x1b[H / \\x1b[F / \\x1b[3~ — «семантика текущего кода сохраняется»;
+          Delete/PageUp/PageDown DECCKM не зависят);
         * Ctrl+C: при выделении — копирование в буфер (semantics v0.9.3), без
           выделения — \\x03 (SIGINT; Acceptance: «Ctrl+C роняет top»);
         * Ctrl+D → \\x04, Ctrl+Z → \\x1a, Ctrl+V — bracketed paste (v0.9.4);
@@ -447,10 +461,12 @@ class TerminalWidget(QWidget):
             self._send(b"\x1b[6~")
             return
         if key == Qt.Key.Key_Home:
-            self._send(b"\x1b[H")            # как в SSHTerminalTextEdit (v0.8)
+            # CSI H в обычном режиме (как в SSHTerminalTextEdit v0.8); в DECCKM —
+            # SS3 H (\x1bOH), семантика xterm (AUDIT U3).
+            self._send(self._cursor_key_seq(b"H"))
             return
         if key == Qt.Key.Key_End:
-            self._send(b"\x1b[F")
+            self._send(self._cursor_key_seq(b"F"))   # CSI F / SS3 F по DECCKM
             return
         if key == Qt.Key.Key_Delete:
             self._send(b"\x1b[3~")
@@ -468,17 +484,21 @@ class TerminalWidget(QWidget):
         if key == Qt.Key.Key_Escape:
             self._send(b"\x1b")
             return
+        # Стрелки — по состоянию DECCKM (AUDIT U3): CSI \x1b[D/C/A/B в обычном
+        # режиме, SS3 \x1bOD/OC/OA/OB, когда mc/vim/htop включили Application
+        # Cursor Keys Mode (smkx \x1b[?1h). Без этого в mc стрелки «не работают»
+        # (приложение ждёт SS3), а в bash под ним — листают историю.
         if key == Qt.Key.Key_Left:
-            self._send(b"\x1b[D")
+            self._send(self._cursor_key_seq(b"D"))
             return
         if key == Qt.Key.Key_Right:
-            self._send(b"\x1b[C")
+            self._send(self._cursor_key_seq(b"C"))
             return
         if key == Qt.Key.Key_Up:
-            self._send(b"\x1b[A")
+            self._send(self._cursor_key_seq(b"A"))
             return
         if key == Qt.Key.Key_Down:
-            self._send(b"\x1b[B")
+            self._send(self._cursor_key_seq(b"B"))
             return
 
         text = event.text()
@@ -486,6 +506,20 @@ class TerminalWidget(QWidget):
             self._send(text.encode("utf-8"))
             return
         event.ignore()
+
+    def _cursor_key_seq(self, suffix: bytes) -> bytes:
+        """Последовательность курсорной клавиши по состоянию DECCKM (AUDIT U3).
+
+        suffix — байт-суффикс («A»/«B»/«C»/«D» у стрелок, «H»/«F» у Home/End):
+        обычный режим → CSI (\x1b[A…); Application Cursor Keys Mode (DECCKM,
+        приватный режим 1 — mc/vim/htop шлют smkx \x1b[?1h при запуске) → SS3
+        (\x1bOA…). Состояние — tscreen.application_cursor_keys(); там же
+        зафиксирован проверенный факт pyte 0.8.2: DECCKM хранится в screen.mode
+        как 32 (приватные режимы со сдвигом <<5), а не как 1.
+        """
+        if self.tscreen.application_cursor_keys():
+            return b"\x1bO" + suffix
+        return b"\x1b[" + suffix
 
     def _send(self, data: bytes):
         if data and self.terminal_thread is not None:

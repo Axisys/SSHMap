@@ -9,11 +9,19 @@
 (он виден в `ps`/диспетчере задач). Внешний терминал = ssh ОС: пароль
 пользователь вводит сам либо используется key auth (`ssh -i key -p port user@host`).
 
-Настройки — простой JSON в ~/.sshmap_settings.json:
-    {"external_terminal": "auto" | "windows_terminal" | "cmd" | "conhost"
-                            | "x-terminal-emulator" | "gnome-terminal" | "konsole"
-                            | "xfce4-terminal" | "alacritty" | "kitty"}
-Отсутствие файла/ключа = "auto".
+Настройки — единый ~/.sshmap/config.json (i18n.load_config/save_config, атомарная
+запись), ключ:
+    "external_terminal": "auto" | "windows_terminal" | "cmd" | "conhost"
+                         | "x-terminal-emulator" | "gnome-terminal" | "konsole"
+                         | "xfce4-terminal" | "alacritty" | "kitty"
+Отсутствие ключа = "auto".
+
+v1.1 (ROADMAP задача 7): до v1.0 настройка жила в отдельном ~/.sshmap_settings.json —
+у приложения было два источника настроек. Теперь при чтении выполняется миграция:
+если ключа нет в config.json, но есть в старом файле — значение копируется в
+config.json (save_config), старый файл удаляется (best effort). Запись идёт ТОЛЬКО
+в config.json. UI выбора пресета — секция SSHConnectDialog (v0.9.9.2) и вкладка
+«Общие» диалога настроек (v1.1).
 """
 
 import os
@@ -29,9 +37,11 @@ except ImportError:
 
 log = get_logger(__name__)
 
-# ── Настройки (~/.sshmap_settings.json) ─────────────────────────────
+# ── Настройки (единый ~/.sshmap/config.json; v1.1 — ROADMAP задача 7) ─────────
 
+# Имя СТАРОГО файла настроек (v0.8.2–v1.0): нужен только для миграции при чтении.
 SETTINGS_FILENAME = ".sshmap_settings.json"
+LEGACY_SETTINGS_FILENAME = SETTINGS_FILENAME  # псевдоним — яснее по смыслу
 
 # Ключи настроек внешнего терминала (значения settings key ↔ id терминала)
 TERMINAL_CHOICES_WINDOWS = ["auto", "windows_terminal", "cmd", "conhost"]
@@ -42,38 +52,87 @@ TERMINAL_CHOICES_LINUX = [
 
 
 def _settings_path() -> str:
-    return os.path.join(os.path.expanduser("~"), SETTINGS_FILENAME)
+    """v1.1: путь ЕДИНОГО файла настроек — ~/.sshmap/config.json (был .sshmap_settings.json)."""
+    return os.path.join(os.path.expanduser("~"), ".sshmap", "config.json")
+
+
+def _legacy_settings_path() -> str:
+    """Путь СТАРОГО отдельного файла (v0.8.2–v1.0) — только для миграции."""
+    return os.path.join(os.path.expanduser("~"), LEGACY_SETTINGS_FILENAME)
+
+
+def _read_legacy_settings() -> Optional[dict]:
+    """Содержимое старого ~/.sshmap_settings.json (None — отсутствует/бит)."""
+    try:
+        import json
+        with open(_legacy_settings_path(), "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else None
+    except Exception:
+        return None
+
+
+def _migrate_legacy_settings() -> Optional[str]:
+    """v1.1 (ROADMAP задача 7): разовая миграция ключа из старого файла в config.json.
+
+    Вызывается при чтении, когда ключа ещё нет в config.json: значение копируется
+    в config.json (save_config — атомарная merge-запись), затем старый файл
+    удаляется (best effort; если запись не удалась — файл остаётся и миграция
+    повторится при следующем чтении). Возвращает смигрированное значение или None.
+    """
+    legacy = _read_legacy_settings()
+    if not legacy or "external_terminal" not in legacy:
+        return None
+    raw = str(legacy["external_terminal"]).strip().lower()
+    try:
+        from i18n import save_config as _save_cfg
+        if not _save_cfg({"external_terminal": raw}):
+            return raw  # запись не удалась — значение отдаём, файл оставляем
+    except Exception:
+        return raw
+    try:
+        os.remove(_legacy_settings_path())
+    except OSError:
+        pass  # удалить не удалось (read-only home и т.п.) — ключ уже в config.json
+    log.info("Migrated external_terminal setting from %s to config.json",
+             LEGACY_SETTINGS_FILENAME)
+    return raw
 
 
 def load_external_terminal_setting() -> str:
-    """Прочитать настройку терминала из ~/.sshmap_settings.json ('auto' по умолчанию)."""
+    """Прочитать настройку терминала из ~/.sshmap/config.json ('auto' по умолчанию).
+
+    v1.1 (ROADMAP задача 7): единый файл настроек. Если ключа нет в config.json,
+    но есть в старом ~/.sshmap_settings.json — миграция при чтении
+    (_migrate_legacy_settings()). Невалидное значение → 'auto'.
+    """
+    value = None
     try:
-        import json
-        with open(_settings_path(), "r", encoding="utf-8") as f:
-            data = json.load(f)
-        value = str(data.get("external_terminal", "auto")).strip().lower()
-        valid = set(TERMINAL_CHOICES_WINDOWS if sys.platform == "win32"
-                    else TERMINAL_CHOICES_LINUX)
-        return value if value in valid else "auto"
+        from i18n import load_config as _load_cfg
+        cfg = _load_cfg() or {}
+        if "external_terminal" in cfg:
+            value = str(cfg.get("external_terminal", "auto")).strip().lower()
+        else:
+            value = _migrate_legacy_settings()
     except Exception:
         return "auto"
+    if value is None:
+        value = "auto"
+    valid = set(TERMINAL_CHOICES_WINDOWS if sys.platform == "win32"
+                else TERMINAL_CHOICES_LINUX)
+    return value if value in valid else "auto"
 
 
 def save_external_terminal_setting(value: str) -> bool:
-    """Сохранить настройку (merge с остальными ключами файла). False при ошибке."""
+    """Сохранить настройку в ~/.sshmap/config.json (атомарная merge-запись).
+
+    v1.1 (ROADMAP задача 7): старый ~/.sshmap_settings.json больше НЕ пишется;
+    если он ещё существует с ключом — load_external_terminal_setting() смигрирует
+    его и удалит файл. False при ошибке записи.
+    """
     try:
-        import json
-        path = _settings_path()
-        data = {}
-        try:
-            with open(path, "r", encoding="utf-8") as f:
-                data = json.load(f)
-        except Exception:
-            pass
-        data["external_terminal"] = value
-        with open(path, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
-        return True
+        from i18n import save_config as _save_cfg
+        return bool(_save_cfg({"external_terminal": value}))
     except Exception as e:
         log.warning("Cannot save external terminal setting: %s", e)
         return False

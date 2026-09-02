@@ -6,7 +6,8 @@
     alacritty/kitty + bash -c «; exec bash» — окно переживает выход ssh), ValueError на
     неизвестный id, -J jump;
   * detect_terminal на текущей ОС (headless-friendly);
-  * настройки ~/.sshmap_settings.json: round-trip, merge чужих ключей, invalid → auto;
+  * настройки внешнего терминала (v1.1: единый ~/.sshmap/config.json, миграция из legacy
+    ~/.sshmap_settings.json): round-trip, merge чужих ключей, invalid → auto;
   * launch(): Popen мокается — флаги детача консоли Windows;
   * connect_external error paths: no_ssh_client / no_terminal;
   * UI-интеграция: external_btn в SSHConnectDialog + i18n-ключи v0.8.2 + метод MainWindow.
@@ -29,7 +30,7 @@ from models.server import ServerData
 # ══════════════════════════════════════════════════════════
 # v0.8.2: внешний (системный) терминал — modules/external_terminal.py
 # build_command() для всех терминалов (БЕЗ реального запуска),
-# detect_terminal(), настройки ~/.sshmap_settings.json round-trip,
+# detect_terminal(), настройки внешнего терминала round-trip (v1.1: единый config.json),
 # UI-интеграция (ctx-меню + кнопка диалога).
 # ══════════════════════════════════════════════════════════
 try:

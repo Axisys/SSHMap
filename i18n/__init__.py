@@ -20,7 +20,11 @@ from typing import Optional, Dict
 # ── Configuration ──────────────────────────────────────────────
 
 _i18n_dir = os.path.dirname(__file__)  # Points to i18n/ folder
-_default_language = "ru"  # Russian is default (developer language)
+# v1.1.1 (ROADMAP пункт 2): английский по умолчанию — влияет только на НОВЫХ
+# пользователей (без сохранённого config.json); у существующих в ~/.sshmap/
+# config.json уже записан выбранный язык (get_last_language() его вернёт).
+# Вернуть русский: «Помощь → Язык» или вкладка «Язык» диалога настроек.
+_default_language = "en"  # English is default (v1.1.1; раньше "ru")
 _current_language: str = _default_language
 _translations: Dict[str, str] = {}
 

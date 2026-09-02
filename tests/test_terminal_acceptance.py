@@ -12,8 +12,10 @@
   * Ctrl+V — bracketed paste из буфера единым блоком.
 Плюс задача 9: ключи terminal_palette / terminal_font / terminal_font_size /
 terminal_history_lines из ~/.sshmap/config.json (все опциональны, дефолты = текущее
-поведение) и состояние релиза: APP_VERSION == "1.0", TerminalScreen.render() (HTML)
-остаётся deprecated (удаление не раньше v1.2), i18n-паритет без изменений.
+поведение) + v1.1.1: terminal_max_open (лимит своих терминалов) и состояние релиза:
+APP_VERSION == "1.1.1" (бамп v1.1 → v1.1.1 — мелкие опции вокруг хаба),
+TerminalScreen.render() (HTML) остаётся deprecated (удаление не раньше v1.2),
+i18n-паритет 373 (+33 ключа v1.1, +14 в v1.1.1).
 
 Запуск: python tests/test_terminal_acceptance.py   (из корня проекта) или python tests/run_all.py
 """
@@ -164,7 +166,8 @@ def clear_config():
 # ════════════════════════════════════════════════════════════
 print("== release state ==")
 
-check("APP_VERSION == '1.0' (бамп из 1.0RC4)", APP_VERSION == "1.0", APP_VERSION)
+check("APP_VERSION == '1.1.1' (бамп из 1.1: мелкие опции вокруг хаба — ROADMAP v1.1.1)",
+      APP_VERSION == "1.1.1", APP_VERSION)
 
 try:
     import tomllib as _toml
@@ -183,9 +186,9 @@ langs = {}
 for code in ("en", "ru", "zh"):
     with open(os.path.join(ROOT, "i18n", f"{code}.json"), encoding="utf-8") as f:
         langs[code] = json.load(f)
-check("i18n-паритет en/ru/zh без изменений (326 ключей; в финале v1.0 новых ключей нет — только конфиг)",
+check("i18n-паритет en/ru/zh (373 ключей; +33 в v1.1 — диалог настроек, +14 в v1.1.1)",
       set(langs["en"]) == set(langs["ru"]) == set(langs["zh"])
-      and all(len(d) == 326 for d in langs.values()),
+      and all(len(d) == 373 for d in langs.values()),
       str({c: len(d) for c, d in langs.items()}))
 
 # ════════════════════════════════════════════════════════════
@@ -384,25 +387,48 @@ print("== config: terminal_* keys ==")
 
 from modules.ssh_terminal import load_terminal_settings
 
+# v1.1: load_terminal_settings() дополнительно возвращает close_behavior
+# ("close" по умолчанию; "ask" — подтверждение закрытия активной сессии);
+# v1.1.1: + max_open (лимит своих терминалов, дефолт 4).
 clear_config()
 s = load_terminal_settings()
-check("нет конфига → дефолты (палитра default, pt 10, история 1000 — скроллбэк включён)",
+check("нет конфига → дефолты (палитра default, pt 10, история 1000 — скроллбэк включён, close_behavior=close, max_open=4)",
       s == {"palette": None, "font_family": "", "font_size": None,
-            "history_lines": TS.DEFAULT_HISTORY_LINES}, str(s))
+            "history_lines": TS.DEFAULT_HISTORY_LINES, "close_behavior": "close",
+            "max_open": 4}, str(s))
 
 write_config({"terminal_palette": " nord ", "terminal_font": " Consolas ",
               "terminal_font_size": 12, "terminal_history_lines": 50})
 s = load_terminal_settings()
 check("валидные значения читаются (trim пробелов)",
       s == {"palette": "nord", "font_family": "Consolas", "font_size": 12,
-            "history_lines": 50}, str(s))
+            "history_lines": 50, "close_behavior": "close", "max_open": 4}, str(s))
 
 write_config({"terminal_palette": 42, "terminal_font": 7,
               "terminal_font_size": "big", "terminal_history_lines": -5})
 s = load_terminal_settings()
 check("битые значения (чужие типы/вне диапазона) → дефолты",
       s == {"palette": None, "font_family": "", "font_size": None,
-            "history_lines": TS.DEFAULT_HISTORY_LINES}, str(s))
+            "history_lines": TS.DEFAULT_HISTORY_LINES, "close_behavior": "close",
+            "max_open": 4}, str(s))
+
+# v1.1.1: terminal_max_open — лимит своих терминалов (дефолт 4, диапазон 1..32)
+write_config({"terminal_max_open": 8})
+check("v1.1.1: terminal_max_open=8 читается", load_terminal_settings()["max_open"] == 8)
+write_config({"terminal_max_open": "many"})
+check("v1.1.1: битое terminal_max_open (str) → дефолт 4",
+      load_terminal_settings()["max_open"] == 4)
+write_config({"terminal_max_open": 99})
+check("v1.1.1: terminal_max_open вне диапазона (99) → дефолт 4",
+      load_terminal_settings()["max_open"] == 4)
+
+write_config({"terminal_close_behavior": " ask "})
+check("v1.1: terminal_close_behavior='ask' читается (trim пробелов)",
+      load_terminal_settings()["close_behavior"] == "ask")
+
+write_config({"terminal_close_behavior": "yell"})
+check("v1.1: битое terminal_close_behavior → дефолт 'close'",
+      load_terminal_settings()["close_behavior"] == "close")
 
 write_config({"terminal_history_lines": 0})
 check("явный terminal_history_lines=0 — отключение скроллбэка (сознательный выбор)",
