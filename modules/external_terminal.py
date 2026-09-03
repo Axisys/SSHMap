@@ -11,10 +11,17 @@
 
 Настройки — единый ~/.sshmap/config.json (i18n.load_config/save_config, атомарная
 запись), ключ:
-    "external_terminal": "auto" | "windows_terminal" | "cmd" | "conhost"
+    "external_terminal": "auto" | "windows_terminal" | "cmd"
                          | "x-terminal-emulator" | "gnome-terminal" | "konsole"
                          | "xfce4-terminal" | "alacritty" | "kitty"
 Отсутствие ключа = "auto".
+
+v1.1.2RC1 (N2): пресет «conhost» УБРАН — conhost.exe не лаунчер (не принимает /c,
+позиционные аргументы трактует как handle консоли/процесс-сервер), собранная команда
+гарантированно не работала. Старое значение конфига "conhost" трактуется как "cmd"
+(окно cmd.exe — это и есть классический conhost): маппинг в
+load_external_terminal_setting() + нормализация при миграции legacy-файла;
+build_command("conhost", ...) остаётся алиасом "cmd" для прямых вызовов.
 
 v1.1 (ROADMAP задача 7): до v1.0 настройка жила в отдельном ~/.sshmap_settings.json —
 у приложения было два источника настроек. Теперь при чтении выполняется миграция:
@@ -43,8 +50,11 @@ log = get_logger(__name__)
 SETTINGS_FILENAME = ".sshmap_settings.json"
 LEGACY_SETTINGS_FILENAME = SETTINGS_FILENAME  # псевдоним — яснее по смыслу
 
-# Ключи настроек внешнего терминала (значения settings key ↔ id терминала)
-TERMINAL_CHOICES_WINDOWS = ["auto", "windows_terminal", "cmd", "conhost"]
+# Ключи настроек внешнего терминала (значения settings key ↔ id терминала).
+# v1.1.2RC1 (N2): «conhost» убран из списка — conhost.exe не лаунчер (см. докстринг
+# модуля); старое сохранённое значение "conhost" маппится на "cmd" в
+# load_external_terminal_setting() (backward-compat).
+TERMINAL_CHOICES_WINDOWS = ["auto", "windows_terminal", "cmd"]
 TERMINAL_CHOICES_LINUX = [
     "auto", "x-terminal-emulator", "gnome-terminal", "konsole",
     "xfce4-terminal", "alacritty", "kitty",
@@ -84,6 +94,10 @@ def _migrate_legacy_settings() -> Optional[str]:
     if not legacy or "external_terminal" not in legacy:
         return None
     raw = str(legacy["external_terminal"]).strip().lower()
+    # v1.1.2RC1 (N2): «conhost» больше не пресет — нормализуем в "cmd" ДО записи,
+    # чтобы мёртвое значение не закреплялось в config.json.
+    if raw == "conhost":
+        raw = "cmd"
     try:
         from i18n import save_config as _save_cfg
         if not _save_cfg({"external_terminal": raw}):
@@ -105,6 +119,9 @@ def load_external_terminal_setting() -> str:
     v1.1 (ROADMAP задача 7): единый файл настроек. Если ключа нет в config.json,
     но есть в старом ~/.sshmap_settings.json — миграция при чтении
     (_migrate_legacy_settings()). Невалидное значение → 'auto'.
+
+    v1.1.2RC1 (N2): backward-compat — старое сохранённое значение "conhost"
+    трактуется как "cmd" (конфиг на диске НЕ перезаписывается, маппинг при чтении).
     """
     value = None
     try:
@@ -118,6 +135,9 @@ def load_external_terminal_setting() -> str:
         return "auto"
     if value is None:
         value = "auto"
+    # v1.1.2RC1 (N2): «conhost» убран из пресетов — старые конфиги читаются как "cmd".
+    if value == "conhost":
+        value = "cmd"
     valid = set(TERMINAL_CHOICES_WINDOWS if sys.platform == "win32"
                 else TERMINAL_CHOICES_LINUX)
     return value if value in valid else "auto"
@@ -150,17 +170,20 @@ def _which(name: str) -> Optional[str]:
 def detect_terminal() -> Optional[str]:
     """Найти доступный эмулятор терминала на текущей ОС.
 
-    Windows: wt.exe → cmd.exe (всегда есть) → conhost.
+    Windows: wt.exe → cmd.exe (всегда есть).
     Linux: x-terminal-emulator / gnome-terminal / konsole / xfce4-terminal /
            alacritty / kitty.
     Возвращает id ("windows_terminal"/"cmd"/... ) или None, если ничего нет.
+
+    v1.1.2RC1 (N2): «conhost» из fallback-цепочки убран — conhost.exe не лаунчер
+    (см. докстринг модуля); окно cmd.exe и есть классический conhost, а cmd.exe
+    на Windows всегда есть, так что цепочка wt → cmd покрывает все случаи.
     """
     forced = load_external_terminal_setting()
     if sys.platform == "win32":
         order = {
             "windows_terminal": lambda: _which("wt.exe"),
             "cmd": lambda: _which("cmd.exe"),
-            "conhost": lambda: _which("conhost.exe"),
             # auto: wt есть почти на всех Win10/11; cmd — гарантированный fallback
             "auto": lambda: _which("wt.exe") or _which("cmd.exe"),
         }
@@ -170,8 +193,7 @@ def detect_terminal() -> Optional[str]:
             return forced if forced in order and forced != "auto" else (
                 "windows_terminal" if _which("wt.exe") else "cmd")
         # Явно выбранный терминал не найден через which → общий fallback.
-        # AUDIT v0.8.3 (#3): conhost тоже участвует в fallback.
-        for tid in ("windows_terminal", "cmd", "conhost"):
+        for tid in ("windows_terminal", "cmd"):
             if order[tid]():
                 return tid
         return None
@@ -236,12 +258,21 @@ def build_command(terminal: str, host: str, user: str, port: int = 22,
     """Полная команда запуска внешнего терминала с ssh внутри.
 
     - Windows Terminal: `wt.exe ssh ...`
-    - cmd/conhost:      `cmd /c start "" ssh ...` (пустой заголовок окна —
+    - cmd:              `cmd /c start "" ssh ...` (пустой заголовок окна —
                         обязательный positional-аргумент start)
     - Linux gnome-terminal и родственные: `<term> -- bash -c "ssh ...; exec bash"`
       (окно не закрывается при разрыве сессии).
     Пароль никогда не входит в команду (см. докстринг модуля).
+
+    v1.1.2RC1 (N2): ветка «conhost» удалена — команда `["conhost.exe", "cmd.exe",
+    "/c", ssh_exe]` была нерабочей (conhost не лаунчер, /c не принимает; прежний
+    докстринг «cmd/conhost: cmd /c start» расходился с реальной веткой). Старый id
+    "conhost" маппится на "cmd" — окно cmd.exe и есть классический conhost.
     """
+    # v1.1.2RC1 (N2): backward-compat для прямых вызовов со старым id.
+    if terminal == "conhost":
+        terminal = "cmd"
+
     ssh_args = build_ssh_args(host, user, port, key_path, jump)
 
     if terminal == "windows_terminal":
@@ -252,12 +283,6 @@ def build_command(terminal: str, host: str, user: str, port: int = 22,
         # `start` ищет в текущем каталоге первым.
         ssh_exe = _which("ssh") or "ssh"
         return ["cmd.exe", "/c", "start", "", ssh_exe] + ssh_args[1:]
-    if terminal == "conhost":
-        # v0.9.3 fix: голый `conhost.exe ssh ...` не работает — conhost требует
-        # команду через /c (иначе окно мигает и умирает). Запускаем как
-        # `conhost cmd /c ssh ...`; ветка остаётся последним fallback'ом.
-        ssh_exe = _which("ssh") or "ssh"
-        return ["conhost.exe", "cmd.exe", "/c", ssh_exe] + ssh_args[1:]
     if terminal == "open_terminal":  # macOS
         # v0.9.4-fix: `open -a Terminal bash -c ...` не работает — open так
         # аргументы не передаёт. Корректный способ — osascript: открываем

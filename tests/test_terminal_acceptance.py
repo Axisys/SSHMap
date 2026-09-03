@@ -13,9 +13,12 @@
 Плюс задача 9: ключи terminal_palette / terminal_font / terminal_font_size /
 terminal_history_lines из ~/.sshmap/config.json (все опциональны, дефолты = текущее
 поведение) + v1.1.1: terminal_max_open (лимит своих терминалов) и состояние релиза:
-APP_VERSION == "1.1.1" (бамп v1.1 → v1.1.1 — мелкие опции вокруг хаба),
-TerminalScreen.render() (HTML) остаётся deprecated (удаление не раньше v1.2),
-i18n-паритет 373 (+33 ключа v1.1, +14 в v1.1.1).
+APP_VERSION == "1.1.2" (финал серии v1.1.2: параллельные пробы статусов + N12/N13;
+пин обновляется на каждый релиз), TerminalScreen.render() (HTML) остаётся deprecated
+(удаление не раньше v1.2), i18n-паритет 377 (+33 ключа v1.1, +14 в v1.1.1, +2 в
+v1.1.2RC2: msg.confirm_delete_profile и status.import_resolving; в v1.1.2RC3 новых
+ключей нет — terminal_wheel только конфиг; +2 в v1.1.2 final:
+settings.statuses.max_parallel и status.auto_interval_hint).
 
 Запуск: python tests/test_terminal_acceptance.py   (из корня проекта) или python tests/run_all.py
 """
@@ -166,8 +169,8 @@ def clear_config():
 # ════════════════════════════════════════════════════════════
 print("== release state ==")
 
-check("APP_VERSION == '1.1.1' (бамп из 1.1: мелкие опции вокруг хаба — ROADMAP v1.1.1)",
-      APP_VERSION == "1.1.1", APP_VERSION)
+check("APP_VERSION == '1.1.2' (финал серии: параллельные пробы статусов + N12/N13)",
+      APP_VERSION == "1.1.2", APP_VERSION)
 
 try:
     import tomllib as _toml
@@ -186,9 +189,10 @@ langs = {}
 for code in ("en", "ru", "zh"):
     with open(os.path.join(ROOT, "i18n", f"{code}.json"), encoding="utf-8") as f:
         langs[code] = json.load(f)
-check("i18n-паритет en/ru/zh (373 ключей; +33 в v1.1 — диалог настроек, +14 в v1.1.1)",
+check("i18n-паритет en/ru/zh (377 ключей; +33 в v1.1 — диалог настроек, +14 в v1.1.1, "
+      "+2 в v1.1.2RC2, +2 в v1.1.2 final)",
       set(langs["en"]) == set(langs["ru"]) == set(langs["zh"])
-      and all(len(d) == 373 for d in langs.values()),
+      and all(len(d) == 377 for d in langs.values()),
       str({c: len(d) for c, d in langs.items()}))
 
 # ════════════════════════════════════════════════════════════
@@ -392,17 +396,18 @@ from modules.ssh_terminal import load_terminal_settings
 # v1.1.1: + max_open (лимит своих терминалов, дефолт 4).
 clear_config()
 s = load_terminal_settings()
-check("нет конфига → дефолты (палитра default, pt 10, история 1000 — скроллбэк включён, close_behavior=close, max_open=4)",
+check("нет конфига → дефолты (палитра default, pt 10, история 1000 — скроллбэк включён, close_behavior=close, max_open=4, wheel=scrollback)",
       s == {"palette": None, "font_family": "", "font_size": None,
             "history_lines": TS.DEFAULT_HISTORY_LINES, "close_behavior": "close",
-            "max_open": 4}, str(s))
+            "max_open": 4, "wheel": "scrollback"}, str(s))
 
 write_config({"terminal_palette": " nord ", "terminal_font": " Consolas ",
               "terminal_font_size": 12, "terminal_history_lines": 50})
 s = load_terminal_settings()
 check("валидные значения читаются (trim пробелов)",
       s == {"palette": "nord", "font_family": "Consolas", "font_size": 12,
-            "history_lines": 50, "close_behavior": "close", "max_open": 4}, str(s))
+            "history_lines": 50, "close_behavior": "close", "max_open": 4,
+            "wheel": "scrollback"}, str(s))
 
 write_config({"terminal_palette": 42, "terminal_font": 7,
               "terminal_font_size": "big", "terminal_history_lines": -5})
@@ -410,7 +415,7 @@ s = load_terminal_settings()
 check("битые значения (чужие типы/вне диапазона) → дефолты",
       s == {"palette": None, "font_family": "", "font_size": None,
             "history_lines": TS.DEFAULT_HISTORY_LINES, "close_behavior": "close",
-            "max_open": 4}, str(s))
+            "max_open": 4, "wheel": "scrollback"}, str(s))
 
 # v1.1.1: terminal_max_open — лимит своих терминалов (дефолт 4, диапазон 1..32)
 write_config({"terminal_max_open": 8})
@@ -433,6 +438,15 @@ check("v1.1: битое terminal_close_behavior → дефолт 'close'",
 write_config({"terminal_history_lines": 0})
 check("явный terminal_history_lines=0 — отключение скроллбэка (сознательный выбор)",
       load_terminal_settings()["history_lines"] == 0)
+
+# v1.1.2RC3 (U3 остаток): terminal_wheel — "scrollback" (дефолт) | "off";
+# полный SGR-passthrough колеса в TUI отложен на v1.2+ (pyte не трекает DECSET
+# 1000/1002/1006). Ключ только конфиг — без UI в диалоге настроек.
+write_config({"terminal_wheel": "off"})
+check("v1.1.2RC3: terminal_wheel='off' читается", load_terminal_settings()["wheel"] == "off")
+write_config({"terminal_wheel": "bogus"})
+check("v1.1.2RC3: битое terminal_wheel → дефолт 'scrollback'",
+      load_terminal_settings()["wheel"] == "scrollback")
 
 # Окно с полным конфигом: палитра nord + Consolas 12 + глубина истории 50
 write_config({"terminal_palette": "nord", "terminal_font": "Consolas",

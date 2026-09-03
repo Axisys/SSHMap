@@ -16,7 +16,7 @@ ROADMAP добавляется полем/чекбоксом в существу
                      (ключи v1.0) + terminal_close_behavior (v1.1: "close"|"ask")
                      + v1.1.1: terminal_font (семейство; читался с v1.0, UI впервые),
                      terminal_max_open (лимит своих терминалов, дефолт 4);
-  * Статусы:        status_interval_sec / status_probe_timeout_sec (новые; дефолты
+  * Статусы:        status_interval_sec / status_probe_timeout_sec (v1.1; дефолты
                      30 c / 3.0 c — поведение v1.0, services/status_checker.py);
   * Автосохранение: autosave_enabled / autosave_interval_sec / backup_count (v0.9.7);
   * Карта:          v1.1.1: ui_node_double_click ("properties"|"connect"),
@@ -274,9 +274,11 @@ class SettingsDialog(QDialog):
 
     def _build_statuses_tab(self):
         try:
-            from ..services.status_checker import get_status_settings
+            from ..services.status_checker import (
+                get_status_settings, MAX_PARALLEL_LIMIT as _MPL)
         except ImportError:
-            from services.status_checker import get_status_settings
+            from services.status_checker import (
+                get_status_settings, MAX_PARALLEL_LIMIT as _MPL)
         st = get_status_settings()
 
         tab = QWidget()
@@ -294,6 +296,14 @@ class SettingsDialog(QDialog):
         self.probe_timeout_spin.setValue(st["probe_timeout_sec"])
         self._lbl_probe_timeout = QLabel(_t("settings.statuses.timeout"))
         form.addRow(self._lbl_probe_timeout, self.probe_timeout_spin)
+
+        # v1.1.2 final (задача 2): потолок параллельных проб в раунде —
+        # status_max_parallel (дефолт 16; диапазон = кламп get_status_settings).
+        self.max_parallel_spin = QSpinBox()
+        self.max_parallel_spin.setRange(1, _MPL)
+        self.max_parallel_spin.setValue(st["max_parallel"])
+        self._lbl_max_parallel = QLabel(_t("settings.statuses.max_parallel"))
+        form.addRow(self._lbl_max_parallel, self.max_parallel_spin)
 
         self.tabs.addTab(tab, _t("settings.tab.statuses"))
 
@@ -419,6 +429,8 @@ class SettingsDialog(QDialog):
         (ui_node_double_click), кнопки сайдбара (ui_show_sidebar_buttons) и тип
         на плашке связи (ui_show_connection_type). ui_font_size = 0 — системный
         размер (валидатор load_ui_settings() читает диапазон 6..72, иначе дефолт).
+        v1.1.2 final: +1 ключ — status_max_parallel (потолок параллельных проб;
+        диапазон спинбокса = кламп валидатора get_status_settings()).
         """
         return {
             "external_terminal": self.ext_term_combo.currentData() or "auto",
@@ -428,6 +440,8 @@ class SettingsDialog(QDialog):
             "terminal_close_behavior": self.close_behavior_combo.currentData() or "close",
             "status_interval_sec": int(self.status_interval_spin.value()),
             "status_probe_timeout_sec": float(self.probe_timeout_spin.value()),
+            # v1.1.2 final (задача 2): потолок параллельных проб в раунде
+            "status_max_parallel": int(self.max_parallel_spin.value()),
             "autosave_enabled": bool(self.autosave_enabled_chk.isChecked()),
             "autosave_interval_sec": int(self.autosave_interval_spin.value()),
             "backup_count": int(self.backup_count_spin.value()),
@@ -493,6 +507,7 @@ class SettingsDialog(QDialog):
 
         self._lbl_status_interval.setText(_t("settings.statuses.interval"))
         self._lbl_probe_timeout.setText(_t("settings.statuses.timeout"))
+        self._lbl_max_parallel.setText(_t("settings.statuses.max_parallel"))
 
         self.autosave_enabled_chk.setText(_t("settings.autosave.enabled"))
         self._lbl_autosave_interval.setText(_t("settings.autosave.interval"))

@@ -233,13 +233,17 @@ class CmdAddRemoveNode(_MapCommand):
         self._arrows = list(arrows or [])  # (source_id, target_id, label, ctype)
         # v0.9.4-fix (орфанные пароли): при удалении узла пароль удаляется из
         # keyring; чтобы Ctrl+Z мог его вернуть, заранее читаем его в память.
+        # v1.1.2RC1 (бонус-N11): стэш нужен и в режиме "add" — дублирование узла
+        # копирует keyring-пароль под новым id ДО push'а команды; undo ("add")
+        # удаляет запись, а redo должен её ВОССТАНОВИТЬ (раньше копия после
+        # Ctrl+Z→Ctrl+Y оставалась без пароля). Для свежего добавления записи в
+        # keyring ещё нет — load_password вернёт None, стэш пустой, restore no-op.
         self._stashed_password: Optional[str] = None
-        if mode == "remove":
-            try:
-                from services.credential_manager import get_credential_manager
-                self._stashed_password = get_credential_manager().load_password(data.id)
-            except Exception:
-                self._stashed_password = None
+        try:
+            from services.credential_manager import get_credential_manager
+            self._stashed_password = get_credential_manager().load_password(data.id)
+        except Exception:
+            self._stashed_password = None
 
     def _delete_keyring_password(self):
         try:
@@ -259,6 +263,9 @@ class CmdAddRemoveNode(_MapCommand):
     def redo(self):
         if self._mode == "add":
             self._scene.add_server(self._data)
+            # v1.1.2RC1 (бонус-N11): вернуть keyring-пароль, стэшный при создании
+            # команды (сценарий дублирования: undo удалил запись — redo её восстанавливает).
+            self._restore_keyring_password()
         else:
             self._scene.remove_server(self._data.id)
             self._delete_keyring_password()

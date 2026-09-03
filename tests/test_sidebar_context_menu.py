@@ -97,9 +97,11 @@ try:
     # v0.9.9.7: +2 ключа PDF-экспорта (file.export_pdf, status.export_pdf_ok)
     # v1.0RC4: +22 ключа Быстрого запуска (ctx.quick_launch … msg.ql_open_failed)
     # v1.1: +33 ключа диалога настроек (settings.* / menu.settings / btn.settings / status.settings_saved)
-    check("key sets identical across en/ru/zh (373 keys each)",
+    # v1.1.2RC2: +2 ключа (msg.confirm_delete_profile, status.import_resolving)
+    # v1.1.2 final: +2 ключа (settings.statuses.max_parallel, status.auto_interval_hint)
+    check("key sets identical across en/ru/zh (377 keys each)",
           set(langs["en"]) == set(langs["ru"]) == set(langs["zh"])
-          and all(len(d) == 373 for d in langs.values()),
+          and all(len(d) == 377 for d in langs.values()),
           str({c: len(d) for c, d in langs.items()}))
     _sidebar_keys = ["ctx.ssh_connect", "ctx.ssh_external", "ctx.edit_server",
                      "ctx.copy_ip", "ctx.copy_hostname", "ctx.ping",

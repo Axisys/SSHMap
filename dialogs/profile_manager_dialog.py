@@ -148,10 +148,11 @@ class ProfileManagerDialog(QDialog):
         
         if self._i18n_available:
             try:
-                from i18n import t as __t
+                # v1.1.2RC2 (N10): свой ключ удаления ПРОФИЛЯ — раньше здесь был
+                # серверный msg.confirm_delete («Delete server ...?»), кривая ветка i18n.
                 reply = QMessageBox.question(
                     self, (self.t("dialog.delete_profile") if self._i18n_available else "Удалить профиль"),
-                    f"{self.t('msg.confirm_delete').format(alias=profile.name)}",
+                    self.t("msg.confirm_delete_profile", alias=profile.name),
                     QMessageBox.Yes | QMessageBox.No,
                     QMessageBox.No
                 )

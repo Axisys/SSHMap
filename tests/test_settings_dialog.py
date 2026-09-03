@@ -21,6 +21,8 @@ ROADMAP v1.1 (задачи 1–7):
 Хранение — ЕДИНЫЙ ~/.sshmap/config.json (i18n.load_config/save_config, атомарная
 merge-запись); все ключи опциональны, дефолты = текущее поведение. i18n: +33 ключа ×
 en/ru/zh в v1.1 (паритет 326 → 359) + 14 в v1.1.1 (опции вокруг хаба — паритет 373;
++2 в v1.1.2RC2 — msg.confirm_delete_profile, status.import_resolving — паритет 375;
++2 в v1.1.2 final — settings.statuses.max_parallel, status.auto_interval_hint — паритет 377;
 свой тематический тест — tests/test_settings_options.py).
 
 Запуск: python tests/test_settings_dialog.py   (из корня проекта) или python tests/run_all.py
@@ -77,7 +79,7 @@ def clear_cfg():
 
 
 # ════════════════════════════════════════════════════════════
-# 1. i18n: +33 ключа × en/ru/zh, паритет 326 → 373
+# 1. i18n: +33 ключа × en/ru/zh, паритет 326 → 359 → … → 377 (с v1.1.2 final)
 # ════════════════════════════════════════════════════════════
 print("== i18n ==")
 langs = {}
@@ -103,9 +105,9 @@ new_keys = [
 missing = [k for k in new_keys
            if any(not langs[c].get(k, "").strip() for c in ("en", "ru", "zh"))]
 check("33 новых ключа v1.1 есть и не пусты в en/ru/zh", not missing, str(missing))
-check("key sets identical across en/ru/zh (373 keys each)",
+check("key sets identical across en/ru/zh (377 keys each)",
       set(langs["en"]) == set(langs["ru"]) == set(langs["zh"])
-      and all(len(d) == 373 for d in langs.values()),
+      and all(len(d) == 377 for d in langs.values()),
       str({c: len(d) for c, d in langs.items()}))
 
 # ════════════════════════════════════════════════════════════
@@ -159,13 +161,15 @@ check("legacy 'cmd' из ~/.sshmap_settings.json → миграция в config.
       f"v={v!r} cfg={cfg}")
 check("старый файл удалён после успешной миграции", not os.path.exists(LEGACY_PATH))
 
-# Ключ уже в config.json → legacy игнорируется (ничего не перезаписывается)
+# Ключ уже в config.json → legacy игнорируется (ничего не перезаписывается).
+# v1.1.2RC1 (N2): старое значение "conhost" больше не пресет — читается как "cmd"
+# (backward-compat при чтении; файл на диске остаётся с исходным значением).
 write_cfg({"external_terminal": "conhost"})
 with open(LEGACY_PATH, "w", encoding="utf-8") as f:
     json.dump({"external_terminal": "cmd"}, f)
 v = load_external_terminal_setting()
-check("config.json приоритетнее legacy (без перезаписи)",
-      v == "conhost" and read_cfg().get("external_terminal") == "conhost", f"v={v!r}")
+check("config.json приоритетнее legacy (без перезаписи); 'conhost' читается как 'cmd' (N2)",
+      v == "cmd" and read_cfg().get("external_terminal") == "conhost", f"v={v!r}")
 
 # save пишет ТОЛЬКО в config.json (legacy не создаётся)
 os.remove(LEGACY_PATH)
@@ -185,20 +189,24 @@ clear_cfg()
 print("== status settings ==")
 clear_cfg()
 st = get_status_settings()
-check("нет конфига → дефолты v1.0 (30 c / 3.0 c)",
-      st == {"interval_sec": 30, "probe_timeout_sec": 3.0}, str(st))
+check("нет конфига → дефолты v1.0 (30 c / 3.0 c / 16 параллельных, v1.1.2 final)",
+      st == {"interval_sec": 30, "probe_timeout_sec": 3.0, "max_parallel": 16}, str(st))
 write_cfg({"status_interval_sec": 45, "status_probe_timeout_sec": 2.5})
 st = get_status_settings()
 check("валидные значения читаются (45 c / 2.5 c)",
-      st == {"interval_sec": 45, "probe_timeout_sec": 2.5}, str(st))
+      st == {"interval_sec": 45, "probe_timeout_sec": 2.5, "max_parallel": 16}, str(st))
 write_cfg({"status_interval_sec": 1, "status_probe_timeout_sec": 99})
 st = get_status_settings()
 check("клампы: interval ≥ 5 c, timeout ≤ 60 c",
-      st == {"interval_sec": 5, "probe_timeout_sec": 60.0}, str(st))
+      st == {"interval_sec": 5, "probe_timeout_sec": 60.0, "max_parallel": 16}, str(st))
 write_cfg({"status_interval_sec": True, "status_probe_timeout_sec": "abc"})
 st = get_status_settings()
 check("битые значения (bool/str) → дефолты",
-      st == {"interval_sec": 30, "probe_timeout_sec": 3.0}, str(st))
+      st == {"interval_sec": 30, "probe_timeout_sec": 3.0, "max_parallel": 16}, str(st))
+# v1.1.2 final: клампы status_max_parallel (детально — tests/test_status_parallel.py)
+write_cfg({"status_max_parallel": 9999})
+st = get_status_settings()
+check("кламп status_max_parallel сверху → 64", st["max_parallel"] == 64, str(st))
 
 chk = StatusChecker(parent=None)
 chk.set_interval(1000)
@@ -402,17 +410,17 @@ check("«Автосохранение» отражает конфиг (выкл 
       not dlg2.autosave_enabled_chk.isChecked() and dlg2.autosave_interval_spin.value() == 120
       and dlg2.backup_count_spin.value() == 3)
 
-# collect(): ровно 17 ключей config.json (10 в v1.1 + 7 в v1.1.1), типы корректны
-# (language НЕ входит — он сразу)
+# collect(): ровно 18 ключей config.json (10 в v1.1 + 7 в v1.1.1 + 1 в v1.1.2 final),
+# типы корректны (language НЕ входит — он сразу)
 dlg2.close_behavior_combo.setCurrentIndex(1)  # ask
 dlg2.status_interval_spin.setValue(60)
 dlg2.probe_timeout_spin.setValue(4.5)
 c = dlg2.collect()
-check("collect(): ровно 17 ключей config.json (v1.1: 10 + v1.1.1: 7)",
+check("collect(): ровно 18 ключей config.json (v1.1: 10 + v1.1.1: 7 + v1.1.2 final: 1)",
       set(c) == {"external_terminal", "terminal_palette", "terminal_font_size",
                  "terminal_history_lines", "terminal_close_behavior",
-                 "status_interval_sec", "status_probe_timeout_sec", "autosave_enabled",
-                 "autosave_interval_sec", "backup_count",
+                 "status_interval_sec", "status_probe_timeout_sec", "status_max_parallel",
+                 "autosave_enabled", "autosave_interval_sec", "backup_count",
                  "ui_font_family", "ui_font_size", "terminal_font",
                  "terminal_max_open", "ui_node_double_click",
                  "ui_show_sidebar_buttons", "ui_show_connection_type"}, str(sorted(c)))
@@ -428,7 +436,7 @@ applied = []
 dlg2.applied.connect(lambda: applied.append(1))
 dlg2._on_accept()
 cfg = read_cfg()
-check("ОК: все 17 ключей записаны в config.json",
+check("ОК: все 18 ключей записаны в config.json",
       cfg is not None and all(k in cfg for k in c), str(cfg))
 check("ОК: merge — чужие ключи сохранены (language/terminal_font)",
       cfg.get("language") == "ru" and cfg.get("terminal_font") == "Consolas", str(cfg))

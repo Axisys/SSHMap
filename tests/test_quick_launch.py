@@ -468,7 +468,7 @@ try:
 finally:
     win._spawn_terminal_window = _orig_spawn
 
-# ══ 8. i18n: 22 новых ключа × en/ru/zh, наборы идентичны (373 на язык; +33 в v1.1) ══════
+# ══ 8. i18n: 22 новых ключа × en/ru/zh, наборы идентичны (377 на язык; +33 в v1.1, +2 в v1.1.2RC2, +2 в v1.1.2 final) ══════
 print("== i18n ==")
 langs = {}
 for code in ("en", "ru", "zh"):
@@ -484,9 +484,9 @@ new_keys = ["ctx.quick_launch", "ql.configure", "ql.configure_button",
             "msg.ql_open_failed"]
 missing = [k for k in new_keys if any(not langs[c].get(k, "").strip() for c in ("en", "ru", "zh"))]
 check("22 новых ключа v1.0RC4 есть и не пусты в en/ru/zh", not missing, str(missing))
-check("key sets identical across en/ru/zh (373 keys each)",
+check("key sets identical across en/ru/zh (377 keys each)",
       set(langs["en"]) == set(langs["ru"]) == set(langs["zh"])
-      and all(len(d) == 373 for d in langs.values()),
+      and all(len(d) == 377 for d in langs.values()),
       str({c: len(d) for c, d in langs.items()}))
 
 # Cleanup: dirty сбрасываем — иначе closeEvent уйдёт в диалог сохранения.

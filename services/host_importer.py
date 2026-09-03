@@ -15,7 +15,10 @@
 
 import ipaddress
 import socket
-from typing import List, Optional
+import threading
+from typing import Dict, List, Optional
+
+from PySide6.QtCore import QThread, Signal
 
 
 def parse_hosts_file(text: str) -> List[str]:
@@ -53,9 +56,50 @@ def resolve_host(hostname: str) -> Optional[str]:
         return None
 
 
+class HostResolverThread(QThread):
+    """v1.1.2RC2 (N6): пакетный DNS-резолв импорта из TXT вне GUI-потока.
+
+    Файл с десятками имён при недоступном резолвере не должен замораживать
+    интерфейс: каждый getaddrinfo() блокирует до таймаута резолвера, поэтому
+    весь список резолвится в отдельном потоке (паттерн _ProbeThread из
+    services/status_checker.py). Прогресс — сигнал progress(done, total) для
+    статус-бара; итог — resolved_map(dict): {имя: IP или None}.
+
+    Отмена: stop() выставляет threading.Event — цикл выходит между именами
+    (текущий getaddrinfo доживает свой таймаут); в этом случае resolved_map
+    приходит частичным, отсутствующие имена потребитель трактует как «не
+    резолвлено» (ip="").
+    """
+
+    progress = Signal(int, int)   # (done, total) — для статус-бара
+    resolved_map = Signal(dict)   # {имя: IP или None}
+
+    def __init__(self, hostnames, parent=None):
+        super().__init__(parent)
+        self._hostnames = list(hostnames)
+        self._cancel = threading.Event()
+
+    def stop(self):
+        """Запросить отмену (проверяется между именами)."""
+        self._cancel.set()
+
+    def run(self):
+        result: Dict[str, Optional[str]] = {}
+        total = len(self._hostnames)
+        for i, name in enumerate(self._hostnames, start=1):
+            if self._cancel.is_set():
+                break  # отмена (stop при закрытии окна) — не продолжаем резолв
+            try:
+                result[name] = resolve_host(name)
+            except Exception:
+                result[name] = None  # резолв не должен ронять поток
+            self.progress.emit(i, total)
+        self.resolved_map.emit(result)
+
+
 # v1.0-fix (audit #14): удалены мёртвые build_server_data() и import_from_text() —
 # нигде не вызывались (фактический импорт в MainWindow._import_servers собирает
-# ServerData инлайном: там же дедупликация по существующим узлам карты и
-# processEvents при длинном резолве), а аннотация/докстринг import_from_text
-# расходились с кодом. Оставлены реально используемые parse_hosts_file /
-# is_ip_address / resolve_host.
+# ServerData инлайном: там же дедупликация по существующим узлам карты), а
+# аннотация/докстринг import_from_text расходились с кодом. Оставлены реально
+# используемые parse_hosts_file / is_ip_address / resolve_host; v1.1.2RC2 (N6):
+# processEvents при длинном резолве заменён HostResolverThread (вне GUI-потока).

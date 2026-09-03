@@ -11,17 +11,30 @@
 (интервал configurable, дефолт 30 c); одновременный повторный запуск
 раунда невозможен (флаг _busy).
 
-Отмена: stop()/shutdown() выставляют threading.Event — цикл проб выходит
-между узлами (текущая проба доживает свой сетевой таймаут), затем поток
-дожидается с запасом N × timeout + 2 c. Раньше shutdown ждал лишь
-probe_timeout + 2 c, что при ≥ 2 узлах короче всего раунда — QObject
-уничтожался вместе с работающим QThread (AUDIT v0.7.2, высокая #5).
+v1.1.2 final: пробы внутри раунда — ПАРАЛЛЕЛЬНО (ThreadPoolExecutor,
+потолок status_max_parallel, дефолт 16): худший случай раунда был
+N × timeout (100 оффлайн ≈ 5 мин), теперь ceil(N/max_parallel) × timeout
+(≈ 20–30 c). Результаты прилетают по мере готовности (as_completed →
+сигнал probed в потоке QThread — семантика _busy/round_finished не
+меняется). Мягкий авто-интервал: N > LARGE_MAP_THRESHOLD (50) → интервал
+раундов удваивается (effective_interval_ms; жёсткого лимита числа серверов
+нет — ROADMAP v1.1.2 final, задача 3).
+
+Отмена: stop()/shutdown() выставляют threading.Event — проба, ещё не начавшаяся
+(ждала воркера), сразу возвращается без результата (узлу статус не присваивается,
+как «пройденный между узлами» в старом последовательном цикле); уже идущие дожи-
+вают свой сетевой таймаут. Затем поток дожидается с запасом
+ceil(N/max_parallel) × timeout + 2 c (верхняя граница; фактический выход — за
+один таймаут). Раньше shutdown ждал лишь probe_timeout + 2 c, что при ≥ 2 узлах
+короче всего раунда — QObject уничтожался вместе с работающим QThread
+(AUDIT v0.7.2, высокая #5).
 
 В headless-окружении без работающего event loop таймеры не срабатывают —
 потомки-потоки не стартуют, что делает модуль безопасным для smoke-тестов.
 """
 import socket
 import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from PySide6.QtCore import QObject, QThread, QTimer, Signal
 
@@ -34,15 +47,22 @@ DEFAULT_INTERVAL_MS = 30_000   # интервал периодических п�
 DEFAULT_INTERVAL_SEC = 30      # то же, в секундах — дефолт ключа status_interval_sec (v1.1)
 PROBE_TIMEOUT_S = 3.0          # таймаут одной пробы (подключение + баннер)
 
+# v1.1.2 final (задачи 1–3): параллельные пробы и мягкий авто-интервал
+DEFAULT_MAX_PARALLEL = 16      # дефолт ключа status_max_parallel (ROADMAP: «дефолт 16»)
+MAX_PARALLEL_LIMIT = 64        # кламп потолка (спин диалога и валидатор — один диапазон)
+LARGE_MAP_THRESHOLD = 50       # N > 50 узлов → интервал раундов удваивается («N > ~50»)
+
 
 def get_status_settings() -> dict:
-    """v1.1 (ROADMAP задача 4): читать настройки статусов из ~/.sshmap/config.json.
+    """v1.1 (ROADMAP задача 4) + v1.1.2 final (задача 2): настройки статусов из ~/.sshmap/config.json.
 
     Источник — i18n.load_config() (никогда не падает, {} на ошибку). Возвращает:
-        {"interval_sec": int, "probe_timeout_sec": float}
-    Ключи ОПЦИОНАЛЬНЫ, дефолты = текущее поведение v1.0 (30 c / 3.0 c):
+        {"interval_sec": int, "probe_timeout_sec": float, "max_parallel": int}
+    Ключи ОПЦИОНАЛЬНЫ, дефолты = текущее поведение v1.0 (30 c / 3.0 c / 16):
         status_interval_sec      — период раундов (кламп 5..86400 c);
-        status_probe_timeout_sec — таймаут одной пробы (кламп 0.2..60 c).
+        status_probe_timeout_sec — таймаут одной пробы (кламп 0.2..60 c);
+        status_max_parallel      — потолок параллельных проб в раунде
+                                   (кламп 1..MAX_PARALLEL_LIMIT; v1.1.2 final).
     Битые значения (не-число, bool) → дефолт. Никогда не бросает.
     """
     cfg: dict = {}
@@ -64,7 +84,11 @@ def get_status_settings() -> dict:
     interval = max(5, min(interval, 86400))
     timeout = _num(cfg.get("status_probe_timeout_sec"), PROBE_TIMEOUT_S)
     timeout = max(0.2, min(timeout, 60.0))
-    return {"interval_sec": interval, "probe_timeout_sec": timeout}
+    # v1.1.2 final (задача 2): потолок параллельных проб — кламп как в диалоге (1..64)
+    max_parallel = int(_num(cfg.get("status_max_parallel"), DEFAULT_MAX_PARALLEL))
+    max_parallel = max(1, min(max_parallel, MAX_PARALLEL_LIMIT))
+    return {"interval_sec": interval, "probe_timeout_sec": timeout,
+            "max_parallel": max_parallel}
 
 
 def probe_ssh(host: str, port: int, timeout: float = PROBE_TIMEOUT_S) -> str:
@@ -90,26 +114,64 @@ def probe_ssh(host: str, port: int, timeout: float = PROBE_TIMEOUT_S) -> str:
 
 
 class _ProbeThread(QThread):
-    """Один раунд проверки: пробы последовательно, результат — по мере готовности."""
+    """Один раунд проверки: пробы параллельно (ThreadPoolExecutor, v1.1.2 final),
+    результат — по мере готовности."""
 
     probed = Signal(str, str)  # (server_id, status)
 
     def __init__(self, targets, timeout: float = PROBE_TIMEOUT_S, parent=None,
-                 cancel: "threading.Event | None" = None):
+                 cancel: "threading.Event | None" = None,
+                 max_parallel: int = DEFAULT_MAX_PARALLEL):
         super().__init__(parent)
         self._targets = list(targets)  # [(id, host, port), ...]
         self._timeout = max(0.2, float(timeout))
         self._cancel = cancel
+        try:
+            mp = int(max_parallel)
+        except (TypeError, ValueError):
+            mp = DEFAULT_MAX_PARALLEL
+        self._max_parallel = max(1, min(mp, MAX_PARALLEL_LIMIT))
 
     def run(self):
-        for sid, host, port in self._targets:
-            if self._cancel is not None and self._cancel.is_set():
-                break  # раунд отменён (stop()/shutdown()) — не продолжаем пробы
-            try:
-                status = probe_ssh(host, port, self._timeout)
-            except Exception:
-                status = STATUS_OFFLINE  # проба не должна ронять раунд
-            self.probed.emit(sid, status)
+        # v1.1.2 final (задача 1): ThreadPoolExecutor вместо последовательного цикла.
+        # Худший случай раунда: ceil(N/max_parallel) × timeout (было N × timeout).
+        # Отмена проверяется перед каждой отправкой: поданные пробы доживают свой
+        # сетевой таймаут, новые не подаются; executor дожидается всех своих
+        # воркеров (with-блок), поэтому run() завершается только после последней пробы.
+        with ThreadPoolExecutor(max_workers=self._max_parallel) as pool:
+            futures = {}
+            for sid, host, port in self._targets:
+                if self._cancel is not None and self._cancel.is_set():
+                    break  # раунд отменён (stop()/shutdown()) — не подаём новые пробы
+                futures[pool.submit(self._probe_one, sid, host, port)] = sid
+            # as_completed: результаты прилетают ПО МЕРЕ ГОТОВНОСТИ (не в порядке
+            # списка целей). Сигнал эмитится здесь — в потоке QThread, а не в
+            # воркерах пула: queued-доставка в GUI-поток и порядок probed → finished
+            # (FIFO одного отправителя) сохраняются без изменений.
+            for fut in as_completed(futures):
+                try:
+                    status = fut.result()
+                except Exception:
+                    status = STATUS_OFFLINE  # проба не должна ронять раунд
+                if status is None:
+                    continue  # отменённая до начала проба — результата нет (как раньше)
+                self.probed.emit(futures[fut], status)
+
+    def _probe_one(self, sid: str, host: str, port: int):
+        """Одна проба в воркере пула (сетевой таймаут ограничен timeout).
+
+        None — раунд отменён ДО начала этой пробы (cancel-флаг выставлен, пока
+        проба ждала воркера): результат узлу не присваивается, сигнал не эмитится —
+        та же семантика, что у последовательного цикла «выход между узлами».
+        Без этой проверки отмена была бы бесполезна: submit-цикл отдаёт все N
+        задач пулу за микросекунды, и раунд доживал бы весь ceil(N/mp) × timeout.
+        """
+        if self._cancel is not None and self._cancel.is_set():
+            return None
+        try:
+            return probe_ssh(host, port, self._timeout)
+        except Exception:
+            return STATUS_OFFLINE  # проба не должна ронять раунд
 
 
 class StatusChecker(QObject):
@@ -130,10 +192,16 @@ class StatusChecker(QObject):
     round_finished = Signal(list)
 
     def __init__(self, interval_ms: int = DEFAULT_INTERVAL_MS,
-                 probe_timeout: float = PROBE_TIMEOUT_S, parent=None):
+                 probe_timeout: float = PROBE_TIMEOUT_S,
+                 max_parallel: int = DEFAULT_MAX_PARALLEL, parent=None):
         super().__init__(parent)
         self._interval = max(5000, int(interval_ms))  # не чаще раза в 5 c
         self._probe_timeout = float(probe_timeout)
+        try:
+            mp = int(max_parallel)
+        except (TypeError, ValueError):
+            mp = DEFAULT_MAX_PARALLEL
+        self._max_parallel = max(1, min(mp, MAX_PARALLEL_LIMIT))  # v1.1.2 final
         self._targets: list = []          # [(id, host, port), ...]
         self._busy = False                # раунд уже выполняется?
         self._last_results: dict = {}     # id -> последний status
@@ -141,7 +209,7 @@ class StatusChecker(QObject):
         self._cancel = threading.Event()  # AUDIT v0.7.2 #5: отмена текущего раунда
 
         self._timer = QTimer(self)
-        self._timer.setInterval(self._interval)
+        self._timer.setInterval(self.effective_interval_ms())
         self._timer.timeout.connect(self.start_round)
 
     @property
@@ -157,21 +225,60 @@ class StatusChecker(QObject):
     def is_busy(self) -> bool:
         return self._busy
 
+    @property
+    def max_parallel(self) -> int:
+        """v1.1.2 final (задача 2): потолок параллельных проб в раунде (кламп 1..64)."""
+        return self._max_parallel
+
+    @property
+    def target_count(self) -> int:
+        """v1.1.2 final: число целей текущего плана проверок."""
+        return len(self._targets)
+
+    def is_large_map(self) -> bool:
+        """v1.1.2 final (задача 3): «большая карта» — N > LARGE_MAP_THRESHOLD (50)."""
+        return len(self._targets) > LARGE_MAP_THRESHOLD
+
+    def effective_interval_ms(self) -> int:
+        """v1.1.2 final (задача 3): эффективный интервал раундов.
+
+        Мягкий предохранитель вместо жёсткого лимита числа серверов: для больших
+        карт (N > LARGE_MAP_THRESHOLD) базовый интервал удваивается — раунд
+        параллельных проб всё равно длиннее, чем на маленькой карте. Жёсткого
+        потолка нет (150 реальных серверов — легитимный случай; навигация по
+        большим картам есть — группы/теги/поиск/collapse).
+        """
+        return self._interval * 2 if self.is_large_map() else self._interval
+
     def set_interval(self, ms: int):
         """v1.1 (ROADMAP задача 4): сменить интервал раундов на лету (диалог «Статусы»).
 
         Кламп как в конструкторе (не чаще раза в 5 c). Работает и во время
         активного таймера — QTimer.setInterval перезапускает отсчёт.
+        v1.1.2 final: в таймер пишется ЭФФЕКТИВНЫЙ интервал (для больших карт —
+        удвоенный, effective_interval_ms()).
         """
         self._interval = max(5000, int(ms))
         try:
-            self._timer.setInterval(self._interval)
+            self._timer.setInterval(self.effective_interval_ms())
         except RuntimeError:
             pass  # Qt teardown — C++-объект таймера уже уничтожен
 
     def set_probe_timeout(self, seconds: float):
         """v1.1 (ROADMAP задача 4): сменить таймаут пробы (действует со следующего раунда)."""
         self._probe_timeout = max(0.2, float(seconds))
+
+    def set_max_parallel(self, n: int):
+        """v1.1.2 final (задача 2): сменить потолок параллельных проб на лету.
+
+        Кламп 1..MAX_PARALLEL_LIMIT; действует со следующего раунда (текущий
+        идёт в своём executor'е). Битое значение → дефолт (паттерн set_probe_timeout).
+        """
+        try:
+            mp = int(n)
+        except (TypeError, ValueError):
+            mp = DEFAULT_MAX_PARALLEL
+        self._max_parallel = max(1, min(mp, MAX_PARALLEL_LIMIT))
 
     def set_servers(self, servers):
         """Обновить список целей. `servers` — итерируемое (id, host, port)."""
@@ -197,7 +304,7 @@ class StatusChecker(QObject):
         self._busy = True
         self._cancel.clear()  # новый раунд — сбрасываем флаг отмены предыдущего
         thread = _ProbeThread(self._targets, self._probe_timeout, parent=self,
-                              cancel=self._cancel)
+                              cancel=self._cancel, max_parallel=self._max_parallel)
         results = []
 
         def _on_probed(sid: str, status: str):
@@ -210,6 +317,12 @@ class StatusChecker(QObject):
             if self._thread is thread:
                 self._thread = None
             thread.deleteLater()
+            # v1.1.2 final (задача 3): интервал СЛЕДУЮЩЕГО тика — под текущий размер
+            # карты (цели могли измениться во время раунда: добавили/удалили узлы).
+            try:
+                self._timer.setInterval(self.effective_interval_ms())
+            except RuntimeError:
+                pass  # Qt teardown — C++-объект таймера уже уничтожен
             self.round_finished.emit(results)
 
         self._thread = thread
@@ -232,14 +345,17 @@ class StatusChecker(QObject):
         """Остановить периодические проверки и текущий раунд.
 
         AUDIT v0.7.2 (высокая #5): ранний бег раунда невозможен — флаг отмены
-        выставляется, цикл проб выходит между узлами; затем поток дожидаем с
-        запасом N × timeout + 2 c (все пробы ограничены сетевыми таймаутами).
+        выставляется, executor перестаёт принимать новые пробы (поданные
+        доживают свой сетевой таймаут); затем поток дожидаем с запасом
+        ceil(N/max_parallel) × timeout + 2 c (v1.1.2 final: раунд параллельный —
+        раньше запас считался последовательным N × timeout).
         """
         self._timer.stop()
         self._cancel.set()
         thread = self._thread
         if thread is not None and thread.isRunning():
-            wait_ms = int(self._probe_timeout * 1000) * max(1, len(self._targets)) + 2000
+            batches = (len(self._targets) + self._max_parallel - 1) // max(1, self._max_parallel)
+            wait_ms = int(self._probe_timeout * 1000) * max(1, batches) + 2000
             if not thread.wait(wait_ms):
                 try:
                     from modules.logger import get_logger as _gl

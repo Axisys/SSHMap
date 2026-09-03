@@ -19,7 +19,9 @@ refresh_sidebar()/_sync_selection_state()/_on_tree_item_clicked() и др. — �
 тестовый шов подмены), панель лишь наполняет его пунктами (fill_context_menu).
 """
 from PySide6.QtCore import Qt, QSize, Signal
-from PySide6.QtGui import QIcon, QPixmap, QPainter, QBrush, QColor
+# v1.1.2RC2 (N9): QColor убран из импортов — с удалением мёртвого setItemData(...,
+# Qt.DecorationRole) в панели не осталось ни одного использования
+from PySide6.QtGui import QIcon, QPixmap, QPainter, QBrush
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QLabel, QLineEdit, QComboBox,
     QTreeWidget, QTreeWidgetItem, QPushButton,
@@ -156,6 +158,12 @@ class SidebarPanel(QWidget):
             btn = QPushButton(ru_fallback)
             self._set_btn_icon(btn, icon_name)
             btn.setMinimumHeight(34)  # UI polish: ровные кнопки сайдбара
+            # v1.1.2RC2 (U1, замечание пользователей): выравнивание влево — отступ
+            # от левого края, иконка, текст. QPushButton по умолчанию центрирует
+            # содержимое; QStyle не даёт настроить alignment без stylesheet,
+            # поэтому — минимальный CSS (рамка/фон нативные, стилизация только
+            # позиционированием контента).
+            btn.setStyleSheet("QPushButton { text-align: left; padding-left: 12px; }")
             if translate_fn is not None:
                 try:
                     # Эмодзи/префиксы уже содержатся в самих значениях перевода,
@@ -273,11 +281,13 @@ class SidebarPanel(QWidget):
             item.setData(0, Qt.UserRole, node.data.id)
             # Ревью-фикс v0.8.0 (#3): цветной маркер статуса узла (online/warn/offline/не проверен)
             self.apply_status_marker(item, node.status, node.data.host or "")
-            # v0.9.4: подпись тегов серым в конце строки
+            # v0.9.4: подпись тегов в конце строки («[tag1, tag2]», до 3 тегов).
+            # v1.1.2RC2 (N8): setForeground(0, palette().windowText()) УБРАН — под
+            # комментарием «серым» он красил ВСЮ строку стандартным цветом текста
+            # (визуальный no-op: цвет не отличался от дефолтного).
             tags = getattr(node.data, "tags", None) or []
             if tags:
                 item.setText(0, item.text(0) + f"  [{', '.join(tags[:3])}]")
-                item.setForeground(0, self.palette().windowText())
             self.tree.addTopLevelItem(item)
 
     def sync_tag_filter_items(self, nodes):
@@ -304,10 +314,11 @@ class SidebarPanel(QWidget):
         try:
             combo.clear()
             combo.addItem(all_label, "")
+            # v1.1.2RC2 (N9): setItemData(QColor, Qt.DecorationRole) УБРАН — стандартный
+            # стиль читает DecorationRole как QIcon, QColor не рендерился (мёртвый код);
+            # «● tag» в тексте — обычный символ цветом текста, цвет тегов несёт карточка.
             for tag in all_tags:
-                color = ServerNode.tag_color(tag).name()
                 combo.addItem(f"● {tag}", tag)
-                combo.setItemData(combo.count() - 1, QColor(color), Qt.DecorationRole)
             idx = combo.findData(current) if current else 0
             combo.setCurrentIndex(idx if idx >= 0 else 0)
         except RuntimeError:

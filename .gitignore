@@ -29,9 +29,8 @@ config_secret.json
 *.swp
 *.swo
 
-# Временные файлы smoke-тестов
-_tmp_testdata/
-_tmp_testdata_v097
+# Временные файлы smoke-тестов (v1.1.2 final N12: wildcard — все _tmp_testdata*)
+_tmp_testdata*/
 
 # Логи приложения
 *.log

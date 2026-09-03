@@ -26,8 +26,9 @@ v1.1.2RC3 (AUDIT U3): application_cursor_keys() — состояние DECCKM (�
 а НЕ 1 (проверено прогоном на установленной версии).
 
 Headless-friendly: сам класс Screen не требует Qt — тестируется без GUI.
-Потокобезопасность: feed() из SSH-потока, snapshot()/render()/cursor/
-application_cursor_keys из GUI-потока.
+Потокобезопасность: feed() из SSH-потока, snapshot()/render()/
+application_cursor_keys из GUI-потока (v1.1.2 final N13: мёртвое свойство
+cursor убрано — декларация совпадает с кодом; курсор отдаёт snapshot()).
 """
 
 import threading
@@ -334,7 +335,6 @@ class TerminalScreen:
             cy = min(scr.cursor.y, scr.lines - 1)
             return out, cx, cy
 
-    @property
-    def cursor(self):
-        """(x, y) позиции курсора pyte."""
-        return self.screen.cursor.x, self.screen.cursor.y
+    # v1.1.2 final (N13): мёртвое свойство cursor() УДАЛЕНО — вызывающих в коде
+    # не было (AUDIT: только внутренние чтения screen.cursor.* под lock'ом).
+    # Курсор для рендера отдаёт snapshot() — под тем же lock'ом, что и feed().

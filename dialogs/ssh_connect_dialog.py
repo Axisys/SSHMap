@@ -406,11 +406,13 @@ class SSHConnectDialog(QDialog):
                                   f"{self.t('ssh.test_ok')}\n\n{message}")
             return
 
-        # Update server data from dialog fields
-        self.server_data.user = self.user_edit.text().strip()
-        self.server_data.key_path = self.key_path_edit.text().strip()
-        self.server_data.ssh_port = self.port_edit.value()
-        
+        # v1.1.2RC1 (N1): прямые записи в server_data УБРАНЫ — раньше диалог сам
+        # писал user/key_path/ssh_port (это тот же объект, что node.data), и
+        # _apply_ssh_dialog_fields() в MainWindow сравнивал old/new уже равные →
+        # CmdEditNodeData не пушился, Ctrl+Z не откатывал смену логина/ключа/порта.
+        # Теперь единственный путь — хелпер MainWindow ПОСЛЕ accept():
+        # _run_ssh_connect() → _apply_ssh_dialog_fields() (undo-стек + dirty).
+
         # Save password to keyring if it was provided via UI (not profile)
         password_from_ui = self.password_edit.text()
         if password_from_ui and self.server_data.id:

@@ -33,7 +33,7 @@ from dialogs.ssh_connect_dialog import SSHConnectDialog
 # Тот же путь, что и модуль (~ — песочница: bootstrap() изолировал HOME/USERPROFILE).
 SETTINGS_PATH = _settings_path()
 
-# ══ i18n: 13 новых ключей × en/ru/zh, наборы идентичны (373 на язык; +2 в v0.9.9.7, +22 в v1.0RC4, +33 в v1.1) ══
+# ══ i18n: 13 новых ключей × en/ru/zh, наборы идентичны (377 на язык; +2 в v0.9.9.7, +22 в v1.0RC4, +33 в v1.1, +2 в v1.1.2RC2, +2 в v1.1.2 final) ══
 print("== i18n ==")
 langs = {}
 for code in ("en", "ru", "zh"):
@@ -47,9 +47,9 @@ new_keys = ["ssh_ext.section", "ssh_ext.preset_label", "ssh_ext.reset",
             "ssh_ext.preset.alacritty", "ssh_ext.preset.kitty"]
 missing = [k for k in new_keys if any(not langs[c].get(k, "").strip() for c in ("en", "ru", "zh"))]
 check("13 новых ключей v0.9.9.2 есть и не пусты в en/ru/zh", not missing, str(missing))
-check("key sets identical across en/ru/zh (373 keys each)",
+check("key sets identical across en/ru/zh (377 keys each)",
       set(langs["en"]) == set(langs["ru"]) == set(langs["zh"])
-      and all(len(d) == 373 for d in langs.values()),
+      and all(len(d) == 377 for d in langs.values()),
       str({c: len(d) for c, d in langs.items()}))
 
 # ══ Секция в SSHConnectDialog: состав пресетов под платформу ══

@@ -61,6 +61,15 @@ try:  # v0.9.9.4: сайдбар-кластер (дерево, тег-фильт
 except ImportError:
     from sidebar import SidebarPanel
 
+try:  # v1.1.2RC3 (AUDIT U2): размеры окон — saveGeometry()/saveState() в config.json
+    from ..modules.window_geometry import (
+        save_window_geometry, restore_window_geometry,
+    )
+except ImportError:
+    from modules.window_geometry import (
+        save_window_geometry, restore_window_geometry,
+    )
+
 
 from PySide6.QtCore import Qt, QRectF, QSize, QTimer, QPointF
 from PySide6.QtGui import (
@@ -123,6 +132,15 @@ class MainWindow(QMainWindow):
             self.t = _noop
         
         self.resize(1200, 850)
+
+        # v1.1.2RC3 (AUDIT U2): восстановление размера/состояния главного окна из
+        # config.json (сохраняется в closeEvent). Ключа нет / битое значение →
+        # дефолтный 1200×850 выше; геометрия не должна ронять старт.
+        try:
+            restore_window_geometry("ui_window_geometry_main", self)
+        except Exception:  # noqa: BLE001
+            pass
+
         self._project_file: Optional[str] = None
         self._dirty = False  # Флаг несохранённых изменений (маркер " [*]" в заголовке)
         self._terminal_windows: List[SSHTerminalWindow] = []
@@ -130,6 +148,12 @@ class MainWindow(QMainWindow):
         self._ssh_connected_nodes: set = set()
         self._ping_thread = None   # v0.7.3: ping-поток (AUDIT v0.7.2 #8: guard против затирания)
         self._dns_thread = None    # AUDIT v0.7.2 (#6): поток обратного DNS для copy-hostname
+        # v1.1.2RC2 (N6): пакетный DNS-резолв импорта из TXT вне GUI-потока —
+        # поток + контекст пачки (pending/path/skipped), дожидающийся resolved_map
+        self._import_resolve_thread = None
+        self._import_pending = None   # [entry, ...] строки файла, ожидающие добавления
+        self._import_path = None      # путь исходного TXT-файла (лог/статус)
+        self._import_skipped = 0      # счётчик пропущенных дубликатов
         self._menu_i18n: List[tuple] = []  # (widget: QMenu|QAction, key) — для повторного перевода
         self._sidebar_title: Optional[QLabel] = None
 
@@ -175,14 +199,19 @@ class MainWindow(QMainWindow):
         # v1.1 (ROADMAP задача 4): интервал/таймаут — из ~/.sshmap/config.json
         # (status_interval_sec / status_probe_timeout_sec; дефолты 30 c / 3.0 c =
         # поведение v1.0); на лету меняются из диалога настроек (_apply_settings_from_dialog).
+        # v1.1.2 final: пробы внутри раунда параллельные (ThreadPoolExecutor),
+        # потолок — status_max_parallel (дефолт 16); для больших карт (N > 50)
+        # интервал удваивается (effective_interval_ms + подсказка в статус-баре).
         self._status_checker = None
+        self._auto_interval_hinted = False  # v1.1.2 final: подсказка о большом интервале — один раз
         try:
             from services.status_checker import StatusChecker as _StatusChecker, \
                 get_status_settings as _get_status_cfg
             _st_cfg = _get_status_cfg()
             self._status_checker = _StatusChecker(
                 interval_ms=int(_st_cfg["interval_sec"]) * 1000,
-                probe_timeout=float(_st_cfg["probe_timeout_sec"]), parent=self)
+                probe_timeout=float(_st_cfg["probe_timeout_sec"]),
+                max_parallel=int(_st_cfg["max_parallel"]), parent=self)
             self._status_checker.status_changed.connect(self._on_node_status_changed)
             # При уничтожении окна — остановить таймер и дождаться текущего раунда,
             # чтобы поток-проба не был убит на ходу вместе с родителем.
@@ -239,6 +268,20 @@ class MainWindow(QMainWindow):
         except Exception as e:
             if self.log:
                 self.log.warning(f"StatusChecker set_servers failed: {e}")
+            return
+        # v1.1.2 final (задача 3): большая карта (N > LARGE_MAP_THRESHOLD) —
+        # интервал проверок удваивается (StatusChecker.effective_interval_ms);
+        # одноразовая подсказка в статус-баре при пересечении порога вверх.
+        try:
+            if checker.is_large_map():
+                if not getattr(self, "_auto_interval_hinted", False):
+                    self._auto_interval_hinted = True
+                    self.statusBar().showMessage(
+                        self.t("status.auto_interval_hint", servers=checker.target_count), 8000)
+            else:
+                self._auto_interval_hinted = False  # порог снова ниже — можно подсказать заново
+        except (AttributeError, RuntimeError):
+            pass  # Qt teardown — статус-бар уже уничтожен
 
     def _on_node_status_changed(self, server_id: str, status: str):
         """Обработать результат пробы одного узла."""
@@ -553,6 +596,14 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event):
         """Ask to save on exit if there are unsaved changes."""
+        # v1.1.2RC3 (AUDIT U2): сохранить размер/состояние окна ДО всего — даже при
+        # отмене закрытия (event.ignore) записанные значения равны текущим, а при
+        # нормальном выходе их прочитает следующий старт (ui_window_geometry_main).
+        try:
+            save_window_geometry("ui_window_geometry_main", self)
+        except Exception:  # noqa: BLE001 — геометрия не блокирует закрытие
+            pass
+
         # v0.9.7: автосохранение останавливается ДО диалога — во время решения
         # пользователя (Save/Discard/Cancel) запись в ~/.sshmap/autosave не нужна.
         try:
@@ -612,8 +663,9 @@ class MainWindow(QMainWindow):
             if hasattr(coll, "isRunning"):
                 threads.append(coll)
 
-        # Ping и обратный DNS
-        for attr in ("_ping_thread", "_dns_thread"):
+        # Ping, обратный DNS и DNS-резолв импорта (v1.1.2RC2 N6 — stop() выставляет
+        # cancel-флаг; текущий getaddrinfo доживает свой таймаут)
+        for attr in ("_ping_thread", "_dns_thread", "_import_resolve_thread"):
             th = getattr(self, attr, None)
             if th is not None and hasattr(th, "isRunning") and th.isRunning():
                 stop = getattr(th, "stop", None)
@@ -678,6 +730,9 @@ class MainWindow(QMainWindow):
 
     def _setup_toolbar(self):
         toolbar = QToolBar()
+        # v1.1.2RC3 (AUDIT U2): objectName нужен saveState()/restoreState() —
+        # без него Qt шлёт в stderr «'objectName' not set for QToolBar».
+        toolbar.setObjectName("main_toolbar")
         self.addToolBar(toolbar)
 
         # UI polish: у всех действий — векторные иконки (ui/icons.py, замена эмодзи);
@@ -1057,7 +1112,8 @@ class MainWindow(QMainWindow):
         """v1.1: применить сохранённые настройки на лету (после ОК в диалоге).
 
         * Автосохранение — QTimer прямо сейчас (интервал + старт/стоп по enabled);
-        * Статусы — StatusChecker.set_interval/set_probe_timeout (следующий раунд);
+        * Статусы — StatusChecker.set_interval/set_probe_timeout/set_max_parallel
+          (следующий раунд; v1.1.2 final: параллельные пробы, потолок 1..64);
         * v1.1.1: шрифт UI (QApplication.setFont), шрифт открытых окон терминала
           (widget.set_font — без перезапуска), кнопки сайдбара, режим двойного
           клика, перерисовка плашек связей (опция «тип на плашке»);
@@ -1083,6 +1139,8 @@ class MainWindow(QMainWindow):
                 _st_cfg = _get_st()
                 checker.set_interval(int(_st_cfg["interval_sec"]) * 1000)
                 checker.set_probe_timeout(float(_st_cfg["probe_timeout_sec"]))
+                # v1.1.2 final (задача 2): потолок параллельных проб — со следующего раунда
+                checker.set_max_parallel(int(_st_cfg["max_parallel"]))
             except Exception as e:  # noqa: BLE001 — статусы не должны ронять применение
                 if self.log:
                     self.log.warning(f"Apply status settings failed: {e}")
@@ -1309,6 +1367,10 @@ class MainWindow(QMainWindow):
         # node.data — терялись при выходе без Ctrl+S и не откатывались).
         # v1.0-fix (audit #2): единый хелпер _apply_ssh_dialog_fields — им же
         # пользуется «Открыть во внешнем терминале».
+        # v1.1.2RC1 (N1): теперь это РЕАЛЬНО единственная запись полей штатного
+        # пути — диалог (_on_worker_success) больше не пишет в node.data сам,
+        # поэтому old/new здесь различаются и CmdEditNodeData пушится: Ctrl+Z
+        # откатывает смену user/key/port, сделанную через успешное подключение.
         self._apply_ssh_dialog_fields(
             node.data.id, dlg.user_edit.text().strip(),
             dlg.key_path_edit.text().strip(), dlg.port_edit.value())
@@ -1636,8 +1698,11 @@ class MainWindow(QMainWindow):
         IP → host=IP; имя → резолвим в IP (поле `ip`), host остаётся именем.
         Дубликаты (уже на карте или повтор в файле) пропускаются. Один узел undo —
         вся пачка добавляется/откатывается одной командой CmdAddRemoveNodeBatch.
+
+        v1.1.2RC2 (N6): DNS-резолв имён — вне GUI-потока (HostResolverThread,
+        прогресс в статус-баре): файл с десятками имён при недоступном резолвере
+        не замораживает интерфейс. IP-адреса резолва не требуют — добавляются сразу.
         """
-        import socket as _socket
         from PySide6.QtWidgets import QFileDialog
 
         path, _ = QFileDialog.getOpenFileName(
@@ -1653,7 +1718,7 @@ class MainWindow(QMainWindow):
                                  self.t("msg.import_servers_failed", error=str(e)))
             return
 
-        from services.host_importer import parse_hosts_file, is_ip_address, resolve_host
+        from services.host_importer import parse_hosts_file, is_ip_address
         entries, file_dups = parse_hosts_file(text), []
         # Дедупликация строк файла (без учёта регистра)
         seen, unique_entries = set(), []
@@ -1671,18 +1736,86 @@ class MainWindow(QMainWindow):
             if d.ip:
                 existing.add(d.ip.lower())
 
-        added_data, skipped = [], len(file_dups)
+        pending, skipped = [], len(file_dups)
         for entry in unique_entries:
             if entry.lower() in existing:
                 skipped += 1
                 continue
-            import uuid as _uuid
+            pending.append(entry)
+            existing.add(entry.lower())
+
+        if not pending:
+            QMessageBox.information(self, self.t("msg.info_title"),
+                                    self.t("msg.import_servers_result", added=0, skipped=skipped))
+            return
+
+        dns_entries = [e for e in pending if not is_ip_address(e)]
+        if not dns_entries:
+            # Только IP-адреса — резолв не нужен, собираем синхронно (без потока)
+            self._finish_import_from_txt(pending, {}, path, skipped)
+            return
+
+        # v1.1.2RC2 (N6): имена — в отдельный поток; GUI остаётся отзывчивым,
+        # прогресс резолва виден в статус-баре. Контекст пачки держим на окне —
+        # resolved_map придёт queued-сигналом уже после возврата из этого метода.
+        from services.host_importer import HostResolverThread
+        thread = HostResolverThread(dns_entries, parent=self)
+        self._import_resolve_thread = thread  # держим ссылку — поток не должен стать orphan'ом
+        self._import_pending = pending
+        self._import_path = path
+        self._import_skipped = skipped
+        thread.progress.connect(self._on_import_resolve_progress)
+        thread.resolved_map.connect(self._on_import_resolved)
+        self.statusBar().showMessage(
+            self.t("status.import_resolving", done=0, total=len(dns_entries)))
+        thread.start()
+
+    def _on_import_resolve_progress(self, done: int, total: int):
+        """v1.1.2RC2 (N6): прогресс DNS-резолва импорта — в статус-баре."""
+        try:
+            self.statusBar().showMessage(
+                self.t("status.import_resolving", done=done, total=total))
+        except RuntimeError:
+            pass  # Qt teardown — окно уже уничтожено
+
+    def _on_import_resolved(self, resolved_map):
+        """v1.1.2RC2 (N6): резолв завершён (GUI-поток) — собираем узлы и добавляем."""
+        thread = getattr(self, "_import_resolve_thread", None)
+        if thread is not None:
+            self._import_resolve_thread = None
+            try:
+                thread.deleteLater()  # run() завершён — поток можно отдать Qt
+            except RuntimeError:
+                pass  # Qt teardown
+        pending = list(getattr(self, "_import_pending", None) or [])
+        path = getattr(self, "_import_path", None) or ""
+        skipped = int(getattr(self, "_import_skipped", 0) or 0)
+        self._import_pending = None
+        self._import_path = None
+        self._import_skipped = 0
+        if not pending:
+            return  # окно закрылось во время резолва (stop()) — импорт не доведён
+        try:
+            self._finish_import_from_txt(pending, dict(resolved_map or {}), path, skipped)
+        except RuntimeError:
+            pass  # Qt teardown — виджеты уже уничтожены
+
+    def _finish_import_from_txt(self, pending, resolved_map, path, skipped):
+        """v1.1.2RC2 (N6): сборка ServerData + раскладка сеткой + одна undo-команда.
+
+        `resolved_map` — {имя: IP или None} из HostResolverThread; IP-адреса в
+        нём отсутствуют (резолва не требовали) и берутся как есть.
+        """
+        import uuid as _uuid
+        from services.host_importer import is_ip_address
+        from models.server import ServerData
+
+        added_data = []
+        for entry in pending:
             if is_ip_address(entry):
                 host, ip = entry, entry
             else:
-                host, ip = entry, resolve_host(entry) or ""
-                QApplication.processEvents()  # UI не замирает при длинном резолве
-            from models.server import ServerData
+                host, ip = entry, resolved_map.get(entry) or ""
             data = ServerData(
                 id=str(_uuid.uuid4())[:8],
                 alias=entry,
@@ -1692,12 +1825,6 @@ class MainWindow(QMainWindow):
                 ip=ip,
             )
             added_data.append(data)
-            existing.add(entry.lower())
-
-        if not added_data:
-            QMessageBox.information(self, self.t("msg.info_title"),
-                                    self.t("msg.import_servers_result", added=0, skipped=skipped))
-            return
 
         # Раскладка импортированных узлов сеткой от центра видимой области
         center = self.view.mapToScene(self.view.viewport().rect().center())

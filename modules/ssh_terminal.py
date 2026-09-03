@@ -1,4 +1,5 @@
 import re
+from typing import List
 
 try:
     from ..models.server import ServerData
@@ -60,12 +61,13 @@ def load_terminal_settings():
        "font_size": int | None,   # None — не задан (pt 10)
        "history_lines": int,      # глубина deque-истории HistoryScreen (0 = выкл.)
        "close_behavior": str,     # v1.1: "close" (дефолт) | "ask" — поведение закрытия
-       "max_open": int}           # v1.1.1: лимит своих открытых терминалов (дефолт 4)
+       "max_open": int,           # v1.1.1: лимит своих открытых терминалов (дефолт 4)
+       "wheel": str}              # v1.1.2RC3 (U3): "scrollback" (дефолт) | "off" — колесо
     Невалидные значения (чужой тип, вне диапазона) → дефолт. Никогда не бросает.
     """
     defaults = {"palette": None, "font_family": "", "font_size": None,
                 "history_lines": DEFAULT_HISTORY_LINES, "close_behavior": "close",
-                "max_open": 4}
+                "max_open": 4, "wheel": "scrollback"}
     try:
         from i18n import load_config
     except Exception:
@@ -98,6 +100,15 @@ def load_terminal_settings():
     if isinstance(v, int) and not isinstance(v, bool) and 1 <= v <= 32:
         defaults["max_open"] = v     # битое/вне диапазона → 4 (дефолт)
 
+    # v1.1.2RC3 (AUDIT U3, остаток): колесо мыши — "scrollback" (дефолт: колесо
+    # скроллит локальный скроллбэк, как в v1.0RC3) | "off" (колесо не перехватывается
+    # для скроллбэка; полный SGR-passthrough колеса в приложение — v1.2+, т.к. pyte
+    # 0.8.2 не трекает mouse-режимы DECSET 1000/1002/1006). Ключ только конфиг
+    # (решение по ROADMAP v1.1.2RC3 — без UI в диалоге настроек).
+    v = cfg.get("terminal_wheel")
+    if isinstance(v, str) and v.strip().lower() in ("scrollback", "off"):
+        defaults["wheel"] = v.strip().lower()   # битое/чужое → "scrollback" (дефолт)
+
     return defaults
 
 
@@ -111,6 +122,33 @@ ANSI_ESCAPE_RE = re.compile(
     r'|\x1B\][^\x07\x1b]*(?:\x07|\x1B\\)'  # OSC: ESC ] ... BEL / ST
     r'|\x1B[@-_]'                # simple two-byte escapes
 )
+
+
+# ── v1.1.2RC1 (N4): реестр орфано-терминальных потоков ────────────────────────
+# Окно терминала имеет WA_DeleteOnClose: если его закрыть во время подключения,
+# closeEvent ждёт поток лишь wait(1500), а paramiko может блокироваться до 15 c.
+# Поток создан БЕЗ QObject parent — без сильного ссылающегося объекта GC уничтожит
+# ЖИВОЙ QThread («QThread: Destroyed while thread is still running» + риск
+# RuntimeError на поздних emit). Реестр держит такие потоки до finished() — паттерн
+# _active_workers (modules/ssh_worker.py): все слоты окна уже отвязаны в closeEvent,
+# поэтому поздние emit без приёмников — безопасный no-op.
+_orphan_threads: List["SSHTerminalThread"] = []
+
+
+def register_orphan_thread(thread: "SSHTerminalThread"):
+    """Держать ещё работающий терминальный поток до finished() (v1.1.2RC1, N4).
+
+    Идемпотентно; самовычищается по сигналу finished().
+    """
+    if thread not in _orphan_threads:
+        _orphan_threads.append(thread)
+
+        def _drop(_=None, t=thread):
+            try:
+                _orphan_threads.remove(t)
+            except ValueError:
+                pass  # уже удалён (двойной finished — на практике не бывает)
+        thread.finished.connect(_drop)
 
 
 class SSHTerminalThread(QThread):
@@ -216,9 +254,14 @@ class SSHTerminalThread(QThread):
             except Exception:
                 pass
             msg = t("ssh.host_key_changed", host=self.host) + "\n" + str(e)
-            self.error_signal.emit(msg if not msg.startswith("[") else f"Host key changed for {self.host}: {e}")
+            # v1.1.2RC1 (N4): guard как в recv-цикле — окно могло закрыться во время
+            # подключения (stop() → running=False); поздний emit без приёмников не нужен.
+            if self.running:
+                self.error_signal.emit(msg if not msg.startswith("[") else f"Host key changed for {self.host}: {e}")
         except Exception as e:
-            self.error_signal.emit(str(e))
+            # v1.1.2RC1 (N4): guard как в recv-цикле — см. выше.
+            if self.running:
+                self.error_signal.emit(str(e))
         finally:
             self.running = False
             if self.channel:
@@ -369,6 +412,16 @@ class SSHTerminalWindow(QMainWindow):
         self.setWindowTitle(t("terminal.window_title", alias=server_data.alias, host=server_data.host))
         self.resize(800, 600)
 
+        # v1.1.2RC3 (AUDIT U2): восстановление размера/состояния предыдущего окна
+        # терминала из config.json (сохраняется в closeEvent). Все окна терминала
+        # делят один ключ ui_window_geometry_terminal — запоминается последний
+        # закрытый; без ключа/битое значение → дефолтный 800×600 выше.
+        try:
+            from .window_geometry import restore_window_geometry as _restore_geo
+        except ImportError:
+            from modules.window_geometry import restore_window_geometry as _restore_geo
+        _restore_geo("ui_window_geometry_terminal", self)
+
         widget = QWidget()
         self.setCentralWidget(widget)
         layout = QVBoxLayout(widget)
@@ -405,7 +458,10 @@ class SSHTerminalWindow(QMainWindow):
         # v1.0RC1: посячейный холст (QWidget + QPainter) вместо QPlainTextEdit+HTML.
         # Шрифт — системный моноширинный pt 10 (AUDIT v0.7.2 низкая #18), палитра
         # 'default' = текущий вид; runs/курсор/широкие глифы — см. terminal_widget.py.
-        self.widget = TerminalWidget(self.tscreen, self.terminal_thread)
+        # v1.1.2RC3 (AUDIT U3): режим колеса из конфига (terminal_wheel) — "off"
+        # перестаёт скроллить локальный скроллбэк колесом (см. wheelEvent).
+        self.widget = TerminalWidget(self.tscreen, self.terminal_thread,
+                                     wheel_mode=term_cfg["wheel"])
         # v1.0 финал: применение конфига (неизвестная палитра → set_palette() False
         # → остаётся "default"; битые значения отброшены в load_terminal_settings).
         if term_cfg["palette"] is not None:
@@ -474,11 +530,28 @@ class SSHTerminalWindow(QMainWindow):
         коалесит несколько update() за один цикл событий; paintEvent читает
         сетку сам (TerminalWidget._paint). Авто-снап скроллбэка к live-строке
         при новом выводе — внутри pyte (HistoryScreen.before_event), поэтому
-        новый вывод виден сразу, даже если пользователь смотрел историю."""
+        новый вывод виден сразу, даже если пользователь смотрел историю.
+
+        v1.1.2RC3 (N7): если этот вывод авто-вернул скроллбэк к live (позиция
+        history изменилась) — выделение сбрасывается: координаты (row, col)
+        зафиксированы в release на ИСТОРИЧЕСКОМ экране, а после возврата они
+        указывают на ДРУГИЕ ячейки live-экрана — Ctrl+C скопировал бы чужой
+        текст. Без нового вывода / без активного выделения поведение простого
+        клика и Ctrl+C не меняется."""
         try:
+            pos_before = self.tscreen.scroll_info()[0]
             self.tscreen.feed(data)
         except Exception:
             return
+        # v1.1.2RC3 (N7): смена позиции history ⇔ авто-возврат к live (feed() —
+        # единственный путь, меняющий позицию без ручного скролла). Активное
+        # выделение на «старом» экране сбрасываем до копирования.
+        try:
+            if self.tscreen.scroll_info()[0] != pos_before \
+                    and self.widget.has_selection():
+                self.widget.clear_selection()
+        except RuntimeError:
+            pass  # C++-объект уже удалён (гонка WA_DeleteOnClose при закрытии)
         try:
             self.widget.update()
         except RuntimeError:
@@ -558,6 +631,15 @@ class SSHTerminalWindow(QMainWindow):
         self.close()
 
     def closeEvent(self, event):
+        # v1.1.2RC3 (AUDIT U2): сохранить размер/состояние окна ДО «ask»-диалога —
+        # если пользователь отменит закрытие (event.ignore), записанные значения и так
+        # равны текущим; при нормальном закрытии они будут прочитаны следующим окном.
+        try:
+            from .window_geometry import save_window_geometry as _save_geo
+            _save_geo("ui_window_geometry_terminal", self)
+        except Exception:  # noqa: BLE001 — геометрия не блокирует закрытие
+            pass
+
         # v1.1 (ROADMAP задача 3): поведение закрытия сессии — terminal_close_behavior.
         # "ask": активная сессия (SSH-поток ещё работает) → подтверждение; отмена =
         # окно живёт (event.ignore). "close" (дефолт, как в v1.0) и уже завершённая
@@ -608,4 +690,11 @@ class SSHTerminalWindow(QMainWindow):
             thread.stop()
             if thread.isRunning():
                 thread.wait(1500)
+                # v1.1.2RC1 (N4): окно после этого события уничтожается
+                # (WA_DeleteOnClose), а paramiko ещё может подключаться (до 15 c).
+                # Живой QThread без parent нельзя оставлять на GC — держим поток в
+                # реестре орфано-потоков до finished() (поздние emit без приёмников
+                # — no-op, все слоты отвязаны выше).
+                if thread.isRunning():
+                    register_orphan_thread(thread)
         super().closeEvent(event)

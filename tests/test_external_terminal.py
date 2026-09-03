@@ -2,9 +2,10 @@
 
 Часть сьюта, разбитого из smoke_test.py v0.6–v0.9.2 (см. INDEX.md).
   * build_ssh_args: порт/ключ/ConnectTimeout, known_hosts не трогаем, пароль никогда в argv;
-  * build_command для ВСЕХ терминалов без реального запуска (wt/cmd/conhost/gnome/konsole/
+  * build_command для ВСЕХ терминалов без реального запуска (wt/cmd/gnome/konsole/
     alacritty/kitty + bash -c «; exec bash» — окно переживает выход ssh), ValueError на
-    неизвестный id, -J jump;
+    неизвестный id, -J jump; v1.1.2RC1 (N2): «conhost» убран из пресетов — build_command
+    принимает старый id как алиас "cmd", detect никогда не возвращает "conhost";
   * detect_terminal на текущей ОС (headless-friendly);
   * настройки внешнего терминала (v1.1: единый ~/.sshmap/config.json, миграция из legacy
     ~/.sshmap_settings.json): round-trip, merge чужих ключей, invalid → auto;
@@ -58,10 +59,11 @@ check("build_command windows_terminal: wt.exe + ssh args",
 _c = _ET.build_command("cmd", "h1", "root")
 check("build_command cmd: start with empty title",
       _c[1] == "/c" and _c[2] == "start" and _c[3] == "", str(_c))
+# v1.1.2RC1 (N2): «conhost» больше не пресет (conhost.exe не лаунчер) — build_command
+# принимает старый id как алиас "cmd"; команда с conhost.exe больше не собирается.
 _c = _ET.build_command("conhost", "h1", "root")
-# v0.9.3 fix: conhost требует команду через cmd /c — голый `conhost ssh` не работает
-check("build_command conhost",
-      _c[0] == "conhost.exe" and _c[1].lower().endswith("cmd.exe")
+check("build_command 'conhost' is an alias of 'cmd' (v1.1.2RC1 N2)",
+      _c == _ET.build_command("cmd", "h1", "root") and _c[0] == "cmd.exe"
       and "/c" in _c and _c[-1] == "root@h1", str(_c))
 for tid in ("gnome-terminal", "x-terminal-emulator", "xfce4-terminal"):
     _c = _ET.build_command(tid, "h1", "root")
@@ -89,8 +91,9 @@ check("build_command supports -J jump", "-J" in _c and "jump@bastion" in _c, str
 # 3) detect_terminal на текущей ОС (headless-friendly)
 _dt = _ET.detect_terminal()
 if sys.platform == "win32":
-    check("detect_terminal on Windows returns wt/cmd/conhost/open_terminal",
-          _dt in ("windows_terminal", "cmd", "conhost"), str(_dt))
+    # v1.1.2RC1 (N2): «conhost» из fallback-цепочки убран — остаются wt → cmd.
+    check("detect_terminal on Windows returns wt/cmd",
+          _dt in ("windows_terminal", "cmd"), str(_dt))
 else:
     check("detect_terminal returns known id or None", _dt is None or isinstance(_dt, str), str(_dt))
 

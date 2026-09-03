@@ -38,6 +38,8 @@ import shutil
 WORK = os.path.join(ROOT, "_tmp_testdata_v097")
 shutil.rmtree(WORK, ignore_errors=True)  # чистый старт (паттерн smoke_test): остатки прошлых прогонов не должны влиять
 os.makedirs(WORK, exist_ok=True)
+# v1.1.2 final (N12): при ВЫХОДЕ каталог тоже чистится (rmtree перед finish() внизу) —
+# после прогона сьюта на диске ничего не остаётся.
 
 # ══ storage.autosave: чистый модуль (без Qt) ════════════════════════════════
 print("== project_key ==")
@@ -318,9 +320,11 @@ check("18 новых ключей v0.9.7 есть и не пусты в en/ru/zh
 # v0.9.9.7: +2 ключа PDF-экспорта (file.export_pdf, status.export_pdf_ok)
 # v1.0RC4: +22 ключа Быстрого запуска (ctx.quick_launch … msg.ql_open_failed)
 # v1.1: +33 ключа диалога настроек (settings.* / menu.settings / btn.settings / status.settings_saved)
-check("наборы ключей идентичны en/ru/zh (373 на язык)",
+# v1.1.2RC2: +2 ключа (msg.confirm_delete_profile, status.import_resolving)
+# v1.1.2 final: +2 ключа (settings.statuses.max_parallel, status.auto_interval_hint)
+check("наборы ключей идентичны en/ru/zh (377 на язык)",
       set(langs["en"]) == set(langs["ru"]) == set(langs["zh"])
-      and all(len(d) == 373 for d in langs.values()),
+      and all(len(d) == 377 for d in langs.values()),
       str({c: len(d) for c, d in langs.items()}))
 
 # Cleanup: сначала dirty=False — иначе closeEvent уйдёт в диалог сохранения.
@@ -330,5 +334,10 @@ for w in (win, win2, win3, win_ns):
         w.close(); w.destroy()
     except Exception:
         pass
+
+# v1.1.2 final (N12): чистим за собой — rmtree рабочей папки при ВЫХОДЕ.
+# Раньше каталог резали только при старте (строка 39) — после каждого прогона
+# сьюта на диске оставались _tmp_testdata_v097/app|ring|rt.
+shutil.rmtree(WORK, ignore_errors=True)
 
 finish()

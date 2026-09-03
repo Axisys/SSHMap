@@ -143,12 +143,18 @@ class SSHWorker(QThread):
                     allow_agent=True,
                 )
             elif final_password:
+                # v1.1.2RC1 (N5): паритет с ssh_terminal.py — при попытке пароля
+                # НЕ опрашиваем локальные ключи/ssh-agent (дефолты paramiko True/True
+                # добавляли задержку и могли «подцепить» чужой ключ из agent до
+                # попытки пароля).
                 client.connect(
                     self.host,
                     username=self.user,
                     password=final_password,
                     port=self.port,
                     timeout=15,
+                    look_for_keys=False,
+                    allow_agent=False,
                 )
             else:
                 # Pure key-based / agent fallback

@@ -47,7 +47,9 @@ v1.1.2RC3 — стрелки по состоянию DECCKM (AUDIT U3: «в mc �
 при запуске), и в CSI (\x1b[A…\x1b[D, \x1b[H/\x1b[F) в обычном режиме. Состояние
 читается с tscreen.application_cursor_keys() (pyte 0.8.2: DECCKM = 32 в
 screen.mode — приватные режимы хранятся со сдвигом <<5; каноническая проверка
-«1 in screen.mode» не работает).
+«1 in screen.mode» не работает). + колесо: параметр wheel_mode из конфига
+terminal_wheel — "scrollback" (дефолт) | "off" (колесо не скроллит локальный
+скроллбэк, event.ignore; SGR-passthrough — v1.2+).
 
 Потоки: paintEvent и snapshot() — GUI-поток; feed() из SSH-потока под lock'ом
 TerminalScreen — race посреди кадра исключён.
@@ -186,10 +188,16 @@ class TerminalWidget(QWidget):
     BLINK_INTERVAL_MS = 530       # v1.0RC3: период мигания курсора (ROADMAP задача 8)
 
     def __init__(self, tscreen, terminal_thread=None, parent=None,
-                 palette_name="default", format_cache_limit=FORMAT_CACHE_LIMIT):
+                 palette_name="default", format_cache_limit=FORMAT_CACHE_LIMIT,
+                 wheel_mode="scrollback"):
         super().__init__(parent)
         self.tscreen = tscreen
         self.terminal_thread = terminal_thread
+        # v1.1.2RC3 (AUDIT U3): режим колеса из конфига terminal_wheel —
+        # "scrollback" (дефолт, поведение v1.0RC3: колесо = локальный скроллбэк)
+        # | "off" (колесо не перехватывается для скроллбэка; SGR-passthrough в
+        # приложение — v1.2+). Неизвестное значение → дефолт.
+        self._wheel_mode = wheel_mode if wheel_mode in ("scrollback", "off") else "scrollback"
         self._palette_name = palette_name if palette_name in PALETTES else "default"
         self._palette = dict(PALETTES[self._palette_name])
         self._format_cache_limit = int(format_cache_limit)
@@ -567,7 +575,18 @@ class TerminalWidget(QWidget):
         На границах (верх истории / live-строка) pyte делает no-op — позиция не
         меняется и холст не перерисовывается. Авто-возврат к live при новом
         выводе — встроен в pyte (before_event); _on_output окна вызывает
-        widget.update(), поэтому снап виден сразу."""
+        widget.update(), поэтому снап виден сразу.
+
+        v1.1.2RC3 (AUDIT U3, остаток): режим из конфига terminal_wheel
+        (_wheel_mode). "off": колесо НЕ скроллит локальный скроллбэк — событие
+        не потребляется (event.ignore), в PTY ничего не шлётся; полный
+        SGR-passthrough колеса в полноэкранное TUI отложен на v1.2+ (pyte 0.8.2
+        не трекает mouse-режимы DECSET 1000/1002/1006 — слепая пересылка
+        засорит shell без mouse-режима). Скроллбэк при "off" остаётся на
+        Ctrl+Shift+PageUp/PageDown."""
+        if self._wheel_mode == "off":
+            event.ignore()
+            return
         if event.angleDelta().y() > 0:
             changed = self.tscreen.scroll_up()
         else:

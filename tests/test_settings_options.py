@@ -70,7 +70,7 @@ def clear_cfg():
 
 
 # ════════════════════════════════════════════════════════════
-# 0. i18n: +14 ключей × en/ru/zh, паритет 359 → 373
+# 0. i18n: +14 ключей × en/ru/zh (v1.1.1), паритет 359 → 375 → 377 (+2 в v1.1.2 final)
 # ════════════════════════════════════════════════════════════
 print("== i18n ==")
 langs = {}
@@ -89,9 +89,9 @@ new_keys = [
 missing = [k for k in new_keys
            if any(not langs[c].get(k, "").strip() for c in ("en", "ru", "zh"))]
 check("14 новых ключей v1.1.1 есть и не пусты в en/ru/zh", not missing, str(missing))
-check("key sets identical across en/ru/zh (373 keys each)",
+check("key sets identical across en/ru/zh (377 keys each; +2 в v1.1.2RC2, +2 в v1.1.2 final)",
       set(langs["en"]) == set(langs["ru"]) == set(langs["zh"])
-      and all(len(d) == 373 for d in langs.values()),
+      and all(len(d) == 377 for d in langs.values()),
       str({c: len(d) for c, d in langs.items()}))
 
 # ════════════════════════════════════════════════════════════
@@ -474,20 +474,20 @@ check("EditConnectionDialog: старая длинная метка (30 симв
       f"len={len(edlg.label.text())}")
 
 # ════════════════════════════════════════════════════════════
-# 7. Состояние релиза v1.1.1
+# 7. Состояние релиза (пин обновлён на каждый релиз; v1.1.2 final — параллельные пробы)
 # ════════════════════════════════════════════════════════════
 print("== release state ==")
 from version import APP_VERSION
 
-check("APP_VERSION == '1.1.1'", APP_VERSION == "1.1.1", APP_VERSION)
+check("APP_VERSION == '1.1.2'", APP_VERSION == "1.1.2", APP_VERSION)
 try:
     import tomllib as _toml
 except ImportError:  # Python < 3.11
     import tomli as _toml
 with open(os.path.join(ROOT, "pyproject.toml"), "rb") as f:
     _pp = _toml.load(f)
-check("pyproject version == APP_VERSION (1.1.1)",
-      _pp["project"]["version"] == "1.1.1", _pp["project"]["version"])
+check("pyproject version == APP_VERSION (1.1.2)",
+      _pp["project"]["version"] == "1.1.2", _pp["project"]["version"])
 
 clear_cfg()
 finish()

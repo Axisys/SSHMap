@@ -1,9 +1,9 @@
-# SSH Map (NodeVisualSSH) — v1.1.1
+# SSH Map (NodeVisualSSH) — v1.1.2
 
 Десктопное приложение (Python + PySide6): интерактивная карта IT-инфраструктуры с прямым SSH-подключением к узлам.
 Slogan: *"Draw your infrastructure. Organize it. Connect to it."*
 
-Единый источник истины для версии — `version.py` (APP_VERSION);
+Единый источник истины для версии — `version.py` (APP_VERSION); история выпущенных версий — CHANGELOG.md, планируемые функции — ROADMAP.md.
 
 ---
 
@@ -19,7 +19,7 @@ pipx install .                            # или pip install . → коман�
 # Тесты без pytest: тематические файлы test_*.py + единый раннер.
 # Тесты изолированы: пишут во временный HOME, UTF-8 stdout ставится сами —
 # на cp1251-консолях и в CI дополнительное окружение не требуется:
-python tests/run_all.py              # ВСЁ (38 файлов): таблица результатов + единый exit code (0 ⇔ всё зелёное)
+python tests/run_all.py              # ВСЁ (44 файла): таблица результатов + единый exit code (0 ⇔ всё зелёное)
 python tests/run_all.py keyring      # фильтр по подстроке в имени файла
 python tests/test_tags.py            # один файл (из корня проекта)
 ```
@@ -52,13 +52,14 @@ graphics/
 └── background_image.py      # BackgroundImage: фон-изображение z=-10, drag/resize за угол
 modules/
 ├── ssh_worker.py            # SSHWorker (одноразовый QThread); реестр get_active_worker/wait_for_worker
-├── ssh_terminal.py          # SSHTerminalThread + SSHTerminalWindow (dirty-рендер без таймера — _on_output→update(); resize PTY: guard по сетке + дебаунс ~150 мс; кнопка «Закрыть терминал» убрана);
+├── ssh_terminal.py          # SSHTerminalThread + SSHTerminalWindow (dirty-рендер без таймера — _on_output→update(); resize PTY: guard по сетке + дебаунс ~150 мс);
 │                            #   connected_signal (после invoke_shell) + initial_command — первая команда Быстрого запуска в shell;
-│                            #   load_terminal_settings() — ключи terminal_palette/terminal_font/terminal_font_size/terminal_history_lines из ~/.sshmap/config.json (дефолты = текущее поведение)
+│                            #   load_terminal_settings() — ключи terminal_* из ~/.sshmap/config.json (дефолты = текущее поведение, см. §4 «Настройки»)
 ├── terminal_widget.py       # TerminalWidget — посячейный холст QWidget+QPainter: runs, кэш форматов, блок-курсор (+cursor.hidden), широкие глифы; полная клавиатура (F1–F12/PgUp/PgDn/Home/End/Delete, Ctrl+C/D/Z, bracketed paste, AltGr-guard) + выделение мышью (selection_cells, координаты (row,col)) и копирование; скроллбэк колесом/Ctrl+Shift+PgUp/PgDn (голые PgUp/PgDn — в shell) + QTimer мигания курсора
 ├── terminal_screen.py       # TerminalScreen: pyte.HistoryScreen(120x32)+ByteStream, feed под threading.Lock; PALETTES+resolve_color, snapshot(); скроллбэк scroll_up/scroll_down/at_bottom (авто-возврат к live встроен в pyte); render() — deprecated
+├── window_geometry.py       # сохранение/восстановление размеров окон — saveGeometry()/saveState() → base64 → config.json (ui_window_geometry_main/terminal); никогда не бросает
 ├── host_key_policy.py       # SshKnownHostsPolicy: ~/.sshmap/known_hosts; изменённый ключ → BadHostKeyException (MITM)
-├── external_terminal.py     # системный терминал ОС; настройки ~/.sshmap_settings.json; пароль НЕ в argv
+├── external_terminal.py     # системный терминал ОС; настройки в ~/.sshmap/config.json (миграция из legacy ~/.sshmap_settings.json); пароль НЕ в argv
 ├── undo_commands.py         # 13 QUndoCommand: MoveNode(merge), MoveNodes(групповой drag),
 │                            #   MoveGroup, ResizeGroup, EditGroupName, AddRemoveNode(+стрелки),
 │                            #   AddRemoveNodeBatch(импорт TXT — один undo), AddRemoveConnection,
@@ -72,9 +73,9 @@ services/
 ├── credential_manager.py    # keyring-абстракция (синглтон get_credential_manager()): только проверенный бэкенд (Windows — wincred, иначе — отказ от записи)
 ├── diagnostics.py           # PingThread + ReverseDnsThread — ping и обратный DNS вне GUI-потока (перенесено из ui/main_window.py)
 ├── host_importer.py         # массовый импорт серверов из TXT: parse_hosts_file, is_ip_address, resolve_host
-├── status_checker.py        # StatusChecker: QTimer разводит раунды, пробы в _ProbeThread; probe_ssh() → online/warn/offline
+├── status_checker.py        # StatusChecker: QTimer разводит раунды, пробы ПАРАЛЛЕЛЬНО в _ProbeThread (ThreadPoolExecutor); probe_ssh() → online/warn/offline
 └── system_info_collector.py # SystemInfoCollector: автосбор ОС/CPU/RAM/диск Linux-сервера одной exec_command-сессией
-version.py                   # единая точка версий: APP_VERSION="1.1.1", VERSION_FORMAT="0.9"
+version.py                   # единая точка версий: APP_VERSION="1.1.2", VERSION_FORMAT="0.9"
 dialogs/                     # AddServerDialog (+кнопка «Быстрый запуск…»), SSHConnectDialog (+кнопка внешнего терминала),
                              #   ConnectionDialog/EditConnectionDialog, ProfileManagerDialog,
                              #   BackupsDialog (бэкапы + автосохранение, откат), QuickLaunchDialog (Быстрый запуск)
@@ -87,8 +88,8 @@ ui/sidebar.py                # SidebarPanel(QWidget) — кнопки, заго�
                              #   статусов, контекстное меню строки; i18n через колбэк + retranslate
 ui/map_search_bar.py         # MapSearchBar — плавающая строка поиска поверх canvas (Enter/Shift+Enter/Esc, счётчик k/N)
 ui/command_palette.py        # CommandPalette: Ctrl+K, fuzzy-поиск по действиям меню и серверам
-i18n/                        # t(key,**kwargs); en.json/ru.json/zh.json — 326 ключей, наборы идентичны; ru — дефолт
-tests/                       # тематический сьют без pytest: 37 × test_*.py + _common.py (обвязка), run_all.py (единый раннер), check_i18n_keys.py; карта — tests/INDEX.md
+i18n/                        # t(key,**kwargs); en.json/ru.json/zh.json — 377 ключей, наборы идентичны; en — дефолт для новых пользователей
+tests/                       # тематический сьют без pytest: 43 × test_*.py + _common.py (обвязка), run_all.py (единый раннер), check_i18n_keys.py; карта — tests/INDEX.md
 ```
 
 ---
@@ -125,13 +126,28 @@ tests/                       # тематический сьют без pytest: 
 ## 4. Ключевые поведения (важно для модификации кода)
 
 ### Статусы
-`probe_ssh(host, port)`: TCP открыт + SSH-баннер → `online`; порт открыт без баннера → `warn`; иначе `offline`. Пробы только в `_ProbeThread` (не на GUI-потоке). `start_status_checks()` вызывается из main.py один раз после `show()`.
+`probe_ssh(host, port)`: TCP открыт + SSH-баннер → `online`; порт открыт без баннера → `warn`; иначе `offline`. Пробы только в `_ProbeThread` (не на GUI-потоке); внутри раунда — **параллельно** (`ThreadPoolExecutor`, потолок `status_max_parallel`, дефолт 16): худший случай раунда `ceil(N/max_parallel) × timeout` вместо `N × timeout`; результаты прилетают по мере готовности, отмена (stop/shutdown) не даёт результатов пробам, ещё не начавшимся. Мягкий авто-интервал: N > 50 узлов → интервал раундов удваивается (`effective_interval_ms()`) + одноразовая подсказка в статус-баре; жёсткого лимита числа серверов нет. `start_status_checks()` вызывается из main.py один раз после `show()`.
 
 ### Терминал
-Сырые байты SSH → `TerminalScreen.feed()` (pyte.HistoryScreen, под lock) → посячейный холст `TerminalWidget` (QWidget+QPainter: runs, цветовой движок `resolve_color`, блок-курсор с миганием). Dirty-рендер без таймера: `_on_output` → `widget.update()` напрямую (queued signal уже в GUI-потоке). Resize PTY — только при реальной смене сетки + дебаунс ~150 мс перед `channel.resize_pty` (начальный `invoke_shell` 120×32, первый resizeEvent синхронизирует с окном). Скроллбэк — готовый `pyte.HistoryScreen`: колесо мыши и Ctrl+Shift+PageUp/PageDown, авто-возврат к live-строке при новом выводе; **голые PageUp/PageDown остаются форвардом в shell** (`\x1b[5~`/`\x1b[6~` — пейджинг less/man). Клавиатура — полная таблица: F1–F12, Delete/PageUp/PageDown (всегда CSI ~), стрелки и Home/End — по состоянию DECCKM, AUDIT U3 «стрелки в mc»: TUI шлют smkx `\x1b[?1h` и ждут SS3 — `_cursor_key_seq()` шлёт `\x1bOA/B/C/D`, `\x1bOH/\x1bOF`; обычный режим — CSI; состояние — `tscreen.application_cursor_keys()`, в pyte 0.8.2 DECCKM = 32 в `screen.mode`), явные Ctrl+C→`\x03` / Ctrl+D→`\x04` (Ctrl+C при выделении копирует в буфер), bracketed paste Ctrl+V (единый блок), AltGr-guard (Ctrl+Alt не уходит как управляющие коды). Выделение мышью — координаты всегда `(row, col)` (`selection_cells()`), копирование мульти-строчного текста. Окно закрывается штатным крестиком (кнопка «Закрыть терминал» убрана). Известный хост пиннится в `~/.sshmap/known_hosts`. Настройки терминала: опциональные ключи `~/.sshmap/config.json` — `terminal_palette` (`default|nord|dracula|tokyo_night`, неизвестная → default), `terminal_font` (семейство, пусто → системный моноширинный), `terminal_font_size` (pt 6–72, иначе 10), `terminal_history_lines` (глубина скроллбэка HistoryScreen; дефолт 1000 — включён, явный 0 — отключён); применяются при создании окна (`load_terminal_settings()`). `terminal_close_behavior` (`"close"` по умолчанию | `"ask"` — подтверждение закрытия активной сессии в closeEvent; уже завершённая сессия закрывается без диалога).
+- Конвейер: сырые байты SSH → `TerminalScreen.feed()` (pyte.HistoryScreen, под lock) → посячейный холст `TerminalWidget` (QWidget+QPainter: runs, цветовой движок `resolve_color`, блок-курсор с миганием).
+- Dirty-рендер без таймера: `_on_output` → `widget.update()` напрямую (queued signal уже в GUI-потоке).
+- Resize PTY — только при реальной смене сетки + дебаунс ~150 мс перед `channel.resize_pty` (начальный `invoke_shell` 120×32, первый resizeEvent синхронизирует с окном).
+- Скроллбэк — готовый `pyte.HistoryScreen`: колесо мыши и Ctrl+Shift+PageUp/PageDown, авто-возврат к live-строке при новом выводе; **голые PageUp/PageDown остаются форвардом в shell** (`\x1b[5~`/`\x1b[6~` — пейджинг less/man).
+- Клавиатура — полная таблица: F1–F12, Delete/PageUp/PageDown (всегда CSI ~), стрелки и Home/End — по состоянию DECCKM: TUI шлют smkx `\x1b[?1h` и ждут SS3 — `_cursor_key_seq()` шлёт `\x1bOA/B/C/D`, `\x1bOH/\x1bOF`; обычный режим — CSI; состояние — `tscreen.application_cursor_keys()`, в pyte 0.8.2 DECCKM = 32 в `screen.mode`. Явные Ctrl+C→`\x03` / Ctrl+D→`\x04` (Ctrl+C при выделении копирует в буфер), bracketed paste Ctrl+V (единый блок), AltGr-guard (Ctrl+Alt не уходит как управляющие коды).
+- Выделение мышью — координаты всегда `(row, col)` (`selection_cells()`), копирование мульти-строчного текста.
+- Окно закрывается штатным крестиком (отдельной кнопки «Закрыть терминал» нет); известный хост пиннится в `~/.sshmap/known_hosts`.
+- Настройки — опциональные ключи `terminal_*` в `~/.sshmap/config.json`; полный список и дефолты — ниже, «Настройки».
 
 ### Настройки
-Диалог настроек (хаб, `ui/settings_dialog.py`) — QTabWidget «Общие / Терминал / Статусы / Автосохранение / Карта / Язык»; точки входа: меню «Настройки» между «Вид» и «Помощь» + кнопка ⚙ внизу сайдбара (векторная шестерёнка `ui/icons.py`); палитра команд Ctrl+K подхватывает пункт автоматически. Хранение — **единый** `~/.sshmap/config.json` (`i18n.save_config`, атомарная merge-запись): все ключи опциональны, дефолты = поведение v1.0. Ключи: `external_terminal` (перенесён из отдельного `~/.sshmap_settings.json` с миграцией при чтении — старый файл удаляется), `terminal_palette/terminal_font_size/terminal_history_lines/terminal_close_behavior`, `status_interval_sec`/`status_probe_timeout_sec` (дефолты 30 c / 3.0 c; применяются на лету через `StatusChecker.set_interval/set_probe_timeout`), `autosave_enabled/autosave_interval_sec/backup_count` (на лету — QTimer автосохранения), `language` (немедленное применение, до ОК). Терминал и внешний терминал читают конфиг при следующем создании окна/запуске. Опции вокруг хаба — `ui_font_family/ui_font_size` (шрифт UI, на лету через `QApplication.setFont`, 0 = системный), `terminal_font` (семейство терминала; ключ читался с v1.0, UI впервые; на лету в открытые окна), `terminal_max_open` (лимит своих терминалов, дефолт 4 — при достижении не отказ, а предложение закрыть старейшую сессию / отмена), `ui_node_double_click` (`"properties"` дефолт | `"connect"` — двойной клик по узлу сразу открывает SSHConnectDialog), `ui_show_sidebar_buttons` (блок кнопок сайдбара; весь сайдбар прячется пунктом меню «Вид → Сайдбар»), `ui_show_connection_type` (тип на плашке связи: «SSH · <метка>», удобно для экспорта PNG/PDF) + лимит 20 символов метки связи (только на ввод — старые проекты с длинными метками читаются без изменений).
+- Диалог (хаб, `ui/settings_dialog.py`) — QTabWidget «Общие / Терминал / Статусы / Автосохранение / Карта / Язык»; точки входа: меню «Настройки» между «Вид» и «Помощь» + кнопка ⚙ внизу сайдбара (векторная шестерёнка `ui/icons.py`); палитра команд Ctrl+K подхватывает пункт автоматически.
+- Хранение — **единый** `~/.sshmap/config.json` (`i18n.save_config`, атомарная merge-запись): все ключи опциональны, дефолты = поведение v1.0. Статусы и автосохранение применяются на лету; терминал и внешний терминал читают конфиг при следующем создании окна/запуске.
+- Ключи:
+  - `external_terminal` (перенесён из отдельного `~/.sshmap_settings.json` с миграцией при чтении — старый файл удаляется);
+  - `terminal_palette` (`default|nord|dracula|tokyo_night`, неизвестная → default), `terminal_font` (семейство, пусто → системный моноширинный; на лету в открытые окна), `terminal_font_size` (pt 6–72, иначе 10), `terminal_history_lines` (глубина скроллбэка HistoryScreen; дефолт 1000 — включён, явный 0 — отключён), `terminal_close_behavior` (`"close"` по умолчанию | `"ask"` — подтверждение закрытия активной сессии в closeEvent; уже завершённая закрывается без диалога), `terminal_max_open` (лимит своих терминалов, дефолт 4 — при достижении не отказ, а предложение закрыть старейшую сессию / отмена);
+  - `status_interval_sec`/`status_probe_timeout_sec`/`status_max_parallel` (дефолты 30 c / 3.0 c / 16 параллельных проб; на лету через `StatusChecker.set_interval/set_probe_timeout/set_max_parallel`);
+  - `autosave_enabled/autosave_interval_sec/backup_count` (на лету — QTimer автосохранения);
+  - `language` (немедленное применение, до ОК);
+  - `ui_font_family/ui_font_size` (шрифт UI, на лету через `QApplication.setFont`, 0 = системный), `ui_node_double_click` (`"properties"` дефолт | `"connect"` — двойной клик по узлу сразу открывает SSHConnectDialog), `ui_show_sidebar_buttons` (блок кнопок сайдбара; весь сайдбар прячется пунктом меню «Вид → Сайдбар»), `ui_show_connection_type` (тип на плашке связи: «SSH · <метка>», удобно для экспорта PNG/PDF) + лимит 20 символов метки связи (только на ввод — старые проекты с длинными метками читаются без изменений).
 
 ### Undo/Redo
 - Любое изменение сцены делается через `MainWindow._push_command(cmd)`; сцена меняется **только** внутри `redo()/undo()` команды — `QUndoStack.push()` сам вызывает redo.
@@ -150,7 +166,7 @@ tests/                       # тематический сьют без pytest: 
 
 **Ограничения:**
 - **TOFU при первом подключении:** ключ хоста, которого нет в `~/.sshmap/known_hosts`, принимается автоматически (отпечаток показывается в логе). Это стандартное поведение paramiko-клиентов, но это **не** полная защита от MITM на самом первом подключении: защита срабатывает на *смене* уже зафиксированного ключа. Для критичных хостов сверяйте отпечаток первого подключения по доверенному каналу.
-- **Windows / keyring:** принимается только системный бэкенд Windows Credential Manager (`keyrings.win.*`, т.е. требуется pywin32 — раскомментируйте его в requirements.txt). Plaintext-файловые fallback-бэкенды (`keyrings.alt.file`) отвергаются: пароли не будут сохранены, а не уехают в открытый файл. На Linux/macOS отвергаются бэкенды `keyrings.alt.*`. Если безопасный бэкенд недоступен — приложение работает, но пароли не сохраняются между запусками.
+- **Windows / keyring:** принимается только системный бэкенд Windows Credential Manager (`keyrings.win.*`, т.е. требуется pywin32 — раскомментируйте его в requirements.txt). Plaintext-файловые fallback-бэкенды (`keyrings.alt.file`) отвергаются: пароли не будут сохранены, а не уехут в открытый файл. На Linux/macOS отвергаются бэкенды `keyrings.alt.*`. Если безопасный бэкенд недоступен — приложение работает, но пароли не сохраняются между запусками.
 
 ---
 
@@ -182,46 +198,38 @@ en (дефолт) / ru / zh. Правило: новый ключ добавля�
 
 ## 7. Состояние и roadmap
 
-**Реализовано полностью:**
-- карта (узлы/Безье-связи 6 типов/заметки/группы)
-- статусы online/warn/offline
-- терминал на pyte
-- внешний системный терминал
-- undo/redo
-- автосбор информации о Linux-сервере
-- профили + keyring
-- перевод приложения i18n ru/en/zh
-- контекстные меню всех объектов
-- fit/zoom/центрирование
-- экспорт карты в PNG/JPEG/PDF и фоновое изображение с drag/resize
-- горячие клавиши и палитра команд Ctrl+K
-- дублирование узла Ctrl+D с копированием keyring-пароля под новым id
-- мультивыделение (Ctrl+клик, рамка, групповой drag, соединить/удалить выделенные)
-- теги/цветные метки серверов: цветная полоска на карточке
-- фильтр по тегам в сайдбаре с затемнением несовпадающих узлов на карте, поиск по тегам
-- экспорт карты в draw.io `.drawio` — узлы/связи/группы-контейнеры/стикеры/фон отдельным слоем; файл открывается в diagrams.net и VS Code-плагине 
-- массовый импорт серверов из TXT
-- контекстное меню дерева серверов сайдбара + «Показать на карте»
-- автосохранение проекта (~/.sshmap/autosave/) + кольцевой буфер бэкапов при каждом save (~/.sshmap/backups/, откат через «Файл → Бэкапы…» / «Восстановить из автосохранения…») и предложение восстановления из автосохранения при открытии файла
-- поиск по карте (Ctrl+F): строка поиска поверх canvas с подсветкой совпадений (alias/host/ip/comment), переход Enter/Shift+Enter с центрированием и рамкой-акцентом, затемнение несовпавших узлов (комбинируется с тег-фильтром по И)
-- per-server список ссылок/команд — подменю «Быстрый запуск» ПЕРВЫМ пунктом контекстного меню (ПКМ в списке серверов и на карте, выше «Подключиться по SSH»); URL открывается в браузере по умолчанию, команда отправляется первой командой в SSH-терминал сервера; настройка — кнопка «Быстрый запуск…» в свойствах сервера и «Настроить…» из подменю; хранится в JSON проекта (`quick_launch`), изменения через undo
-- QTabWidget-хаб «Общие / Терминал / Статусы / Автосохранение / Карта / Язык» — меню «Настройки» + кнопка сайдбара; единый `~/.sshmap/config.json` (миграция `external_terminal` из `~/.sshmap_settings.json`); палитра/шрифт/глубина истории терминала + поведение закрытия сессии (close/ask), интервал/таймаут StatusChecker, автосохранение (вкл/интервал/бэкапы), язык с немедленным применением
-- шрифты UI и терминала (семейство + размер) с применением на лету без перезапуска; английский по умолчанию для новых пользователей (русский — «Помощь → Язык» / вкладка «Язык»); лимит своих терминалов = 4 — при достижении предложение закрыть старейшую сессию / отмена; двойной клик по узлу: свойства или сразу диалог входа SSH; скрытие кнопочного блока сайдбара (настройка) + пункт меню «Вид → Сайдбар» для всего сайдбара; плашка связи: опция «тип на плашке» («SSH · <метка>») + лимит 20 символов метки (только на ввод)
+**Реализованные функции приложения** (детали — в разделах 3–4):
+- интерактивная карта: узлы, Безье-связи 6 типов, заметки, группы, фоновое изображение с drag/resize
+- статусы узлов online/warn/offline: параллельные пробы, авто-интервал для больших карт
+- встроенный SSH-терминал на pyte (скроллбэк, выделение мышью, полная клавиатура) + внешний системный терминал
+- undo/redo сценарных операций
+- автосбор информации о Linux-сервере (ОС/CPU/RAM/диск)
+- профили и пароли в keyring ОС — пароль никогда не пишется в JSON
+- i18n: en (дефолт) / ru / zh
+- контекстные меню всех объектов, fit/zoom/центрирование
+- мультивыделение: Ctrl+клик, рамка, групповой drag, «соединить/удалить выделенные»
+- теги: цветная полоска на карточке + фильтр по тегам в сайдбаре с затемнением несовпадающих узлов
+- поиск по карте (Ctrl+F): подсветка совпадений, переход Enter/Shift+Enter, затемнение несовпавших
+- быстрый запуск на сервер: список URL/команд (URL — браузер, команда — первая команда терминала)
+- диалог настроек (хаб): единый `~/.sshmap/config.json`, применение на лету без перезапуска
+- автосохранение + кольцевой буфер бэкапов с откатом («Файл → Бэкапы…»)
+- экспорт в PNG/JPEG/PDF и draw.io `.drawio`; массовый импорт серверов из TXT
+- горячие клавиши и палитра команд (Ctrl+K)
 
-**Известные ограничения:** undo не покрывает статусы узлов и геометрию фона; фоновое изображение хранится путём (при переносе проекта на другую машину файл нужно переносить вместе с картой); язык интерфейса выбирается во вкладке «Язык» диалога настроек (немедленное применение) или через меню «Помощь → Язык» (сохранён; персистентность — ~/.sshmap/config.json); Язык по умолчанию — английский (только для новых пользователей без сохранённого config.json).
+**Известные ограничения:**
+- undo не покрывает статусы узлов и геометрию фона — детали в «Undo/Redo»;
+- фоновое изображение хранится путём в JSON: при переносе проекта на другую машину файл нужно переносить вместе с картой;
+- TOFU при первом подключении (новый ключ хоста принимается автоматически) и ограничения keyring — детали в «Безопасность».
 
-**Roadmap (по приоритету, детали — в ROADMAP.md):**
-- **v1.1.2** (серия RC1→RC3 + final): фиксы аудита v1.0/v1.1 (undo-путь SSH-диалога, paramiko-дефолты, жизненный цикл терминального потока, drag-состояние карты, асинхронный DNS-импорт, выделение/копирование в терминале, колесо мыши при полноэкранном TUI, сохранение размеров окон, мёртвый код сайдбара) + параллельные пробы статусов (ThreadPoolExecutor, `status.max_parallel`, мягкий авто-интервал для больших карт).
-- **v1.1.3**: SFTP-вкладка в окне терминала (тот же transport, один worker с очередью, прогресс и отмена).
-- **v1.1.4**: гигиена main_window.py — разрез на миксины (project I/O / node ops / SSH), публичный API без изменений.
-- **v1.2**: полировка карты (анимированный поток по связям, плавные перелёты камеры, центральная тема `ui/theme.py`) + опции терминала (табы сессий, выделение слова/строки).
-- Бэклог (без версии): импорт из ~/.ssh/config, экспорт/импорт профилей, Prometheus-метрики, интеграции Docker/K8s·Proxmox·WoL·SNMP, мини-карта и другие «большого уровня».
+**Roadmap** (задачи, порядок и acceptance — в ROADMAP.md):
+- **v1.1.3**: SFTP-вкладка в окне терминала (тот же transport, один worker с очередью задач, прогресс и отмена).
+- **v1.1.4**: гигиена main_window.py — разрез на миксины, публичный API без изменений.
+- **Серия v1.2.x**: рефактор терминала «окно → страница»; сессии табами в окне и доком окна карты; мультинабор; крепление заметок к серверам; центральная тема `ui/theme.py` + анимации карты; выделение и контекстное меню терминала; D&D в SFTP-вкладку; удаление мёртвого кода + полный wcwidth CJK; подсветка логов (opt-in).
+- **Серия v1.3.x**: панель файлов внизу окна карты + просмотрщик текста; настройка горячих клавиш; языки без написания кода; лёгкие плагины.
 
 ---
 
 ## 8. Лицензия и безопасность
 
-- MIT License
-- Пароли никогда не покидают машину: keyring ОС (Windows Credential Manager / GNOME Keyring / macOS Keychain); в JSON проекта пароль не пишется никогда.
-- known_hosts-пиннинг (`~/.sshmap/known_hosts`): смена ключа хоста → отказ подключения (защита от MITM). Первое подключение — TOFU: новый ключ принимается автоматически (отпечаток логируется).
-- Внешний системный терминал: пароль вводится ssh-клиенту ОС интерактивно, никогда не передаётся в argv.
+- MIT License (LICENSE).
+- Модель безопасности: пароли только в keyring ОС (никогда не в JSON проекта), known_hosts-пиннинг с TOFU при первом подключении, внешний терминал без пароля в argv — детали и ограничения: раздел 4 «Безопасность».

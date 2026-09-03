@@ -37,8 +37,9 @@ if TYPE_CHECKING:
     from ..graphics.map_scene import MapScene
 
 
-from PySide6.QtCore import Qt, Signal, QRectF
-from PySide6.QtGui import QPainter, QWheelEvent, QKeyEvent, QMouseEvent, QBrush, QColor, QPen
+from PySide6.QtCore import Qt, Signal, QRectF, QEvent
+from PySide6.QtGui import (QPainter, QWheelEvent, QKeyEvent, QMouseEvent, QFocusEvent,
+                           QBrush, QColor, QPen)
 from PySide6.QtWidgets import QGraphicsView, QGraphicsPathItem, QMenu
 
 
@@ -363,6 +364,35 @@ class MapView(QGraphicsView):
                 self._group_drag_olds = []
             self.setDragMode(QGraphicsView.ScrollHandDrag)
         super().mouseReleaseEvent(event)
+
+    # ── v1.1.2RC2 (N3): сброс «залипшего» drag-состояния при потере фокуса ──
+    # Единственный штатный сброс — mouseReleaseEvent; но если capture ушёл без
+    # отпускания (Alt+Tab / смена активации окна посреди драга), release не
+    # приходит и вид остаётся в NoDrag с живым _move_drag_node: следующий левый
+    # драг ведёт себя непредсказуемо. Потеря фокуса/активации — тот же симптом,
+    # поэтому возвращаем ScrollHandDrag и чистим состояние жеста (идемпотентно:
+    # без активного drag оба условия ложны — ничего не меняется). В Qt «blur» —
+    # это QFocusEvent(FocusOut) → focusOutEvent (отдельного blurEvent у QWidget
+    # нет, проверено на PySide6 6.11); смена активации окна — changeEvent.
+
+    def _reset_stuck_drag_state(self):
+        """Сбросить незавершённый drag-жест: ScrollHandDrag + очистка состояния."""
+        if self._move_drag_node is not None or self.dragMode() == QGraphicsView.NoDrag:
+            self._move_drag_node = None
+            self._move_drag_old = None
+            self._group_drag_olds = []
+            self.setDragMode(QGraphicsView.ScrollHandDrag)
+
+    def focusOutEvent(self, event: QFocusEvent):
+        """v1.1.2RC2 (N3): потеря фокуса («blur») — capture мог уйти, release не придёт."""
+        self._reset_stuck_drag_state()
+        super().focusOutEvent(event)
+
+    def changeEvent(self, event: QEvent):
+        """v1.1.2RC2 (N3): смена активации окна — тот же путь залипания, что blur."""
+        if event.type() == QEvent.Type.ActivationChange:
+            self._reset_stuck_drag_state()
+        super().changeEvent(event)
 
     def keyPressEvent(self, event: QKeyEvent):
         if self._rubber_select_item is not None:
