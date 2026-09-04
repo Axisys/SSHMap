@@ -20,6 +20,11 @@ ROOT, WORK = bootstrap()  # ДО импортов модулей приложе�
 print("== compile ==")
 import py_compile
 bad = []
+# v1.1.4: cfile — в рабочую папку процесса (WORK уникальна на файл при параллельном
+# run_all.py): запись .pyc в ОБЩИЙ __pycache__ из 4 процессов гонится на Windows
+# (WinError 5 «Access is denied» при rename .pyc, пока другой процесс его держит) —
+# флейк «all .py compile». Семантика та же: полная компиляция каждого модуля.
+_pyc_dir = os.path.join(WORK, "pyc")
 for dirpath, _, files in os.walk(ROOT):
     if "__pycache__" in dirpath:
         continue
@@ -27,7 +32,10 @@ for dirpath, _, files in os.walk(ROOT):
         if f.endswith(".py"):
             p = os.path.join(dirpath, f)
             try:
-                py_compile.compile(p, doraise=True)
+                rel = os.path.relpath(p, ROOT)
+                cfile = os.path.join(_pyc_dir, *os.path.dirname(rel), os.path.basename(rel)[:-3] + "c")
+                os.makedirs(os.path.dirname(cfile), exist_ok=True)
+                py_compile.compile(p, cfile=cfile, doraise=True)
             except Exception as e:
                 bad.append((p, str(e)))
 check("all .py compile", not bad, str(bad))

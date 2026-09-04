@@ -58,15 +58,21 @@ check("ReverseDnsThread.resolved(str) keeps its signature", _got_dns == ["resolv
       str(_got_dns))
 
 # ══ 2. Гигиена main_window.py: вложенные Thread-классы исчезли ═════
+# v1.1.4: _ping_node/_copy_node_info переехали в NodeOpsMixin — импорты потоков
+# проверяем там (фасад main_window.py их больше не содержит).
 _mw_src_path = sys.modules[MW.__name__].__file__
 with open(_mw_src_path, encoding="utf-8") as f:
     _mw_src = f.read()
-check("main_window.py: no nested 'class _PingThread'", "class _PingThread" not in _mw_src)
-check("main_window.py: no nested 'class _ReverseDnsThread'", "class _ReverseDnsThread" not in _mw_src)
-check("main_window.py imports PingThread from services.diagnostics",
-      "from services.diagnostics import PingThread" in _mw_src)
-check("main_window.py imports ReverseDnsThread from services.diagnostics",
-      "from services.diagnostics import ReverseDnsThread" in _mw_src)
+import ui.main_window_node_ops as _MWO
+with open(_MWO.__file__, encoding="utf-8") as f:
+    _mwo_src = f.read()
+_mw_cluster_src = _mw_src + _mwo_src
+check("main_window cluster: no nested 'class _PingThread'", "class _PingThread" not in _mw_cluster_src)
+check("main_window cluster: no nested 'class _ReverseDnsThread'", "class _ReverseDnsThread" not in _mw_cluster_src)
+check("node_ops mixin imports PingThread from services.diagnostics",
+      "from services.diagnostics import PingThread" in _mwo_src)
+check("node_ops mixin imports ReverseDnsThread from services.diagnostics",
+      "from services.diagnostics import ReverseDnsThread" in _mwo_src)
 
 
 # ══ 3. ReverseDnsThread: поведение (hermetic, без реального DNS) ════

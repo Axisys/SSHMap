@@ -1,4 +1,4 @@
-# SSH Map (NodeVisualSSH) — v1.1.3
+# SSH Map (NodeVisualSSH) — v1.1.4
 
 Десктопное приложение (Python + PySide6): интерактивная карта IT-инфраструктуры с прямым SSH-подключением к узлам.
 Slogan: *"Draw your infrastructure. Organize it. Connect to it."*
@@ -83,21 +83,24 @@ services/
 ├── host_importer.py         # массовый импорт серверов из TXT: parse_hosts_file, is_ip_address, resolve_host
 ├── status_checker.py        # StatusChecker: QTimer разводит раунды, пробы ПАРАЛЛЕЛЬНО в _ProbeThread (ThreadPoolExecutor); probe_ssh() → online/warn/offline
 └── system_info_collector.py # SystemInfoCollector: автосбор ОС/CPU/RAM/диск Linux-сервера одной exec_command-сессией
-version.py                   # единая точка версий: APP_VERSION="1.1.3", VERSION_FORMAT="0.9"
+version.py                   # единая точка версий: APP_VERSION="1.1.4", VERSION_FORMAT="0.9"
 dialogs/                     # AddServerDialog (+кнопка «Быстрый запуск…»), SSHConnectDialog (+кнопка внешнего терминала),
                              #   ConnectionDialog/EditConnectionDialog, ProfileManagerDialog,
                              #   BackupsDialog (бэкапы + автосохранение, откат), QuickLaunchDialog (Быстрый запуск)
-ui/main_window.py            # MainWindow: контроллер; undo_stack (QUndoStack), dirty по canUndo()+baseline;
-                             #   дублирование узла Ctrl+D (keyring-пароль под новым id), групповые операции
-                             #   экспорт карты в PNG/JPEG/PDF, экспорт в drawio, установка/удаление фона, «Собрать информацию»
-                             #   поиск по карте Ctrl+F, _qaction_guard — guard на QActions с прикреплённым QMenu;
-                             #   сайдбар-кластер вынесен в ui/sidebar.py (MainWindow — фасад)
+ui/main_window.py            # MainWindow: ФАКАД (v1.1.4: class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow));
+                             #   UI-обвязка __init__/тулбар/меню/closeEvent + шатдаун потоков, undo_stack (QUndoStack), dirty по canUndo()+baseline;
+                             #   заметки, группы, фон, экспорт PNG/JPEG/PDF/drawio, «Собрать информацию», поиск по карте Ctrl+F, тег-фильтр;
+                             #   _qaction_guard — guard на QActions с прикреплённым QMenu; публичный API без изменений (имена методов/точки вызова не тронуты)
+ui/main_window_project_io.py # ProjectIOMixin (v1.1.4): проект new/open/load/save/autosave/backups/restore; владение _project_file/_dirty/_autosave_timer
+ui/main_window_node_ops.py   # NodeOpsMixin (v1.1.4): операции над узлами/связями + импорт из TXT; _is_scene_point (bool-guard v0.8.1)
+ui/main_window_ssh.py        # SshMixin (v1.1.4): SSH-диалог, терминальные окна, автосбор информации, быстрый запуск; владение _terminal_windows/_ssh_connected_nodes/_info_collectors
+ui/mixin_support.py          # host_attr(self, name) — доступ к глобальным модуля-фасада в момент вызова (миксины не импортируют main_window — нет цикла; тестовый шов подмены MW.<имя>)
 ui/sidebar.py                # SidebarPanel(QWidget) — кнопки, заголовок, поиск, тег-фильтр, дерево с маркерами
                              #   статусов, контекстное меню строки; i18n через колбэк + retranslate
 ui/map_search_bar.py         # MapSearchBar — плавающая строка поиска поверх canvas (Enter/Shift+Enter/Esc, счётчик k/N)
 ui/command_palette.py        # CommandPalette: Ctrl+K, fuzzy-поиск по действиям меню и серверам
 i18n/                        # t(key,**kwargs); en.json/ru.json/zh.json — 398 ключей, наборы идентичны; en — дефолт для новых пользователей
-tests/                       # тематический сьют без pytest: 44 × test_*.py + _common.py (обвязка), run_all.py (параллельный раннер, 4 воркера), check_i18n_keys.py; карта — tests/INDEX.md
+tests/                       # тематический сьют без pytest: 45 × test_*.py + _common.py (обвязка), run_all.py (параллельный раннер, 4 воркера), check_i18n_keys.py; карта — tests/INDEX.md
 ```
 
 ---
@@ -231,7 +234,6 @@ en (дефолт) / ru / zh. Правило: новый ключ добавля�
 - TOFU при первом подключении (новый ключ хоста принимается автоматически) и ограничения keyring — детали в «Безопасность».
 
 **Roadmap** (задачи, порядок и acceptance — в ROADMAP.md):
-- **v1.1.4**: гигиена main_window.py — разрез на миксины, публичный API без изменений.
 - **Серия v1.2.x**: рефактор терминала «окно → страница»; сессии табами в окне и доком окна карты; мультинабор; крепление заметок к серверам; центральная тема `ui/theme.py` + анимации карты; выделение и контекстное меню терминала; D&D в SFTP-вкладку; удаление мёртвого кода + полный wcwidth CJK; подсветка логов (opt-in).
 - **Серия v1.3.x**: панель файлов внизу окна карты + просмотрщик текста; настройка горячих клавиш; языки без написания кода; лёгкие плагины.
 
