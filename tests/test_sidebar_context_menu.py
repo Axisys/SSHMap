@@ -12,9 +12,9 @@ ROADMAP v0.9.6:
 
 Запуск:  python tests/test_sidebar_context_menu.py   (из корня проекта) или python tests/run_all.py
 """
-import os, sys, json, tempfile, traceback
+import os, sys, tempfile, traceback
 
-from _common import bootstrap, check, finish, wait_until
+from _common import bootstrap, check, finish, wait_until, load_i18n_langs, check_i18n_parity
 
 ROOT, WORK = bootstrap()  # ДО импортов модулей приложения (HOME-изоляция и faulthandler внутри)
 
@@ -84,10 +84,7 @@ try:
 
     # ══ #4. i18n: новый ключ ctx.reveal_on_map × en/ru/zh, наборы идентичны ══
     print("== i18n ==")
-    langs = {}
-    for code in ("en", "ru", "zh"):
-        with open(os.path.join(ROOT, "i18n", f"{code}.json"), encoding="utf-8") as f:
-            langs[code] = json.load(f)
+    langs = load_i18n_langs(ROOT)
     check("ctx.reveal_on_map present and non-empty in en/ru/zh",
           all(langs[c].get("ctx.reveal_on_map", "").strip() for c in ("en", "ru", "zh")),
           str({c: langs[c].get("ctx.reveal_on_map") for c in ("en", "ru", "zh")}))
@@ -99,10 +96,7 @@ try:
     # v1.1: +33 ключа диалога настроек (settings.* / menu.settings / btn.settings / status.settings_saved)
     # v1.1.2RC2: +2 ключа (msg.confirm_delete_profile, status.import_resolving)
     # v1.1.2 final: +2 ключа (settings.statuses.max_parallel, status.auto_interval_hint)
-    check("key sets identical across en/ru/zh (377 keys each)",
-          set(langs["en"]) == set(langs["ru"]) == set(langs["zh"])
-          and all(len(d) == 377 for d in langs.values()),
-          str({c: len(d) for c, d in langs.items()}))
+    check_i18n_parity(langs)
     _sidebar_keys = ["ctx.ssh_connect", "ctx.ssh_external", "ctx.edit_server",
                      "ctx.copy_ip", "ctx.copy_hostname", "ctx.ping",
                      "ctx.collect_info", "ctx.reveal_on_map", "ctx.delete_server"]

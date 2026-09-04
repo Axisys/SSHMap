@@ -16,18 +16,16 @@ Acceptance-тест серии: фейковые пробы (monkeypatch probe_s
   * диалог «Статусы»: спин max_parallel (1..64, prefill из конфига),
     collect() — 18 ключей (+status_max_parallel);
   * i18n: +2 ключа × en/ru/zh — паритет 375 → 377;
-  * состояние релиза: APP_VERSION == "1.1.2", pyproject-сверка, заголовок requirements.
+  * состояние релиза: APP_VERSION == "1.1.3", pyproject-сверка, заголовок requirements.
 
 Запуск: python tests/test_status_parallel.py   (из корня проекта) или python tests/run_all.py
 """
-import json
 import os
-import re
 import sys
 import threading
 import time
 
-from _common import bootstrap, check, finish, wait_until
+from _common import bootstrap, check, finish, wait_until, load_i18n_langs, check_i18n_parity, check_release_state
 
 ROOT, WORK = bootstrap()  # ДО импортов модулей приложения (HOME-изоляция и faulthandler внутри)
 
@@ -305,39 +303,14 @@ _clear_cfg()
 
 # ══ 9. i18n: +2 ключа × en/ru/zh — паритет 375 → 377 ════════════════════════
 print("== i18n ==")
-langs = {}
-for code in ("en", "ru", "zh"):
-    with open(os.path.join(ROOT, "i18n", f"{code}.json"), encoding="utf-8") as f:
-        langs[code] = json.load(f)
+langs = load_i18n_langs(ROOT)
 new_keys = ["settings.statuses.max_parallel", "status.auto_interval_hint"]
 missing = [k for k in new_keys if any(not langs[c].get(k, "").strip() for c in ("en", "ru", "zh"))]
 check("2 новых ключа v1.1.2 final есть и не пусты в en/ru/zh", not missing, str(missing))
-check("key sets identical across en/ru/zh (377 keys each)",
-      set(langs["en"]) == set(langs["ru"]) == set(langs["zh"])
-      and all(len(d) == 377 for d in langs.values()),
-      str({c: len(d) for c, d in langs.items()}))
+check_i18n_parity(langs)
 
-# ══ 10. Состояние релиза v1.1.2 final ═══════════════════════════════════════
+# ══ 10. Состояние релиза (пины — tests/_common.py: EXPECTED_APP_VERSION) ══════
 print("== release state ==")
-from version import APP_VERSION
-check("release: APP_VERSION == '1.1.2'", APP_VERSION == "1.1.2", APP_VERSION)
-try:
-    try:
-        import tomllib as _toml
-    except ModuleNotFoundError:
-        import tomli as _toml
-    with open(os.path.join(ROOT, "pyproject.toml"), "rb") as f:
-        _pp = _toml.load(f)
-    check("release: pyproject version == APP_VERSION",
-          _pp["project"]["version"] == APP_VERSION, str(_pp["project"].get("version")))
-except Exception as e:  # noqa: BLE001
-    check("release: pyproject version == APP_VERSION", False, repr(e))
-try:
-    with open(os.path.join(ROOT, "requirements.txt"), encoding="utf-8") as f:
-        _req_head = f.readline()
-    check("release: requirements.txt header carries v1.1.2 (не RC)",
-          re.search(r"v1\.1\.2(?![A-Za-z0-9])", _req_head) is not None, _req_head.strip())
-except Exception as e:  # noqa: BLE001
-    check("release: requirements.txt header carries v1.1.2 (не RC)", False, repr(e))
+check_release_state(ROOT)
 
 finish()

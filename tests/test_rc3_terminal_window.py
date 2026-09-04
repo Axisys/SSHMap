@@ -49,19 +49,18 @@ feed из SSH-потока параллельно с чтением режима
 симулированном menubar'е), дефолт свежего QMainWindow — 640×480, поэтому round-trip
 проверяется с не-дефолтным 700×500.
 
-Секция 8 — состояние релиза: APP_VERSION == "1.1.2" (пин обновлён на финал серии),
+Секция 8 — состояние релиза: APP_VERSION == "1.1.3" (пин обновлён на финал серии),
 пины pyproject/requirements.
 
 Запуск:  python tests/test_rc3_terminal_window.py   (из корня проекта) или python tests/run_all.py
 """
 import json
 import os
-import re
 import sys
 import threading
 import time
 
-from _common import bootstrap, check, finish, wait_until
+from _common import bootstrap, check, finish, wait_until, check_release_state
 
 ROOT, WORK = bootstrap()  # ДО импортов модулей приложения (HOME-изоляция и faulthandler внутри)
 
@@ -78,7 +77,6 @@ from modules.ssh_terminal import load_terminal_settings
 from modules.window_geometry import save_window_geometry, restore_window_geometry
 from models.server import ServerData
 import ui.main_window as MW
-from version import APP_VERSION
 
 
 # ════════════════════════════════════════════════════════════
@@ -588,28 +586,9 @@ clear_config()
 
 
 # ════════════════════════════════════════════════════════════
-# 8. Состояние релиза v1.1.2 (пин обновлён на каждый релиз)
+# 8. Состояние релиза (пины — tests/_common.py: EXPECTED_APP_VERSION)
 # ════════════════════════════════════════════════════════════
 print("== release state ==")
-
-check("release: APP_VERSION == '1.1.2'", APP_VERSION == "1.1.2", APP_VERSION)
-try:
-    try:
-        import tomllib as _toml
-    except ModuleNotFoundError:
-        import tomli as _toml  # type: ignore
-    with open(os.path.join(ROOT, "pyproject.toml"), "rb") as f:
-        _pp = _toml.load(f)
-    check("release: pyproject version == APP_VERSION",
-          _pp["project"]["version"] == APP_VERSION, str(_pp["project"].get("version")))
-except Exception as e:  # noqa: BLE001
-    check("release: pyproject version == APP_VERSION", False, repr(e))
-try:
-    with open(os.path.join(ROOT, "requirements.txt"), encoding="utf-8") as f:
-        _req_head = f.readline()
-    check("release: requirements.txt header carries v1.1.2 (не RC)",
-          re.search(r"v1\.1\.2(?![A-Za-z0-9])", _req_head) is not None, _req_head.strip())
-except OSError as e:
-    check("release: requirements.txt header carries v1.1.2 (не RC)", False, repr(e))
+check_release_state(ROOT)
 
 finish()

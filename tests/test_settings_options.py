@@ -27,7 +27,7 @@ import json
 import os
 import sys
 
-from _common import bootstrap, check, finish
+from _common import bootstrap, check, finish, load_i18n_langs, check_i18n_parity, check_release_state
 
 ROOT, WORK = bootstrap()  # ДО импортов модулей приложения (HOME-изоляция внутри)
 
@@ -73,10 +73,7 @@ def clear_cfg():
 # 0. i18n: +14 ключей × en/ru/zh (v1.1.1), паритет 359 → 375 → 377 (+2 в v1.1.2 final)
 # ════════════════════════════════════════════════════════════
 print("== i18n ==")
-langs = {}
-for code in ("en", "ru", "zh"):
-    with open(os.path.join(ROOT, "i18n", f"{code}.json"), encoding="utf-8") as f:
-        langs[code] = json.load(f)
+langs = load_i18n_langs(ROOT)
 new_keys = [
     "settings.general.ui_font_family", "settings.general.ui_font_size",
     "settings.ui_font_system", "settings.terminal.font_family",
@@ -89,10 +86,7 @@ new_keys = [
 missing = [k for k in new_keys
            if any(not langs[c].get(k, "").strip() for c in ("en", "ru", "zh"))]
 check("14 новых ключей v1.1.1 есть и не пусты в en/ru/zh", not missing, str(missing))
-check("key sets identical across en/ru/zh (377 keys each; +2 в v1.1.2RC2, +2 в v1.1.2 final)",
-      set(langs["en"]) == set(langs["ru"]) == set(langs["zh"])
-      and all(len(d) == 377 for d in langs.values()),
-      str({c: len(d) for c, d in langs.items()}))
+check_i18n_parity(langs)
 
 # ════════════════════════════════════════════════════════════
 # 1. Пункт #2: английский по умолчанию (только для новых пользователей)
@@ -474,20 +468,10 @@ check("EditConnectionDialog: старая длинная метка (30 симв
       f"len={len(edlg.label.text())}")
 
 # ════════════════════════════════════════════════════════════
-# 7. Состояние релиза (пин обновлён на каждый релиз; v1.1.2 final — параллельные пробы)
+# 7. Состояние релиза (пины — tests/_common.py: EXPECTED_APP_VERSION)
 # ════════════════════════════════════════════════════════════
 print("== release state ==")
-from version import APP_VERSION
-
-check("APP_VERSION == '1.1.2'", APP_VERSION == "1.1.2", APP_VERSION)
-try:
-    import tomllib as _toml
-except ImportError:  # Python < 3.11
-    import tomli as _toml
-with open(os.path.join(ROOT, "pyproject.toml"), "rb") as f:
-    _pp = _toml.load(f)
-check("pyproject version == APP_VERSION (1.1.2)",
-      _pp["project"]["version"] == "1.1.2", _pp["project"]["version"])
+check_release_state(ROOT)
 
 clear_cfg()
 finish()

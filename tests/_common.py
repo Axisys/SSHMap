@@ -20,10 +20,13 @@
     весь ввод-вывод уходит в песочницу, реальный home не трогается (отключается
     SSHMAP_TEST_NO_HOME_ISOLATION=1);
   * QT_QPA_PLATFORM=offscreen по умолчанию (если пользователь не выставил свой);
-  * sys.path: корень проекта; рабочая папка _tmp_testdata — свежая на каждый прогон;
+  * sys.path: корень проекта; рабочая папка — свежая на каждый прогон
+    (_tmp_testdata, либо $SSHMAP_TEST_WORKDIR при параллельном run_all.py);
   * faulthandler-таймаут 180 c: зависший offscreen (модалка) — дамп стеков и выход.
 """
+import json
 import os
+import re
 import shutil
 import sys
 import tempfile
@@ -51,7 +54,10 @@ def bootstrap(faulthandler_timeout=180):
     if root not in sys.path:
         sys.path.insert(0, root)
 
-    work = os.path.join(root, "_tmp_testdata")
+    # Параллельный run_all.py передаёт уникальный каталог на файл через
+    # SSHMAP_TEST_WORKDIR (иначе bootstrap() соседнего процесса сотрёт scratch);
+    # одиночный запуск — фиксированный _tmp_testdata (gitignored).
+    work = os.environ.get("SSHMAP_TEST_WORKDIR") or os.path.join(root, "_tmp_testdata")
     shutil.rmtree(work, ignore_errors=True)
     os.makedirs(work, exist_ok=True)
 
@@ -130,3 +136,66 @@ def restore_i18n_config(snap):
             f.write(snap[1])
     except OSError:
         pass  # sandbox may block writes to ~ — config untouched anyway
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Пины релиза: при каждом релизе обновлять ТОЛЬКО ЗДЕСЬ (ранее: число «N ключей»
+# в 12 i18n-файлах + APP_VERSION/requirements-пины в 7 release-state-секциях).
+# Пропуски самих ключей против кода ловит check_i18n_keys.py.
+# ─────────────────────────────────────────────────────────────────────────────
+EXPECTED_APP_VERSION = "1.1.3"  # текущий релиз (sentinel: ловит «бамп не в ту версию»)
+EXPECTED_I18N_KEYS = 398        # паритет en/ru/zh (v1.1.3: 377 + 21 sftp.*)
+VERSION_FORMAT_RE = re.compile(r"^\d+(\.\d+){1,3}(RC\d+)?$")  # "1.1.3", "1.0RC4", "0.9.9.7"
+
+
+def load_i18n_langs(root):
+    """i18n/{en,ru,zh}.json → {code: dict} (общая загрузка для parity-проверок)."""
+    langs = {}
+    for code in ("en", "ru", "zh"):
+        with open(os.path.join(root, "i18n", f"{code}.json"), encoding="utf-8") as f:
+            langs[code] = json.load(f)
+    return langs
+
+
+def check_i18n_parity(langs):
+    """Паритет en/ru/zh: наборы ключей равны и число == EXPECTED_I18N_KEYS."""
+    check(
+        f"i18n-паритет en/ru/zh ({EXPECTED_I18N_KEYS} keys each)",
+        set(langs["en"]) == set(langs["ru"]) == set(langs["zh"])
+        and all(len(d) == EXPECTED_I18N_KEYS for d in langs.values()),
+        str({c: len(d) for c, d in langs.items()}))
+
+
+def check_release_state(root):
+    """Состояние релиза из version.py (единая точка истины): sentinel
+    EXPECTED_APP_VERSION + формат + pyproject-сверка + заголовок requirements.txt.
+    Вызывать ПОСЛЕ bootstrap() — version импортируется внутри функции."""
+    try:
+        from version import APP_VERSION
+    except Exception as e:  # noqa: BLE001
+        check("release: version.py читается", False, repr(e))
+        return
+
+    check(f"release: APP_VERSION == '{EXPECTED_APP_VERSION}'",
+          APP_VERSION == EXPECTED_APP_VERSION, APP_VERSION)
+    check("release: APP_VERSION формат (X.Y.Z[.W][RCn])",
+          bool(VERSION_FORMAT_RE.match(APP_VERSION)), APP_VERSION)
+    try:
+        try:
+            import tomllib as _toml
+        except ModuleNotFoundError:
+            import tomli as _toml  # type: ignore
+        with open(os.path.join(root, "pyproject.toml"), "rb") as f:
+            _pp = _toml.load(f)
+        check("release: pyproject version == APP_VERSION",
+              _pp["project"]["version"] == APP_VERSION, str(_pp["project"].get("version")))
+    except Exception as e:  # noqa: BLE001
+        check("release: pyproject version == APP_VERSION", False, repr(e))
+    try:
+        with open(os.path.join(root, "requirements.txt"), encoding="utf-8") as f:
+            _head = f.readline()
+        pat = re.compile(rf"v{re.escape(APP_VERSION)}(?![A-Za-z0-9])")
+        check(f"release: requirements.txt header carries v{APP_VERSION}",
+              pat.search(_head) is not None, _head.strip())
+    except Exception as e:  # noqa: BLE001
+        check(f"release: requirements.txt header carries v{APP_VERSION}", False, repr(e))

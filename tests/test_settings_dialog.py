@@ -31,7 +31,7 @@ import json
 import os
 import sys
 
-from _common import bootstrap, check, finish
+from _common import bootstrap, check, finish, load_i18n_langs, check_i18n_parity
 
 ROOT, WORK = bootstrap()  # ДО импортов модулей приложения (HOME-изоляция внутри)
 
@@ -82,10 +82,7 @@ def clear_cfg():
 # 1. i18n: +33 ключа × en/ru/zh, паритет 326 → 359 → … → 377 (с v1.1.2 final)
 # ════════════════════════════════════════════════════════════
 print("== i18n ==")
-langs = {}
-for code in ("en", "ru", "zh"):
-    with open(os.path.join(ROOT, "i18n", f"{code}.json"), encoding="utf-8") as f:
-        langs[code] = json.load(f)
+langs = load_i18n_langs(ROOT)
 new_keys = [
     "settings.title", "settings.ok", "settings.cancel",
     "settings.tab.general", "settings.tab.terminal", "settings.tab.statuses",
@@ -105,10 +102,7 @@ new_keys = [
 missing = [k for k in new_keys
            if any(not langs[c].get(k, "").strip() for c in ("en", "ru", "zh"))]
 check("33 новых ключа v1.1 есть и не пусты в en/ru/zh", not missing, str(missing))
-check("key sets identical across en/ru/zh (377 keys each)",
-      set(langs["en"]) == set(langs["ru"]) == set(langs["zh"])
-      and all(len(d) == 377 for d in langs.values()),
-      str({c: len(d) for c, d in langs.items()}))
+check_i18n_parity(langs)
 
 # ════════════════════════════════════════════════════════════
 # 2. Иконка шестерёнки (ui/icons.py)

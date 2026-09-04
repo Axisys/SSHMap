@@ -11,9 +11,9 @@ ROADMAP v0.9.8:
 
 Запуск:  python tests/test_map_search.py   (из корня проекта) или python tests/run_all.py
 """
-import os, sys, json, tempfile, traceback
+import os, sys, tempfile, traceback
 
-from _common import bootstrap, check, finish, wait_until
+from _common import bootstrap, check, finish, wait_until, load_i18n_langs, check_i18n_parity
 
 ROOT, WORK = bootstrap()  # ДО импортов модулей приложения (HOME-изоляция и faulthandler внутри)
 
@@ -57,20 +57,14 @@ app.processEvents()
 bar = win.map_search
 line = bar._line
 
-# ══ i18n: 6 новых ключей × en/ru/zh, наборы идентичны (377 на язык; +13 в v0.9.9.2, +2 в v0.9.9.7, +22 в v1.0RC4, +33 в v1.1, +2 в v1.1.2RC2, +2 в v1.1.2 final) ══
+# ══ i18n: 6 новых ключей × en/ru/zh (паритет — _common.check_i18n_parity) ══
 print("== i18n ==")
-langs = {}
-for code in ("en", "ru", "zh"):
-    with open(os.path.join(ROOT, "i18n", f"{code}.json"), encoding="utf-8") as f:
-        langs[code] = json.load(f)
+langs = load_i18n_langs(ROOT)
 new_keys = ["view.find_on_map", "search.map_placeholder", "search.count",
             "search.no_results", "hint.map_search", "status.no_matches"]
 missing = [k for k in new_keys if any(not langs[c].get(k, "").strip() for c in ("en", "ru", "zh"))]
 check("6 новых ключей v0.9.8 есть и не пусты в en/ru/zh", not missing, str(missing))
-check("key sets identical across en/ru/zh (377 keys each)",
-      set(langs["en"]) == set(langs["ru"]) == set(langs["zh"])
-      and all(len(d) == 377 for d in langs.values()),
-      str({c: len(d) for c, d in langs.items()}))
+check_i18n_parity(langs)
 
 # ══ MapSearchBar: клавиатура (Enter / Shift+Enter / Esc) и счётчик ══
 print("== MapSearchBar widget ==")

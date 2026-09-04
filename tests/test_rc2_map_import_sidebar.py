@@ -25,14 +25,12 @@ ROADMAP v1.1.2RC2 (пункты AUDIT §5, проверенные на v1.1.1):
 
 Запуск: python tests/test_rc2_map_import_sidebar.py   (из корня проекта) или python tests/run_all.py
 """
-import json
 import os
-import re
 import sys
 import threading
 import time
 
-from _common import bootstrap, check, finish, wait_until, viewport_point as _vp
+from _common import bootstrap, check, finish, wait_until, viewport_point as _vp, load_i18n_langs, check_i18n_parity, check_release_state
 
 ROOT, WORK = bootstrap()  # ДО импортов модулей приложения (HOME-изоляция и faulthandler внутри)
 
@@ -366,14 +364,7 @@ for _code in ("en", "ru", "zh"):
           "TestProfile" in _val and _val != "msg.confirm_delete_profile", _val)
 i18n.set_language("en")
 
-langs = {}
-for code in ("en", "ru", "zh"):
-    with open(os.path.join(ROOT, "i18n", f"{code}.json"), encoding="utf-8") as f:
-        langs[code] = json.load(f)
-check("N10: i18n parity en/ru/zh (377 keys; 373 + msg.confirm_delete_profile + status.import_resolving +2 v1.1.2 final)",
-      set(langs["en"]) == set(langs["ru"]) == set(langs["zh"])
-      and all(len(d) == 377 for d in langs.values()),
-      str({c: len(d) for c, d in langs.items()}))
+check_i18n_parity(load_i18n_langs(ROOT))
 
 # (b) диалог: подтверждение удаления ПРОФИЛЯ — свой ключ, не серверский msg.confirm_delete
 from models import profile as _prof
@@ -405,29 +396,9 @@ check("N10: profile deleted after Yes",
 dlg.close()
 
 # ════════════════════════════════════════════════════════════
-# Состояние релиза v1.1.2 (пин обновлён на каждый релиз)
+# Состояние релиза (пины — tests/_common.py: EXPECTED_APP_VERSION)
 # ════════════════════════════════════════════════════════════
 print("== release state ==")
-from version import APP_VERSION
-
-check("release: APP_VERSION == '1.1.2'", APP_VERSION == "1.1.2", APP_VERSION)
-try:
-    try:
-        import tomllib as _toml
-    except ModuleNotFoundError:
-        import tomli as _toml  # type: ignore
-    with open(os.path.join(ROOT, "pyproject.toml"), "rb") as f:
-        _pp = _toml.load(f)
-    check("release: pyproject version == APP_VERSION",
-          _pp["project"]["version"] == APP_VERSION, str(_pp["project"].get("version")))
-except Exception as e:  # noqa: BLE001
-    check("release: pyproject version == APP_VERSION", False, repr(e))
-try:
-    with open(os.path.join(ROOT, "requirements.txt"), encoding="utf-8") as f:
-        _req_head = f.readline()
-    check("release: requirements.txt header carries v1.1.2 (не RC)",
-          re.search(r"v1\.1\.2(?![A-Za-z0-9])", _req_head) is not None, _req_head.strip())
-except OSError as e:
-    check("release: requirements.txt header carries v1.1.2 (не RC)", False, repr(e))
+check_release_state(ROOT)
 
 finish()

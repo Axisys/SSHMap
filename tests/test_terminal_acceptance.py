@@ -12,13 +12,13 @@
   * Ctrl+V — bracketed paste из буфера единым блоком.
 Плюс задача 9: ключи terminal_palette / terminal_font / terminal_font_size /
 terminal_history_lines из ~/.sshmap/config.json (все опциональны, дефолты = текущее
-поведение) + v1.1.1: terminal_max_open (лимит своих терминалов) и состояние релиза:
-APP_VERSION == "1.1.2" (финал серии v1.1.2: параллельные пробы статусов + N12/N13;
-пин обновляется на каждый релиз), TerminalScreen.render() (HTML) остаётся deprecated
-(удаление не раньше v1.2), i18n-паритет 377 (+33 ключа v1.1, +14 в v1.1.1, +2 в
-v1.1.2RC2: msg.confirm_delete_profile и status.import_resolving; в v1.1.2RC3 новых
-ключей нет — terminal_wheel только конфиг; +2 в v1.1.2 final:
-settings.statuses.max_parallel и status.auto_interval_hint).
+поведение) + v1.1.1: terminal_max_open (лимит своих терминалов) и состояние релиза —
+_common.check_release_state() (пин EXPECTED_APP_VERSION — в tests/_common.py),
+TerminalScreen.render() (HTML) остаётся deprecated (удаление не раньше v1.2),
+i18n-паритет — _common.check_i18n_parity() (пин EXPECTED_I18N_KEYS; +33 ключа v1.1,
++14 в v1.1.1, +2 в v1.1.2RC2: msg.confirm_delete_profile и status.import_resolving;
+в v1.1.2RC3 новых ключей нет — terminal_wheel только конфиг; +2 в v1.1.2 final:
+settings.statuses.max_parallel и status.auto_interval_hint; +21 в v1.1.3: sftp.*).
 
 Запуск: python tests/test_terminal_acceptance.py   (из корня проекта) или python tests/run_all.py
 """
@@ -26,7 +26,7 @@ import json
 import os
 import sys
 
-from _common import bootstrap, check, finish, wait_until
+from _common import bootstrap, check, finish, wait_until, load_i18n_langs, check_i18n_parity, check_release_state
 
 ROOT, WORK = bootstrap()  # ДО импортов модулей приложения
 
@@ -40,7 +40,6 @@ import modules.terminal_screen as TS
 from modules.terminal_screen import PALETTES
 from modules.terminal_widget import TerminalWidget
 from models.server import ServerData
-from version import APP_VERSION
 
 D = PALETTES["default"]
 NORD = PALETTES["nord"]
@@ -94,6 +93,12 @@ def make_window(alias):
         ServerData(id=f"acc-{alias}", alias=alias, host="10.99.0.1", user="root"),
         None, password="pw")
     _windows.append(w)
+    # v1.1.3: окно ПОКАЗАНО (как в продакшене — MainWindow.show()). Без show()
+    # offscreen-окно обрабатывает resize() отложенно: поздний _sync_grid →
+    # tscreen.resize() случился бы уже после нарисованного контента и сдвинул
+    # его за край видимой сетки (vim/1049). show() заставляет layout устаканиться
+    # ДО любого вывода.
+    w.show()
     w.resize(700, 500)   # resizeEvent → singleShot(0) → _sync_grid (guard по сетке)
     wait_until(lambda: (w._last_cols, w._last_rows) != (120, 32), timeout_ms=3000)
     app.processEvents()
@@ -165,35 +170,16 @@ def clear_config():
 
 
 # ════════════════════════════════════════════════════════════
-# 0. Состояние релиза v1.0 (задача 10)
+# 0. Состояние релиза (пины — tests/_common.py: EXPECTED_APP_VERSION)
 # ════════════════════════════════════════════════════════════
 print("== release state ==")
-
-check("APP_VERSION == '1.1.2' (финал серии: параллельные пробы статусов + N12/N13)",
-      APP_VERSION == "1.1.2", APP_VERSION)
-
-try:
-    import tomllib as _toml
-except ImportError:  # Python < 3.11
-    import tomli as _toml
-with open(os.path.join(ROOT, "pyproject.toml"), "rb") as f:
-    _pp = _toml.load(f)
-check("pyproject version == APP_VERSION", _pp["project"]["version"] == APP_VERSION,
-      _pp["project"]["version"])
+check_release_state(ROOT)
 
 _render_doc = (TS.TerminalScreen.render.__doc__ or "") if hasattr(TS.TerminalScreen, "render") else ""
 check("TerminalScreen.render() (HTML) на месте и помечен DEPRECATED (удаление не раньше v1.2)",
       callable(getattr(TS.TerminalScreen, "render", None)) and "DEPRECATED" in _render_doc)
 
-langs = {}
-for code in ("en", "ru", "zh"):
-    with open(os.path.join(ROOT, "i18n", f"{code}.json"), encoding="utf-8") as f:
-        langs[code] = json.load(f)
-check("i18n-паритет en/ru/zh (377 ключей; +33 в v1.1 — диалог настроек, +14 в v1.1.1, "
-      "+2 в v1.1.2RC2, +2 в v1.1.2 final)",
-      set(langs["en"]) == set(langs["ru"]) == set(langs["zh"])
-      and all(len(d) == 377 for d in langs.values()),
-      str({c: len(d) for c, d in langs.items()}))
+check_i18n_parity(load_i18n_langs(ROOT))
 
 # ════════════════════════════════════════════════════════════
 # 1. bash: промпт + ls --color (SGR 34/93/256/truecolor) через окно

@@ -21,12 +21,11 @@ ROADMAP v1.1.2RC1 (пункты AUDIT §5, проверенные на v1.1.1):
 """
 import json as _json
 import os
-import re
 import sys
 import threading
 import time
 
-from _common import bootstrap, check, finish, wait_until
+from _common import bootstrap, check, finish, wait_until, check_release_state
 
 ROOT, WORK = bootstrap()  # ДО импортов модулей приложения (HOME-изоляция и faulthandler внутри)
 
@@ -488,29 +487,9 @@ finally:
     _cm_mod.get_credential_manager = _orig_get_cm
 
 # ════════════════════════════════════════════════════════════
-# Состояние релиза (пин обновлён на каждый релиз; v1.1.2 final — параллельные пробы)
+# Состояние релиза (пины — tests/_common.py: EXPECTED_APP_VERSION)
 # ════════════════════════════════════════════════════════════
 print("== release state ==")
-from version import APP_VERSION
-
-check("release: APP_VERSION == '1.1.2'", APP_VERSION == "1.1.2", APP_VERSION)
-try:
-    try:
-        import tomllib as _toml
-    except ModuleNotFoundError:
-        import tomli as _toml  # type: ignore
-    with open(os.path.join(ROOT, "pyproject.toml"), "rb") as f:
-        _pp = _toml.load(f)
-    check("release: pyproject version == APP_VERSION",
-          _pp["project"]["version"] == APP_VERSION, str(_pp["project"].get("version")))
-except Exception as e:  # noqa: BLE001
-    check("release: pyproject version == APP_VERSION", False, repr(e))
-try:
-    with open(os.path.join(ROOT, "requirements.txt"), encoding="utf-8") as f:
-        _req_head = f.readline()
-    check("release: requirements.txt header carries v1.1.2 (не RC)",
-          re.search(r"v1\.1\.2(?![A-Za-z0-9])", _req_head) is not None, _req_head.strip())
-except OSError as e:
-    check("release: requirements.txt header carries v1.1.2 (не RC)", False, repr(e))
+check_release_state(ROOT)
 
 finish()

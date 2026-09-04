@@ -9,14 +9,13 @@
   4. MainWindow: `_export_map_pdf` существует и зарегистрирован в меню «Файл»
      (i18n-реестр `_menu_i18n`).
   5. i18n: новые ключи `file.export_pdf` / `status.export_pdf_ok` × en/ru/zh
-     не пусты; наборы ключей идентичны (304 на язык — +2 к пину v0.9.9.6).
+     не пусты; наборы ключей идентичны (пин паритета — tests/_common.py).
 
 Запуск: python tests/test_pdf_export.py   (из корня проекта) или python tests/run_all.py
 """
-import json
 import os
 
-from _common import bootstrap, check, finish
+from _common import bootstrap, check, finish, load_i18n_langs, check_i18n_parity
 
 ROOT, WORK = bootstrap()  # ДО импортов модулей приложения (HOME-изоляция и faulthandler внутри)
 
@@ -97,17 +96,11 @@ win._dirty = False  # closeEvent без диалога сохранения
 win.close()
 
 # ── 5. i18n: новые ключи × en/ru/zh + идентичность наборов (377 на язык; +22 в v1.0RC4, +33 в v1.1, +2 в v1.1.2RC2, +2 в v1.1.2 final) ──
-langs = {}
-for code in ("en", "ru", "zh"):
-    with open(os.path.join(ROOT, "i18n", f"{code}.json"), encoding="utf-8") as f:
-        langs[code] = json.load(f)
+langs = load_i18n_langs(ROOT)
 new_keys = ["file.export_pdf", "status.export_pdf_ok"]
 missing = [k for k in new_keys
            if any(not langs[c].get(k, "").strip() for c in ("en", "ru", "zh"))]
 check("2 новых ключа v0.9.9.7 есть и не пусты в en/ru/zh", not missing, str(missing))
-check("key sets identical across en/ru/zh (377 keys each)",
-      set(langs["en"]) == set(langs["ru"]) == set(langs["zh"])
-      and all(len(d) == 377 for d in langs.values()),
-      str({c: len(d) for c, d in langs.items()}))
+check_i18n_parity(langs)
 
 finish()

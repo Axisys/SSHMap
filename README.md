@@ -1,4 +1,4 @@
-# SSH Map (NodeVisualSSH) — v1.1.2
+# SSH Map (NodeVisualSSH) — v1.1.3
 
 Десктопное приложение (Python + PySide6): интерактивная карта IT-инфраструктуры с прямым SSH-подключением к узлам.
 Slogan: *"Draw your infrastructure. Organize it. Connect to it."*
@@ -16,10 +16,11 @@ python main.py                              # запуск GUI
 # installable-идентичность (pyproject.toml) — установка как пакета:
 pipx install .                            # или pip install . → команда sshmap (entry point main:main)
 
-# Тесты без pytest: тематические файлы test_*.py + единый раннер.
+# Тесты без pytest: тематические файлы test_*.py + единый параллельный раннер.
 # Тесты изолированы: пишут во временный HOME, UTF-8 stdout ставится сами —
 # на cp1251-консолях и в CI дополнительное окружение не требуется:
-python tests/run_all.py              # ВСЁ (44 файла): таблица результатов + единый exit code (0 ⇔ всё зелёное)
+python tests/run_all.py              # ВСЁ (45 файлов): параллельно (4 воркера), таблица результатов + единый exit code (0 ⇔ всё зелёное)
+python tests/run_all.py --workers 8  # число воркеров (1 = последовательно, как раньше)
 python tests/run_all.py keyring      # фильтр по подстроке в имени файла
 python tests/test_tags.py            # один файл (из корня проекта)
 ```
@@ -27,6 +28,8 @@ python tests/test_tags.py            # один файл (из корня про
 Карта сьюта — что какой `test_*.py` покрывает и откуда пришёл, конвенции: `tests/INDEX.md`.
 Обвязка `tests/_common.py`: HOME-изоляция (песочница для `~/.sshmap/*`), offscreen,
 faulthandler-таймаут 180 c; каждый файл завершается exit 0 = ALL PASS.
+Пины релиза централизованы внизу `_common.py` (`EXPECTED_APP_VERSION`, `EXPECTED_I18N_KEYS`
++ общие проверки): при релизе правится одно место.
 
 Требования: Python 3.10+, Windows/Linux/macOS. Логи: `~/.sshmap/logs/sshmap.log` (RotatingFileHandler 5MB × 3).
 
@@ -54,7 +57,12 @@ modules/
 ├── ssh_worker.py            # SSHWorker (одноразовый QThread); реестр get_active_worker/wait_for_worker
 ├── ssh_terminal.py          # SSHTerminalThread + SSHTerminalWindow (dirty-рендер без таймера — _on_output→update(); resize PTY: guard по сетке + дебаунс ~150 мс);
 │                            #   connected_signal (после invoke_shell) + initial_command — первая команда Быстрого запуска в shell;
-│                            #   load_terminal_settings() — ключи terminal_* из ~/.sshmap/config.json (дефолты = текущее поведение, см. §4 «Настройки»)
+│                            #   load_terminal_settings() — ключи terminal_* из ~/.sshmap/config.json (дефолты = текущее поведение, см. §4 «Настройки»);
+│                            #   v1.1.3: QTabWidget [Терминал | Файлы] — ленивый open_sftp() на том же transport + прогресс в статус-баре
+├── sftp_worker.py           # SftpWorker (v1.1.3): один worker-поток с очередью задач list/upload/download поверх живого transport'а;
+│                            #   отмена — флаг между операциями, корректный shutdown, реестр орфано-worker'ов
+├── sftp_tab.py              # SftpTab (v1.1.3): вкладка «Файлы» — листинг текущего каталога + навигация «..», upload/download выбранных,
+│                            #   кнопка «Отменить»; GUI не блокируется (все операции SFTP — в worker-потоке)
 ├── terminal_widget.py       # TerminalWidget — посячейный холст QWidget+QPainter: runs, кэш форматов, блок-курсор (+cursor.hidden), широкие глифы; полная клавиатура (F1–F12/PgUp/PgDn/Home/End/Delete, Ctrl+C/D/Z, bracketed paste, AltGr-guard) + выделение мышью (selection_cells, координаты (row,col)) и копирование; скроллбэк колесом/Ctrl+Shift+PgUp/PgDn (голые PgUp/PgDn — в shell) + QTimer мигания курсора
 ├── terminal_screen.py       # TerminalScreen: pyte.HistoryScreen(120x32)+ByteStream, feed под threading.Lock; PALETTES+resolve_color, snapshot(); скроллбэк scroll_up/scroll_down/at_bottom (авто-возврат к live встроен в pyte); render() — deprecated
 ├── window_geometry.py       # сохранение/восстановление размеров окон — saveGeometry()/saveState() → base64 → config.json (ui_window_geometry_main/terminal); никогда не бросает
@@ -75,7 +83,7 @@ services/
 ├── host_importer.py         # массовый импорт серверов из TXT: parse_hosts_file, is_ip_address, resolve_host
 ├── status_checker.py        # StatusChecker: QTimer разводит раунды, пробы ПАРАЛЛЕЛЬНО в _ProbeThread (ThreadPoolExecutor); probe_ssh() → online/warn/offline
 └── system_info_collector.py # SystemInfoCollector: автосбор ОС/CPU/RAM/диск Linux-сервера одной exec_command-сессией
-version.py                   # единая точка версий: APP_VERSION="1.1.2", VERSION_FORMAT="0.9"
+version.py                   # единая точка версий: APP_VERSION="1.1.3", VERSION_FORMAT="0.9"
 dialogs/                     # AddServerDialog (+кнопка «Быстрый запуск…»), SSHConnectDialog (+кнопка внешнего терминала),
                              #   ConnectionDialog/EditConnectionDialog, ProfileManagerDialog,
                              #   BackupsDialog (бэкапы + автосохранение, откат), QuickLaunchDialog (Быстрый запуск)
@@ -88,8 +96,8 @@ ui/sidebar.py                # SidebarPanel(QWidget) — кнопки, заго�
                              #   статусов, контекстное меню строки; i18n через колбэк + retranslate
 ui/map_search_bar.py         # MapSearchBar — плавающая строка поиска поверх canvas (Enter/Shift+Enter/Esc, счётчик k/N)
 ui/command_palette.py        # CommandPalette: Ctrl+K, fuzzy-поиск по действиям меню и серверам
-i18n/                        # t(key,**kwargs); en.json/ru.json/zh.json — 377 ключей, наборы идентичны; en — дефолт для новых пользователей
-tests/                       # тематический сьют без pytest: 43 × test_*.py + _common.py (обвязка), run_all.py (единый раннер), check_i18n_keys.py; карта — tests/INDEX.md
+i18n/                        # t(key,**kwargs); en.json/ru.json/zh.json — 398 ключей, наборы идентичны; en — дефолт для новых пользователей
+tests/                       # тематический сьют без pytest: 44 × test_*.py + _common.py (обвязка), run_all.py (параллельный раннер, 4 воркера), check_i18n_keys.py; карта — tests/INDEX.md
 ```
 
 ---
@@ -202,6 +210,7 @@ en (дефолт) / ru / zh. Правило: новый ключ добавля�
 - интерактивная карта: узлы, Безье-связи 6 типов, заметки, группы, фоновое изображение с drag/resize
 - статусы узлов online/warn/offline: параллельные пробы, авто-интервал для больших карт
 - встроенный SSH-терминал на pyte (скроллбэк, выделение мышью, полная клавиатура) + внешний системный терминал
+- SFTP-вкладка в окне терминала (v1.1.3): файлы по тому же SSH-соединению — листинг/навигация «..», upload/download с прогрессом в статус-баре и отменой
 - undo/redo сценарных операций
 - автосбор информации о Linux-сервере (ОС/CPU/RAM/диск)
 - профили и пароли в keyring ОС — пароль никогда не пишется в JSON
@@ -222,7 +231,6 @@ en (дефолт) / ru / zh. Правило: новый ключ добавля�
 - TOFU при первом подключении (новый ключ хоста принимается автоматически) и ограничения keyring — детали в «Безопасность».
 
 **Roadmap** (задачи, порядок и acceptance — в ROADMAP.md):
-- **v1.1.3**: SFTP-вкладка в окне терминала (тот же transport, один worker с очередью задач, прогресс и отмена).
 - **v1.1.4**: гигиена main_window.py — разрез на миксины, публичный API без изменений.
 - **Серия v1.2.x**: рефактор терминала «окно → страница»; сессии табами в окне и доком окна карты; мультинабор; крепление заметок к серверам; центральная тема `ui/theme.py` + анимации карты; выделение и контекстное меню терминала; D&D в SFTP-вкладку; удаление мёртвого кода + полный wcwidth CJK; подсветка логов (opt-in).
 - **Серия v1.3.x**: панель файлов внизу окна карты + просмотрщик текста; настройка горячих клавиш; языки без написания кода; лёгкие плагины.

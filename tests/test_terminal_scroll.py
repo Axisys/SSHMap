@@ -21,8 +21,8 @@
     widget.update() напрямую (E2E через окно с фейковым потоком);
   * Мигание курсора: свой QTimer в TerminalWidget (старт showEvent, стоп
     hideEvent), переключение фазы меняет рендер блок-курсора;
-  * Кнопка «Закрыть терминал» убрана (v1.0RC3): в окне нет QPushButton;
-    close_terminal() сохранён (cleanup-путь MainWindow).
+  * Кнопка «Закрыть терминал» убрана (v1.0RC3): QPushButton в окне есть только
+    на SFTP-вкладке (v1.1.3); close_terminal() сохранён (cleanup-путь MainWindow).
 
 Запуск:  python tests/test_terminal_scroll.py   (из корня проекта) или python tests/run_all.py
 """
@@ -367,8 +367,10 @@ try:
           isinstance(win2.tscreen.screen, pyte.HistoryScreen))
     check("scroll API на экране окна", all(
         hasattr(win2.tscreen, m) for m in ("scroll_up", "scroll_down", "at_bottom", "scroll_info")))
-    check("кнопка «Закрыть терминал» убрана: в окне нет QPushButton",
-          win2.findChildren(QPushButton) == [])
+    # v1.0RC3: кнопка «Закрыть терминал» убрана; v1.1.3: в окне появились кнопки —
+    # но только на SFTP-вкладке (сам терминальный виджет QPushButton не содержит).
+    check("кнопка «Закрыть терминал» убрана: QPushButton есть только на SFTP-вкладке",
+          all(win2.sftp_tab.isAncestorOf(b) for b in win2.findChildren(QPushButton)))
     check("close_terminal() сохранён (cleanup-путь MainWindow)",
           callable(getattr(win2, "close_terminal", None)))
 finally:

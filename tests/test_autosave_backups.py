@@ -16,7 +16,7 @@ import sys
 import tempfile
 import time as _time
 
-from _common import bootstrap, check, finish
+from _common import bootstrap, check, finish, load_i18n_langs, check_i18n_parity
 
 ROOT, WORK = bootstrap()  # ДО импортов модулей приложения (HOME-изоляция и faulthandler внутри)
 
@@ -304,10 +304,7 @@ finally:
 
 # ══ i18n: 18 новых ключей × en/ru/zh ════════════════════════════════════════
 print("== i18n ==")
-langs = {}
-for code in ("en", "ru", "zh"):
-    with open(os.path.join(ROOT, "i18n", f"{code}.json"), encoding="utf-8") as f:
-        langs[code] = json.load(f)
+langs = load_i18n_langs(ROOT)
 new_keys = ["file.restore_autosave", "file.backups", "dialog.autosave_found",
             "msg.autosave_newer", "dialog.backups", "backups.autosave",
             "backups.backup", "backups.empty", "backups.col_source",
@@ -322,10 +319,7 @@ check("18 новых ключей v0.9.7 есть и не пусты в en/ru/zh
 # v1.1: +33 ключа диалога настроек (settings.* / menu.settings / btn.settings / status.settings_saved)
 # v1.1.2RC2: +2 ключа (msg.confirm_delete_profile, status.import_resolving)
 # v1.1.2 final: +2 ключа (settings.statuses.max_parallel, status.auto_interval_hint)
-check("наборы ключей идентичны en/ru/zh (377 на язык)",
-      set(langs["en"]) == set(langs["ru"]) == set(langs["zh"])
-      and all(len(d) == 377 for d in langs.values()),
-      str({c: len(d) for c, d in langs.items()}))
+check_i18n_parity(langs)
 
 # Cleanup: сначала dirty=False — иначе closeEvent уйдёт в диалог сохранения.
 for w in (win, win2, win3, win_ns):

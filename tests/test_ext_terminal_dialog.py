@@ -12,9 +12,9 @@ ROADMAP v0.9.9.2:
 
 Запуск:  python tests/test_ext_terminal_dialog.py   (из корня проекта) или python tests/run_all.py
 """
-import os, sys, json, shutil, tempfile, traceback
+import os, sys, shutil, tempfile, traceback
 
-from _common import bootstrap, check, finish
+from _common import bootstrap, check, finish, load_i18n_langs, check_i18n_parity
 
 ROOT, WORK = bootstrap()  # ДО импортов модулей приложения (HOME-изоляция и faulthandler внутри)
 
@@ -33,12 +33,9 @@ from dialogs.ssh_connect_dialog import SSHConnectDialog
 # Тот же путь, что и модуль (~ — песочница: bootstrap() изолировал HOME/USERPROFILE).
 SETTINGS_PATH = _settings_path()
 
-# ══ i18n: 13 новых ключей × en/ru/zh, наборы идентичны (377 на язык; +2 в v0.9.9.7, +22 в v1.0RC4, +33 в v1.1, +2 в v1.1.2RC2, +2 в v1.1.2 final) ══
+# ══ i18n: 13 новых ключей × en/ru/zh (паритет — _common.check_i18n_parity) ══
 print("== i18n ==")
-langs = {}
-for code in ("en", "ru", "zh"):
-    with open(os.path.join(ROOT, "i18n", f"{code}.json"), encoding="utf-8") as f:
-        langs[code] = json.load(f)
+langs = load_i18n_langs(ROOT)
 new_keys = ["ssh_ext.section", "ssh_ext.preset_label", "ssh_ext.reset",
             "ssh_ext.preset.auto", "ssh_ext.preset.windows_terminal",
             "ssh_ext.preset.cmd", "ssh_ext.preset.conhost",
@@ -47,10 +44,7 @@ new_keys = ["ssh_ext.section", "ssh_ext.preset_label", "ssh_ext.reset",
             "ssh_ext.preset.alacritty", "ssh_ext.preset.kitty"]
 missing = [k for k in new_keys if any(not langs[c].get(k, "").strip() for c in ("en", "ru", "zh"))]
 check("13 новых ключей v0.9.9.2 есть и не пусты в en/ru/zh", not missing, str(missing))
-check("key sets identical across en/ru/zh (377 keys each)",
-      set(langs["en"]) == set(langs["ru"]) == set(langs["zh"])
-      and all(len(d) == 377 for d in langs.values()),
-      str({c: len(d) for c, d in langs.items()}))
+check_i18n_parity(langs)
 
 # ══ Секция в SSHConnectDialog: состав пресетов под платформу ══
 print("== dialog section ==")
