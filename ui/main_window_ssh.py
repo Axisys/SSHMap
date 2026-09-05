@@ -16,7 +16,9 @@ SSH-кластер переносится вместе с ним (ROADMAP «По
   * ``self._terminal_windows`` — реестр открытых СЕССИЙ терминала
     (v1.2: TerminalSessionPage из modules/terminal_page.py, а не окна — зелёная
     точка узла гаснет только когда закрыты ВСЕ сессии узла, лимит «4 своих
-    терминала» считается по сессиям);
+    терминала» считается по сессиям во всех окнах; v1.2.1: одно окно может
+    хостить несколько сессий узла табами — _spawn_terminal_window переиспользует
+    живое окно узла через window.add_session(), иначе создаёт новое окно);
   * ``self._ssh_connected_nodes`` — id узлов с активной сессией (зелёная точка);
   * ``self._info_collectors`` — реестр SystemInfoCollector по server_id.
 Миксин НЕ импортирует ui.main_window (цикл) — только duck-typing по инстансу;
@@ -52,6 +54,25 @@ class SshMixin:
                 self.log.exception(f"SSH connect error for {node.data.alias}")
             QMessageBox.critical(self, self.t("msg.ssh_error"), self.t("msg.connect_failed", error=str(e)))
 
+    def _find_terminal_window_for(self, node_id):
+        """v1.2.1 (задача 1): живое терминальное окно узла — чтобы открыть новую
+        сессию ТАБОМ в нём. Реестр хранит сессии (страницы); страница знает своего
+        хоста (set_host_window). Мёртвый C++-объект / фейк без _host_window → None
+        (duck-typing, RuntimeError не падает)."""
+        for s in list(getattr(self, "_terminal_windows", [])):
+            try:
+                sd = getattr(s, "server_data", None)
+                if sd is None or getattr(sd, "id", None) != node_id:
+                    continue
+                w = getattr(s, "_host_window", None)
+                if w is None:
+                    continue
+                w.windowTitle()  # alive-проверка (C++-объект не удалён)
+                return w
+            except RuntimeError:
+                continue  # C++-объект удалён в пути teardown — ищем дальше
+        return None
+
     def _spawn_terminal_window(self, node: "ServerNode", password: str = None,
                                initial_command: str = ""):
         """v1.0RC4: создание терминального окна + учёт (единый путь).
@@ -67,8 +88,13 @@ class SshMixin:
         сообщать об «открытом» терминале).
 
         v1.2 (ROADMAP задача 4): реестр регистрирует СЕССИИ (TerminalSessionPage),
-        а не окна — лимит считается по сессиям; teardown старейшей при лимите —
-        через страницу (page.close_terminal → closeEvent хост-окна → shutdown).
+        а не окна — лимит считается по сессиям во ВСЕХ окнах; teardown старейшей
+        при лимите — через страницу (page.close_terminal → close_page хоста).
+
+        v1.2.1 (задача 1): новая сессия = новый таб — если для узла уже есть живое
+        окно терминала (_find_terminal_window_for), сессия открывается там через
+        window.add_session() (заголовок таба — alias узла, статус-сообщение
+        terminal.session_new_tab); иначе — новое окно с одним табом (поведение v1.2).
         """
         try:
             from modules.ssh_terminal import load_terminal_settings as _load_ts
@@ -96,11 +122,26 @@ class SshMixin:
         win_cls = host_attr(self, "SSHTerminalWindow")
         if win_cls is None:
             raise RuntimeError("SSHTerminalWindow недоступен в модуле MainWindow")
-        terminal_window = win_cls(
-            node.data, self, password=password, initial_command=initial_command)
+        # v1.2.1 (задача 1): новая сессия = новый таб — если для узла уже есть живое
+        # окно терминала, открываем сессию там (заголовок таба — alias узла); иначе —
+        # новое окно с одним табом (поведение v1.2).
+        existing = self._find_terminal_window_for(node.data.id)
+        if existing is not None and hasattr(existing, "add_session"):
+            page = existing.add_session(
+                node.data, password=password, initial_command=initial_command)
+            terminal_window = existing
+            try:
+                self.statusBar().showMessage(
+                    self.t("terminal.session_new_tab", alias=node.data.alias), 4000)
+            except Exception:  # noqa: BLE001 — статус-бар косметика при teardown
+                pass
+        else:
+            terminal_window = win_cls(
+                node.data, self, password=password, initial_command=initial_command)
+            page = getattr(terminal_window, "page", None) or terminal_window
         # v1.2: регистрируем СЕССИЮ (страницу), а не окно; фейк без .page —
         # сам себя (тестовый шов host_attr: подмена MW.SSHTerminalWindow).
-        session = getattr(terminal_window, "page", None) or terminal_window
+        session = page
         session.destroyed.connect(lambda *_a, s=session: self._forget_terminal_window(s))
         self._terminal_windows.append(session)
         terminal_window.show()

@@ -23,19 +23,23 @@
    "ask" + активная сессия → Cancel держит / Close закрывает; _force_close (путь
    лимита v1.1.1) и завершённая сессия — без диалога.
 
-§4 Регрессия жизненного цикла окна (режим `windows` = v1.1.x): тонкая обёртка
-   (WA_DeleteOnClose, заголовок, геометрия window_geometry.py), compat-свойства
-   live-ссылаются на страницу, ресайз холста → синхронизация сетки через eventFilter
+§4 Регрессия жизненного цикла окна (режим `windows` = v1.1.x): обёртка
+   (WA_DeleteOnClose, заголовок, геометрия window_geometry.py), центральный виджет —
+   QTabWidget из сессий (v1.2.1: compat-свойства live-ссылаются на АКТИВНЫЙ таб),
+   ресайз холста → синхронизация сетки через eventFilter
    (раньше resizeEvent окна), мост «статус-бар страницы → статус-бар окна»
    (sticky-текст + SFTP-прогресс), round-trip ui_window_geometry_terminal,
    WA_DeleteOnClose E2E (C++-объект уничтожен после close).
 
 §5 Трекинг по СЕССИЯМ в MainWindow (ROADMAP задача 4): реестр _terminal_windows
-   хранит TerminalSessionPage, а не окна; зелёная точка узла гаснет только когда
-   закрыты ВСЕ сессии узла; лимит «4 своих терминала» (terminal_max_open) считается
-   по сессиям — Close закрывает старейшую (_force_close), Cancel — None.
+   хранит TerminalSessionPage, а не окна; v1.2.1: две сессии одного узла — два таба
+   в одном окне (вторая «подключиться к узлу» переиспользует живое окно); зелёная
+   точка узла гаснет только когда закрыты ВСЕ сессии узла; лимит «4 своих терминала»
+   (terminal_max_open) считается по сессиям во всех окнах — Close закрывает таб
+   старейшей (_force_close), Cancel — None.
 
-§6 i18n-паритет (новых ключей в v1.2 нет — 398) + состояние релиза (pin _common.py).
+§6 i18n-паритет (pin EXPECTED_I18N_KEYS в _common.py; v1.2.1: 400) + состояние релиза
+   (pin _common.py).
 
 Запуск:  python tests/test_terminal_page.py   (из корня проекта) или python tests/run_all.py
 """
@@ -51,7 +55,7 @@ ROOT, WORK = bootstrap()  # ДО импортов модулей приложе�
 
 from PySide6.QtCore import Qt, QThread, QSize, Signal as QtSignal
 from PySide6.QtGui import QColor
-from PySide6.QtWidgets import QApplication, QMessageBox
+from PySide6.QtWidgets import QApplication, QMessageBox, QTabWidget
 
 app = QApplication(sys.argv)
 
@@ -482,8 +486,9 @@ check("окно: WA_DeleteOnClose сохранён",
       bool(wv.testAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)) is True)
 check("окно: заголовок terminal.window_title (alias+host)",
       "win" in wv.windowTitle() and "10.99.0.5" in wv.windowTitle(), wv.windowTitle())
-check("окно: центральный виджет — TerminalSessionPage",
-      isinstance(wv.centralWidget(), TerminalSessionPage) and wv.centralWidget() is wv.page)
+check("окно: центральный виджет — QTabWidget из сессий (v1.2.1; compat win.page)",
+      isinstance(wv.centralWidget(), QTabWidget) and wv.session_tabs is wv.centralWidget()
+      and wv.session_tabs.widget(0) is wv.page)
 check("окно: compat server_data (BUGFIX v0.9.5.5 сохранён)",
       wv.server_data.alias == "win")
 
@@ -589,29 +594,33 @@ def dot_color(node):
     return node._ssh_status.brush().color().name()
 
 
-# ── две сессии одного узла: точка гаснет только когда закрыты ВСЕ ───────────
+# ── две сессии одного узла (v1.2.1: два таба в одном окне): точка гаснет только когда закрыты ВСЕ ──
 node1 = mw.scene.add_server(
     ServerData(id="sess-a", alias="sessA", host="10.98.1.1", user="root"))
 win_s1 = mw._spawn_terminal_window(node1)
-win_s2 = mw._spawn_terminal_window(node1)
+win_s2 = mw._spawn_terminal_window(node1)   # v1.2.1: новый таб в том же окне
 app.processEvents()
 check("реестр хранит СЕССИИ (TerminalSessionPage), а не окна",
       len(mw._terminal_windows) == 2
       and all(isinstance(s, TerminalSessionPage) for s in mw._terminal_windows)
       and all(s is not win_s1 and s is not win_s2 for s in mw._terminal_windows),
       f"registry={[type(s).__name__ for s in mw._terminal_windows]}")
+check("v1.2.1: вторая сессия — ТАБ в том же окне (не новое окно)",
+      win_s2 is win_s1 and win_s1.session_tabs.count() == 2,
+      f"tabs={win_s1.session_tabs.count() if alive(win_s1) else '?'}")
 check("зелёная точка узла горит (2 активные сессии)", dot_color(node1) == "#22c55e",
       dot_color(node1))
 
-win_s1.close()   # первая сессия закрыта — вторая жива
+page_s1 = win_s1.session_tabs.widget(0)
+win_s1.close_page(page_s1)   # закрыт один таб — соседний жив
 wait_until(lambda: len(mw._terminal_windows) == 1, timeout_ms=4000)
 app.processEvents()
-check("закрыта одна из двух сессий → реестр 1 (destroyed-сигнал страницы)",
-      len(mw._terminal_windows) == 1 and not alive(win_s1))
+check("закрыт один из двух табов → реестр 1 (destroyed-сигнал страницы)",
+      len(mw._terminal_windows) == 1 and not alive(page_s1))
 check("зелёная точка горит, пока жива вторая сессия узла", dot_color(node1) == "#22c55e",
       dot_color(node1))
 
-win_s2.close()   # все сессии узла закрыты
+win_s1.close_page(win_s1.session_tabs.widget(0))   # последний таб → окно (все сессии узла закрыты)
 wait_until(lambda: len(mw._terminal_windows) == 0, timeout_ms=4000)
 app.processEvents()
 check("закрыты ВСЕ сессии узла → реестр пуст", len(mw._terminal_windows) == 0)
@@ -625,9 +634,11 @@ write_config({"terminal_max_open": 2})
 node2 = mw.scene.add_server(
     ServerData(id="sess-b", alias="sessB", host="10.98.1.2", user="root"))
 w_a = mw._spawn_terminal_window(node2)
-w_b = mw._spawn_terminal_window(node2)
+mw._spawn_terminal_window(node2)   # v1.2.1: второй таб в том же окне (w_a)
 app.processEvents()
-check("лимит: 2 сессии открыты (terminal_max_open=2)", len(mw._terminal_windows) == 2)
+check("лимит: 2 сессии открыты (terminal_max_open=2; оба таба в одном окне)",
+      len(mw._terminal_windows) == 2 and w_a.session_tabs.count() == 2,
+      f"registry={len(mw._terminal_windows)} tabs={w_a.session_tabs.count() if alive(w_a) else '?'}")
 
 _limit_result = [QMessageBox.StandardButton.Cancel]
 _orig_mw_question = MW.QMessageBox.question
@@ -652,18 +663,18 @@ try:
     # Close → старейшая СЕССИЯ закрыта (_force_close), новая зарегистрирована
     _limit_result[0] = QMessageBox.StandardButton.Close
     asked.clear()
-    oldest_sess = mw._terminal_windows[0]
-    w_oldest_win = w_a   # окно старейшей сессии (порядок создания)
+    oldest_sess = mw._terminal_windows[0]   # первый таб окна node2 (порядок создания)
     node4 = mw.scene.add_server(
         ServerData(id="sess-d", alias="sessD", host="10.98.1.4", user="root"))
     w_new = mw._spawn_terminal_window(node4)
     check("лимит: Close → диалог про старейшую сессию", len(asked) == 1, str(asked))
     check("лимит: _force_close поставлен на старейшую сессию (против повторного 'ask')",
           getattr(oldest_sess, "_force_close", False) is True)
-    wait_until(lambda: not alive(w_oldest_win), timeout_ms=4000)
+    wait_until(lambda: oldest_sess not in mw._terminal_windows, timeout_ms=4000)
     app.processEvents()
-    check("лимит: окно старейшей сессии закрыто (page.close_terminal → closeEvent)",
-          not alive(w_oldest_win))
+    check("лимит: закрыт таб старейшей сессии — её окно живо с соседней (v1.2.1)",
+          alive(w_a) and w_a.session_tabs.count() == 1,
+          f"tabs={w_a.session_tabs.count() if alive(w_a) else '?'}")
     check("лимит: реестр снова 2 — старейшая убрана, новая сессия зарегистрирована",
           w_new is not None and len(mw._terminal_windows) == 2
           and oldest_sess not in mw._terminal_windows
@@ -680,7 +691,7 @@ clear_config()
 print("== i18n parity + release state ==")
 
 langs = load_i18n_langs(ROOT)
-check_i18n_parity(langs)   # в v1.2 новых ключей нет — паритет 398 без изменений
+check_i18n_parity(langs)   # паритет по pin EXPECTED_I18N_KEYS (v1.2.1: 400)
 check_release_state(ROOT)
 
 finish()

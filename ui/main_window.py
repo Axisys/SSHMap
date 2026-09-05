@@ -669,14 +669,15 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
                         pass
                 threads.append(th)
 
-        # Терминальные СЕССИИ (v1.2: реестр хранит страницы, не окна): их
-        # closeEvent сам делает thread.stop()+wait() через page.shutdown();
-        # здесь только ждём остаток, если окно ещё не закрыто пользователем.
+        # Терминальные СЕССИИ (v1.2: реестр хранит страницы, не окна): их teardown
+        # сам делает thread.stop()+wait() через page.shutdown(); здесь только ждём
+        # остаток, если окно ещё не закрыто пользователем. v1.2.1: закрываем ВСЕ
+        # сессии, а не только видимые — в табовом окне неактивные табы «невидимы»
+        # (QStackedWidget прячет их), но их потоки обязаны остановиться.
         terminal_waits = []
         for s in list(getattr(self, "_terminal_windows", [])):
             try:
-                if s.isVisible():
-                    s.close_terminal()
+                s.close_terminal()
                 th = getattr(s, "terminal_thread", None)
                 if th is not None and hasattr(th, "isRunning") and th.isRunning():
                     terminal_waits.append(th)

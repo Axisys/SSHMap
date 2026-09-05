@@ -162,6 +162,8 @@
   "terminal.error_prefix": "Error:",
   "terminal.session_closed": "SSH session closed",
   "terminal.window_title": "SSH Terminal — {alias} ({host})",
+  "terminal.tab_close_tooltip": "Close session",
+  "terminal.session_new_tab": "Session for {alias} opened in a new tab",
   "sftp.tab_terminal": "Terminal",
   "sftp.tab_files": "Files",
   "sftp.up": "Up",

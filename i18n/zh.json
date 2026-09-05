@@ -162,6 +162,8 @@
   "terminal.error_prefix": "错误:",
   "terminal.session_closed": "SSH 会话已关闭",
   "terminal.window_title": "SSH终端 — {alias} ({host})",
+  "terminal.tab_close_tooltip": "关闭会话",
+  "terminal.session_new_tab": "{alias} 的会话已在新标签页打开",
   "sftp.tab_terminal": "终端",
   "sftp.tab_files": "文件",
   "sftp.up": "上一级",

@@ -404,18 +404,26 @@ class SSHTerminalTextEdit(QPlainTextEdit):
 
 
 class SSHTerminalWindow(QMainWindow):
-    """v1.2 (ROADMAP v1.2): ТОНКАЯ ОБЁРТКА над TerminalSessionPage.
+    """v1.2.1 (ROADMAP v1.2.1): окно терминала с QTabWidget из сессий.
 
-    В окне остались только: WA_DeleteOnClose, заголовок, сохранение/восстановление
+    Каждый таб — одна TerminalSessionPage (modules/terminal_page.py): SSH-сессия
+    (thread + pyte-экран + холст + статус-строка + SFTP-вкладка). Новая сессия =
+    новый таб существующим путём «подключиться к узлу» (MainWindow.
+    _spawn_terminal_window): если для узла уже есть живое окно терминала — сессия
+    открывается там новым табом, иначе создаётся новое окно с одним табом.
+    Заголовок таба — alias узла.
+
+    В окне остались: WA_DeleteOnClose, заголовок, сохранение/восстановление
     геометрии (modules/window_geometry.py, ключ ui_window_geometry_terminal) и
-    статус-бар с SFTP-прогресс-баром — мост для сигналов страницы (в режиме
-    `windows` отображение идентично v1.1.x). Состояние сессии (thread + screen +
-    терминальный виджет + статус-строка + SFTP) и ВСЯ cleanup-логика — на странице
-    (modules/terminal_page.py): teardown проходит через ЕДИНЫЙ метод page.shutdown(),
-    gate «ask» — page.confirm_close().
+    статус-бар с SFTP-прогресс-баром — мост сигналов АКТИВНОГО таба (sticky-текст +
+    прогресс; при переключении табов мост переподключается — вид v1.1.x). Состояние
+    сессии и ВСЯ cleanup-логика — на странице: teardown проходит через ЕДИНЫЙ метод
+    page.shutdown(), gate «ask» — page.confirm_close(). Закрытие таба = существующая
+    cleanup-логика страницы (close_page); закрытие ПОСЛЕДНЕГО таба закрывает окно
+    (WA_DeleteOnClose — текущее поведение).
 
-    Совместимость v1.1.x: атрибуты сессии доступны на окне как live-свойства
-    (self.widget is self.page.widget и т.д.) — существующий код/тесты, читающие
+    Совместимость v1.2: атрибуты сессии доступны на окне как live-свойства активного
+    таба (self.widget is self.page.widget и т.д.) — существующий код/тесты, читающие
     их по окну, работают без изменений.
     """
 
@@ -424,8 +432,9 @@ class SSHTerminalWindow(QMainWindow):
         super().__init__(parent)
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
 
-        # BUGFIX v0.9.5.5 (сохранено): server_data на окне — compat-атрибут;
-        # с v1.2 трекинг MainWindow читает его со СЕССИИ (page.server_data).
+        # BUGFIX v0.9.5.5 (сохранено): server_data на окне — compat-атрибут (данные
+        # ПЕРВОЙ сессии; окно хостит сессии одного узла); с v1.2 трекинг MainWindow
+        # читает его со СЕССИИ (page.server_data).
         self.server_data = server_data
 
         t = get_translator()
@@ -442,26 +451,127 @@ class SSHTerminalWindow(QMainWindow):
             from modules.window_geometry import restore_window_geometry as _restore_geo
         _restore_geo("ui_window_geometry_terminal", self)
 
-        # v1.2: сессия = переиспользуемая страница (thread + screen + холст +
-        # статус-строка + SFTP-вкладка). Конфиг terminal_* читает сама страница.
-        self.page = TerminalSessionPage(
-            server_data, parent=self, password=password, initial_command=initial_command)
-        self.page.set_host_window(self)
-        self.setCentralWidget(self.page)
+        # v1.2.1 (задача 1): центральный виджет — QTabWidget из страниц сессий
+        # (каждый таб = одна SSH-сессия). Табы закрываемые: закрытие таба =
+        # существующая cleanup-логика страницы; последний таб → close() окна.
+        self.session_tabs = QTabWidget()
+        self.session_tabs.setTabsClosable(True)
+        self.session_tabs.tabCloseRequested.connect(self._on_tab_close_requested)
+        self.session_tabs.currentChanged.connect(self._on_current_tab_changed)
+        self.setCentralWidget(self.session_tabs)
 
-        # v1.2 (режим `windows`): «статус-бар» страницы мостится в статус-бар окна —
-        # sticky-текст + SFTP-прогресс (permanent-виджет справа, скрыт когда передач
-        # нет) ровно как в v1.1.x. Страница не знает о QMainWindow: в док-режиме
-        # (v1.2.2) мост подключит док.
+        # v1.2 (режим `windows`): «статус-бар» мостится в статус-бар окна — sticky-текст
+        # + SFTP-прогресс (permanent-виджет справа, скрыт когда передач нет) ровно как
+        # в v1.1.x; с v1.2.1 мостится ТОЛЬКО активный таб (_set_bridged_page). Страница
+        # не знает о QMainWindow: в док-режиме (v1.2.2) мост подключит док.
         self._sftp_progress = QProgressBar()
         self._sftp_progress.setFixedWidth(180)
         self._sftp_progress.setTextVisible(True)
         self._sftp_progress.setVisible(False)
         self.statusBar().addPermanentWidget(self._sftp_progress)
-        self.page.status_message.connect(self._on_page_status_message)
-        self.page.progress_busy.connect(self._on_page_progress_busy)
-        self.page.progress_update.connect(self._on_page_progress_update)
-        self.page.progress_hidden.connect(self._sftp_progress.hide)
+        self._bridged_page = None
+
+        # Первая сессия — тем же путём, что и новый таб (v1.2.1 задача 1).
+        self.add_session(server_data, password=password, initial_command=initial_command)
+
+    # ── v1.2.1: табы = сессии ────────────────────────────────────────────────
+
+    def add_session(self, server_data: ServerData, password: str = None,
+                    initial_command: str = "") -> "TerminalSessionPage":
+        """v1.2.1 (задача 1): новая сессия = новый таб (существующий путь
+        «подключиться к узлу»). Страница создаётся с parent=session_tabs (уничтожается
+        вместе с окном), привязывается к хосту и добавляется как таб — заголовок:
+        alias узла, tooltip: terminal.tab_close_tooltip. Новый таб становится
+        активным (setCurrentIndex → currentChanged → мост сигналов в статус-бар)."""
+        t = get_translator()
+        page = TerminalSessionPage(
+            server_data, parent=self.session_tabs,
+            password=password, initial_command=initial_command)
+        page.set_host_window(self)
+        idx = self.session_tabs.addTab(page, server_data.alias)
+        # Qt: addTab делает текущим только ПЕРВЫЙ таб — новый явно активируем
+        # (currentChanged → мост сигналов в статус-бар).
+        self.session_tabs.setCurrentIndex(idx)
+        try:
+            self.session_tabs.setTabToolTip(idx, t("terminal.tab_close_tooltip"))
+        except RuntimeError:
+            pass  # C++-объект уже удалён (гонка закрытия) — tooltip не критичен
+        return page
+
+    def close_page(self, page):
+        """v1.2.1 (задача 2): закрыть ОДИН таб — существующая cleanup-логика страницы
+        (gate «ask» confirm_close → единый teardown shutdown); соседние табы не
+        затрагиваются. Закрытие ПОСЛЕДНЕГО таба закрывает окно (WA_DeleteOnClose —
+        текущее поведение)."""
+        idx = self.session_tabs.indexOf(page)
+        if idx < 0:
+            return  # таб уже удалён (гонка teardown)
+        try:
+            if not page.confirm_close():
+                return  # «ask» + Cancel — таб остаётся открытым
+        except RuntimeError:
+            pass  # C++-объект уже удалён — закрываем без вопросов (как раньше)
+        try:
+            page.shutdown()
+        except Exception:  # noqa: BLE001 — teardown-устойчивость
+            pass
+        self.session_tabs.removeTab(idx)   # currentChanged → мост переподключается
+        page.deleteLater()
+        if self.session_tabs.count() == 0:
+            self.close()  # последний таб — закрыть окно (WA_DeleteOnClose)
+
+    def _on_tab_close_requested(self, index: int):
+        """Крестик на табе (setTabsClosable) → close_page."""
+        try:
+            page = self.session_tabs.widget(index)
+        except RuntimeError:
+            return  # C++-объект уже удалён (гонка закрытия)
+        if page is not None:
+            self.close_page(page)
+
+    # ── v1.2.1: мост «статус-бар» — только активный таб ──────────────────────
+
+    def _on_current_tab_changed(self, index: int):
+        try:
+            page = (self.session_tabs.widget(index)
+                    if 0 <= index < self.session_tabs.count() else None)
+        except RuntimeError:
+            page = None  # C++-объект уже удалён (гонка закрытия)
+        self._set_bridged_page(page)
+
+    def _set_bridged_page(self, page):
+        """Мост сигналов АКТИВНОГО таба в статус-бар окна (вид v1.2); при смене таба —
+        переподключение: статус-бар показывает активную сессию, сообщения неактивных
+        табов его не трогают. SFTP-прогресс-бар синхронизируется со состоянием активного
+        таба (неактивные передачи бар не обновляют)."""
+        old = self._bridged_page
+        if old is not None and old is not page:
+            try:
+                old.status_message.disconnect(self._on_page_status_message)
+                old.progress_busy.disconnect(self._on_page_progress_busy)
+                old.progress_update.disconnect(self._on_page_progress_update)
+                old.progress_hidden.disconnect(self._sftp_progress.hide)
+            except (TypeError, RuntimeError):
+                pass  # слот не был подключён / C++-объект удалён — делать нечего
+        self._bridged_page = page
+        if page is None:
+            return
+        try:
+            page.status_message.connect(self._on_page_status_message)
+            page.progress_busy.connect(self._on_page_progress_busy)
+            page.progress_update.connect(self._on_page_progress_update)
+            page.progress_hidden.connect(self._sftp_progress.hide)
+        except RuntimeError:
+            return  # C++-объект уже удалён (гонка закрытия) — мостить нечего
+        try:
+            if getattr(page, "_sftp_busy", 0) > 0:
+                self._sftp_progress.setRange(0, 0)   # пока не прилетел total — busy
+                self._sftp_progress.setValue(0)
+                self._sftp_progress.show()
+            else:
+                self._sftp_progress.hide()
+        except RuntimeError:
+            pass  # C++-объект уже удалён (гонка закрытия)
 
     # ── v1.2: мост «статус-бар страницы → статус-бар окна» (вид = v1.1.x) ────
 
@@ -493,6 +603,19 @@ class SSHTerminalWindow(QMainWindow):
             pass
 
     # ── v1.2: compat-атрибуты — сессия живёт на странице (live-ссылки) ───────
+
+    @property
+    def page(self):
+        """v1.2.1: активный (текущий) таб = «сессия окна»; для одно-табового окна —
+        единственная сессия (совместимость v1.2). Все compat-свойства ниже читают
+        её, поэтому существующий код/тесты работают без изменений."""
+        try:
+            cur = self.session_tabs.currentWidget()
+            if cur is not None:
+                return cur
+        except RuntimeError:
+            pass  # C++-объект уже удалён (гонка закрытия)
+        return None
 
     @property
     def terminal_thread(self):
@@ -558,9 +681,12 @@ class SSHTerminalWindow(QMainWindow):
     # ── v1.2: teardown — страница (единый метод) ────────────────────────────
 
     def close_terminal(self):
-        """v1.0RC3 сохранён для cleanup-пути MainWindow: с v1.2 — делегирование
-        на страницу (стоп потока + закрытие окна → closeEvent → shutdown)."""
-        self.page.close_terminal()
+        """v1.0RC3 сохранён для cleanup-пути MainWindow: с v1.2 — делегирование на
+        страницу; с v1.2.1 закрывает АКТИВНЫЙ таб (page.close_terminal → host.
+        close_page), а не всё окно."""
+        p = self.page
+        if p is not None:
+            p.close_terminal()
 
     def closeEvent(self, event):
         # v1.1.2RC3 (AUDIT U2): сохранить размер/состояние окна ДО «ask»-диалога —
@@ -575,12 +701,25 @@ class SSHTerminalWindow(QMainWindow):
         except Exception:  # noqa: BLE001 — геометрия не блокирует закрытие
             pass
 
-        # v1.2 (ROADMAP задача 3): «ask»-gate и ВСЯ cleanup-логика — на странице;
-        # все teardown-пути проходят через единый метод page.shutdown() (идемпотентен).
-        if not self.page.confirm_close():
-            event.ignore()
-            return
-        self.page.shutdown()
+        # v1.2.1 (задача 2): закрытие окна = закрытие ВСЕХ табов: «ask»-gate на каждую
+        # активную сессию (Cancel на любом табе держит окно), затем единый teardown —
+        # page.shutdown() (идемпотентен) на каждой странице.
+        try:
+            pages = [self.session_tabs.widget(i) for i in range(self.session_tabs.count())]
+        except RuntimeError:
+            pages = []  # C++-объект уже удалён — закрываем без вопросов (как раньше)
+        for page in pages:
+            try:
+                if not page.confirm_close():
+                    event.ignore()
+                    return
+            except RuntimeError:
+                pass  # C++-объект уже удалён — закрываем без вопросов (как раньше)
+        for page in pages:
+            try:
+                page.shutdown()
+            except Exception:  # noqa: BLE001 — teardown-устойчивость
+                pass
         super().closeEvent(event)
 
 

@@ -1,4 +1,4 @@
-# SSH Map (NodeVisualSSH) — v1.2
+# SSH Map (NodeVisualSSH) — v1.2.1
 
 Десктопное приложение (Python + PySide6): интерактивная карта IT-инфраструктуры с прямым SSH-подключением к узлам.
 Slogan: *"Draw your infrastructure. Organize it. Connect to it."*
@@ -19,7 +19,7 @@ pipx install .                            # или pip install . → коман�
 # Тесты без pytest: тематические файлы test_*.py + единый параллельный раннер.
 # Тесты изолированы: пишут во временный HOME, UTF-8 stdout ставится сами —
 # на cp1251-консолях и в CI дополнительное окружение не требуется:
-python tests/run_all.py              # ВСЁ (46 файлов): параллельно (4 воркера), таблица результатов + единый exit code (0 ⇔ всё зелёное)
+python tests/run_all.py              # ВСЁ (47 файлов): параллельно (4 воркера), таблица результатов + единый exit code (0 ⇔ всё зелёное)
 python tests/run_all.py --workers 8  # число воркеров (1 = последовательно, как раньше)
 python tests/run_all.py keyring      # фильтр по подстроке в имени файла
 python tests/test_tags.py            # один файл (из корня проекта)
@@ -55,13 +55,15 @@ graphics/
 └── background_image.py      # BackgroundImage: фон-изображение z=-10, drag/resize за угол
 modules/
 ├── ssh_worker.py            # SSHWorker (одноразовый QThread); реестр get_active_worker/wait_for_worker
-├── ssh_terminal.py          # SSHTerminalThread (connected_signal после invoke_shell) + SSHTerminalWindow — ТОНКАЯ ОБЁРТКА над TerminalSessionPage (v1.2):
-│                            #   WA_DeleteOnClose, заголовок, геометрия window_geometry.py, мост «статус-бар страницы → статус-бар окна» (sticky-текст + SFTP-прогресс);
+├── ssh_terminal.py          # SSHTerminalThread (connected_signal после invoke_shell) + SSHTerminalWindow — окно с QTabWidget из TerminalSessionPage (v1.2.1:
+│                            #   сессии ТАБАМИ, заголовок таба = alias узла; v1.2: WA_DeleteOnClose, заголовок, геометрия window_geometry.py);
+│                            #   мост «статус-бар → статус-бар окна» — только АКТИВНЫЙ таб (sticky-текст + SFTP-прогресс); add_session()/close_page();
 │                            #   load_terminal_settings() — ключи terminal_* из ~/.sshmap/config.json (дефолты = поведение v1.0, см. §4 «Настройки»);
 │                            #   _orphan_threads — реестр орфано-потоков (v1.1.2RC1 N4)
 ├── terminal_page.py         # TerminalSessionPage (v1.2): SSH-сессия как переиспользуемый виджет — thread + pyte-экран + холст + статус-строка + SFTP-вкладка;
 │                            #   ЕДИНЫЙ teardown shutdown() (идемпотентен) на все пути, gate confirm_close() («ask»), мостовые сигналы status_message/progress_*;
-│                            #   dirty-рендер без таймера, resize PTY: guard по сетке + дебаунс ~150 мс (eventFilter холста), initial_command — первая команда Быстрого запуска
+│                            #   close_terminal() — закрыть СВОЙ таб на хосте (v1.2.1: соседние табы не затрагиваются); dirty-рендер без таймера,
+│                            #   resize PTY: guard по сетке + дебаунс ~150 мс (eventFilter холста), initial_command — первая команда Быстрого запуска
 ├── sftp_worker.py           # SftpWorker (v1.1.3): один worker-поток с очередью задач list/upload/download поверх живого transport'а;
 │                            #   отмена — флаг между операциями, корректный shutdown, реестр орфано-worker'ов
 ├── sftp_tab.py              # SftpTab (v1.1.3): вкладка «Файлы» — листинг текущего каталога + навигация «..», upload/download выбранных,
@@ -86,7 +88,7 @@ services/
 ├── host_importer.py         # массовый импорт серверов из TXT: parse_hosts_file, is_ip_address, resolve_host
 ├── status_checker.py        # StatusChecker: QTimer разводит раунды, пробы ПАРАЛЛЕЛЬНО в _ProbeThread (ThreadPoolExecutor); probe_ssh() → online/warn/offline
 └── system_info_collector.py # SystemInfoCollector: автосбор ОС/CPU/RAM/диск Linux-сервера одной exec_command-сессией
-version.py                   # единая точка версий: APP_VERSION="1.2", VERSION_FORMAT="0.9"
+version.py                   # единая точка версий: APP_VERSION="1.2.1", VERSION_FORMAT="0.9"
 dialogs/                     # AddServerDialog (+кнопка «Быстрый запуск…»), SSHConnectDialog (+кнопка внешнего терминала),
                              #   ConnectionDialog/EditConnectionDialog, ProfileManagerDialog,
                              #   BackupsDialog (бэкапы + автосохранение, откат), QuickLaunchDialog (Быстрый запуск)
@@ -97,14 +99,15 @@ ui/main_window.py            # MainWindow: ФАКАД (v1.1.4: class MainWindow(
 ui/main_window_project_io.py # ProjectIOMixin (v1.1.4): проект new/open/load/save/autosave/backups/restore; владение _project_file/_dirty/_autosave_timer
 ui/main_window_node_ops.py   # NodeOpsMixin (v1.1.4): операции над узлами/связями + импорт из TXT; _is_scene_point (bool-guard v0.8.1)
 ui/main_window_ssh.py        # SshMixin (v1.1.4): SSH-диалог, терминальные окна, автосбор информации, быстрый запуск; владение _terminal_windows/_ssh_connected_nodes/_info_collectors;
-                              #   v1.2: реестр _terminal_windows хранит СЕССИИ (TerminalSessionPage) — зелёная точка узла и лимит «4 терминала» считаются по сессиям
+                              #   v1.2: реестр _terminal_windows хранит СЕССИИ (TerminalSessionPage) — зелёная точка узла и лимит «4 терминала» считаются по сессиям;
+                              #   v1.2.1: повторное «подключиться к узлу» переиспользует живое окно узла — новая сессия = новый таб (window.add_session())
 ui/mixin_support.py          # host_attr(self, name) — доступ к глобальным модуля-фасада в момент вызова (миксины не импортируют main_window — нет цикла; тестовый шов подмены MW.<имя>)
 ui/sidebar.py                # SidebarPanel(QWidget) — кнопки, заголовок, поиск, тег-фильтр, дерево с маркерами
                              #   статусов, контекстное меню строки; i18n через колбэк + retranslate
 ui/map_search_bar.py         # MapSearchBar — плавающая строка поиска поверх canvas (Enter/Shift+Enter/Esc, счётчик k/N)
 ui/command_palette.py        # CommandPalette: Ctrl+K, fuzzy-поиск по действиям меню и серверам
-i18n/                        # t(key,**kwargs); en.json/ru.json/zh.json — 398 ключей, наборы идентичны; en — дефолт для новых пользователей
-tests/                       # тематический сьют без pytest: 46 × test_*.py + _common.py (обвязка), run_all.py (параллельный раннер, 4 воркера), check_i18n_keys.py; карта — tests/INDEX.md
+i18n/                        # t(key,**kwargs); en.json/ru.json/zh.json — 400 ключей, наборы идентичны; en — дефолт для новых пользователей
+tests/                       # тематический сьют без pytest: 47 × test_*.py + _common.py (обвязка), run_all.py (параллельный раннер, 4 воркера), check_i18n_keys.py; карта — tests/INDEX.md
 ```
 
 ---
@@ -144,7 +147,8 @@ tests/                       # тематический сьют без pytest: 
 `probe_ssh(host, port)`: TCP открыт + SSH-баннер → `online`; порт открыт без баннера → `warn`; иначе `offline`. Пробы только в `_ProbeThread` (не на GUI-потоке); внутри раунда — **параллельно** (`ThreadPoolExecutor`, потолок `status_max_parallel`, дефолт 16): худший случай раунда `ceil(N/max_parallel) × timeout` вместо `N × timeout`; результаты прилетают по мере готовности, отмена (stop/shutdown) не даёт результатов пробам, ещё не начавшимся. Мягкий авто-интервал: N > 50 узлов → интервал раундов удваивается (`effective_interval_ms()`) + одноразовая подсказка в статус-баре; жёсткого лимита числа серверов нет. `start_status_checks()` вызывается из main.py один раз после `show()`.
 
 ### Терминал
-- Архитектура v1.2: сессия = `TerminalSessionPage` (modules/terminal_page.py) — переиспользуемый виджет (thread + pyte-экран + холст + статус-строка + SFTP-вкладка); `SSHTerminalWindow` — тонкая обёртка (WA_DeleteOnClose, заголовок, геометрия). ВСЯ cleanup-логика — на странице: все teardown-пути (закрытие окна, ошибка сессии, шатдаун MainWindow, лимит) проходят через единый идемпотентный `page.shutdown()`; gate «ask» — `page.confirm_close()`. Окно мостит сигналы страницы в свой статус-бар (sticky-текст + SFTP-прогресс — вид v1.1.x).
+- Архитектура v1.2: сессия = `TerminalSessionPage` (modules/terminal_page.py) — переиспользуемый виджет (thread + pyte-экран + холст + статус-строка + SFTP-вкладка); ВСЯ cleanup-логика — на странице: все teardown-пути (закрытие таба/окна, ошибка сессии, шатдаун MainWindow, лимит) проходят через единый идемпотентный `page.shutdown()`; gate «ask» — `page.confirm_close()`.
+- v1.2.1 — сессии ТАБАМИ в одном окне: `SSHTerminalWindow` (WA_DeleteOnClose, заголовок, геометрия) держит QTabWidget из страниц (`session_tabs`, табы закрываемые, заголовок таба = alias узла); повторное «подключиться к узлу» переиспользует живое окно узла — новая сессия = новый таб (`window.add_session()`, статус-сообщение `terminal.session_new_tab`), другой узел — новое окно. Закрытие таба (крестик / `close_page`) — cleanup ЛОКАЛЬНОЙ страницы: соседние табы не затрагиваются; закрытие ПОСЛЕДНЕГО таба закрывает окно (`WA_DeleteOnClose`). Мост «статус-бар → статус-бар окна» мостит ТОЛЬКО активный таб (при переключении переподключается). Compat-атрибуты окна — live-ссылки на АКТИВНЫЙ таб (`win.page` = текущий).
 - Конвейер: сырые байты SSH → `TerminalScreen.feed()` (pyte.HistoryScreen, под lock) → посячейный холст `TerminalWidget` (QWidget+QPainter: runs, цветовой движок `resolve_color`, блок-курсор с миганием).
 - Dirty-рендер без таймера: `_on_output` → `widget.update()` напрямую (queued signal уже в GUI-потоке).
 - Resize PTY — только при реальной смене сетки + дебаунс ~150 мс перед `channel.resize_pty` (начальный `invoke_shell` 120×32; v1.2: пересчёт — по ресайзу холста через eventFilter страницы, раньше resizeEvent окна).
@@ -159,7 +163,7 @@ tests/                       # тематический сьют без pytest: 
 - Хранение — **единый** `~/.sshmap/config.json` (`i18n.save_config`, атомарная merge-запись): все ключи опциональны, дефолты = поведение v1.0. Статусы и автосохранение применяются на лету; терминал и внешний терминал читают конфиг при следующем создании окна/запуске.
 - Ключи:
   - `external_terminal` (перенесён из отдельного `~/.sshmap_settings.json` с миграцией при чтении — старый файл удаляется);
-  - `terminal_palette` (`default|nord|dracula|tokyo_night`, неизвестная → default), `terminal_font` (семейство, пусто → системный моноширинный; на лету в открытые окна), `terminal_font_size` (pt 6–72, иначе 10), `terminal_history_lines` (глубина скроллбэка HistoryScreen; дефолт 1000 — включён, явный 0 — отключён), `terminal_close_behavior` (`"close"` по умолчанию | `"ask"` — подтверждение закрытия активной сессии в `page.confirm_close()`; уже завершённая закрывается без диалога), `terminal_max_open` (лимит своих терминалов, дефолт 4 — при достижении не отказ, а предложение закрыть старейшую сессию / отмена; v1.2: лимит считается по СЕССИЯМ реестра, а не окнам);
+  - `terminal_palette` (`default|nord|dracula|tokyo_night`, неизвестная → default), `terminal_font` (семейство, пусто → системный моноширинный; на лету в открытые окна), `terminal_font_size` (pt 6–72, иначе 10), `terminal_history_lines` (глубина скроллбэка HistoryScreen; дефолт 1000 — включён, явный 0 — отключён), `terminal_close_behavior` (`"close"` по умолчанию | `"ask"` — подтверждение закрытия активной сессии в `page.confirm_close()`; уже завершённая закрывается без диалога), `terminal_max_open` (лимит своих терминалов, дефолт 4 — при достижении не отказ, а предложение закрыть старейшую сессию / отмена; v1.2: лимит считается по СЕССИЯМ реестра, а не окнам; v1.2.1: по сессиям во ВСЕХ окнах — табы одного окна считаются отдельно);
   - `status_interval_sec`/`status_probe_timeout_sec`/`status_max_parallel` (дефолты 30 c / 3.0 c / 16 параллельных проб; на лету через `StatusChecker.set_interval/set_probe_timeout/set_max_parallel`);
   - `autosave_enabled/autosave_interval_sec/backup_count` (на лету — QTimer автосохранения);
   - `language` (немедленное применение, до ОК);
@@ -219,6 +223,7 @@ en (дефолт) / ru / zh. Правило: новый ключ добавля�
 - статусы узлов online/warn/offline: параллельные пробы, авто-интервал для больших карт
 - встроенный SSH-терминал на pyte (скроллбэк, выделение мышью, полная клавиатура) + внешний системный терминал
 - SFTP-вкладка в окне терминала (v1.1.3): файлы по тому же SSH-соединению — листинг/навигация «..», upload/download с прогрессом в статус-баре и отменой
+- несколько SSH-сессий табами в одном окне терминала (v1.2.1): повторное подключение к узлу — новый таб (заголовок = alias), закрытие таба не затрагивает соседний, последний таб закрывает окно; лимит «4 своих терминала» — по сессиям во всех окнах
 - undo/redo сценарных операций
 - автосбор информации о Linux-сервере (ОС/CPU/RAM/диск)
 - профили и пароли в keyring ОС — пароль никогда не пишется в JSON
@@ -239,7 +244,7 @@ en (дефолт) / ru / zh. Правило: новый ключ добавля�
 - TOFU при первом подключении (новый ключ хоста принимается автоматически) и ограничения keyring — детали в «Безопасность».
 
 **Roadmap** (задачи, порядок и acceptance — в ROADMAP.md):
-- **Серия v1.2.x** (рефактор «окно → страница» `TerminalSessionPage` выполнен в v1.2): сессии табами в окне и доком окна карты; мультинабор; крепление заметок к серверам; центральная тема `ui/theme.py` + анимации карты; выделение и контекстное меню терминала; D&D в SFTP-вкладку; удаление мёртвого кода + полный wcwidth CJK; подсветка логов (opt-in).
+- **Серия v1.2.x** (рефактор «окно → страница» `TerminalSessionPage` — v1.2, сессии табами в окне — v1.2.1): док терминалов окна карты; мультинабор; крепление заметок к серверам; центральная тема `ui/theme.py` + анимации карты; выделение и контекстное меню терминала; D&D в SFTP-вкладку; удаление мёртвого кода + полный wcwidth CJK; подсветка логов (opt-in).
 - **Серия v1.3.x**: панель файлов внизу окна карты + просмотрщик текста; настройка горячих клавиш; языки без написания кода; лёгкие плагины.
 
 ---

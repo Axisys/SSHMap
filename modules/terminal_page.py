@@ -83,7 +83,8 @@ class TerminalSessionPage(QWidget):
 
     Хост (SSHTerminalWindow / будущий док) создаёт страницу с parent и может:
       * подсоединить мостовые сигналы status_message/progress_* к своему UI;
-      * вызвать set_host_window(w) — close_terminal() закроет хост-окно;
+      * вызвать set_host_window(w) — close_terminal() закроет таб этой сессии на
+        хосте (v1.2.1: последний таб закрывает окно);
       * пройти teardown через shutdown() (единый метод, идемпотентен).
     """
 
@@ -258,17 +259,21 @@ class TerminalSessionPage(QWidget):
             pass  # C++-объект уже удалён (гонка закрытия)
 
     def close_terminal(self):
-        """Закрыть сессию (v1.2): стоп потока + закрытие хост-окна — teardown
-        пройдёт штатным путём (closeEvent → confirm_close → shutdown). Путь
-        MainWindow._shutdown_background_threads и лимита «4 своих терминала»."""
+        """Закрыть сессию (v1.2.1): стоп потока + закрытие СВОЕГО таба на хосте
+        (window.close_page → confirm_close → shutdown; последний таб закрывает окно).
+        Путь MainWindow._shutdown_background_threads и лимита «4 своих терминала»:
+        в табовом окне закрытие сессии НЕ затрагивает соседние табы. Без хоста /
+        у хоста нет close_page (фейк) — teardown напрямую."""
         self.stop_thread()
         w = getattr(self, "_host_window", None)
         if w is not None:
-            try:
-                w.close()
-                return
-            except RuntimeError:
-                pass  # хост уже уничтожен — teardown напрямую
+            close_page_fn = getattr(w, "close_page", None)
+            if callable(close_page_fn):
+                try:
+                    close_page_fn(self)
+                    return
+                except RuntimeError:
+                    pass  # хост уже уничтожен — teardown напрямую
         self.shutdown()
 
     def shutdown(self):
