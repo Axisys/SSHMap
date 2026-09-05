@@ -18,7 +18,12 @@ SSH-кластер переносится вместе с ним (ROADMAP «По
     точка узла гаснет только когда закрыты ВСЕ сессии узла, лимит «4 своих
     терминала» считается по сессиям во всех окнах; v1.2.1: одно окно может
     хостить несколько сессий узла табами — _spawn_terminal_window переиспользует
-    живое окно узла через window.add_session(), иначе создаёт новое окно);
+    живое окно узла через window.add_session(), иначе создаёт новое окно;
+    v1.2.2: в режиме "tabs" (terminal_mode) сессии открываются ТАБОМ в доке
+    «Терминалы» — _ensure_terminals_dock, реестр/лимит/зелёная точка по-прежнему
+    по СЕССИЯМ независимо от контейнера);
+  * ``self._terminals_dock`` — док «Терминалы» (v1.2.2, ленивое создание;
+    modules/terminal_dock.TerminalsDock), None пока режим "tabs" не использовался;
   * ``self._ssh_connected_nodes`` — id узлов с активной сессией (зелёная точка);
   * ``self._info_collectors`` — реестр SystemInfoCollector по server_id.
 Миксин НЕ импортирует ui.main_window (цикл) — только duck-typing по инстансу;
@@ -29,6 +34,7 @@ SSHTerminalWindow/SSHConnectDialog/_ext_term берутся из модуля-ф
 """
 import copy
 
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QDialog, QMessageBox
 
 try:  # v1.1.4: общий шов подмены глобальных модуля-фасада (см. mixin_support)
@@ -73,6 +79,31 @@ class SshMixin:
                 continue  # C++-объект удалён в пути teardown — ищем дальше
         return None
 
+    def _ensure_terminals_dock(self):
+        """v1.2.2 (задача 2): док «Терминалы» в MainWindow — ленивое создание.
+
+        Первая сессия в режиме "tabs" создаёт QDockWidget с TerminalDockContent
+        (QTabWidget из страниц, modules/terminal_dock.py) в правой области и
+        показывает его; повторные вызовы возвращают тот же док (если спрятан —
+        показывают снова). Карта остаётся центральным виджетом: self.view не
+        трогается. WA_DeleteOnClose у дока нет — контейнер переживает свои
+        сессии (teardown постраничный, page.shutdown())."""
+        dock = getattr(self, "_terminals_dock", None)
+        if dock is None:
+            try:
+                from modules.terminal_dock import TerminalsDock
+            except ImportError:
+                from ..modules.terminal_dock import TerminalsDock
+            dock = TerminalsDock(self)
+            self._terminals_dock = dock
+            self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, dock)
+        else:
+            try:
+                dock.show()   # док мог быть спрятан (последний таб / крестик в заголовке)
+            except RuntimeError:
+                pass  # C++-объект уже уничтожен (гонка закрытия) — док не нужен
+        return dock
+
     def _spawn_terminal_window(self, node: "ServerNode", password: str = None,
                                initial_command: str = ""):
         """v1.0RC4: создание терминального окна + учёт (единый путь).
@@ -95,12 +126,20 @@ class SshMixin:
         окно терминала (_find_terminal_window_for), сессия открывается там через
         window.add_session() (заголовок таба — alias узла, статус-сообщение
         terminal.session_new_tab); иначе — новое окно с одним табом (поведение v1.2).
+
+        v1.2.2 (задачи 2/4): режим отображения из ключа terminal_mode ("windows"
+        дефолт | "tabs"): в режиме "tabs" новая сессия открывается ТАБОМ в доке
+        «Терминалы» (_ensure_terminals_dock, ленивое создание) — переиспользование
+        окна узла не применяется; применение БЕЗ перезапуска: новые сессии уходят
+        в выбранный режим, открытые окна/док живут как есть до закрытия.
         """
         try:
             from modules.ssh_terminal import load_terminal_settings as _load_ts
         except ImportError:
             from ..modules.ssh_terminal import load_terminal_settings as _load_ts
-        max_open = _load_ts()["max_open"]
+        ts_cfg = _load_ts()
+        max_open = ts_cfg["max_open"]
+        mode = ts_cfg["mode"]   # v1.2.2: "windows" (дефолт, текущее поведение) | "tabs"
         if len(self._terminal_windows) >= max_open and self._terminal_windows:
             oldest = self._terminal_windows[0]  # порядок создания — порядок списка (сессии)
             alias = getattr(getattr(oldest, "server_data", None), "alias", "?")
@@ -119,26 +158,43 @@ class SshMixin:
         node.update_appearance()
         node.set_ssh_connected(True)
         self._ssh_connected_nodes.add(node.data.id)  # v0.9.4-fix: сброс индикатора при закрытии терминала
-        win_cls = host_attr(self, "SSHTerminalWindow")
-        if win_cls is None:
-            raise RuntimeError("SSHTerminalWindow недоступен в модуле MainWindow")
-        # v1.2.1 (задача 1): новая сессия = новый таб — если для узла уже есть живое
-        # окно терминала, открываем сессию там (заголовок таба — alias узла); иначе —
-        # новое окно с одним табом (поведение v1.2).
-        existing = self._find_terminal_window_for(node.data.id)
-        if existing is not None and hasattr(existing, "add_session"):
-            page = existing.add_session(
+        if mode == "tabs":
+            # v1.2.2 (задача 2): новая сессия → док «Терминалы» на карте (ленивое
+            # создание/повторный show). Открытые окна режима "windows" живут как
+            # есть — переиспользование окна узла здесь не применяется (задача 4).
+            dock = self._ensure_terminals_dock()
+            content = dock.content
+            had_tabs = content.session_tabs.count() > 0
+            page = content.add_session(
                 node.data, password=password, initial_command=initial_command)
-            terminal_window = existing
-            try:
-                self.statusBar().showMessage(
-                    self.t("terminal.session_new_tab", alias=node.data.alias), 4000)
-            except Exception:  # noqa: BLE001 — статус-бар косметика при teardown
-                pass
+            terminal_window = dock
+            if had_tabs:   # присоединение к уже открытому контейнеру — как v1.2.1
+                try:
+                    self.statusBar().showMessage(
+                        self.t("terminal.session_new_tab", alias=node.data.alias), 4000)
+                except Exception:  # noqa: BLE001 — статус-бар косметика при teardown
+                    pass
         else:
-            terminal_window = win_cls(
-                node.data, self, password=password, initial_command=initial_command)
-            page = getattr(terminal_window, "page", None) or terminal_window
+            win_cls = host_attr(self, "SSHTerminalWindow")
+            if win_cls is None:
+                raise RuntimeError("SSHTerminalWindow недоступен в модуле MainWindow")
+            # v1.2.1 (задача 1): новая сессия = новый таб — если для узла уже есть
+            # живое окно терминала, открываем сессию там (заголовок таба — alias
+            # узла); иначе — новое окно с одним табом (поведение v1.2).
+            existing = self._find_terminal_window_for(node.data.id)
+            if existing is not None and hasattr(existing, "add_session"):
+                page = existing.add_session(
+                    node.data, password=password, initial_command=initial_command)
+                terminal_window = existing
+                try:
+                    self.statusBar().showMessage(
+                        self.t("terminal.session_new_tab", alias=node.data.alias), 4000)
+                except Exception:  # noqa: BLE001 — статус-бар косметика при teardown
+                    pass
+            else:
+                terminal_window = win_cls(
+                    node.data, self, password=password, initial_command=initial_command)
+                page = getattr(terminal_window, "page", None) or terminal_window
         # v1.2: регистрируем СЕССИЮ (страницу), а не окно; фейк без .page —
         # сам себя (тестовый шов host_attr: подмена MW.SSHTerminalWindow).
         session = page

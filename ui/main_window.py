@@ -137,6 +137,9 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         # узла гаснет только когда закрыты ВСЕ сессии узла, лимит «4 своих
         # терминала» (v1.1.1) считается по сессиям. Имя сохранено (v1.1.x API).
         self._terminal_windows: List = []
+        # v1.2.2: док «Терминалы» (terminal.mode = "tabs") — ленивое создание в
+        # SshMixin._ensure_terminals_dock на первую сессию в режиме "tabs".
+        self._terminals_dock = None
         # v0.9.4-fix: id узлов с активной SSH-сессией (для сброса индикатора)
         self._ssh_connected_nodes: set = set()
         self._ping_thread = None   # v0.7.3: ping-поток (AUDIT v0.7.2 #8: guard против затирания)
@@ -337,6 +340,13 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
                 panel.retranslate()
             except RuntimeError:
                 pass  # Qt teardown — панель уже уничтожена
+        # v1.2.2: док «Терминалы» мог быть создан до смены языка — перевести заголовок
+        dock = getattr(self, "_terminals_dock", None)
+        if dock is not None:
+            try:
+                dock.setWindowTitle(self.t("terminal.dock_title"))
+            except RuntimeError:
+                pass  # Qt teardown — док уже уничтожен
         self.statusBar().showMessage(self.t("status.ready"))
 
     @property
@@ -1113,7 +1123,10 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
           (widget.set_font — без перезапуска), кнопки сайдбара, режим двойного
           клика, перерисовка плашек связей (опция «тип на плашке»);
         * Терминал (палитра/история/поведение закрытия) и внешний терминал
-          читают конфиг при следующем создании окна/запуске — действия не нужно.
+          читают конфиг при следующем создании окна/запуске — действия не нужно;
+        * v1.2.2: terminal_mode ("windows"|"tabs") — применение БЕЗ перезапуска
+          «на новые сессии»: _spawn_terminal_window читает ключ на каждом вызове,
+          открытые окна/док живут как есть до закрытия (задача 4) — действия нет.
         """
         try:
             from storage.autosave import get_autosave_settings as _get_as

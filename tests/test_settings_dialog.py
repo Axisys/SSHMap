@@ -378,6 +378,9 @@ check("«Терминал»: глубина истории от 0 (0 = скро�
 check("«Терминал»: поведение закрытия (close/ask)",
       [dlg.close_behavior_combo.itemData(i) for i in range(dlg.close_behavior_combo.count())]
       == ["close", "ask"])
+check("«Терминал»: режим отображения (windows/tabs, v1.2.2)",
+      [dlg.mode_combo.itemData(i) for i in range(dlg.mode_combo.count())]
+      == ["windows", "tabs"] and dlg.mode_combo.currentData() == "windows")
 check("«Статусы»: интервал (≥5 c) + таймаут пробы (≤60 c)",
       dlg.status_interval_spin.minimum() >= 5 and dlg.probe_timeout_spin.maximum() <= 60.0)
 check("«Автосохранение»: чекбокс вкл/выкл + интервал + число бэкапов",
@@ -392,11 +395,14 @@ write_cfg({"terminal_palette": "dracula", "terminal_font_size": 14,
            "terminal_history_lines": 250, "status_interval_sec": 90,
            "status_probe_timeout_sec": 5.0, "autosave_enabled": False,
            "autosave_interval_sec": 120, "backup_count": 3,
-           "language": "ru", "terminal_font": "Consolas"})
+           "language": "ru", "terminal_font": "Consolas",
+           "terminal_mode": "tabs"})   # v1.2.2
 dlg2 = SettingsDialog(None)
 check("«Терминал» отражает конфиг (dracula / 14 pt / 250 строк)",
       dlg2.palette_combo.currentData() == "dracula" and dlg2.font_size_spin.value() == 14
       and dlg2.history_spin.value() == 250)
+check("«Терминал» отражает terminal_mode (tabs, v1.2.2)",
+      dlg2.mode_combo.currentData() == "tabs", str(dlg2.mode_combo.currentData()))
 check("«Статусы» отражают конфиг (90 c / 5.0 c)",
       dlg2.status_interval_spin.value() == 90
       and abs(dlg2.probe_timeout_spin.value() - 5.0) < 1e-6)
@@ -404,14 +410,15 @@ check("«Автосохранение» отражает конфиг (выкл 
       not dlg2.autosave_enabled_chk.isChecked() and dlg2.autosave_interval_spin.value() == 120
       and dlg2.backup_count_spin.value() == 3)
 
-# collect(): ровно 18 ключей config.json (10 в v1.1 + 7 в v1.1.1 + 1 в v1.1.2 final),
-# типы корректны (language НЕ входит — он сразу)
+# collect(): ровно 19 ключей config.json (10 в v1.1 + 7 в v1.1.1 + 1 в v1.1.2 final
+# + 1 в v1.2.2 — terminal_mode), типы корректны (language НЕ входит — он сразу)
 dlg2.close_behavior_combo.setCurrentIndex(1)  # ask
 dlg2.status_interval_spin.setValue(60)
 dlg2.probe_timeout_spin.setValue(4.5)
 c = dlg2.collect()
-check("collect(): ровно 18 ключей config.json (v1.1: 10 + v1.1.1: 7 + v1.1.2 final: 1)",
-      set(c) == {"external_terminal", "terminal_palette", "terminal_font_size",
+check("collect(): ровно 19 ключей config.json (v1.1: 10 + v1.1.1: 7 + v1.1.2 final: 1 + v1.2.2: 1)",
+      set(c) == {"external_terminal", "terminal_mode", "terminal_palette",
+                 "terminal_font_size",
                  "terminal_history_lines", "terminal_close_behavior",
                  "status_interval_sec", "status_probe_timeout_sec", "status_max_parallel",
                  "autosave_enabled", "autosave_interval_sec", "backup_count",
@@ -430,7 +437,7 @@ applied = []
 dlg2.applied.connect(lambda: applied.append(1))
 dlg2._on_accept()
 cfg = read_cfg()
-check("ОК: все 18 ключей записаны в config.json",
+check("ОК: все 19 ключей записаны в config.json",
       cfg is not None and all(k in cfg for k in c), str(cfg))
 check("ОК: merge — чужие ключи сохранены (language/terminal_font)",
       cfg.get("language") == "ru" and cfg.get("terminal_font") == "Consolas", str(cfg))

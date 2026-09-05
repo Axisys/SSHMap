@@ -81,12 +81,13 @@ def load_terminal_settings():
        "history_lines": int,      # глубина deque-истории HistoryScreen (0 = выкл.)
        "close_behavior": str,     # v1.1: "close" (дефолт) | "ask" — поведение закрытия
        "max_open": int,           # v1.1.1: лимит своих открытых терминалов (дефолт 4)
-       "wheel": str}              # v1.1.2RC3 (U3): "scrollback" (дефолт) | "off" — колесо
+       "wheel": str,              # v1.1.2RC3 (U3): "scrollback" (дефолт) | "off" — колесо
+       "mode": str}               # v1.2.2: "windows" (дефолт) | "tabs" — режим отображения
     Невалидные значения (чужой тип, вне диапазона) → дефолт. Никогда не бросает.
     """
     defaults = {"palette": None, "font_family": "", "font_size": None,
                 "history_lines": DEFAULT_HISTORY_LINES, "close_behavior": "close",
-                "max_open": 4, "wheel": "scrollback"}
+                "max_open": 4, "wheel": "scrollback", "mode": "windows"}
     try:
         from i18n import load_config
     except Exception:
@@ -127,6 +128,14 @@ def load_terminal_settings():
     v = cfg.get("terminal_wheel")
     if isinstance(v, str) and v.strip().lower() in ("scrollback", "off"):
         defaults["wheel"] = v.strip().lower()   # битое/чужое → "scrollback" (дефолт)
+
+    # v1.2.2 (ROADMAP задача 1): режим отображения терминалов — "windows" (дефолт,
+    # текущее поведение: отдельные окна SSHTerminalWindow) | "tabs" (QDockWidget
+    # «Терминалы» в MainWindow, QTabWidget из TerminalSessionPage). Валидация по
+    # паттерну остальных ключей: битое значение/чужой тип → дефолт.
+    v = cfg.get("terminal_mode")
+    if isinstance(v, str) and v.strip().lower() in ("windows", "tabs"):
+        defaults["mode"] = v.strip().lower()   # битое/чужое → "windows" (дефолт)
 
     return defaults
 

@@ -15,7 +15,8 @@ ROADMAP добавляется полем/чекбоксом в существу
   * Терминал:       terminal_palette / terminal_font_size / terminal_history_lines
                      (ключи v1.0) + terminal_close_behavior (v1.1: "close"|"ask")
                      + v1.1.1: terminal_font (семейство; читался с v1.0, UI впервые),
-                     terminal_max_open (лимит своих терминалов, дефолт 4);
+                     terminal_max_open (лимит своих терминалов, дефолт 4)
+                      + v1.2.2: terminal_mode ("windows" дефолт | "tabs" — док на карте);
   * Статусы:        status_interval_sec / status_probe_timeout_sec (v1.1; дефолты
                      30 c / 3.0 c — поведение v1.0, services/status_checker.py);
   * Автосохранение: autosave_enabled / autosave_interval_sec / backup_count (v0.9.7);
@@ -214,6 +215,19 @@ class SettingsDialog(QDialog):
 
         tab = QWidget()
         form = QFormLayout(tab)
+
+        # v1.2.2 (задача 4): режим отображения терминалов — "windows" (дефолт,
+        # текущее поведение: отдельные окна) | "tabs" (док «Терминалы» на карте).
+        # Применение без перезапуска: новые сессии уходят в выбранный режим,
+        # открытые окна/док живут как есть до закрытия.
+        self.mode_combo = QComboBox()
+        self.mode_combo.addItem(_t("settings.terminal.mode.windows"), "windows")
+        self.mode_combo.addItem(_t("settings.terminal.mode.tabs"), "tabs")
+        idx = next((i for i in range(self.mode_combo.count())
+                    if self.mode_combo.itemData(i) == cfg["mode"]), 0)
+        self.mode_combo.setCurrentIndex(idx)
+        self._lbl_mode = QLabel(_t("settings.terminal.mode"))
+        form.addRow(self._lbl_mode, self.mode_combo)
 
         self.palette_combo = QComboBox()
         self.palette_combo.addItem(_t("settings.terminal.palette.default"), "default")
@@ -431,9 +445,12 @@ class SettingsDialog(QDialog):
         размер (валидатор load_ui_settings() читает диапазон 6..72, иначе дефолт).
         v1.1.2 final: +1 ключ — status_max_parallel (потолок параллельных проб;
         диапазон спинбокса = кламп валидатора get_status_settings()).
+        v1.2.2: +1 ключ — terminal_mode ("windows"|"tabs"; комбо даёт фиксированные id).
         """
         return {
             "external_terminal": self.ext_term_combo.currentData() or "auto",
+            # v1.2.2 (задача 4): режим отображения терминалов
+            "terminal_mode": self.mode_combo.currentData() or "windows",
             "terminal_palette": self.palette_combo.currentData() or "default",
             "terminal_font_size": int(self.font_size_spin.value()),
             "terminal_history_lines": int(self.history_spin.value()),
@@ -479,6 +496,17 @@ class SettingsDialog(QDialog):
         self._lbl_ui_font_size.setText(_t("settings.general.ui_font_size"))
         self.ui_font_size_spin.setSpecialValueText(_t("settings.ui_font_system"))
         self.sidebar_buttons_chk.setText(_t("settings.general.sidebar_buttons"))
+
+        # v1.2.2: режим отображения (вкладка «Терминал»)
+        self._lbl_mode.setText(_t("settings.terminal.mode"))
+        for i in range(self.mode_combo.count()):
+            mid = self.mode_combo.itemData(i)
+            key = {
+                "windows": "settings.terminal.mode.windows",
+                "tabs": "settings.terminal.mode.tabs",
+            }.get(mid)
+            if key:
+                self.mode_combo.setItemText(i, _t(key))
 
         self._lbl_palette.setText(_t("settings.terminal.palette"))
         for i in range(self.palette_combo.count()):

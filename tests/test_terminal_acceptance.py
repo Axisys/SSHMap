@@ -379,13 +379,14 @@ from modules.ssh_terminal import load_terminal_settings
 
 # v1.1: load_terminal_settings() дополнительно возвращает close_behavior
 # ("close" по умолчанию; "ask" — подтверждение закрытия активной сессии);
-# v1.1.1: + max_open (лимит своих терминалов, дефолт 4).
+# v1.1.1: + max_open (лимит своих терминалов, дефолт 4);
+# v1.2.2: + mode (режим отображения: "windows" дефолт | "tabs" — док на карте).
 clear_config()
 s = load_terminal_settings()
-check("нет конфига → дефолты (палитра default, pt 10, история 1000 — скроллбэк включён, close_behavior=close, max_open=4, wheel=scrollback)",
+check("нет конфига → дефолты (палитра default, pt 10, история 1000 — скроллбэк включён, close_behavior=close, max_open=4, wheel=scrollback, mode=windows)",
       s == {"palette": None, "font_family": "", "font_size": None,
             "history_lines": TS.DEFAULT_HISTORY_LINES, "close_behavior": "close",
-            "max_open": 4, "wheel": "scrollback"}, str(s))
+            "max_open": 4, "wheel": "scrollback", "mode": "windows"}, str(s))
 
 write_config({"terminal_palette": " nord ", "terminal_font": " Consolas ",
               "terminal_font_size": 12, "terminal_history_lines": 50})
@@ -393,7 +394,7 @@ s = load_terminal_settings()
 check("валидные значения читаются (trim пробелов)",
       s == {"palette": "nord", "font_family": "Consolas", "font_size": 12,
             "history_lines": 50, "close_behavior": "close", "max_open": 4,
-            "wheel": "scrollback"}, str(s))
+            "wheel": "scrollback", "mode": "windows"}, str(s))
 
 write_config({"terminal_palette": 42, "terminal_font": 7,
               "terminal_font_size": "big", "terminal_history_lines": -5})
@@ -401,7 +402,7 @@ s = load_terminal_settings()
 check("битые значения (чужие типы/вне диапазона) → дефолты",
       s == {"palette": None, "font_family": "", "font_size": None,
             "history_lines": TS.DEFAULT_HISTORY_LINES, "close_behavior": "close",
-            "max_open": 4, "wheel": "scrollback"}, str(s))
+            "max_open": 4, "wheel": "scrollback", "mode": "windows"}, str(s))
 
 # v1.1.1: terminal_max_open — лимит своих терминалов (дефолт 4, диапазон 1..32)
 write_config({"terminal_max_open": 8})
@@ -412,6 +413,17 @@ check("v1.1.1: битое terminal_max_open (str) → дефолт 4",
 write_config({"terminal_max_open": 99})
 check("v1.1.1: terminal_max_open вне диапазона (99) → дефолт 4",
       load_terminal_settings()["max_open"] == 4)
+
+# v1.2.2: terminal_mode — режим отображения ("windows" дефолт | "tabs" — док на карте);
+# валидация по паттерну остальных ключей (битое значение/чужой тип → дефолт)
+write_config({"terminal_mode": "tabs"})
+check("v1.2.2: terminal_mode='tabs' читается", load_terminal_settings()["mode"] == "tabs")
+write_config({"terminal_mode": " TABS "})
+check("v1.2.2: terminal_mode ' TABS ' (strip+lower) → 'tabs'",
+      load_terminal_settings()["mode"] == "tabs")
+write_config({"terminal_mode": 123})
+check("v1.2.2: битый terminal_mode (int) → дефолт 'windows'",
+      load_terminal_settings()["mode"] == "windows")
 
 write_config({"terminal_close_behavior": " ask "})
 check("v1.1: terminal_close_behavior='ask' читается (trim пробелов)",

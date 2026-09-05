@@ -295,8 +295,8 @@ check("retranslate: лейбл переведён (не сырой ключ)",
       and dlg2._lbl_max_parallel.text() != "settings.statuses.max_parallel",
       dlg2._lbl_max_parallel.text())
 c = dlg2.collect()
-check("collect(): ровно 18 ключей (17 + status_max_parallel, v1.1.2 final)",
-      len(c) == 18 and "status_max_parallel" in c, str(sorted(c)))
+check("collect(): ровно 19 ключей (17 + status_max_parallel v1.1.2 final + terminal_mode v1.2.2)",
+      len(c) == 19 and "status_max_parallel" in c and "terminal_mode" in c, str(sorted(c)))
 check("collect(): status_max_parallel = int из спинбокса",
       isinstance(c["status_max_parallel"], int) and c["status_max_parallel"] == 32, str(c.get("status_max_parallel")))
 _clear_cfg()

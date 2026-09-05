@@ -1,118 +1,112 @@
-# SSH Map (NodeVisualSSH) — v1.2.1
+# SSH Map (NodeVisualSSH) — v1.2.2
 
-Десктопное приложение (Python + PySide6): интерактивная карта IT-инфраструктуры с прямым SSH-подключением к узлам.
-Slogan: *"Draw your infrastructure. Organize it. Connect to it."*
+Desktop application (Python + PySide6): an interactive map of your IT infrastructure with direct SSH connections to nodes.
+*"Draw your infrastructure. Organize it. Connect to it."*
 
-Единый источник истины для версии — `version.py` (APP_VERSION); история выпущенных версий — CHANGELOG.md, планируемые функции — ROADMAP.md.
+Single source of truth for the version — `version.py` (`APP_VERSION`); released versions — `CHANGELOG.md`; planned features — `ROADMAP.md`.
 
 ---
 
-## 1. Запуск и тесты
+## 1. Running & Tests
 
 ```bash
-pip install PySide6 paramiko keyring pyte   # все зависимости из requirements.txt
-python main.py                              # запуск GUI
+pip install -r requirements.txt        # all dependencies (PySide6, paramiko, keyring, pyte)
+python main.py                         # run the GUI
 
-# installable-идентичность (pyproject.toml) — установка как пакета:
-pipx install .                            # или pip install . → команда sshmap (entry point main:main)
+# Installable identity (pyproject.toml) — install as a package:
+pipx install .                         # or pip install . → sshmap command (entry point main:main)
 
-# Тесты без pytest: тематические файлы test_*.py + единый параллельный раннер.
-# Тесты изолированы: пишут во временный HOME, UTF-8 stdout ставится сами —
-# на cp1251-консолях и в CI дополнительное окружение не требуется:
-python tests/run_all.py              # ВСЁ (47 файлов): параллельно (4 воркера), таблица результатов + единый exit code (0 ⇔ всё зелёное)
-python tests/run_all.py --workers 8  # число воркеров (1 = последовательно, как раньше)
-python tests/run_all.py keyring      # фильтр по подстроке в имени файла
-python tests/test_tags.py            # один файл (из корня проекта)
+# Tests without pytest: topical test_*.py files + a single parallel runner.
+# Tests are isolated: they write to a temporary HOME and set UTF-8 stdout
+# themselves — no extra environment needed on cp1251 consoles or in CI:
+python tests/run_all.py              # everything (49 files): parallel (4 workers), results table + single exit code (0 ⇔ all green)
+python tests/run_all.py --workers 8  # worker count (1 = sequential, as before)
+python tests/run_all.py keyring      # filter by substring in file name
+python tests/test_tags.py            # a single file (from the project root)
 ```
 
-Карта сьюта — что какой `test_*.py` покрывает и откуда пришёл, конвенции: `tests/INDEX.md`.
-Обвязка `tests/_common.py`: HOME-изоляция (песочница для `~/.sshmap/*`), offscreen,
-faulthandler-таймаут 180 c; каждый файл завершается exit 0 = ALL PASS.
-Пины релиза централизованы внизу `_common.py` (`EXPECTED_APP_VERSION`, `EXPECTED_I18N_KEYS`
-+ общие проверки): при релизе правится одно место.
+Suite map — what each `test_*.py` covers and where it came from, plus conventions: `tests/INDEX.md`.
+Test harness `tests/_common.py`: HOME isolation (sandbox for `~/.sshmap/*`), offscreen platform,
+faulthandler timeout of 180 s; each file exits with exit 0 = ALL PASS.
+Release pins are centralized at the bottom of `_common.py` (`EXPECTED_APP_VERSION`, `EXPECTED_I18N_KEYS`
++ shared checks): one place to update per release.
 
-Требования: Python 3.10+, Windows/Linux/macOS. Логи: `~/.sshmap/logs/sshmap.log` (RotatingFileHandler 5MB × 3).
+Requirements: Python 3.10+, Windows/Linux/macOS. Logs: `~/.sshmap/logs/sshmap.log` (RotatingFileHandler 5 MB × 3).
 
 ---
 
-## 2. Структура проекта
+## 2. Project Structure
 
 ```
-main.py                      # точка входа: setup_logging() → QApplication → MainWindow → start_status_checks()
-pyproject.toml               # installable-идентичность (имя/версия/deps из version.py и requirements.txt, entry point sshmap = main:main) — сверка tests/test_pyproject.py
+main.py                      # Entry point: setup_logging() → QApplication → MainWindow → start_status_checks()
+pyproject.toml               # Installable identity (name/version/deps from version.py and requirements.txt, entry point sshmap = main:main) — checked by tests/test_pyproject.py
 models/
-├── server.py                # ServerData dataclass; server_data_from_dict/to_dict (password исключается);
-│                            #   quick_launch — список пунктов Быстрого запуска + sanitize_quick_launch
-└── profile.py               # Profile; CRUD; JSON ~/.sshmap_profiles.json (пароли в keyring, префикс "profile:{id}")
+├── server.py                # ServerData dataclass; server_data_from_dict/to_dict (password excluded);
+│                            #   quick_launch — list of Quick Launch items + sanitize_quick_launch
+└── profile.py               # Profile; CRUD; JSON ~/.sshmap_profiles.json (passwords in keyring, "profile:{id}" prefix)
 graphics/
-├── map_scene.py             # MapScene: _nodes/_arrows/_notes/_groups; resync_group_members (геометрическое членство)
-├── map_view.py              # MapView: зум 0.1–5.0, панорамирование, Shift+drag связи, ctx-меню,
-│                            #   node_drag_committed, мультивыделение Ctrl+клик/рамкой + nodes_drag_committed
-├── server_node.py           # ServerNode: карточка со статусом online/warn/offline (#22c55e/#facc15/#ef4444)
-├── connection_arrow.py      # ConnectionArrow: кубическая Безье, 6 типов связей, hit-зона ~10px через contains()
-├── sticky_note.py           # StickyNote: QGraphicsProxyWidget+QTextEdit, ручной drag/resize/edit
-├── node_group.py            # NodeGroup: рамка кластера z=-5; членство = центр узла внутри верхней группы
-└── background_image.py      # BackgroundImage: фон-изображение z=-10, drag/resize за угол
+├── map_scene.py             # MapScene: _nodes/_arrows/_notes/_groups; resync_group_members (geometric membership)
+├── map_view.py              # MapView: zoom 0.1–5.0, panning, Shift+drag connections, context menus,
+│                            #   node_drag_committed, multi-selection Ctrl+click/rubber band + nodes_drag_committed
+├── server_node.py           # ServerNode: card with online/warn/offline status (#22c55e/#facc15/#ef4444)
+├── connection_arrow.py      # ConnectionArrow: cubic Bezier, 6 connection types, ~10 px hit zone via contains()
+├── sticky_note.py           # StickyNote: QGraphicsProxyWidget+QTextEdit, manual drag/resize/edit
+├── node_group.py            # NodeGroup: cluster frame z=-5; membership = node center inside the topmost group
+└── background_image.py      # BackgroundImage: map background image z=-10, drag/resize by corner
 modules/
-├── ssh_worker.py            # SSHWorker (одноразовый QThread); реестр get_active_worker/wait_for_worker
-├── ssh_terminal.py          # SSHTerminalThread (connected_signal после invoke_shell) + SSHTerminalWindow — окно с QTabWidget из TerminalSessionPage (v1.2.1:
-│                            #   сессии ТАБАМИ, заголовок таба = alias узла; v1.2: WA_DeleteOnClose, заголовок, геометрия window_geometry.py);
-│                            #   мост «статус-бар → статус-бар окна» — только АКТИВНЫЙ таб (sticky-текст + SFTP-прогресс); add_session()/close_page();
-│                            #   load_terminal_settings() — ключи terminal_* из ~/.sshmap/config.json (дефолты = поведение v1.0, см. §4 «Настройки»);
-│                            #   _orphan_threads — реестр орфано-потоков (v1.1.2RC1 N4)
-├── terminal_page.py         # TerminalSessionPage (v1.2): SSH-сессия как переиспользуемый виджет — thread + pyte-экран + холст + статус-строка + SFTP-вкладка;
-│                            #   ЕДИНЫЙ teardown shutdown() (идемпотентен) на все пути, gate confirm_close() («ask»), мостовые сигналы status_message/progress_*;
-│                            #   close_terminal() — закрыть СВОЙ таб на хосте (v1.2.1: соседние табы не затрагиваются); dirty-рендер без таймера,
-│                            #   resize PTY: guard по сетке + дебаунс ~150 мс (eventFilter холста), initial_command — первая команда Быстрого запуска
-├── sftp_worker.py           # SftpWorker (v1.1.3): один worker-поток с очередью задач list/upload/download поверх живого transport'а;
-│                            #   отмена — флаг между операциями, корректный shutdown, реестр орфано-worker'ов
-├── sftp_tab.py              # SftpTab (v1.1.3): вкладка «Файлы» — листинг текущего каталога + навигация «..», upload/download выбранных,
-│                            #   кнопка «Отменить»; GUI не блокируется (все операции SFTP — в worker-потоке)
-├── terminal_widget.py       # TerminalWidget — посячейный холст QWidget+QPainter: runs, кэш форматов, блок-курсор (+cursor.hidden), широкие глифы; полная клавиатура (F1–F12/PgUp/PgDn/Home/End/Delete, Ctrl+C/D/Z, bracketed paste, AltGr-guard) + выделение мышью (selection_cells, координаты (row,col)) и копирование; скроллбэк колесом/Ctrl+Shift+PgUp/PgDn (голые PgUp/PgDn — в shell) + QTimer мигания курсора
-├── terminal_screen.py       # TerminalScreen: pyte.HistoryScreen(120x32)+ByteStream, feed под threading.Lock; PALETTES+resolve_color, snapshot(); скроллбэк scroll_up/scroll_down/at_bottom (авто-возврат к live встроен в pyte); render() — deprecated
-├── window_geometry.py       # сохранение/восстановление размеров окон — saveGeometry()/saveState() → base64 → config.json (ui_window_geometry_main/terminal); никогда не бросает
-├── host_key_policy.py       # SshKnownHostsPolicy: ~/.sshmap/known_hosts; изменённый ключ → BadHostKeyException (MITM)
-├── external_terminal.py     # системный терминал ОС; настройки в ~/.sshmap/config.json (миграция из legacy ~/.sshmap_settings.json); пароль НЕ в argv
-├── undo_commands.py         # 13 QUndoCommand: MoveNode(merge), MoveNodes(групповой drag),
-│                            #   MoveGroup, ResizeGroup, EditGroupName, AddRemoveNode(+стрелки),
-│                            #   AddRemoveNodeBatch(импорт TXT — один undo), AddRemoveConnection,
-│                            #   ConnectSelected, AddRemoveNote, EditTextNote(дебаунс 600мс),
+├── ssh_worker.py            # SSHWorker (one-shot QThread); get_active_worker/wait_for_worker registry
+├── ssh_terminal.py          # SSHTerminalThread (connected_signal after invoke_shell) + SSHTerminalWindow — a window with a QTabWidget of TerminalSessionPage sessions (tab title = node alias; WA_DeleteOnClose, geometry via window_geometry.py); load_terminal_settings() — terminal_* keys from ~/.sshmap/config.json (defaults = behavior, see §4 "Settings"); _orphan_threads registry. Details: §4 "Terminal"
+├── terminal_page.py         # TerminalSessionPage: an SSH session as a reusable widget — thread + pyte screen + canvas + status line + SFTP tab; single idempotent teardown shutdown() on every path, confirm_close() gate ("ask"); close_terminal() closes only its own tab. Details: §4 "Terminal"
+├── terminal_dock.py         # TerminalDockContent + TerminalsDock: "tabs" mode (terminal_mode) — a detachable "Terminals" QDockWidget in MainWindow. Details: §4 "Terminal"
+├── sftp_worker.py           # SftpWorker: one worker thread with a list/upload/download task queue over the live transport; cancellation via a flag between operations, clean shutdown, orphan-worker registry
+├── sftp_tab.py              # SftpTab: "Files" tab — current-directory listing + ".." navigation, upload/download of selected items, "Cancel" button; GUI never blocks (all SFTP in the worker thread)
+├── terminal_widget.py       # TerminalWidget — cell-based QWidget+QPainter canvas: runs, format cache, block cursor (+cursor.hidden), wide glyphs; full keyboard (F1–F12/PgUp/PgDn/Home/End/Delete, Ctrl+C/D/Z, bracketed paste, AltGr guard) + mouse selection (selection_cells, (row,col) coordinates) and copy; scrollback via wheel/Ctrl+Shift+PgUp/PgDn (bare PgUp/PgDn go to the shell) + QTimer cursor blink
+├── terminal_screen.py       # TerminalScreen: pyte.HistoryScreen(120x32)+ByteStream, feed under a threading.Lock; PALETTES+resolve_color, snapshot(); scrollback scroll_up/scroll_down/at_bottom (auto-return to live is built into pyte); render() — deprecated
+├── window_geometry.py       # Window size save/restore — saveGeometry()/saveState() → base64 → config.json (ui_window_geometry_main/terminal); never raises
+├── host_key_policy.py       # SshKnownHostsPolicy: ~/.sshmap/known_hosts; changed key → BadHostKeyException (MITM)
+├── external_terminal.py     # OS system terminal; settings in ~/.sshmap/config.json (migrated from legacy ~/.sshmap_settings.json); password never in argv
+├── undo_commands.py         # 13 QUndoCommands: MoveNode(merge), MoveNodes(group drag),
+│                            #   MoveGroup, ResizeGroup, EditGroupName, AddRemoveNode(+arrows),
+│                            #   AddRemoveNodeBatch(TXT import — one undo), AddRemoveConnection,
+│                            #   ConnectSelected, AddRemoveNote, EditTextNote(600 ms debounce),
 │                            #   EditConnection, EditNodeData
 └── logger.py                # setup_logging()/get_logger(__name__)
-storage/project.py           # save_project/load_project + serialize_scene()/write_project_json() — JSON версии (VERSION_FORMAT из version.py; + ключ "background")
-storage/autosave.py          # автосохранение ~/.sshmap/autosave/<key>.json + кольцевой буфер бэкапов ~/.sshmap/backups/<key>_NNN.json (без Qt, атомарные записи)
-storage/export_drawio.py     # экспорт карты в .drawio (mxGraph XML, ElementTree, без новых зависимостей)
+storage/project.py           # save_project/load_project + serialize_scene()/write_project_json() — JSON version (VERSION_FORMAT from version.py; + "background" key)
+storage/autosave.py          # Autosave ~/.sshmap/autosave/<key>.json + ring buffer of backups ~/.sshmap/backups/<key>_NNN.json (no Qt, atomic writes)
+storage/export_drawio.py     # Map export to .drawio (mxGraph XML, ElementTree, no new dependencies)
 services/
-├── credential_manager.py    # keyring-абстракция (синглтон get_credential_manager()): только проверенный бэкенд (Windows — wincred, иначе — отказ от записи)
-├── diagnostics.py           # PingThread + ReverseDnsThread — ping и обратный DNS вне GUI-потока (перенесено из ui/main_window.py)
-├── host_importer.py         # массовый импорт серверов из TXT: parse_hosts_file, is_ip_address, resolve_host
-├── status_checker.py        # StatusChecker: QTimer разводит раунды, пробы ПАРАЛЛЕЛЬНО в _ProbeThread (ThreadPoolExecutor); probe_ssh() → online/warn/offline
-└── system_info_collector.py # SystemInfoCollector: автосбор ОС/CPU/RAM/диск Linux-сервера одной exec_command-сессией
-version.py                   # единая точка версий: APP_VERSION="1.2.1", VERSION_FORMAT="0.9"
-dialogs/                     # AddServerDialog (+кнопка «Быстрый запуск…»), SSHConnectDialog (+кнопка внешнего терминала),
+├── credential_manager.py    # keyring abstraction (get_credential_manager() singleton): only the verified backend (Windows — wincred, otherwise refuse to write)
+├── diagnostics.py           # PingThread + ReverseDnsThread — ping and reverse DNS off the GUI thread (moved from ui/main_window.py)
+├── host_importer.py         # Bulk server import from TXT: parse_hosts_file, is_ip_address, resolve_host
+├── status_checker.py        # StatusChecker: QTimer schedules rounds, probes run in parallel on _ProbeThread (ThreadPoolExecutor); probe_ssh() → online/warn/offline
+└── system_info_collector.py # SystemInfoCollector: auto-collection of OS/CPU/RAM/disk from a Linux server in one exec_command session
+version.py                   # Single version point: APP_VERSION="1.2.2", VERSION_FORMAT="0.9"
+dialogs/                     # AddServerDialog (+ "Quick Launch…" button), SSHConnectDialog (+ external terminal button),
                              #   ConnectionDialog/EditConnectionDialog, ProfileManagerDialog,
-                             #   BackupsDialog (бэкапы + автосохранение, откат), QuickLaunchDialog (Быстрый запуск)
-ui/main_window.py            # MainWindow: ФАКАД (v1.1.4: class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow));
-                             #   UI-обвязка __init__/тулбар/меню/closeEvent + шатдаун потоков (включая терминальные сессии v1.2), undo_stack (QUndoStack), dirty по canUndo()+baseline;
-                             #   заметки, группы, фон, экспорт PNG/JPEG/PDF/drawio, «Собрать информацию», поиск по карте Ctrl+F, тег-фильтр;
-                             #   _qaction_guard — guard на QActions с прикреплённым QMenu; публичный API без изменений (имена методов/точки вызова не тронуты)
-ui/main_window_project_io.py # ProjectIOMixin (v1.1.4): проект new/open/load/save/autosave/backups/restore; владение _project_file/_dirty/_autosave_timer
-ui/main_window_node_ops.py   # NodeOpsMixin (v1.1.4): операции над узлами/связями + импорт из TXT; _is_scene_point (bool-guard v0.8.1)
-ui/main_window_ssh.py        # SshMixin (v1.1.4): SSH-диалог, терминальные окна, автосбор информации, быстрый запуск; владение _terminal_windows/_ssh_connected_nodes/_info_collectors;
-                              #   v1.2: реестр _terminal_windows хранит СЕССИИ (TerminalSessionPage) — зелёная точка узла и лимит «4 терминала» считаются по сессиям;
-                              #   v1.2.1: повторное «подключиться к узлу» переиспользует живое окно узла — новая сессия = новый таб (window.add_session())
-ui/mixin_support.py          # host_attr(self, name) — доступ к глобальным модуля-фасада в момент вызова (миксины не импортируют main_window — нет цикла; тестовый шов подмены MW.<имя>)
-ui/sidebar.py                # SidebarPanel(QWidget) — кнопки, заголовок, поиск, тег-фильтр, дерево с маркерами
-                             #   статусов, контекстное меню строки; i18n через колбэк + retranslate
-ui/map_search_bar.py         # MapSearchBar — плавающая строка поиска поверх canvas (Enter/Shift+Enter/Esc, счётчик k/N)
-ui/command_palette.py        # CommandPalette: Ctrl+K, fuzzy-поиск по действиям меню и серверам
-i18n/                        # t(key,**kwargs); en.json/ru.json/zh.json — 400 ключей, наборы идентичны; en — дефолт для новых пользователей
-tests/                       # тематический сьют без pytest: 47 × test_*.py + _common.py (обвязка), run_all.py (параллельный раннер, 4 воркера), check_i18n_keys.py; карта — tests/INDEX.md
+                             #   BackupsDialog (backups + autosave, restore), QuickLaunchDialog (Quick Launch)
+ui/main_window.py            # MainWindow: façade: class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow);
+                             #   UI wiring __init__/toolbar/menus/closeEvent + thread shutdown (including terminal sessions), undo_stack (QUndoStack), dirty via canUndo()+baseline;
+                             #   notes, groups, background, PNG/JPEG/PDF/drawio export, "Collect information", map search Ctrl+F, tag filter;
+                             #   _qaction_guard — guard for QActions with an attached QMenu; public API unchanged (method names/call sites untouched)
+ui/main_window_project_io.py # ProjectIOMixin: project new/open/load/save/autosave/backups/restore; owns _project_file/_dirty/_autosave_timer
+ui/main_window_node_ops.py   # NodeOpsMixin: node/connection operations + TXT import; _is_scene_point (bool guard)
+ui/main_window_ssh.py        # SshMixin: SSH dialog, terminal windows, info auto-collection, quick launch; owns _terminal_windows/_terminals_dock/_ssh_connected_nodes/_info_collectors;
+                             #   the _terminal_windows registry stores SESSIONS (TerminalSessionPage) — the node's green dot and the "4 terminals" limit are counted per session;
+                             #   reconnecting to a node reuses its live window — new session = new tab (window.add_session());
+                             #   "tabs" mode (terminal_mode) — sessions as tabs in the "Terminals" dock (_ensure_terminals_dock, lazy creation);
+                             #   applied without restart: new sessions go to the selected mode, open windows/dock stay as they are
+ui/mixin_support.py          # host_attr(self, name) — access to façade module globals at call time (mixins do not import main_window — no cycle; test seam for substituting MW.<name>)
+ui/sidebar.py                # SidebarPanel(QWidget) — buttons, header, search, tag filter, tree with status markers,
+                             #   row context menu; i18n via callback + retranslate
+ui/map_search_bar.py         # MapSearchBar — floating search bar over the canvas (Enter/Shift+Enter/Esc, k/N counter)
+ui/command_palette.py        # CommandPalette: Ctrl+K, fuzzy search over menu actions and servers
+i18n/                        # t(key,**kwargs); en.json/ru.json/zh.json — 404 keys, identical sets; en is the default for new users
+tests/                       # Topical suite without pytest: 48 × test_*.py + _common.py (harness), run_all.py (parallel runner, 4 workers), check_i18n_keys.py; map — tests/INDEX.md
 ```
 
 ---
 
-## 3. Формат проекта (JSON `.json` / `.sshmap`)
+## 3. Project Format (JSON `.json` / `.sshmap`)
 
 ```json
 {
@@ -131,78 +125,79 @@ tests/                       # тематический сьют без pytest: 
 }
 ```
 
-Инварианты формата:
-- `password` **никогда** не сериализуется — только keyring (`server_data_to_dict()` исключает).
-- Типы связей: `ssh|vpn|http|database|nfs|kubernetes`; неизвестный/отсутствующий тип → `ssh`. Поле `version` при загрузке не валидируется (файлы 0.6+ читаются).
-- Членство в группах **не хранится** — вычисляется из геометрии (центр карточки внутри верхней группы, эксклюзивно).
-- `tags` — массив строк у записи сервера; отсутствует или не массив в старых JSON → пустой список (`server_data_from_dict` нормализует).
-- `quick_launch` — массив пунктов Быстрого запуска `{"type": "url"|"command", "name", "value"}`; отсутствует в старых JSON → пустой список, битые записи отбрасываются (`sanitize_quick_launch`). URL открывается в браузере по умолчанию, команда — первая команда в SSH-терминале.
-- `background` хранит **путь** к изображению (файл НЕ встраивается в JSON); отсутствующий файл при загрузке игнорируется с warning. Геометрия фона в undo не входит.
+Format invariants:
+- `password` is **never** serialized — keyring only (`server_data_to_dict()` excludes it).
+- Connection types: `ssh|vpn|http|database|nfs|kubernetes`; unknown/missing type → `ssh`. The `version` field is not validated on load (files 0.6+ are readable).
+- Group membership is **not stored** — computed from geometry (card center inside the topmost group, exclusive).
+- `tags` — an array of strings in the server record; missing or non-array in old JSON → empty list (`server_data_from_dict` normalizes it).
+- `quick_launch` — an array of Quick Launch items `{"type": "url"|"command", "name", "value"}`; missing in old JSON → empty list, broken records are dropped (`sanitize_quick_launch`). URLs open in the default browser, commands become the first command in the SSH terminal.
+- `background` stores a **path** to the image (the file is NOT embedded in the JSON); a missing file on load is ignored with a warning. Background geometry is not part of undo.
 
 ---
 
-## 4. Ключевые поведения (важно для модификации кода)
+## 4. Key Behaviors (important for code changes)
 
-### Статусы
-`probe_ssh(host, port)`: TCP открыт + SSH-баннер → `online`; порт открыт без баннера → `warn`; иначе `offline`. Пробы только в `_ProbeThread` (не на GUI-потоке); внутри раунда — **параллельно** (`ThreadPoolExecutor`, потолок `status_max_parallel`, дефолт 16): худший случай раунда `ceil(N/max_parallel) × timeout` вместо `N × timeout`; результаты прилетают по мере готовности, отмена (stop/shutdown) не даёт результатов пробам, ещё не начавшимся. Мягкий авто-интервал: N > 50 узлов → интервал раундов удваивается (`effective_interval_ms()`) + одноразовая подсказка в статус-баре; жёсткого лимита числа серверов нет. `start_status_checks()` вызывается из main.py один раз после `show()`.
+### Statuses
+`probe_ssh(host, port)`: TCP open + SSH banner → `online`; port open without a banner → `warn`; otherwise → `offline`. Probes run only on `_ProbeThread` (never the GUI thread); within a round — **in parallel** (`ThreadPoolExecutor`, cap `status_max_parallel`, default 16): worst-case round time is `ceil(N/max_parallel) × timeout` instead of `N × timeout`; results arrive as they complete; cancellation (stop/shutdown) prevents probes that have not started yet from producing results. Soft auto-interval: N > 50 nodes → the round interval doubles (`effective_interval_ms()`) + a one-time hint in the status bar; there is no hard limit on server count. `start_status_checks()` is called once from main.py after `show()`.
 
-### Терминал
-- Архитектура v1.2: сессия = `TerminalSessionPage` (modules/terminal_page.py) — переиспользуемый виджет (thread + pyte-экран + холст + статус-строка + SFTP-вкладка); ВСЯ cleanup-логика — на странице: все teardown-пути (закрытие таба/окна, ошибка сессии, шатдаун MainWindow, лимит) проходят через единый идемпотентный `page.shutdown()`; gate «ask» — `page.confirm_close()`.
-- v1.2.1 — сессии ТАБАМИ в одном окне: `SSHTerminalWindow` (WA_DeleteOnClose, заголовок, геометрия) держит QTabWidget из страниц (`session_tabs`, табы закрываемые, заголовок таба = alias узла); повторное «подключиться к узлу» переиспользует живое окно узла — новая сессия = новый таб (`window.add_session()`, статус-сообщение `terminal.session_new_tab`), другой узел — новое окно. Закрытие таба (крестик / `close_page`) — cleanup ЛОКАЛЬНОЙ страницы: соседние табы не затрагиваются; закрытие ПОСЛЕДНЕГО таба закрывает окно (`WA_DeleteOnClose`). Мост «статус-бар → статус-бар окна» мостит ТОЛЬКО активный таб (при переключении переподключается). Compat-атрибуты окна — live-ссылки на АКТИВНЫЙ таб (`win.page` = текущий).
-- Конвейер: сырые байты SSH → `TerminalScreen.feed()` (pyte.HistoryScreen, под lock) → посячейный холст `TerminalWidget` (QWidget+QPainter: runs, цветовой движок `resolve_color`, блок-курсор с миганием).
-- Dirty-рендер без таймера: `_on_output` → `widget.update()` напрямую (queued signal уже в GUI-потоке).
-- Resize PTY — только при реальной смене сетки + дебаунс ~150 мс перед `channel.resize_pty` (начальный `invoke_shell` 120×32; v1.2: пересчёт — по ресайзу холста через eventFilter страницы, раньше resizeEvent окна).
-- Скроллбэк — готовый `pyte.HistoryScreen`: колесо мыши и Ctrl+Shift+PageUp/PageDown, авто-возврат к live-строке при новом выводе; **голые PageUp/PageDown остаются форвардом в shell** (`\x1b[5~`/`\x1b[6~` — пейджинг less/man).
-- Клавиатура — полная таблица: F1–F12, Delete/PageUp/PageDown (всегда CSI ~), стрелки и Home/End — по состоянию DECCKM: TUI шлют smkx `\x1b[?1h` и ждут SS3 — `_cursor_key_seq()` шлёт `\x1bOA/B/C/D`, `\x1bOH/\x1bOF`; обычный режим — CSI; состояние — `tscreen.application_cursor_keys()`, в pyte 0.8.2 DECCKM = 32 в `screen.mode`. Явные Ctrl+C→`\x03` / Ctrl+D→`\x04` (Ctrl+C при выделении копирует в буфер), bracketed paste Ctrl+V (единый блок), AltGr-guard (Ctrl+Alt не уходит как управляющие коды).
-- Выделение мышью — координаты всегда `(row, col)` (`selection_cells()`), копирование мульти-строчного текста.
-- Окно закрывается штатным крестиком (отдельной кнопки «Закрыть терминал» нет); известный хост пиннится в `~/.sshmap/known_hosts`.
-- Настройки — опциональные ключи `terminal_*` в `~/.sshmap/config.json`; полный список и дефолты — ниже, «Настройки».
+### Terminal
+- Architecture: session = `TerminalSessionPage` (modules/terminal_page.py) — a reusable widget (thread + pyte screen + canvas + status line + SFTP tab); ALL cleanup logic lives on the page side: every teardown path (tab/window close, session error, MainWindow shutdown, limit reached) goes through the single idempotent `page.shutdown()`; the "ask" gate is `page.confirm_close()`.
+- Sessions as tabs in one window: `SSHTerminalWindow` (WA_DeleteOnClose, title, geometry) holds a QTabWidget of pages (`session_tabs`, closable tabs, tab title = node alias); re-"connecting to a node" reuses that node's live window — new session = new tab (`window.add_session()`, status message `terminal.session_new_tab`), a different node opens a new window. Closing a tab (the X / `close_page`) is cleanup of the LOCAL page only: neighboring tabs are unaffected; closing the LAST tab closes the window (`WA_DeleteOnClose`). The "status bar → window status bar" bridge bridges ONLY the active tab (re-bridged on switch). Window compat attributes are live references to the ACTIVE tab (`win.page` = current one).
+- Second display mode `terminal_mode`: `"windows"` (default, behavior above) | `"tabs"` — sessions as tabs in a detachable QDockWidget "Terminals" on the map (`modules/terminal_dock.py`; the map remains the central widget). From one mechanism come both "tabs" and "windows": the dock detaches into a separate window (float) and returns. Cleanup is per-page (closing a tab = session cleanup; the last tab hides the dock, does not destroy it); green dot/limit — per SESSION regardless of container. Applied without restart: new sessions go to the selected mode, open windows/dock stay as they are; UI — "Terminal" tab of the settings dialog. The external terminal is unchanged (always a separate OS process).
+- Pipeline: raw SSH bytes → `TerminalScreen.feed()` (pyte.HistoryScreen, under lock) → cell-based canvas `TerminalWidget` (QWidget+QPainter: runs, color engine `resolve_color`, blinking block cursor).
+- Dirty rendering without a timer: `_on_output` → `widget.update()` directly (the queued signal is already on the GUI thread).
+- PTY resize — only on an actual grid change + ~150 ms debounce before `channel.resize_pty` (initial `invoke_shell` 120×32; recomputed on canvas resize via the page's eventFilter, previously the window's resizeEvent).
+- Scrollback — stock `pyte.HistoryScreen`: mouse wheel and Ctrl+Shift+PageUp/PageDown, auto-return to the live line on new output; **bare PageUp/PageDown remain forwarded to the shell** (`\x1b[5~`/`\x1b[6~` — paging in less/man).
+- Keyboard — full table: F1–F12, Delete/PageUp/PageDown (always CSI ~), arrows and Home/End per DECCKM state: TUIs send smkx `\x1b[?1h` and wait for SS3 — `_cursor_key_seq()` sends `\x1bOA/B/C/D`, `\x1bOH/\x1bOF`; normal mode — CSI; state is `tscreen.application_cursor_keys()`, in pyte 0.8.2 DECCKM = 32 in `screen.mode`. Explicit Ctrl+C→`\x03` / Ctrl+D→`\x04` (Ctrl+C with a selection copies to the clipboard), bracketed paste Ctrl+V (single block), AltGr guard (Ctrl+Alt is not sent as control codes).
+- Mouse selection — coordinates are always `(row, col)` (`selection_cells()`), multi-line text copy.
+- The window closes with the standard X button (there is no separate "Close terminal" button); known hosts are pinned in `~/.sshmap/known_hosts`.
+- Settings — optional `terminal_*` keys in `~/.sshmap/config.json`; full list and defaults below, in "Settings".
 
-### Настройки
-- Диалог (хаб, `ui/settings_dialog.py`) — QTabWidget «Общие / Терминал / Статусы / Автосохранение / Карта / Язык»; точки входа: меню «Настройки» между «Вид» и «Помощь» + кнопка ⚙ внизу сайдбара (векторная шестерёнка `ui/icons.py`); палитра команд Ctrl+K подхватывает пункт автоматически.
-- Хранение — **единый** `~/.sshmap/config.json` (`i18n.save_config`, атомарная merge-запись): все ключи опциональны, дефолты = поведение v1.0. Статусы и автосохранение применяются на лету; терминал и внешний терминал читают конфиг при следующем создании окна/запуске.
-- Ключи:
-  - `external_terminal` (перенесён из отдельного `~/.sshmap_settings.json` с миграцией при чтении — старый файл удаляется);
-  - `terminal_palette` (`default|nord|dracula|tokyo_night`, неизвестная → default), `terminal_font` (семейство, пусто → системный моноширинный; на лету в открытые окна), `terminal_font_size` (pt 6–72, иначе 10), `terminal_history_lines` (глубина скроллбэка HistoryScreen; дефолт 1000 — включён, явный 0 — отключён), `terminal_close_behavior` (`"close"` по умолчанию | `"ask"` — подтверждение закрытия активной сессии в `page.confirm_close()`; уже завершённая закрывается без диалога), `terminal_max_open` (лимит своих терминалов, дефолт 4 — при достижении не отказ, а предложение закрыть старейшую сессию / отмена; v1.2: лимит считается по СЕССИЯМ реестра, а не окнам; v1.2.1: по сессиям во ВСЕХ окнах — табы одного окна считаются отдельно);
-  - `status_interval_sec`/`status_probe_timeout_sec`/`status_max_parallel` (дефолты 30 c / 3.0 c / 16 параллельных проб; на лету через `StatusChecker.set_interval/set_probe_timeout/set_max_parallel`);
-  - `autosave_enabled/autosave_interval_sec/backup_count` (на лету — QTimer автосохранения);
-  - `language` (немедленное применение, до ОК);
-  - `ui_font_family/ui_font_size` (шрифт UI, на лету через `QApplication.setFont`, 0 = системный), `ui_node_double_click` (`"properties"` дефолт | `"connect"` — двойной клик по узлу сразу открывает SSHConnectDialog), `ui_show_sidebar_buttons` (блок кнопок сайдбара; весь сайдбар прячется пунктом меню «Вид → Сайдбар»), `ui_show_connection_type` (тип на плашке связи: «SSH · <метка>», удобно для экспорта PNG/PDF) + лимит 20 символов метки связи (только на ввод — старые проекты с длинными метками читаются без изменений).
+### Settings
+- Dialog (hub, `ui/settings_dialog.py`) — QTabWidget "General / Terminal / Statuses / Autosave / Map / Language"; entry points: the "Settings" menu between "View" and "Help" + a ⚙ button at the bottom of the sidebar (vector gear from `ui/icons.py`); the Ctrl+K command palette picks up the item automatically.
+- Storage — a SINGLE `~/.sshmap/config.json` (`i18n.save_config`, atomic merge write): all keys are optional, defaults = behavior. Statuses and autosave apply live; terminal and external terminal read the config on next window creation/launch.
+- Keys:
+  - `external_terminal` (moved from a separate `~/.sshmap_settings.json`, with migration on read — the old file is deleted);
+  - `terminal_palette` (`default|nord|dracula|tokyo_night`, unknown → default), `terminal_font` (family, empty → system monospace; live for open windows), `terminal_font_size` (pt 6–72, otherwise 10), `terminal_history_lines` (HistoryScreen scrollback depth; default 1000 — enabled, explicit 0 — disabled), `terminal_close_behavior` (`"close"` by default | `"ask"` — confirm closing the active session in `page.confirm_close()`; an already-finished session closes without a dialog), `terminal_max_open` (limit on own terminals, default 4 — when reached, not a refusal but a suggestion to close the oldest session / cancel; the limit counts SESSIONS in the registry, not windows; per session across ALL windows — tabs of one window are counted separately), `terminal_mode` (`"windows"` by default | `"tabs"` — sessions as tabs in the "Terminals" dock on the map; broken value/wrong type → default; applied without restart — to new sessions), `terminal_wheel` (`"scrollback"` by default | `"off"` — the wheel is not intercepted for scrollback; config-only key, no UI);
+  - `status_interval_sec`/`status_probe_timeout_sec`/`status_max_parallel` (defaults 30 s / 3.0 s / 16 parallel probes; live via `StatusChecker.set_interval/set_probe_timeout/set_max_parallel`);
+  - `autosave_enabled/autosave_interval_sec/backup_count` (live — the autosave QTimer);
+  - `language` (applied immediately, before OK);
+  - `ui_font_family/ui_font_size` (UI font, live via `QApplication.setFont`, 0 = system), `ui_node_double_click` (`"properties"` by default | `"connect"` — double-clicking a node opens SSHConnectDialog directly), `ui_show_sidebar_buttons` (the sidebar button block; the whole sidebar is hidden via the "View → Sidebar" menu item), `ui_show_connection_type` (type on the connection badge: "SSH · <label>", handy for PNG/PDF export) + 20-character limit on the connection label (input only — old projects with long labels load unchanged).
 
 ### Undo/Redo
-- Любое изменение сцены делается через `MainWindow._push_command(cmd)`; сцена меняется **только** внутри `redo()/undo()` команды — `QUndoStack.push()` сам вызывает redo.
-- Dirty-маркер: `self._dirty = undo_stack.canUndo() or self._undo_baseline_dirty`; `_do_save()` вызывает `_reset_undo_stack()` (новая baseline). `_undo_baseline_dirty` покрывает dirty-причины вне undo (статусы, фон).
-- В undo НЕ входят: статусы узлов, координаты при загрузке, геометрия фона. Группы (move/resize/переименование) — входят (CmdMoveGroup/CmdResizeGroup/CmdEditGroupName).
-- Перетаскивание узла: MapView ловит release, эмитит `node_drag_committed(node, old, new)` → CmdMoveNode.
-- Групповой drag: если тянется уже выделенный узел и выделено >1 — двигаются ВСЕ выделенные; одна команда CmdMoveNodes на жест.
+- Any scene change goes through `MainWindow._push_command(cmd)`; the scene is modified **only** inside a command's `redo()/undo()` — `QUndoStack.push()` calls redo itself.
+- Dirty marker: `self._dirty = undo_stack.canUndo() or self._undo_baseline_dirty`; `_do_save()` calls `_reset_undo_stack()` (new baseline). `_undo_baseline_dirty` covers non-undo dirty causes (statuses, background).
+- NOT in undo: node statuses, coordinates on load, background geometry. Groups (move/resize/rename) — ARE included (CmdMoveGroup/CmdResizeGroup/CmdEditGroupName).
+- Node drag: MapView catches the release and emits `node_drag_committed(node, old, new)` → CmdMoveNode.
+- Group drag: if an already-selected node is dragged and >1 are selected — ALL selected move; one CmdMoveNodes command per gesture.
 
-### Горячие клавиши + палитра команд
-- Хоткеи: Ctrl+N/O/S — проект; Ctrl+Z/Y(+Shift) — undo/redo; Ctrl+Shift+A/G/C — сервер/группа/связь; Ctrl+I — свойства; **Ctrl+Enter** — SSH к выделенному узлу; **Ctrl+E** — редактировать узел; **Ctrl+D** — дублировать узел; **Ctrl+Shift+N** — заметка в центре видимой области; Delete — удалить выделенное; Ctrl+Shift+F — вписать карту; **Ctrl+F** — поиск по карте (строка поиска поверх canvas, Enter/Shift+Enter — переход между совпадениями с центрированием и рамкой-акцентом, Esc — закрыть).
-- Мультивыделение: Ctrl+клик по узлу добавляет к выделению (нативный Qt), **Ctrl+drag по пустому месту** — рамка выделения (Shift+Ctrl добавляет к текущему); групповой drag двигает все выделенные; ПКМ при мультивыделении → «Соединить выделенные» / «Удалить выделенные» (одно подтверждение, guarded для каждого).
-- **Ctrl+K** — палитра команд (`ui/command_palette.py`): fuzzy-поиск (subsequence-скоринг, без зависимостей) по всем QAction меню + по серверам проекта; выбор сервера → выделение узла + centerOn. Enter/Up/Down/Esc.
+### Hotkeys + Command Palette
+- Hotkeys: Ctrl+N/O/S — project; Ctrl+Z/Y(+Shift) — undo/redo; Ctrl+Shift+A/G/C — server/group/connection; Ctrl+I — properties; **Ctrl+Enter** — SSH to the selected node; **Ctrl+E** — edit node; **Ctrl+D** — duplicate node; **Ctrl+Shift+N** — note in the center of the visible area; Delete — delete selection; Ctrl+Shift+F — fit map; **Ctrl+F** — map search (search bar over the canvas, Enter/Shift+Enter — jump between matches with centering and an accent frame, Esc — close).
+- Multi-selection: Ctrl+click on a node adds to the selection (native Qt), **Ctrl+drag on empty space** — rubber-band selection (Shift+Ctrl adds to current); group drag moves all selected; right-click during multi-selection → "Connect selected" / "Delete selected" (one confirmation, guarded per item).
+- **Ctrl+K** — command palette (`ui/command_palette.py`): fuzzy search (subsequence scoring, no dependencies) over all menu QActions + project servers; selecting a server → select node + centerOn. Enter/Up/Down/Esc.
 
-### Безопасность
-Пароли: только keyring (профили `"profile:{id}"`, серверы по server_id). При недоступном keyring приложение работает, но пароли не переживают перезапуск. Внешний терминал: пароль вводит ssh-клиент ОС, никогда не argv.
+### Security
+Passwords: keyring only (profiles `"profile:{id}"`, servers by server_id). If the keyring is unavailable, the app works but passwords do not survive a restart. External terminal: the password is entered by the OS ssh client, never in argv.
 
-**Ограничения:**
-- **TOFU при первом подключении:** ключ хоста, которого нет в `~/.sshmap/known_hosts`, принимается автоматически (отпечаток показывается в логе). Это стандартное поведение paramiko-клиентов, но это **не** полная защита от MITM на самом первом подключении: защита срабатывает на *смене* уже зафиксированного ключа. Для критичных хостов сверяйте отпечаток первого подключения по доверенному каналу.
-- **Windows / keyring:** принимается только системный бэкенд Windows Credential Manager (`keyrings.win.*`, т.е. требуется pywin32 — раскомментируйте его в requirements.txt). Plaintext-файловые fallback-бэкенды (`keyrings.alt.file`) отвергаются: пароли не будут сохранены, а не уехут в открытый файл. На Linux/macOS отвергаются бэкенды `keyrings.alt.*`. Если безопасный бэкенд недоступен — приложение работает, но пароли не сохраняются между запусками.
+**Limitations:**
+- **TOFU on first connect:** a host key that is not in `~/.sshmap/known_hosts` is accepted automatically (the fingerprint is shown in the log). This is standard paramiko-client behavior, but it is **not** full MITM protection on the very first connection: protection kicks in on a *change* of an already-recorded key. For critical hosts, verify the first-connect fingerprint over a trusted channel.
+- **Windows / keyring:** only the Windows Credential Manager system backend (`keyrings.win.*`, i.e., requires pywin32 — uncomment it in requirements.txt) is accepted. Plaintext file fallback backends (`keyrings.alt.file`) are rejected: passwords would not be saved rather than leak into a plaintext file. On Linux/macOS, `keyrings.alt.*` backends are rejected. If no secure backend is available — the app works, but passwords are not saved between runs.
 
 ---
 
-## 5. Нюансы PySide6 / Qt 6.11 (обязательные знания)
+## 5. PySide6 / Qt 6.11 Gotchas (required knowledge)
 
-| Проблема | Решение |
+| Issue | Solution |
 |---|---|
-| Мышиный ввод в тестах QGraphicsView | Только `PySide6.QtTest.QTest.mousePress/Move/Release/DClick` — самодельные QMouseEvent ядро игнорирует |
-| Monkey-patch C++-слотов с возвращаемым значением (`itemChange`, `eventFilter`) | ЗАПРЕЩЕНО: бесконечная рекурсия или Access Violation 0xC0000005. Только override в подклассе |
-| `QPropertyAnimation(target=QGraphicsItem)` | Не работает («non-existing property opacity») → использовать QVariantAnimation |
-| `QGraphicsItemGroup.boundingRect()` | Не пересчитывается из детей (нулевой rect) → явный override (см. ServerNode) |
-| `itemChange(ItemPositionChange)` | Вызывается ДО применения позиции → целевые rect передавать явно (паттерн resync_group_members) |
-| QGraphicsProxyWidget «съедает» мышь | Drag StickyNote/NodeGroup обрабатывается вручную; MapView временно переключает dragMode в NoDrag |
-| strokeToFill/strokedPath QPainterPath | Не пробиндованы в PySide6 → hit-зона стрелки через свой contains() с сэмплированием кривой |
-| focusIn/focusOut сигналы QWidget | В Qt6 их нет → eventFilter |
-| Смерть Python-обёртки QAction с прикреплённым QMenu | PySide6 6.11 уничтожает за ней C++-QMenu (проверено offscreen И native): временные обёртки из `menubar.actions()`/`act.menu()` убивали ВСЕ меню, кроме последнего — при открытии палитры Ctrl+K и смене языка. Лечение: постоянное хранение таких QAction (`MainWindow._qaction_guard`) + не ходить через `action.menu()` там, где есть прямой путь (реестр `_menu_i18n`) |
+| Mouse input in QGraphicsView tests | Only `PySide6.QtTest.QTest.mousePress/Move/Release/DClick` — hand-crafted QMouseEvents are ignored by the core |
+| Monkey-patching C++ slots with return values (`itemChange`, `eventFilter`) | FORBIDDEN: infinite recursion or Access Violation 0xC0000005. Only subclass overrides |
+| `QPropertyAnimation(target=QGraphicsItem)` | Does not work ("non-existing property opacity") → use QVariantAnimation |
+| `QGraphicsItemGroup.boundingRect()` | Not recomputed from children (zero rect) → explicit override (see ServerNode) |
+| `itemChange(ItemPositionChange)` | Called BEFORE the position is applied → pass target rects explicitly (the resync_group_members pattern) |
+| QGraphicsProxyWidget "eats" the mouse | StickyNote/NodeGroup dragging is handled manually; MapView temporarily switches dragMode to NoDrag |
+| strokeToFill/strokedPath QPainterPath | Not bound in PySide6 → arrow hit zone via a custom contains() with curve sampling |
+| QWidget focusIn/focusOut signals | Do not exist in Qt6 → eventFilter |
+| Death of the Python QAction wrapper with an attached QMenu | PySide6 6.11 destroys the C++ QMenu along with it (verified offscreen AND native): temporary wrappers from `menubar.actions()`/`act.menu()` were killing ALL menus except the last one — when opening the Ctrl+K palette and switching language. Cure: keep such QActions permanently (`MainWindow._qaction_guard`) + do not go through `action.menu()` where a direct path exists (the `_menu_i18n` registry) |
 
 ---
 
@@ -210,46 +205,46 @@ tests/                       # тематический сьют без pytest: 
 
 ```python
 from i18n import t, set_language, get_available_languages
-t("btn.add_server", alias="web-1")   # форматирование {alias}
+t("btn.add_server", alias="web-1")   # {alias} formatting
 ```
-en (дефолт) / ru / zh. Правило: новый ключ добавляется во все 3 файла сразу; проверка — `python tests/check_i18n_keys.py`. Модули с горячим путём (ssh_worker, ssh_terminal) используют кэшированный `get_translator()`.
+en (default) / ru / zh. Rule: a new key is added to all 3 files at once; check — `python tests/check_i18n_keys.py`. Modules on the hot path (ssh_worker, ssh_terminal) use a cached `get_translator()`.
 
 ---
 
-## 7. Состояние и roadmap
+## 7. State & Roadmap
 
-**Реализованные функции приложения** (детали — в разделах 3–4):
-- интерактивная карта: узлы, Безье-связи 6 типов, заметки, группы, фоновое изображение с drag/resize
-- статусы узлов online/warn/offline: параллельные пробы, авто-интервал для больших карт
-- встроенный SSH-терминал на pyte (скроллбэк, выделение мышью, полная клавиатура) + внешний системный терминал
-- SFTP-вкладка в окне терминала (v1.1.3): файлы по тому же SSH-соединению — листинг/навигация «..», upload/download с прогрессом в статус-баре и отменой
-- несколько SSH-сессий табами в одном окне терминала (v1.2.1): повторное подключение к узлу — новый таб (заголовок = alias), закрытие таба не затрагивает соседний, последний таб закрывает окно; лимит «4 своих терминала» — по сессиям во всех окнах
-- undo/redo сценарных операций
-- автосбор информации о Linux-сервере (ОС/CPU/RAM/диск)
-- профили и пароли в keyring ОС — пароль никогда не пишется в JSON
-- i18n: en (дефолт) / ru / zh
-- контекстные меню всех объектов, fit/zoom/центрирование
-- мультивыделение: Ctrl+клик, рамка, групповой drag, «соединить/удалить выделенные»
-- теги: цветная полоска на карточке + фильтр по тегам в сайдбаре с затемнением несовпадающих узлов
-- поиск по карте (Ctrl+F): подсветка совпадений, переход Enter/Shift+Enter, затемнение несовпавших
-- быстрый запуск на сервер: список URL/команд (URL — браузер, команда — первая команда терминала)
-- диалог настроек (хаб): единый `~/.sshmap/config.json`, применение на лету без перезапуска
-- автосохранение + кольцевой буфер бэкапов с откатом («Файл → Бэкапы…»)
-- экспорт в PNG/JPEG/PDF и draw.io `.drawio`; массовый импорт серверов из TXT
-- горячие клавиши и палитра команд (Ctrl+K)
+**Implemented features** (details in sections 3–4):
+- interactive map: nodes, Bezier connections of 6 types, notes, groups, background image with drag/resize
+- node statuses online/warn/offline: parallel probes, auto-interval for large maps
+- built-in SSH terminal on pyte (scrollback, mouse selection, full keyboard) + external system terminal — details in §4 "Terminal"
+- SFTP tab in the terminal window: files over the same SSH connection — listing/".." navigation, upload/download with progress in the status bar and cancel
+- multiple SSH sessions as tabs in one terminal window (reconnect = new tab, title = alias; closing a tab does not affect its neighbors; the last tab closes the window) + `terminal_mode`: separate windows (default) or a detachable "Terminals" dock on the map; switching without restart — details in §4 "Terminal"
+- undo/redo of scene operations
+- automatic info collection for Linux servers (OS/CPU/RAM/disk)
+- profiles and passwords in the OS keyring — password is never written to JSON
+- i18n: en (default) / ru / zh
+- context menus for all objects, fit/zoom/centering
+- multi-selection: Ctrl+click, rubber band, group drag, "connect/delete selected"
+- tags: color strip on the card + tag filter in the sidebar with dimming of non-matching nodes
+- map search (Ctrl+F): match highlighting, Enter/Shift+Enter navigation, dimming of non-matches
+- quick launch on a server: list of URLs/commands (URL — browser, command — first terminal command)
+- settings dialog (hub): single `~/.sshmap/config.json`, live application without restart
+- autosave + ring buffer of backups with rollback ("File → Backups…")
+- export to PNG/JPEG/PDF and draw.io `.drawio`; bulk server import from TXT
+- hotkeys and command palette (Ctrl+K)
 
-**Известные ограничения:**
-- undo не покрывает статусы узлов и геометрию фона — детали в «Undo/Redo»;
-- фоновое изображение хранится путём в JSON: при переносе проекта на другую машину файл нужно переносить вместе с картой;
-- TOFU при первом подключении (новый ключ хоста принимается автоматически) и ограничения keyring — детали в «Безопасность».
+**Known limitations:**
+- undo does not cover node statuses and background geometry — details in "Undo/Redo";
+- the background image is stored in JSON by path: when moving a project to another machine, move the file together with the map;
+- TOFU on first connect (a new host key is accepted automatically) and keyring limitations — details in "Security".
 
-**Roadmap** (задачи, порядок и acceptance — в ROADMAP.md):
-- **Серия v1.2.x** (рефактор «окно → страница» `TerminalSessionPage` — v1.2, сессии табами в окне — v1.2.1): док терминалов окна карты; мультинабор; крепление заметок к серверам; центральная тема `ui/theme.py` + анимации карты; выделение и контекстное меню терминала; D&D в SFTP-вкладку; удаление мёртвого кода + полный wcwidth CJK; подсветка логов (opt-in).
-- **Серия v1.3.x**: панель файлов внизу окна карты + просмотрщик текста; настройка горячих клавиш; языки без написания кода; лёгкие плагины.
+**Roadmap** (tasks, order, acceptance — in ROADMAP.md):
+- **v1.2.x series** (the "window → page" refactor `TerminalSessionPage` — v1.2, sessions as tabs in a window — v1.2.1, terminals dock of the map window — v1.2.2): multi-typing; note pinning to servers; central theme `ui/theme.py` + map animations; terminal selection and context menu; D&D into the SFTP tab; dead code removal + full wcwidth CJK; log highlighting (opt-in).
+- **v1.3.x series**: file panel at the bottom of the map window + text viewer; configurable hotkeys; languages without writing code; lightweight plugins.
 
 ---
 
-## 8. Лицензия и безопасность
+## 8. License & Security
 
 - MIT License (LICENSE).
-- Модель безопасности: пароли только в keyring ОС (никогда не в JSON проекта), known_hosts-пиннинг с TOFU при первом подключении, внешний терминал без пароля в argv — детали и ограничения: раздел 4 «Безопасность».
+- Security model: passwords only in the OS keyring (never in project JSON), known_hosts pinning with TOFU on first connect, external terminal without a password in argv — details and limitations: §4 "Security".
