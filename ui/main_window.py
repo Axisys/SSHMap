@@ -132,7 +132,11 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
 
         self._project_file: Optional[str] = None
         self._dirty = False  # Флаг несохранённых изменений (маркер " [*]" в заголовке)
-        self._terminal_windows: List[SSHTerminalWindow] = []
+        # v1.2 (ROADMAP задача 4): реестр открытых СЕССИЙ терминала
+        # (modules/terminal_page.TerminalSessionPage), а не окон — зелёная точка
+        # узла гаснет только когда закрыты ВСЕ сессии узла, лимит «4 своих
+        # терминала» (v1.1.1) считается по сессиям. Имя сохранено (v1.1.x API).
+        self._terminal_windows: List = []
         # v0.9.4-fix: id узлов с активной SSH-сессией (для сброса индикатора)
         self._ssh_connected_nodes: set = set()
         self._ping_thread = None   # v0.7.3: ping-поток (AUDIT v0.7.2 #8: guard против затирания)
@@ -665,14 +669,15 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
                         pass
                 threads.append(th)
 
-        # Терминальные окна: их closeEvent сам делает thread.stop()+wait();
+        # Терминальные СЕССИИ (v1.2: реестр хранит страницы, не окна): их
+        # closeEvent сам делает thread.stop()+wait() через page.shutdown();
         # здесь только ждём остаток, если окно ещё не закрыто пользователем.
         terminal_waits = []
-        for w in list(getattr(self, "_terminal_windows", [])):
+        for s in list(getattr(self, "_terminal_windows", [])):
             try:
-                if w.isVisible():
-                    w.close_terminal()
-                th = getattr(w, "terminal_thread", None)
+                if s.isVisible():
+                    s.close_terminal()
+                th = getattr(s, "terminal_thread", None)
                 if th is not None and hasattr(th, "isRunning") and th.isRunning():
                     terminal_waits.append(th)
             except Exception:
@@ -1141,20 +1146,21 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
             if self.log:
                 self.log.warning(f"Apply UI options failed: {e}")
 
-        # v1.1.1 (пункт 1): шрифт терминала — в УЖЕ ОТКРЫТЫЕ окна без перезапуска
+        # v1.1.1 (пункт 1): шрифт терминала — в УЖЕ ОТКРЫТЫЕ сессии без перезапуска
+        # (v1.2: реестр хранит страницы — page.widget)
         try:
             from modules.ssh_terminal import load_terminal_settings as _load_ts
         except ImportError:
             from ..modules.ssh_terminal import load_terminal_settings as _load_ts
         term_cfg = _load_ts()
         if term_cfg["font_family"] or term_cfg["font_size"] is not None:
-            for w in list(getattr(self, "_terminal_windows", [])):
+            for s in list(getattr(self, "_terminal_windows", [])):
                 try:
-                    w.widget.set_font(
+                    s.widget.set_font(
                         family=term_cfg["font_family"],
                         size=term_cfg["font_size"] if term_cfg["font_size"] is not None else 10)
                 except (RuntimeError, AttributeError):
-                    pass  # Qt teardown / окно без widget — пропускаем
+                    pass  # Qt teardown / сессия без widget — пропускаем
 
         # v1.1.1 (пункт 6): опция «тип на плашке» — перерисовать метки связей сцены
         try:

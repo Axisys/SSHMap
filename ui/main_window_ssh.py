@@ -13,7 +13,10 @@ v1.1.3 (SFTP) уже выпущен — код sftp_worker.py/sftp_tab.py на �
 SSH-кластер переносится вместе с ним (ROADMAP «Порядок»).
 
 Владение общим состоянием (AUDIT §3, зафиксировано комментарием):
-  * ``self._terminal_windows`` — реестр открытых окон терминала;
+  * ``self._terminal_windows`` — реестр открытых СЕССИЙ терминала
+    (v1.2: TerminalSessionPage из modules/terminal_page.py, а не окна — зелёная
+    точка узла гаснет только когда закрыты ВСЕ сессии узла, лимит «4 своих
+    терминала» считается по сессиям);
   * ``self._ssh_connected_nodes`` — id узлов с активной сессией (зелёная точка);
   * ``self._info_collectors`` — реестр SystemInfoCollector по server_id.
 Миксин НЕ импортирует ui.main_window (цикл) — только duck-typing по инстансу;
@@ -55,13 +58,17 @@ class SshMixin:
 
         Вынесен из _run_ssh_connect (v0.9.5.6), чтобы «Быстрый запуск» с командой
         мог открыть терминал БЕЗ SSH-диалога (пароль уже в keyring / key auth):
-        индикатор подключения, трекинг окна (_terminal_windows/_forget_terminal_window)
+        индикатор подключения, трекинг (_terminal_windows/_forget_terminal_window)
         и show() — ровно как штатный путь подключения.
 
         v1.1.1 (пункт 3): лимит своих терминалов (terminal_max_open, дефолт 4) —
         при достижении НЕ отказ: предложение закрыть СТАРЕЙШУЮ сессию / отмена.
         Возвращает None, если пользователь отменил (вызывающий код не должен
         сообщать об «открытом» терминале).
+
+        v1.2 (ROADMAP задача 4): реестр регистрирует СЕССИИ (TerminalSessionPage),
+        а не окна — лимит считается по сессиям; teardown старейшей при лимите —
+        через страницу (page.close_terminal → closeEvent хост-окна → shutdown).
         """
         try:
             from modules.ssh_terminal import load_terminal_settings as _load_ts
@@ -69,7 +76,7 @@ class SshMixin:
             from ..modules.ssh_terminal import load_terminal_settings as _load_ts
         max_open = _load_ts()["max_open"]
         if len(self._terminal_windows) >= max_open and self._terminal_windows:
-            oldest = self._terminal_windows[0]  # порядок создания — порядок списка
+            oldest = self._terminal_windows[0]  # порядок создания — порядок списка (сессии)
             alias = getattr(getattr(oldest, "server_data", None), "alias", "?")
             reply = QMessageBox.question(
                 self, self.t("msg.terminal_limit_title"),
@@ -80,7 +87,7 @@ class SshMixin:
             try:
                 oldest._force_close = True  # «ask»-поведение не спрашивает повторно
                 oldest.close_terminal()
-            except Exception:  # noqa: BLE001 — окно могло уже исчезнуть (teardown)
+            except Exception:  # noqa: BLE001 — сессия/окно могли уже исчезнуть (teardown)
                 pass
             self._forget_terminal_window(oldest)  # сразу из реестра (destroyed ещё в пути)
         node.update_appearance()
@@ -91,8 +98,11 @@ class SshMixin:
             raise RuntimeError("SSHTerminalWindow недоступен в модуле MainWindow")
         terminal_window = win_cls(
             node.data, self, password=password, initial_command=initial_command)
-        terminal_window.destroyed.connect(lambda *_: self._forget_terminal_window(terminal_window))
-        self._terminal_windows.append(terminal_window)
+        # v1.2: регистрируем СЕССИЮ (страницу), а не окно; фейк без .page —
+        # сам себя (тестовый шов host_attr: подмена MW.SSHTerminalWindow).
+        session = getattr(terminal_window, "page", None) or terminal_window
+        session.destroyed.connect(lambda *_a, s=session: self._forget_terminal_window(s))
+        self._terminal_windows.append(session)
         terminal_window.show()
         return terminal_window
 
@@ -411,20 +421,29 @@ class SshMixin:
             self.log.info("Quick launch command started",
                           extra={"alias": data.alias, "ql_name": name})
 
-    def _forget_terminal_window(self, window):
-        self._terminal_windows = [w for w in self._terminal_windows if w is not window]
-        # v0.9.4-fix: терминал закрыт → гасим зелёную SSH-точку узла
-        # (раньше индикатор горел вечно после первого подключения).
+    def _forget_terminal_window(self, session):
+        """v1.2 (ROADMAP задача 4): реестр хранит СЕССИИ (TerminalSessionPage),
+        а не окна — сюда может прийти и окно (разрешается в его .page).
+
+        v0.9.4-fix: терминал закрыт → гасим зелёную SSH-точку узла (раньше
+        индикатор горел вечно после первого подключения). С v1.2 точка гаснет
+        только когда закрыты ВСЕ сессии узла — подсчёт по сессиям реестра.
+        """
+        session = getattr(session, "page", None) or session
+        self._terminal_windows = [s for s in self._terminal_windows if s is not session]
         try:
-            sid = getattr(getattr(window, "server_data", None), "id", None)
+            sid = getattr(getattr(session, "server_data", None), "id", None)
             if sid:
-                self._ssh_connected_nodes.discard(sid)
-                node = self.scene.get_node(sid) if hasattr(self.scene, "get_node") else None
-                if node is not None and not any(
-                    getattr(w, "server_data", None) is not None
-                    and getattr(w, "server_data").id == sid
-                    for w in self._terminal_windows
-                ):
-                    node.set_ssh_connected(False)
+                remaining = any(
+                    getattr(s, "server_data", None) is not None
+                    and getattr(s, "server_data").id == sid
+                    for s in self._terminal_windows
+                )
+                if not remaining:
+                    # все сессии узла закрыты — снимаем индикатор
+                    self._ssh_connected_nodes.discard(sid)
+                    node = self.scene.get_node(sid) if hasattr(self.scene, "get_node") else None
+                    if node is not None:
+                        node.set_ssh_connected(False)
         except RuntimeError:
             pass  # C++-объект уже уничтожен при teardown — нормально

@@ -334,7 +334,7 @@ CTRL = Qt.KeyboardModifier.ControlModifier
 
 win_n7 = make_term_win("n7")
 for i in range(60):   # ~60 строк истории — скроллбэк становится прокручиваемым
-    win_n7._on_output(f"hist line {i:03d}\r\n".encode())
+    win_n7.page._on_output(f"hist line {i:03d}\r\n".encode())  # v1.2: сессия на странице
 app.processEvents()
 
 pos_live, _size = win_n7.tscreen.scroll_info()
@@ -350,7 +350,7 @@ select_drag(win_n7.widget)
 check("выделение в истории активно", win_n7.widget.has_selection())
 
 # Новый вывод → pyte before_event авто-возврат к live → N7 сбрасывает выделение
-win_n7._on_output(b"new output line\r\n")
+win_n7.page._on_output(b"new output line\r\n")  # v1.2: сессия на странице
 app.processEvents()
 pos_after, _ = win_n7.tscreen.scroll_info()
 check("авто-возврат: позиция снова == live", pos_after == pos_live,
@@ -366,7 +366,7 @@ check("Ctrl+C после N7-сброса → b'\\x03'", win_n7.terminal_thread.c
 # Регрессия: вывод при live-позиции (без авто-возврата) — выделение ЖИВЁТ
 select_drag(win_n7.widget)
 check("выделение на live активно", win_n7.widget.has_selection())
-win_n7._on_output(b"more output at live\r\n")
+win_n7.page._on_output(b"more output at live\r\n")  # v1.2: сессия на странице
 app.processEvents()
 check("вывод при live (позиция не менялась) → выделение сохранено",
       win_n7.widget.has_selection())

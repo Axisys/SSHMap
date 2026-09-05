@@ -322,7 +322,7 @@ try:
     check("окно создаёт TerminalWidget", isinstance(win.widget, TerminalWidget))
     check("у окна нет self.edit (HTML-путь заменён)", not hasattr(win, "edit"))
 
-    win._on_output(b"hello")
+    win.page._on_output(b"hello")  # v1.2: сессия на странице
     wait_until(lambda: "hello" in win.widget.visible_text(), timeout_ms=1500)
     check("байты → pyte → холст (visible_text)", "hello" in win.widget.visible_text(),
           f"text={win.widget.visible_text()!r}"[:200])
