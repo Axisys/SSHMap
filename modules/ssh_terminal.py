@@ -448,6 +448,9 @@ class SSHTerminalWindow(QMainWindow):
 
         t = get_translator()
         self.setWindowTitle(t("terminal.window_title", alias=server_data.alias, host=server_data.host))
+        # v1.2.3 (ROADMAP задача 2): база заголовка для подсветки режима мультинабора —
+        # apply_container_highlight подставляет/снимает префикс terminal.multi_title_prefix.
+        self._multi_base_title = self.windowTitle()
         self.resize(800, 600)
 
         # v1.1.2RC3 (AUDIT U2): восстановление размера/состояния предыдущего окна

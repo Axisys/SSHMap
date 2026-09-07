@@ -530,6 +530,38 @@ class MapView(QGraphicsView):
         menu = QMenu(self)
 
         if note is not None and StickyNote is not None:
+            # v1.2.4: крепление к серверу (drag на узел — основной путь, меню — запасной).
+            # Порядок пунктов: [Прикрепить… / Открепить] → [Удалить заметку].
+            if hasattr(win, "_attach_note_to_node") or hasattr(win, "_detach_note"):
+                if getattr(note, "server_id", None):
+                    act_det = menu.addAction(_t("ctx.note_detach"))
+                    def _det(checked=False, n=note):  # checked — bool из triggered (питфол v0.8.1)
+                        w = self.window()
+                        if hasattr(w, "_detach_note"):
+                            w._detach_note(n)
+                    act_det.triggered.connect(_det)
+                else:
+                    target = node  # узел под курсором (из _classify_at выше)
+                    if target is None and hasattr(scene, "get_selected_node"):
+                        target = scene.get_selected_node()
+                    if target is not None:
+                        act_att = menu.addAction(_t("ctx.note_attach_to").format(
+                            alias=(target.data.alias or target.data.host or target.data.id)))
+                        def _att(checked=False, n=note, tnode=target):
+                            w = self.window()
+                            if hasattr(w, "_attach_note_to_node"):
+                                w._attach_note_to_node(n, tnode)
+                        act_att.triggered.connect(_att)
+                    elif scene.nodes():
+                        sub = menu.addMenu(_t("ctx.note_attach"))
+                        for srv in scene.nodes():
+                            label = (srv.data.alias or srv.data.host or srv.data.id)
+                            act_s = sub.addAction(label)
+                            def _atts(checked=False, n=note, tnode=srv):
+                                w = self.window()
+                                if hasattr(w, "_attach_note_to_node"):
+                                    w._attach_note_to_node(n, tnode)
+                            act_s.triggered.connect(_atts)
             # Заметка (v0.7.2): редактирование — двойным кликом, здесь только удаление
             act_del = menu.addAction(_t("ctx.delete_note"))
             # v0.8.1: QAction.triggered передаёт bool `checked` первым аргументом —

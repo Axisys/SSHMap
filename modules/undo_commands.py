@@ -515,10 +515,16 @@ class CmdEditTextNote(_MapCommand):
         if note is None:
             return  # живой заметки с этим id нет — применять некуда
         try:
-            note.set_text(value)
             committed = getattr(self._win, "_note_committed", None)
             if committed is not None and self._note_id:
                 committed[self._note_id] = value
+            if note.text() == value:
+                # v1.2.4-fix (замечание тестировщиков): текст уже совпадает — типичный
+                # случай дебаунс-коммита во время активного ввода (QUndoStack.push сам
+                # вызывает redo). set_text → setPlainText сбрасывает документ и уводит
+                # каретку в НАЧАЛО заметки, ломая редактирование; не трогаем виджет.
+                return
+            note.set_text(value)
         except RuntimeError:
             pass  # уничтожена между _resolve_note и set_text (гонка WA_DeleteOnClose)
 
@@ -527,6 +533,85 @@ class CmdEditTextNote(_MapCommand):
 
     def undo(self):
         self._apply(self._old)
+
+
+# ── v1.2.4: AttachNote / DetachNote — крепление заметки к серверу ──
+
+class CmdAttachNote(_MapCommand):
+    """Крепление/открепление заметки от узла одной командой (mode="attach"|"detach").
+
+    attach: redo — server_id + позиция у угла узла + линия; undo — detach + возврат
+            на old_pos (позицию заметки ДО прикрепления).
+    detach: redo — снять с узла (заметка остаётся на месте); undo — повторный attach
+            c keep_position=True (v1.2.4-fix: точное обратное действие — заметка не
+            прыгает в угол, а возвращается туда, где её открепили; offset пересчитан).
+    Merge нет (id() не переопределяем → 0): каждое крепление/открепление — отдельный
+    undo-шаг; LIFO-цепочка «detach + удаление сервера» откатывается полностью.
+    """
+
+    def __init__(self, win, note, node_id: str, mode: str = "attach"):
+        super().__init__(win, "Attach note" if mode == "attach" else "Detach note")
+        self._note = note
+        self._note_id = getattr(note, "note_id", None)
+        self._node_id = node_id
+        self._mode = mode
+        try:
+            self._old_pos = QPointF(note.pos())  # позиция ДО attach (для undo)
+        except RuntimeError:
+            self._old_pos = QPointF(0.0, 0.0)
+
+    def _resolve_note(self):
+        """Паттерн audit #8 (CmdEditTextNote): C++-объект мог быть уничтожен — по id."""
+        try:
+            if self._note.scene() is not None:
+                return self._note
+        except RuntimeError:
+            pass  # C++-объект уже удалён
+        scene = getattr(self._win, "scene", None)
+        if scene is None or not self._note_id:
+            return None
+        try:
+            return scene.get_note_by_id(self._note_id)
+        except Exception:  # noqa: BLE001 — сцена тоже может уничтожаться
+            return None
+
+    def _scene(self):
+        return getattr(self._win, "scene", None)
+
+    def redo(self):
+        note, scene = self._resolve_note(), self._scene()
+        if note is None or scene is None:
+            return
+        try:
+            if self._mode == "attach":
+                node = scene.get_node(self._node_id)
+                if node is not None and getattr(note, "server_id", None) != self._node_id:
+                    scene.attach_note_to_node(note, node)
+            elif getattr(note, "server_id", None):
+                scene.detach_note_from_node(note)
+        except RuntimeError:
+            pass  # Qt teardown — item уничтожен
+        self._refresh()
+
+    def undo(self):
+        note, scene = self._resolve_note(), self._scene()
+        if note is None or scene is None:
+            return
+        try:
+            if self._mode == "attach":
+                if getattr(note, "server_id", None):
+                    scene.detach_note_from_node(note)
+                note.prepareGeometryChange()
+                note.setPos(self._old_pos)
+            else:
+                node = scene.get_node(self._node_id)
+                if node is not None and getattr(note, "server_id", None) != self._node_id:
+                    # v1.2.4-fix: detach не двигал заметку → undo возвращает её на то же
+                    # место (keep_position), а не в угол узла
+                    scene.attach_note_to_node(note, node, keep_position=True)
+        except RuntimeError:
+            pass  # Qt teardown — item уничтожен
+        self._refresh()
 
 
 # ── EditConnection: правка метки/типа связи ─────────────────────

@@ -63,6 +63,31 @@ try:
 except ImportError:
     from modules.terminal_screen import PALETTES, resolve_color
 
+# v1.2.3 (ROADMAP v1.2.3): мультинабор — хаб broadcast'а ввода во все открытые сессии.
+# Цикла импортов нет: multi_input не знает о terminal_widget.
+try:
+    from .multi_input import get_hub as _get_multi_hub
+except ImportError:
+    from modules.multi_input import get_hub as _get_multi_hub
+
+# v1.2.4-fix (диагностика мультинабора): логгер приложения (лениво, паттерн
+# get_translator) — DEBUG-строка на каждый broadcast в _send. Без setup_logging
+# записи никуда не уходят (namespace 'sshmap' без хендлеров) — безопасно для тестов.
+_log_cache = {"log": None}
+
+
+def _get_app_log():
+    if _log_cache["log"] is None:
+        try:
+            try:
+                from .logger import get_logger as _gl
+            except ImportError:
+                from modules.logger import get_logger as _gl
+            _log_cache["log"] = _gl("modules.terminal_widget")
+        except Exception:
+            _log_cache["log"] = False  # логгер недоступен — дальше молчим
+    return _log_cache["log"] or None
+
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import (
     QBrush, QColor, QFont, QFontDatabase, QFontMetricsF, QPainter, QPen,
@@ -175,11 +200,13 @@ _F_KEY_SEQUENCES = {
 
 class TerminalWidget(QWidget):
     """Посячейный холст pyte-экрана (v1.0RC1; v1.0RC2 — клавиатура + выделение;
-    v1.0RC3 — скроллбэк колесом/Ctrl+Shift+PgUp/PgDn + мигание курсора).
+    v1.0RC3 — скроллбэк колесом/Ctrl+Shift+PgUp/PgDn + мигание курсора;
+    v1.2.3 — мультинабор: broadcast ввода во все открытые сессии).
 
     tscreen — TerminalScreen (pyte.HistoryScreen + lock); terminal_thread — объект с
     send_data(bytes) (SSHTerminalThread; None — ввод отключён, рендер и скроллбэк
-    работают).
+    работают). multi_hub — хаб мультинабора (modules/multi_input.py): None — модульный
+    хаб по умолчанию (get_hub()); явный экземпляр — тестовый шов изоляции.
     """
 
     FORMAT_CACHE_LIMIT = 512      # лимит кэша форматов (TERMINAL.md §5.1)
@@ -189,10 +216,13 @@ class TerminalWidget(QWidget):
 
     def __init__(self, tscreen, terminal_thread=None, parent=None,
                  palette_name="default", format_cache_limit=FORMAT_CACHE_LIMIT,
-                 wheel_mode="scrollback"):
+                 wheel_mode="scrollback", multi_hub=None):
         super().__init__(parent)
         self.tscreen = tscreen
         self.terminal_thread = terminal_thread
+        # v1.2.3 (ROADMAP задача 1): хаб мультинабора — None = модульный по умолчанию;
+        # явный экземпляр — тестовый шов (изоляция от singleton'а приложения).
+        self._multi_hub = multi_hub
         # v1.1.2RC3 (AUDIT U3): режим колеса из конфига terminal_wheel —
         # "scrollback" (дефолт, поведение v1.0RC3: колесо = локальный скроллбэк)
         # | "off" (колесо не перехватывается для скроллбэка; SGR-passthrough в
@@ -416,7 +446,10 @@ class TerminalWidget(QWidget):
           выделения — \\x03 (SIGINT; Acceptance: «Ctrl+C роняет top»);
         * Ctrl+D → \\x04, Ctrl+Z → \\x1a, Ctrl+V — bracketed paste (v0.9.4);
         * AltGr-guard (TERMINAL.md §3.12): Ctrl+Alt-комбинации (на Windows
-          AltGr = Ctrl+Alt) НЕ уходят как управляющие коды — ignore.
+          AltGr = Ctrl+Alt) НЕ уходят как управляющие коды — ignore;
+        * F12 в режиме мультинабора (v1.2.3, ROADMAP задача 3) — ВЫХОД из режима, а не
+          клавиша shell: RC2-маппинг F12→\\x1b[24~ приостанавливается (клавиша не
+          доходит до shell); режим выключен → F12 работает как раньше (\\x1b[24~).
         """
         if self.terminal_thread is None:
             event.ignore()
@@ -457,6 +490,15 @@ class TerminalWidget(QWidget):
             if key == Qt.Key.Key_Z:
                 self._send(b"\x1a")
                 return
+
+        # v1.2.3 (ROADMAP задача 3): мультинабор — F12 = ВЫХОД из режима, не Esc
+        # (Esc уходит в shell как \x1b!). При включённом режиме RC2-маппинг
+        # F12→\x1b[24~ приостанавливается: клавиша не доходит до shell, режим
+        # выключается. Режим выключен → fall-through на таблицу F1–F12 как в v1.0RC2.
+        if key == Qt.Key.Key_F12 and self._multi_active():
+            self._multi_exit()
+            event.accept()
+            return
 
         seq = _F_KEY_SEQUENCES.get(key)      # F1–F12 (полная таблица, v1.0RC2)
         if seq is not None:
@@ -529,12 +571,64 @@ class TerminalWidget(QWidget):
             return b"\x1bO" + suffix
         return b"\x1b[" + suffix
 
+    # ── v1.2.3: мультинабор (broadcast в единственной точке ввода) ───────────
+    def _resolve_multi_hub(self):
+        """Хаб мультинабора этого виджета: явный (конструктор — тестовый шов,
+        атрибут self._multi_hub) или модульный по умолчанию (get_hub — singleton,
+        тот же, что у MainWindow). Имя НЕ `_multi_hub`: атрибут-хаб затеняет
+        одноимённый метод в self.<имя> (TypeError: 'NoneType' is not callable)."""
+        hub = self._multi_hub
+        if hub is not None:
+            return hub
+        try:
+            return _get_multi_hub()
+        except Exception:
+            return None  # модуль недоступен — ввод работает как в v1.2.2
+
+    def _multi_active(self) -> bool:
+        """Включён ли режим мультинабора (для F12-выхода в keyPressEvent)."""
+        try:
+            hub = self._resolve_multi_hub()
+            return bool(hub is not None and hub.active)
+        except Exception:
+            return False
+
+    def _multi_exit(self):
+        """Выход из режима мультинабора (F12 / UI): слушатели хабa сбрасывают UI."""
+        try:
+            hub = self._resolve_multi_hub()
+            if hub is not None:
+                hub.set_active(False)
+        except Exception:
+            pass  # hub под teardown — клавиша просто не уходит в shell
+
     def _send(self, data: bytes):
-        if data and self.terminal_thread is not None:
+        """ЕДИНСТВЕННАЯ точка отправки пользовательского ввода (v1.2.3, ROADMAP задача 1).
+
+        Байты уходят в send_data() СВОЕЙ сессии; при включённом режиме мультинабора —
+        те же байты дублируются во ВСЕ остальные открытые сессии реестра
+        (hub.broadcast: источник пропускается, мёртвые потоки фильтруются). Отсюда
+        проходят и печатные клавиши, и служебные (Return/Backspace/Esc/стрелки), и
+        bracketed paste Ctrl+V — в мультирежиме дублируется всё, что набирается."""
+        if not data or self.terminal_thread is None:
+            return
+        try:
+            self.terminal_thread.send_data(data)
+        except Exception:
+            pass
+        hub = self._resolve_multi_hub()
+        if hub is not None and hub.active:
             try:
-                self.terminal_thread.send_data(data)
+                sent = hub.broadcast(data, source_widget=self)
+                # v1.2.4-fix (диагностика): DEBUG-строка на каждый broadcast —
+                # в логе видно, сколько сессий реально получили байты (0 →
+                # реестр пуст/мёртвые потоки; N>0 → байты ушли во все живые).
+                _log = _get_app_log()
+                if _log is not None:
+                    _log.debug(
+                        f"multi-input broadcast: {len(data)}B -> {sent} session(s)")
             except Exception:
-                pass
+                pass  # broadcast-сбой не должен ломать ввод в активной сессии
 
     def _bracketed_paste(self):
         """Ctrl+V — bracketed paste (перенос из v0.9.4): многострочный буфер

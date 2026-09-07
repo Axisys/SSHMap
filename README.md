@@ -1,9 +1,9 @@
-# SSH Map (NodeVisualSSH) — v1.2.2
+# SSH Map (NodeVisualSSH)
 
 Desktop application (Python + PySide6): an interactive map of your IT infrastructure with direct SSH connections to nodes.
 *"Draw your infrastructure. Organize it. Connect to it."*
 
-Single source of truth for the version — `version.py` (`APP_VERSION`); released versions — `CHANGELOG.md`; planned features — `ROADMAP.md`.
+Single source of truth for the version — `version.py` (`APP_VERSION`); released versions — `CHANGELOG.md`; planned features — `ROADMAP.md`; full documentation (architecture, project format, Qt gotchas) — `DOCUMENTATION.md`.
 
 ---
 
@@ -19,17 +19,13 @@ pipx install .                         # or pip install . → sshmap command (en
 # Tests without pytest: topical test_*.py files + a single parallel runner.
 # Tests are isolated: they write to a temporary HOME and set UTF-8 stdout
 # themselves — no extra environment needed on cp1251 consoles or in CI:
-python tests/run_all.py              # everything (49 files): parallel (4 workers), results table + single exit code (0 ⇔ all green)
+python tests/run_all.py              # everything (52 test files + i18n check): parallel (4 workers), results table + single exit code (0 ⇔ all green)
 python tests/run_all.py --workers 8  # worker count (1 = sequential, as before)
 python tests/run_all.py keyring      # filter by substring in file name
 python tests/test_tags.py            # a single file (from the project root)
 ```
 
-Suite map — what each `test_*.py` covers and where it came from, plus conventions: `tests/INDEX.md`.
-Test harness `tests/_common.py`: HOME isolation (sandbox for `~/.sshmap/*`), offscreen platform,
-faulthandler timeout of 180 s; each file exits with exit 0 = ALL PASS.
-Release pins are centralized at the bottom of `_common.py` (`EXPECTED_APP_VERSION`, `EXPECTED_I18N_KEYS`
-+ shared checks): one place to update per release.
+Suite map — what each `test_*.py` covers and where it came from, plus harness conventions (HOME isolation, offscreen platform, release pins): `tests/INDEX.md`.
 
 Requirements: Python 3.10+, Windows/Linux/macOS. Logs: `~/.sshmap/logs/sshmap.log` (RotatingFileHandler 5 MB × 3).
 
@@ -37,71 +33,28 @@ Requirements: Python 3.10+, Windows/Linux/macOS. Logs: `~/.sshmap/logs/sshmap.lo
 
 ## 2. Project Structure
 
+Full annotated tree (per file, with version history) — `DOCUMENTATION.md` §2. Compact overview:
+
 ```
-main.py                      # Entry point: setup_logging() → QApplication → MainWindow → start_status_checks()
-pyproject.toml               # Installable identity (name/version/deps from version.py and requirements.txt, entry point sshmap = main:main) — checked by tests/test_pyproject.py
-models/
-├── server.py                # ServerData dataclass; server_data_from_dict/to_dict (password excluded);
-│                            #   quick_launch — list of Quick Launch items + sanitize_quick_launch
-└── profile.py               # Profile; CRUD; JSON ~/.sshmap_profiles.json (passwords in keyring, "profile:{id}" prefix)
-graphics/
-├── map_scene.py             # MapScene: _nodes/_arrows/_notes/_groups; resync_group_members (geometric membership)
-├── map_view.py              # MapView: zoom 0.1–5.0, panning, Shift+drag connections, context menus,
-│                            #   node_drag_committed, multi-selection Ctrl+click/rubber band + nodes_drag_committed
-├── server_node.py           # ServerNode: card with online/warn/offline status (#22c55e/#facc15/#ef4444)
-├── connection_arrow.py      # ConnectionArrow: cubic Bezier, 6 connection types, ~10 px hit zone via contains()
-├── sticky_note.py           # StickyNote: QGraphicsProxyWidget+QTextEdit, manual drag/resize/edit
-├── node_group.py            # NodeGroup: cluster frame z=-5; membership = node center inside the topmost group
-└── background_image.py      # BackgroundImage: map background image z=-10, drag/resize by corner
-modules/
-├── ssh_worker.py            # SSHWorker (one-shot QThread); get_active_worker/wait_for_worker registry
-├── ssh_terminal.py          # SSHTerminalThread (connected_signal after invoke_shell) + SSHTerminalWindow — a window with a QTabWidget of TerminalSessionPage sessions (tab title = node alias; WA_DeleteOnClose, geometry via window_geometry.py); load_terminal_settings() — terminal_* keys from ~/.sshmap/config.json (defaults = behavior, see §4 "Settings"); _orphan_threads registry. Details: §4 "Terminal"
-├── terminal_page.py         # TerminalSessionPage: an SSH session as a reusable widget — thread + pyte screen + canvas + status line + SFTP tab; single idempotent teardown shutdown() on every path, confirm_close() gate ("ask"); close_terminal() closes only its own tab. Details: §4 "Terminal"
-├── terminal_dock.py         # TerminalDockContent + TerminalsDock: "tabs" mode (terminal_mode) — a detachable "Terminals" QDockWidget in MainWindow. Details: §4 "Terminal"
-├── sftp_worker.py           # SftpWorker: one worker thread with a list/upload/download task queue over the live transport; cancellation via a flag between operations, clean shutdown, orphan-worker registry
-├── sftp_tab.py              # SftpTab: "Files" tab — current-directory listing + ".." navigation, upload/download of selected items, "Cancel" button; GUI never blocks (all SFTP in the worker thread)
-├── terminal_widget.py       # TerminalWidget — cell-based QWidget+QPainter canvas: runs, format cache, block cursor (+cursor.hidden), wide glyphs; full keyboard (F1–F12/PgUp/PgDn/Home/End/Delete, Ctrl+C/D/Z, bracketed paste, AltGr guard) + mouse selection (selection_cells, (row,col) coordinates) and copy; scrollback via wheel/Ctrl+Shift+PgUp/PgDn (bare PgUp/PgDn go to the shell) + QTimer cursor blink
-├── terminal_screen.py       # TerminalScreen: pyte.HistoryScreen(120x32)+ByteStream, feed under a threading.Lock; PALETTES+resolve_color, snapshot(); scrollback scroll_up/scroll_down/at_bottom (auto-return to live is built into pyte); render() — deprecated
-├── window_geometry.py       # Window size save/restore — saveGeometry()/saveState() → base64 → config.json (ui_window_geometry_main/terminal); never raises
-├── host_key_policy.py       # SshKnownHostsPolicy: ~/.sshmap/known_hosts; changed key → BadHostKeyException (MITM)
-├── external_terminal.py     # OS system terminal; settings in ~/.sshmap/config.json (migrated from legacy ~/.sshmap_settings.json); password never in argv
-├── undo_commands.py         # 13 QUndoCommands: MoveNode(merge), MoveNodes(group drag),
-│                            #   MoveGroup, ResizeGroup, EditGroupName, AddRemoveNode(+arrows),
-│                            #   AddRemoveNodeBatch(TXT import — one undo), AddRemoveConnection,
-│                            #   ConnectSelected, AddRemoveNote, EditTextNote(600 ms debounce),
-│                            #   EditConnection, EditNodeData
-└── logger.py                # setup_logging()/get_logger(__name__)
-storage/project.py           # save_project/load_project + serialize_scene()/write_project_json() — JSON version (VERSION_FORMAT from version.py; + "background" key)
-storage/autosave.py          # Autosave ~/.sshmap/autosave/<key>.json + ring buffer of backups ~/.sshmap/backups/<key>_NNN.json (no Qt, atomic writes)
-storage/export_drawio.py     # Map export to .drawio (mxGraph XML, ElementTree, no new dependencies)
-services/
-├── credential_manager.py    # keyring abstraction (get_credential_manager() singleton): only the verified backend (Windows — wincred, otherwise refuse to write)
-├── diagnostics.py           # PingThread + ReverseDnsThread — ping and reverse DNS off the GUI thread (moved from ui/main_window.py)
-├── host_importer.py         # Bulk server import from TXT: parse_hosts_file, is_ip_address, resolve_host
-├── status_checker.py        # StatusChecker: QTimer schedules rounds, probes run in parallel on _ProbeThread (ThreadPoolExecutor); probe_ssh() → online/warn/offline
-└── system_info_collector.py # SystemInfoCollector: auto-collection of OS/CPU/RAM/disk from a Linux server in one exec_command session
-version.py                   # Single version point: APP_VERSION="1.2.2", VERSION_FORMAT="0.9"
-dialogs/                     # AddServerDialog (+ "Quick Launch…" button), SSHConnectDialog (+ external terminal button),
-                             #   ConnectionDialog/EditConnectionDialog, ProfileManagerDialog,
-                             #   BackupsDialog (backups + autosave, restore), QuickLaunchDialog (Quick Launch)
-ui/main_window.py            # MainWindow: façade: class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow);
-                             #   UI wiring __init__/toolbar/menus/closeEvent + thread shutdown (including terminal sessions), undo_stack (QUndoStack), dirty via canUndo()+baseline;
-                             #   notes, groups, background, PNG/JPEG/PDF/drawio export, "Collect information", map search Ctrl+F, tag filter;
-                             #   _qaction_guard — guard for QActions with an attached QMenu; public API unchanged (method names/call sites untouched)
-ui/main_window_project_io.py # ProjectIOMixin: project new/open/load/save/autosave/backups/restore; owns _project_file/_dirty/_autosave_timer
-ui/main_window_node_ops.py   # NodeOpsMixin: node/connection operations + TXT import; _is_scene_point (bool guard)
-ui/main_window_ssh.py        # SshMixin: SSH dialog, terminal windows, info auto-collection, quick launch; owns _terminal_windows/_terminals_dock/_ssh_connected_nodes/_info_collectors;
-                             #   the _terminal_windows registry stores SESSIONS (TerminalSessionPage) — the node's green dot and the "4 terminals" limit are counted per session;
-                             #   reconnecting to a node reuses its live window — new session = new tab (window.add_session());
-                             #   "tabs" mode (terminal_mode) — sessions as tabs in the "Terminals" dock (_ensure_terminals_dock, lazy creation);
-                             #   applied without restart: new sessions go to the selected mode, open windows/dock stay as they are
-ui/mixin_support.py          # host_attr(self, name) — access to façade module globals at call time (mixins do not import main_window — no cycle; test seam for substituting MW.<name>)
-ui/sidebar.py                # SidebarPanel(QWidget) — buttons, header, search, tag filter, tree with status markers,
-                             #   row context menu; i18n via callback + retranslate
-ui/map_search_bar.py         # MapSearchBar — floating search bar over the canvas (Enter/Shift+Enter/Esc, k/N counter)
-ui/command_palette.py        # CommandPalette: Ctrl+K, fuzzy search over menu actions and servers
-i18n/                        # t(key,**kwargs); en.json/ru.json/zh.json — 404 keys, identical sets; en is the default for new users
-tests/                       # Topical suite without pytest: 48 × test_*.py + _common.py (harness), run_all.py (parallel runner, 4 workers), check_i18n_keys.py; map — tests/INDEX.md
+main.py                      # Entry point: logging → QApplication → MainWindow → status checks
+version.py                   # Single source of truth for APP_VERSION / VERSION_FORMAT (JSON format)
+pyproject.toml               # Installable identity (entry point sshmap = main:main) — checked by tests/test_pyproject.py
+models/                      # server.py — ServerData (password never serialized); profile.py — profiles, passwords in keyring
+graphics/                    # MapScene; MapView (zoom 0.1–5.0, panning, multi-selection); ServerNode (status card);
+                             # ConnectionArrow (cubic Bezier, 6 types); StickyNote (pinning to a node); NodeGroup; BackgroundImage
+modules/                     # ssh_worker.py — one-shot SSH worker + registry; ssh_terminal.py — terminal thread + tabbed window;
+                             # terminal_page.py — session as a reusable widget (single idempotent shutdown()); terminal_dock.py — "tabs" mode dock;
+                             # multi_input.py — multi-input broadcast hub; sftp_worker.py / sftp_tab.py — SFTP over the live transport;
+                             # terminal_widget.py — cell-based canvas (full keyboard, selection, scrollback); terminal_screen.py — pyte screen + palettes;
+                             # window_geometry.py; host_key_policy.py; external_terminal.py; undo_commands.py (14 QUndoCommands); logger.py
+storage/                     # project.py — JSON save/load; autosave.py — autosave + backup ring buffer; export_drawio.py — .drawio export
+services/                    # credential_manager.py (keyring); diagnostics.py (ping / reverse DNS off the GUI thread); host_importer.py (TXT import);
+                             # status_checker.py (parallel SSH probes); system_info_collector.py (OS/CPU/RAM/disk)
+dialogs/                     # AddServer, SSHConnect (+ external terminal), Connection/EditConnection, ProfileManager, Backups, QuickLaunch
+ui/                          # main_window.py — façade over ProjectIOMixin / NodeOpsMixin / SshMixin; sidebar.py; map_search_bar.py (Ctrl+F);
+                             # command_palette.py (Ctrl+K); icons.py; mixin_support.py
+i18n/                        # t(key, **kwargs); en/ru/zh JSON with identical key sets (parity pinned in tests); en is the default for new users
+tests/                       # 52 × test_*.py without pytest + _common.py harness + run_all.py (parallel runner) + check_i18n_keys.py — map: tests/INDEX.md
 ```
 
 ---
@@ -118,7 +71,7 @@ tests/                       # Topical suite without pytest: 48 × test_*.py + _
                 "quick_launch": [{"type": "url", "name": "Webmin", "value": "http://host:10000/"},
                                  {"type": "command", "name": "K9S", "value": "k9s"}]}],
   "connections": [{"source_id": "...", "target_id": "...", "label": "", "type": "ssh"}],
-  "notes":  [{"id": "...", "text": "", "x": 0.0, "y": 0.0, "width": 240.0, "height": 160.0}],
+  "notes":  [{"id": "...", "text": "", "x": 0.0, "y": 0.0, "width": 240.0, "height": 160.0, "server_id": "..."}],
   "groups": [{"id": "...", "name": "", "x": 0.0, "y": 0.0, "width": 480.0, "height": 320.0}],
   "background": {"path": "/path/to/background.png", "x": 0.0, "y": 0.0, "width": 1920.0, "height": 1080.0},
   "zoom": 1.0, "center_x": 0.0, "center_y": 0.0
@@ -131,6 +84,7 @@ Format invariants:
 - Group membership is **not stored** — computed from geometry (card center inside the topmost group, exclusive).
 - `tags` — an array of strings in the server record; missing or non-array in old JSON → empty list (`server_data_from_dict` normalizes it).
 - `quick_launch` — an array of Quick Launch items `{"type": "url"|"command", "name", "value"}`; missing in old JSON → empty list, broken records are dropped (`sanitize_quick_launch`). URLs open in the default browser, commands become the first command in the SSH terminal.
+- `server_id` — an **optional** note field (pattern of `"groups"`/`"background"`): written only when set; absent = free note (old files without the key load as-is). Broken reference (missing node / not a string) → log warning + the note stays free at its saved position; on load an attached note's position is recomputed from the node's CURRENT geometry. `VERSION_FORMAT` stays `"0.9"`.
 - `background` stores a **path** to the image (the file is NOT embedded in the JSON); a missing file on load is ignored with a warning. Background geometry is not part of undo.
 
 ---
@@ -151,10 +105,11 @@ Format invariants:
 - Keyboard — full table: F1–F12, Delete/PageUp/PageDown (always CSI ~), arrows and Home/End per DECCKM state: TUIs send smkx `\x1b[?1h` and wait for SS3 — `_cursor_key_seq()` sends `\x1bOA/B/C/D`, `\x1bOH/\x1bOF`; normal mode — CSI; state is `tscreen.application_cursor_keys()`, in pyte 0.8.2 DECCKM = 32 in `screen.mode`. Explicit Ctrl+C→`\x03` / Ctrl+D→`\x04` (Ctrl+C with a selection copies to the clipboard), bracketed paste Ctrl+V (single block), AltGr guard (Ctrl+Alt is not sent as control codes).
 - Mouse selection — coordinates are always `(row, col)` (`selection_cells()`), multi-line text copy.
 - The window closes with the standard X button (there is no separate "Close terminal" button); known hosts are pinned in `~/.sshmap/known_hosts`.
+- Multi-input: typing in the focused session is broadcast to ALL other open sessions — every user input passes one point (`TerminalWidget.keyPressEvent()` → `_send(bytes)` → `terminal_thread.send_data()`), and the hub (`modules/multi_input.py`, process singleton) hangs on exactly that point: when the mode is on, `_send` duplicates the same bytes into `send_data()` of every other live session from the registry. No echo by definition — bytes come from the keyboard of the focused widget, never from output; the source session is skipped by the broadcast (it already got them via its own `send_data`). Ctrl+V (bracketed paste) goes through the same point and is duplicated too. Toggle: checkable "View" menu item + **F12 = EXIT** (NOT Esc — Esc goes to the shell as `\x1b`!); while the mode is on the RC2 F12→`\x1b[24~` mapping is suspended (the key never reaches the shell), when off it works as before. UI: status-bar plaque "MULTI: N sessions" with an exit button, "MULTI · <alias>" tab badges + amber frame on every open container (window and dock) + window title prefix; a session that dies mid-typing (error → close) leaves the registry through the stock path (`destroyed` → `_forget_terminal_window`) and dead threads are additionally filtered by liveness, so the broadcast keeps working for the rest.
 - Settings — optional `terminal_*` keys in `~/.sshmap/config.json`; full list and defaults below, in "Settings".
 
 ### Settings
-- Dialog (hub, `ui/settings_dialog.py`) — QTabWidget "General / Terminal / Statuses / Autosave / Map / Language"; entry points: the "Settings" menu between "View" and "Help" + a ⚙ button at the bottom of the sidebar (vector gear from `ui/icons.py`); the Ctrl+K command palette picks up the item automatically.
+- Dialog (hub, `ui/settings_dialog.py`) — QTabWidget "General / Terminal / Statuses / Autosave / Map / Language"; entry points: the "Settings" menu between "View" and "Help" + a button at the bottom of the sidebar (vector gear from `ui/icons.py`); the Ctrl+K command palette picks up the item automatically.
 - Storage — a SINGLE `~/.sshmap/config.json` (`i18n.save_config`, atomic merge write): all keys are optional, defaults = behavior. Statuses and autosave apply live; terminal and external terminal read the config on next window creation/launch.
 - Keys:
   - `external_terminal` (moved from a separate `~/.sshmap_settings.json`, with migration on read — the old file is deleted);
@@ -170,6 +125,7 @@ Format invariants:
 - NOT in undo: node statuses, coordinates on load, background geometry. Groups (move/resize/rename) — ARE included (CmdMoveGroup/CmdResizeGroup/CmdEditGroupName).
 - Node drag: MapView catches the release and emits `node_drag_committed(node, old, new)` → CmdMoveNode.
 - Group drag: if an already-selected node is dragged and >1 are selected — ALL selected move; one CmdMoveNodes command per gesture.
+- Note pinning: `CmdAttachNote` — attaching/detaching a note to/from a node is undoable; undo of attach restores the note's pre-attach position; when deleting a node that has attached notes, the detach commands are pushed **before** the removal command (LIFO: undo first restores the node, then re-attaches the notes).
 
 ### Hotkeys + Command Palette
 - Hotkeys: Ctrl+N/O/S — project; Ctrl+Z/Y(+Shift) — undo/redo; Ctrl+Shift+A/G/C — server/group/connection; Ctrl+I — properties; **Ctrl+Enter** — SSH to the selected node; **Ctrl+E** — edit node; **Ctrl+D** — duplicate node; **Ctrl+Shift+N** — note in the center of the visible area; Delete — delete selection; Ctrl+Shift+F — fit map; **Ctrl+F** — map search (search bar over the canvas, Enter/Shift+Enter — jump between matches with centering and an accent frame, Esc — close).
@@ -218,7 +174,9 @@ en (default) / ru / zh. Rule: a new key is added to all 3 files at once; check �
 - node statuses online/warn/offline: parallel probes, auto-interval for large maps
 - built-in SSH terminal on pyte (scrollback, mouse selection, full keyboard) + external system terminal — details in §4 "Terminal"
 - SFTP tab in the terminal window: files over the same SSH connection — listing/".." navigation, upload/download with progress in the status bar and cancel
-- multiple SSH sessions as tabs in one terminal window (reconnect = new tab, title = alias; closing a tab does not affect its neighbors; the last tab closes the window) + `terminal_mode`: separate windows (default) or a detachable "Terminals" dock on the map; switching without restart — details in §4 "Terminal"
+- multiple SSH sessions as tabs in one terminal window (reconnect = new tab) + `terminal_mode`: separate windows (default) or a detachable "Terminals" dock on the map, switching without restart — details in §4 "Terminal"
+- multi-input: typing of the focused session is broadcast to all other open sessions; F12 exits the mode — details in §4 "Terminal"
+- note pinning: a note can be pinned to a server and follows it on any movement (dashed anchor line); undoable, survives save/load via the optional `server_id` field — details in §3 and §4 "Undo/Redo"
 - undo/redo of scene operations
 - automatic info collection for Linux servers (OS/CPU/RAM/disk)
 - profiles and passwords in the OS keyring — password is never written to JSON
@@ -239,12 +197,12 @@ en (default) / ru / zh. Rule: a new key is added to all 3 files at once; check �
 - TOFU on first connect (a new host key is accepted automatically) and keyring limitations — details in "Security".
 
 **Roadmap** (tasks, order, acceptance — in ROADMAP.md):
-- **v1.2.x series** (the "window → page" refactor `TerminalSessionPage` — v1.2, sessions as tabs in a window — v1.2.1, terminals dock of the map window — v1.2.2): multi-typing; note pinning to servers; central theme `ui/theme.py` + map animations; terminal selection and context menu; D&D into the SFTP tab; dead code removal + full wcwidth CJK; log highlighting (opt-in).
-- **v1.3.x series**: file panel at the bottom of the map window + text viewer; configurable hotkeys; languages without writing code; lightweight plugins.
+- **v1.2.x series** (the "window → page" refactor `TerminalSessionPage` — v1.2, sessions as tabs in a window — v1.2.1, terminals dock of the map window — v1.2.2, multi-input broadcast — v1.2.3, note pinning to servers — v1.2.4): central theme `ui/theme.py` + map animations; terminal selection and context menu; D&D into the SFTP tab; dead code removal + full wcwidth CJK; log highlighting (opt-in).
+- **v1.3.x series**: terminal command library (macros) — one click sends a saved command/script to the active terminal; text viewer in the SFTP tab; configurable hotkeys; languages without writing code; lightweight plugins.
 
 ---
 
 ## 8. License & Security
 
 - MIT License (LICENSE).
-- Security model: passwords only in the OS keyring (never in project JSON), known_hosts pinning with TOFU on first connect, external terminal without a password in argv — details and limitations: §4 "Security".
+- Security model and its limitations: see §4 "Security".

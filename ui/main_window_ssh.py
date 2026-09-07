@@ -21,7 +21,8 @@ SSH-кластер переносится вместе с ним (ROADMAP «По
     живое окно узла через window.add_session(), иначе создаёт новое окно;
     v1.2.2: в режиме "tabs" (terminal_mode) сессии открываются ТАБОМ в доке
     «Терминалы» — _ensure_terminals_dock, реестр/лимит/зелёная точка по-прежнему
-    по СЕССИЯМ независимо от контейнера);
+    по СЕССИЯМ независимо от контейнера; v1.2.3: тот же реестр — provider хаба
+    мультинабора modules/multi_input.py (broadcast ввода во все открытые сессии));
   * ``self._terminals_dock`` — док «Терминалы» (v1.2.2, ленивое создание;
     modules/terminal_dock.TerminalsDock), None пока режим "tabs" не использовался;
   * ``self._ssh_connected_nodes`` — id узлов с активной сессией (зелёная точка);
@@ -35,12 +36,18 @@ SSHTerminalWindow/SSHConnectDialog/_ext_term берутся из модуля-ф
 import copy
 
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QKeySequence  # v1.2.3: F12-шорткат мультинабора (QAction)
 from PySide6.QtWidgets import QDialog, QMessageBox
 
 try:  # v1.1.4: общий шов подмены глобальных модуля-фасада (см. mixin_support)
     from .mixin_support import host_attr
 except ImportError:
     from mixin_support import host_attr
+
+try:  # v1.2.3 (ROADMAP v1.2.3): мультинабор — подсветка контейнеров сессий
+    from ..modules.multi_input import apply_container_highlight as _apply_multi_highlight
+except ImportError:
+    from modules.multi_input import apply_container_highlight as _apply_multi_highlight
 
 
 class SshMixin:
@@ -201,6 +208,9 @@ class SshMixin:
         session.destroyed.connect(lambda *_a, s=session: self._forget_terminal_window(s))
         self._terminal_windows.append(session)
         terminal_window.show()
+        # v1.2.3 (ROADMAP задача 2): в режиме мультинабора новая сессия сразу
+        # подсвечивается (рамка/бейдж «MULTI») + счётчик плашки обновляется.
+        self._multi_refresh_ui()
         return terminal_window
 
     def _apply_ssh_dialog_fields(self, node_id: str, user: str, key_path: str, ssh_port: int):
@@ -544,3 +554,121 @@ class SshMixin:
                         node.set_ssh_connected(False)
         except RuntimeError:
             pass  # C++-объект уже уничтожен при teardown — нормально
+        # v1.2.3 (ROADMAP задача 4): мёртвая сессия убрана из реестра штатным путём —
+        # счётчик плашки «МУЛЬТИ: N сессий» обновляется, broadcast продолжает работать
+        # по оставшимся (мёртвые потоки hub дополнительно фильтрует по живости).
+        self._multi_refresh_ui()
+
+    # ── v1.2.3: мультинабор (ROADMAP v1.2.3) ────────────────────────────────
+    # Состояние режима — в хубе modules/multi_input.py (singleton процесса), который
+    # MainWindow держит как self._multi_hub и передаёт TerminalWidget по умолчанию;
+    # реестр открытых сессий — provider = self._terminal_windows (тот же, что у
+    # зелёной точки/лимита). Методы здесь: UI-реакция на смену состояния и хуки
+    # реестра. Broadcast сам по себе живёт в единственной точке ввода
+    # (TerminalWidget._send → hub.broadcast) — миксин его не трогает.
+
+    def _toggle_multi_input(self, checked=None):
+        """v1.2.3 (задачи 2/3): переключить мультинабор — пункт меню «Вид»
+        (checkable QAction; v1.2.4-fix: подключён к toggled(bool) — в PySide6 6.11
+        triggered через QMenu.addAction(text, slot) НЕ передаёт состояние Python-
+        слоту) или кнопка выхода на плашке (явный False).
+
+        checked=None — РЕАЛЬНЫЙ toggle (запасной путь для безаргументных вызовов;
+        до v1.2.4-fix здесь была no-op-ветка «сохранить текущее состояние»);
+        True/False — явное состояние. Сам hub уведомляет слушателей → _on_multi_changed (UI)."""
+        hub = getattr(self, "_multi_hub", None)
+        if hub is None:
+            return  # окно без хаба (тестовый фейк) — делать нечего
+        target = (not hub.active) if checked is None else bool(checked)
+        hub.set_active(target)
+
+    def _on_multi_changed(self, active: bool):
+        """v1.2.3: смена состояния хаба → UI (задача 2/3).
+
+        * QAction: отметка + F12-шорткат ВКЛЮЧЁН только в режиме (F12 — выход;
+          режим выключен → шорткат отключён и клавиша уходит в shell как \\x1b[24~);
+        * плашка статус-бара «МУЛЬТИ: N сессий» + кнопка выхода — видимость;
+        * подсветка ВСЕХ открытых контейнеров (рамка + бейджи вкладок «MULTI»,
+          заголовок окна) или её сброс;
+        * статус-сообщение (status.multi_enabled / status.multi_disabled)."""
+        act = getattr(self, "act_multi_input", None)
+        if act is not None:
+            try:
+                act.setChecked(active)
+                # F12 — только выход из режима: шорткат на QAction живёт ТОЛЬКО в
+                # режиме (QAction не имеет setShortcutEnabled; пустой QKeySequence =
+                # шортката нет → F12 уходит в фокусированный виджет, в shell как
+                # \x1b[24~ по RC2-маппингу TerminalWidget).
+                act.setShortcut(QKeySequence("F12") if active else QKeySequence())
+            except RuntimeError:
+                pass  # C++-объект уже удалён (гонка закрытия) — обновлять нечего
+        count = len(getattr(self, "_terminal_windows", []))
+        try:
+            label = getattr(self, "_multi_label", None)
+            plaque = getattr(self, "_multi_plaque", None)
+            if label is not None:
+                label.setText(self.t("terminal.multi_status", count=count))
+            if plaque is not None:
+                plaque.setVisible(active)
+        except RuntimeError:
+            pass  # C++-объект уже удалён (гонка закрытия) — обновлять нечего
+        for s in list(getattr(self, "_terminal_windows", [])):
+            try:
+                host = getattr(s, "_host_window", None)
+            except RuntimeError:
+                continue  # страница уничтожена в пути teardown — пропускаем
+            if host is None:
+                continue
+            try:
+                _apply_multi_highlight(host, active)
+            except RuntimeError:
+                pass  # контейнер уже уничтожен (гонка закрытия) — пропускаем
+        try:
+            key = "status.multi_enabled" if active else "status.multi_disabled"
+            self.statusBar().showMessage(self.t(key), 4000)
+        except Exception:  # noqa: BLE001 — статус-бар косметика при teardown
+            pass
+
+    def _multi_refresh_ui(self):
+        """v1.2.3 (задача 4): реестр изменился (сессия открыта/закрыта) → счётчик
+        плашки + подсветка контейнеров. Вызывается из _spawn_terminal_window /
+        _forget_terminal_window; режим выключен — no-op (плашка скрыта, подсвечивать
+        нечего). Идемпотентно: повторное применение бейджей/рамки — та же строка."""
+        hub = getattr(self, "_multi_hub", None)
+        if hub is None or not hub.active:
+            return
+        count = len(getattr(self, "_terminal_windows", []))
+        try:
+            label = getattr(self, "_multi_label", None)
+            plaque = getattr(self, "_multi_plaque", None)
+            if label is not None:
+                label.setText(self.t("terminal.multi_status", count=count))
+            if plaque is not None:
+                plaque.setVisible(True)
+        except RuntimeError:
+            pass  # C++-объект уже удалён (гонка закрытия) — обновлять нечего
+        for s in list(getattr(self, "_terminal_windows", [])):
+            try:
+                host = getattr(s, "_host_window", None)
+            except RuntimeError:
+                continue  # страница уничтожена в пути teardown — пропускаем
+            if host is None:
+                continue
+            try:
+                _apply_multi_highlight(host, True)
+            except RuntimeError:
+                pass  # контейнер уже уничтожен (гонка закрытия) — пропускаем
+
+    def _multi_shutdown(self):
+        """v1.2.3: выход приложения — режим выключается, provider отвязывается
+        (реестр умирает вместе с окном; висящий callable держал бы мёртвое окно)."""
+        hub = getattr(self, "_multi_hub", None)
+        if hub is None:
+            return
+        try:
+            hub.set_active(False)
+            provider = getattr(self, "_multi_provider", None)
+            if provider is not None and hub.session_provider is provider:
+                hub.set_session_provider(None)
+        except Exception:  # noqa: BLE001 — мультинабор не блокирует выход
+            pass

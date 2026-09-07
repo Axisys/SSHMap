@@ -66,6 +66,11 @@ except ImportError:
         save_window_geometry, restore_window_geometry,
     )
 
+try:  # v1.2.3 (ROADMAP v1.2.3): мультинабор — хаб broadcast'а ввода во все сессии
+    from ..modules import multi_input as _multi_input_mod
+except ImportError:
+    from modules import multi_input as _multi_input_mod
+
 
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import (
@@ -77,7 +82,7 @@ from PySide6.QtWidgets import (
     QMainWindow, QWidget, QHBoxLayout, QSplitter,
     QLabel, QTreeWidgetItem,  # QTreeWidgetItem — аннотации слотов дерева (v0.9.9.4: дерево в ui/sidebar.py)
     QToolBar, QMessageBox, QDialog, QFileDialog, QMenu,
-    QApplication,
+    QApplication, QToolButton,  # QToolButton — кнопка выхода на плашке мультинабора (v1.2.3)
 )
 
 # v1.1.4 (ROADMAP): разрез на миксины — кластеры «проект I/O», «операции над
@@ -137,6 +142,15 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         # узла гаснет только когда закрыты ВСЕ сессии узла, лимит «4 своих
         # терминала» (v1.1.1) считается по сессиям. Имя сохранено (v1.1.x API).
         self._terminal_windows: List = []
+        # v1.2.3 (ROADMAP v1.2.3): мультинабор — состояние режима живёт в хубе
+        # (modules/multi_input.py, singleton процесса), который окно держит как
+        # self._multi_hub; TerminalWidget берёт тот же хаб по умолчанию. Provider —
+        # реестр сессий (тот же, что у зелёной точки/лимита); UI-реакция — слушатель
+        # _on_multi_changed (SshMixin). Шатдаун — _multi_shutdown в closeEvent-пути.
+        self._multi_hub = _multi_input_mod.get_hub()
+        self._multi_provider = lambda: list(getattr(self, "_terminal_windows", []))
+        self._multi_hub.set_session_provider(self._multi_provider)
+        self._multi_hub.add_listener(self._on_multi_changed)
         # v1.2.2: док «Терминалы» (terminal.mode = "tabs") — ленивое создание в
         # SshMixin._ensure_terminals_dock на первую сессию в режиме "tabs".
         self._terminals_dock = None
@@ -347,6 +361,13 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
                 dock.setWindowTitle(self.t("terminal.dock_title"))
             except RuntimeError:
                 pass  # Qt teardown — док уже уничтожен
+        # v1.2.3: плашка мультинабора — tooltip кнопки выхода на новом языке
+        _multi_btn = getattr(self, "_multi_exit_btn", None)
+        if _multi_btn is not None:
+            try:
+                _multi_btn.setToolTip(self.t("terminal.multi_exit_button"))
+            except RuntimeError:
+                pass  # Qt teardown — плашка уже уничтожена
         self.statusBar().showMessage(self.t("status.ready"))
 
     @property
@@ -481,6 +502,26 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         self.zoom_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         self.zoom_label.setStyleSheet("color: #e2e8f0; padding-right: 6px;")
         self.statusBar().addPermanentWidget(self.zoom_label)
+
+        # v1.2.3 (ROADMAP задача 3): плашка режима мультинабора «МУЛЬТИ: N сессий» +
+        # кнопка выхода — permanent-виджет справа в статус-баре; скрыта, пока режим
+        # выключен (_on_multi_changed/_multi_refresh_ui управляют видимостью).
+        self._multi_plaque = QWidget()
+        _multi_row = QHBoxLayout(self._multi_plaque)
+        _multi_row.setContentsMargins(8, 0, 4, 0)
+        _multi_row.setSpacing(6)
+        self._multi_label = QLabel("")
+        self._multi_label.setStyleSheet(
+            f"color: {_multi_input_mod.MULTI_ACCENT}; font-weight: bold;")
+        self._multi_exit_btn = QToolButton()
+        self._multi_exit_btn.setText("✕")
+        self._multi_exit_btn.setToolTip(self.t("terminal.multi_exit_button"))
+        # Кнопка выхода — НЕ Esc (Esc уходит в shell как \x1b!): явный False.
+        self._multi_exit_btn.clicked.connect(lambda: self._toggle_multi_input(False))
+        _multi_row.addWidget(self._multi_label)
+        _multi_row.addWidget(self._multi_exit_btn)
+        self._multi_plaque.setVisible(False)
+        self.statusBar().addPermanentWidget(self._multi_plaque)
 
         try:
             self.view.zoomChanged.connect(self._on_zoom_changed)
@@ -653,6 +694,14 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         Паттерн взят у StatusChecker: stop() + ограниченный wait() — никогда
         не блокируем GUI-поток дольше пары секунд на поток.
         """
+        # v1.2.3 (ROADMAP v1.2.3): мультинабор — режим выключается и provider
+        # отвязывается ДО teardown сессий (подсветка/плашка сбрасываются, пока
+        # контейнеры живы; висящий callable не держит мёртвое окно).
+        try:
+            self._multi_shutdown()
+        except Exception:  # noqa: BLE001 — мультинабор не блокирует выход
+            pass
+
         threads = []
 
         # Автосбор системной информации (SystemInfoCollector)
@@ -893,6 +942,32 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         view_menu.addSeparator()
         self._add_menu_action(view_menu, "view.set_background", self._set_background_image)
         self._add_menu_action(view_menu, "view.remove_background", self._remove_background_image)
+        # v1.2.3 (ROADMAP задачи 2/3): мультинабор — checkable-пункт; F12 = ВЫХОД из
+        # режима (не Esc — он уходит в shell как \x1b!). ApplicationShortcut: клавиша
+        # ловится независимо от того, где фокус (карта / окно терминала / док). Пока
+        # режим выключен шортката на QAction НЕТ (QKeySequence() пустой; QAction не
+        # имеет setShortcutEnabled) — F12 уходит в shell как \x1b[24~ (RC2-маппинг
+        # TerminalWidget); в режиме _on_multi_changed вешает F12, маппинг приостанавливается.
+        view_menu.addSeparator()
+        # v1.2.4-fix (корень инцидента «пункт меню не работает»): пункт НЕ создаётся
+        # через _add_menu_action — его авто-подключение QMenu.addAction(text, slot) в
+        # PySide6 6.11 эмитит QAction.triggered в Python-слот БЕЗ аргументов (эмпирика:
+        # явный .triggered.connect передаёт новое состояние, авто-подключение — нет),
+        # причём отключить такое подключение disconnect() НЕ удаётся (RuntimeWarning,
+        # внутренний адаптер) — слот оставался бы висящим. checked=None падал в no-op-
+        # ветку: режим из меню не включался и не выключался вообще (двигалась только
+        # галочка; F12 тоже молчал — шорткат вешается только в активном режиме).
+        # Поэтому QAction создаётся вручную и подключается к toggled(bool) — он несёт
+        # новое состояние (и срабатывает на программный setChecked: галочка и хаб не
+        # расходятся). Регрессия: tests/test_menu_actions_regression.py.
+        self.act_multi_input = view_menu.addAction(self.t("view.multi_input"))
+        self._register_i18n(self.act_multi_input, "view.multi_input")
+        self.act_multi_input.setCheckable(True)
+        self.act_multi_input.setChecked(False)
+        self.act_multi_input.toggled.connect(self._toggle_multi_input)
+        from PySide6.QtGui import QKeySequence as _QKeySequence  # локально (как QShortcut в палитре)
+        self.act_multi_input.setShortcut(_QKeySequence())  # F12 вешает _on_multi_changed (в режиме)
+        self.act_multi_input.setShortcutContext(Qt.ShortcutContext.ApplicationShortcut)
 
         # v1.1 (ROADMAP задача 2): диалог настроек (хаб) — пункт «Настройки» МЕЖДУ
         # «Вид» и «Помощь». Пункт — QAction ВНУТРИ меню (не голое действие на menubar):
@@ -1321,6 +1396,11 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         try:
             note.textEdited.connect(lambda *_a: self._on_note_text_edited(note))
             note.moved.connect(lambda *_a: self._mark_dirty())
+            # v1.2.4: крепление к серверу (drag на узел / drag закреплённой)
+            note.attachRequested.connect(
+                lambda node, n=note: self._attach_note_to_node(n, node))
+            note.detachRequested.connect(
+                lambda *_a, n=note: self._detach_note(n))
         except Exception:
             pass  # повторное подключение для той же заметки — не критично
 
@@ -1381,6 +1461,36 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         if self.log:
             self.log.info("Note deleted", extra={"id": note_id})
         self.statusBar().showMessage(self.t("status.note_deleted"))
+        self._mark_dirty()
+        return True
+
+    def _attach_note_to_node(self, note, node) -> bool:
+        """v1.2.4: прикрепить заметку к узлу (меню / drag). Undo-команда."""
+        if note is None or node is None:
+            return False
+        try:
+            if note.scene() is None or getattr(note, "server_id", None) == node.data.id:
+                return False  # уже закреплена к этому же узлу — no-op
+        except RuntimeError:
+            return False
+        from modules.undo_commands import CmdAttachNote
+        self._push_command(CmdAttachNote(self, note, node.data.id, "attach"))
+        if self.log:
+            self.log.info("Note attached", extra={"note": note.note_id, "server": node.data.id})
+        self.statusBar().showMessage(self.t("status.note_attached", alias=node.data.alias))
+        self._mark_dirty()
+        return True
+
+    def _detach_note(self, note) -> bool:
+        """v1.2.4: открепить заметку (меню / drag / удаление сервера). Undo-команда."""
+        sid = getattr(note, "server_id", None) if note is not None else None
+        if not sid:
+            return False
+        from modules.undo_commands import CmdAttachNote
+        self._push_command(CmdAttachNote(self, note, sid, "detach"))
+        if self.log:
+            self.log.info("Note detached", extra={"note": getattr(note, "note_id", None)})
+        self.statusBar().showMessage(self.t("status.note_detached"))
         self._mark_dirty()
         return True
 

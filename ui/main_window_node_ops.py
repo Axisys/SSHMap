@@ -367,12 +367,20 @@ class NodeOpsMixin:
             QMessageBox.information(self, self.t("msg.info_title"),
                                     self.t("msg.select_server_edit"))
             return False
-        # одно подтверждение на всю группу
+        # одно подтверждение на всю группу; v1.2.4 (D7): + закреплённые заметки (сумма)
+        attached_total = sum(
+            len(self.scene.notes_attached_to(n.data.id)) for n in nodes)
+        if self._i18n_available:
+            confirm_text = self.t("msg.confirm_delete_many").format(count=len(nodes))
+            if attached_total:
+                confirm_text += "\n" + self.t("msg.delete_server_with_notes").format(
+                    count=attached_total)
+        else:
+            confirm_text = f"Удалить серверы ({len(nodes)})?"
         reply = QMessageBox.question(
             self,
             self.t("dialog.confirm_delete") if self._i18n_available else "Подтверждение",
-            self.t("msg.confirm_delete_many").format(count=len(nodes))
-            if self._i18n_available else f"Удалить серверы ({len(nodes)})?",
+            confirm_text,
             QMessageBox.Yes | QMessageBox.No,
             QMessageBox.No
         )
@@ -385,6 +393,11 @@ class NodeOpsMixin:
             if not self._ensure_worker_done(node.data.id):
                 continue
             alias = node.data.alias
+            # v1.2.4 (D7): detach-команды этого узла — ПЕРЕД его удалением (LIFO:
+            # undo вернёт сначала узел, затем переприкрепит заметки)
+            from modules.undo_commands import CmdAttachNote
+            for n in list(self.scene.notes_attached_to(node.data.id)):
+                self._push_command(CmdAttachNote(self, n, node.data.id, "detach"))
             arrows = [
                 (a.source.data.id, a.target.data.id, a.label_text, a.connection_type)
                 for a in self.scene.arrows()
@@ -579,10 +592,19 @@ class NodeOpsMixin:
         Используется кнопкой сайдбара, клавишей Delete (MapView) и контекстным
         меню узла (v0.7.3). Возвращает True, если удаление произошло.
         """
+        # v1.2.4 (D7): закреплённые заметки — расширяем ТЕКСТ подтверждения (не два диалога)
+        attached = self.scene.notes_attached_to(node.data.id)
+        if self._i18n_available:
+            confirm_text = self.t("msg.confirm_delete").format(alias=node.data.alias)
+            if attached:
+                confirm_text += "\n" + self.t("msg.delete_server_with_notes").format(
+                    count=len(attached))
+        else:
+            confirm_text = f"Удалить сервер '{node.data.alias}'?"
         reply = QMessageBox.question(
-            self, 
+            self,
             self.t("dialog.confirm_delete") if self._i18n_available else "Подтверждение",
-            f"{self.t('msg.confirm_delete').format(alias=node.data.alias)}" if self._i18n_available else f"Удалить сервер '{node.data.alias}'?",
+            confirm_text,
             QMessageBox.Yes | QMessageBox.No,
             QMessageBox.No
         )
@@ -592,6 +614,11 @@ class NodeOpsMixin:
             return False
         alias = node.data.alias
         host = node.data.host
+        # v1.2.4 (D7): открепление ДО удаления — LIFO: undo сначала вернёт узел,
+        # потом переприкрепит заметки (узел к тому моменту уже жив)
+        from modules.undo_commands import CmdAttachNote
+        for n in list(attached):
+            self._push_command(CmdAttachNote(self, n, node.data.id, "detach"))
         # v0.8.3: захват стрелок узла ДО удаления — undo восстановит их вместе с узлом
         arrows = [
             (a.source.data.id, a.target.data.id, a.label_text, a.connection_type)

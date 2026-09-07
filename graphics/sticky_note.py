@@ -16,12 +16,20 @@ QGraphicsProxyWidget с QTextEdit внутри: заметка — это и г�
 
 Delete на клавиатуре удаляет выбранную заметку только когда фокус НЕ внутри
 редактора (в edit mode клавиши идут виджету — Delete стирает символы).
+
+v1.2.4-fix (замечания тестировщиков): закреплённую заметку можно двигать —
+драг НЕ открепляет её, линия-якорь следует live (сигнал dragUpdated → сцена
+пересчитывает offset и путь); открепление — через контекстное меню / undo /
+удаление сервера. Тело заметки рисуется в paint() скруглённым rect'ом
+(редактор прозрачный) — QSS border-radius один по себе не клипает фон виджета,
+и углы «выпирали» квадратом.
 """
 import uuid
 from typing import Optional, Tuple
 
 from PySide6.QtCore import Qt, QRectF, Signal, QEvent
-from PySide6.QtGui import QFont
+from PySide6.QtGui import (QFont, QBrush, QColor, QPainter, QPainterPath,
+                           QPen)
 from PySide6.QtWidgets import QGraphicsProxyWidget, QTextEdit, QGraphicsItem
 
 
@@ -35,18 +43,32 @@ def _t(key: str) -> str:
 
 
 class StickyNote(QGraphicsProxyWidget):
-    """Заметка на карте: перетаскивание, resize за угол, двойной клик — текст."""
+    """Заметка на карте: перетаскивание, resize за угол, двойной клик — текст.
+
+    v1.2.4-fix: закреплённую заметку можно двигать (drag не открепляет) — линия-якорь
+    следует live через dragUpdated → MapScene.on_note_drag_updated.
+    """
 
     MIN_W, MIN_H = 140.0, 90.0
     MAX_W, MAX_H = 1200.0, 800.0
     CORNER_HIT = 16.0      # зона «за угол» для resize (px от правого нижнего)
 
-    BG_COLOR = "#fef08a"   # классический жёлтый стикер — читается на тёмной карте
-    BORDER_COLOR = "#ca8a04"
-    TEXT_COLOR = "#1c1917"
+    # v1.2.4-fix: приглушённая палитра по замечанию тестировщиков (классический
+    # #fef08a/#ca8a04 слишком яркий); читается на тёмной карте, но не «режет»
+    BG_COLOR = "#eedd9f"
+    BORDER_COLOR = "#a9853d"
+    TEXT_COLOR = "#403a2b"
+    CORNER_RADIUS = 10.0   # закругление углов окна заметки (v1.2.4-fix: было 4 px)
 
     textEdited = Signal()  # текст изменён (MainWindow помечает проект dirty)
     moved = Signal()       # заметку переместили мышью (тоже dirty-причина)
+    # v1.2.4: крепление к серверу — сигналы для MainWindow
+    attachRequested = Signal(object)  # release над ServerNode → окно крепит заметку
+    detachRequested = Signal()        # запасной путь; из драга не эмитится (v1.2.4-fix:
+                                      # drag закреплённой двигает её, открепление — меню/undo)
+    # v1.2.4-fix: live-геометрия во время драга (move И resize), каждый шаг —
+    # сцена пересчитывает offset якоря и путь линии-якоря закреплённой заметки
+    dragUpdated = Signal(object)  # эмитится с самой заметкой (self)
 
     def __init__(self, text: str = "", x: float = 0.0, y: float = 0.0,
                  width: float = 240.0, height: float = 160.0, note_id: Optional[str] = None):
@@ -55,6 +77,14 @@ class StickyNote(QGraphicsProxyWidget):
         self.setWidget(editor)
 
         self.note_id = note_id or str(uuid.uuid4())[:8]
+        # v1.2.4: id закреплённого сервера (None — свободная заметка); состояние на item,
+        # сериализуется через to_dict() (ключ "server_id" пишется только если задан)
+        self.server_id: Optional[str] = None
+        # v1.2.4-fix: смещение позиции заметки от якоря узла (правый верхний угол + 12 px).
+        # (0,0) — заметка ровно в якоре (свежий attach/меню); ≠0 — пользователь двигал
+        # закреплённую заметку. Ведёт MapScene (on_note_drag_updated / attach keep_position);
+        # не сериализуется — при загрузке вычисляется от сохранённой x/y.
+        self.anchor_offset: Tuple[float, float] = (0.0, 0.0)
         self._editing = False
         self._drag_mode = None  # None | "move" | "resize"
         self._drag_start_scene = None
@@ -62,13 +92,17 @@ class StickyNote(QGraphicsProxyWidget):
         self._moved_this_drag = False
 
         # ── Внешний вид редактора (стикер) ────────────────────────
+        # v1.2.4-fix: фон/рамка/скругление рисует paint() этого item'а (см. там),
+        # редактор — ТОЛЬКО текст на прозрачном фоне. QSS background один по себе
+        # не клипается по border-radius (фон виджета рисуется квадратом) — скруглённые
+        # углы «выпирали» квадратом за рамку.
         editor.setAcceptRichText(False)
         editor.setLineWrapMode(QTextEdit.LineWrapMode.WidgetWidth)
         editor.setFont(QFont("Segoe UI", 10))
         editor.setStyleSheet(
-            "QTextEdit { background: %s; color: %s;"
-            " border: 2px solid %s; border-radius: 4px; padding: 6px; }"
-            % (self.BG_COLOR, self.TEXT_COLOR, self.BORDER_COLOR)
+            "QTextEdit { background: transparent; color: %s;"
+            " border: none; padding: 6px; }"
+            % self.TEXT_COLOR
         )
         editor.setPlaceholderText(_t("note.placeholder"))
         # Обычный режим: виджет НЕ берёт фокус — клики обрабатывает заметка
@@ -197,8 +231,10 @@ class StickyNote(QGraphicsProxyWidget):
                 return
             if self._drag_mode == "move":
                 delta = scene_pos - self._drag_start_scene
-                if abs(delta.x()) + abs(delta.y()) > 1.0:
+                if not self._moved_this_drag and abs(delta.x()) + abs(delta.y()) > 1.0:
                     self._moved_this_drag = True
+                    # v1.2.4-fix: drag закреплённой заметки НЕ открепляет (замечание
+                    # тестировщиков) — заметку можно двигать, линия-якорь следует live
                 self.prepareGeometryChange()
                 # Пошаговый сдвиг (старт обновляется) — без накопительной ошибки
                 self.setPos(self.pos() + delta)
@@ -210,6 +246,11 @@ class StickyNote(QGraphicsProxyWidget):
                 if abs(cur_local.x() - start_local.x()) + abs(cur_local.y() - start_local.y()) > 1.0:
                     self.set_note_size(w0 + (cur_local.x() - start_local.x()),
                                        h0 + (cur_local.y() - start_local.y()))
+            # v1.2.4-fix: live-геометрия — сцена обновляет offset/линию закреплённой
+            try:
+                self.dragUpdated.emit(self)
+            except RuntimeError:  # Qt teardown
+                pass
             event.accept()
             return
         super().mouseMoveEvent(event)
@@ -221,7 +262,61 @@ class StickyNote(QGraphicsProxyWidget):
             self._drag_start_scene = None
             if mode == "move" and self._moved_this_drag and self.scene() is not None:
                 self.moved.emit()  # перемещение — несохранённое изменение
+                # v1.2.4 (D6): release над ServerNode → прикрепить к нему. items()
+                # (а не itemAt) — заметка сама под курсором, узел может быть ПОД ней.
+                # v1.2.4-fix: для УЖЕ закреплённой это пере-крепление на ДРУГОЙ узел
+                # (server_id != node.data.id); отпускание над СВОИМ узлом — no-op
+                # (заметка остаётся там, куда её перетащили).
+                node = self._find_node_at_release(event.scenePos())
+                if node is not None and getattr(self, "server_id", None) != node.data.id:
+                    try:
+                        self.attachRequested.emit(node)
+                    except RuntimeError:  # Qt teardown
+                        pass
         super().mouseReleaseEvent(event)
+
+    def _find_node_at_release(self, scene_pos):
+        """v1.2.4: ServerNode под точкой отпускания (hit-test + обход parentItem).
+
+        Duck-typing по атрибуту `data.id` — без импорта ServerNode (риск циклического
+        импорта; только ServerNode несёт self.data, см. server_node.py). scene.items()
+        возвращает ВСЕ объекты под точкой — заметка сама в списке и просто пропускается.
+        """
+        if scene_pos is None:
+            return None
+        scene = self.scene()
+        if scene is None:
+            return None
+        try:
+            items = list(scene.items(scene_pos))
+        except RuntimeError:  # Qt teardown
+            return None
+        for item in items:
+            n = item
+            while n is not None:
+                data = getattr(n, "data", None)
+                if data is not None and getattr(data, "id", None):
+                    return n
+                n = n.parentItem()
+        return None
+
+    def paint(self, painter: QPainter, option, widget=None):
+        """Тело заметки — скруглённый rect (v1.2.4-fix), затем прозрачный редактор.
+
+        QGraphicsProxyWidget рисует ТОЛЬКО изображение виджета; QSS background у
+        QTextEdit не клипается по border-radius (фон рисуется квадратом, и углы
+        «выпирали» за рамку). Поэтому: фон+рамка — здесь (QPainterPath), текст —
+        поверх (редактор с transparent-фоном). adjusted(1) + pen 2 px — штрих целиком
+        внутри boundingRect, без обрезки по краю item'а.
+        """
+        path = QPainterPath()
+        path.addRoundedRect(self.rect().adjusted(1, 1, -1, -1),
+                            self.CORNER_RADIUS, self.CORNER_RADIUS)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        painter.setPen(QPen(QColor(self.BORDER_COLOR), 2))
+        painter.setBrush(QBrush(QColor(self.BG_COLOR)))
+        painter.drawPath(path)
+        super().paint(painter, option, widget)
 
     def mouseDoubleClickEvent(self, event):
         """Двойной клик — включить режим редактирования (каретка под курсором)."""
@@ -261,7 +356,7 @@ class StickyNote(QGraphicsProxyWidget):
     # ── Serialization (v0.7.2: массив "notes" в JSON проекта) ───
 
     def to_dict(self) -> dict:
-        return {
+        d = {
             "id": self.note_id,
             "text": self.text(),
             "x": float(self.pos().x()),
@@ -269,6 +364,11 @@ class StickyNote(QGraphicsProxyWidget):
             "width": float(self.rect().width()),
             "height": float(self.rect().height()),
         }
+        # v1.2.4 (D9): ключ пишется ТОЛЬКО если задан — чистые файлы для свободных
+        # заметок; старые версии приложения неизвестный ключ просто не читают
+        if getattr(self, "server_id", None):
+            d["server_id"] = str(self.server_id)
+        return d
 
     @classmethod
     def from_dict(cls, raw: dict) -> "StickyNote":

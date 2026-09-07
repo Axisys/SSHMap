@@ -6,7 +6,8 @@ except ImportError:
     from models.server import ServerData
 
 from .server_node import ServerNode
-from .connection_arrow import ConnectionArrow, DEFAULT_CONNECTION_TYPE
+from .connection_arrow import (ConnectionArrow, DEFAULT_CONNECTION_TYPE,
+                               edge_point)  # v1.2.4: линия-якорь «от края к краю»
 try:
     from .sticky_note import StickyNote
 except ImportError:  # плоский импорт (запуск из корня)
@@ -23,12 +24,17 @@ except ImportError:
     from background_image import BackgroundImage
 
 from PySide6.QtCore import Qt, QRectF
-from PySide6.QtGui import QBrush, QColor, QPainter, QPen
+from PySide6.QtGui import QBrush, QColor, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import QGraphicsScene
 
 
 class MapScene(QGraphicsScene):
     """Главная сцена карты."""
+
+    # v1.2.4: якорное крепление заметки — левый верхний угол заметки = правый верхний
+    # угол узла + офсет (ROADMAP «правый верхний угол + 12px»)
+    NOTE_ANCHOR_OFFSET_X = 12.0
+    NOTE_ANCHOR_OFFSET_Y = 12.0
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -37,6 +43,8 @@ class MapScene(QGraphicsScene):
         self._arrows: List[ConnectionArrow] = []
         # v0.7.2: независимые заметки (не связаны с серверами)
         self._notes: List[StickyNote] = []
+        # v1.2.4: линии-якоря закреплённых заметок (note_id → QGraphicsPathItem)
+        self._note_anchor_lines: Dict[str, object] = {}
         # v0.8.1: группы узлов (кластеры/папки на карте). Порядок в списке — порядок
         # добавления; при одинаковом z верхняя группа = последняя добавленная.
         self._groups: List[NodeGroup] = []
@@ -163,6 +171,11 @@ class MapScene(QGraphicsScene):
                 self.removeItem(a)
                 getattr(a, 'deleteLater', lambda: None)()  # v0.9.3 fix: убираем C++-объект (иначе утечка до конца сессии)
                 self._arrows.remove(a)
+            # v1.2.4 (D7): страховка — закреплённые заметки снимаются, линии убираются
+            # (no-op, если окно уже пушило detach-команды; защищает fallback-пути без окна)
+            for n in self.notes_attached_to(node_id):
+                n.server_id = None
+                self._remove_note_anchor_line(n.note_id)
             self.removeItem(node)
             getattr(node, 'deleteLater', lambda: None)()  # v0.9.3 fix: карточка+тень+пульс+тексты — иначе живут вечно
             del self._nodes[node_id]
@@ -205,6 +218,12 @@ class MapScene(QGraphicsScene):
         for arrow in self._arrows:
             if arrow.source == node or arrow.target == node:
                 arrow.update_position()
+        # v1.2.4 (D4): закреплённые заметки следуют за узлом — единая точка покрытия,
+        # все пути изменения геометрии узла уже вызывают этот метод (itemChange при
+        # любом setPos, оба конца update_appearance). Во время live-drag якорь «догоняет»
+        # на один шаг ровно как стрелки — самоисцеление через повторный setPos в
+        # CmdMoveNode.redo() при отпускании.
+        self.update_note_anchor_for_node(node)
 
     def get_selected_node(self):
         """Возвращает выделенный ServerNode или None."""
@@ -225,12 +244,19 @@ class MapScene(QGraphicsScene):
         note = StickyNote(text=text, x=x, y=y, width=width, height=height, note_id=note_id)
         self.addItem(note)
         self._notes.append(note)
+        # v1.2.4-fix: live-геометрия драга — линия-якорь закреплённой заметки следует
+        # за ней (свободной сигнал ни на что не влияет: on_note_drag_updated no-op)
+        try:
+            note.dragUpdated.connect(self.on_note_drag_updated)
+        except RuntimeError:  # Qt teardown
+            pass
         return note
 
     def remove_note(self, note_id: str):
         """Удалить заметку по id (no-op, если её нет)."""
         for i, n in enumerate(self._notes):
             if n.note_id == note_id:
+                self._remove_note_anchor_line(note_id)  # v1.2.4: линия не должна остаться сиротой
                 self.removeItem(n)
                 getattr(n, 'deleteLater', lambda: None)()  # v0.9.3 fix: QTextEdit внутри заметки — тяжёлый C++-объект
                 del self._notes[i]
@@ -241,6 +267,120 @@ class MapScene(QGraphicsScene):
             if n.note_id == note_id:
                 return n
         return None
+
+    # ── v1.2.4: крепление заметок к серверам + линия-якорь ────────
+
+    def notes_attached_to(self, node_id: str) -> List["StickyNote"]:
+        """Заметки, закреплённые к узлу (копия списка)."""
+        return [n for n in self._notes if getattr(n, "server_id", None) == node_id]
+
+    def attach_note_to_node(self, note, node, keep_position: bool = False) -> bool:
+        """v1.2.4: закрепить заметку к узлу (server_id + линия).
+
+        keep_position=False (меню/drag): заметка «встает» в якорь — правый верхний
+        угол узла + офсет 12 px, anchor_offset обнуляется.
+        keep_position=True (загрузка из файла / undo открепления): сохранённая позиция
+        доверяется — anchor_offset вычисляется от неё относительно якоря, заметка не
+        прыгает в угол (v1.2.4-fix: закреплённую заметку можно двигать).
+        Идемпотентно по совпадению id; False — если аргументы не на этой сцене.
+        """
+        if note is None or node is None or getattr(note, "scene", lambda: None)() is not self:
+            return False
+        r = node.sceneBoundingRect()
+        anchor_x = r.right() + self.NOTE_ANCHOR_OFFSET_X
+        anchor_y = r.top() + self.NOTE_ANCHOR_OFFSET_Y
+        if keep_position:
+            try:
+                p = note.pos()
+                note.anchor_offset = (float(p.x() - anchor_x), float(p.y() - anchor_y))
+            except RuntimeError:  # Qt teardown
+                note.anchor_offset = (0.0, 0.0)
+        else:
+            note.anchor_offset = (0.0, 0.0)
+            self._place_note_at_anchor(note, node)
+        note.server_id = node.data.id
+        self._ensure_note_anchor_line(note, node)
+        return True
+
+    def detach_note_from_node(self, note) -> bool:
+        """v1.2.4: открепить заметку (заметка остаётся на месте; линия убирается)."""
+        if not getattr(note, "server_id", None):
+            return False
+        note.server_id = None
+        self._remove_note_anchor_line(getattr(note, "note_id", None))
+        return True
+
+    def on_note_drag_updated(self, note=None):
+        """v1.2.4-fix: заметку двигают/масштабируют мышью (dragUpdated) — закреплённая
+        остаётся закреплённой: offset от якоря пересчитывается, линия-якорь следует
+        live. Свободная заметка / мёртвого узла нет — no-op."""
+        if note is None or not getattr(note, "server_id", None):
+            return
+        node = self._nodes.get(note.server_id)
+        if node is None:
+            return
+        try:
+            r = node.sceneBoundingRect()
+            p = note.pos()
+            note.anchor_offset = (p.x() - (r.right() + self.NOTE_ANCHOR_OFFSET_X),
+                                  p.y() - (r.top() + self.NOTE_ANCHOR_OFFSET_Y))
+            self._update_note_anchor_line(note, node)
+        except RuntimeError:  # Qt teardown — item уничтожен
+            pass
+
+    def update_note_anchor_for_node(self, node):
+        """v1.2.4: пересчёт позиций заметок, закреплённых к узлу (паттерн
+        update_connections_for_node). Публичный — для прямых вызовов attach/detach/load.
+        v1.2.4-fix: заметка следует с сохранением своего anchor_offset (после ручного
+        сдвига она не «впрыгивает» обратно в угол узла)."""
+        for note in self.notes_attached_to(node.data.id):
+            try:
+                if note.scene() is not None:
+                    self._place_note_at_anchor(note, node)
+                    self._update_note_anchor_line(note, node)
+            except RuntimeError:  # Qt teardown — item уничтожен
+                pass
+
+    def _place_note_at_anchor(self, note, node):
+        """Позиция заметки = якорь узла (правый верхний угол + офсет 12 px, D2)
+        + anchor_offset заметки (v1.2.4-fix: её можно двигать — смещение сохраняется)."""
+        r = node.sceneBoundingRect()
+        ox, oy = getattr(note, "anchor_offset", (0.0, 0.0))
+        note.prepareGeometryChange()  # QGraphicsProxyWidget — без этого артефакты
+        note.setPos(r.right() + self.NOTE_ANCHOR_OFFSET_X + ox,
+                    r.top() + self.NOTE_ANCHOR_OFFSET_Y + oy)
+
+    def _ensure_note_anchor_line(self, note, node):
+        line = self._note_anchor_lines.get(getattr(note, "note_id", None))
+        if line is None:
+            from PySide6.QtWidgets import QGraphicsPathItem
+            line = QGraphicsPathItem()
+            pen = QPen(QColor(StickyNote.BG_COLOR), 1.2, Qt.PenStyle.DashLine)
+            pen.setDashPattern([4.0, 3.0])
+            line.setPen(pen)
+            line.setZValue(-1.0)  # выше стрелок (-2), ниже узлов/заметок (0)
+            self.addItem(line)
+            self._note_anchor_lines[note.note_id] = line
+        self._update_note_anchor_line(note, node)
+
+    def _update_note_anchor_line(self, note, node):
+        """Прямой путь от края заметки до края узла через два edge_point (D3)."""
+        line = self._note_anchor_lines.get(getattr(note, "note_id", None))
+        if line is None:
+            return
+        nr, rr = note.sceneBoundingRect(), node.sceneBoundingRect()
+        p0 = edge_point(nr, nr.center(), rr.center())
+        p1 = edge_point(rr, rr.center(), nr.center())
+        path = QPainterPath()
+        path.moveTo(p0)
+        path.lineTo(p1)
+        line.setPath(path)
+
+    def _remove_note_anchor_line(self, note_id):
+        line = self._note_anchor_lines.pop(note_id, None) if note_id else None
+        if line is not None:
+            self.removeItem(line)
+            getattr(line, "deleteLater", lambda: None)()  # v0.9.3-паттерн против утечки
 
     # ── v0.8.1: группы узлов (кластеры/папки на карте) ───────────
 
@@ -385,6 +525,9 @@ class MapScene(QGraphicsScene):
         self._nodes.clear()
         self._arrows.clear()
         self._notes.clear()
+        # v1.2.4: линии-якоря тоже scene items — clear() их уже уничтожил (C++-объекты
+        # мёртвы, removeItem на них падает RuntimeError'ом), достаточно сбросить ссылки
+        self._note_anchor_lines.clear()
         self._groups.clear()  # v0.8.1: составы групп живут в самих items — они удалены
         self._background = None  # v0.9.1
 

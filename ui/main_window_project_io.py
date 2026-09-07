@@ -133,6 +133,21 @@ class ProjectIOMixin:
             except (TypeError, ValueError):
                 continue
             self._connect_note_signals(note)
+            # v1.2.4 (D8): закреплённые заметки — опциональное поле "server_id".
+            # Старые файлы без ключа → заметки свободные; битая ссылка (узла нет /
+            # не строка) → warning в лог + заметка свободная на сохранённой позиции.
+            # Без undo-команды: стек сбрасывается после импорта (_reset_undo_stack).
+            # v1.2.4-fix: сохранённая x/y закреплённой заметки ДОВЕРЯЕТСЯ (её можно
+            # двигать мышью) — offset от якоря вычисляется от неё, заметка остаётся
+            # там, где её оставили (keep_position=True).
+            sid = raw_note.get("server_id")
+            if isinstance(sid, str) and sid:
+                srv = self.scene.get_node(sid)
+                if srv is not None:
+                    self.scene.attach_note_to_node(note, srv, keep_position=True)
+                elif self.log:
+                    self.log.warning("Note references missing server on load (kept free)",
+                                     extra={"note": note.note_id, "server_id": sid})
 
         # v0.9.1: фон из файла. Backward-compat: проекты до v0.9.1 не имеют ключа
         # "background" → raw.get(...) = None, карта открывается без фона.
