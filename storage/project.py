@@ -65,13 +65,19 @@ def serialize_scene(
     servers = [server_data_to_dict(n.data) for n in nodes.values()]
     connections = []
     for a in arrows:
-        connections.append({
+        conn = {
             'source_id': a.source.data.id,
             'target_id': a.target.data.id,
             'label': a.label_text,
             # v0.7: тип связи (SSH/VPN/HTTP/Database/NFS/Kubernetes)
             'type': getattr(a, "connection_type", "ssh"),
-        })
+        }
+        # v1.2.6: двухсторонняя связь — опциональное поле (паттерн server_id заметок):
+        # пишется только когда true; отсутствует = односторонняя (старые файлы без
+        # ключа читаются как есть). VERSION_FORMAT "0.9" не меняется.
+        if getattr(a, "bidirectional", False):
+            conn['bidirectional'] = True
+        connections.append(conn)
 
     # v0.7.2: независимые заметки на карте (отдельный массив).
     # Для старых версий приложения поле просто не читается — backward-compat.

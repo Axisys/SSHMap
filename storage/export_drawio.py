@@ -244,14 +244,17 @@ class DrawioExporter:
             ctype = getattr(arrow, "connection_type", "ssh")
             color = type_color_safe(ctype)
             label = getattr(arrow, "label_text", "") or ""
+            # v1.2.6: двухсторонняя связь — наконечник и на стартовом конце (startArrow)
+            bidir = bool(getattr(arrow, "bidirectional", False))
             edge = ET.SubElement(root_el, "mxCell", {
                 "id": f"edge-{ai}",
                 "value": label,
                 "style": (
                     "edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;"
                     f"strokeColor={color};endArrow=classic;"
-                    f"fontColor={NODE_TEXT if self.dark else '#0f172a'};"
-                    "fontSize=10;"),
+                    + ("startArrow=classic;" if bidir else "")
+                    + f"fontColor={NODE_TEXT if self.dark else '#0f172a'};"
+                      "fontSize=10;"),
                 "edge": "1",
                 "parent": LAYER_MAP,
                 "source": src,

@@ -11,7 +11,7 @@ except ImportError:
     from graphics.connection_arrow import CONNECTION_TYPES, DEFAULT_CONNECTION_TYPE
 
 from PySide6.QtWidgets import (
-    QDialog, QFormLayout, QComboBox, QLineEdit, QDialogButtonBox,
+    QDialog, QFormLayout, QComboBox, QLineEdit, QDialogButtonBox, QCheckBox,
 )
 
 
@@ -115,6 +115,11 @@ class ConnectionDialog(QDialog):
             display = self.t(f"connection.type.{cid}") if self._i18n_available else cid
             self.type_combo.addItem(display, cid)
 
+        # v1.2.6: двухсторонняя связь (наконечники на обоих концах). Чекбокс со
+        # СВОЕЙ подписью — addRow(widget) растягивает его на обе колонки формы.
+        self.bidirectional_check = QCheckBox(
+            self.t("connection.bidirectional") if self._i18n_available else "Bidirectional")
+
         self._node_map: Dict[str, ServerNode] = {}
         for n in nodes:
             text = f"{n.data.alias} ({n.data.host})"
@@ -145,6 +150,8 @@ class ConnectionDialog(QDialog):
             self.t("connection.type_label") if self._i18n_available else "Тип связи:",
             self.type_combo,
         )
+        # v1.2.6: чекбокс на всю ширину формы (подпись — текст самого чекбокса)
+        layout.addRow(self.bidirectional_check)
 
         btns = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         btns.accepted.connect(self.accept)
@@ -152,12 +159,16 @@ class ConnectionDialog(QDialog):
         layout.addRow(btns)
 
     def get_connection(self):
-        """Возвращает (source_id, target_id, label, connection_type)."""
+        """Возвращает (source_id, target_id, label, connection_type, bidirectional).
+
+        v1.2.6: 5-й элемент — двухсторонний режим (bool); до v1.2.6 было 4 элемента.
+        """
         return (
             self.source.currentData(),
             self.target.currentData(),
             self.label.text(),
             self.type_combo.currentData(),
+            self.bidirectional_check.isChecked(),
         )
 
 
@@ -213,6 +224,12 @@ class EditConnectionDialog(QDialog):
         if type_idx >= 0:
             self.type_combo.setCurrentIndex(type_idx)
 
+        # v1.2.6: двухсторонний режим — prefill из состояния стрелки (getattr-гард:
+        # объект без атрибута, например тестовый двойник, читается как стандартный).
+        self.bidirectional_check = QCheckBox(
+            self.t("connection.bidirectional") if self._i18n_available else "Bidirectional")
+        self.bidirectional_check.setChecked(bool(getattr(arrow, "bidirectional", False)))
+
         layout.addRow(
             self.t("connection.from") if self._i18n_available else "От:",
             self.source)
@@ -225,6 +242,8 @@ class EditConnectionDialog(QDialog):
         layout.addRow(
             self.t("connection.type_label") if self._i18n_available else "Тип связи:",
             self.type_combo)
+        # v1.2.6: чекбокс на всю ширину формы (подпись — текст самого чекбокса)
+        layout.addRow(self.bidirectional_check)
 
         btns = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         btns.accepted.connect(self.accept)
@@ -232,5 +251,9 @@ class EditConnectionDialog(QDialog):
         layout.addRow(btns)
 
     def get_connection(self):
-        """Возвращает (label, connection_type) — узлы фиксированы."""
-        return (self.label.text(), self.type_combo.currentData())
+        """Возвращает (label, connection_type, bidirectional) — узлы фиксированы.
+
+        v1.2.6: 3-й элемент — двухсторонний режим (bool); до v1.2.6 было 2 элемента.
+        """
+        return (self.label.text(), self.type_combo.currentData(),
+                self.bidirectional_check.isChecked())

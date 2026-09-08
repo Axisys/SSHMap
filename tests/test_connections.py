@@ -127,8 +127,9 @@ check("ConnectionDialog exposes type combo with 6 types", cdlg.type_combo.count(
 check("ConnectionDialog prefills source/target (drag mode)",
       cdlg.source.currentData() == "oldaaa01" and cdlg.target.currentData() == "oldbbb02")
 res = cdlg.get_connection()
-check("get_connection returns 4-tuple with valid type",
-      len(res) == 4 and res[3] in CONNECTION_TYPES, str(res))
+# v1.2.6: кортеж расширен до 5 элементов (5-й — bidirectional, дефолт False)
+check("get_connection returns 5-tuple with valid type + bidir flag",
+      len(res) == 5 and res[3] in CONNECTION_TYPES and res[4] is False, str(res))
 
 # Drag-режим: Shift+ЛКМ на узле → движение → отпускание над другим узлом.
 # Модальный диалог заменяем фейком (offscreen), проверяется весь путь MapView→MainWindow.
@@ -152,7 +153,10 @@ class _FakeConnDialog:
     def exec(self): return 1  # QDialog.Accepted
     def get_connection(self):
         src, tgt = drag_calls[-1]
-        return (src, tgt, "drag-label", "http")
+        # v1.2.6: 5-кортеж (src, tgt, label, ctype, bidirectional) — как у настоящего диалога;
+        # старый 4-кортеж роняет _add_connection ValueError'ом → модалка QMessageBox.critical
+        # зависает offscreen на faulthandler-таймаут (180 c).
+        return (src, tgt, "drag-label", "http", False)
 
 _orig_cd = MW.ConnectionDialog
 MW.ConnectionDialog = _FakeConnDialog

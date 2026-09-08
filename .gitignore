@@ -13,6 +13,7 @@ __pycache__/
 
 # Избыточная в подробностях документация, все основное в README.md
 AUDIT.md
+PYTE82_AUDIT.md
 CHANGELOG.md
 CHANGELOG_HISTORY.md
 DOCUMENTATION.md
@@ -37,6 +38,7 @@ _tmp_testdata*/
 
 # Данные карт: содержат топологию/хосты реальной сети — не публиковать
 server_map1.json
+server_map2.json
 server_map1.drawio
 *.sshmap.json
 

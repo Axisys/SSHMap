@@ -108,6 +108,7 @@
   "connection.to": "К:",
   "connection.label": "Метка:",
   "connection.type_label": "Тип связи:",
+  "connection.bidirectional": "Двусторонняя связь",
   "connection.type.ssh": "SSH",
   "connection.type.vpn": "VPN",
   "connection.type.http": "HTTP",

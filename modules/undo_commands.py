@@ -225,12 +225,14 @@ class CmdAddRemoveNode(_MapCommand):
     """
 
     def __init__(self, win, scene, data, mode: str = "add",
-                 arrows: Optional[List[Tuple[str, str, str, str]]] = None):
+                 arrows: Optional[List[Tuple]] = None):
         super().__init__(win, "Add server" if mode == "add" else "Delete server")
         self._scene = scene
         self._data = data          # единый ServerData (id стабилен между undo/redo)
         self._mode = mode
-        self._arrows = list(arrows or [])  # (source_id, target_id, label, ctype)
+        # v1.2.6: 5-кортежи (source_id, target_id, label, ctype, bidirectional);
+        # 4-кортежи до v1.2.6 поддерживаются (restore читает bidir как False).
+        self._arrows = list(arrows or [])
         # v0.9.4-fix (орфанные пароли): при удалении узла пароль удаляется из
         # keyring; чтобы Ctrl+Z мог его вернуть, заранее читаем его в память.
         # v1.1.2RC1 (бонус-N11): стэш нужен и в режиме "add" — дублирование узла
@@ -278,10 +280,14 @@ class CmdAddRemoveNode(_MapCommand):
         else:
             self._scene.add_server(self._data)
             self._restore_keyring_password()
-            for src, tgt, lbl, ctype in self._arrows:
+            for rec in self._arrows:
+                # v1.2.6: стэш — 5-кортежи (src, tgt, label, ctype, bidir); старые
+                # 4-кортежи (вызовы до v1.2.6) читаются как односторонние.
+                src, tgt, lbl, ctype = rec[0], rec[1], rec[2], rec[3]
+                bidir = bool(rec[4]) if len(rec) > 4 else False
                 if (self._scene.has_node(src) and self._scene.has_node(tgt)
                         and not self._scene.has_connection(src, tgt)):
-                    self._scene.add_connection(src, tgt, lbl, ctype)
+                    self._scene.add_connection(src, tgt, lbl, ctype, bidirectional=bidir)
         self._refresh()
 
 
@@ -362,7 +368,10 @@ class CmdAddRemoveNodeBatch(_MapCommand):
 
 class CmdAddRemoveConnection(_MapCommand):
     def __init__(self, win, scene, source_id: str, target_id: str,
-                 label: str, ctype: str, mode: str = "add"):
+                 label: str, ctype: str, mode: str = "add",
+                 bidirectional: bool = False):
+        # v1.2.6: bidirectional — в хвосте сигнатуры (после mode), чтобы старые
+        # позиционные вызовы (mode 7-м аргументом) не ломались.
         super().__init__(win, "Add connection" if mode == "add" else "Delete connection")
         self._scene = scene
         self._src = source_id
@@ -370,6 +379,7 @@ class CmdAddRemoveConnection(_MapCommand):
         self._label = label
         self._ctype = ctype
         self._mode = mode
+        self._bidir = bool(bidirectional)
 
     def _find_arrow(self):
         for a in self._scene.arrows():
@@ -379,7 +389,8 @@ class CmdAddRemoveConnection(_MapCommand):
 
     def redo(self):
         if self._mode == "add":
-            self._scene.add_connection(self._src, self._tgt, self._label, self._ctype)
+            self._scene.add_connection(self._src, self._tgt, self._label, self._ctype,
+                                       bidirectional=self._bidir)
         else:
             arrow = self._find_arrow()
             if arrow is not None:
@@ -392,7 +403,8 @@ class CmdAddRemoveConnection(_MapCommand):
             if arrow is not None:
                 self._scene.remove_connection(arrow)
         else:
-            self._scene.add_connection(self._src, self._tgt, self._label, self._ctype)
+            self._scene.add_connection(self._src, self._tgt, self._label, self._ctype,
+                                       bidirectional=self._bidir)
         self._refresh()
 
 
@@ -617,14 +629,16 @@ class CmdAttachNote(_MapCommand):
 # ── EditConnection: правка метки/типа связи ─────────────────────
 
 class CmdEditConnection(_MapCommand):
-    def __init__(self, win, arrow, old_label: str, old_type: str,
-                 new_label: str, new_type: str):
+    def __init__(self, win, arrow, old_label: str, old_type: str, old_bidir: bool,
+                 new_label: str, new_type: str, new_bidir: bool):
+        # v1.2.6: состояние связи — тройки (label, type, bidirectional) вместо пар;
+        # порядок аргументов не меняется для старых трёх первых/двух последних полей.
         super().__init__(win, "Edit connection")
         self._arrow = arrow
-        self._old = (old_label, old_type)
-        self._new = (new_label, new_type)
+        self._old = (old_label, old_type, bool(old_bidir))
+        self._new = (new_label, new_type, bool(new_bidir))
 
-    def _apply(self, label: str, ctype: str):
+    def _apply(self, label: str, ctype: str, bidir: bool):
         try:
             if self._arrow.scene() is None:
                 return
@@ -632,6 +646,10 @@ class CmdEditConnection(_MapCommand):
                 self._arrow.set_label(label)
             if ctype != self._arrow.connection_type:
                 self._arrow.set_type(ctype)
+            # v1.2.6: двухсторонний режим (set_bidirectional идемпотентен, но
+            # сравниваем явно — паттерн set_type/set_label выше)
+            if bidir != bool(getattr(self._arrow, "bidirectional", False)):
+                self._arrow.set_bidirectional(bidir)
         except RuntimeError:
             pass
 

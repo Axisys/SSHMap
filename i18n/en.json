@@ -108,6 +108,7 @@
   "connection.to": "To:",
   "connection.label": "Label:",
   "connection.type_label": "Connection type:",
+  "connection.bidirectional": "Bidirectional",
   "connection.type.ssh": "SSH",
   "connection.type.vpn": "VPN",
   "connection.type.http": "HTTP",

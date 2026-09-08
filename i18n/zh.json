@@ -108,6 +108,7 @@
   "connection.to": "到：",
   "connection.label": "标签：",
   "connection.type_label": "连接类型：",
+  "connection.bidirectional": "双向连接",
   "connection.type.ssh": "SSH",
   "connection.type.vpn": "VPN",
   "connection.type.http": "HTTP",

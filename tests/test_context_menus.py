@@ -48,20 +48,20 @@ check("scene.remove_connection returns False for unknown arrow",
       win73.scene.remove_connection(arrow73) is False)
 arrow73 = win73.scene.add_connection(d_a.id, d_b.id, "l1", "vpn")  # вернуть для следующих тестов
 
-# EditConnectionDialog: prefill метки/типа, get_connection -> (label, ctype)
+# EditConnectionDialog: prefill метки/типа, get_connection -> (label, ctype, bidir) (v1.2.6)
 try:
     ecd = _ECD73(arrow73, None)
     check("EditConnectionDialog prefills label", ecd.label.text() == "l1")
     check("EditConnectionDialog prefills type vpn", ecd.type_combo.currentData() == "vpn")
     check("EditConnectionDialog source is readonly", ecd.source.isReadOnly() and ecd.target.isReadOnly())
-    check("EditConnectionDialog get_connection returns (label, ctype)",
-          ecd.get_connection() == ("l1", "vpn"))
+    check("EditConnectionDialog get_connection returns (label, ctype, bidir)",
+          ecd.get_connection() == ("l1", "vpn", False))
 except Exception:
     check("EditConnectionDialog builds", False, traceback.format_exc(limit=1))
 
 # MainWindow._edit_connection: применяет метку и тип к стрелке + dirty-маркер
 class _FakeDlg:
-    def __init__(self, label, ctype): self._r = (label, ctype)
+    def __init__(self, label, ctype, bidir=False): self._r = (label, ctype, bidir)  # v1.2.6: 3-кортеж
     def exec(self): return 1  # QDialog.Accepted
     def get_connection(self): return self._r
 _real_ecd = _ECD73

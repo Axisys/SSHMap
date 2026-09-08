@@ -96,8 +96,12 @@ class ProjectIOMixin:
                 continue  # битая запись — пропускаем без падения загрузки
             try:
                 ctype = c.get("type", DEFAULT_CONNECTION_TYPE)  # v0.6: нет поля type → SSH
+                # v1.2.6: нет поля bidirectional (старые файлы) → односторонняя;
+                # битое значение (не bool) нормализуется через bool() без падения.
+                bidir = bool(c.get("bidirectional", False))
                 src_id, tgt_id = c["source_id"], c["target_id"]
-                arrow = self.scene.add_connection(src_id, tgt_id, c.get("label", ""), ctype)
+                arrow = self.scene.add_connection(src_id, tgt_id, c.get("label", ""), ctype,
+                                                  bidirectional=bidir)
             except KeyError as e:
                 if self.log:
                     self.log.warning("Skipping broken connection record on load", extra={"error": str(e)})

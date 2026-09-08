@@ -19,7 +19,7 @@ pipx install .                         # or pip install . → sshmap command (en
 # Tests without pytest: topical test_*.py files + a single parallel runner.
 # Tests are isolated: they write to a temporary HOME and set UTF-8 stdout
 # themselves — no extra environment needed on cp1251 consoles or in CI:
-python tests/run_all.py              # everything (54 test files + i18n check): parallel (4 workers), results table + single exit code (0 ⇔ all green)
+python tests/run_all.py              # everything (55 test files + i18n check): parallel (4 workers), results table + single exit code (0 ⇔ all green)
 python tests/run_all.py --workers 8  # worker count (1 = sequential, as before)
 python tests/run_all.py keyring      # filter by substring in file name
 python tests/test_tags.py            # a single file (from the project root)
@@ -41,7 +41,7 @@ version.py                   # Single source of truth for APP_VERSION / VERSION_
 pyproject.toml               # Installable identity (entry point sshmap = main:main) — checked by tests/test_pyproject.py
 models/                      # server.py — ServerData (password never serialized); profile.py — profiles, passwords in keyring
 graphics/                    # MapScene; MapView (zoom 0.1–5.0, panning, multi-selection); ServerNode (status card);
-                             # ConnectionArrow (cubic Bezier, 6 types); StickyNote (pinning to a node); NodeGroup; BackgroundImage
+                             # ConnectionArrow (cubic Bezier, 6 types, optional bidirectional heads); StickyNote (pinning to a node); NodeGroup; BackgroundImage
 modules/                     # ssh_worker.py — one-shot SSH worker + registry; ssh_terminal.py — terminal thread + tabbed window;
                              # terminal_page.py — session as a reusable widget (single idempotent shutdown()); terminal_dock.py — "tabs" mode dock;
                              # multi_input.py — multi-input broadcast hub; sftp_worker.py / sftp_tab.py — SFTP over the live transport;
@@ -54,7 +54,7 @@ dialogs/                     # AddServer, SSHConnect (+ external terminal), Conn
 ui/                          # main_window.py — façade over ProjectIOMixin / NodeOpsMixin / SshMixin; sidebar.py; map_search_bar.py (Ctrl+F);
                              # command_palette.py (Ctrl+K); icons.py; mixin_support.py; theme.py (central UI palette, radii, fonts)
 i18n/                        # t(key, **kwargs); en/ru/zh JSON with identical key sets (parity pinned in tests); en is the default for new users
-tests/                       # 54 × test_*.py without pytest + _common.py harness + run_all.py (parallel runner) + check_i18n_keys.py — map: tests/INDEX.md
+tests/                       # 55 × test_*.py without pytest + _common.py harness + run_all.py (parallel runner) + check_i18n_keys.py — map: tests/INDEX.md
 ```
 
 ---
@@ -70,7 +70,7 @@ tests/                       # 54 × test_*.py without pytest + _common.py harne
                 "os_name": "", "cpu_model": "", "tags": ["prod", "dev"],
                 "quick_launch": [{"type": "url", "name": "Webmin", "value": "http://host:10000/"},
                                  {"type": "command", "name": "K9S", "value": "k9s"}]}],
-  "connections": [{"source_id": "...", "target_id": "...", "label": "", "type": "ssh"}],
+  "connections": [{"source_id": "...", "target_id": "...", "label": "", "type": "ssh", "bidirectional": true}],
   "notes":  [{"id": "...", "text": "", "x": 0.0, "y": 0.0, "width": 240.0, "height": 160.0, "server_id": "..."}],
   "groups": [{"id": "...", "name": "", "x": 0.0, "y": 0.0, "width": 480.0, "height": 320.0}],
   "background": {"path": "/path/to/background.png", "x": 0.0, "y": 0.0, "width": 1920.0, "height": 1080.0},
@@ -81,6 +81,7 @@ tests/                       # 54 × test_*.py without pytest + _common.py harne
 Format invariants:
 - `password` is **never** serialized — keyring only (`server_data_to_dict()` excludes it).
 - Connection types: `ssh|vpn|http|database|nfs|kubernetes`; unknown/missing type → `ssh`. The `version` field is not validated on load (files 0.6+ are readable).
+- `bidirectional` — an **optional** connection field: written only when true; absent = one-way arrow (old files without the key load as-is). A bidirectional arrow draws heads on BOTH ends of the curve (two-way data exchange).
 - Group membership is **not stored** — computed from geometry (card center inside the topmost group, exclusive).
 - `tags` — an array of strings in the server record; missing or non-array in old JSON → empty list (`server_data_from_dict` normalizes it).
 - `quick_launch` — an array of Quick Launch items `{"type": "url"|"command", "name", "value"}`; missing in old JSON → empty list, broken records are dropped (`sanitize_quick_launch`). URLs open in the default browser, commands become the first command in the SSH terminal.
@@ -170,7 +171,7 @@ en (default) / ru / zh. Rule: a new key is added to all 3 files at once; check �
 ## 7. State & Roadmap
 
 **Implemented features** (details in sections 3–4):
-- interactive map: nodes, Bezier connections of 6 types, notes, groups, background image with drag/resize
+- interactive map: nodes, Bezier connections of 6 types (one-way or bidirectional), notes, groups, background image with drag/resize
 - node statuses online/warn/offline: parallel probes, auto-interval for large maps
 - built-in SSH terminal on pyte (scrollback, mouse selection, full keyboard) + external system terminal — details in §4 "Terminal"
 - SFTP tab in the terminal window: files over the same SSH connection — listing/".." navigation, upload/download with progress in the status bar and cancel
@@ -198,7 +199,7 @@ en (default) / ru / zh. Rule: a new key is added to all 3 files at once; check �
 - TOFU on first connect (a new host key is accepted automatically) and keyring limitations — details in "Security".
 
 **Roadmap** (tasks, order, acceptance — in ROADMAP.md):
-- **v1.2.x series** (the "window → page" refactor `TerminalSessionPage` — v1.2, sessions as tabs in a window — v1.2.1, terminals dock of the map window — v1.2.2, multi-input broadcast — v1.2.3, note pinning to servers — v1.2.4, independent sidebar/map collapse into thin strips — v1.2.4.1, central theme `ui/theme.py` (palette/radii/fonts) — v1.2.5): map animations; terminal selection and context menu; D&D into the SFTP tab; dead code removal + full wcwidth CJK; log highlighting (opt-in).
+- **v1.2.x series** (the "window → page" refactor `TerminalSessionPage` — v1.2, sessions as tabs in a window — v1.2.1, terminals dock of the map window — v1.2.2, multi-input broadcast — v1.2.3, note pinning to servers — v1.2.4, independent sidebar/map collapse into thin strips — v1.2.4.1, central theme `ui/theme.py` (palette/radii/fonts) — v1.2.5, bidirectional arrows — v1.2.6): terminal selection and context menu; D&D into the SFTP tab; dead code removal + full wcwidth CJK; log highlighting (opt-in).
 - **v1.3.x series**: terminal command library (macros) — one click sends a saved command/script to the active terminal; text viewer in the SFTP tab; configurable hotkeys; languages without writing code; lightweight plugins.
 
 ---

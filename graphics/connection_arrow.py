@@ -144,7 +144,7 @@ class ConnectionArrow(QGraphicsPathItem):
     COLOR_HOVER = QColor(theme.ARROW_HOVER_COMPAT)  # сохранено для совместимости с v0.6
 
     def __init__(self, source: ServerNode, target: ServerNode, label: str = "",
-                 ctype: str = DEFAULT_CONNECTION_TYPE, parent=None):
+                 ctype: str = DEFAULT_CONNECTION_TYPE, bidirectional: bool = False, parent=None):
         super().__init__(parent)
         self.source = source
         self.target = target
@@ -154,6 +154,9 @@ class ConnectionArrow(QGraphicsPathItem):
             ctype = DEFAULT_CONNECTION_TYPE
         self.connection_type = ctype
         self._base_color = type_color(ctype)
+        # v1.2.6: двухсторонняя связь — наконечники на ОБАХ концах кривой
+        # (двухсторонний обмен данными); стандартный режим — только целевой.
+        self.bidirectional = bool(bidirectional)
         # UI polish: контрольные точки кривой для расширенной зоны hit-testing (contains());
         # None до первого успешного update_position() — contains() тогда в базовом режиме.
         self._curve_pts = None
@@ -163,6 +166,9 @@ class ConnectionArrow(QGraphicsPathItem):
         self.setToolTip(_t(f"connection.type.{self.connection_type}"))
 
         self._arrow_head = QGraphicsPathItem(self)
+        # v1.2.6: наконечник у ИСХОДНОГО узла (двухсторонний режим); в стандартном
+        # режиме путь пуст — item невидим, но живёт вместе с родителем (без утечек).
+        self._arrow_head_src = QGraphicsPathItem(self)
 
         # UI polish: скруглённый фон метки (PathItem вместо RectItem)
         self._label_bg = QGraphicsPathItem(self)
@@ -188,6 +194,9 @@ class ConnectionArrow(QGraphicsPathItem):
         self.setPen(QPen(color, width))
         self._arrow_head.setPen(QPen(color, 1.5))
         self._arrow_head.setBrush(QBrush(color))
+        # v1.2.6: второй наконечник держит то же оформление (в стандартном режиме путь пуст)
+        self._arrow_head_src.setPen(QPen(color, 1.5))
+        self._arrow_head_src.setBrush(QBrush(color))
         self._label.setDefaultTextColor(color)
 
     # ── Геометрия (v0.7): Безье + край-к-краю ───────────────────
@@ -241,6 +250,32 @@ class ConnectionArrow(QGraphicsPathItem):
         head_path.lineTo(right)
         head_path.closeSubpath()
         self._arrow_head.setPath(head_path)
+
+        # v1.2.6: двухсторонний режим — второй наконечник у начала кривой (p0).
+        # Ориентация ПРОТИВ направления движения: кончик ровно на границе исходного
+        # узла, крылья — на стороне кривой (отсюда «+», а не «-» как у целевого
+        # наконечника): наконечник смотрит НА свой узел, и оба конца дают ←——→.
+        # С «-» треугольник указывал в сторону цели и его тело уходило под узел
+        # (стрелки zValue -2) — визуально второй наконечник был невидим.
+        # Стандартный режим — пустой путь (item невидим).
+        if self.bidirectional:
+            sx = c1.x() - p0.x()
+            sy = c1.y() - p0.y()
+            if math.hypot(sx, sy) < 1e-9:
+                sx, sy = p3.x() - p0.x(), p3.y() - p0.y()
+            s_angle = math.atan2(sy, sx)
+            src_head = QPainterPath()
+            src_head.moveTo(p0)
+            src_head.lineTo(
+                QPointF(p0.x() + math.cos(s_angle - math.pi / 6) * arrow_size,
+                        p0.y() + math.sin(s_angle - math.pi / 6) * arrow_size))
+            src_head.lineTo(
+                QPointF(p0.x() + math.cos(s_angle + math.pi / 6) * arrow_size,
+                        p0.y() + math.sin(s_angle + math.pi / 6) * arrow_size))
+            src_head.closeSubpath()
+            self._arrow_head_src.setPath(src_head)
+        else:
+            self._arrow_head_src.setPath(QPainterPath())
 
         # Метка — в середине кривой, со смещением на сторону, противоположную изгибу
         mid = curve_midpoint(p0, c1, c2, p3)
@@ -309,6 +344,18 @@ class ConnectionArrow(QGraphicsPathItem):
         self._apply_visual_state()
         # v1.1.1: тип на плашке мог появиться/измениться — пересобираем текст метки
         self.refresh_label()
+
+    def set_bidirectional(self, flag: bool):
+        """v1.2.6: включить/выключить двухсторонний режим (наконечник на обоих концах).
+
+        Идемпотентно при том же значении; переключение пересчитывает геометрию —
+        второй наконечник появляется/исчезает без пересоздания item'а.
+        """
+        flag = bool(flag)
+        if flag == self.bidirectional:
+            return
+        self.bidirectional = flag
+        self.update_position()
 
     def set_label(self, text: str):
         self.label_text = text

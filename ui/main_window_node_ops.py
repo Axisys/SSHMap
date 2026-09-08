@@ -272,8 +272,8 @@ class NodeOpsMixin:
             )
             if dlg.exec() == QDialog.Accepted:
                 # get_connection() возвращает id узлов (строки), а не объекты ServerNode;
-                # 4-й элемент — тип связи (v0.7)
-                src, tgt, lbl, ctype = dlg.get_connection()
+                # 4-й элемент — тип связи (v0.7), 5-й — двухсторонний режим (v1.2.6)
+                src, tgt, lbl, ctype, bidir = dlg.get_connection()
                 if src == tgt:
                     QMessageBox.warning(self, self.t("msg.error_title"), 
                                       self.t("validation.self_connection"))
@@ -281,7 +281,7 @@ class NodeOpsMixin:
                 # v0.8.3: связь создаёт undo-команда (push сам выполняет redo)
                 from modules.undo_commands import CmdAddRemoveConnection
                 self._push_command(CmdAddRemoveConnection(
-                    self, self.scene, src, tgt, lbl, ctype, "add"))
+                    self, self.scene, src, tgt, lbl, ctype, "add", bidirectional=bidir))
                 if not self.scene.has_connection(src, tgt):
                     # команда не смогла создать (узлы исчезли?) — как раньше, предупреждение
                     QMessageBox.warning(self, self.t("msg.error_title"),
@@ -399,7 +399,9 @@ class NodeOpsMixin:
             for n in list(self.scene.notes_attached_to(node.data.id)):
                 self._push_command(CmdAttachNote(self, n, node.data.id, "detach"))
             arrows = [
-                (a.source.data.id, a.target.data.id, a.label_text, a.connection_type)
+                # v1.2.6: 5-й элемент — двухсторонний режим (undo вернёт связь как была)
+                (a.source.data.id, a.target.data.id, a.label_text, a.connection_type,
+                 bool(getattr(a, "bidirectional", False)))
                 for a in self.scene.arrows()
                 if a.source is node or a.target is node
             ]
@@ -526,11 +528,15 @@ class NodeOpsMixin:
             from dialogs.connection_dialog import EditConnectionDialog
             dlg = EditConnectionDialog(arrow, self)
             if dlg.exec() == QDialog.Accepted:
-                label, ctype = dlg.get_connection()
-                # v0.8.3: правка связи (метка/тип) — undo-команда
+                # v1.2.6: 3-й элемент — двухсторонний режим (был 2-хэлементный кортеж)
+                label, ctype, bidir = dlg.get_connection()
+                # v0.8.3: правка связи (метка/тип/направление) — undo-команда
                 from modules.undo_commands import CmdEditConnection
                 self._push_command(CmdEditConnection(
-                    self, arrow, arrow.label_text, arrow.connection_type, label, ctype))
+                    self, arrow,
+                    arrow.label_text, arrow.connection_type,
+                    bool(getattr(arrow, "bidirectional", False)),
+                    label, ctype, bidir))
                 self.statusBar().showMessage(self.t("status.connection_updated"))
                 self._mark_dirty()  # ← unsaved changes
         except Exception as e:
@@ -621,7 +627,9 @@ class NodeOpsMixin:
             self._push_command(CmdAttachNote(self, n, node.data.id, "detach"))
         # v0.8.3: захват стрелок узла ДО удаления — undo восстановит их вместе с узлом
         arrows = [
-            (a.source.data.id, a.target.data.id, a.label_text, a.connection_type)
+            # v1.2.6: 5-й элемент — двухсторонний режим (undo вернёт связь как была)
+            (a.source.data.id, a.target.data.id, a.label_text, a.connection_type,
+             bool(getattr(a, "bidirectional", False)))
             for a in self.scene.arrows()
             if a.source is node or a.target is node
         ]

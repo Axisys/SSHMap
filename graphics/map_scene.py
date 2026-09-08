@@ -187,14 +187,17 @@ class MapScene(QGraphicsScene):
             del self._nodes[node_id]
 
     def add_connection(self, source_id: str, target_id: str, label: str = "",
-                       ctype: str = DEFAULT_CONNECTION_TYPE) -> Optional[ConnectionArrow]:
+                       ctype: str = DEFAULT_CONNECTION_TYPE,
+                       bidirectional: bool = False) -> Optional[ConnectionArrow]:
+        # v1.2.6: bidirectional — наконечники на обоих концах (опционально; дефолт
+        # False — стандартная односторонняя стрелка, как до v1.2.6).
         if source_id not in self._nodes or target_id not in self._nodes:
             return None
         if self.has_connection(source_id, target_id):
             return None  # дубль связи не создаём
         src = self._nodes[source_id]
         tgt = self._nodes[target_id]
-        arrow = ConnectionArrow(src, tgt, label, ctype)
+        arrow = ConnectionArrow(src, tgt, label, ctype, bidirectional=bidirectional)
         self.addItem(arrow)
         self._arrows.append(arrow)
         return arrow
