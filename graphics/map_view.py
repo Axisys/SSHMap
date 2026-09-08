@@ -32,6 +32,11 @@ except ImportError:
     except ImportError:
         NodeGroup = None
 
+try:  # v1.2.5: центральная тема (палитра/радиусы/шрифты — ui/theme.py)
+    from ..ui import theme
+except ImportError:
+    from ui import theme
+
 
 if TYPE_CHECKING:
     from ..graphics.map_scene import MapScene
@@ -73,7 +78,7 @@ class MapView(QGraphicsView):
         self.setTransformationAnchor(QGraphicsView.AnchorUnderMouse)
         self.setResizeAnchor(QGraphicsView.AnchorViewCenter)
         self.setDragMode(QGraphicsView.ScrollHandDrag)
-        self.setBackgroundBrush(QBrush(QColor("#020617")))
+        self.setBackgroundBrush(QBrush(QColor(theme.CANVAS_BG)))  # v1.2.5: центральная тема
         self._zoom = 1.0
 
         # ── Drag-режим создания связи (v0.7) ─────────────
@@ -484,10 +489,12 @@ class MapView(QGraphicsView):
         self._rubber_select_origin = scene_pos
         self._rubber_saved_selection = list(self.scene().selectedItems()) \
             if additive else []
-        pen = QPen(QColor("#38bdf8"), 0)  # cosmetic pen — толщина не зависит от зума
+        pen = QPen(QColor(theme.ACCENT), 0)  # v1.2.5: акцент темы; cosmetic pen — толщина не зависит от зума
         self._rubber_select_item = QGraphicsRectItem()
         self._rubber_select_item.setPen(pen)
-        self._rubber_select_item.setBrush(QBrush(QColor(56, 189, 248, 30)))
+        _rubber_fill = QColor(theme.ACCENT)        # v1.2.5: ACCENT + alpha (заливка рамки выделения)
+        _rubber_fill.setAlpha(30)
+        self._rubber_select_item.setBrush(QBrush(_rubber_fill))
         self._rubber_select_item.setZValue(200)
         self.scene().addItem(self._rubber_select_item)
         self.setCursor(Qt.CrossCursor)

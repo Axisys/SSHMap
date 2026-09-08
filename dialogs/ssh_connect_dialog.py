@@ -18,6 +18,11 @@ try:
 except ImportError:
     from models.profile import load_profiles as _load_profiles, get_profile_by_id as _get_pw
 
+try:  # v1.2.5: центральная тема (палитра/радиусы/шрифты — ui/theme.py)
+    from ..ui import theme
+except ImportError:
+    from ui import theme
+
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QLabel, QFormLayout, QLineEdit, QSpinBox,
     QPushButton, QHBoxLayout, QFileDialog, QMessageBox, QComboBox,
@@ -124,16 +129,16 @@ class SSHConnectDialog(QDialog):
 
         layout.addLayout(profile_section)
 
-        # Separator
+        # Separator (v1.2.5: цвета — из центральной темы ui/theme.py)
         sep = QLabel("─" * 50)
-        sep.setStyleSheet("color: #334155;")
+        sep.setStyleSheet(f"color: {theme.SURFACE_ALT};")
         layout.addWidget(sep)
         layout.addSpacing(6)
 
         # ── Server info (read-only) ──
         info_text = f"{self.t('ssh.server_info')} {self.server_data.host}"
         info_label = QLabel(f"<b>{info_text}</b>")
-        info_label.setStyleSheet("font-weight: bold; color: #e2e8f0;")
+        info_label.setStyleSheet(f"font-weight: bold; color: {theme.TEXT_PRIMARY};")
         layout.addWidget(info_label)
 
         # ── Auth form ──
@@ -174,7 +179,7 @@ class SSHConnectDialog(QDialog):
 
         ext_section = QFormLayout()
         ext_title = QLabel(self.t("ssh_ext.section"))
-        ext_title.setStyleSheet("font-weight: bold; color: #e2e8f0;")
+        ext_title.setStyleSheet(f"font-weight: bold; color: {theme.TEXT_PRIMARY};")
         ext_section.addRow("", ext_title)
 
         self.ext_terminal_combo = QComboBox()
@@ -226,7 +231,7 @@ class SSHConnectDialog(QDialog):
 
         # ── Status ──
         self.status_label = QLabel("")
-        self.status_label.setStyleSheet("color: #94a3b8;")
+        self.status_label.setStyleSheet(f"color: {theme.TEXT_MUTED};")
         layout.addWidget(self.status_label)
 
     def _on_profile_changed(self, index: int):

@@ -44,6 +44,11 @@ except Exception:  # noqa: BLE001 — импорт вне дерева прое�
     def _t(key, **kwargs):  # type: ignore
         return key
 
+try:  # v1.2.5: центральная тема (статус-лейблы — ui/theme.py)
+    from ..ui import theme
+except ImportError:
+    from ui import theme
+
 
 def format_size(n) -> str:
     """Человекочитаемый размер: 0 → "0 B", 1536 → "1.5 KB" (без локалей)."""
@@ -102,7 +107,8 @@ class SftpTab(QWidget):
 
         # Строка пути — текущий каталог («адресная строка»).
         self.path_label = QLabel(t("sftp.waiting_connection"))
-        self.path_label.setStyleSheet("color: #94a3b8; padding: 2px 0;")
+        # v1.2.5: цвет — из центральной темы (ui/theme.py); значение без изменений
+        self.path_label.setStyleSheet(f"color: {theme.TEXT_MUTED}; padding: 2px 0;")
         outer.addWidget(self.path_label)
 
         # Кнопки: навигация | операции.

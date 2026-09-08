@@ -52,6 +52,11 @@ try:
 except ImportError:
     from modules.sftp_tab import SftpTab, format_size
 
+try:  # v1.2.5: центральная тема (статус-лейблы — ui/theme.py)
+    from ..ui import theme
+except ImportError:
+    from ui import theme
+
 
 def _st_module():
     """Модуль ssh_terminal в момент вызова (тестовый шов подмены атрибутов).
@@ -115,7 +120,8 @@ class TerminalSessionPage(QWidget):
         layout = QVBoxLayout(self)
 
         self.status_label = QLabel(t("terminal.initializing"))
-        self.status_label.setStyleSheet("color: #94a3b8; padding: 4px 0;")
+        # v1.2.5: цвет — из центральной темы (ui/theme.py); значение без изменений
+        self.status_label.setStyleSheet(f"color: {theme.TEXT_MUTED}; padding: 4px 0;")
         layout.addWidget(self.status_label)
 
         # AUDIT v0.7.2 (средняя #7): явный пароль приоритетнее node.data.password —

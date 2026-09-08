@@ -71,12 +71,21 @@ try:  # v1.2.3 (ROADMAP v1.2.3): мультинабор — хаб broadcast'а 
 except ImportError:
     from modules import multi_input as _multi_input_mod
 
+try:  # v1.2.5: центральная тема (палитра/радиусы/шрифты — ui/theme.py)
+    from . import theme
+except ImportError:
+    try:
+        from ui import theme
+    except ImportError:  # flat-раскладка: каталог ui/ сам на sys.path
+        import theme
 
-from PySide6.QtCore import Qt, QTimer
+
+from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtGui import (
     QFont,      # v1.1.1: шрифт UI из конфига (QApplication.setFont)
     QMouseEvent,
     QUndoStack,  # v0.8.3: undo/redo
+    QColor, QIcon, QPainter, QPainterPath, QPen, QPixmap,  # v1.2.4.1: полоски/ромбы сворачивания
 )
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QHBoxLayout, QSplitter,
@@ -97,6 +106,100 @@ except ImportError:  # flat-раскладка без пакета (паттер
     from main_window_project_io import ProjectIOMixin
     from main_window_node_ops import NodeOpsMixin, _is_scene_point
     from main_window_ssh import SshMixin
+
+
+# ── v1.2.4.1: сворачивание сайдбара/карты в тонкую линию (ROADMAP v1.2.4.1) ──
+
+def _diamond_icon():
+    """Векторный ромб «◇» на канвасе 20×20 (угловые кнопки сворачивания).
+
+    v1.2.4.1-fix (запрос тестировщика): вместо шевронов «›»/«‹» — единый ромб у обеих
+    панелей (сайдбар и карта — оба внизу справа; верх карты зарезервирован под
+    миникарту). Та же техника, что ui/icons.py (QPainterPath на прозрачном QPixmap),
+    но иконки живут локально: в _DRAWERS по спецификации добавляется только пара
+    sidebar_panel/map_panel (пункты меню «Вид»), а ромбы кнопок/полосок — служебная
+    графика окна.
+    """
+    pm = QPixmap(20, 20)
+    pm.fill(QColor(0, 0, 0, 0))
+    p = QPainter(pm)
+    p.setRenderHint(QPainter.Antialiasing, True)
+    pen = QPen(QColor(theme.ICON_COLOR), 1.8)  # v1.2.5: центральная тема
+    pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+    pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+    p.setPen(pen)
+    path = QPainterPath()
+    path.moveTo(10.0, 4.5)
+    path.lineTo(15.5, 10.0)
+    path.lineTo(10.0, 15.5)
+    path.lineTo(4.5, 10.0)
+    path.closeSubpath()
+    p.drawPath(path)
+    p.end()
+    icon = QIcon()
+    icon.addPixmap(pm)
+    return icon
+
+
+class _CollapseStrip(QWidget):
+    """Тонкая кликабельная полоска свёрнутой панели (~18 px; ROADMAP v1.2.4.1, задача 1).
+
+    Клик в ЛЮБОМ месте = развернуть панель (expand_requested); внутри — ромб «◇»
+    внизу справа (v1.2.4.1-fix: вместо шеврона, запрос тестировщика) + tooltip
+    (выставляет MainWindow).
+    Реальный виджет панели при этом hide()н: скрытый член контейнера занимает 0px —
+    нативный Qt, кастомного лейаута нет. Цвета — тёмная палитра Fusion приложения
+    (theme.WINDOW_BG / theme.BASE_BG, v1.2.5): полоска читается и на фоне сайдбара, и карты.
+    """
+
+    expand_requested = Signal()
+    STRIP_WIDTH = 18
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setFixedWidth(self.STRIP_WIDTH)
+        self.setMinimumHeight(40)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._hover = False
+
+    def enterEvent(self, event):
+        self._hover = True
+        self.update()
+        super().enterEvent(event)
+
+    def leaveEvent(self, event):
+        self._hover = False
+        self.update()
+        super().leaveEvent(event)
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.expand_requested.emit()
+            event.accept()
+            return
+        super().mousePressEvent(event)
+
+    def paintEvent(self, event):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing, True)
+        # v1.2.5: цвета — из центральной темы (ui/theme.py); значения без изменений.
+        p.fillRect(self.rect(), QColor(theme.SURFACE_ALT if self._hover else theme.BASE_BG))
+        # Ромб «◇» внизу справа (v1.2.4.1-fix: запрос тестировщика — вместо шеврона;
+        # та же точка, что и у угловой кнопки развёрнутой панели — ромб «внизу» и до,
+        # и после сворачивания).
+        pen = QPen(QColor(theme.ICON_COLOR), 1.8)
+        pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+        pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+        p.setPen(pen)
+        cx, cy = float(self.width()) - 9.0, float(self.height()) - 12.0
+        path = QPainterPath()
+        path.moveTo(cx, cy - 4.5)
+        path.lineTo(cx + 4.5, cy)
+        path.lineTo(cx, cy + 4.5)
+        path.lineTo(cx - 4.5, cy)
+        path.closeSubpath()
+        p.drawPath(path)
+        p.end()
 
 
 class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
@@ -181,6 +284,13 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
 
         # ── Logger (lazy import to avoid circular deps at module level) ──
         self._log: Optional[object] = None
+
+        # v1.2.4.1: состояние сворачивания панелей (checked пункта меню = развёрнут).
+        # Инициализация ДО _setup_ui: методы окна (_select_node и др.) гвардируются
+        # по этим флагам; сохранённое из config.json значение применяется в
+        # _apply_ui_options_from_config (ПОСЛЕ restore_window_geometry/restoreState).
+        self._sidebar_collapsed = False
+        self._map_collapsed = False
 
         self._setup_ui()
         self._setup_toolbar()
@@ -368,6 +478,21 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
                 _multi_btn.setToolTip(self.t("terminal.multi_exit_button"))
             except RuntimeError:
                 pass  # Qt teardown — плашка уже уничтожена
+        # v1.2.4.1: tooltip'ы угловых кнопок сворачивания и полосок свёрнутых панелей
+        _sb_panel = getattr(self, "sidebar", None)
+        if _sb_panel is not None:
+            try:
+                _sb_panel.collapse_btn.setToolTip(self.t("view.toggle_sidebar"))
+            except RuntimeError:
+                pass  # Qt teardown — панель уже уничтожена
+        for _widget, _key in ((getattr(self, "_map_collapse_btn", None), "view.toggle_map"),
+                              (getattr(self, "_sidebar_strip", None), "view.strip_sidebar_tooltip"),
+                              (getattr(self, "_map_strip", None), "view.strip_map_tooltip")):
+            if _widget is not None:
+                try:
+                    _widget.setToolTip(self.t(_key))
+                except RuntimeError:
+                    pass  # Qt teardown — виджет уже уничтожен
         self.statusBar().showMessage(self.t("status.ready"))
 
     @property
@@ -387,7 +512,14 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         layout = QHBoxLayout(central)
         layout.setContentsMargins(0, 0, 0, 0)
 
+        # v1.2.4.1: self._splitter — фасадная ссылка (механика сворачивания панелей).
+        # Члены сплиттера — КОНТЕЙНЕРЫ [панель | полоска], а не сами виджеты: в
+        # свёрнутом состоянии реальный виджет hide()н (0px, нативный Qt), на его
+        # месте — кликабельная полоска ~18px (_CollapseStrip). Ручку нельзя дотянуть
+        # до нуля (setCollapsible(False) + minimumWidth контейнера) — панель нельзя
+        # «потерять»; состояние управляется кнопками/меню (ROADMAP v1.2.4.1, задача 6).
         splitter = QSplitter(Qt.Horizontal)
+        self._splitter = splitter
         layout.addWidget(splitter)
 
         # Side panel — v0.9.9.4: сайдбар-кластер (кнопки, заголовок, поиск,
@@ -447,7 +579,17 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         # v1.1: кнопка ⚙ «Настройки» внизу сайдбара → диалог настроек (хаб)
         self.sidebar.settings_clicked.connect(self._open_settings_dialog)
 
-        splitter.addWidget(self.sidebar)
+        # v1.2.4.1 (задача 1): контейнер сайдбара [sidebar | полоска]. Полоска — у
+        # правого края (со стороны ручки сплиттера); в развёрнутом состоянии скрыта.
+        self._sidebar_container = QWidget()
+        _sb_lay = QHBoxLayout(self._sidebar_container)
+        _sb_lay.setContentsMargins(0, 0, 0, 0)
+        _sb_lay.setSpacing(0)
+        self._sidebar_strip = _CollapseStrip()
+        _sb_lay.addWidget(self.sidebar)
+        _sb_lay.addWidget(self._sidebar_strip)
+        self._sidebar_strip.hide()
+        splitter.addWidget(self._sidebar_container)
 
         # Map canvas
         self.scene = MapScene()
@@ -475,8 +617,41 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         self.view.connect_drag_finished.connect(
             lambda: self.statusBar().showMessage(self.t("status.ready")))
 
-        splitter.addWidget(self.view)
+        # v1.2.4.1 (задача 1): контейнер карты [полоска | view]. Полоска — у левого
+        # края (со стороны ручки сплиттера: целевое состояние [сайдбар | полоска-карта]);
+        # в развёрнутом состоянии скрыта. Док «Терминалы» — QDockWidget окна, к
+        # механике сплиттера не относится (собирается нативно).
+        self._map_container = QWidget()
+        _mp_lay = QHBoxLayout(self._map_container)
+        _mp_lay.setContentsMargins(0, 0, 0, 0)
+        _mp_lay.setSpacing(0)
+        self._map_strip = _CollapseStrip()
+        _mp_lay.addWidget(self._map_strip)
+        _mp_lay.addWidget(self.view)
+        self._map_strip.hide()
+        splitter.addWidget(self._map_container)
         splitter.setSizes([250, 950])
+
+        # v1.2.4.1 (задача 6): ручку нельзя дотянуть до нуля вручную — состояние
+        # свёрнутости управляется кнопками/меню; minimumWidth контейнеров — нижняя
+        # граница ручной растяжки (свёрнутый контейнер сжимается до 18px в _set_panel_collapsed).
+        splitter.setCollapsible(0, False)
+        splitter.setCollapsible(1, False)
+        self.SIDEBAR_MIN_WIDTH = 160
+        self.MAP_MIN_WIDTH = 240
+        self._sidebar_container.setMinimumWidth(self.SIDEBAR_MIN_WIDTH)
+        self._map_container.setMinimumWidth(self.MAP_MIN_WIDTH)
+
+        # v1.2.4.1 (задача 2): угловая кнопка сворачивания карты — overlay-QToolButton
+        # на MapView (паттерн map_search: child of view, вне layout), перепозиция по
+        # resizeEvent через сигнал MapView.resized. Кнопка сворачивания САЙДБАРА живёт
+        # в нижнем ряду SidebarPanel (self.sidebar.collapse_btn); иконки/tooltip/подключение
+        # — в _setup_menubar (после создания QAction).
+        self._map_collapse_btn = QToolButton(self.view)
+        self._map_collapse_btn.setAutoRaise(True)
+        self._map_collapse_btn.setToolTip("Свернуть карту")  # fallback без i18n
+        self.view.resized.connect(self._position_map_collapse_btn)
+        self._position_map_collapse_btn()
 
         # v0.9.8: поиск по карте (Ctrl+F) — плавающая строка поверх canvas
         self._setup_map_search()
@@ -494,13 +669,14 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         # UI polish: постоянные индикаторы справа в статус-баре — счётчики узлов/
         # связей/статусов и процент зума (обновляются из MapView.zoomChanged).
         self.counts_label = QLabel("")
-        self.counts_label.setStyleSheet("color: #94a3b8; padding-right: 10px;")
+        # v1.2.5: QSS — f-string со ссылкой на константу темы (значение без изменений)
+        self.counts_label.setStyleSheet(f"color: {theme.TEXT_MUTED}; padding-right: 10px;")
         self.statusBar().addPermanentWidget(self.counts_label)
 
         self.zoom_label = QLabel("100%")
         self.zoom_label.setMinimumWidth(44)
         self.zoom_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-        self.zoom_label.setStyleSheet("color: #e2e8f0; padding-right: 6px;")
+        self.zoom_label.setStyleSheet(f"color: {theme.TEXT_PRIMARY}; padding-right: 6px;")
         self.statusBar().addPermanentWidget(self.zoom_label)
 
         # v1.2.3 (ROADMAP задача 3): плашка режима мультинабора «МУЛЬТИ: N сессий» +
@@ -924,15 +1100,47 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         # v0.9.8: поиск по карте (Ctrl+F) — строка поиска поверх canvas; тот же аргумент
         # про Ctrl, что у fit_map (голая F занята вводом в поля поиска)
         self._add_menu_action(view_menu, "view.find_on_map", self._toggle_map_search, "Ctrl+F")
-        # v1.1.1 (пункт 5): показать/скрыть ВЕСЬ сайдбар — один виджет в QSplitter;
-        # пункт меню — способ вернуть его. Кнопочный блок прячется отдельно
-        # (настройка ui_show_sidebar_buttons, чекбокс во вкладке «Общие»).
+        # v1.1.1 (пункт 5): показать/скрыть ВЕСЬ сайдбар; v1.2.4.1 (задача 3): пункт
+        # становится переключателем expanded↔collapsed (checked = развёрнут) — ОДИН
+        # механизм «свернуть в тонкую линию» для обеих панелей: клик по пункту, угловая
+        # кнопка и полоска свёрнутой панели идут через один QAction (toggle() → toggled).
+        # Подключение к toggled(bool), а не triggered — паттерн фикса v1.2.4-fix у
+        # act_multi_input (PySide6 6.11: авто-подключение addAction(text, slot) эмитит
+        # triggered БЕЗ состояния; явный connect передаёт новое состояние и срабатывает
+        # на программный setChecked — галочка и механика не расходятся).
         self.act_show_sidebar = view_menu.addAction(
             self.t("view.toggle_sidebar") if self._i18n_available else "Сайдбар")
         self.act_show_sidebar.setCheckable(True)
         self.act_show_sidebar.setChecked(True)
-        self.act_show_sidebar.triggered.connect(self._toggle_sidebar)
+        self.act_show_sidebar.setIcon(get_icon("sidebar_panel"))  # v1.2.4.1: иконка пары
+        self.act_show_sidebar.toggled.connect(self._on_sidebar_toggled)
         self._register_i18n(self.act_show_sidebar, "view.toggle_sidebar")
+        # v1.2.4.1 (задача 3): карта — по тому же паттерну (создание вручную, иконка пары).
+        self.act_show_map = view_menu.addAction(
+            self.t("view.toggle_map") if self._i18n_available else "Карта")
+        self.act_show_map.setCheckable(True)
+        self.act_show_map.setChecked(True)
+        self.act_show_map.setIcon(get_icon("map_panel"))
+        self.act_show_map.toggled.connect(self._on_map_toggled)
+        self._register_i18n(self.act_show_map, "view.toggle_map")
+        # v1.2.4.1 (задача 2): угловые кнопки сворачивания — тот же QAction (toggle()).
+        # v1.2.4.1-fix (запрос тестировщика): иконка — ромб «◇» у обеих панелей, обе
+        # внизу справа (нижний ряд сайдбара / правый НИЖНИЙ угол карты — верх зарезервирован
+        # под миникарту по новым обсуждениям).
+        self.sidebar.collapse_btn.setIcon(_diamond_icon())
+        if self._i18n_available:
+            self.sidebar.collapse_btn.setToolTip(self.t("view.toggle_sidebar"))
+        self.sidebar.collapse_clicked.connect(lambda: self.act_show_sidebar.toggle())
+        self._map_collapse_btn.setIcon(_diamond_icon())
+        if self._i18n_available:
+            self._map_collapse_btn.setToolTip(self.t("view.toggle_map"))
+        self._map_collapse_btn.clicked.connect(lambda: self.act_show_map.toggle())
+        # v1.2.4.1 (задача 1): tooltip'ы полосок свёрнутых панелей.
+        if self._i18n_available:
+            self._sidebar_strip.setToolTip(self.t("view.strip_sidebar_tooltip"))
+            self._map_strip.setToolTip(self.t("view.strip_map_tooltip"))
+        self._sidebar_strip.expand_requested.connect(lambda: self.act_show_sidebar.toggle())
+        self._map_strip.expand_requested.connect(lambda: self.act_show_map.toggle())
         # v0.8.4 (бывш. DESIGN.md §D): массовое сворачивание — половина ценности фичи
         # для больших карт.
         view_menu.addSeparator()
@@ -1065,18 +1273,163 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
     def _expand_all_servers(self):
         self._set_all_collapsed(False)
 
-    def _toggle_sidebar(self, checked: bool = True):
-        """v1.1.1 (пункт 5): показать/скрыть весь сайдбар (один виджет в QSplitter).
+    # ── v1.2.4.1 (ROADMAP v1.2.4.1): ОДИН механизм «свернуть в тонкую линию» ──
+    # Три точки управления каждой панелью (угловая кнопка, клик по полоске, пункт
+    # меню «Вид») идут через один checkable QAction: Qt-клик инвертирует checked сам,
+    # кнопки/полоска зовут action.toggle() — все пути эмитят toggled(bool) в слоты ниже.
 
-        QAction checkable — состояние пункта = видимость панели; скрытый сайдбар
-        не теряет данные (поиск/тег-фильтр/дерево живут, refresh_sidebar работает).
+    def _toggle_sidebar(self, checked: bool = True):
+        """v1.1.1 (пункт 5) → v1.2.4.1: совместимость — checked = развёрнут.
+
+        Раньше: setVisible по всему сайдбару (один виджет в QSplitter). Теперь:
+        переключатель expanded↔collapsed — свёрнутый сайдбар не теряет данные
+        (поиск/тег-фильтр/дерево живут, refresh_sidebar работает), на его месте
+        полоска ~18px.
         """
-        panel = getattr(self, "sidebar", None)
-        if panel is not None:
+        if self._set_panel_collapsed("sidebar", not checked) == "forbidden":
+            self._reject_collapse_both("sidebar")
+
+    def _on_sidebar_toggled(self, checked: bool):
+        """v1.2.4.1: пункт меню «Вид → Сайдбар» (toggled; checked = развёрнут)."""
+        if self._set_panel_collapsed("sidebar", not checked) == "forbidden":
+            self._reject_collapse_both("sidebar")
+
+    def _on_map_toggled(self, checked: bool):
+        """v1.2.4.1: пункт меню «Вид → Карта» (toggled; checked = развёрнут)."""
+        if self._set_panel_collapsed("map", not checked) == "forbidden":
+            self._reject_collapse_both("map")
+
+    def _reject_collapse_both(self, which: str):
+        """v1.2.4.1-fix (запрос тестировщика): отказ свернуть ВТОРУЮ панель.
+
+        Все три пути управления сходятся в checkable QAction, и при запрете Qt уже
+        инвертировал checked (или его инвертировал программный setChecked) — галочку
+        возвращаем в фактическое состояние с заблокированными сигналами (паттерн
+        v1.2.4-fix: галочка и механика не расходятся) + подсказка в статус-баре.
+        """
+        act = getattr(self, "act_show_sidebar" if which == "sidebar" else "act_show_map", None)
+        if act is not None:
             try:
-                panel.setVisible(bool(checked))
-            except RuntimeError:
-                pass  # Qt teardown — панель уже уничтожена
+                act.blockSignals(True)
+                act.setChecked(True)  # панель остаётся развёрнутой
+            finally:
+                act.blockSignals(False)
+        try:
+            self.statusBar().showMessage(self.t("status.collapse_both_forbidden"))
+        except Exception:  # noqa: BLE001 — подсказка не роняет отказ
+            pass
+
+    def _set_panel_collapsed(self, which: str, collapsed: bool) -> str:
+        """v1.2.4.1 (задача 1): свернуть/развернуть сайдбар или карту в полоску.
+
+        `which` — "sidebar" | "map"; `collapsed` — целевое состояние (True = полоска).
+        Идемпотентно: no-op, если панель уже в целевом состоянии (toggled/trigger могут
+        прийти повторно). В свёрнутом состоянии реальный виджет hide()н (скрытый член
+        контейнера занимает 0px — нативный Qt), показана кликабельная полоска; ширина
+        контейнера фиксируется setSizes + minimumWidth=18. При развёртывании
+        восстанавливается СОБСТВЕННАЯ ширина панели ДО сворачивания (сохраняется при
+        первом сворачивании в текущем цикле); если вторая панель тоже свёрнута — она
+        остаётся полоской (18px), остальное место берёт развёрнутая. Состояние
+        персистентно: ui_sidebar_collapsed / ui_map_collapsed в config.json
+        (merge-write i18n.save_config) — переживает перезапуск.
+
+        v1.2.4.1-fix (запрос тестировщика): обе панели ОДНОВРЕМЕННО свёрнутыми быть
+        НЕ МОГУТ — хотя бы одна (сайдбар или карта) всегда развёрнута, иначе окно —
+        «пустышка» из двух полосок (даже при открытом доке «Терминалы»). Сворачивание
+        второй панели запрещено для ВСЕХ путей управления (кнопка/полоска/меню/программный
+        setChecked — все сходятся в toggled). Возвращает "changed" / "noop" / "forbidden".
+        """
+        if which == "sidebar":
+            panel, strip = self.sidebar, self._sidebar_strip
+            container = self._sidebar_container
+            key, flag_attr = "ui_sidebar_collapsed", "_sidebar_collapsed"
+            min_w = self.SIDEBAR_MIN_WIDTH
+            other_flag = "_map_collapsed"
+        elif which == "map":
+            panel, strip = self.view, self._map_strip
+            container = self._map_container
+            key, flag_attr = "ui_map_collapsed", "_map_collapsed"
+            min_w = self.MAP_MIN_WIDTH
+            other_flag = "_sidebar_collapsed"
+        else:
+            return "noop"
+        if getattr(self, flag_attr) == bool(collapsed):
+            return "noop"  # уже в целевом состоянии — no-op
+        if collapsed and getattr(self, other_flag, False):
+            return "forbidden"  # вторая панель уже полоска — обе свёрнутыми нельзя
+
+        try:
+            w_strip = _CollapseStrip.STRIP_WIDTH
+            sizes = self._splitter.sizes()
+            own_w = sizes[0] if which == "sidebar" else sizes[1]
+            if collapsed:
+                saved_attr = f"_saved_panel_width_{which}"
+                # Сохраняем ширину только если вторая панель развёрнута: иначе «своя»
+                # ширина завышена (вторая — полоска 18px) и восстановление её при
+                # втором развёртывании сжимало бы первую до minimum. Без сохранения —
+                # дефолт 250/950 при развёртывании (разумный возврат).
+                if getattr(self, saved_attr, None) is None \
+                        and not getattr(self, other_flag, False):
+                    setattr(self, saved_attr, int(own_w))  # ширина ДО сворачивания
+                panel.hide()
+                strip.show()
+                container.setMinimumWidth(w_strip)
+                total = max(self._splitter.width(), 2 * w_strip + 10)
+                if which == "sidebar":
+                    self._splitter.setSizes([w_strip, total - w_strip])
+                else:
+                    self._splitter.setSizes([total - w_strip, w_strip])
+            else:
+                container.setMinimumWidth(min_w)
+                panel.show()
+                strip.hide()
+                saved = getattr(self, f"_saved_panel_width_{which}", None)
+                setattr(self, f"_saved_panel_width_{which}", None)
+                total = max(self._splitter.width(), 2 * w_strip + 10)
+                x_w = int(saved) if saved else (250 if which == "sidebar" else 950)
+                if getattr(self, other_flag, False):
+                    # вторая панель свёрнута — остаётся полоской (инвариант 18px)
+                    if which == "sidebar":
+                        self._splitter.setSizes([x_w, w_strip])
+                    else:
+                        self._splitter.setSizes([w_strip, x_w])
+                else:
+                    if which == "sidebar":
+                        self._splitter.setSizes([x_w, total - x_w])
+                    else:
+                        self._splitter.setSizes([total - x_w, x_w])
+        except RuntimeError:
+            return "noop"  # Qt teardown — C++-объект уже уничтожен
+
+        setattr(self, flag_attr, bool(collapsed))
+        try:
+            from i18n import save_config as _save_cfg
+            _save_cfg({key: bool(collapsed)})
+        except Exception:  # noqa: BLE001 — персистентность не роняет переключение
+            pass
+        return "changed"
+
+    def _position_map_collapse_btn(self):
+        """v1.2.4.1 (задача 2): кнопка сворачивания карты — правый НИЖНИЙ угол MapView.
+
+        v1.2.4.1-fix (запрос тестировщика): была в правом ВЕРХНЕМ углу — теперь внизу
+        (ромб «внизу» и до, и после сворачивания); верх зарезервирован под миникарту
+        по новым обсуждениям. Перепозиция по resizeEvent (сигнал MapView.resized:
+        ресайз окна, драг ручки сплиттера, смена размеров дока «Терминалы»).
+        """
+        btn = getattr(self, "_map_collapse_btn", None)
+        view = getattr(self, "view", None)
+        if btn is None or view is None:
+            return
+        try:
+            w, h = view.width(), view.height()
+            if w <= 0 or h <= 0:
+                return
+            bw = max(btn.sizeHint().width(), 24)
+            bh = max(btn.sizeHint().height(), 24)
+            btn.move(max(4, w - bw - 8), max(4, h - bh - 8))
+        except RuntimeError:
+            pass  # Qt teardown — виджет уже уничтожен
 
     def _switch_language(self, language_code: str):
         """Switch application language and re-apply to all UI elements."""
@@ -1173,6 +1526,23 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
                 pass  # Qt teardown — панель уже уничтожена
 
         self._node_double_click_mode = ui_cfg["node_double_click"]
+
+        # v1.2.4.1 (задача 4): состояние сворачивания панелей из config.json —
+        # ui_sidebar_collapsed / ui_map_collapsed. Применяется при старте ПОСЛЕ
+        # restoreState() (метод вызывается в __init__ после restore_window_geometry)
+        # и после ОК в диалоге настроек (идемпотентно: _set_panel_collapsed — no-op,
+        # если состояние совпадает). setChecked(False) эмитит toggled → механизм.
+        try:
+            from i18n import load_config as _load_cfg
+            _cfg = _load_cfg()
+            for attr, key in (("act_show_sidebar", "ui_sidebar_collapsed"),
+                              ("act_show_map", "ui_map_collapsed")):
+                act = getattr(self, attr, None)
+                if act is not None and bool(_cfg.get(key, False)):
+                    act.setChecked(False)  # checked = развёрнут → сворачиваем
+        except Exception as e:  # noqa: BLE001 — состояние не роняет старт/применение
+            if self.log:
+                self.log.warning(f"Apply panel collapsed states failed: {e}")
 
     def _open_settings_dialog(self):
         """v1.1: открыть диалог настроек (QTabWidget-хаб) — меню «Настройки» и кнопка ⚙."""
@@ -1313,7 +1683,10 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         finally:
             self._selection_syncing = False
         self._sync_selection_state()
-        if center:
+        # v1.2.4.1 (задача 5): карта свёрнута — центрирование пропускается (выделение
+        # и акцент работают; без исключений и без авто-показа карты). Покрыты все пути:
+        # «Показать на карте» (_reveal_node_on_map) и навигация поиска Enter/Shift+Enter.
+        if center and not getattr(self, "_map_collapsed", False):
             self.view.centerOn(node)
 
     def _sync_selection_state(self):
@@ -1997,7 +2370,10 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
 
         Раньше centerOn(0, 0) — при узлах в отрицательных координатах взгляд уходил
         в пустой угол сцены (баг из ревью v0.8).
+        v1.2.4.1 (задача 5): карта свёрнута — no-op (без исключений, без авто-показа).
         """
+        if self._map_collapsed:
+            return
         rect = self.view.content_bounding_rect()
         if rect is None or rect.isEmpty():
             self.view.centerOn(0, 0)
@@ -2005,7 +2381,12 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         self.view.centerOn(rect.center())
 
     def _fit_to_content(self):
-        """UI polish: «Вписать карту» — все узлы и заметки в видимой области."""
+        """UI polish: «Вписать карту» — все узлы и заметки в видимой области.
+
+        v1.2.4.1 (задача 5): карта свёрнута — no-op (без исключений, без авто-показа).
+        """
+        if self._map_collapsed:
+            return
         if not self.view.fit_to_content():
             self.statusBar().showMessage(self.t("status.fit_nothing"))
 

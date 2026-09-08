@@ -10,6 +10,11 @@ try:
 except ImportError:
     from modules.ssh_worker import SSHWorker
 
+try:  # v1.2.5: центральная тема (палитра/радиусы/шрифты — ui/theme.py)
+    from ..ui import theme
+except ImportError:
+    from ui import theme
+
 from PySide6.QtCore import Qt, QPointF, QRectF, QVariantAnimation
 from PySide6.QtGui import QBrush, QColor, QFont, QPainterPath, QPen, QFontMetrics, QTransform
 from PySide6.QtWidgets import (
@@ -61,51 +66,40 @@ class ServerNode(QGraphicsItemGroup):
     # Тень рисуется ВНУТРИ boundingRect (Qt клипует дочерних элементов по нему),
     # поэтому boundingRect() расширен вниз на SHADOW_BOTTOM px; стрелки при этом
     # доходят ровно до границы тени, а не «в вис» (edge_point работает от boundingRect).
-    CORNER_RADIUS = 10.0
+    CORNER_RADIUS = theme.RADIUS_NODE
     SHADOW_BOTTOM = 3.0
 
-    COLOR_BG = QColor("#1e293b")
-    COLOR_BORDER = QColor("#3b82f6")
-    COLOR_SELECTED = QColor("#f59e0b")
-    COLOR_HOVER = QColor("#60a5fa")
+    # v1.2.5: все цвета — из центральной темы (ui/theme.py); значения без изменений.
+    COLOR_BG = QColor(theme.NODE_BG)
+    COLOR_BORDER = QColor(theme.NODE_BORDER)
+    COLOR_SELECTED = QColor(theme.SELECTION_AMBER)
+    COLOR_HOVER = QColor(theme.NODE_HOVER)
     # v0.9.6: акцент «Показать на карте» (сайдбар) — рамка-вспышка. Голубой,
     # отличимый от янтарного выделения (#f59e0b): узел уже выделен, и вспышка
-    # должна читаться как отдельный сигнал «тут он». Тот же #38bdf8, что у рамки
-    # rectangle-выделения MapView — единый акцент приложения.
-    REVEAL_COLOR = QColor("#38bdf8")
+    # должна читаться как отдельный сигнал «тут он». Тот же ACCENT темы, что у
+    # рамки rectangle-выделения MapView — единый акцент приложения.
+    REVEAL_COLOR = QColor(theme.ACCENT)
     # v0.9.8: поиск по карте (Ctrl+F) — статическая рамка совпавших узлов.
-    # Тот же #38bdf8 (единый акцент): совпадения читаются мгновенно, а текущий
-    # результат поиска дополнительно выделен янтарём (#f59e0b) + вспышка reveal_flash.
-    SEARCH_MATCH_COLOR = QColor("#38bdf8")
-    COLOR_TEXT = QColor("#e2e8f0")
-    COLOR_LABEL = QColor("#94a3b8")
+    # Тот же ACCENT темы (единый акцент): совпадения читаются мгновенно, а текущий
+    # результат поиска дополнительно выделен янтарём + вспышка reveal_flash.
+    SEARCH_MATCH_COLOR = QColor(theme.ACCENT)
+    COLOR_TEXT = QColor(theme.NODE_TEXT)
+    COLOR_LABEL = QColor(theme.NODE_LABEL)
     # UI polish: «тень» под карточкой и серый цвет точек-индикаторов до проверки.
     COLOR_SHADOW = QColor(0, 0, 0, 110)
-    COLOR_DOT_IDLE = QColor("#64748b")
+    COLOR_DOT_IDLE = QColor(theme.DOT_IDLE)
 
     # v0.7.1: цвета рамки по статусу доступности (StatusChecker).
-    # warn — жёлтый, отличимый от янтарного COLOR_SELECTED (#f59e0b):
+    # warn — жёлтый, отличимый от янтарного COLOR_SELECTED:
     # в один момент времени показывается либо выделение, либо статус.
-    STATUS_COLORS = {
-        "online": QColor("#22c55e"),   # зелёный: TCP + SSH баннер
-        "warn": QColor("#facc15"),     # жёлтый: порт открыт, баннера нет
-        "offline": QColor("#ef4444"),  # красный: недоступен
-    }
+    # v1.2.5: значения — из центральной темы (ui/theme.py).
+    STATUS_COLORS = {k: QColor(v) for k, v in theme.STATUS_COLORS.items()}
 
     # v0.9.4: цвета тегов/ролей окружений. Известные роли — фиксированные цвета;
     # произвольные теги — детерминированный цвет из палитры по хэшу имени.
-    TAG_PALETTE = [
-        QColor("#22c55e"), QColor("#3b82f6"), QColor("#a855f7"),
-        QColor("#f97316"), QColor("#06b6d4"), QColor("#ec4899"),
-    ]
-    TAG_COLORS = {
-        "prod":    QColor("#ef4444"),  # красный — боевое окружение
-        "staging": QColor("#facc15"),  # жёлтый — предпрод
-        "dev":     QColor("#22c55e"),  # зелёный — разработка
-        "test":    QColor("#a855f7"),  # фиолетовый — тестовый контур
-        "backup":  QColor("#06b6d4"),  # голубой — бэкап-реплика
-        "dmz":     QColor("#f97316"),  # оранжевый — демилитаризованная зона
-    }
+    # v1.2.5: значения — из центральной темы (ui/theme.py).
+    TAG_PALETTE = [QColor(c) for c in theme.TAG_PALETTE]
+    TAG_COLORS = {k: QColor(v) for k, v in theme.TAG_COLORS.items()}
     # Полоска тегов на карточке: вертикальные сегменты вдоль левого края.
     TAG_STRIP_WIDTH = 5.0
 
@@ -187,7 +181,7 @@ class ServerNode(QGraphicsItemGroup):
         # пикселизуется; QPainterPath кроссплатформен и чёткий на любом масштабе).
         self._icon = QGraphicsEllipseItem(10, 10, 40, 40, self)
         self._icon.setPen(QPen(self.COLOR_BORDER, 2))
-        self._icon.setBrush(QBrush(QColor("#2563eb")))
+        self._icon.setBrush(QBrush(QColor(theme.NODE_ICON_BG)))
 
         glyph_pen = QPen(self.COLOR_TEXT, 1.6)
         glyph_pen.setCapStyle(Qt.PenCapStyle.RoundCap)
@@ -207,7 +201,7 @@ class ServerNode(QGraphicsItemGroup):
 
         # Alias
         self._alias = QGraphicsTextItem(self.data.alias or "Unnamed", self)
-        self._alias.setFont(QFont("Segoe UI", 11, QFont.Bold))
+        self._alias.setFont(QFont(theme.FONT_UI, 11, QFont.Bold))
         self._alias.setDefaultTextColor(self.COLOR_TEXT)
         self._alias.setPos(55, 18)
 
@@ -226,18 +220,20 @@ class ServerNode(QGraphicsItemGroup):
 
         # Текстовая плашка (инициализация); фон — скруглённый (UI polish)
         self._info = QGraphicsTextItem("", self)
-        self._info.setFont(QFont("Consolas", 8))
+        self._info.setFont(QFont(theme.FONT_MONO, 8))
         self._info.setDefaultTextColor(self.COLOR_LABEL)
         self._info_bg = QGraphicsPathItem(self)
         self._info_bg.setPen(QPen(Qt.PenStyle.NoPen))
-        self._info_bg.setBrush(QBrush(QColor(15, 23, 42, 150)))
+        _info_bg_color = QColor(theme.WINDOW_BG)   # v1.2.5: WINDOW_BG + alpha (подложка инфо-плашки)
+        _info_bg_color.setAlpha(150)
+        self._info_bg.setBrush(QBrush(_info_bg_color))
         self._info_bg.setZValue(0)
         self._info.setZValue(1)
 
         # Host под алиасом
         self._host_label = QGraphicsTextItem(f"@{self.data.host}", self)
-        self._host_label.setFont(QFont("Consolas", 8))
-        self._host_label.setDefaultTextColor(QColor("#64748b"))
+        self._host_label.setFont(QFont(theme.FONT_MONO, 8))
+        self._host_label.setDefaultTextColor(QColor(theme.DOT_IDLE))
         self._host_label.setPos(55, 36)
 
         # UI polish: декоративная «кнопка SSH» (🔒) удалена — она не кликалась и
@@ -255,9 +251,10 @@ class ServerNode(QGraphicsItemGroup):
 
     def _set_server_glyph(self):
         """Векторный глиф «сервер» внутри круглой иконки (два юнита + LED)."""
+        r = theme.RADIUS_NODE_GLYPH_UNIT
         path = QPainterPath()
-        path.addRoundedRect(QRectF(21, 22, 18, 7), 2.0, 2.0)
-        path.addRoundedRect(QRectF(21, 31, 18, 7), 2.0, 2.0)
+        path.addRoundedRect(QRectF(21, 22, 18, 7), r, r)
+        path.addRoundedRect(QRectF(21, 31, 18, 7), r, r)
         for cy in (25.5, 34.5):
             path.addEllipse(QPointF(36.5, float(cy)), 0.9, 0.9)
         self._glyph.setPath(path)
@@ -657,7 +654,7 @@ class ServerNode(QGraphicsItemGroup):
 
     def set_ssh_connected(self, connected: bool):
         """Установить статус SSH подключения."""
-        color = QColor("#22c55e") if connected else QColor("#64748b")
+        color = QColor(theme.STATUS_ONLINE) if connected else QColor(theme.DOT_IDLE)
         self._ssh_status.setBrush(QBrush(color))
 
     def set_status(self, status: str):

@@ -23,6 +23,11 @@ from PySide6.QtCore import Qt, QRectF, QPointF, Signal
 from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen, QPixmap
 from PySide6.QtWidgets import QGraphicsItem, QGraphicsObject
 
+try:  # v1.2.5: центральная тема (палитра/радиусы/шрифты — ui/theme.py)
+    from ..ui import theme
+except ImportError:
+    from ui import theme
+
 
 class BackgroundImage(QGraphicsObject):
     """Фоновое изображение под всеми элементами карты; drag + resize за угол."""
@@ -113,8 +118,9 @@ class BackgroundImage(QGraphicsObject):
         painter.drawPixmap(QRectF(0, 0, self._width, self._height),
                            self._pixmap, QRectF(self._pixmap.rect()))
 
-        # Тонкая полупрозрачная рамка — чтобы фон был различим на тёмной сетке
-        color = QColor("#f59e0b") if self.isSelected() else QColor("#94a3b8")
+        # Тонкая полупрозрачная рамка — чтобы фон был различим на тёмной сетке.
+        # v1.2.5: цвета — из центральной темы (ui/theme.py); значения без изменений.
+        color = QColor(theme.SELECTION_AMBER) if self.isSelected() else QColor(theme.TEXT_MUTED)
         color.setAlpha(self.BORDER_ALPHA if not self.isSelected() else 180)
         painter.setPen(QPen(color, 1.5))
         painter.setBrush(Qt.BrushStyle.NoBrush)

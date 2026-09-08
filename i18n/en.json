@@ -411,9 +411,13 @@
   "settings.map.node_double_click.connect": "Open SSH login dialog",
   "settings.general.sidebar_buttons": "Show sidebar button block",
   "view.toggle_sidebar": "Sidebar",
+  "view.toggle_map": "Map",
+  "view.strip_sidebar_tooltip": "Click to expand the sidebar",
+  "view.strip_map_tooltip": "Click to expand the map",
   "settings.map.show_connection_type": "Always show type on connection label",
   "connection.label_hint": "up to 20 characters",
   "status.settings_saved": "Settings saved.",
+  "status.collapse_both_forbidden": "Cannot collapse both panels — at least one must stay open",
   "msg.confirm_close_session": "Close the SSH session?",
   "msg.close_session_title": "SSH Session"
 }

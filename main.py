@@ -5,6 +5,11 @@ try:
 except ImportError:
     from ui.main_window import MainWindow
 
+try:  # v1.2.5: центральная тема (палитра/радиусы/шрифты — ui/theme.py)
+    from .ui import theme
+except ImportError:
+    from ui import theme
+
 
 def main():
     # ── Setup logging (before anything else) ──────────────────
@@ -36,15 +41,16 @@ def main():
         app = QApplication(sys.argv)
         app.setStyle('Fusion')
 
-        # Тёмная палитра
+        # Тёмная палитра (v1.2.5: значения — из центральной темы ui/theme.py;
+        # светлая тема/акцентный цвет в будущем — переназначение констант темы)
         pal = app.palette()
-        pal.setColor(QPalette.ColorRole.Window, QColor("#0f172a"))
-        pal.setColor(QPalette.ColorRole.WindowText, QColor("#e2e8f0"))
-        pal.setColor(QPalette.ColorRole.Base, QColor("#1e293b"))
-        pal.setColor(QPalette.ColorRole.AlternateBase, QColor("#334155"))
-        pal.setColor(QPalette.ColorRole.Text, QColor("#e2e8f0"))
-        pal.setColor(QPalette.ColorRole.Button, QColor("#334155"))
-        pal.setColor(QPalette.ColorRole.ButtonText, QColor("#e2e8f0"))
+        pal.setColor(QPalette.ColorRole.Window, QColor(theme.WINDOW_BG))
+        pal.setColor(QPalette.ColorRole.WindowText, QColor(theme.TEXT_PRIMARY))
+        pal.setColor(QPalette.ColorRole.Base, QColor(theme.BASE_BG))
+        pal.setColor(QPalette.ColorRole.AlternateBase, QColor(theme.SURFACE_ALT))
+        pal.setColor(QPalette.ColorRole.Text, QColor(theme.TEXT_PRIMARY))
+        pal.setColor(QPalette.ColorRole.Button, QColor(theme.SURFACE_ALT))
+        pal.setColor(QPalette.ColorRole.ButtonText, QColor(theme.TEXT_PRIMARY))
         app.setPalette(pal)
 
         win = MainWindow()

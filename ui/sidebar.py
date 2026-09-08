@@ -23,8 +23,8 @@ from PySide6.QtCore import Qt, QSize, Signal
 # Qt.DecorationRole) в панели не осталось ни одного использования
 from PySide6.QtGui import QIcon, QPixmap, QPainter, QBrush
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QLabel, QLineEdit, QComboBox,
-    QTreeWidget, QTreeWidgetItem, QPushButton,
+    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QComboBox,
+    QTreeWidget, QTreeWidgetItem, QPushButton, QToolButton,
 )
 
 try:
@@ -91,6 +91,7 @@ class SidebarPanel(QWidget):
     show_properties_clicked = Signal()
     delete_selected_clicked = Signal()
     settings_clicked = Signal()  # v1.1: кнопка ⚙ «Настройки» (6-я в _BUTTONS)
+    collapse_clicked = Signal()  # v1.2.4.1: угловая кнопка (ромб «◇») — свернуть сайдбар в полоску
 
     def __init__(self, translate_fn=None, actions=None, show_title: bool = True,
                  parent=None):
@@ -180,6 +181,18 @@ class SidebarPanel(QWidget):
         self.btn_props.clicked.connect(self.show_properties_clicked)
         self.btn_delete.clicked.connect(self.delete_selected_clicked)
         self.btn_settings.clicked.connect(self.settings_clicked)  # v1.1: хаб настроек
+
+        # ── v1.2.4.1 (ROADMAP задача 2): кнопка сворачивания — нижний ряд, правый угол ──
+        # Иконка (векторный ромб «◇», v1.2.4.1-fix) и tooltip выставляет MainWindow (i18n + ui/icons);
+        # здесь — только виджет и сигнал collapse_clicked (паттерн «модуль + колбэки»).
+        self.collapse_btn = QToolButton()
+        self.collapse_btn.setAutoRaise(True)
+        self.collapse_btn.setToolTip("Свернуть сайдбар")  # fallback без i18n (как кнопки выше)
+        _row = QHBoxLayout()
+        _row.addStretch(1)
+        _row.addWidget(self.collapse_btn)
+        layout.addLayout(_row)
+        self.collapse_btn.clicked.connect(self.collapse_clicked)
 
     # ── i18n (колбэк + retranslate — регрессия на баг v0.9.2) ─────────────────
 

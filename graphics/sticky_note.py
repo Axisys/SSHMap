@@ -32,6 +32,11 @@ from PySide6.QtGui import (QFont, QBrush, QColor, QPainter, QPainterPath,
                            QPen)
 from PySide6.QtWidgets import QGraphicsProxyWidget, QTextEdit, QGraphicsItem
 
+try:  # v1.2.5: центральная тема (палитра/радиусы/шрифты — ui/theme.py)
+    from ..ui import theme
+except ImportError:
+    from ui import theme
+
 
 def _t(key: str) -> str:
     """Безопасный i18n-хук: при недоступности i18n возвращает сам ключ."""
@@ -54,11 +59,12 @@ class StickyNote(QGraphicsProxyWidget):
     CORNER_HIT = 16.0      # зона «за угол» для resize (px от правого нижнего)
 
     # v1.2.4-fix: приглушённая палитра по замечанию тестировщиков (классический
-    # #fef08a/#ca8a04 слишком яркий); читается на тёмной карте, но не «режет»
-    BG_COLOR = "#eedd9f"
-    BORDER_COLOR = "#a9853d"
-    TEXT_COLOR = "#403a2b"
-    CORNER_RADIUS = 10.0   # закругление углов окна заметки (v1.2.4-fix: было 4 px)
+    # #fef08a/#ca8a04 слишком яркий); читается на тёмной карте, но не «режет».
+    # v1.2.5: значения — из центральной темы (ui/theme.py), без изменений.
+    BG_COLOR = theme.NOTE_BG
+    BORDER_COLOR = theme.NOTE_BORDER
+    TEXT_COLOR = theme.NOTE_TEXT
+    CORNER_RADIUS = theme.RADIUS_NOTE   # закругление углов окна заметки (v1.2.4-fix: было 4 px)
 
     textEdited = Signal()  # текст изменён (MainWindow помечает проект dirty)
     moved = Signal()       # заметку переместили мышью (тоже dirty-причина)
@@ -98,7 +104,7 @@ class StickyNote(QGraphicsProxyWidget):
         # углы «выпирали» квадратом за рамку.
         editor.setAcceptRichText(False)
         editor.setLineWrapMode(QTextEdit.LineWrapMode.WidgetWidth)
-        editor.setFont(QFont("Segoe UI", 10))
+        editor.setFont(QFont(theme.FONT_UI, 10))
         editor.setStyleSheet(
             "QTextEdit { background: transparent; color: %s;"
             " border: none; padding: 6px; }"

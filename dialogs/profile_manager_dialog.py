@@ -12,6 +12,11 @@ except ImportError:
     from models.profile import (Profile, load_profiles, save_profiles, add_profile,
                                 update_profile, delete_profile, get_profile_password)
 
+try:  # v1.2.5: центральная тема (палитра/радиусы/шрифты — ui/theme.py)
+    from ..ui import theme
+except ImportError:
+    from ui import theme
+
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QPushButton, QTableWidget,
     QTableWidgetItem, QLabel, QMessageBox, QLineEdit, QDialogButtonBox,
@@ -47,14 +52,14 @@ class ProfileManagerDialog(QDialog):
 
         # Title
         title = QLabel(self.t("dialog.manage_profiles")) if self._i18n_available else QLabel("Профили SSH-подключения")
-        title.setStyleSheet("font-size: 13pt; font-weight: bold; color: #e2e8f0;")
+        title.setStyleSheet(f"font-size: 13pt; font-weight: bold; color: {theme.TEXT_PRIMARY};")  # v1.2.5: тема
         layout.addWidget(title)
 
         subtitle = QLabel(self.t("dialog.manage_profiles_desc")) if self._i18n_available else QLabel(
             "Профили позволяют хранить пару логин/пароль и подставлять\n"
             "их в свойства сервера одним кликом."
         )
-        subtitle.setStyleSheet("color: #94a3b8; font-size: 10pt;")
+        subtitle.setStyleSheet(f"color: {theme.TEXT_MUTED}; font-size: 10pt;")  # v1.2.5: тема
         layout.addWidget(subtitle)
 
         layout.addSpacing(8)

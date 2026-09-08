@@ -28,10 +28,12 @@ from i18n import t as it, set_language as _set_lang
 from models.server import ServerData
 import ui.main_window as MW
 
-# Геометрический baseline (vp=900 → x=240) зашит под РУССКИЙ сайдбар: minSizeHint
-# кнопки «Добавить сервер» = 280 px, на английском («Add Server») — 232 px и viewport
-# шире (931). С v1.1.1 язык по умолчанию — en (ROADMAP пункт 2), поэтому ru ставим
-# явно ДО создания окна (распределение QSplitter фиксируется при первом layout).
+# Язык: с v1.1.1 по умолчанию en (ROADMAP пункт 2), но тест стартует с ru —
+# ширина сайдбара зависит от minSizeHint кнопок («Добавить сервер» 280 px в ru,
+# 232 px в en), и распределение QSplitter фиксируется при первом layout: ru ставим
+# явно ДО создания окна для детерминизма. Геометрический baseline (x центра панели)
+# с v1.2.4.1 считается ДИНАМИЧЕСКИ от фактического viewport — view живёт в
+# контейнере [полоска | view], и прямой resize(view) больше не игнорируется сплиттером.
 _set_lang("ru")
 
 win = MW.MainWindow()
@@ -130,9 +132,19 @@ check("status bar shows the navigation hint",
 # ══ v0.9.9.1 fix: при ресайзе окна панель возвращается в центр (MapView.resized) ══
 # До v0.9.9.1 connect view.resized падал в AttributeError и глотался try/except —
 # после сужения окна панель оставалась на старом x (240 вместо ~40 при vp 500).
+# v1.2.4.1: baseline ДИНАМИЧЕСКИЙ (view в контейнере [полоска | view]: прямой
+# resize(view) уважается layout'ом контейнера, viewport = view − scrollbar; в v1.2.4
+# сплиттер игнорировал resize, и x=240@vp900 был артефактом окна 1200px). Инвариант
+# тот же: панель в верхнем центре фактического viewport (та же формула, что в
+# MainWindow._position_map_search_bar).
 print("== resize reposition (v0.9.9.1 fix) ==")
+vp_before = view.viewport().width()
+w_before = min(bar.PREFERRED_WIDTH, max(vp_before - 16, bar.MIN_WIDTH))
+x_expected_before = max(8, (vp_before - w_before) // 2)
 x_before = bar.geometry().x()
-check("bar centered before resize (baseline x=240 at vp 900)", x_before == 240, f"x={x_before}")
+check("bar centered before resize (baseline: верхний центр фактического viewport)",
+      x_before == x_expected_before,
+      f"x={x_before} expected={x_expected_before} vp={vp_before}")
 view.resize(500, 700); app.processEvents()
 geo_r = bar.geometry(); vp_r = view.viewport().rect()
 w_r = min(bar.PREFERRED_WIDTH, max(vp_r.width() - 16, bar.MIN_WIDTH))

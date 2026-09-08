@@ -10,6 +10,11 @@ try:
 except ImportError:
     from server_node import ServerNode
 
+try:  # v1.2.5: центральная тема (палитра/радиусы/шрифты — ui/theme.py)
+    from ..ui import theme
+except ImportError:
+    from ui import theme
+
 from PySide6.QtCore import Qt, QPointF, QRectF
 from PySide6.QtGui import QBrush, QColor, QFont, QPainterPath, QPen
 from PySide6.QtWidgets import (
@@ -62,14 +67,9 @@ def label_display_text(ctype: str, label: str) -> str:
 # ── Типы связей (v0.7): id → базовый цвет стрелки ────────────────
 # SSH сохраняет зелёный цвет v0.6 и остаётся типом по умолчанию —
 # старые проекты без поля "type" загружаются как SSH-связи.
-CONNECTION_TYPES = {
-    "ssh": "#34d399",        # зелёный — по умолчанию
-    "vpn": "#60a5fa",        # синий
-    "http": "#fbbf24",       # янтарный
-    "database": "#a78bfa",   # фиолетовый
-    "nfs": "#f472b6",        # розовый
-    "kubernetes": "#22d3ee", # бирюзовый (Kubernetes)
-}
+# v1.2.5: цвета — центральная тема (ui/theme.py); CONNECTION_TYPES — тот же
+# dict (порядок объявления = порядок комбобокса диалога связи).
+CONNECTION_TYPES = theme.ARROW_TYPE_COLORS
 
 DEFAULT_CONNECTION_TYPE = "ssh"
 
@@ -141,7 +141,7 @@ class ConnectionArrow(QGraphicsPathItem):
     """Кривая стрелка (cubic Bezier) от края одного узла к краю другого."""
 
     COLOR_IDLE = QColor(CONNECTION_TYPES[DEFAULT_CONNECTION_TYPE])
-    COLOR_HOVER = QColor("#6ee7b7")  # сохранено для совместимости с v0.6
+    COLOR_HOVER = QColor(theme.ARROW_HOVER_COMPAT)  # сохранено для совместимости с v0.6
 
     def __init__(self, source: ServerNode, target: ServerNode, label: str = "",
                  ctype: str = DEFAULT_CONNECTION_TYPE, parent=None):
@@ -167,11 +167,13 @@ class ConnectionArrow(QGraphicsPathItem):
         # UI polish: скруглённый фон метки (PathItem вместо RectItem)
         self._label_bg = QGraphicsPathItem(self)
         self._label_bg.setPen(QPen(Qt.PenStyle.NoPen))
-        self._label_bg.setBrush(QBrush(QColor(2, 6, 23, 190)))
+        _label_bg_color = QColor(theme.CANVAS_BG)  # v1.2.5: CANVAS_BG + alpha (фон метки связи)
+        _label_bg_color.setAlpha(190)
+        self._label_bg.setBrush(QBrush(_label_bg_color))
 
         # Текст метки (v1.1.1: с учётом опции «тип на плашке» — label_display_text)
         self._label = QGraphicsTextItem(label_display_text(ctype, label), self)
-        self._label.setFont(QFont("Consolas", 9))
+        self._label.setFont(QFont(theme.FONT_MONO, 9))
 
         self._apply_visual_state()
         self.update_position()
@@ -254,9 +256,10 @@ class ConnectionArrow(QGraphicsPathItem):
         self._label.setPos(label_x, label_y)
         # UI polish: скруглённый фон под текстом метки (PySide6: addRoundedRect() → None,
         # путь собираем через объект — как в ServerNode._rounded)
+        r = theme.RADIUS_ARROW_LABEL
         bg_path = QPainterPath()
         bg_path.addRoundedRect(label_x - 6, label_y - 2,
-                               label_rect.width() + 12, label_rect.height() + 4, 5.0, 5.0)
+                               label_rect.width() + 12, label_rect.height() + 4, r, r)
         self._label_bg.setPath(bg_path)
 
     # ── Тип и метка ─────────────────────────────────────────────

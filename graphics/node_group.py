@@ -30,6 +30,18 @@ from PySide6.QtGui import (
 )
 from PySide6.QtWidgets import QGraphicsItem, QGraphicsObject
 
+try:  # v1.2.5: центральная тема (палитра/радиусы/шрифты — ui/theme.py)
+    from ..ui import theme
+except ImportError:
+    from ui import theme
+
+
+def _tint(hex_color: str, alpha: int) -> "QColor":
+    """v1.2.5: цвет центральной темы с прозрачностью (заливки группы)."""
+    c = QColor(hex_color)
+    c.setAlpha(alpha)
+    return c
+
 
 class NodeGroup(QGraphicsObject):
     """Кластер/папка на карте: рамка + заголовок, drag/resize, членство серверов."""
@@ -43,15 +55,16 @@ class NodeGroup(QGraphicsObject):
     TITLE_ZONE_H = 28.0    # верхняя полоса: двойной клик — переименование
     MEMBER_MARGIN = 8.0    # мин. отступ членов от рамки при клампе на resize
 
-    CORNER_RADIUS = 12.0   # скругление рамки (в едином стиле с карточкой узла)
+    CORNER_RADIUS = theme.RADIUS_GROUP   # скругление рамки (в едином стиле с карточкой узла)
 
-    COLOR_BORDER = QColor("#7c3aed")       # violet-600 — отличается от синего узлов (#3b82f6)
-    COLOR_HOVER = QColor("#a78bfa")        # violet-400
-    COLOR_SELECTED = QColor("#f59e0b")     # тот же янтарь, что выделение узла (единая палитра)
-    COLOR_FILL = QColor(124, 58, 237, 16)        # почти прозрачная заливка — сетка видна сквозь
-    COLOR_FILL_HOVER = QColor(124, 58, 237, 28)
-    COLOR_FILL_SELECTED = QColor(245, 158, 11, 20)
-    COLOR_TITLE = QColor("#c4b5fd")          # violet-300 — читается на тёмной карте
+    # v1.2.5: цвета — из центральной темы (ui/theme.py); значения без изменений.
+    COLOR_BORDER = QColor(theme.GROUP_BORDER)     # violet-600 — отличается от синего узлов
+    COLOR_HOVER = QColor(theme.GROUP_HOVER)       # violet-400
+    COLOR_SELECTED = QColor(theme.SELECTION_AMBER)  # тот же янтарь, что выделение узла (единая палитра)
+    COLOR_FILL = _tint(theme.GROUP_BORDER, 16)        # почти прозрачная заливка — сетка видна сквозь
+    COLOR_FILL_HOVER = _tint(theme.GROUP_BORDER, 28)
+    COLOR_FILL_SELECTED = _tint(theme.SELECTION_AMBER, 20)
+    COLOR_TITLE = QColor(theme.GROUP_TITLE)       # violet-300 — читается на тёмной карте
 
     moved = Signal()               # группу переместили (dirty-причина для MainWindow)
     resized = Signal()             # размер изменён (drag за угол или set_group_size)
@@ -274,7 +287,7 @@ class NodeGroup(QGraphicsObject):
     # ── Заголовок ──────────────────────────────────────────────
 
     def _title_font(self) -> QFont:
-        return QFont("Segoe UI", 9, QFont.Bold)
+        return QFont(theme.FONT_UI, 9, QFont.Bold)
 
     def _update_title_text(self):
         """Elide длинного имени под ширину рамки (полное имя — в tooltip; паттерн ServerNode)."""
@@ -293,11 +306,12 @@ class NodeGroup(QGraphicsObject):
     def _state_colors(self):
         """(pen_color, pen_width, fill, title_color) для текущего состояния."""
         if self.isSelected():
-            return (self.COLOR_SELECTED, 2.5, self.COLOR_FILL_SELECTED, QColor("#fde68a"))
+            return (self.COLOR_SELECTED, 2.5, self.COLOR_FILL_SELECTED,
+                    QColor(theme.GROUP_TITLE_SELECTED))
         if self._hover:
             color = QColor(self.COLOR_HOVER)
             color.setAlpha(170)
-            return (color, 2.0, self.COLOR_FILL_HOVER, QColor("#e9d5ff"))
+            return (color, 2.0, self.COLOR_FILL_HOVER, QColor(theme.GROUP_TITLE_HOVER))
         return (self.COLOR_BORDER, 1.5, self.COLOR_FILL, self.COLOR_TITLE)
 
     def paint(self, painter: QPainter, option, widget=None):
@@ -330,7 +344,8 @@ class NodeGroup(QGraphicsObject):
         if self._hover or self.isSelected():
             painter.setPen(Qt.PenStyle.NoPen)
             painter.setBrush(QBrush(pen_color))
-            painter.drawRoundedRect(QRectF(w - 16.0, h - 16.0, 10.0, 10.0), 3.0, 3.0)
+            r = theme.RADIUS_RESIZE_MARK
+            painter.drawRoundedRect(QRectF(w - 16.0, h - 16.0, 10.0, 10.0), r, r)
 
     # ── Mouse (ручное перемещение/resize — паттерн StickyNote) ──
 

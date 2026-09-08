@@ -32,6 +32,11 @@ F12→\\x1b[24~ приостанавливается (клавиша не дох
 
 import time
 
+try:  # v1.2.5: центральная тема (ui/theme.py — чистые данные, без PySide6)
+    from ..ui import theme
+except ImportError:
+    from ui import theme
+
 _t_cache = None
 
 
@@ -50,7 +55,9 @@ def get_translator():
 
 
 # ── Подсветка: цвет рамки/бейджа «MULTI» + objectName рамки (QSS-селектор) ─────
-MULTI_ACCENT = "#f59e0b"                          # amber — рамка/бейдж режима
+# v1.2.5: янтарный акцент — из центральной темы (тот же, что выделение узла/группы);
+# имя MULTI_ACCENT сохранено (используется в QSS плашки статус-бара MainWindow).
+MULTI_ACCENT = theme.SELECTION_AMBER              # amber — рамка/бейдж режима
 MULTI_FRAME_OBJECT_NAME = "sshmap_multi_frame"    # селектор QSS только для контейнера
 
 

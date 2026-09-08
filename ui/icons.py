@@ -8,8 +8,17 @@ QAction/QPushButton получают QIcon из get_icon(name).
 from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QColor, QIcon, QPainter, QPainterPath, QPen, QPixmap
 
+try:  # v1.2.5: центральная тема (палитра/радиусы/шрифты — ui/theme.py)
+    from . import theme
+except ImportError:
+    try:
+        from ui import theme
+    except ImportError:  # flat-раскладка: каталог ui/ сам на sys.path
+        import theme
+
 # Базовый цвет иконок (slate-300) — читается на тёмной палитре Fusion (#1e293b).
-ICON_COLOR = "#cbd5e1"
+# v1.2.5: значение — из центральной темы; имя сохранено (публичная константа модуля).
+ICON_COLOR = theme.ICON_COLOR
 ICON_SIZE = 20
 
 
@@ -261,6 +270,47 @@ def _draw_settings(p):
     p.drawPath(hub)
 
 
+def _draw_sidebar_panel(p):
+    """v1.2.4.1: окно с выделенной левой колонкой (сайдбар) + метки строк.
+
+    Пара к map_panel: тот же контур-рамка 14×13, тот же штрих — читается как
+    «панель слева» в меню «Вид» и на угловой кнопке сворачивания сайдбара.
+    """
+    frame = QPainterPath()
+    frame.addRoundedRect(QRectF(3.0, 3.5, 14.0, 13.0), 1.8, 1.8)
+    p.drawPath(frame)
+    divider = QPainterPath()
+    divider.moveTo(8.0, 3.5)
+    divider.lineTo(8.0, 16.5)
+    p.drawPath(divider)
+    for y in (6.9, 10.0, 13.1):
+        row = QPainterPath()
+        row.moveTo(4.7, float(y))
+        row.lineTo(6.5, float(y))
+        p.drawPath(row)
+
+
+def _draw_map_panel(p):
+    """v1.2.4.1: окно с мини-картой внутри (два узла и линия между ними).
+
+    Пара к sidebar_panel: та же рамка; внутренность — эхо иконки connection
+    (узел-линия-узел), но в масштабе «карты» — для пункта/кнопки карты.
+    """
+    frame = QPainterPath()
+    frame.addRoundedRect(QRectF(3.0, 3.5, 14.0, 13.0), 1.8, 1.8)
+    p.drawPath(frame)
+    a = QPainterPath()
+    a.addEllipse(QPointF(7.3, 12.7), 1.6, 1.6)
+    p.drawPath(a)
+    b = QPainterPath()
+    b.addEllipse(QPointF(12.7, 7.3), 1.6, 1.6)
+    p.drawPath(b)
+    line = QPainterPath()
+    line.moveTo(8.4, 11.6)
+    line.lineTo(11.6, 8.4)
+    p.drawPath(line)
+
+
 _DRAWERS = {
     "new": _draw_new,
     "open": _draw_open,
@@ -275,6 +325,9 @@ _DRAWERS = {
     "undo": _draw_undo,
     "redo": _draw_redo,
     "settings": _draw_settings,  # v1.1: шестерёнка — кнопка/пункт «Настройки»
+    # v1.2.4.1: пара иконок сворачивания панелей (меню «Вид» + угловые кнопки)
+    "sidebar_panel": _draw_sidebar_panel,
+    "map_panel": _draw_map_panel,
 }
 
 

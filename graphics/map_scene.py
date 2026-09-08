@@ -23,6 +23,11 @@ try:
 except ImportError:
     from background_image import BackgroundImage
 
+try:  # v1.2.5: центральная тема (палитра/радиусы/шрифты — ui/theme.py)
+    from ..ui import theme
+except ImportError:
+    from ui import theme
+
 from PySide6.QtCore import Qt, QRectF
 from PySide6.QtGui import QBrush, QColor, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import QGraphicsScene
@@ -58,8 +63,9 @@ class MapScene(QGraphicsScene):
         self._grid_size = 20
         self._grid_min_screen_px = float(self._grid_size) * 0.8   # 16 px
         self._grid_major_every = 5
-        self._grid_color = QColor("#0f172a")      # minor-линии (тёмные)
-        self._grid_major_color = QColor("#1e293b")  # major-линии (чуть светлее)
+        # v1.2.5: цвета — из центральной темы (ui/theme.py); значения без изменений.
+        self._grid_color = QColor(theme.WINDOW_BG)      # minor-линии (тёмные)
+        self._grid_major_color = QColor(theme.BASE_BG)  # major-линии (чуть светлее)
 
     # ── AUDIT v0.8.3 (#5): публичные итераторы вместо обращений к _nodes/_arrows ──
 
@@ -107,7 +113,7 @@ class MapScene(QGraphicsScene):
         return step
 
     def drawBackground(self, painter: QPainter, rect: QRectF):
-        painter.fillRect(rect, QBrush(QColor("#020617")))
+        painter.fillRect(rect, QBrush(QColor(theme.CANVAS_BG)))
 
         # Масштаб вида (m11) — из первого вью; без вью рисуем базовый шаг.
         scale = 1.0
@@ -565,8 +571,9 @@ class MapScene(QGraphicsScene):
 
         Область — itemsBoundingRect (+padding), т.е. вся карта целиком,
         независимо от текущего зума/панорамирования окна. Фон-изображение
-        входит в результат (это часть карты); сетка drawBackground не рисуется —
-        рендер идёт через QGraphicsScene.render на чистый pixmap.
+        входит в результат (это часть карты); фон и сетка рисуются через
+        drawBackground (CANVAS_BG + линии) — QGraphicsScene.render вызывает её,
+        поэтому экспорт выглядит как интерактивный вид (поведение с v0.9.1).
         """
         from PySide6.QtGui import QPixmap, QColor
 
@@ -578,7 +585,7 @@ class MapScene(QGraphicsScene):
         w = max(int(src.width() * scale), 1)
         h = max(int(src.height() * scale), 1)
         pixmap = QPixmap(w, h)
-        pixmap.fill(QColor("#0b1220"))  # тот же тон тёмной темы (фон сцены)
+        pixmap.fill(QColor(theme.RENDER_BG))  # тот же тон тёмной темы (фон сцены)
 
         painter = QPainter(pixmap)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)

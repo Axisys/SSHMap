@@ -411,9 +411,13 @@
   "settings.map.node_double_click.connect": "Диалог входа (SSH)",
   "settings.general.sidebar_buttons": "Показывать блок кнопок сайдбара",
   "view.toggle_sidebar": "Сайдбар",
+  "view.toggle_map": "Карта",
+  "view.strip_sidebar_tooltip": "Кликните, чтобы развернуть сайдбар",
+  "view.strip_map_tooltip": "Кликните, чтобы развернуть карту",
   "settings.map.show_connection_type": "Всегда показывать тип на плашке связи",
   "connection.label_hint": "до 20 символов",
   "status.settings_saved": "Настройки сохранены.",
+  "status.collapse_both_forbidden": "Нельзя свернуть обе панели — хотя бы одна должна остаться открытой",
   "msg.confirm_close_session": "Закрыть SSH-сессию?",
   "msg.close_session_title": "SSH-сессия"
 }

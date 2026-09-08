@@ -11,12 +11,21 @@ ROADMAP v0.9.8:
 Виджет НЕ содержит логику поиска: он только принимает ввод и эмитит сигналы —
 какие узлы совпадают, что затемнять и куда центрировать решает MainWindow
 (единый источник истины — ui/main_window.py). Тёмная тема в палитре приложения
-(#0f172a фон карточки, #38bdf8 акцент, #e2e8f0 текст — те же цвета, что у узлов).
+(theme.WINDOW_BG фон карточки, theme.ACCENT акцент, theme.TEXT_PRIMARY текст —
+те же цвета, что у узлов; v1.2.5: константы центральной темы ui/theme.py).
 """
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QKeyEvent
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QLineEdit, QPushButton, QWidget
+
+try:  # v1.2.5: центральная тема (палитра/радиусы/шрифты — ui/theme.py)
+    from . import theme
+except ImportError:
+    try:
+        from ui import theme
+    except ImportError:  # flat-раскладка: каталог ui/ сам на sys.path
+        import theme
 
 
 def _t(key: str) -> str:
@@ -28,33 +37,34 @@ def _t(key: str) -> str:
         return key
 
 
-# Тёмная тема панели (палитра приложения): карточка #0f172a на фоне canvas #020617,
-# акцентная рамка #38bdf8 — тот же, что у совпадений/выделения MapView.
-_BAR_STYLE = """
-QWidget#MapSearchBar {
-    background-color: #0f172a;
-    border: 1px solid #38bdf8;
-    border-radius: 8px;
-}
-QLineEdit {
+# Тёмная тема панели (палитра приложения): карточка WINDOW_BG на фоне canvas CANVAS_BG,
+# акцентная рамка ACCENT — тот же, что у совпадений/выделения MapView.
+# v1.2.5: f-string со ссылками на константы центральной темы (значения без изменений).
+_BAR_STYLE = f"""
+QWidget#MapSearchBar {{
+    background-color: {theme.WINDOW_BG};
+    border: 1px solid {theme.ACCENT};
+    border-radius: {theme.RADIUS_SEARCH_BAR}px;
+}}
+QLineEdit {{
     background-color: transparent;
     border: none;
-    color: #e2e8f0;
+    color: {theme.TEXT_PRIMARY};
     font-size: 13px;
     padding: 2px 4px;
-    selection-background-color: #38bdf8;
-}
-QLabel {
-    color: #94a3b8;
+    selection-background-color: {theme.ACCENT};
+}}
+QLabel {{
+    color: {theme.TEXT_MUTED};
     font-size: 12px;
-}
-QPushButton {
+}}
+QPushButton {{
     background-color: transparent;
     border: none;
-    color: #94a3b8;
+    color: {theme.TEXT_MUTED};
     font-size: 15px;
-}
-QPushButton:hover { color: #e2e8f0; }
+}}
+QPushButton:hover {{ color: {theme.TEXT_PRIMARY}; }}
 """
 
 

@@ -37,6 +37,11 @@ try:
 except ImportError:
     from modules.terminal_page import TerminalSessionPage
 
+try:  # v1.2.5: центральная тема (статус-лейблы — ui/theme.py)
+    from ..ui import theme
+except ImportError:
+    from ui import theme
+
 
 def _st_module():
     """Модуль ssh_terminal в момент вызова (тестовый шов подмены атрибутов)."""
@@ -90,7 +95,8 @@ class TerminalDockContent(QWidget):
         # sticky-текст слева, SFTP-прогресс справа (скрыт, когда передач нет).
         row = QHBoxLayout()
         self.status_label = QLabel("")
-        self.status_label.setStyleSheet("color: #94a3b8; padding: 2px 0;")
+        # v1.2.5: цвет — из центральной темы (ui/theme.py); значение без изменений
+        self.status_label.setStyleSheet(f"color: {theme.TEXT_MUTED}; padding: 2px 0;")
         self.sftp_progress = QProgressBar()
         self.sftp_progress.setFixedWidth(180)
         self.sftp_progress.setTextVisible(True)

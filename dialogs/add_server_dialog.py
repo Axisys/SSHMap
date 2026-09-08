@@ -11,6 +11,11 @@ try:
 except ImportError:
     from models.profile import load_profiles, get_profile_by_id
 
+try:  # v1.2.5: центральная тема (палитра/радиусы/шрифты — ui/theme.py)
+    from ..ui import theme
+except ImportError:
+    from ui import theme
+
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
     QDialog, QFormLayout, QLineEdit, QPushButton, QSpinBox,
@@ -130,9 +135,9 @@ class AddServerDialog(QDialog):
 
         main_layout.addLayout(profile_section)
 
-        # Separator
+        # Separator (v1.2.5: цвет — из центральной темы ui/theme.py)
         sep = QLabel("─" * 50)
-        sep.setStyleSheet("color: #334155;")
+        sep.setStyleSheet(f"color: {theme.SURFACE_ALT};")
         main_layout.addWidget(sep)
         main_layout.addSpacing(6)
 

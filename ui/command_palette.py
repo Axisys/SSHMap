@@ -183,12 +183,17 @@ class CommandPalette(QDialog):
 
     @staticmethod
     def _reveal_node(node):
-        """Центрировать вид на узле + акцент выделения."""
+        """Центрировать вид на узле + акцент выделения.
+
+        v1.2.4.1 (задача 5): карта свёрнута — центрирование пропускается (выделение
+        работает; без исключений и без авто-показа карты).
+        """
         mw = node.scene().views()[0].window() if node.scene().views() else None
         scene = node.scene()
         scene.clearSelection()
         node.setSelected(True)
-        if mw is not None and hasattr(mw, "view"):
+        if mw is not None and hasattr(mw, "view") \
+                and not getattr(mw, "_map_collapsed", False):
             mw.view.centerOn(node)
 
     # ── Показ / фильтрация / запуск ─────────────────────────────

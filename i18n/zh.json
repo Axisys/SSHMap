@@ -411,9 +411,13 @@
   "settings.map.node_double_click.connect": "打开 SSH 登录对话框",
   "settings.general.sidebar_buttons": "显示侧边栏按钮块",
   "view.toggle_sidebar": "侧边栏",
+  "view.toggle_map": "地图",
+  "view.strip_sidebar_tooltip": "点击展开侧边栏",
+  "view.strip_map_tooltip": "点击展开地图",
   "settings.map.show_connection_type": "始终在连接标签上显示类型",
   "connection.label_hint": "最多 20 个字符",
   "status.settings_saved": "设置已保存。",
+  "status.collapse_both_forbidden": "无法同时折叠两个面板 — 至少需保持一个展开",
   "msg.confirm_close_session": "关闭 SSH 会话？",
   "msg.close_session_title": "SSH 会话"
 }
