@@ -194,6 +194,8 @@
   "sftp.upload_dialog_title": "Файлы для загрузки",
   "sftp.download_dir_title": "Каталог для скачивания",
   "sftp.open_failed": "Не удалось открыть SFTP-канал: {error}",
+  "sftp.drop_queued": "В очередь на загрузку в {dir}: {count} файл(ов)",
+  "sftp.drop_no_files": "В перетаскивании нет локальных файлов (каталоги не поддерживаются)",
   "dialog.save_changes": "Сохранить изменения?",
   "msg.save_on_exit": "Есть несохранённые изменения. Сохранить перед выходом?",
   "validation.empty_host": "У сервера не указан host.",

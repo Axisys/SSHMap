@@ -9,6 +9,9 @@
     уровень вверх; двойной клик по каталогу — вход в него;
   * upload: локальные файлы (QFileDialog) → ТЕКУЩИЙ показанный каталог
     (несколько файлов = последовательные задачи очереди);
+  * D&D (v1.2.8): файлы из Проводника в любое место вкладки → тот же
+    worker-очередной upload в ТЕКУЩИЙ каталог; каталоги/не-файлы игнорируются
+    с подсказкой; без соединения — подсказка «ожидание» (как у кнопки Upload);
   * download: выбранные файлы (мультивыделение) → выбранный локальный
     каталог; существующий файл той же цели перезаписывается (обработка
     конфликтов — v1.3 панель файлов);
@@ -26,13 +29,14 @@ SSH-подключения…» и ждёт set_worker(worker) — окно вы
 connected_signal / при переключении на вкладку (open_sftp() на том же
 transport — ROADMAP задача 3).
 
-Полное дерево с ленивым раскрытием, просмотрщик и D&D — цепочка v1.2.8/v1.3
-(фундамент — этот модуль + sftp_worker.py).
+Полное дерево с ленивым раскрытием, просмотрщик и drop «в конкретную строку»
+— цепочка v1.3 (фундамент — этот модуль + sftp_worker.py).
 """
+import os
 import posixpath
 from datetime import datetime
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import QEvent, Qt, Signal
 from PySide6.QtWidgets import (
     QFileDialog, QHBoxLayout, QLabel, QPushButton, QStyle, QTreeWidget,
     QTreeWidgetItem, QVBoxLayout, QWidget,
@@ -147,6 +151,15 @@ class SftpTab(QWidget):
         self.btn_upload.clicked.connect(self._on_upload)
         self.btn_download.clicked.connect(self._on_download)
         self.btn_cancel.clicked.connect(self._on_cancel)
+
+        # v1.2.8: D&D — файлы из Проводника в любое место вкладки. Qt доставляет
+        # drag-события виджету под курсором (дерево занимает почти всю вкладку),
+        # поэтому обработчики живут здесь, а eventFilter пересылает события с
+        # ДЕТЕЙ (tree/viewport/header/кнопки) в свои же обработчики.
+        self.setAcceptDrops(True)
+        for w in self.findChildren(QWidget):
+            w.installEventFilter(self)
+        self.installEventFilter(self)
 
     # ── Привязка worker'а (вызывает окно) ────────────────────────────────
 
@@ -301,6 +314,70 @@ class SftpTab(QWidget):
     def _on_cancel(self):
         if self._worker is not None:
             self._worker.cancel()
+
+    # ── D&D: файлы из Проводника (v1.2.8) ───────────────────────────────
+
+    _DRAG_TYPES = (QEvent.Type.DragEnter, QEvent.Type.DragMove, QEvent.Type.Drop)
+
+    def eventFilter(self, obj, event):
+        """Drag-события на детях вкладки пересылаются в обработчики САМОЙ
+        вкладки: цель drop'а — текущий каталог независимо от того, куда именно
+        (на строку дерева, на кнопки) упали файлы. Возврат True = событие
+        потреблено (QTreeWidget не обрабатывает его «по-своему»)."""
+        etype = event.type()
+        if etype in self._DRAG_TYPES and (obj is self or self.isAncestorOf(obj)):
+            if etype == QEvent.Type.DragEnter:
+                self.dragEnterEvent(event)
+            elif etype == QEvent.Type.DragMove:
+                self.dragMoveEvent(event)
+            else:  # Drop
+                self.dropEvent(event)
+            return True
+        return False
+
+    @staticmethod
+    def _local_files(mime_data) -> list:
+        """Существующие локальные файлы из URL перетаскивания. Каталоги,
+        удалённые/несуществующие пути и не-file данные — пропускаются."""
+        out = []
+        if mime_data is None or not mime_data.hasUrls():
+            return out
+        for url in mime_data.urls():
+            if not url.isLocalFile():
+                continue
+            path = url.toLocalFile()
+            if os.path.isfile(path):
+                out.append(path)
+        return out
+
+    def dragEnterEvent(self, event):
+        if self._local_files(event.mimeData()):
+            event.acceptProposedAction()
+
+    def dragMoveEvent(self, event):
+        # Тот же ответ, что и в dragEnter — иначе Qt сбросит действие до Drop.
+        if self._local_files(event.mimeData()):
+            event.acceptProposedAction()
+
+    def dropEvent(self, event):
+        files = self._local_files(event.mimeData())
+        if files:
+            event.acceptProposedAction()
+        self._on_drop(files)
+
+    def _on_drop(self, files: list):
+        """Результат drop'а: upload в ТЕКУЩИЙ каталог (как кнопка Upload)."""
+        if not files:
+            # В перетаскивании нет локальных файлов (каталоги/другие данные).
+            self.message.emit(_t("sftp.drop_no_files"))
+            return
+        if self._worker is None:
+            self.message.emit(_t("sftp.waiting_connection"))
+            return
+        for f in files:  # несколько файлов = последовательные задачи очереди (v1.1.3)
+            self._worker.queue_upload(f, self._current_dir)
+        self.message.emit(
+            _t("sftp.drop_queued", count=len(files), dir=self._current_dir))
 
     # ── Состояние передач (кнопка «Отменить») ────────────────────────────
 

@@ -143,8 +143,8 @@ def restore_i18n_config(snap):
 # в 12 i18n-файлах + APP_VERSION/requirements-пины в 7 release-state-секциях).
 # Пропуски самих ключей против кода ловит check_i18n_keys.py.
 # ─────────────────────────────────────────────────────────────────────────────
-EXPECTED_APP_VERSION = "1.2.7"    # текущий релиз (sentinel: ловит «бамп не в ту версию»)
-EXPECTED_I18N_KEYS = 425        # паритет en/ru/zh (v1.2.7: 422 + 3 — terminal.menu.*)
+EXPECTED_APP_VERSION = "1.2.8"    # текущий релиз (sentinel: ловит «бамп не в ту версию»)
+EXPECTED_I18N_KEYS = 427        # паритет en/ru/zh (v1.2.8: 425 + 2 — sftp.drop_*)
 VERSION_FORMAT_RE = re.compile(r"^\d+(\.\d+){1,3}(RC\d+)?$")  # "1.1.3", "1.0RC4", "0.9.9.7"
 
 

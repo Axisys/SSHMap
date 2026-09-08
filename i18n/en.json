@@ -194,6 +194,8 @@
   "sftp.upload_dialog_title": "Choose files to upload",
   "sftp.download_dir_title": "Choose directory for download",
   "sftp.open_failed": "Failed to open SFTP channel: {error}",
+  "sftp.drop_queued": "Queued {count} file(s) for upload to {dir}",
+  "sftp.drop_no_files": "No local files in the drop (directories are not supported)",
   "dialog.save_changes": "Save changes?",
   "msg.save_on_exit": "There are unsaved changes. Save before exiting?",
   "validation.empty_host": "The server host is empty.",
