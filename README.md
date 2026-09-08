@@ -19,7 +19,7 @@ pipx install .                         # or pip install . → sshmap command (en
 # Tests without pytest: topical test_*.py files + a single parallel runner.
 # Tests are isolated: they write to a temporary HOME and set UTF-8 stdout
 # themselves — no extra environment needed on cp1251 consoles or in CI:
-python tests/run_all.py              # everything (55 test files + i18n check): parallel (4 workers), results table + single exit code (0 ⇔ all green)
+python tests/run_all.py              # everything (56 test files + i18n check): parallel (4 workers), results table + single exit code (0 ⇔ all green)
 python tests/run_all.py --workers 8  # worker count (1 = sequential, as before)
 python tests/run_all.py keyring      # filter by substring in file name
 python tests/test_tags.py            # a single file (from the project root)
@@ -54,7 +54,7 @@ dialogs/                     # AddServer, SSHConnect (+ external terminal), Conn
 ui/                          # main_window.py — façade over ProjectIOMixin / NodeOpsMixin / SshMixin; sidebar.py; map_search_bar.py (Ctrl+F);
                              # command_palette.py (Ctrl+K); icons.py; mixin_support.py; theme.py (central UI palette, radii, fonts)
 i18n/                        # t(key, **kwargs); en/ru/zh JSON with identical key sets (parity pinned in tests); en is the default for new users
-tests/                       # 55 × test_*.py without pytest + _common.py harness + run_all.py (parallel runner) + check_i18n_keys.py — map: tests/INDEX.md
+tests/                       # 56 × test_*.py without pytest + _common.py harness + run_all.py (parallel runner) + check_i18n_keys.py — map: tests/INDEX.md
 ```
 
 ---
@@ -104,7 +104,8 @@ Format invariants:
 - PTY resize — only on an actual grid change + ~150 ms debounce before `channel.resize_pty` (initial `invoke_shell` 120×32; recomputed on canvas resize via the page's eventFilter, previously the window's resizeEvent).
 - Scrollback — stock `pyte.HistoryScreen`: mouse wheel and Ctrl+Shift+PageUp/PageDown, auto-return to the live line on new output; **bare PageUp/PageDown remain forwarded to the shell** (`\x1b[5~`/`\x1b[6~` — paging in less/man).
 - Keyboard — full table: F1–F12, Delete/PageUp/PageDown (always CSI ~), arrows and Home/End per DECCKM state: TUIs send smkx `\x1b[?1h` and wait for SS3 — `_cursor_key_seq()` sends `\x1bOA/B/C/D`, `\x1bOH/\x1bOF`; normal mode — CSI; state is `tscreen.application_cursor_keys()`, in pyte 0.8.2 DECCKM = 32 in `screen.mode`. Explicit Ctrl+C→`\x03` / Ctrl+D→`\x04` (Ctrl+C with a selection copies to the clipboard), bracketed paste Ctrl+V (single block), AltGr guard (Ctrl+Alt is not sent as control codes).
-- Mouse selection — coordinates are always `(row, col)` (`selection_cells()`), multi-line text copy.
+- Mouse selection — coordinates are always `(row, col)` (`selection_cells()`), multi-line text copy; **double-click selects a word, triple-click the whole line** (word = maximal run of non-space cells, CJK wide-glyph placeholders belong to the word); drag after double/triple-click extends from the far end.
+- Context menu (right click) — Copy (enabled only with a selection), Paste into the PTY (same bracketed-paste path as Ctrl+V), Select All; labels in en/ru/zh (`terminal.menu.*`).
 - The window closes with the standard X button (there is no separate "Close terminal" button); known hosts are pinned in `~/.sshmap/known_hosts`.
 - Multi-input: typing in the focused session is broadcast to ALL other open sessions — every user input passes one point (`TerminalWidget.keyPressEvent()` → `_send(bytes)` → `terminal_thread.send_data()`), and the hub (`modules/multi_input.py`, process singleton) hangs on exactly that point: when the mode is on, `_send` duplicates the same bytes into `send_data()` of every other live session from the registry. No echo by definition — bytes come from the keyboard of the focused widget, never from output; the source session is skipped by the broadcast (it already got them via its own `send_data`). Ctrl+V (bracketed paste) goes through the same point and is duplicated too. Toggle: checkable "View" menu item + **F12 = EXIT** (NOT Esc — Esc goes to the shell as `\x1b`!); while the mode is on the RC2 F12→`\x1b[24~` mapping is suspended (the key never reaches the shell), when off it works as before. UI: status-bar plaque "MULTI: N sessions" with an exit button, "MULTI · <alias>" tab badges + amber frame on every open container (window and dock) + window title prefix; a session that dies mid-typing (error → close) leaves the registry through the stock path (`destroyed` → `_forget_terminal_window`) and dead threads are additionally filtered by liveness, so the broadcast keeps working for the rest.
 - Settings — optional `terminal_*` keys in `~/.sshmap/config.json`; full list and defaults below, in "Settings".
@@ -173,7 +174,7 @@ en (default) / ru / zh. Rule: a new key is added to all 3 files at once; check �
 **Implemented features** (details in sections 3–4):
 - interactive map: nodes, Bezier connections of 6 types (one-way or bidirectional), notes, groups, background image with drag/resize
 - node statuses online/warn/offline: parallel probes, auto-interval for large maps
-- built-in SSH terminal on pyte (scrollback, mouse selection, full keyboard) + external system terminal — details in §4 "Terminal"
+- built-in SSH terminal on pyte (scrollback, mouse selection incl. word/line double/triple-click and right-click context menu, full keyboard) + external system terminal — details in §4 "Terminal"
 - SFTP tab in the terminal window: files over the same SSH connection — listing/".." navigation, upload/download with progress in the status bar and cancel
 - multiple SSH sessions as tabs in one terminal window (reconnect = new tab) + `terminal_mode`: separate windows (default) or a detachable "Terminals" dock on the map, switching without restart — details in §4 "Terminal"
 - multi-input: typing of the focused session is broadcast to all other open sessions; F12 exits the mode — details in §4 "Terminal"
@@ -199,7 +200,7 @@ en (default) / ru / zh. Rule: a new key is added to all 3 files at once; check �
 - TOFU on first connect (a new host key is accepted automatically) and keyring limitations — details in "Security".
 
 **Roadmap** (tasks, order, acceptance — in ROADMAP.md):
-- **v1.2.x series** (the "window → page" refactor `TerminalSessionPage` — v1.2, sessions as tabs in a window — v1.2.1, terminals dock of the map window — v1.2.2, multi-input broadcast — v1.2.3, note pinning to servers — v1.2.4, independent sidebar/map collapse into thin strips — v1.2.4.1, central theme `ui/theme.py` (palette/radii/fonts) — v1.2.5, bidirectional arrows — v1.2.6): terminal selection and context menu; D&D into the SFTP tab; dead code removal + full wcwidth CJK; log highlighting (opt-in).
+- **v1.2.x series** (the "window → page" refactor `TerminalSessionPage` — v1.2, sessions as tabs in a window — v1.2.1, terminals dock of the map window — v1.2.2, multi-input broadcast — v1.2.3, note pinning to servers — v1.2.4, independent sidebar/map collapse into thin strips — v1.2.4.1, central theme `ui/theme.py` (palette/radii/fonts) — v1.2.5, bidirectional arrows — v1.2.6, terminal selection and context menu — v1.2.7): D&D into the SFTP tab; dead code removal + full wcwidth CJK; log highlighting (opt-in).
 - **v1.3.x series**: terminal command library (macros) — one click sends a saved command/script to the active terminal; text viewer in the SFTP tab; configurable hotkeys; languages without writing code; lightweight plugins.
 
 ---

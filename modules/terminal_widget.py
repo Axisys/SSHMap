@@ -51,11 +51,27 @@ screen.mode — приватные режимы хранятся со сдвиг
 terminal_wheel — "scrollback" (дефолт) | "off" (колесо не скроллит локальный
 скроллбэк, event.ignore; SGR-passthrough — v1.2+).
 
+v1.2.7 — выделение двойным/тройным кликом + контекстное меню (ПКМ):
+* двойной клик — выделение СЛОВА на строке (word_units() — чистая функция:
+  слово = максимальный прогон небелых ячеек; заглушка широкого CJK-глифа
+  принадлежит слову), тройной — вся СТРОКА (0..columns-1); клики считает сам
+  виджет (ячейка + интервал DOUBLE_CLICK_MS) — QMouseEvent в PySide6 не несёт
+  click-count, и синтетические события тестов его не имеют; drag после двойного/
+  тройного клика расширяет выделение от ДАЛЬНОГО конца слова/строки
+  (_click_sel_end), отпускание ЛКМ при count>=2 НЕ затирает выделение;
+* ПКМ — контекстное меню (contextMenuEvent → _build_context_menu(), тестовый
+  шов): Копировать (enabled только при выделении, тот же путь copy_selection()),
+  Вставить в PTY (тот же bracketed paste, что Ctrl+V: единый блок
+  \x1b[200~…\x1b[201~ через _send — мультинабор дублирует как и клавишу),
+  Выделить всё (select_all() — вся видимая сетка); подписи — i18n-ключи
+  terminal.menu.* × en/ru/zh (get_translator, кэш по паттерну ssh_terminal.py).
+
 Потоки: paintEvent и snapshot() — GUI-поток; feed() из SSH-потока под lock'ом
 TerminalScreen — race посреди кадра исключён.
 """
 
 import math
+import time
 import unicodedata
 
 try:
@@ -88,11 +104,33 @@ def _get_app_log():
             _log_cache["log"] = False  # логгер недоступен — дальше молчим
     return _log_cache["log"] or None
 
+
+# v1.2.7: i18n для контекстного меню (кэш по паттерну get_translator в
+# modules/ssh_terminal.py — модуль на горячем пути, импорт i18n ленивый).
+_t_cache = None
+
+
+def get_translator():
+    """Безопасный i18n-хелпер: кэшированный t() или fallback "[key]".
+
+    Ключи terminal.menu.* используются ТОЛЬКО в _build_context_menu(); до v1.2.7
+    модуль i18n не импортировал вовсе."""
+    global _t_cache
+    if _t_cache is None:
+        try:
+            from i18n import t as _func
+            _t_cache = lambda key, **kwargs: (
+                _func(key, **kwargs) if kwargs else _func(key)
+            )
+        except Exception:
+            _t_cache = lambda k, **kw: f"[{k}]"
+    return _t_cache
+
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import (
     QBrush, QColor, QFont, QFontDatabase, QFontMetricsF, QPainter, QPen,
 )
-from PySide6.QtWidgets import QApplication, QSizePolicy, QWidget
+from PySide6.QtWidgets import QApplication, QMenu, QSizePolicy, QWidget
 
 
 def _fmt_key(ch):
@@ -180,6 +218,41 @@ def selection_cells(start, end, columns):
     return cells
 
 
+def word_units(row_chars):
+    """Диапазоны слов строки: list[(start_col, end_col)] включительно (v1.2.7).
+
+    row_chars — список pyte Char длиной columns (одна строка snapshot'а).
+    Слово — максимальный прогон НЕБЕЛЫХ ячеек: разделитель только пробельные
+    символы (data.isspace()); пунктуация к слову ПРИНАДЛЕЖИТ ("foo,bar" — одно
+    слово, как в xterm/Windows Terminal). Заглушка широкого CJK-глифа
+    (data == '') принадлежит СЛОВОУ: в pyte 0.8.2 широкий глиф занимает ячейку
+    + следующую заглушку (TERMINAL.md факт №11), поэтому "a中b" — одно слово
+    на 4 ячейках, а не два. Чистая функция — юнит-тестится без GUI
+    (tests/test_terminal_selection_menu.py).
+    """
+    n = len(row_chars)
+    units = []
+    x = 0
+    while x < n:
+        d = row_chars[x].data
+        if not d or d.isspace():      # пробел/пусто — не начало слова
+            x += 1
+            continue
+        start = x
+        x += 1
+        while x < n:
+            d2 = row_chars[x].data
+            if d2 == "":              # заглушка после широкого глифа — в слове
+                x += 1
+                continue
+            if not d2.isspace():
+                x += 1
+                continue
+            break                     # пробел — конец слова
+        units.append((start, x - 1))
+    return units
+
+
 # xterm-последовательности F1–F12 (таблица из черновика TERMINAL.md §6/фаза 1):
 # F1–F4 — SS3 (\x1bOP…\x1bOS), F5–F12 — CSI (\x1b[15~ … \x1b[24~).
 _F_KEY_SEQUENCES = {
@@ -201,7 +274,8 @@ _F_KEY_SEQUENCES = {
 class TerminalWidget(QWidget):
     """Посячейный холст pyte-экрана (v1.0RC1; v1.0RC2 — клавиатура + выделение;
     v1.0RC3 — скроллбэк колесом/Ctrl+Shift+PgUp/PgDn + мигание курсора;
-    v1.2.3 — мультинабор: broadcast ввода во все открытые сессии).
+    v1.2.3 — мультинабор: broadcast ввода во все открытые сессии;
+    v1.2.7 — двойной/тройной клик (слово/строка) + контекстное меню ПКМ).
 
     tscreen — TerminalScreen (pyte.HistoryScreen + lock); terminal_thread — объект с
     send_data(bytes) (SSHTerminalThread; None — ввод отключён, рендер и скроллбэк
@@ -213,6 +287,7 @@ class TerminalWidget(QWidget):
     CURSOR_COLOR = "#e2e8f0"      # блок-курсор: цвет default-текста (классический вид)
     SELECTION_COLOR = (59, 130, 246, 90)   # v1.0RC2: оверлей выделения (RGBA, alpha≈35%)
     BLINK_INTERVAL_MS = 530       # v1.0RC3: период мигания курсора (ROADMAP задача 8)
+    DOUBLE_CLICK_MS = 500         # v1.2.7: интервал двойного/тройного клика (тест-хук)
 
     def __init__(self, tscreen, terminal_thread=None, parent=None,
                  palette_name="default", format_cache_limit=FORMAT_CACHE_LIMIT,
@@ -241,6 +316,17 @@ class TerminalWidget(QWidget):
         # координаты ВСЕГДА (row, col); None — выделения нет.
         self._sel_anchor = None
         self._sel_active = None
+
+        # v1.2.7: учёт двойного/тройного клика — сам виджет (QMouseEvent в PySide6
+        # не несёт click-count; синтетические события тестов его тоже не имеют):
+        # _click_count растёт при press в той же ячейке внутри DOUBLE_CLICK_MS,
+        # иначе сбрасывается на 1. _click_sel_end — «зафиксированный» конец для
+        # drag'а после двойного/тройного клика (дальний конец слова/строки);
+        # None — обычный press/drag v1.0RC2.
+        self._click_count = 0
+        self._last_click_cell = None
+        self._last_click_ms = 0.0
+        self._click_sel_end = None
 
         # v1.0RC3: мигание курсора — свой QTimer (ROADMAP задача 8): стартует в
         # showEvent, останавливается в hideEvent (скрытое окно не мигает).
@@ -728,6 +814,7 @@ class TerminalWidget(QWidget):
     def clear_selection(self):
         self._sel_anchor = None
         self._sel_active = None
+        self._click_sel_end = None   # v1.2.7: фиксатор drag'а после double/triple-click
         self.update()
 
     def selected_text(self):
@@ -760,11 +847,33 @@ class TerminalWidget(QWidget):
         clipboard.setText(text)
         return True
 
-    # ── мышь: ЛКМ press → drag → release (v1.0RC2) ──────────
+    # ── мышь: ЛКМ press → drag → release (v1.0RC2; v1.2.7 — double/triple-click) ──
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
-            self._sel_anchor = self._cell_at(event.position().toPoint())
-            self._sel_active = self._sel_anchor   # простой клик — пока не выделение
+            cell = self._cell_at(event.position().toPoint())
+            # v1.2.7: клик-счётчик (QMouseEvent не несёт click-count — считаем сами):
+            # press в той же ячейке внутри DOUBLE_CLICK_MS → count+1, иначе 1.
+            # ВАЖНО: time.monotonic() — СЕКУНДЫ, DOUBLE_CLICK_MS — миллисекунды
+            # (сравнение без ×1000 дало бы «двойной клик» в течение 500 секунд).
+            now_ms = time.monotonic() * 1000.0
+            if (self._click_count > 0 and self._last_click_cell == cell
+                    and now_ms - self._last_click_ms <= self.DOUBLE_CLICK_MS):
+                self._click_count += 1
+            else:
+                self._click_count = 1
+            self._last_click_cell = cell
+            self._last_click_ms = now_ms
+
+            if self._click_count >= 3:
+                # тройной клик — вся строка (ROADMAP v1.2.7 задача 1)
+                self._select_line(cell)
+            elif self._click_count == 2:
+                # двойной клик — слово под курсором
+                self._select_word(cell)
+            else:
+                self._sel_anchor = cell
+                self._sel_active = cell       # простой клик — пока не выделение
+                self._click_sel_end = None
             self.update()
             event.accept()
             return
@@ -772,6 +881,11 @@ class TerminalWidget(QWidget):
 
     def mouseMoveEvent(self, event):
         if self._sel_anchor is not None and (event.buttons() & Qt.MouseButton.LeftButton):
+            # v1.2.7: drag ПОСЛЕ двойного/тройного клика — зафиксированный конец =
+            # дальний конец слова/строки (_click_sel_end), выделение расширяется от него.
+            if self._click_sel_end is not None:
+                self._sel_anchor = self._click_sel_end
+                self._click_sel_end = None
             self._sel_active = self._cell_at(event.position().toPoint())
             self.update()
             event.accept()
@@ -780,6 +894,15 @@ class TerminalWidget(QWidget):
 
     def mouseReleaseEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton and self._sel_anchor is not None:
+            if self._click_count >= 2:
+                # v1.2.7: отпускание после двойного/тройного клика НЕ затирает
+                # выделение (простой клик ниже перезаписал бы _sel_active позицией
+                # release'а и сбросил одно-ячеечное слово). Drag уже обработан в
+                # mouseMoveEvent; здесь только сброс фиксатора.
+                self._click_sel_end = None
+                self.update()
+                event.accept()
+                return
             # Позиция отпускания — конец выделения (drag может закончиться без
             # промежуточного Move-события).
             self._sel_active = self._cell_at(event.position().toPoint())
@@ -791,3 +914,95 @@ class TerminalWidget(QWidget):
             event.accept()
             return
         super().mouseReleaseEvent(event)
+
+    # ── v1.2.7: двойной/тройной клик (ROADMAP v1.2.7 задача 1) ────────────────
+    def _select_word(self, cell):
+        """Двойной клик — выделение слова на строке под курсором.
+
+        Слово — word_units() (максимальный прогон небелых ячеек; заглушка широкого
+        CJK-глифа принадлежит слову). Клик по пробелу — бездействия: текущее
+        выделение не меняется. _click_sel_end — дальний конец слова (ближе к клику
+        НЕ фиксируем): drag после двойного клика расширяет выделение от него,
+        как в xterm."""
+        rows, _cx, _cy, _hidden = self.tscreen.snapshot()
+        row, col = cell
+        if not (0 <= row < len(rows)):
+            return
+        for start, end in word_units(rows[row]):
+            if start <= col <= end:
+                self._sel_anchor = (row, start)
+                self._sel_active = (row, end)
+                # фиксатор drag'а — дальний конец слова от точки клика
+                self._click_sel_end = (row, end) if col - start < end - col else (row, start)
+                return
+        self._click_sel_end = None   # клик по пробелу — выделение не меняется
+
+    def _select_line(self, cell):
+        """Тройной клик — вся строка 0..columns-1 (ROADMAP v1.2.7 задача 1).
+
+        Хвостовые пробелы при копировании и так обрезаются selected_text() (rstrip),
+        поэтому «вся строка» = весь видимый диапазон колонок. _click_sel_end —
+        дальний конец строки от точки клика (drag расширяет в обе стороны)."""
+        cols = getattr(self.tscreen, "columns", 80)
+        lines = getattr(self.tscreen, "lines", 24)
+        row, col = cell
+        r = max(0, min(int(row), lines - 1))
+        self._sel_anchor = (r, 0)
+        self._sel_active = (r, cols - 1)
+        self._click_sel_end = (r, cols - 1) if col * 2 < cols else (r, 0)
+
+    # ── v1.2.7: контекстное меню ПКМ (ROADMAP v1.2.7 задача 2) ────────────────
+    def select_all(self):
+        """Выделить всё — вся видимая сетка (контекстное меню, Ctrl+A-семантика)."""
+        cols = getattr(self.tscreen, "columns", 80)
+        lines = getattr(self.tscreen, "lines", 24)
+        self._sel_anchor = (0, 0)
+        self._sel_active = (lines - 1, cols - 1)
+        self._click_sel_end = None
+        self.update()
+
+    def _build_context_menu(self):
+        """QMenu контекстного меню ПКМ (v1.2.7): Копировать | Вставить | Выделить всё.
+
+        Тестовый шов: contextMenuEvent создаёт меню этим методом и только показывает
+        его — тесты вызывают _build_context_menu() напрямую и триггерят QAction'ы,
+        не входя в menu.exec() (offscreen-зависание). Подписи — i18n terminal.menu.*
+        (en/ru/zh). Копировать — enabled ТОЛЬКО при выделении; Вставить — только при
+        живом потоке (terminal_thread), путь тот же, что Ctrl+V (_bracketed_paste →
+        _send: bracketed-paste-блок в PTY + broadcast мультинабора)."""
+        t = get_translator()
+        menu = QMenu(self)
+        act_copy = menu.addAction(t("terminal.menu.copy"))
+        act_copy.setEnabled(self.has_selection())
+        act_copy.triggered.connect(self.copy_selection)
+        act_paste = menu.addAction(t("terminal.menu.paste"))
+        act_paste.setEnabled(self.terminal_thread is not None)
+        act_paste.triggered.connect(self._bracketed_paste)
+        act_all = menu.addAction(t("terminal.menu.select_all"))
+        act_all.triggered.connect(self.select_all)
+        return menu
+
+    def contextMenuEvent(self, event):
+        """ПКМ — контекстное меню (v1.2.7). Никогда не бросает: сбой сборки меню
+        (teardown-гонка) игнорируется; сбой exec'а логируется (не глотаем молча —
+        паттерн аудита v0.7.2 из map_view.py)."""
+        try:
+            menu = self._build_context_menu()
+        except Exception:
+            event.ignore()
+            return
+        if menu is None:
+            event.ignore()
+            return
+        try:
+            # v1.2.7-fix (ручное тестирование): QContextMenuEvent.globalPos() уже
+            # возвращает QPoint (в отличие от QMouseEvent.globalPosition() → QPointF) —
+            # лишнее .toPoint() бросало AttributeError, которое старый except глотал
+            # молча: «ПКМ ничего не делает» без единой видимой ошибки. Координаты —
+            # как есть.
+            menu.exec(event.globalPos())
+        except Exception as e:  # noqa: BLE001 — GUI-компонент не должен ронять приложение
+            _log = _get_app_log()
+            if _log is not None:
+                _log.error(f"contextMenuEvent: menu.exec failed: {e}")
+        event.accept()
