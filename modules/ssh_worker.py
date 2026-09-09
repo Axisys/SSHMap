@@ -133,11 +133,17 @@ class SSHWorker(QThread):
 
         try:
             if self.key_path:
+                # v1.2.10 (AUDIT авто #1): паритет с SystemInfoCollector (system_info_collector.py:236–240) —
+                # если final_password заполнен (явный аргумент или keyring, стр. 127–132), передаём его
+                # как fallback: paramiko сначала пробует ключ, затем пароль. До фикса «Подключиться по SSH»
+                # падал там, где «Собрать информацию» работало. Пароля нет — None (paramiko пропускает,
+                # чистый key-путь без изменений).
                 client.connect(
                     self.host,
                     username=self.user,
                     port=self.port,
                     key_filename=self.key_path,
+                    password=final_password or None,
                     timeout=15,
                     look_for_keys=False,
                     allow_agent=True,

@@ -427,7 +427,17 @@ class SettingsDialog(QDialog):
                     self, _t("msg.error_title"),
                     _t("msg.save_failed", error="~/.sshmap/config.json"))
                 return  # не закрываем молча — пользователь видит ошибку
-        except Exception:
+        except Exception as e:
+            # v1.2.10 (AUDIT авто #3): тихий `return` оставлял «замерзший» диалог без объяснений;
+            # теперь — лог + видимая ошибка, как в ветке save_config()==False выше (те же i18n-ключи).
+            try:
+                from modules.logger import get_logger
+                get_logger("ui.settings_dialog").warning(f"save_config failed: {e}")
+            except Exception:
+                pass
+            QMessageBox.warning(
+                self, _t("msg.error_title"),
+                _t("msg.save_failed", error="~/.sshmap/config.json"))
             return
         self.applied.emit()
         self.accept()

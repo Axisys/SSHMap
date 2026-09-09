@@ -74,10 +74,14 @@ class CredentialManager:
                 self._keyring_backend = kr
                 self._backend_available = True
             else:
+                # v1.2.10 (AUDIT ручной #2): get_logger() без аргумента бросал TypeError
+                # (name — обязательный позиционный аргумент, modules/logger.py), который
+                # глотался окружающим except — задокументированное в DOCUMENTATION.md
+                # предупреждение «Rejected keyring backend» никогда не доходило до лога.
                 log = None
                 try:
                     from modules.logger import get_logger
-                    log = get_logger()
+                    log = get_logger("services.credential_manager")
                 except Exception:
                     pass
                 if log:

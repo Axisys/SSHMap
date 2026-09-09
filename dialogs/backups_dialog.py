@@ -71,8 +71,10 @@ class BackupsDialog(QDialog):
                 _fmt_time(it.get("mtime", 0.0)),
                 _fmt_size(int(it.get("size", 0))),
             ])
-            # path+label — данные строки; сигнал несёт их дальше в MainWindow
-            row.setData(0, Qt.UserRole, (it["path"], it.get("label", "")))
+            # path+label — данные строки; сигнал несёт их дальше в MainWindow.
+            # v1.2.10 (AUDIT авто #4): паритет с .get() для label/mtime/size выше — элемент
+            # без "path" не роняет диалог KeyError'ом.
+            row.setData(0, Qt.UserRole, (it.get("path", ""), it.get("label", "")))
             self.tree.addTopLevelItem(row)
 
         header = self.tree.header()

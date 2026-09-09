@@ -314,9 +314,12 @@ class AddServerDialog(QDialog):
         sid = self._data.id if self._data else str(uuid.uuid4())[:8]
         return ServerData(
             id=sid,
-            alias=self.alias.text() or "Server",
-            host=self.host.text(),
-            user=self.user.text(),
+            # v1.2.10 (AUDIT ручной #3): валидация проверяет непустоту ПОСЛЕ strip, а значение
+            # сохранялось с пробелами — терминальное подключение к « 192.168.1.5» падало на DNS
+            # (terminal_page.py передаёт host как есть); тем же фиксом закрыт путь SystemInfoCollector.
+            alias=self.alias.text().strip() or "Server",
+            host=self.host.text().strip(),
+            user=self.user.text().strip(),
             password=self.password.text(),  # plaintext from UI (server credentials are per-server)
             key_path=self.key_path.text(),
             ssh_port=self.port.value(),
