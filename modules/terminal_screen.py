@@ -10,7 +10,7 @@ width=120, height=32). Альтернативного экрана (режим 1
 v1.0RC1: добавлен цветовой движок для посячейного холста (PALETTES +
 resolve_color, TERMINAL.md §5.1) и snapshot() — снимок сетки для
 TerminalWidget (modules/terminal_widget.py). Старый HTML-рендер render()
-помечен deprecated (удаление не раньше v1.2, ROADMAP v1.0).
+помечен deprecated с v1.0RC1 и удалён в v1.2.9 (ROADMAP «Гигиена терминала»).
 
 v1.0RC3: pyte.Screen → pyte.HistoryScreen (TERMINAL.md §5.4) — готовый
 скроллбэк (deque-история + prev_page()/next_page()) со встроенным авто-возвратом
@@ -26,9 +26,9 @@ v1.1.2RC3 (AUDIT U3): application_cursor_keys() — состояние DECCKM (�
 а НЕ 1 (проверено прогоном на установленной версии).
 
 Headless-friendly: сам класс Screen не требует Qt — тестируется без GUI.
-Потокобезопасность: feed() из SSH-потока, snapshot()/render()/
-application_cursor_keys из GUI-потока (v1.1.2 final N13: мёртвое свойство
-cursor убрано — декларация совпадает с кодом; курсор отдаёт snapshot()).
+Потокобезопасность: feed() из SSH-потока, snapshot()/application_cursor_keys
+из GUI-потока (v1.1.2 final N13: мёртвое свойство cursor убрано — декларация
+совпадает с кодом; курсор отдаёт snapshot()).
 """
 
 import threading
@@ -40,21 +40,6 @@ except ImportError as e:  # pragma: no cover
         "Для v0.8 терминала требуется пакет 'pyte' (pip install pyte)"
     ) from e
 
-# Палитра xterm-подобная: индексы 0–15 → hex, 16–255 — через pyte.graphics.FG_BG_256
-_PALETTE16 = [
-    "#2e3440", "#cd3131", "#0dbc79", "#e5e510",
-    "#2472c8", "#bc3fbc", "#11a8cd", "#e5e5e5",
-    "#555555", "#f14c4c", "#23d18b", "#f5f543",
-    "#3b8eea", "#d670d6", "#29b8db", "#ffffff",
-]
-_DEFAULT_FG = "#e2e8f0"   # светлый текст на тёмном фоне окна терминала
-_DEFAULT_BG = None        # фон задаёт стиль QPlainTextEdit (#0f172a)
-
-# имя цвета pyte ('red', 'brown', ...) → индекс базовой палитры
-_NAME_TO_IDX = {name: i for i, name in enumerate(
-    ["black", "red", "green", "brown", "blue", "magenta", "cyan", "white"])}
-
-
 # ── v1.0RC1: цветовой движок для посячейного холста (TERMINAL.md §5.1) ───────
 # Проверенные факты pyte 0.8.2 (прогоном на установленной версии):
 #   * SGR 33 → fg='brown', SGR 93 → fg='brightbrown' — жёлтый называется brown;
@@ -63,7 +48,7 @@ _NAME_TO_IDX = {name: i for i, name in enumerate(
 #   * опечатка самого pyte: BG_AIXTERM[105] = 'bfightmagenta' (SGR 4;105 → bg='bfightmagenta').
 # Движок headless (без Qt) — тестируется без GUI (tests/test_terminal_colors.py).
 
-DEFAULT_FG_HEX = "#e2e8f0"   # default-текст (то же, что _DEFAULT_FG в HTML-пути)
+DEFAULT_FG_HEX = "#e2e8f0"   # default-текст на тёмном фоне окна терминала
 DEFAULT_BG_HEX = "#0f172a"   # фон окна терминала (стиль QPlainTextEdit v0.8)
 
 # ── v1.0RC3: параметры скроллбэка HistoryScreen (TERMINAL.md §5.4) ───────────
@@ -78,7 +63,7 @@ SCROLL_RATIO = 0.1
 
 # Палитры: ОБЯЗАТЕЛЬНЫЕ ключи black…white + br_* (8+8) — иначе SGR 33/93 и
 # bright-цвета уходят в default (критическая ошибка №2 из TERMINAL.md §3).
-# 'default' — текущая xterm-подобная палитра (_PALETTE16): дефолты = текущий вид.
+# 'default' — текущая xterm-подобная палитра: дефолты = текущий вид.
 # default_fg/default_bg — цвет текста и фон экрана (reverse сводится к ним).
 ANSI_COLOR_NAMES = ("black", "red", "green", "yellow", "blue", "magenta", "cyan", "white")
 
@@ -145,36 +130,6 @@ def resolve_color(value, palette=None, default_hex=DEFAULT_FG_HEX):
     if name == "brown":              # SGR 33 — в pyte жёлтый называется brown
         return pal.get("yellow", default_hex)
     return pal.get(name, default_hex)
-
-
-def _color(value):
-    """Значение цвета pyte → hex-строка или None (default)."""
-    if value in (None, "default"):
-        return None
-    if isinstance(value, int):
-        return _PALETTE16[value] if value < 16 else "#" + pyte.graphics.FG_BG_256[value]
-    # строка: либо имя ('red'), либо hex-строка pyte 256-цвета ('ff0000')
-    if value.startswith("#"):
-        return value
-    if len(value) == 6:
-        try:
-            int(value, 16)
-            return "#" + value
-        except ValueError:
-            pass
-    idx = _NAME_TO_IDX.get(value)
-    if idx is not None:
-        return _PALETTE16[idx]
-    if value.startswith("bright"):  # 'brightred' и т.п.
-        base = value[len("bright"):]
-        idx = _NAME_TO_IDX.get(base)
-        if idx is not None:
-            return _PALETTE16[idx + 8]
-    return None
-
-
-def _esc_html(s):
-    return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
 class TerminalScreen:
@@ -277,63 +232,9 @@ class TerminalScreen:
             cy = min(scr.cursor.y, scr.lines - 1)
             return rows, cx, cy, bool(scr.cursor.hidden)
 
-    def render(self):
-        """DEPRECATED (v1.0RC1): HTML-рендер для QPlainTextEdit — заменён
-        TerminalWidget (modules/terminal_widget.py, посячейный холст QWidget+QPainter;
-        новый код использует snapshot() + resolve_color()). Оставлен до v1.2
-        (ROADMAP v1.0: «удалить не раньше v1.2»); сьют от него не зависит.
-
-        Возвращает (html_lines: list[str], cursor_x, cursor_y).
-
-        html_lines — готовые строки HTML (<span style=color:…>),
-        текст внутри экранирован; хвостовые пробелы строк обрезаны.
-        """
-        with self._lock:
-            scr = self.screen
-            out = []
-            for y in range(scr.lines):
-                line = scr.buffer[y]
-                spans = []          # [(text, fg_hex|None, bg_hex|None, bold)]
-                cur = [None, None, False]
-                buf = []
-
-                def flush():
-                    if buf:
-                        spans.append(("".join(buf), cur[0], cur[1], cur[2]))
-                        buf.clear()
-
-                for x in range(scr.columns):
-                    ch = line[x]
-                    fg = _color(ch.fg) if ch.fg not in (None, "default") else None
-                    bg = _color(ch.bg) if ch.bg not in (None, "default") else None
-                    if ch.reverse:
-                        fg, bg = bg or _DEFAULT_FG, fg or "#0f172a"  # инверсия default-цветов
-                    if [fg, bg, bool(ch.bold)] != cur:
-                        flush()
-                        cur = [fg, bg, bool(ch.bold)]
-                    buf.append(ch.data)
-                flush()
-
-                html = []
-                for text, fg, bg, bold in spans:
-                    stripped = text.rstrip()
-                    if not stripped:
-                        continue
-                    styles = []
-                    if fg:
-                        styles.append(f"color:{fg}")
-                    if bg:
-                        styles.append(f"background-color:{bg}")
-                    if bold:
-                        styles.append("font-weight:bold")
-                    esc = _esc_html(stripped)
-                    html.append(f'<span style="{";".join(styles)}">{esc}</span>'
-                                if styles else esc)
-                out.append("".join(html))
-
-            cx = min(scr.cursor.x, scr.columns - 1)
-            cy = min(scr.cursor.y, scr.lines - 1)
-            return out, cx, cy
+    # v1.2.9 (ROADMAP «Гигиена терминала»): deprecated HTML-рендер render()
+    # (v1.0RC1) УДАЛЁН вместе с хелперами _color()/_esc_html() — мёртвый код с
+    # v1.0RC1, окном никогда не создавался; рендер — TerminalWidget.snapshot().
 
     # v1.1.2 final (N13): мёртвое свойство cursor() УДАЛЕНО — вызывающих в коде
     # не было (AUDIT: только внутренние чтения screen.cursor.* под lock'ом).

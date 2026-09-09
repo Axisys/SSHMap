@@ -12,7 +12,8 @@
     заглушки), пиксельные цвета ячеек (SGR 31/33/93, 41, 256, truecolor),
     блок-курсор через свап + cursor.hidden (ESC[?25l/h), счётчик drawText
     (runs, а не по-символьный рендер);
-  * интеграция: SSHTerminalWindow → TerminalWidget, TerminalScreen.render() — deprecated.
+  * интеграция: SSHTerminalWindow → TerminalWidget; v1.2.9: TerminalScreen.render()
+    (HTML-путь) удалён — проверка отсутствия мёртвого кода.
 
 Запуск:  python tests/test_terminal_colors.py   (из корня проекта) или python tests/run_all.py
 """
@@ -300,8 +301,6 @@ check("два цвета — два drawText", _wr2.last_paint_stats["draw_text_
 # 6. Интеграция: SSHTerminalWindow → TerminalWidget (задача 3 RC1)
 # ════════════════════════════════════════════════════════════
 print("== SSHTerminalWindow integration ==")
-import inspect
-
 import modules.ssh_terminal as ST
 from models.server import ServerData
 
@@ -327,8 +326,8 @@ try:
     check("байты → pyte → холст (visible_text)", "hello" in win.widget.visible_text(),
           f"text={win.widget.visible_text()!r}"[:200])
 
-    doc = inspect.getdoc(ST.TerminalScreen.render) or ""
-    check("TerminalScreen.render() помечен DEPRECATED", "DEPRECATED" in doc, doc[:80])
+    check("v1.2.9: TerminalScreen.render() (HTML-путь) удалён — мёртвый код с v1.0RC1",
+          not hasattr(ST.TerminalScreen, "render"))
 finally:
     ST.SSHTerminalThread = _orig_thread_cls
     if win is not None:

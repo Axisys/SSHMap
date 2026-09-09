@@ -19,7 +19,7 @@ pipx install .                         # or pip install . → sshmap command (en
 # Tests without pytest: topical test_*.py files + a single parallel runner.
 # Tests are isolated: they write to a temporary HOME and set UTF-8 stdout
 # themselves — no extra environment needed on cp1251 consoles or in CI:
-python tests/run_all.py              # everything (57 test files + i18n check): parallel (4 workers), results table + single exit code (0 ⇔ all green)
+python tests/run_all.py              # everything (58 test files + i18n check): parallel (4 workers), results table + single exit code (0 ⇔ all green)
 python tests/run_all.py --workers 8  # worker count (1 = sequential, as before)
 python tests/run_all.py keyring      # filter by substring in file name
 python tests/test_tags.py            # a single file (from the project root)
@@ -54,7 +54,7 @@ dialogs/                     # AddServer, SSHConnect (+ external terminal), Conn
 ui/                          # main_window.py — façade over ProjectIOMixin / NodeOpsMixin / SshMixin; sidebar.py; map_search_bar.py (Ctrl+F);
                              # command_palette.py (Ctrl+K); icons.py; mixin_support.py; theme.py (central UI palette, radii, fonts)
 i18n/                        # t(key, **kwargs); en/ru/zh JSON with identical key sets (parity pinned in tests); en is the default for new users
-tests/                       # 57 × test_*.py without pytest + _common.py harness + run_all.py (parallel runner) + check_i18n_keys.py — map: tests/INDEX.md
+tests/                       # 58 × test_*.py without pytest + _common.py harness + run_all.py (parallel runner) + check_i18n_keys.py — map: tests/INDEX.md
 ```
 
 ---
@@ -200,7 +200,6 @@ en (default) / ru / zh. Rule: a new key is added to all 3 files at once; check �
 - TOFU on first connect (a new host key is accepted automatically) and keyring limitations — details in "Security".
 
 **Roadmap** (tasks, order, acceptance — in ROADMAP.md):
-- **v1.2.x series** (the "window → page" refactor `TerminalSessionPage` — v1.2, sessions as tabs in a window — v1.2.1, terminals dock of the map window — v1.2.2, multi-input broadcast — v1.2.3, note pinning to servers — v1.2.4, independent sidebar/map collapse into thin strips — v1.2.4.1, central theme `ui/theme.py` (palette/radii/fonts) — v1.2.5, bidirectional arrows — v1.2.6, terminal selection and context menu — v1.2.7, D&D of files from Explorer into the SFTP tab — v1.2.8): dead code removal + full wcwidth CJK; log highlighting (opt-in).
 - **v1.3.x series**: terminal command library (macros) — one click sends a saved command/script to the active terminal; text viewer in the SFTP tab; configurable hotkeys; languages without writing code; lightweight plugins.
 
 ---

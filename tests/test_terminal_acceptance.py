@@ -14,7 +14,7 @@
 terminal_history_lines из ~/.sshmap/config.json (все опциональны, дефолты = текущее
 поведение) + v1.1.1: terminal_max_open (лимит своих терминалов) и состояние релиза —
 _common.check_release_state() (пин EXPECTED_APP_VERSION — в tests/_common.py),
-TerminalScreen.render() (HTML) остаётся deprecated (удаление не раньше v1.2),
+v1.2.9: TerminalScreen.render() (HTML-путь) удалён (мёртвый код с v1.0RC1),
 i18n-паритет — _common.check_i18n_parity() (пин EXPECTED_I18N_KEYS; +33 ключа v1.1,
 +14 в v1.1.1, +2 в v1.1.2RC2: msg.confirm_delete_profile и status.import_resolving;
 в v1.1.2RC3 новых ключей нет — terminal_wheel только конфиг; +2 в v1.1.2 final:
@@ -175,9 +175,8 @@ def clear_config():
 print("== release state ==")
 check_release_state(ROOT)
 
-_render_doc = (TS.TerminalScreen.render.__doc__ or "") if hasattr(TS.TerminalScreen, "render") else ""
-check("TerminalScreen.render() (HTML) на месте и помечен DEPRECATED (удаление не раньше v1.2)",
-      callable(getattr(TS.TerminalScreen, "render", None)) and "DEPRECATED" in _render_doc)
+check("v1.2.9: TerminalScreen.render() (HTML-путь) удалён — мёртвый код с v1.0RC1",
+      not hasattr(TS.TerminalScreen, "render"))
 
 check_i18n_parity(load_i18n_langs(ROOT))
 

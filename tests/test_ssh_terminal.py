@@ -13,6 +13,9 @@
   #4 fingerprint «unavailable»/неверный SHA256 — paramiko>=5 asbytes() возвращает
                               сырые wire-байты, а не base64.
 
+v1.2.9: §3c клавиатура — через TerminalWidget (deprecated SSHTerminalTextEdit
+удалён вместе с HTML-путём; семантика та же: печатные/Return/Backspace → канал).
+
 Запуск:  python tests/test_ssh_terminal.py   (из корня проекта) или python tests/run_all.py
 """
 import os, sys, hashlib, traceback
@@ -58,7 +61,7 @@ def wait_until(cond, timeout_ms=2000, tick_ms=50):
 #      (именно этот путь давал «Shiboken::Conversions ... Cannot copy-convert (bytes)»)
 # ════════════════════════════════════════════════════════════
 print("== terminal signal (bug #3) ==")
-from modules.ssh_terminal import SSHTerminalThread, SSHTerminalTextEdit
+from modules.ssh_terminal import SSHTerminalThread
 
 PAYLOAD = b"\x1b[0m\x1b[31mhello\xff\xfe\r\n"  # ANSI + не-UTF8 байты + CRLF
 
@@ -124,6 +127,7 @@ finally:
 
 # ════════════════════════════════════════════════════════════
 # #3c. Клавиатура: печатные символы/Return/Backspace уходят в канал
+#     (v1.2.9: путь — TerminalWidget; deprecated SSHTerminalTextEdit удалён)
 # ════════════════════════════════════════════════════════════
 sent = []
 
@@ -131,7 +135,10 @@ class _FakeChanThread:
     def send_data(self, b): sent.append(b)
     def stop(self): pass
 
-edit3 = SSHTerminalTextEdit(_FakeChanThread())
+from modules.terminal_screen import TerminalScreen
+from modules.terminal_widget import TerminalWidget
+
+edit3 = TerminalWidget(TerminalScreen(columns=20, lines=5), terminal_thread=_FakeChanThread())
 for ch in ("h", "é"):
     edit3.keyPressEvent(_key(ch, ord(ch[0])))
 edit3.keyPressEvent(_key("\t", Qt.Key_Tab))

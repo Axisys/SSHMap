@@ -11,7 +11,9 @@ truecolor, опечатка 'bfightmagenta').
 перерисовать глиф цветом фона (НЕ XOR-инверсия — на цветных ячейках даёт
 «мыльные» оттенки); уважает screen.cursor.hidden (ESC[?25l/h — vim прячет курсор).
 Широкие глифы (CJK): двойная ширина, «заглушка» (data == '') пропускается
-(TERMINAL.md факт №11; эвристика east_asian_width W/F, полный wcwidth — v1.2+).
+(TERMINAL.md факт №11; v1.2.9: полный wcwidth(3) — та же таблица пакета wcwidth,
+что сам pyte 0.8.2 использует для раскладки сетки, вместо эвристики
+east_asian_width W/F из v1.0RC1).
 
 Кэш форматов (fg,bg,атрибуты) → (QPen,QBrush,QFont) с ограничением размера
 (512 записей, clear при переполнении — TERMINAL.md §5.1); reverse сводится к
@@ -72,7 +74,16 @@ TerminalScreen — race посреди кадра исключён.
 
 import math
 import time
-import unicodedata
+
+# v1.2.9 (ROADMAP «Гигиена терминала»): полный wcwidth(3) — ТА ЖЕ библиотека, что
+# использует сам pyte 0.8.2 для раскладки сетки (pyte.screens: `from wcwidth import
+# wcwidth`); жёсткая зависимость pyte, поэтому на месте всегда, когда есть pyte.
+try:
+    from wcwidth import wcwidth as _wcwidth
+except ImportError as e:  # pragma: no cover
+    raise ImportError(
+        "Для терминального холста требуется пакет 'wcwidth' (устанавливается вместе с pyte)"
+    ) from e
 
 try:
     from .terminal_screen import PALETTES, resolve_color
@@ -126,7 +137,7 @@ def get_translator():
             _t_cache = lambda k, **kw: f"[{k}]"
     return _t_cache
 
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import QEvent, Qt, QTimer
 from PySide6.QtGui import (
     QBrush, QColor, QFont, QFontDatabase, QFontMetricsF, QPainter, QPen,
 )
@@ -145,16 +156,39 @@ def _fmt_key(ch):
             bool(ch.underscore), bool(ch.strikethrough), bool(ch.reverse))
 
 
-def is_wide_char(data: str) -> bool:
-    """Эвристика широкого глифа (CJK): east_asian_width W/F (stdlib, без зависимостей).
+def char_width(data: str) -> int:
+    """Полная ширина символа по wcwidth(3): 0 — нулевая (составные/контрольные),
+    1 — узкий, 2 — широкий (CJK/Fullwidth).
 
-    Known limitation (ROADMAP v1.0): полный wcwidth — v1.2+. Важно: в pyte 0.8.2
-    сам глиф хранится с len(data)==1 («широкий» по data не определить) — широкой
-    является СЛЕДУЮЩАЯ ячейка-«заглушка» с data==''; её пропускает split_row_runs.
+    v1.2.9 (ROADMAP «Гигиена терминала»): заменяет эвристику east_asian_width W/F
+    из v1.0RC1 — known limitation v1.0 закрыт. Используется ТА ЖЕ библиотека
+    `wcwidth`, что и сам pyte 0.8.2 (pyte.screens: `from wcwidth import wcwidth`)
+    для раскладки сетки, поэтому классификация «широкий/узкий» холста всегда
+    совпадает с тем, как pyte размещает глифы в ячейках (+ заглушка после широкого).
+    Пустая строка (заглушка) → 0; не-печатные контрольные (-1) клампятся в 0.
+    data — содержимое ОДНОЙ ячейки: обычно один символ, но pyte NFC-сливает
+    составные знаки в предыдущую ячейку (мульти-символьный графемный кластер),
+    поэтому ширина = сумма по символам (ровно как посимвольный draw() pyte);
+    в сетке это всегда 0/1/2.
     """
     if not data:
-        return False
-    return unicodedata.east_asian_width(data[0]) in ("W", "F")
+        return 0
+    total = 0
+    for ch in data:
+        w = _wcwidth(ch)
+        total += 0 if w < 0 else w
+    return total
+
+
+def is_wide_char(data: str) -> bool:
+    """Широкий ли глиф (двойная ширина, CJK/Fullwidth).
+
+    v1.2.9: полный wcwidth(3) через библиотеку `wcwidth` (та же, что у pyte 0.8.2),
+    вместо эвристики east_asian_width W/F (v1.0RC1). Важно: в pyte 0.8.2 сам глиф
+    хранится с len(data)==1 («широкий» по data не определить) — широкой является
+    СЛЕДУЮЩАЯ ячейка-«заглушка» с data==''; её пропускает split_row_runs.
+    """
+    return char_width(data) == 2
 
 
 def split_row_runs(row):
@@ -275,7 +309,10 @@ class TerminalWidget(QWidget):
     """Посячейный холст pyte-экрана (v1.0RC1; v1.0RC2 — клавиатура + выделение;
     v1.0RC3 — скроллбэк колесом/Ctrl+Shift+PgUp/PgDn + мигание курсора;
     v1.2.3 — мультинабор: broadcast ввода во все открытые сессии;
-    v1.2.7 — двойной/тройной клик (слово/строка) + контекстное меню ПКМ).
+    v1.2.7 — двойной/тройной клик (слово/строка) + контекстное меню ПКМ;
+    v1.2.9-fix — Tab/Shift+Tab перехватываются в event(): focus-change-механизм
+    Qt 6 не передаёт их keyPressEvent, без перехвата фокус уходил из терминала
+    в кнопки окна и \\t не доходил до shell).
 
     tscreen — TerminalScreen (pyte.HistoryScreen + lock); terminal_thread — объект с
     send_data(bytes) (SSHTerminalThread; None — ввод отключён, рендер и скроллбэк
@@ -510,6 +547,38 @@ class TerminalWidget(QWidget):
         rows, _cx, _cy, _hidden = self.tscreen.snapshot()
         return "\n".join("".join(ch.data for ch in row) for row in rows)
 
+    # ── v1.2.9-fix: Tab/Shift+Tab — Qt 6 перехватывает ДО keyPressEvent ─────
+    def event(self, e):
+        """v1.2.9-fix (баг с v1.0RC2, пойман в работе): Tab/Shift+Tab уходили
+        из терминала в кнопки/табы окна; \\t не доходил до shell — bash-автозаполнение
+        не срабатывало, в mc панели не переключались.
+
+        Механизм (документация Qt 6, QWidget): «The Tab and Shift+Tab keys are only
+        passed to the widget if they are not used by the focus-change mechanisms. To
+        force those keys to be processed by your widget, you must reimplement
+        QWidget::event()» — голые Tab/Shift+Tab к keyPressEvent НЕ доходят: Qt сам
+        гоняет фокус по цепочке виджетов и помечает событие обработанным. Ветка
+        Key_Tab в keyPressEvent (v1.0RC2) работала только при прямых вызовах
+        (тесты) — реальные события её обходили, поэтому баг прожил с v1.0RC2 по
+        v1.2.9 и сьютом не ловился (тесты звали keyPressEvent напрямую).
+
+        Перехват: Tab → \\t, Shift+Tab → \\x1b[Z (xterm) + accept — фокус остаётся
+        на терминале. Ctrl/Meta+Tab НЕ перехватывается (fall-through в
+        super().event() → keyPressEvent — прежняя семантика); terminal_thread=None
+        — тоже не перехватывается (ввод отключён = guard в начале keyPressEvent).
+        Все остальные события проходят через super().event(e) без изменений."""
+        if e.type() == QEvent.Type.KeyPress:
+            key = e.key()
+            if key in (Qt.Key.Key_Tab, Qt.Key.Key_Backtab):
+                mod = e.modifiers()
+                if not (mod & Qt.KeyboardModifier.ControlModifier
+                        or mod & Qt.KeyboardModifier.MetaModifier) \
+                        and self.terminal_thread is not None:
+                    self._send(b"\t" if key == Qt.Key.Key_Tab else b"\x1b[Z")
+                    e.accept()
+                    return True
+        return super().event(e)
+
     # ── клавиатура: полная таблица v1.0RC2 ────────────────
     def keyPressEvent(self, event):
         """Полная таблица клавиатуры (v1.0RC2, ROADMAP задача 4; v1.0RC3 — скроллбэк).
@@ -531,6 +600,9 @@ class TerminalWidget(QWidget):
         * Ctrl+C: при выделении — копирование в буфер (semantics v0.9.3), без
           выделения — \\x03 (SIGINT; Acceptance: «Ctrl+C роняет top»);
         * Ctrl+D → \\x04, Ctrl+Z → \\x1a, Ctrl+V — bracketed paste (v0.9.4);
+        * Tab → \\t / Shift+Tab → \\x1b[Z (v1.2.9-fix): в реальных событиях перехватываются
+          РАНЬШЕ — в event() (focus-change-механизм Qt 6 не передаёт их keyPressEvent;
+          без этого фокус уходил в кнопки окна, а \\t не доходил до shell);
         * AltGr-guard (TERMINAL.md §3.12): Ctrl+Alt-комбинации (на Windows
           AltGr = Ctrl+Alt) НЕ уходят как управляющие коды — ignore;
         * F12 в режиме мультинабора (v1.2.3, ROADMAP задача 3) — ВЫХОД из режима, а не
@@ -614,8 +686,14 @@ class TerminalWidget(QWidget):
         if key == Qt.Key.Key_Backspace:
             self._send(b"\x7f")
             return
+        # Tab/Shift+Tab: в РЕАЛЬНЫХ событиях перехватываются раньше — в event()
+        # (focus-change-механизм Qt 6 не отдаёт их keyPressEvent; см. event()).
+        # Ветки сохранены для прямых вызовов keyPressEvent (тестовый шов).
         if key == Qt.Key.Key_Tab:
             self._send(b"\t")
+            return
+        if key == Qt.Key.Key_Backtab:
+            self._send(b"\x1b[Z")   # xterm Shift+Tab (mc, reverse-completion в bash)
             return
         if key == Qt.Key.Key_Escape:
             self._send(b"\x1b")

@@ -40,11 +40,15 @@ try:
 except ImportError:
     from modules.terminal_page import TerminalSessionPage
 
-from PySide6.QtCore import Qt, QThread, Signal, QTimer
-from PySide6.QtWidgets import (
-    QMainWindow, QWidget, QVBoxLayout, QLabel, QPlainTextEdit,
-    QMessageBox, QApplication, QTabWidget, QProgressBar,
-)
+# v1.2.9: импорты Qt — только реально используемые (QPlainTextEdit/QApplication и
+# прочие остатки HTML-пути SSHTerminalTextEdit удалены вместе с классом).
+# QMessageBox НЕ остаток HTML-пути — живой namespace для тестовых швов
+# terminal_page.py/terminal_dock.py: `_st_module().QMessageBox` берётся в момент
+# вызова (паттерн v1.1.4 host_attr), подмена ST.QMessageBox.question/critical в
+# тестах работает без изменений; без импорта confirm_close("ask")/_show_error падали
+# AttributeError'ом (регрессия v1.2.9, поймана сьютом).
+from PySide6.QtCore import Qt, QThread, Signal
+from PySide6.QtWidgets import QMainWindow, QMessageBox, QTabWidget, QProgressBar
 
 
 # Pre-warmed translator for this module (loaded once on first call)
@@ -317,99 +321,9 @@ class SSHTerminalThread(QThread):
         self.running = False
 
 
-class SSHTerminalTextEdit(QPlainTextEdit):
-    """DEPRECATED (v1.0RC1): HTML-путь QPlainTextEdit — заменён TerminalWidget
-    (modules/terminal_widget.py, посячейный холст QWidget+QPainter). Класс оставлен
-    до v1.2 (ROADMAP v1.0: «удалить не раньше v1.2»); SSHTerminalWindow его больше
-    не создаёт. Клавиатурная обработка перенесена в TerminalWidget.keyPressEvent."""
-
-    def __init__(self, terminal_thread, parent=None):
-        super().__init__(parent)
-        self.terminal_thread = terminal_thread
-        self.setCursorWidth(2)
-        self.setUndoRedoEnabled(False)
-        self.setLineWrapMode(QPlainTextEdit.NoWrap)
-
-    def keyPressEvent(self, event):
-        key = event.key()
-        mod = event.modifiers()
-
-        if mod & Qt.KeyboardModifier.ControlModifier:
-            if key == Qt.Key_C:
-                # v0.9.3 fix: стандартное поведение терминалов — Ctrl+C шлёт SIGINT
-                # только когда нет выделения; при выделении копируем в буфер.
-                if self.textCursor().hasSelection():
-                    self.copy()
-                    return
-                self.terminal_thread.send_data(b'\x03')
-                return
-            elif key == Qt.Key_V:
-                # v0.9.4-fix: вставка через bracketed paste — многострочный
-                # буфер приходит в shell ЕДИНЫМ вставленным блоком, а не
-                # построчным вводом (раньше каждая строка немедленно
-                # исполнялась удалённой shell). Терминалы без поддержки
-                # просто проигнорируют обёртку и получат сырой текст.
-                clipboard = QApplication.clipboard()
-                if clipboard.text():
-                    try:
-                        payload = clipboard.text().replace('\r\n', '\n').replace('\r', '\n')
-                        self.terminal_thread.send_data(
-                            b'\x1b[200~' + payload.encode('utf-8') + b'\x1b[201~')
-                    except Exception:
-                        pass
-                    return
-                event.ignore()
-                return
-            elif key == Qt.Key_D:
-                self.terminal_thread.send_data(b'\x04')
-                return
-            elif key == Qt.Key_Z:
-                self.terminal_thread.send_data(b'\x1a')
-                return
-
-        if key in (Qt.Key_Return, Qt.Key_Enter):
-            self.terminal_thread.send_data(b'\r')
-            return
-        elif key == Qt.Key_Backspace:
-            self.terminal_thread.send_data(b'\x7f')
-            return
-        elif key == Qt.Key_Left:
-            self.terminal_thread.send_data(b'\x1b[D')
-            return
-        elif key == Qt.Key_Right:
-            self.terminal_thread.send_data(b'\x1b[C')
-            return
-        elif key == Qt.Key_Up:
-            self.terminal_thread.send_data(b'\x1b[A')
-            return
-        elif key == Qt.Key_Down:
-            self.terminal_thread.send_data(b'\x1b[B')
-            return
-        elif key == Qt.Key_Tab:
-            self.terminal_thread.send_data(b'\t')
-            return
-        elif key == Qt.Key_Escape:
-            self.terminal_thread.send_data(b'\x1b')
-            return
-        elif key == Qt.Key_Home:
-            self.terminal_thread.send_data(b'\x1b[H')
-            return
-        elif key == Qt.Key_End:
-            self.terminal_thread.send_data(b'\x1b[F')
-            return
-        elif key == Qt.Key_Delete:
-            self.terminal_thread.send_data(b'\x1b[3~')
-            return
-
-        text = event.text()
-        if text:
-            try:
-                self.terminal_thread.send_data(text.encode('utf-8'))
-            except Exception:
-                pass
-            return
-
-        event.ignore()
+# v1.2.9 (ROADMAP «Гигиена терминала»): deprecated SSHTerminalTextEdit (HTML-путь
+# QPlainTextEdit, v1.0RC1) УДАЛЁН — мёртвый код с v1.0RC1, окном никогда не
+# создавался; клавиатурная обработка живёт в TerminalWidget.keyPressEvent.
 
 
 class SSHTerminalWindow(QMainWindow):

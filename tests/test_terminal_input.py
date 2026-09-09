@@ -9,9 +9,13 @@
   * клавиатура (offscreen-виджет + фейковый thread): полная таблица F1–F12
     (xterm-последовательности SS3/CSI), PageUp/PageDown, Home/End/Delete
     (семантика старого SSHTerminalTextEdit сохранена), базовый набор RC1
-    (печатные/utf-8/Return/Backspace/Tab/Esc/стрелки); Ctrl+C без выделения →
+    (печатные/utf-8/Return/Backspace/Tab/Shift+Tab/Esc/стрелки); Ctrl+C без выделения →
     b'\\x03' (Acceptance: «Ctrl+C роняет top»); Ctrl+D → \\x04, Ctrl+Z → \\x1a;
     AltGr-guard (Ctrl+Alt зажат → ничего не шлётся — TERMINAL.md §3.12);
+  * Tab/Shift+Tab ПОЛНЫМ путём (QApplication.sendEvent через notify, §2b):
+    regression v1.2.9-fix — Qt 6 перехватывает их ДО keyPressEvent
+    (focus-change-механизм), \t/\x1b[Z должны дойти до канала, а фокус остаться
+    на терминале (сценарий mc: серии Tab без дрейфа фокуса);
   * bracketed paste Ctrl+V (перенос из v0.9.4): многострочный буфер с
     смешанными EOL — ЕДИНЫЙ блок \\x1b[200~...\\x1b[201~ с нормализованными
     переводами строк; пустой буфер → ничего не шлётся;
@@ -31,7 +35,7 @@ ROOT, WORK = bootstrap()  # ДО импортов модулей приложе�
 
 from PySide6.QtCore import Qt, QEvent, QPointF
 from PySide6.QtGui import QKeyEvent, QMouseEvent
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QHBoxLayout, QPushButton, QWidget
 
 app = QApplication(sys.argv)
 
@@ -144,6 +148,7 @@ for label, k, e in (("Return", Qt.Key.Key_Return, b"\r"),
                     ("Enter", Qt.Key.Key_Enter, b"\r"),
                     ("Backspace", Qt.Key.Key_Backspace, b"\x7f"),
                     ("Tab", Qt.Key.Key_Tab, b"\t"),
+                    ("Shift+Tab", Qt.Key.Key_Backtab, b"\x1b[Z"),
                     ("Esc", Qt.Key.Key_Escape, b"\x1b"),
                     ("Left", Qt.Key.Key_Left, b"\x1b[D"),
                     ("Right", Qt.Key.Key_Right, b"\x1b[C"),
@@ -180,6 +185,81 @@ try:
     check("terminal_thread=None: клавиши не роняют и ничего не шлют", True)
 except Exception as e:
     check("terminal_thread=None: клавиши не роняют и ничего не шлют", False, repr(e))
+
+
+# ════════════════════════════════════════════════════════════
+# 2b. Tab/Shift+Tab — ПОЛНЫЙ путь доставки (regression v1.2.9-fix)
+#     Qt 6 перехватывает голые Tab/Shift+Tab на уровне focus-change ДО
+#     keyPressEvent (документация QWidget: «To force those keys to be processed
+#     by your widget, you must reimplement QWidget::event()»). Прямой вызов
+#     keyPressEvent (таблица выше) этот путь НЕ покрывал — поэтому баг прожил
+#     с v1.0RC2 по v1.2.9: в реальном окне Tab гонял фокус по кнопкам/табам,
+#     а \t не доходил до shell (bash-автозаполнение, панели mc).
+#     Здесь — QApplication.sendEvent (через notify) + второй фокусируемый
+#     виджет в том же окне = реальная цепочка фокуса.
+# ════════════════════════════════════════════════════════════
+print("== Tab/Shift+Tab focus retention (full delivery path) ==")
+
+
+class _FocusThread:
+    def __init__(self):
+        self.sent = []
+
+    def send_data(self, b):
+        self.sent.append(b)
+
+    def stop(self):
+        pass
+
+
+def _focus_setup():
+    """TerminalWidget + кнопка в одном окне (цепочка фокуса), фокус — на холсте."""
+    scr_ = TerminalScreen(columns=20, lines=5)
+    th = _FocusThread()
+    w_ = TerminalWidget(scr_, th)
+    btn = QPushButton("next")
+    host = QWidget()
+    lay = QHBoxLayout(host)
+    lay.addWidget(w_)
+    lay.addWidget(btn)
+    host.resize(400, 200)
+    host.show()
+    app.processEvents()
+    w_.setFocus()
+    app.processEvents()
+    return w_, th, btn, host
+
+
+w_f, th_f, _btn_f, host_f = _focus_setup()
+
+ev_tab = QKeyEvent(QEvent.Type.KeyPress, int(Qt.Key.Key_Tab),
+                   Qt.KeyboardModifier.NoModifier, "\t")
+QApplication.sendEvent(w_f, ev_tab)
+app.processEvents()
+check("Tab (полный путь): \\t дошёл до канала", th_f.sent == [b"\t"], f"sent={th_f.sent!r}")
+check("Tab (полный путь): фокус ОСТАЛСЯ на терминале (не ушёл в кнопку)",
+      app.focusWidget() is w_f, f"focus={app.focusWidget()}")
+
+ev_btab = QKeyEvent(QEvent.Type.KeyPress, int(Qt.Key.Key_Backtab),
+                    Qt.KeyboardModifier.ShiftModifier, "")
+QApplication.sendEvent(w_f, ev_btab)
+app.processEvents()
+check("Shift+Tab (полный путь): \\x1b[Z дошёл до канала",
+      th_f.sent == [b"\t", b"\x1b[Z"], f"sent={th_f.sent!r}")
+check("Shift+Tab (полный путь): фокус остался на терминале", app.focusWidget() is w_f,
+      f"focus={app.focusWidget()}")
+
+# Сценарий mc: серии Tab — фокус не дрейфует, каждый \t доходит до канала
+for _ in range(3):
+    QApplication.sendEvent(w_f, QKeyEvent(QEvent.Type.KeyPress, int(Qt.Key.Key_Tab),
+                                          Qt.KeyboardModifier.NoModifier, "\t"))
+    app.processEvents()
+check("5 Tab подряд: фокус стабилен на терминале", app.focusWidget() is w_f)
+check("5 Tab подряд: 5 × \\t в канале (панели mc переключаются)", len(th_f.sent) == 5,
+      f"sent={th_f.sent!r}")
+
+host_f.close()
+app.processEvents()
 
 
 # ════════════════════════════════════════════════════════════
