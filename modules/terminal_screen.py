@@ -372,10 +372,34 @@ class TerminalScreen:
         Читается под тем же lock'ом, что и feed(): SSH-поток может менять режимы
         параллельно с GUI-потоком (htop/vim шлют \\x1b[?1049h при старте и
         \\x1b[?1049l при выходе). Пока in_alt — TerminalWidget НЕ скроллит
-        историю колесом мыши и Ctrl+Shift+PgUp/PgDn (гейт; полноценная
-        маршрутизация колеса в TUI — v1.2.13)."""
+        историю колесом мыши и Ctrl+Shift+PgUp/PgDn (гейт); колесо в TUI уходит
+        в PTY только при включённом mouse tracking (v1.2.13, mouse_tracking())."""
         with self._lock:
             return self.screen.in_alt
+
+    # ── v1.2.13 (PYTE82_AUDIT.md пачка C): состояние mouse tracking ──────────
+    def mouse_tracking(self):
+        """(enabled, sgr) — включён ли xterm mouse tracking и используется ли SGR-формат.
+
+        enabled — включён любой из DECSET 1000/1002/1003 (button / button-motion /
+        all-motion tracking); sgr — включён DECSET 1006 (SGR extended encoding).
+
+        ВАЖНО (проверено прогоном на установленной pyte 0.8.2): приватные режимы
+        хранятся в screen.mode со сдвигом влево на 5 бит — set_mode(private=True)
+        делает mode << 5: после \\x1b[?1000h\\x1b[?1006h в режиме есть 32000 и 32192.
+        DECSET 1006 ОДИН не включает tracking — он только меняет кодировку отчётов
+        (реальный xterm без 1000/1002/1003 mouse-события не генерирует) →
+        feed(b'\\x1b[?1006h') даёт (False, True), а НЕ (True, True).
+
+        Читается под тем же lock'ом, что и feed(), на КАЖДОЕ событие колеса:
+        TUI меняет режимы во время сессии (htop включает 1003+1006 при старте и
+        выключает при выходе) — кэшировать нельзя. RIS (\\x1bc) сбрасывает все
+        приватные режимы → после полного reset снова (False, False) (проверено).
+        """
+        with self._lock:
+            mode = self.screen.mode
+            enabled = any((n << 5) in mode for n in (1000, 1002, 1003))
+            return enabled, (1006 << 5) in mode
 
     # ── рендер для GUI-потока ──────────────────────────
     def snapshot(self):

@@ -51,7 +51,8 @@ v1.1.2RC3 — стрелки по состоянию DECCKM (AUDIT U3: «в mc �
 screen.mode — приватные режимы хранятся со сдвигом <<5; каноническая проверка
 «1 in screen.mode» не работает). + колесо: параметр wheel_mode из конфига
 terminal_wheel — "scrollback" (дефолт) | "off" (колесо не скроллит локальный
-скроллбэк, event.ignore; SGR-passthrough — v1.2+).
+скроллбэк, event.ignore); v1.2.13: если TUI включил mouse tracking (DECSET
+1000/1002/1003), колесо уходит в PTY как SGR/X10-отчёт — passthrough приоритетнее "off".
 
 v1.2.7 — выделение двойным/тройным кликом + контекстное меню (ПКМ):
 * двойной клик — выделение СЛОВА на строке (word_units() — чистая функция:
@@ -70,8 +71,15 @@ v1.2.7 — выделение двойным/тройным кликом + ко�
 
 v1.2.12 — альтернативный экран (PYTE82_AUDIT.md пачка B): пока tscreen.in_alt_screen()
 (TUI владеет сеткой — vim/htop/mc/less), колесо мыши и Ctrl+Shift+PageUp/PageDown
-НЕ скроллят историю (гейт no-op; полноценная маршрутизация колеса в TUI через
-SGR/X10 passthrough — v1.2.13).
+НЕ скроллят историю (гейт no-op).
+
+v1.2.13 — колесо в полноэкранном TUI (PYTE82_AUDIT.md пачка C): если
+tscreen.mouse_tracking() (DECSET 1000/1002/1003) — колесо уходит в PTY как
+xterm mouse-отчёт: SGR (\x1b[<64;{col};{row}M, при 1006; up=64/down=65) или X10
+(\x1b[M + [96|97, 32+col, 32+row]; координаты зажаты в сетку и в лимит протокола
+223). Отправка — НАПРЯМУЮ terminal_thread.send_data(), НЕ через _send(): координаты
+сессионно-локальны, мультинабор их broadcast'ить не должен. Alt без tracking
+остаётся no-op (v1.2.12); passthrough приоритетнее wheel_mode="off".
 
 Потоки: paintEvent и snapshot() — GUI-поток; feed() из SSH-потока под lock'ом
 TerminalScreen — race посреди кадра исключён.
@@ -315,6 +323,7 @@ class TerminalWidget(QWidget):
     v1.0RC3 — скроллбэк колесом/Ctrl+Shift+PgUp/PgDn + мигание курсора;
     v1.2.3 — мультинабор: broadcast ввода во все открытые сессии;
     v1.2.7 — двойной/тройной клик (слово/строка) + контекстное меню ПКМ;
+    v1.2.13 — колесо в TUI: SGR/X10 passthrough при включённом mouse tracking;
     v1.2.9-fix — Tab/Shift+Tab перехватываются в event(): focus-change-механизм
     Qt 6 не передаёт их keyPressEvent, без перехвата фокус уходил из терминала
     в кнопки окна и \\t не доходил до shell).
@@ -342,8 +351,9 @@ class TerminalWidget(QWidget):
         self._multi_hub = multi_hub
         # v1.1.2RC3 (AUDIT U3): режим колеса из конфига terminal_wheel —
         # "scrollback" (дефолт, поведение v1.0RC3: колесо = локальный скроллбэк)
-        # | "off" (колесо не перехватывается для скроллбэка; SGR-passthrough в
-        # приложение — v1.2+). Неизвестное значение → дефолт.
+        # | "off" (колесо не перехватывается для скроллбэка). Неизвестное значение → дефолт.
+        # v1.2.13: если TUI включил mouse tracking (DECSET 1000/1002/1003), колесо
+        # уходит в PTY как SGR/X10-отчёт — passthrough приоритетнее "off".
         self._wheel_mode = wheel_mode if wheel_mode in ("scrollback", "off") else "scrollback"
         self._palette_name = palette_name if palette_name in PALETTES else "default"
         self._palette = dict(PALETTES[self._palette_name])
@@ -640,8 +650,8 @@ class TerminalWidget(QWidget):
             # \x1b[5~/\x1b[6~ в shell (ловушка ROADMAP v1.0RC3 задача 7).
             if key in (Qt.Key.Key_PageUp, Qt.Key.Key_PageDown) \
                     and mod & Qt.KeyboardModifier.ShiftModifier:
-                # v1.2.12: alt-экран (TUI владеет сеткой) — no-op; полноценная
-                # маршрутизация в TUI — v1.2.13.
+                # v1.2.12: alt-экран (TUI владеет сеткой) — no-op; колесо в TUI
+                # уходит только при mouse tracking (v1.2.13), клавиши остаются локальными.
                 if self.tscreen.in_alt_screen():
                     return
                 if key == Qt.Key.Key_PageUp:
@@ -846,25 +856,35 @@ class TerminalWidget(QWidget):
         return False
 
     def wheelEvent(self, event):
-        """Колесо мыши — скроллбэк: вверх → prev_page, вниз → next_page.
+        """Колесо мыши: v1.2.13 — сначала mouse tracking TUI, затем скроллбэк.
 
-        На границах (верх истории / live-строка) pyte делает no-op — позиция не
-        меняется и холст не перерисовывается. Авто-возврат к live при новом
-        выводе — встроен в pyte (before_event); _on_output окна вызывает
-        widget.update(), поэтому снап виден сразу.
+        Порядок проверок (v1.2.13, PYTE82_AUDIT.md пачка C):
+        1. tscreen.mouse_tracking() — включён DECSET 1000/1002/1003 (TUI ждёт
+           mouse-отчёты) → колесо уходит в PTY как xterm-отчёт: SGR
+           (\\x1b[<64;{col};{row}M, при 1006 — up=64/down=65) или X10
+           (\\x1b[M + [96|97, 32+col, 32+row]). Координаты — 1-based ячейка из позиции
+           мыши, зажаты в сетку; X10 дополнительно в лимит протокола 223. Отправка —
+           напрямую terminal_thread.send_data(), НЕ через _send() (координаты
+           сессионно-локальны — мультинабор их broadcast'ить не должен). Passthrough
+           приоритетнее wheel_mode="off".
+        2. in_alt_screen() БЕЗ tracking → no-op (v1.2.12: TUI владеет сеткой,
+           история не скролится; событие не потребляется — предков-QScrollArea в
+           контейнерах нет, пропагация безвредна).
+        3. Иначе — текущее поведение v1.0RC3: скроллбэк истории (вверх → prev_page,
+           вниз → next_page; на границах pyte no-op), wheel_mode="off" →
+           event.ignore(). Скроллбэк при "off" остаётся на Ctrl+Shift+PageUp/PageDown.
 
-        v1.1.2RC3 (AUDIT U3, остаток): режим из конфига terminal_wheel
-        (_wheel_mode). "off": колесо НЕ скроллит локальный скроллбэк — событие
-        не потребляется (event.ignore), в PTY ничего не шлётся; полный
-        SGR-passthrough колеса в полноэкранное TUI отложен на v1.2+ (pyte 0.8.2
-        не трекает mouse-режимы DECSET 1000/1002/1006 — слепая пересылка
-        засорит shell без mouse-режима). Скроллбэк при "off" остаётся на
-        Ctrl+Shift+PageUp/PageDown.
-
-        v1.2.12: пока в альтернативном экране (TUI владеет сеткой) — no-op:
-        история не скролится; полноценная маршрутизация колеса в TUI (SGR/X10)
-        — v1.2.13."""
-        if self.tscreen.in_alt_screen():   # v1.2.12: alt-экран — скроллбэк отключён
+        Режимы читаются на КАЖДОЕ событие (TUI переключает их во время сессии —
+        htop включает 1003+1006 при старте, выключает при выходе; кэшировать нельзя).
+        Авто-возврат к live при новом выводе — встроен в pyte (before_event);
+        _on_output окна вызывает widget.update(), поэтому снап виден сразу.
+        """
+        enabled, sgr = self.tscreen.mouse_tracking()   # v1.2.13: чтение на каждое событие
+        if not enabled and self.tscreen.in_alt_screen():
+            return  # alt без tracking — no-op (v1.2.12)
+        if enabled:
+            self._send_wheel_to_pty(event, sgr)
+            event.accept()
             return
         if self._wheel_mode == "off":
             event.ignore()
@@ -876,6 +896,42 @@ class TerminalWidget(QWidget):
         if changed:
             self.update()
         event.accept()
+
+    def _send_wheel_to_pty(self, event, sgr):
+        """v1.2.13: колесо → PTY (xterm mouse-отчёт, SGR/X10). Никогда не бросает.
+
+        Координаты — 1-based ячейка из позиции мыши (event.position() в координатах
+        виджета), зажаты в сетку [1..columns]×[1..lines]: виджет может быть шире/выше
+        сетки на остаток округления метрик шрифта. SGR (DECSET 1006): \\x1b[<64;{col};{row}M —
+        wheel up = кнопка 64, down = 65 (ctlseqs: кнопки 4/5 = коды событий кнопок
+        1/2 + 64), лимитов на координаты нет. X10: \\x1b[M + [96|97, 32+col, 32+row] —
+        значение+32 (up=96, down=97); протокол ограничивает координаты 223 (=255−32) —
+        клампится (ctlseqs «Extended coordinates»: расширения только через UTF-8 1005 /
+        SGR 1006; на ультрашироких сетках >223 колонки X10-отчёт неточен, SGR — нет).
+
+        Отправка — НАПРЯМУЮ terminal_thread.send_data(), НЕ через _send(): колесо
+        адресовано СВОЕЙ сессии (её координаты), broadcast мультинабора во все
+        открытые сессии шёл бы чужим TUI отчёты с чужими координатами — осознанное
+        решение, зафиксировано тестом.
+        """
+        if self.terminal_thread is None:
+            return
+        up = event.angleDelta().y() > 0
+        cols, lines = self.tscreen.columns, self.tscreen.lines
+        pos = event.position()
+        col = max(1, min(int(pos.x() // max(1, self._cell_w)) + 1, cols))
+        row = max(1, min(int(pos.y() // max(1, self._cell_h)) + 1, lines))
+        if sgr:
+            data = (b"\x1b[<" + str(64 if up else 65).encode("ascii") + b";"
+                    + str(col).encode("ascii") + b";" + str(row).encode("ascii") + b"M")
+        else:
+            col = min(col, 223)   # X10-лимит протокола (см. docstring)
+            row = min(row, 223)
+            data = b"\x1b[M" + bytes([96 if up else 97, 32 + col, 32 + row])
+        try:
+            self.terminal_thread.send_data(data)
+        except Exception:
+            pass  # мёртвый канал/поток под teardown — колесо молча не уходит
 
     # ── v1.0RC3: мигание курсора (свой QTimer, ROADMAP задача 8) ───────────
     def showEvent(self, event):
