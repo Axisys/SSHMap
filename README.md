@@ -19,7 +19,7 @@ pipx install .                         # or pip install . → sshmap command (en
 # Tests without pytest: topical test_*.py files + a single parallel runner.
 # Tests are isolated: they write to a temporary HOME and set UTF-8 stdout
 # themselves — no extra environment needed on cp1251 consoles or in CI:
-python tests/run_all.py              # everything (65 test files + i18n check): parallel (4 workers), results table + single exit code (0 ⇔ all green)
+python tests/run_all.py              # everything (66 test files + i18n check): parallel (4 workers), results table + single exit code (0 ⇔ all green)
 python tests/run_all.py --workers 8  # worker count (1 = sequential, as before)
 python tests/run_all.py keyring      # filter by substring in file name
 python tests/test_tags.py            # a single file (from the project root)
@@ -54,7 +54,7 @@ dialogs/                     # AddServer, SSHConnect (+ external terminal), Conn
 ui/                          # main_window.py — façade over ProjectIOMixin / NodeOpsMixin / SshMixin; sidebar.py; map_search_bar.py (Ctrl+F);
                              # command_palette.py (Ctrl+K); icons.py; mixin_support.py; theme.py (central UI palette, radii, fonts)
 i18n/                        # t(key, **kwargs); en/ru/zh JSON with identical key sets (parity pinned in tests); en is the default for new users
-tests/                       # 65 × test_*.py without pytest + _common.py harness + run_all.py (parallel runner) + check_i18n_keys.py — map: tests/INDEX.md
+tests/                       # 66 × test_*.py without pytest + _common.py harness + run_all.py (parallel runner) + check_i18n_keys.py — map: tests/INDEX.md
 ```
 
 ---
@@ -106,6 +106,7 @@ Format invariants:
 - Screen is `SshmapHistoryScreen` (subclass of `pyte.HistoryScreen`, v1.2.11): bare LF acts as CR+LF (LNM on by default — xterm behavior) and private SGR (`CSI ? … m`, sent by Vim 9+) are ignored — compatibility with the pinned pyte 0.8.2.
 - Alternate screen (v1.2.12): private modes 47/1047/1048/1049 are implemented in `SshmapHistoryScreen` (pyte 0.8.2 has none) — after vim/htop/mc/less the previous screen is restored character-for-character, colors included; TUI lines never enter the scrollback; while a TUI owns the grid, mouse wheel and Ctrl+Shift+PageUp/PageDown do not scroll history (v1.2.12 gate).
 - Mouse wheel in fullscreen TUI (v1.2.13): when a TUI enables mouse tracking (DECSET 1000/1002/1003 — `tscreen.mouse_tracking()`), the wheel goes to the PTY as an xterm report — SGR `\x1b[<64;{col};{row}M` (with 1006; up=64/down=65) or X10 `\x1b[M` + `[96|97, 32+col, 32+row]` (coordinates clamped to the grid and to the protocol limit of 223); sent directly via `terminal_thread.send_data()` — NOT through `_send()`, so multi-input never broadcasts session-local coordinates; passthrough takes precedence over `terminal_wheel="off"`.
+- Batched auto-return to the live line (v1.2.14): new output while scrolled deep in history triggers ONE bulk shift (`SshmapHistoryScreen.before_event`) instead of ~250 page-by-page `next_page()` calls — measured cost of the auto-return dropped from ~27 ms to ~0.3 ms per 19 KB htop chunk (68–73 → 42–44 ms, now at live-line level); manual paging (wheel / Ctrl+Shift+PgUp/PgDn) stays one page at a time.
 - Keyboard — full table: F1–F12, Delete/PageUp/PageDown (always CSI ~), arrows and Home/End per DECCKM state: TUIs send smkx `\x1b[?1h` and wait for SS3 — `_cursor_key_seq()` sends `\x1bOA/B/C/D`, `\x1bOH/\x1bOF`; normal mode — CSI; state is `tscreen.application_cursor_keys()`, in pyte 0.8.2 DECCKM = 32 in `screen.mode`. Explicit Ctrl+C→`\x03` / Ctrl+D→`\x04` (Ctrl+C with a selection copies to the clipboard), bracketed paste Ctrl+V (single block), AltGr guard (Ctrl+Alt is not sent as control codes).
 - Mouse selection — coordinates are always `(row, col)` (`selection_cells()`), multi-line text copy; **double-click selects a word, triple-click the whole line** (word = maximal run of non-space cells, CJK wide-glyph placeholders belong to the word); drag after double/triple-click extends from the far end.
 - Context menu (right click) — Copy (enabled only with a selection), Paste into the PTY (same bracketed-paste path as Ctrl+V), Select All; labels in en/ru/zh (`terminal.menu.*`).

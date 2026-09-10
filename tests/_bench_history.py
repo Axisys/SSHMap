@@ -15,6 +15,10 @@
 Числа — в CHANGELOG/ROADMAP («измерено на …, v1.2.12»); порог боли ~20–50 мс на
 чанк при глубокой истории — триггер v1.2.14 (батчинг авто-возврата).
 
+v1.2.14: батчинг выпущен (override before_event в SshmapHistoryScreen) — сценарий A
+обязан быть ≈ B (измерено: A = 42,7 мс против B = 42,4 мс, overhead 0,25 мс). Скрипт
+остался монитором регрессии: если A снова > 50 мс или A−B велик — проверить override.
+
 htop-чанк: pyte/tests/captured/htop.input из master-checkout F:\\PythonAI\\pyte
 (~19 КБ); нет файла — синтетический htop-подобный чанк того же размера.
 
@@ -138,13 +142,12 @@ def main():
     print(f"  C plain pyte.Screen (no history): {ms_plain:.2f} мс/чанк")
 
     overhead = ms_deep - ms_live
-    # Порог боли — по PYTE82_AUDIT.md D2: «> ~20–50 мс НА ЧАНК при глубокой истории
-    # (заметный лаг UI) → делать фикс». Меряется абсолютное время сценария A
-    # (feed идёт в GUI-потоке через queued signal — блокировка на всё это время),
-    # а не только overhead A−B: после батчинга A≈B, но сам порог задан для A.
-    verdict = ("БОЛЬ (>50 мс/чанк при глубокой истории) — v1.2.14 подтверждён "
-               "(батчинг авто-возврата)" if ms_deep > 50
-               else "в пределах нормы — v1.2.14 НЕ нужен, наблюдение закрыто")
+    # v1.2.14: батчинг авто-возврата выпущен — сценарий A обязан быть ≈ B (feed идёт
+    # в GUI-потоке через queued signal; порог боли D2 был > ~20–50 мс на чанк).
+    # Отклонение A от B или A > 50 мс — регрессия override before_event.
+    verdict = ("РЕГРЕССИЯ БАТЧИНГА (A >> B или A > 50 мс) — проверить override "
+               "before_event в SshmapHistoryScreen (v1.2.14)" if overhead > 5 or ms_deep > 50
+               else "в норме: A ≈ B — батчинг авто-возврата работает (v1.2.14)")
     print(f"  overhead A−B (стоимость ~{expected_pages:.0f} next_page): {overhead:.2f} мс; "
           f"A = {ms_deep:.2f} мс/чанк при глубокой истории → {verdict}")
     return 0

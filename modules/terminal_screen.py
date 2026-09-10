@@ -64,6 +64,22 @@ screen.mode со сдвигом <<5 (обработчиков нет). Сема�
 и feed(); пока in_alt — колесо мыши и Ctrl+Shift+PgUp/PgDn не скроллят историю
 (гейт в TerminalWidget; полноценная маршрутизация колеса в TUI — v1.2.13).
 
+v1.2.14 (PYTE82_AUDIT.md пачка D2): батчинг авто-возврата к live-строке — override
+before_event в SshmapHistoryScreen. Для каждого события кроме prev_page/next_page
+pyte крутил next_page() в цикле: при глубокой истории до ~250 итераций, каждая
+O(lines) (замер D1 v1.2.12: 68–73 мс/чанк против ~42 на live-строке; feed идёт
+через queued signal — блокировка GUI-потока). Теперь одна bulk-операция с той же
+арифметикой, что в next_page (screens.py): mid = min(len(history.bottom), size −
+position); top.extend(buffer[0:mid]); buffer сдвиг вверх; buffer[-mid:] — из
+bottom.popleft(); position += mid; dirty = все строки — O(lines) один раз. Проверенный
+факт (прогоном): инвариант len(history.bottom) == size − position → mid может
+превышать lines (глубокая история); тогда избыток mid сверх lines возвращается из
+главы bottom обратно в top (те же строки, что цикл переносил бы в промежуточных
+итерациях) — итог идентичен циклу next_page(): position == size, bottom пуст, top
+полностью восстановлен, buffer = live-экран. Обёртка вызывает self.before_event(event)
+по имени → override подхватывается (before_event не входит в _wrapped); prev_page/
+next_page — no-op, как в pyte.
+
 Headless-friendly: сам класс Screen не требует Qt — тестируется без GUI.
 Потокобезопасность: feed() из SSH-потока, snapshot()/application_cursor_keys
 из GUI-потока (v1.1.2 final N13: мёртвое свойство cursor убрано — декларация
@@ -221,6 +237,52 @@ class SshmapHistoryScreen(pyte.HistoryScreen):
             self._alt_cursor = None
         super().reset()                 # Screen.reset() сбрасывает mode на _DEFAULT_MODE
         self.mode.add(pyte.modes.LNM)   # …поэтому после RIS (ESC c) LNM возвращаем
+
+    # ── v1.2.14 (PYTE82_AUDIT.md пачка D2): батчинг авто-возврата к live-строке ──
+    def before_event(self, event):
+        """Батчинг авто-возврата к live-строке (замер D1, v1.2.12: 68–73 мс/чанк).
+
+        pyte.HistoryScreen.before_event для каждого события кроме prev_page/next_page
+        крутит next_page() в цикле: при глубокой истории до ~250 итераций, каждая
+        O(lines) (замер D1 v1.2.12: 68–73 мс/чанк против ~42 на live-строке — feed
+        идёт через queued signal в GUI-потоке). Здесь — одна bulk-операция с той же
+        арифметикой, что в HistoryScreen.next_page (screens.py):
+        mid = min(len(history.bottom), size − position); top.extend(buffer[0:mid]);
+        buffer сдвиг вверх; buffer[-mid:] — из bottom.popleft(); position += mid;
+        dirty = все строки. O(lines) один раз вместо O(position/ratio × lines).
+
+        Проверенный факт (прогоном на установленной pyte 0.8.2): инвариант
+        len(history.bottom) == size − position (каждый prev_page/next_page переносит
+        одно и то же число строк между buffer и bottom) → mid может превышать lines
+        (глубокая история: 968 строк на 32-строчном экране). В этом случае наивный
+        цикл next_page() ломается (range(lines − mid) пуст — сдвиг не происходит, а
+        отрицательные индексы создали бы мусор в buffer): избыток mid сверх lines
+        возвращается из ГЛАВЫ bottom обратно в top (те же строки, которые цикл
+        переносил бы в промежуточных итерациях), а экран получает последние lines
+        строк последовательности (buffer[take:] + остаток bottom). Итог идентичен
+        циклу next_page(): position == size, bottom пуст, top полностью восстановлен,
+        buffer = live-экран; при mid ≤ lines код совпадает с next_page() пословно.
+
+        Механизм подхвата: обёртка HistoryScreen.__getattribute__ вызывает
+        self.before_event(event) по имени → переопределение подкласса подхватывается
+        (before_event не входит в _wrapped — конфликтов нет). prev_page/next_page —
+        no-op, как в pyte: ручная прокрутка колесом/PgUp-PgDn авто-возврат НЕ трогает.
+        """
+        if event in ("prev_page", "next_page"):
+            return
+        h = self.history
+        if h.position < h.size and h.bottom:
+            mid = min(len(h.bottom), h.size - h.position)
+            take = min(mid, self.lines)      # строк из buffer, которые уходят обратно в top
+            h.top.extend(self.buffer[y] for y in range(take))
+            if mid > take:                   # глубокая история: избыток — из главы bottom в top
+                h.top.extend(h.bottom.popleft() for _ in range(mid - take))
+            for y in range(self.lines - take):        # buffer сдвиг вверх (как в next_page)
+                self.buffer[y] = self.buffer[y + take]
+            for y in range(self.lines - take, self.lines):
+                self.buffer[y] = h.bottom.popleft()   # нижние строки — из bottom
+            self.history = h._replace(position=h.position + mid)
+            self.dirty = set(range(self.lines))
 
     # ── v1.2.12: альтернативный экран (пачка B; семантика — upstream PR #212,
     #    закрыт без мерджа, автор dwgx; код pyte LGPL-3.0 — атрибуция обязательна) ──
