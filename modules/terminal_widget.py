@@ -68,6 +68,11 @@ v1.2.7 — выделение двойным/тройным кликом + ко�
   Выделить всё (select_all() — вся видимая сетка); подписи — i18n-ключи
   terminal.menu.* × en/ru/zh (get_translator, кэш по паттерну ssh_terminal.py).
 
+v1.2.12 — альтернативный экран (PYTE82_AUDIT.md пачка B): пока tscreen.in_alt_screen()
+(TUI владеет сеткой — vim/htop/mc/less), колесо мыши и Ctrl+Shift+PageUp/PageDown
+НЕ скроллят историю (гейт no-op; полноценная маршрутизация колеса в TUI через
+SGR/X10 passthrough — v1.2.13).
+
 Потоки: paintEvent и snapshot() — GUI-поток; feed() из SSH-потока под lock'ом
 TerminalScreen — race посреди кадра исключён.
 """
@@ -595,6 +600,7 @@ class TerminalWidget(QWidget):
         * Ctrl+Shift+PageUp/PageDown → СКОЛЛБЭК (v1.0RC3, TERMINAL.md §5.4): перехват
           стоит ДО проверки голых PageUp/PageDown — иначе fall-through из Ctrl-ветки
           шлёт \\x1b[5~/\\x1b[6~ в shell (ловушка из ROADMAP v1.0RC3 задача 7);
+          v1.2.12: на альтернативном экране (in_alt_screen) — no-op;
         * голые PageUp/PageDown → \\x1b[5~/\\x1b[6~ — форвард в shell (семантика
           v1.0RC2 сохраняется: пейджинг less/man работает, конвенция Windows
           Terminal/GNOME/xterm);
@@ -634,6 +640,10 @@ class TerminalWidget(QWidget):
             # \x1b[5~/\x1b[6~ в shell (ловушка ROADMAP v1.0RC3 задача 7).
             if key in (Qt.Key.Key_PageUp, Qt.Key.Key_PageDown) \
                     and mod & Qt.KeyboardModifier.ShiftModifier:
+                # v1.2.12: alt-экран (TUI владеет сеткой) — no-op; полноценная
+                # маршрутизация в TUI — v1.2.13.
+                if self.tscreen.in_alt_screen():
+                    return
                 if key == Qt.Key.Key_PageUp:
                     self.scroll_page_up()
                 else:
@@ -849,7 +859,13 @@ class TerminalWidget(QWidget):
         SGR-passthrough колеса в полноэкранное TUI отложен на v1.2+ (pyte 0.8.2
         не трекает mouse-режимы DECSET 1000/1002/1006 — слепая пересылка
         засорит shell без mouse-режима). Скроллбэк при "off" остаётся на
-        Ctrl+Shift+PageUp/PageDown."""
+        Ctrl+Shift+PageUp/PageDown.
+
+        v1.2.12: пока в альтернативном экране (TUI владеет сеткой) — no-op:
+        история не скролится; полноценная маршрутизация колеса в TUI (SGR/X10)
+        — v1.2.13."""
+        if self.tscreen.in_alt_screen():   # v1.2.12: alt-экран — скроллбэк отключён
+            return
         if self._wheel_mode == "off":
             event.ignore()
             return

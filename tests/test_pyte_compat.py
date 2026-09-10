@@ -11,12 +11,17 @@ modules/terminal_screen.py — два override'а:
     override с той же семантикой остаётся до поднятия пина на pyte 0.8.3;
   * LNM (режим 20) включён по умолчанию: голый LF = CR+LF (xterm-поведение).
     Screen.reset() сбрасывает mode на _DEFAULT_MODE БЕЗ LNM → явное восстановление
-    в __init__ и в reset() (после RIS ESC[c); явные \\x1b[20h/\\x1b[20l (SM/RM 20)
+    в __init__ и в reset() (после RIS ESC c); явные \\x1b[20h/\\x1b[20l (SM/RM 20)
     от удалённой программы по-прежнему работают.
 
 Примечание: в PYTE82_AUDIT.md/ROADMAP последовательности записаны как \\x1b[2h/\\x1b[2l —
 опечатка плана; LNM это режим 20 (pyte.modes.LNM = 20), и pyte 0.8.2 переключает его
 ровно SM/RM 20 (проверено прогоном: \\x1b[2l трогает бит 2, а не 20).
+
+v1.2.12 (поправка): RIS — это ESC c (\\x1bc), а НЕ ESC [ c (\\x1b[c) — последнее
+pyte 0.8.2 парсит как CSI DA (report_device_attributes, no-op): проверено прогоном,
+\\x1b[c Screen.reset() не вызывает вовсе. Проверка «LNM после RIS» ниже исправлена
+на реальные байты + закреплён факт про \\x1b[c (ранее check был ложноположительным).
 
 Запуск: python tests/test_pyte_compat.py   (из корня проекта) или python tests/run_all.py
 """
@@ -118,13 +123,22 @@ scr6.feed(b"ef\ngh")
 check("после \\x1b[20h: голый LF снова CR+LF — \"gh\" с x=0 на новой строке",
       lines(scr6)[1:3] == ["  cdef", "gh"], repr(lines(scr6)[1:3]))
 
-# RIS (ESC [ c): полный сброс — LNM возвращается (reset() подкласса).
+# RIS (ESC c — НЕ ESC [ c): полный сброс — LNM возвращается (reset() подкласса).
 scr7 = TerminalScreen(columns=40, lines=5, history_lines=10)
-scr7.feed(b"\x1b[cab\ncd")
-check("после RIS (\\x1b[c): LNM восстановлен", pyte.modes.LNM in scr7.screen.mode,
+scr7.feed(b"\x1bcab\ncd")
+check("после RIS (\\x1bc): LNM восстановлен", pyte.modes.LNM in scr7.screen.mode,
       str(sorted(scr7.screen.mode)))
 check("после RIS: голый LF снова CR+LF → [\"ab\", \"cd\"]",
       lines(scr7)[:2] == ["ab", "cd"], repr(lines(scr7)[:2]))
+
+# v1.2.12 (проверено прогоном): \\x1b[c — это CSI DA, а не RIS: Screen.reset()
+# не вызывается вовсе (экран НЕ чистится). Закрепляем факт — чтобы опечатка
+# «ESC [ c» больше не маскировалась ложноположительным check'ом.
+scr8 = TerminalScreen(columns=40, lines=5, history_lines=10)
+scr8.feed(b"stale\r\n")
+scr8.feed(b"\x1b[c")
+check("\\x1b[c (CSI DA) НЕ сбрасывает экран (это не RIS)",
+      "stale" in scr8.screen.display[0], repr(scr8.screen.display[0]))
 
 
 # ════════════════════════════════════════════════════════════

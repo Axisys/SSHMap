@@ -6,6 +6,8 @@ escape-последовательности (CSI/OSC/режимы курсора
 width=120, height=32). Альтернативного экрана (режим 1049) в pyte 0.8.2 НЕТ
 (проверено по установленной версии — TERMINAL.md факт №6): после vim/htop
 предыдущий экран не восстанавливается, known limitation (ROADMAP v1.0).
+→ ЗАКРЫТО v1.2.12 подклассом SshmapHistoryScreen (режимы 47/1047/1048/1049 —
+см. секцию v1.2.12 ниже и PYTE82_AUDIT.md пачка B).
 
 v1.0RC1: добавлен цветовой движок для посячейного холста (PALETTES +
 resolve_color, TERMINAL.md §5.1) и snapshot() — снимок сетки для
@@ -42,16 +44,39 @@ upstream issue #202); в 0.8.2 это TypeError из feed() — Screen.select_gr
 без LNM → явное восстановление после super().__init__ и в reset(); явные
 \x1b[20h/\x1b[20l (SM/RM 20) от удалённой программы по-прежнему работают).
 
+v1.2.12 (PYTE82_AUDIT.md пачка B): альтернативный экран в SshmapHistoryScreen —
+приватные режимы 47/1047/1048/1049, которые в 0.8.2 были инертными битами
+screen.mode со сдвигом <<5 (обработчиков нет). Семантика — по upstream PR #212
+(закрыт без мерджа, автор dwgx; код pyte LGPL-3.0 — атрибуция автору PR в
+комментарии к коду обязательна), дифференциально проверенная против tmux 3.6b
+и GNU screen: ОДИН флаг in_alt (ESC[?47l выходит из экрана, вошедшего через
+1049h); вход — сохранить основной буфер → рабочий = пустой новый (курсор НЕ
+хомится — TUI сам шлёт CUP; повторный вход идемпотентен); выход — восстановить
+сохранённый буфер с клипом под текущую ширину, альтерн-буфер отбросить
+(содержимое не переживает round-trip — поведение обоих референс-эмуляторов
+приоритетнее буквы xterm «without clearing»); курсор сохраняется/восстанавливается
+только для 1048/1049 (xterm: 1049 = 1047+1048) отдельным полем _alt_cursor, а НЕ
+стек savepoints (TUI внутри сессии сам гоняет ESC 7/ESC 8). Строки, ушедшие за
+край альтерн-буфера (index/reverse_index при in_alt), не попадают в скроллбэк —
+как less в настоящем терминале; RIS (ESC c — НЕ ESC [ c, это CSI DA) внутри alt →
+полный сброс + выход.
+Доступор: screen.in_alt + TerminalScreen.in_alt_screen() под тем же lock'ом, что
+и feed(); пока in_alt — колесо мыши и Ctrl+Shift+PgUp/PgDn не скроллят историю
+(гейт в TerminalWidget; полноценная маршрутизация колеса в TUI — v1.2.13).
+
 Headless-friendly: сам класс Screen не требует Qt — тестируется без GUI.
 Потокобезопасность: feed() из SSH-потока, snapshot()/application_cursor_keys
 из GUI-потока (v1.1.2 final N13: мёртвое свойство cursor убрано — декларация
 совпадает с кодом; курсор отдаёт snapshot()).
 """
 
+import copy
 import threading
+from collections import defaultdict
 
 try:
     import pyte
+    from pyte.screens import Char, Margins, StaticDefaultDict
 except ImportError as e:  # pragma: no cover
     raise ImportError(
         "Для v0.8 терминала требуется пакет 'pyte' (pip install pyte)"
@@ -151,7 +176,8 @@ def resolve_color(value, palette=None, default_hex=DEFAULT_FG_HEX):
 
 # ── v1.2.11 (PYTE82_AUDIT.md пачка A): совместимость с установленной pyte 0.8.2 ─
 class SshmapHistoryScreen(pyte.HistoryScreen):
-    """pyte.HistoryScreen + два override'а совместимости (факт №12, PYTE82_AUDIT.md).
+    """pyte.HistoryScreen + override'ы совместимости (факт №12, PYTE82_AUDIT.md)
+    и альтернативный экран (v1.2.12, пачка B).
 
     * private SGR (CSI ? … m) — игнорируются: в 0.8.2 это TypeError из feed()
       (Vim 9+ шлёт \\x1b[?4m, upstream issue #202; фикс уже вмержен в master —
@@ -159,19 +185,94 @@ class SshmapHistoryScreen(pyte.HistoryScreen):
       пина на pyte 0.8.3 (совместим и задокументирован);
     * LNM (режим 20) включён по умолчанию: голый LF = CR+LF (xterm-поведение).
       Screen.reset() сбрасывает mode на _DEFAULT_MODE БЕЗ LNM → явное восстановление
-      в __init__ (ПОСЛЕ super().__init__) и в reset() (RIS ESC[c); явные
-      \\x1b[20h/\\x1b[20l (SM/RM 20) от удалённой программы по-прежнему работают.
+      в __init__ (ПОСЛЕ super().__init__) и в reset() (RIS ESC c — НЕ ESC [ c, это CSI DA); явные
+      \\x1b[20h/\\x1b[20l (SM/RM 20) от удалённой программы по-прежнему работают;
+    * альтернативный экран (v1.2.12): приватные режимы 47/1047/1048/1049 — в 0.8.2
+      это инертные биты screen.mode (сдвиг <<5), обработчиков нет. Семантика — по
+      upstream PR #212 (закрыт без мерджа, автор dwgx; код pyte LGPL-3.0 — атрибуция
+      автору PR обязательна), дифференциально проверенная против tmux 3.6b и GNU
+      screen: один флаг in_alt; вход — сохранить основной буфер → рабочий = пустой
+      новый (курсор НЕ хомится, повторный вход идемпотентен); выход — восстановить
+      сохранённый буфер с клипом под текущую ширину, альтерн-буфер отбросить; курсор
+      только для 1048/1049 — отдельное поле _alt_cursor (НЕ стек savepoints); строки,
+      ушедшие за край альтерн-буфера, не попадают в скроллбэк; RIS внутри alt →
+      полный сброс + выход.
 
     Механизм подхвата: Stream привязывает методы экрана через getattr(listener, attr)
     при attach → парсер видит переопределения этого подкласса автоматически."""
 
+    # Приватные коды ДО сдвига <<5 (в pyte.modes 0.8.2 констант для них нет —
+    # проверено: там только LNM/IRM/DECTCEM/DECSCNM/DECOM/DECAWM/DECCOLM).
+    ALTSCREEN_MODES = (47, 1047, 1048, 1049)
+
     def __init__(self, *args, **kwargs):
+        # Состояние alt инициализируется ДО super().__init__: внутри конструктора
+        # Screen.__init__ вызывается self.reset(), а override ниже читает in_alt.
+        self.in_alt = False            # один флаг (не четыре): мы на альтерн-экране
+        self._saved_buffer = None      # основной буфер, пока in_alt
+        self._alt_cursor = None        # курсор для 1048/1049 (отдельное поле, НЕ savepoints)
         super().__init__(*args, **kwargs)
         self.mode.add(pyte.modes.LNM)   # xterm-поведение: голый LF = CR+LF
 
     def reset(self):
+        if self.in_alt:                # RIS (ESC c) внутри alt: полный сброс + выход
+            self.in_alt = False
+            self._saved_buffer = None  # основной буфер всё равно чистится штатным reset()
+            self._alt_cursor = None
         super().reset()                 # Screen.reset() сбрасывает mode на _DEFAULT_MODE
-        self.mode.add(pyte.modes.LNM)   # …поэтому после RIS (ESC [ c) LNM возвращаем
+        self.mode.add(pyte.modes.LNM)   # …поэтому после RIS (ESC c) LNM возвращаем
+
+    # ── v1.2.12: альтернативный экран (пачка B; семантика — upstream PR #212,
+    #    закрыт без мерджа, автор dwgx; код pyte LGPL-3.0 — атрибуция обязательна) ──
+    def set_mode(self, *modes, **kwargs):
+        if kwargs.get("private") and any(m in self.ALTSCREEN_MODES for m in modes):
+            self._enter_alt(save_cursor=any(m in (1048, 1049) for m in modes))
+        super().set_mode(*modes, **kwargs)      # биты складываются в mode как раньше
+
+    def reset_mode(self, *modes, **kwargs):
+        if kwargs.get("private") and any(m in self.ALTSCREEN_MODES for m in modes):
+            self._exit_alt(restore_cursor=any(m in (1048, 1049) for m in modes))
+        super().reset_mode(*modes, **kwargs)
+
+    def _enter_alt(self, save_cursor):
+        if self.in_alt:
+            return                  # повторный вход идемпотентен (основной не теряется)
+        self._saved_buffer = self.buffer
+        self.buffer = defaultdict(lambda: StaticDefaultDict[int, Char](self.default_char))
+        self.dirty.update(range(self.lines))
+        if save_cursor:             # только 1048/1049 (xterm: 1049 = 1047+1048)
+            self._alt_cursor = copy.copy(self.cursor)
+        self.in_alt = True          # курсор НЕ хомится — TUI сам шлёт CUP
+
+    def _exit_alt(self, restore_cursor):
+        if not self.in_alt:
+            return
+        saved = self._saved_buffer
+        for line in saved.values():             # клип под текущую ширину (resize-безопасность;
+            for x in [x for x in line if x >= self.columns]:   # те же границы, что в Screen.resize)
+                line.pop(x, None)
+        self.buffer = saved                     # альтерн-буфер отброшен: содержимое не
+                                                # переживает round-trip (tmux/screen так же)
+        self.in_alt = False
+        self._saved_buffer = None
+        self.dirty.update(range(self.lines))
+        if restore_cursor and self._alt_cursor is not None:
+            self.cursor = self._alt_cursor
+            self._alt_cursor = None
+            self.ensure_hbounds()               # кламп после возможного resize в alt
+            self.ensure_vbounds()
+
+    def index(self):
+        top, bottom = self.margins or Margins(0, self.lines - 1)
+        if self.cursor.y == bottom and not self.in_alt:
+            self.history.top.append(self.buffer[top])   # в alt — не сливаем в скроллбэк (less)
+        pyte.Screen.index(self)
+
+    def reverse_index(self):
+        top, bottom = self.margins or Margins(0, self.lines - 1)
+        if self.cursor.y == top and not self.in_alt:
+            self.history.bottom.append(self.buffer[bottom])
+        pyte.Screen.reverse_index(self)
 
     def select_graphic_rendition(self, *attrs, private=False):
         if private:
@@ -183,7 +284,8 @@ class TerminalScreen:
     """Сетка columns x lines на pyte + потокобезопасный вход.
 
     v1.0RC3: screen — pyte.HistoryScreen (скроллбэк, TERMINAL.md §5.4).
-    v1.2.11: screen — SshmapHistoryScreen (подкласс, совместимость с pyte 0.8.2)."""
+    v1.2.11: screen — SshmapHistoryScreen (подкласс, совместимость с pyte 0.8.2).
+    v1.2.12: + in_alt_screen() — состояние альтернативного экрана под lock'ом."""
 
     def __init__(self, columns=120, lines=32, history_lines=DEFAULT_HISTORY_LINES):
         self.columns = columns
@@ -262,6 +364,18 @@ class TerminalScreen:
         """
         with self._lock:
             return (1 << 5) in self.screen.mode
+
+    # ── v1.2.12 (PYTE82_AUDIT.md пачка B): состояние альтернативного экрана ──
+    def in_alt_screen(self):
+        """Включён ли альтернативный экран (приватные режимы 47/1047/1048/1049)?
+
+        Читается под тем же lock'ом, что и feed(): SSH-поток может менять режимы
+        параллельно с GUI-потоком (htop/vim шлют \\x1b[?1049h при старте и
+        \\x1b[?1049l при выходе). Пока in_alt — TerminalWidget НЕ скроллит
+        историю колесом мыши и Ctrl+Shift+PgUp/PgDn (гейт; полноценная
+        маршрутизация колеса в TUI — v1.2.13)."""
+        with self._lock:
+            return self.screen.in_alt
 
     # ── рендер для GUI-потока ──────────────────────────
     def snapshot(self):

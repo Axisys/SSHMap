@@ -3,9 +3,10 @@
 
 Один прогон БЕЗ сети покрывает Acceptance v1.0 на симулированном TUI-выводе:
   * bash — промпт + `ls --color` (SGR 34/93/256/truecolor) через окно терминала;
-  * vim  — скрытие курсора ESC[?25l, полноэкранный перерисов с цветами
-           (known limitation: в pyte 0.8.2 нет альтернативного экрана, режим 1049
-           отсутствует — предыдущий экран НЕ восстанавливается, зафиксировано тестом);
+  * vim  — скрытие курсора ESC[?25l, альтернативный экран \x1b[?1049h (v1.2.12:
+           SshmapHistoryScreen), полноэкранный перерисов с цветами; выход \x1b[?1049l —
+           предыдущий экран восстанавливается посимвольно включая fg/bg (known
+           limitation закрыт v1.2.12, зафиксировано тестом);
   * htop — повторяющиеся полноэкранные фреймы + dirty-рендер без таймера;
   * копирование — выделение мышью → буфер обмена; Ctrl+C при выделении = копирование,
     без выделения = \\x03 (SIGINT, «роняет top»);
@@ -223,18 +224,27 @@ check("bash: 'secret.key' — truecolor #c86432 (38;2;200;100;50)",
 win.close()
 
 # ════════════════════════════════════════════════════════════
-# 2. vim: ESC[?25l + полноэкранный перерис; known limitation — нет режима 1049
+# 2. vim: ESC[?25l + альтернативный экран (v1.2.12) + полноэкранный перерисов;
+#    выход \x1b[?1049l — предыдущий экран восстанавливается посимвольно
 # ════════════════════════════════════════════════════════════
 print("== vim ==")
 
 win = make_window("vim")
+# Промпт shell ДО vim — основной экран, который должен быть сохранён и восстановлен.
+emit_out(win, b"\x1b[1;32mroot@master\x1b[0m:\x1b[1;34m~\x1b[0m$ vim notes.txt\r\n",
+         until_substr="vim notes.txt")
+g0 = win.tscreen.snapshot()   # (rows, cx, cy, hidden) — снимок с цветами ДО входа в alt
+
 # Курсор в конце — на ПУСТОЙ строке 4: пиксельные проверки курсора должны идти по
 # ячейке без глифов (в offscreen-окружении шрифт без глифов рисует «тофу» цветом
 # default_fg, который совпадает с CURSOR_COLOR — на строках с текстом проверка
 # была бы некорректной).
-emit_out(win, b"\x1b[?25l\x1b[2J\x1b[H\x1b[41m vim session \x1b[0m\r\nvim content line\x1b[5H",
+# vim входит в альтернативный экран (v1.2.12): \x1b[?25l + \x1b[?1049h + полноэкранный
+# перерисов с цветами (рабочий буфер — пустой новый, основной сохранён).
+emit_out(win, b"\x1b[?25l\x1b[?1049h\x1b[2J\x1b[H\x1b[41m vim session \x1b[0m\r\nvim content line\x1b[5H",
          until_substr="vim session")
 
+check("vim: в альтернативном экране (in_alt_screen True)", win.tscreen.in_alt_screen() is True)
 rows, cx, cy, hidden = win.tscreen.snapshot()
 check("vim: курсор скрыт (ESC[?25l)", hidden is True)
 check("vim: курсор на пустой строке 4 (позиция для пиксельной проверки)",
@@ -245,6 +255,8 @@ cur_ink = ink_count(img, cw, chh, cx, cy, TerminalWidget.CURSOR_COLOR, tol=16)
 check("vim: блок-курсор НЕ рисуется, пока скрыт", cur_ink == 0, f"ink={cur_ink}")
 red_bg = ink_count(img, cw, chh, 5, 0, D["red"], tol=32)
 check("vim: SGR 41 — красный фон строки ' vim session '", red_bg >= 10, f"ink={red_bg}")
+check("vim: alt-экран — отдельный буфер (промпт shell на сетке не виден)",
+      "vim notes.txt" not in win.widget.visible_text())
 
 emit_out(win, b"\x1b[?25h")
 rows, cx, cy, hidden = win.tscreen.snapshot()
@@ -254,11 +266,17 @@ p = pixel(img, cx * cw + cw // 2, cy * chh + chh // 2)
 check("vim: блок-курсор нарисован в позиции курсора",
       close_enough(p, hex_rgb(TerminalWidget.CURSOR_COLOR), tol=16), f"got={p}")
 
-# known limitation (ROADMAP): pyte 0.8.2 не реализует альтернативный экран —
-# ?1049h/?1049l игнорируются, «выход из vim» предыдущий экран НЕ восстанавливает.
-emit_out(win, b"\x1b[?1049h\x1b[?1049l")
-check("known limitation: режима 1049 нет — экран после 'vim' не восстанавливается",
-      "vim session" in win.widget.visible_text())
+# v1.2.12 (known limitation закрыт): \x1b[?1049l — выход из alt-экрана: предыдущий
+# экран восстанавливается посимвольно включая fg/bg (SshmapHistoryScreen; семантика —
+# upstream PR #212, дифференциально проверено против tmux 3.6b и GNU screen).
+emit_out(win, b"\x1b[?1049l")
+check("vim: выход из alt-экрана (in_alt_screen False)", win.tscreen.in_alt_screen() is False)
+g1 = win.tscreen.snapshot()
+check("vim: предыдущий экран восстановлен посимвольно включая fg/bg (снимок == G0)",
+      g1 == g0, f"cursor=({g1[1]},{g1[2]}) hidden={g1[3]}")
+check("vim: 'vim session' исчез, промпт shell вернулся",
+      "vim session" not in win.widget.visible_text()
+      and "vim notes.txt" in win.widget.visible_text())
 win.close()
 
 # ════════════════════════════════════════════════════════════
