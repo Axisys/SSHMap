@@ -122,7 +122,10 @@ class NodeOpsMixin:
             return
 
         from services.host_importer import parse_hosts_file, is_ip_address
-        entries, file_dups = parse_hosts_file(text), []
+        # v1.2.10rc2 (AUDIT ручной #5b): убран file_dups-призрак — раньше рядом жила
+        # переменная, всегда равная пустому списку; реальная дедупликация делается
+        # руками ниже (case-insensitive + хосты, уже на карте).
+        entries = parse_hosts_file(text)
         # Дедупликация строк файла (без учёта регистра)
         seen, unique_entries = set(), []
         for e in entries:
@@ -139,7 +142,7 @@ class NodeOpsMixin:
             if d.ip:
                 existing.add(d.ip.lower())
 
-        pending, skipped = [], len(file_dups)
+        pending, skipped = [], 0   # v1.2.10rc2 (#5b): file_dups-призрак убран — счётчик с нуля
         for entry in unique_entries:
             if entry.lower() in existing:
                 skipped += 1
@@ -472,12 +475,34 @@ class NodeOpsMixin:
             host = node.data.host
             from services.diagnostics import ReverseDnsThread  # v0.9.9.3: был вложенным классом
 
-            thread = ReverseDnsThread(host)
+            # AUDIT v1.2.10 (авто #2): не затираем ещё работающий DNS-поток — тот же
+            # guard, что у ping (_ping_node ниже): второй «Copy Hostname», пока первый
+            # запрос жив (getaddrinfo может висеть до таймаута резолвера), раньше
+            # перезаписывал self._dns_thread, и старый поток становился orphan'ом
+            # (closeEvent останавливает только ТЕКУЩИЙ _dns_thread). Игнорируем и
+            # показываем статус-сообщение. i18n: без новых ключей — существующий
+            # status.import_resolving («Резолвим имена хостов… 0/1»).
+            if self._dns_thread is not None and self._dns_thread.isRunning():
+                self.statusBar().showMessage(
+                    self.t("status.import_resolving", done=0, total=1))
+                return
+
+            # v1.2.10rc1: parent=self — C++-объект потока имеет владельца, пока живо
+            # окно (гонки GC на живом QThread исключены); переживший wait-бюджет
+            # шатдауна поток регистрируется в orphan-реестре (services/diagnostics.
+            # register_orphan_thread — паттерн N4, как _orphan_threads ssh_terminal).
+            thread = ReverseDnsThread(host, parent=self)
 
             def _on_dns_done(name):
-                if getattr(self, "_dns_thread", None) is thread:
-                    self._dns_thread = None
-                _copy(name, "hostname")
+                try:
+                    if getattr(self, "_dns_thread", None) is thread:
+                        self._dns_thread = None
+                    _copy(name, "hostname")
+                except RuntimeError:
+                    # v1.2.10rc1 (AUDIT авто #2): доставка сигнала после teardown —
+                    # C++-объекты statusBar()/clipboard() уже удалены; поздний emit
+                    # без живого окна безопасен (окно закрыто, копировать некуда).
+                    pass
 
             thread.resolved.connect(_on_dns_done)
             self._dns_thread = thread  # держим ссылку — поток не должен стать orphan'ом

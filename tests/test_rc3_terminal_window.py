@@ -86,9 +86,10 @@ print("== U3: DECCKM state in pyte (headless) ==")
 
 scr = TerminalScreen(columns=80, lines=24)
 check("свежий экран: DECCKM выключен", scr.application_cursor_keys() is False)
-# Проверенный факт pyte 0.8.2: по умолчанию в режиме DECAWM (7<<5=224) + DECTCEM (25<<5=800)
-check("факт pyte 0.8.2: дефолтный mode = {224, 800} (DECAWM+DECTCEM)",
-      scr.screen.mode == {224, 800}, f"got={scr.screen.mode}")
+# Проверенный факт pyte 0.8.2: по умолчанию в режиме DECAWM (7<<5=224) + DECTCEM (25<<5=800);
+# v1.2.11: SshmapHistoryScreen добавляет LNM (20) — голый LF = CR+LF (xterm-поведение).
+check("дефолтный mode = {224, 800, 20} (DECAWM+DECTCEM+LNM; LNM с v1.2.11)",
+      scr.screen.mode == {224, 800, 20}, f"got={scr.screen.mode}")
 
 scr.feed(b"\x1b[?1h")   # smkx — включение DECCKM (так делает mc при запуске)
 check("после \\x1b[?1h: application_cursor_keys() True", scr.application_cursor_keys() is True)

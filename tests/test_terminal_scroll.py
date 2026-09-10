@@ -2,7 +2,8 @@
 """v1.0RC3 — Resize PTY + скроллбэк + dirty-рендер (ROADMAP v1.0RC3).
 
   * Скроллбэк на готовом pyte.HistoryScreen (TERMINAL.md §5.4, факт №7; ввод
-    ТОЛЬКО с \\r\\n — факт №10): история растёт, prev/next page (страница =
+    ТОЛЬКО с \\r\\n — конвенция с v1.0RC3; факт №10 закрыт v1.2.11: LNM по
+    умолчанию, голый \n = CR+LF): история растёт, prev/next page (страница =
     ceil(lines * ratio)), авто-возврат к live-строке при новом выводе (встроен
     в pyte before_event), границы (no-op наверху/снизу), лимит глубины;
   * Resize PTY — guard по смене сетки + дебаунс ~150 мс (TERMINAL.md §5.5,
@@ -54,7 +55,7 @@ check("TerminalScreen создаёт pyte.HistoryScreen",
       isinstance(scr.screen, pyte.HistoryScreen), type(scr.screen).__name__)
 
 for i in range(50):
-    scr.feed(f"line-{i:02d}\r\n".encode())   # факт №10: только \\r\\n
+    scr.feed(f"line-{i:02d}\r\n".encode())   # конвенция: только \\r\\n (факт №10 закрыт v1.2.11)
 
 pos, size = scr.scroll_info()
 check("после вывода: на live-строке (position == size)", pos == size, f"({pos}, {size})")

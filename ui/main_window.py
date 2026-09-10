@@ -891,8 +891,12 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
             if hasattr(coll, "isRunning"):
                 threads.append(coll)
 
-        # Ping, обратный DNS и DNS-резолв импорта (v1.1.2RC2 N6 — stop() выставляет
-        # cancel-флаг; текущий getaddrinfo доживает свой таймаут)
+        # Ping, обратный DNS и DNS-резолв импорта. v1.2.10rc1 (находка верификации):
+        # stop() с cancel-флагом есть ТОЛЬКО у _import_resolve_thread
+        # (HostResolverThread.stop, services/host_importer.py — выставляет Event, цикл
+        # выходит между именами); у PingThread/ReverseDnsThread stop() НЕТ — текущий
+        # getaddrinfo/ping доживает свой таймаут. Пережившие wait-бюджет ниже потоки
+        # регистрируются в orphan-реестре (services/diagnostics.register_orphan_thread).
         for attr in ("_ping_thread", "_dns_thread", "_import_resolve_thread"):
             th = getattr(self, attr, None)
             if th is not None and hasattr(th, "isRunning") and th.isRunning():
@@ -912,6 +916,14 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         terminal_waits = []
         for s in list(getattr(self, "_terminal_windows", [])):
             try:
+                # v1.2.10rc1 (AUDIT ручной #1): при шатдауне «ask»-гейт пропускается —
+                # поток уже остановлен (stop_thread() внутри close_terminal()), решения
+                # принимать не о чем. Раньше при terminal_close_behavior="ask" на каждую
+                # активную сессию при выходе показывался QMessageBox.question, а «Отмена»
+                # не работала (окно закрывалось независимо от ответа). Тот же путь, что
+                # у лимита v1.1.1: _force_close — подтверждённое решение, без повторного
+                # вопроса.
+                s._force_close = True
                 s.close_terminal()
                 th = getattr(s, "terminal_thread", None)
                 if th is not None and hasattr(th, "isRunning") and th.isRunning():
@@ -927,6 +939,20 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
             try:
                 th.wait(min(per_thread, remaining))
             except Exception:
+                pass
+
+        # v1.2.10rc1 (находка верификации): ping/DNS/import-resolve потоки, пережившие
+        # wait-бюджет (getaddrinfo/ping при недоступном резолвере), регистрируются в
+        # orphan-реестре — живой QThread без сильного ссылающегося объекта нельзя
+        # оставлять на GC («QThread: Destroyed while thread is still running» на всех
+        # путях выхода). Терминальные потоки имеют собственный N4-путь (page.shutdown()
+        # → modules/ssh_terminal._orphan_threads) — сюда не дублируем.
+        for th in threads:
+            try:
+                if hasattr(th, "isRunning") and th.isRunning():
+                    from services.diagnostics import register_orphan_thread as _register_orphan
+                    _register_orphan(th)
+            except Exception:  # noqa: BLE001 — реестр не блокирует выход
                 pass
 
     @property

@@ -149,6 +149,8 @@ def load_terminal_settings():
 #   OSC (ESC ] ... BEL | ESC \) — последовательности установки заголовка окна,
 #   которые TUI-приложения (vim/htop) отправляют постоянно. Без их удаления
 #   в выводе остаётся мусор вида «0;vim».
+# v1.2.10rc2 (AUDIT ручной #5a): используется только tests/test_core.py (в проде ANSI
+# парсит pyte); НЕ удалять — см. ROADMAP «Не трогать».
 ANSI_ESCAPE_RE = re.compile(
     r'\x1B\[[0-?]*[ -/]*[@-~]'   # CSI: ESC [ params final
     r'|\x1B\][^\x07\x1b]*(?:\x07|\x1B\\)'  # OSC: ESC ] ... BEL / ST

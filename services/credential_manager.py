@@ -44,7 +44,12 @@ class CredentialManager:
         глобальный keyring API обходить запрещено.
         """
         try:
-            import keyring.errors  # noqa: F401 — исключения перехватываются в save/load/delete
+            # v1.2.10rc2 (AUDIT авто #7): явный import keyring — раньше имя привязывалось
+            # побочным эффектом `import keyring.errors` ниже; работало, но хрупко по
+            # читаемости. keyring.errors нужен отдельно: исключения перехватываются в
+            # save/load/delete.
+            import keyring
+            import keyring.errors  # noqa: F401
 
             kr = keyring.get_keyring()
             if kr is None or not hasattr(kr, "name"):
@@ -194,9 +199,15 @@ class CredentialManager:
             return True
         except keyring.errors.NoKeyringError:
             return True  # Nothing to delete — no store available
-        except getattr(keyring.errors, "PasswordDeleteError", ()):  # keyring 25.x: запись отсутствовала
-            return True  # Nothing to delete — entry was already absent
         except Exception as e:
+            # v1.2.10rc2 (AUDIT ручной #6): явная проверка PasswordDeleteError вместо
+            # обманчивого `except getattr(keyring.errors, "PasswordDeleteError", ())` —
+            # при отсутствии атрибута except () никогда не срабатывал и исключение
+            # молча уходило в общий обработчик. Теперь та же деградация (общий
+            # обработчик), но без обмана: класс через getattr(..., None) + isinstance.
+            _pde = getattr(keyring.errors, "PasswordDeleteError", None)  # keyring 25.x
+            if _pde is not None and isinstance(e, _pde):
+                return True  # Nothing to delete — entry was already absent
             try:
                 from modules.logger import get_logger
                 log = get_logger("services.credential_manager")

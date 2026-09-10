@@ -500,18 +500,36 @@ class MapView(QGraphicsView):
         self.setCursor(Qt.CrossCursor)
 
     def _update_rubber_select(self, scene_pos):
-        """Обновить геометрию рамки + live-выделение пересекаемых узлов."""
+        """Обновить геометрию рамки + live-выделение пересекаемых узлов.
+
+        v1.2.10rc3 (AUDIT авто #9): полный O(n) обход ВСЕХ элементов сцены на каждое
+        движение мыши — scene.items() возвращает и детей QGraphicsItemGroup, поэтому у
+        500 узлов это ~6,5 тыс. элементов, по каждому isinstance + (у узлов)
+        sceneBoundingRect/intersects → прямой обход scene.nodes(): ТОТ ЖЕ набор
+        ServerNode (старый фильтр isinstance отбирал ровно их), но без ~6 тыс.
+        дочерних элементов групп. Замеренно быстрее полного обхода в ~3 раза
+        (tests/_bench_rubber.py, CHANGELOG v1.2.10rc3).
+
+        Замеченный в ROADMAP вариант `scene().items(rect)` (пространственный индекс Qt)
+        ИЗМЕРЕН и отвергнут: на Qt 6.11.1/PySide6 6.11.1 накладные расходы на
+        кандидата ~2,6 мкс, поэтому рамка, покрывающая всю карту, стоила 15,6 мс против
+        0,9 мс у простого обхода ВСЕХ элементов — медленнее СТАРОГО кода (выигрыш
+        только у малых рамок). want-критерий не изменился: пересекается ИЛИ в базовом
+        выделении (аддитивный режим Shift, _rubber_saved_selection) — результат
+        идентичен v1.2.10rc2."""
         origin = self._rubber_select_origin
         rect = QRectF(origin, scene_pos).normalized()
         self._rubber_select_item.setRect(rect)
         # live: подсвечиваем узлы под рамкой прямо во время драга
         base_ids = {id(n) for n in getattr(self, "_rubber_saved_selection", [])}
-        for item in self.scene().items():
-            if isinstance(item, ServerNode):
-                hit = rect.intersects(item.sceneBoundingRect())
-                want = hit or (id(item) in base_ids)
-                if item.isSelected() != want:
-                    item.setSelected(want)
+        scene = self.scene()
+        nodes = scene.nodes() if hasattr(scene, "nodes") \
+            else [i for i in scene.items() if isinstance(i, ServerNode)]
+        for node in nodes:
+            hit = rect.intersects(node.sceneBoundingRect())
+            want = hit or (id(node) in base_ids)
+            if node.isSelected() != want:
+                node.setSelected(want)
 
     def _finish_rubber_select(self):
         """Убрать рамку; итоговое выделение уже установлено в _update_rubber_select."""

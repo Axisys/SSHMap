@@ -187,7 +187,8 @@ print("== bash ==")
 
 clear_config()
 win = make_window("bash")
-# Ввод — только \r\n (факт №10: LNM не включён, голый \n не возвращает каретку).
+# Ввод — только \r\n (конвенция с v1.0RC3; факт №10 закрыт v1.2.11: LNM теперь
+# включён по умолчанию и голый \n = CR+LF, но конвенция \r\n остаётся).
 bash_out = (
     b"\x1b[1;32mroot@master\x1b[0m:\x1b[1;34m~\x1b[0m$ ls --color=auto\r\n"
     # row 1: docs(0–3, SGR 34) '  ' notes.txt(6–14, SGR 93) '  ' all.xml(17–23, 38;5;196)

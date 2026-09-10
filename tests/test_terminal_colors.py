@@ -229,6 +229,31 @@ got_bg = pixel(img_bg, cw // 2, chh // 2)
 check("SGR 41: ячейка залита красным палитры", close_enough(got_bg, hex_rgb(D["red"])),
       f"got={got_bg} want={D['red']}")
 
+# v1.2.10rc3 (косметический баг аудита): TUI-приложение явно красит пустую строку
+# пробелами под своим цветом (область просмотрщика mc/mcedit — в xterm однородно серая).
+# whitespace-only run без чернил, но fillRect при bg != default_bg (реальная цепочка
+# TerminalScreen→TerminalWidget; до фикса: в сетке bg='white', на холсте #0f172a).
+scr_ws = TerminalScreen(columns=20, lines=5)
+scr_ws.feed(b"\x1b[47m" + b" " * 20 + b"\x1b[0m\r\n")
+rows_ws, *_ = scr_ws.snapshot()
+check("сетка: пробелы под SGR 47 несут bg='white' (факт pyte)",
+      rows_ws[0][5].bg == "white", repr(rows_ws[0][5].bg))
+_wws, img_ws, cw, chh = render_widget(scr_ws)
+got_ws1 = pixel(img_ws, 5 * cw + cw // 2, chh // 2)      # курсор после \r\n на (0,1) — строка 0 цела
+got_ws2 = pixel(img_ws, 12 * cw + cw // 2, chh // 2)     # однородность по всей строке
+check("SGR 47-пробелы: ячейка залита белым палитры (не default_bg)",
+      close_enough(got_ws1, hex_rgb(D["white"]), tol=8), f"got={got_ws1} want={D['white']}")
+check("SGR 47-пробелы: строка однородна (ячейка 12 = ячейке 5)",
+      close_enough(got_ws2, hex_rgb(D["white"]), tol=8), f"got={got_ws2}")
+
+# Регрессия: НЕзакрашенная пустая строка (без SGR) — рендер совпадает с xterm:
+# базовая заливка, лишних fillRect нет.
+scr_sp = TerminalScreen(columns=20, lines=5)
+_wsp, img_sp, cw, chh = render_widget(scr_sp)   # курсор на (0,0) — смотрим строку 3
+got_sp = pixel(img_sp, 7 * cw + cw // 2, 3 * chh + chh // 2)
+check("незакрашенная пустая строка: базовая заливка default_bg",
+      close_enough(got_sp, hex_rgb(D["default_bg"]), tol=4), f"got={got_sp} want={D['default_bg']}")
+
 # fg: SGR 31/33/93 + 256 + truecolor — Acceptance «ls --color»
 scr = TerminalScreen(columns=20, lines=5)
 scr.feed(b"\x1b[31mR\x1b[33mY\x1b[93mB\x1b[38;5;196mP\x1b[38;2;1;2;3mT\x1b[0m")

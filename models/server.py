@@ -86,6 +86,11 @@ def server_data_from_dict(raw: dict) -> ServerData:
     data = {k: v for k, v in raw.items() if k in fields}
     if not data.get('id'):  # id обязателен — генерируем, если в JSON его нет
         data['id'] = str(uuid.uuid4())[:8]
+    else:
+        # v1.2.10rc2 (AUDIT ручной #5e): явный "id": 123 (int) в JSON раньше проходил
+        # как есть — ниже id используется как строка/ключ везде (имя keyring-сервиса,
+        # undo-команды, реестры). Приводим к str после проверки на пустоту.
+        data['id'] = str(data['id'])
     # Дефолты как при ручной сборке ServerData в старых версиях _open_project().
     # v1.0-fix (audit #4): setdefault заполнял только ОТСУТСТВУЮЩИЕ ключи — явный
     # null в JSON ("host": null) проходил как None и крашил SSH-диалог на .strip()

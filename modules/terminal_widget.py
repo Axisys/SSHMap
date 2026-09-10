@@ -482,10 +482,17 @@ class TerminalWidget(QWidget):
             runs = split_row_runs(row)
             stats["runs"] += len(runs)
             for x, text, is_wide in runs:
-                if not text.strip():
-                    continue  # run из пробелов — фон уже залит
                 ch0 = row[x]
                 fg, bg = self._resolved_colors(ch0)
+                has_ink = bool(text.strip())
+                # v1.2.10rc3 (косметический баг аудита): whitespace-only run без чернил —
+                # fillRect всё равно нужен, если резолвлённый bg ≠ базовой заливке: TUI-приложение
+                # может явно красить пустую строку пробелами под своим цветом (область
+                # просмотрщика mc/mcedit — в настоящем xterm она однородно серая; в сетке pyte
+                # такие ячейки несут bg=<цвет>). Старая предпосылка «фон уже залит» была верна
+                # только для пробелов с фоном по умолчанию.
+                if not has_ink and bg == self._palette["default_bg"]:
+                    continue  # пробелы с дефолтным фоном — базовая заливка уже покрывает
                 pen, brush, font = self._format_for(
                     fg, bg, bool(ch0.bold), bool(ch0.italics),
                     bool(ch0.underscore), bool(ch0.strikethrough))
@@ -497,8 +504,9 @@ class TerminalWidget(QWidget):
                 run_cells = 2 if is_wide else len(text)
                 painter.fillRect(cell_x, cell_y, run_cells * self._cell_w,
                                  self._cell_h, brush)
-                painter.drawText(cell_x, cell_y + self._ascent, text)
-                stats["draw_text_calls"] += 1
+                if has_ink:
+                    painter.drawText(cell_x, cell_y + self._ascent, text)
+                    stats["draw_text_calls"] += 1
             stats["rows"] += 1
 
         # v1.0RC2: выделение — полупрозрачный оверлей поверх выбранных ячеек.

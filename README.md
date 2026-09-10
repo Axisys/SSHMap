@@ -54,7 +54,7 @@ dialogs/                     # AddServer, SSHConnect (+ external terminal), Conn
 ui/                          # main_window.py — façade over ProjectIOMixin / NodeOpsMixin / SshMixin; sidebar.py; map_search_bar.py (Ctrl+F);
                              # command_palette.py (Ctrl+K); icons.py; mixin_support.py; theme.py (central UI palette, radii, fonts)
 i18n/                        # t(key, **kwargs); en/ru/zh JSON with identical key sets (parity pinned in tests); en is the default for new users
-tests/                       # 58 × test_*.py without pytest + _common.py harness + run_all.py (parallel runner) + check_i18n_keys.py — map: tests/INDEX.md
+tests/                       # 63 × test_*.py without pytest + _common.py harness + run_all.py (parallel runner) + check_i18n_keys.py — map: tests/INDEX.md
 ```
 
 ---
@@ -102,7 +102,8 @@ Format invariants:
 - Pipeline: raw SSH bytes → `TerminalScreen.feed()` (pyte.HistoryScreen, under lock) → cell-based canvas `TerminalWidget` (QWidget+QPainter: runs, color engine `resolve_color`, blinking block cursor).
 - Dirty rendering without a timer: `_on_output` → `widget.update()` directly (the queued signal is already on the GUI thread).
 - PTY resize — only on an actual grid change + ~150 ms debounce before `channel.resize_pty` (initial `invoke_shell` 120×32; recomputed on canvas resize via the page's eventFilter, previously the window's resizeEvent).
-- Scrollback — stock `pyte.HistoryScreen`: mouse wheel and Ctrl+Shift+PageUp/PageDown, auto-return to the live line on new output; **bare PageUp/PageDown remain forwarded to the shell** (`\x1b[5~`/`\x1b[6~` — paging in less/man).
+- Scrollback — `pyte.HistoryScreen`: mouse wheel and Ctrl+Shift+PageUp/PageDown, auto-return to the live line on new output; **bare PageUp/PageDown remain forwarded to the shell** (`\x1b[5~`/`\x1b[6~` — paging in less/man).
+- Screen is `SshmapHistoryScreen` (subclass of `pyte.HistoryScreen`, v1.2.11): bare LF acts as CR+LF (LNM on by default — xterm behavior) and private SGR (`CSI ? … m`, sent by Vim 9+) are ignored — compatibility with the pinned pyte 0.8.2.
 - Keyboard — full table: F1–F12, Delete/PageUp/PageDown (always CSI ~), arrows and Home/End per DECCKM state: TUIs send smkx `\x1b[?1h` and wait for SS3 — `_cursor_key_seq()` sends `\x1bOA/B/C/D`, `\x1bOH/\x1bOF`; normal mode — CSI; state is `tscreen.application_cursor_keys()`, in pyte 0.8.2 DECCKM = 32 in `screen.mode`. Explicit Ctrl+C→`\x03` / Ctrl+D→`\x04` (Ctrl+C with a selection copies to the clipboard), bracketed paste Ctrl+V (single block), AltGr guard (Ctrl+Alt is not sent as control codes).
 - Mouse selection — coordinates are always `(row, col)` (`selection_cells()`), multi-line text copy; **double-click selects a word, triple-click the whole line** (word = maximal run of non-space cells, CJK wide-glyph placeholders belong to the word); drag after double/triple-click extends from the far end.
 - Context menu (right click) — Copy (enabled only with a selection), Paste into the PTY (same bracketed-paste path as Ctrl+V), Select All; labels in en/ru/zh (`terminal.menu.*`).

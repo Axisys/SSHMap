@@ -405,60 +405,74 @@ class SSHConnectDialog(QDialog):
         self.status_label.setText(self.t("ssh_ext.launched", alias=self.server_data.alias))
 
     def _on_worker_success(self, message: str):
-        self.status_label.setText(message)
-        if self._ssh_worker and self._ssh_worker.test_only:
-            QMessageBox.information(self, self.t("msg.success_title"), 
-                                  f"{self.t('ssh.test_ok')}\n\n{message}")
-            return
+        # v1.2.10rc2 (AUDIT ручной #5c): тело в try/except RuntimeError — поздний
+        # success после закрытия диалога (closeEvent отвязал worker'а setParent(None),
+        # стр. 497, и тот доживает подключение) доставляется queued-сигналом на уже
+        # уничтоженный C++-виджет: RuntimeError внутри Qt-диспетча слота (PySide
+        # печатает и глотает). Диалог закрыт — показывать некуда, guard молчит.
+        try:
+            self.status_label.setText(message)
+            if self._ssh_worker and self._ssh_worker.test_only:
+                QMessageBox.information(self, self.t("msg.success_title"),
+                                      f"{self.t('ssh.test_ok')}\n\n{message}")
+                return
 
-        # v1.1.2RC1 (N1): прямые записи в server_data УБРАНЫ — раньше диалог сам
-        # писал user/key_path/ssh_port (это тот же объект, что node.data), и
-        # _apply_ssh_dialog_fields() в MainWindow сравнивал old/new уже равные →
-        # CmdEditNodeData не пушился, Ctrl+Z не откатывал смену логина/ключа/порта.
-        # Теперь единственный путь — хелпер MainWindow ПОСЛЕ accept():
-        # _run_ssh_connect() → _apply_ssh_dialog_fields() (undo-стек + dirty).
+            # v1.1.2RC1 (N1): прямые записи в server_data УБРАНЫ — раньше диалог сам
+            # писал user/key_path/ssh_port (это тот же объект, что node.data), и
+            # _apply_ssh_dialog_fields() в MainWindow сравнивал old/new уже равные →
+            # CmdEditNodeData не пушился, Ctrl+Z не откатывал смену логина/ключа/порта.
+            # Теперь единственный путь — хелпер MainWindow ПОСЛЕ accept():
+            # _run_ssh_connect() → _apply_ssh_dialog_fields() (undo-стек + dirty).
 
-        # Save password to keyring if it was provided via UI (not profile)
-        password_from_ui = self.password_edit.text()
-        if password_from_ui and self.server_data.id:
-            try:
-                # BUGFIX v0.9.5.6: двойной импорт (относительный + плоский) —
-                # при запуске «python main.py» пакет dialogs top-level, и
-                # «from ..services» падал ImportError, который ловил внешний
-                # except Exception → ложное «keyring save failed» + предупреждение
-                # пользователю (подключение при этом шло). Фолбэк — как у всех
-                # остальных импортов этого файла.
+            # Save password to keyring if it was provided via UI (not profile)
+            password_from_ui = self.password_edit.text()
+            if password_from_ui and self.server_data.id:
                 try:
-                    from ..services.credential_manager import get_credential_manager
-                except ImportError:
-                    from services.credential_manager import get_credential_manager
-                cm = get_credential_manager()
-                # v0.9.4-fix: результат проверяется — выровнено с _do_save, где
-                # тихая потеря пароля предупреждается. save_password возвращает
-                # False при недоступном keyring (NoKeyringError и т.п. ловятся там).
-                saved_ok = bool(cm.save_password(self.server_data.id, password_from_ui))
-            except Exception as e:
-                saved_ok = False  # credential manager failure is non-critical
-                try:
-                    from modules.logger import get_logger
-                    get_logger(__name__).warning(f"keyring save failed: {e}")
-                except Exception:
-                    pass
-            if not saved_ok:
-                # Тот же i18n-ключ, что в _do_save (паритет поведения)
-                QMessageBox.warning(
-                    self,
-                    self.t("msg.error_title"),
-                    self.t("msg.credentials_save_failed", alias=self.server_data.alias))
+                    # BUGFIX v0.9.5.6: двойной импорт (относительный + плоский) —
+                    # при запуске «python main.py» пакет dialogs top-level, и
+                    # «from ..services» падал ImportError, который ловил внешний
+                    # except Exception → ложное «keyring save failed» + предупреждение
+                    # пользователю (подключение при этом шло). Фолбэк — как у всех
+                    # остальных импортов этого файла.
+                    try:
+                        from ..services.credential_manager import get_credential_manager
+                    except ImportError:
+                        from services.credential_manager import get_credential_manager
+                    cm = get_credential_manager()
+                    # v0.9.4-fix: результат проверяется — выровнено с _do_save, где
+                    # тихая потеря пароля предупреждается. save_password возвращает
+                    # False при недоступном keyring (NoKeyringError и т.п. ловятся там).
+                    saved_ok = bool(cm.save_password(self.server_data.id, password_from_ui))
+                except Exception as e:
+                    saved_ok = False  # credential manager failure is non-critical
+                    try:
+                        from modules.logger import get_logger
+                        get_logger(__name__).warning(f"keyring save failed: {e}")
+                    except Exception:
+                        pass
+                if not saved_ok:
+                    # Тот же i18n-ключ, что в _do_save (паритет поведения)
+                    QMessageBox.warning(
+                        self,
+                        self.t("msg.error_title"),
+                        self.t("msg.credentials_save_failed", alias=self.server_data.alias))
 
-        # v0.9.5.6: окно «Успех / SSH подключение установлено» УБРАНО — лишний
-        # клик раздражал; подтверждение подключения — само терминальное окно,
-        # а детали уже в status_label (message) и в статус-баре MainWindow.
-        self.accept()
+            # v0.9.5.6: окно «Успех / SSH подключение установлено» УБРАНО — лишний
+            # клик раздражал; подтверждение подключения — само терминальное окно,
+            # а детали уже в status_label (message) и в статус-баре MainWindow.
+            self.accept()
+        except RuntimeError:
+            pass  # C++-объект диалога/виджетов уничтожен — поздний сигнал безопасен
 
     def _on_worker_error(self, message: str):
-        self.status_label.setText(f"\u2717 {message}")
-        QMessageBox.critical(self, self.t("msg.ssh_error"), message)
+        # v1.2.10rc2 (AUDIT ручной #5c): тот же guard, что в _on_worker_success —
+        # поздний error после закрытия диалога (setParent(None) в closeEvent) не
+        # должен давать RuntimeError внутри Qt-диспетча слота.
+        try:
+            self.status_label.setText(f"\u2717 {message}")
+            QMessageBox.critical(self, self.t("msg.ssh_error"), message)
+        except RuntimeError:
+            pass  # C++-объект диалога/виджетов уничтожен — поздний сигнал безопасен
 
     def _on_worker_finished(self):
         self._set_busy(False)
