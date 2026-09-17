@@ -1,7 +1,8 @@
 # -*- coding: utf-8 -*-
 """SFTP worker thread of the terminal window (v1.1.3, ROADMAP task 1).
 
-One worker thread per session with a FIFO task queue (list/upload/download/read):
+One worker thread per session with a FIFO task queue
+(list/upload/download/read + the v1.3.3.2 file operations mkdir/rename/delete):
 the paramiko SFTPClient does NOT guarantee thread-safety — all operations on
 the client are performed strictly in this thread; N threads for one client are
 forbidden. The window opens the client on top of a live transport
@@ -33,7 +34,8 @@ C++ object).
 Signals (emitted from the worker thread; delivery to the GUI — queued):
     list_ready(task_id, remote_dir, entries)  — entries: [{name,is_dir,size,mtime}]
                                                 (directories first, then by name)
-    task_started(task_id, kind, label)        — kind: "list" | "upload" | "download" | "read"
+    task_started(task_id, kind, label)        — kind: "list" | "upload" | "download"
+                                                | "read" | "mkdir" | "rename" | "delete"
     progress(task_id, done_bytes, total_bytes)
     task_done(task_id, detail)                — detail: final path (file/directory)
     task_error(task_id, kind, message)        — task error; the QUEUE does NOT die
@@ -43,6 +45,22 @@ Signals (emitted from the worker thread; delivery to the GUI — queued):
 For a "read" task the task_error message is a MACHINE CODE (READ_ERROR_*), not a
 human sentence: the SFTP tab maps it to an i18n message (the worker stays free of
 UI strings). Everything else reports str(exception) as before.
+
+The transfer ATOMICITY (v1.3.3.2, ROADMAP tasks 3 and 6): both directions write to a
+provisional PART_SUFFIX name and commit the result in ONE step — the local side with
+os.replace (the tmp + fsync + replace discipline every other write path of the
+application uses), the remote side with posix_rename (posix-rename@openssh.com, the
+extension that exists exactly for the atomic overwrite) and, on a server that does not
+know it, with a v3 rename that clears an existing destination first (a small
+non-atomic window — DOCUMENTATION.md §14f). A cancelled or failed transfer therefore
+never truncates the destination: the old file stays byte-identical, the provisional
+file is dropped.
+
+The queue_mkdir / queue_rename / queue_delete kinds (v1.3.3.2, ROADMAP task 1) share
+the same queue and the same rule: the client stays single-threaded, a failing
+operation reports task_error, and the QUEUE DOES NOT DIE (the v1.1.3 rule). A
+directory delete is NOT recursive (rmdir — a non-empty directory reports the server's
+error); recursive transfers are out of the version.
 
 The queue_* methods are intended to be called from the GUI thread (the task id
 counter is not synchronized — all calls come from a single thread).
@@ -66,6 +84,18 @@ KIND_LIST = "list"
 KIND_UPLOAD = "upload"
 KIND_DOWNLOAD = "download"
 KIND_READ = "read"          # v1.3.1: the SFTP viewer — read a text file into memory
+KIND_MKDIR = "mkdir"        # v1.3.3.2: the file operations (ROADMAP task 1)
+KIND_RENAME = "rename"
+KIND_DELETE = "delete"
+
+# The operation kinds (no bytes, no progress bar): the page's status line stays
+# silent about them — the SFTP tab reports their outcome itself (its message signal).
+OP_KINDS = (KIND_MKDIR, KIND_RENAME, KIND_DELETE)
+
+# v1.3.3.2 (ROADMAP tasks 3 and 6): the provisional name of BOTH transfer directions
+# (a local `<dest>.part` committed with os.replace, a remote `<target>.part` renamed
+# on success). One constant so the two halves cannot drift apart.
+PART_SUFFIX = ".part"
 
 # ── v1.3.1 (ROADMAP task 2): the viewer's hard limit ─────────────────────────
 # A larger file is NOT read at all (not even partially): the task fails with
@@ -147,21 +177,31 @@ class _SftpTask:
     """A queue task. remote_path/local_path — the semantics depend on kind:
 
       list     : remote_path = the directory to list
-      upload   : local_path  = the local file, remote_path = the TARGET directory
-      download : remote_path = the remote file, local_path = the target directory
+      upload   : local_path  = the local file, remote_path = the TARGET file
+                 (the directory + the name are joined by queue_upload; remote_name=
+                 overrides the name — the conflict dialog's "Rename" answer)
+      download : remote_path = the remote file, local_path = the TARGET file
+                 (local_name= overrides the name of the local copy)
+      read     : remote_path = the remote file to read into memory
+      mkdir    : remote_path = the directory to create
+      rename   : remote_path = the current path, remote_path2 = the new path
+      delete   : remote_path = the path, is_dir = a directory (rmdir, not remove)
     """
-    __slots__ = ("id", "kind", "label", "remote_path", "local_path",
-                 "total_size", "detail")
+    __slots__ = ("id", "kind", "label", "remote_path", "remote_path2",
+                 "local_path", "total_size", "detail", "is_dir")
 
     def __init__(self, task_id: int, kind: str, label: str, remote_path: str,
-                 local_path: str = "", total_size: int = 0, detail: str = ""):
+                 local_path: str = "", total_size: int = 0, detail: str = "",
+                 remote_path2: str = "", is_dir: bool = False):
         self.id = task_id
         self.kind = kind
         self.label = label          # for the GUI (file name / directory path)
         self.remote_path = remote_path
+        self.remote_path2 = remote_path2   # the rename target
         self.local_path = local_path
         self.total_size = total_size  # 0 — unknown (indeterminate progress)
         self.detail = detail
+        self.is_dir = bool(is_dir)  # delete: rmdir instead of remove
 
 
 # ── Orphan-worker registry (the _orphan_threads pattern, ssh_terminal.py N4) ───
@@ -212,23 +252,65 @@ class SftpWorker(QThread):
             self._next_id, KIND_LIST, remote_dir, remote_path=remote_dir,
             detail=remote_dir))
 
-    def queue_upload(self, local_path: str, remote_dir: str) -> Optional[int]:
-        """Upload a local file into a remote directory (name = basename)."""
-        name = os.path.basename(local_path)
+    def queue_upload(self, local_path: str, remote_dir: str,
+                     remote_name: str = "") -> Optional[int]:
+        """Upload a local file into a remote directory.
+
+        remote_name — the destination file name (the conflict dialog's "Rename"
+        answer); empty = the basename of the local file. The transfer is ATOMIC:
+        it lands on `<target>.part` and is renamed on success (v1.3.3.2, task 6).
+        """
+        name = remote_name or os.path.basename(local_path)
         remote_path = posixpath.join(remote_dir or "/", name)
         return self._queue_task(_SftpTask(
             self._next_id, KIND_UPLOAD, name, remote_path=remote_path,
             local_path=local_path, detail=remote_path))
 
     def queue_download(self, remote_path: str, local_dir: str,
-                       total_size: int = 0) -> Optional[int]:
-        """Download a remote file into a local directory (name = basename)."""
-        name = posixpath.basename(remote_path)
+                       total_size: int = 0, local_name: str = "") -> Optional[int]:
+        """Download a remote file into a local directory.
+
+        local_name — the name of the local copy (the conflict dialog's "Rename"
+        answer); empty = the basename of the remote file. The transfer is ATOMIC:
+        it lands on `<dest>.part` and is committed with os.replace (v1.3.3.2, task 3).
+        """
+        name = local_name or posixpath.basename(remote_path)
         local_path = os.path.join(local_dir or ".", name)
         return self._queue_task(_SftpTask(
             self._next_id, KIND_DOWNLOAD, name, remote_path=remote_path,
             local_path=local_path, total_size=int(total_size or 0),
             detail=local_path))
+
+    def queue_mkdir(self, remote_dir: str, name: str) -> Optional[int]:
+        """v1.3.3.2 (ROADMAP task 1): create a directory under remote_dir.
+
+        The mode is the server's default (paramiko's 0o777 minus the umask, as the
+        mkdir command does) — the tab validates the NAME, the server the rest.
+        """
+        path = posixpath.join(remote_dir or "/", name)
+        return self._queue_task(_SftpTask(
+            self._next_id, KIND_MKDIR, name, remote_path=path, detail=path))
+
+    def queue_rename(self, remote_path: str, new_name: str) -> Optional[int]:
+        """v1.3.3.2: rename a remote file/directory inside its own directory.
+
+        Only the NAME changes — the tab never moves a path across directories
+        (that is a "cut/paste" feature, out of the version).
+        """
+        target = posixpath.join(posixpath.dirname(remote_path) or "/", new_name)
+        return self._queue_task(_SftpTask(
+            self._next_id, KIND_RENAME, posixpath.basename(remote_path),
+            remote_path=remote_path, remote_path2=target, detail=target))
+
+    def queue_delete(self, remote_path: str, is_dir: bool = False) -> Optional[int]:
+        """v1.3.3.2: delete a remote file (remove) or a DIRECTORY (rmdir).
+
+        Deliberately not recursive: a non-empty directory reports the server's
+        error (recursive transfers are out of v1.3.3.2 — ROADMAP "Not in").
+        """
+        return self._queue_task(_SftpTask(
+            self._next_id, KIND_DELETE, posixpath.basename(remote_path),
+            remote_path=remote_path, detail=remote_path, is_dir=bool(is_dir)))
 
     def queue_read(self, remote_path: str, total_size: int = 0) -> Optional[int]:
         """v1.3.1 (ROADMAP task 2): read a remote file into memory for the viewer.
@@ -330,6 +412,12 @@ class SftpWorker(QThread):
                         self._do_upload(task)
                     elif task.kind == KIND_READ:
                         self._do_read(task)
+                    elif task.kind == KIND_MKDIR:
+                        self._do_mkdir(task)
+                    elif task.kind == KIND_RENAME:
+                        self._do_rename(task)
+                    elif task.kind == KIND_DELETE:
+                        self._do_delete(task)
                     else:
                         self._do_download(task)
                     self._emit(self.task_done, task.id, task.detail)
@@ -386,8 +474,18 @@ class SftpWorker(QThread):
         self._emit(self.list_ready, task.id, task.remote_path, entries)
 
     def _do_upload(self, task: _SftpTask):
+        """v1.3.3.2 (task 6): upload to `<target>.part`, then rename it into place.
+
+        An interrupted upload (cancel, a dead network, a full disk) therefore never
+        truncates the EXISTING remote file: the destination is untouched until the
+        very last operation, and the provisional file is dropped on any failure.
+        """
         total = os.path.getsize(task.local_path)  # FileNotFoundError → task_error
-        remote_fh = self._sftp.open(task.remote_path, "wb")
+        temp = task.remote_path + PART_SUFFIX
+        # open() of a nonexistent directory / no permission → task_error (nothing
+        # was created, nothing has to be cleaned up).
+        remote_fh = self._sftp.open(temp, "wb")
+        committed = False
         try:
             with open(task.local_path, "rb") as local:
                 done = 0
@@ -399,16 +497,51 @@ class SftpWorker(QThread):
                     remote_fh.write(chunk)
                     done += len(chunk)
                     self._emit(self.progress, task.id, done, total)
+            remote_fh.close()          # close the handle BEFORE the rename
+            remote_fh = None
+            self._commit_upload(temp, task.remote_path)
+            committed = True
         finally:
+            if remote_fh is not None:
+                try:
+                    remote_fh.close()
+                except Exception:
+                    pass
+            if not committed:
+                self._remote_remove_quiet(temp)   # cancel/failure: no litter, no loss
+
+    def _commit_upload(self, temp: str, target: str):
+        """Publish the finished provisional file as the destination (task 6).
+
+        posix-rename@openssh.com is the atomic overwrite — the extension exists
+        exactly for it. A server that refuses it (not OpenSSH / no extension) gets
+        the SFTP v3 rename with an existing destination cleared first: a small
+        non-atomic window, documented in DOCUMENTATION.md §14f.
+        """
+        posix_rename = getattr(self._sftp, "posix_rename", None)
+        if posix_rename is not None:
             try:
-                remote_fh.close()
+                posix_rename(temp, target)
+                return
             except Exception:
-                pass
+                pass   # the extension is unknown to this server — the v3 fallback
+        try:
+            self._sftp.rename(temp, target)
+        except Exception:
+            self._remote_remove_quiet(target)   # the overwrite case only
+            self._sftp.rename(temp, target)
 
     def _do_download(self, task: _SftpTask):
+        """v1.3.3.2 (task 3): download to `<dest>.part`, commit with os.replace.
+
+        A cancelled or failed download leaves the destination byte-identical to
+        what it was; the provisional file is removed (never left on the disk).
+        """
         remote_fh = self._sftp.open(task.remote_path, "rb")  # no file → error
+        temp = task.local_path + PART_SUFFIX
+        committed = False
         try:
-            with open(task.local_path, "wb") as local:
+            with open(temp, "wb") as local:
                 done = 0
                 while True:
                     self._check_cancel()
@@ -418,11 +551,42 @@ class SftpWorker(QThread):
                     local.write(chunk)
                     done += len(chunk)
                     self._emit(self.progress, task.id, done, task.total_size)
+                local.flush()
+                os.fsync(local.fileno())   # the data on the disk BEFORE the replace
+            os.replace(temp, task.local_path)   # same directory → atomic
+            committed = True
         finally:
             try:
                 remote_fh.close()
             except Exception:
                 pass
+            if not committed:
+                try:
+                    os.remove(temp)
+                except OSError:
+                    pass   # never created / already gone — nothing to clean
+
+    # ── v1.3.3.2: the file operations (ROADMAP task 1) ───────────────────
+
+    def _do_mkdir(self, task: _SftpTask):
+        self._sftp.mkdir(task.remote_path)
+
+    def _do_rename(self, task: _SftpTask):
+        self._sftp.rename(task.remote_path, task.remote_path2)
+
+    def _do_delete(self, task: _SftpTask):
+        if task.is_dir:
+            self._sftp.rmdir(task.remote_path)   # non-empty → the server's error
+        else:
+            self._sftp.remove(task.remote_path)
+
+    def _remote_remove_quiet(self, path: str):
+        """Best-effort cleanup of a provisional remote path (never masks the real
+        error of the task that is already on its way to task_error)."""
+        try:
+            self._sftp.remove(path)
+        except Exception:
+            pass
 
     def _do_read(self, task: _SftpTask):
         """v1.3.1 (ROADMAP task 2): read a text file into memory (the viewer).

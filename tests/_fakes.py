@@ -150,16 +150,20 @@ class FakeSftpAttr:
 class FakeSftpFS:
     """An in-memory remote FS: dirs (a set of paths) + files (a dict path→bytes).
 
-    deny_write — the paths where open("wb") raises PermissionError ("no permission").
+    deny_write — the file paths where open("wb") raises PermissionError ("no permission").
+    deny_dirs (v1.3.3.2) — the DIRECTORIES that refuse new files/directories (a
+    read-only directory: with the atomic upload of v1.3.3.2 the worker opens
+    `<target>.part`, so a per-FILE denial would no longer model "no write permission").
     remove_dir() — simulates removing the directory ON THE SERVER between the listing and
     the drop (a real-world race: the directory lives in the tree but vanishes on the server).
     """
 
-    def __init__(self, deny_write=frozenset()):
+    def __init__(self, deny_write=frozenset(), deny_dirs=frozenset()):
         self.dirs = {"/"}
         self.files = {}
         self.mtimes = {}
         self.deny_write = set(deny_write)
+        self.deny_dirs = set(deny_dirs)
 
     def add_dir(self, path):
         self.dirs.add(_norm(path))
@@ -175,6 +179,11 @@ class FakeSftpFS:
         self.files[path] = bytes(data)
         self.mtimes[path] = mtime
 
+    def exists(self, path):
+        """A file OR a directory at this path (v1.3.3.2: the rename/mkdir checks)."""
+        path = _norm(path)
+        return path in self.files or path in self.dirs
+
 
 class FakeSftpFile:
     """The file of the fake FS; the chunk_delay imitates the network delay per the chunk."""
@@ -186,9 +195,10 @@ class FakeSftpFile:
         self._delay = chunk_delay
         if "w" in mode or "a" in mode:
             # The paramiko semantics: open("wb") does NOT create the parent directories.
-            if posixpath.dirname(self._path) not in fs.dirs:
+            parent = posixpath.dirname(self._path)
+            if parent not in fs.dirs:
                 raise IOError("No such file")
-            if self._path in fs.deny_write:
+            if self._path in fs.deny_write or parent in fs.deny_dirs:
                 raise PermissionError("Permission denied")
             if self._path not in fs.files:
                 fs.files[self._path] = bytearray()
@@ -216,12 +226,25 @@ class FakeSftpFile:
 
 
 class FakeSftpClient:
-    """The fake paramiko SFTPClient (listdir_attr/open/close/get_channel)."""
+    """The fake paramiko SFTPClient (listdir_attr/open/close/get_channel).
+
+    v1.3.3.2 — the file operations of the SFTP tab and the atomic transfer commit:
+    mkdir/rmdir/remove/rename/posix_rename. `rename` mimics OpenSSH's sftp-server
+    (a v3 rename REFUSES an existing target), `posix_rename` is the
+    posix-rename@openssh.com extension (it overwrites — the atomic upload commit).
+    posix_rename_ok=False simulates a server WITHOUT the extension, which makes the
+    worker take its remove+rename fallback.
+    """
 
     def __init__(self, fs, chunk_delay=0.0):
         self._fs = fs
         self._chunk_delay = chunk_delay
         self._closed = False
+        self.posix_rename_ok = True
+
+    def _pause(self):
+        if self._chunk_delay:
+            time.sleep(self._chunk_delay)
 
     def listdir_attr(self, path):
         if self._chunk_delay:
@@ -245,6 +268,86 @@ class FakeSftpClient:
         if self._chunk_delay:
             time.sleep(self._chunk_delay)
         return FakeSftpFile(self._fs, path, mode, self._chunk_delay)
+
+    # ── v1.3.3.2: the file operations (+ the upload commit) ──────────────
+
+    def mkdir(self, path, mode=0o777):
+        self._pause()
+        path = _norm(path)
+        parent = posixpath.dirname(path)
+        if parent not in self._fs.dirs:
+            raise IOError("No such file")
+        if parent in self._fs.deny_dirs:
+            raise PermissionError("Permission denied")
+        if self._fs.exists(path):
+            raise IOError("Failure")
+        self._fs.dirs.add(path)
+        self._fs.mtimes[path] = int(time.time())
+
+    def rmdir(self, path):
+        self._pause()
+        path = _norm(path)
+        if path not in self._fs.dirs:
+            raise IOError("No such file")
+        if path in self._fs.deny_dirs:
+            raise PermissionError("Permission denied")
+        children = [p for p in list(self._fs.dirs) + list(self._fs.files)
+                    if p != path and posixpath.dirname(p) == path]
+        if children:
+            raise IOError("Directory not empty")
+        self._fs.dirs.discard(path)
+        self._fs.mtimes.pop(path, None)
+
+    def remove(self, path):
+        self._pause()
+        path = _norm(path)
+        if path in self._fs.files:
+            del self._fs.files[path]
+            self._fs.mtimes.pop(path, None)
+            return
+        if path in self._fs.dirs:
+            raise IOError("Failure")   # a directory needs rmdir (paramiko's remove)
+        raise IOError("No such file")
+
+    def rename(self, oldpath, newpath):
+        """The SFTP v3 rename — like OpenSSH's sftp-server it refuses an existing target."""
+        self._pause()
+        if self._fs.exists(newpath):
+            raise IOError("Failure")
+        self._move(oldpath, newpath)
+
+    def posix_rename(self, oldpath, newpath):
+        """posix-rename@openssh.com — the atomic overwrite (the upload commit)."""
+        self._pause()
+        if not self.posix_rename_ok:
+            raise IOError("Operation unsupported")
+        self._move(oldpath, newpath)
+
+    def _move(self, oldpath, newpath):
+        """Move a file, or a directory WITH its subtree (the target is overwritten)."""
+        fs = self._fs
+        old = _norm(oldpath)
+        new = _norm(newpath)
+        if old in fs.files:
+            if new in fs.files:
+                del fs.files[new]
+            fs.files[new] = fs.files.pop(old)
+            if old in fs.mtimes:
+                fs.mtimes[new] = fs.mtimes.pop(old)
+            return
+        if old in fs.dirs:
+            for d in sorted(p for p in list(fs.dirs)
+                            if p == old or p.startswith(old + "/")):
+                fs.dirs.discard(d)
+                fs.dirs.add(new + d[len(old):])
+            for f in sorted(p for p in list(fs.files) if p.startswith(old + "/")):
+                fs.files[new + f[len(old):]] = fs.files.pop(f)
+                if f in fs.mtimes:
+                    fs.mtimes[new + f[len(old):]] = fs.mtimes.pop(f)
+            if old in fs.mtimes:
+                fs.mtimes[new] = fs.mtimes.pop(old)
+            return
+        raise IOError("No such file")
 
     def get_channel(self):
         return self  # "channel" = the client itself (the closed attribute for the worker check)

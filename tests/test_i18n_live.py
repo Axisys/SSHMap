@@ -770,15 +770,15 @@ print("== §9 the release state ==")
 # ════════════════════════════════════════════════════════════════════════════
 
 check("EXPECTED_APP_VERSION is the version this test file describes",
-      EXPECTED_APP_VERSION == "1.3.3.1", EXPECTED_APP_VERSION)
-check("the pin counts the new keys (lang.reload + status.language_reloaded)",
-      EXPECTED_I18N_KEYS == 460, str(EXPECTED_I18N_KEYS))
+      EXPECTED_APP_VERSION == "1.3.3.2", EXPECTED_APP_VERSION)
+check("the pin counts the keys of this release (v1.3.3.2: +17 sftp.op/conflict/drag)",
+      EXPECTED_I18N_KEYS == 477, str(EXPECTED_I18N_KEYS))
 check_release_state(ROOT)
 for _code in i18n_lang_codes(ROOT):
-    check(f"i18n/{_code}.json carries the new lang.reload key",
-          "lang.reload" in translation_keys(read_lang(_code)))
-    check(f"i18n/{_code}.json carries the new status.language_reloaded key",
-          "status.language_reloaded" in translation_keys(read_lang(_code)))
+    check(f"i18n/{_code}.json carries the new sftp.conflict.title key",
+          "sftp.conflict.title" in translation_keys(read_lang(_code)))
+    check(f"i18n/{_code}.json carries the new sftp.op.new_folder key",
+          "sftp.op.new_folder" in translation_keys(read_lang(_code)))
 
 # cleanup: back to en + the original config, then close the windows
 i18n.set_language("en")

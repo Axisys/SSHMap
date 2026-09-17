@@ -9,19 +9,41 @@ a current listing (QTreeWidget) + "..." navigation:
     one level up; double-click on a directory — enter it;
   * upload: local files (QFileDialog) → the CURRENT shown directory
     (several files = sequential queue tasks);
-  * D&D (v1.2.8): files from Explorer into any spot of the tab → the same
-    worker-queue upload into the CURRENT directory; directories/non-files are
-    ignored with a hint; no connection — "waiting" hint (same as the Upload
-    button);
+  * D&D (v1.2.8): files from Explorer into the tab → the same worker-queue
+    upload; v1.3.3.2: the target is the directory UNDER THE CURSOR — a drop on a
+    directory row goes into THAT directory, a drop on a file row or on empty
+    space goes into the current directory; directories/non-files are ignored
+    with a hint; no connection — "waiting" hint (same as the Upload button);
   * download: selected files (multi-selection) → the chosen local directory;
-    an existing file at the same target is overwritten (conflict handling —
-    v1.3 file panel);
+  * the OVERWRITE CONFLICT (v1.3.3.2, ROADMAP task 2 — the deferred v1.3
+    promise): an existing destination in either direction opens a dialog with
+    Overwrite / Skip / Rename / "Apply to all" for the rest of the batch; a
+    cancelled dialog skips that file; the existence check is never a guess (the
+    current listing for the shown directory, a listing of the target directory
+    queued first for a drop on a row, os.path.exists for the local side);
   * progress — in the window's status bar (SSHTerminalWindow connects to
     the worker's signals itself: progress bar + showMessage); the tab only
     keeps its own state (the "Cancel" button is active while transfers are
     running) and local hints via the message() signal;
   * the GUI is not blocked: all SFTP operations run in the worker thread,
     the tab merely queues tasks and redraws the listing on list_ready.
+
+v1.3.3.2 (ROADMAP v1.3.3.2): the tab becomes a FILE MANAGER.
+  * the file operations — New folder / Rename / Delete / Copy remote path in the
+    tree's context menu (`_build_context_menu(item)` — the test seam, the
+    QActions are triggered directly by the tests, no menu.exec()). The three
+    operations are ordinary tasks of the SAME worker queue (kind mkdir/rename/
+    delete): the client stays single-threaded, a failure is a task_error and the
+    queue lives on; the listing is refreshed when an operation finishes; the
+    delete asks for a confirmation (QMessageBox — a module attribute, the
+    command-library test-seam pattern);
+  * both transfer directions are ATOMIC (modules/sftp_worker.py): the download
+    goes to `<dest>.part` + os.replace, the upload to `<remote>.part` + rename —
+    a cancelled or failed transfer never truncates the destination;
+  * drag-OUT: a dragged row publishes its REMOTE PATH as text/plain, so a file
+    can be dropped into a terminal, an editor or a chat window (the real "drag
+    files out to Explorer" — a download into a temp dir with its own
+    progress/cancel story — is NOT in this version).
 
 v1.3.1 (ROADMAP v1.3.1): the read-only PREVIEW. The tab body is a
 QSplitter [tree | viewer]: a double click on a text file queues a "read"
@@ -55,18 +77,20 @@ tab shows "Waiting for SSH connection…" and waits for set_worker(worker) —
 the window calls it after connected_signal / when switching to the tab
 (open_sftp() on the same transport — ROADMAP task 3).
 
-A full tree with lazy expansion, a file viewer, and drop "into a specific row"
-— the v1.3 chain (foundation — this module + sftp_worker.py).
+A full tree with lazy expansion and recursive transfers — still the backlog: the tab
+is built around ONE current directory (a model change), and the drop "into a specific
+row" landed in v1.3.3.2 as the directory under the cursor.
 """
 import os
 import posixpath
 from datetime import datetime
 
-from PySide6.QtCore import QEvent, Qt, Signal
-from PySide6.QtGui import QColor, QFontDatabase, QIcon, QPainter, QPixmap
+from PySide6.QtCore import QEvent, QMimeData, Qt, Signal
+from PySide6.QtGui import QColor, QDrag, QFontDatabase, QIcon, QPainter, QPixmap
 from PySide6.QtWidgets import (
-    QFileDialog, QHBoxLayout, QLabel, QPlainTextEdit, QPushButton, QSplitter,
-    QStyle, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget,
+    QApplication, QCheckBox, QFileDialog, QHBoxLayout, QInputDialog, QLabel,
+    QMenu, QMessageBox, QPlainTextEdit, QPushButton, QSplitter, QStyle,
+    QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget,
 )
 
 try:
@@ -81,10 +105,12 @@ except ImportError:
     from ui import theme
 
 try:  # v1.3.1: the viewer's shared constants (limit + task_error codes)
-    from .sftp_worker import (KIND_READ, MAX_READ_BYTES, READ_ERROR_BINARY,
+    from .sftp_worker import (KIND_DELETE, KIND_MKDIR, KIND_READ, KIND_RENAME,
+                              MAX_READ_BYTES, OP_KINDS, READ_ERROR_BINARY,
                               READ_ERROR_TOO_LARGE, classify_extension)
 except ImportError:
-    from sftp_worker import (KIND_READ, MAX_READ_BYTES, READ_ERROR_BINARY,
+    from sftp_worker import (KIND_DELETE, KIND_MKDIR, KIND_READ, KIND_RENAME,
+                             MAX_READ_BYTES, OP_KINDS, READ_ERROR_BINARY,
                              READ_ERROR_TOO_LARGE, classify_extension)
 
 
@@ -164,6 +190,89 @@ def preview_block_reason(path: str, size, facts=None) -> str:
     return ""
 
 
+def ask_conflict(parent, name: str, target: str, remaining: int = 0):
+    """v1.3.3.2 (ROADMAP task 2): the overwrite question for ONE item of a batch.
+
+    Returns `(action, apply_all)`, where action is one of
+
+      * `"overwrite"` — replace the existing destination;
+      * `"skip"` — leave the destination alone and go on with the batch;
+      * `"rename"` — ask for another name (the caller prompts, then uploads /
+        downloads under it) — `apply_all` is never set for it: a batch rename needs
+        a name per file;
+      * a cancelled dialog (Esc / the window's X) is reported as `"skip"`.
+
+    `remaining` is the number of conflicts still to come in this batch — "Apply to
+    all" is offered only when there is anything left to apply it to.
+
+    The QMessageBox is taken as a MODULE ATTRIBUTE at call time
+    (`STAB.QMessageBox = <fake>` is the test seam — the command-library pattern);
+    `SftpTab._ask_conflict()` is the caller, so a test can also replace the whole
+    decision.
+    """
+    box = QMessageBox(parent)   # a module attribute — the monkeypatch seam
+    box.setWindowTitle(_t("sftp.conflict.title"))
+    try:
+        box.setIcon(QMessageBox.Icon.Question)
+    except Exception:   # noqa: BLE001 — an exotic Qt build without the enum
+        pass
+    box.setText(_t("sftp.conflict.message", name=name, target=target))
+    btn_over = box.addButton(_t("sftp.conflict.overwrite"),
+                             QMessageBox.ButtonRole.AcceptRole)
+    btn_skip = box.addButton(_t("sftp.conflict.skip"),
+                             QMessageBox.ButtonRole.RejectRole)
+    btn_rename = box.addButton(_t("sftp.conflict.rename"),
+                               QMessageBox.ButtonRole.ActionRole)
+    check = QCheckBox(_t("sftp.conflict.apply_all"))
+    check.setEnabled(int(remaining or 0) > 0)
+    box.setCheckBox(check)
+    box.exec()
+    clicked = box.clickedButton()
+    if clicked is btn_over:
+        action = "overwrite"
+    elif clicked is btn_rename:
+        action = "rename"
+    else:
+        action = "skip"        # Skip, or a cancelled dialog (clickedButton() is None)
+    apply_all = bool(check.isChecked()) and action in ("overwrite", "skip")
+    return action, apply_all
+
+
+class _SftpTree(QTreeWidget):
+    """The listing tree of the tab (v1.3.3.2, ROADMAP task 5): drag-OUT.
+
+    A row can be dragged into a terminal, an editor or a chat window: the drag
+    payload is the REMOTE PATH of the row as `text/plain` (the file itself is not
+    transferred). A SUBCLASS, because `startDrag()` is a C++ slot — runtime
+    monkey-patching is forbidden (Qt gotcha #7).
+
+    `drag_mime(item)` builds the payload on its own, which is the seam the tests
+    read (a real drag needs an event loop and a drop target).
+    """
+
+    def startDrag(self, supported_actions):
+        mime = self.drag_mime(self.currentItem())
+        if mime is None:
+            return
+        drag = QDrag(self)
+        drag.setMimeData(mime)
+        drag.exec(Qt.DropAction.CopyAction)
+
+    def drag_mime(self, item):
+        """The drag payload of a row: the remote path as text/plain.
+
+        None — nothing to drag (no row / a row without a path).
+        """
+        if item is None:
+            return None
+        path = item.data(0, SftpTab.PATH_ROLE)
+        if not path:
+            return None
+        mime = QMimeData()
+        mime.setText(str(path))
+        return mime
+
+
 class SftpTab(QWidget):
     """The "Files" tab: listing of the current directory + upload/download via the queue."""
 
@@ -196,6 +305,13 @@ class SftpTab(QWidget):
         # that the worker really refused (see preview_block_reason); per session.
         self._blocked = {}
         self._blocked_icon_cache = None
+        # v1.3.3.2 (ROADMAP task 1): the file operations — task_id → kind, so an
+        # answer refreshes the listing and an error is reported as an OPERATION
+        # error (the queue itself is untouched), and the pre-flight listings of a
+        # drop on a directory row — task_id → (target dir, local files).
+        self._op_tasks = {}
+        self._pending_batches = {}
+        self._drag_source = None      # the widget the current drag event came from
 
         t = _t
         outer = QVBoxLayout(self)
@@ -229,7 +345,7 @@ class SftpTab(QWidget):
         outer.addLayout(bar)
 
         # Listing: Name | Size | Modified.
-        self.tree = QTreeWidget()
+        self.tree = _SftpTree()
         self.tree.setColumnCount(3)
         self.tree.setHeaderLabels([t("sftp.column_name"), t("sftp.column_size"),
                                    t("sftp.column_modified")])
@@ -237,6 +353,16 @@ class SftpTab(QWidget):
         self.tree.setSelectionMode(QTreeWidget.SelectionMode.ExtendedSelection)
         self.tree.setColumnWidth(0, 320)
         self.tree.itemDoubleClicked.connect(self._on_item_double_clicked)
+        # v1.3.3.2: the operations live in the context menu (the QActions are built
+        # by _build_context_menu — the test seam; exec() never runs in the tests).
+        self.tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.tree.customContextMenuRequested.connect(self._on_context_menu)
+        # v1.3.3.2: drag-OUT — a dragged row hands out its remote path as text/plain
+        # (DragOnly: the tree never accepts its own drops; D&D INTO the tab is
+        # handled by the tab's own eventFilter, which consumes those events first).
+        self.tree.setDragEnabled(True)
+        self.tree.setDragDropMode(QTreeWidget.DragDropMode.DragOnly)
+        self.tree.setToolTip(t("sftp.drag_hint"))
 
         # v1.3.1 (ROADMAP task 1): the preview panel — QSplitter [tree | viewer].
         # The panel starts hidden (it appears on a double click on a text file);
@@ -305,6 +431,9 @@ class SftpTab(QWidget):
         row tooltips. The module translator (`i18n.t`) is looked up at call time,
         so no cache has to be invalidated.
 
+        v1.3.3.2: the drag-out hint of the tree (the context menu is rebuilt on
+        every right click and needs nothing here).
+
         Deliberately NOT touched: the path label and the viewer header — they carry
         the CURRENT directory / file (data, not UI text); the "waiting connection"
         state is re-texted by `set_worker(None)` on the next call. Never raises —
@@ -318,6 +447,7 @@ class SftpTab(QWidget):
             self.btn_cancel.setText(_t("sftp.cancel"))
             self.tree.setHeaderLabels([_t("sftp.column_name"), _t("sftp.column_size"),
                                        _t("sftp.column_modified")])
+            self.tree.setToolTip(_t("sftp.drag_hint"))
             self.btn_viewer_close.setToolTip(_t("sftp.viewer.close_tooltip"))
             # The row markers carry the refusal text in the tooltip — re-text the
             # rows of the CURRENT listing that are really marked (the facts of this
@@ -347,6 +477,10 @@ class SftpTab(QWidget):
                     pass  # no connection existed — nothing to do
         self._worker = worker
         self._transfer_tasks.clear()
+        # v1.3.3.2: the operation answers and the pre-flight listings belong to the
+        # transport that was asked — a new worker starts with a clean bookkeeping.
+        self._op_tasks.clear()
+        self._pending_batches.clear()
         # v1.3.1.1: the previewability facts belong to ONE transport/session — a new
         # worker (a new connection, possibly another server on the same paths) starts
         # with a clean listing.
@@ -369,9 +503,9 @@ class SftpTab(QWidget):
 
         worker.list_ready.connect(self._on_list_ready)
         worker.task_started.connect(self._on_task_started)
-        worker.task_done.connect(lambda tid, _d: self._on_task_finished(tid))
+        worker.task_done.connect(self._on_task_done)
         worker.task_error.connect(self._on_task_error)
-        worker.task_cancelled.connect(lambda tid, _k: self._on_task_finished(tid))
+        worker.task_cancelled.connect(self._on_task_cancelled)
         worker.read_ready.connect(self._on_read_ready)   # v1.3.1: the viewer
         for b in (self.btn_up, self.btn_refresh, self.btn_upload,
                   self.btn_download):
@@ -414,6 +548,16 @@ class SftpTab(QWidget):
             self._pending_lists[tid] = self._current_dir
 
     def _on_list_ready(self, task_id: int, remote_dir: str, entries: list):
+        # v1.3.3.2: the pre-flight listing of a drop on a directory row — the answer
+        # is NOT rendered (that directory is not on the screen), it only feeds the
+        # conflict check of the batch that is waiting for it.
+        pending = self._pending_batches.pop(task_id, None)
+        if pending is not None:
+            target, files = pending
+            self._queue_uploads(files, target, {e["name"] for e in entries})
+            self.message.emit(
+                _t("sftp.drop_queued", count=len(files), dir=target))
+            return
         requested = self._pending_lists.pop(task_id, None)
         # Staleness filter: render only the response for the CURRENT directory
         # (navigation or Refresh while an old listing was in flight — ignored).
@@ -586,6 +730,19 @@ class SftpTab(QWidget):
                 self._blocked[path] = message
                 self._mark_row(path)
             self.message.emit(self._read_error_text(message, path))
+        elif kind in OP_KINDS:
+            # v1.3.3.2: a file operation failed (the queue lives on) — the tab owns
+            # the message (the page stays silent about the operation kinds), and the
+            # listing is NOT refreshed: nothing changed on the server.
+            self._op_tasks.pop(task_id, None)
+            self.message.emit(_t("sftp.op.error", error=message))
+        elif kind == "list":
+            # v1.3.3.2: the pre-flight listing of a drop on a row failed (the
+            # directory vanished / no permission) — the batch is dropped, the tab
+            # reports the reason instead of uploading into nowhere.
+            pending = self._pending_batches.pop(task_id, None)
+            if pending is not None:
+                self.message.emit(_t("sftp.op.error", error=message))
         self._on_task_finished(task_id)
 
     def _read_error_text(self, code: str, path: str = "") -> str:
@@ -649,8 +806,10 @@ class SftpTab(QWidget):
             return
         files, _ = QFileDialog.getOpenFileNames(
             self, _t("sftp.upload_dialog_title"))
-        for f in files:  # several files = sequential queue tasks
-            self._worker.queue_upload(f, self._current_dir)
+        if not files:
+            return   # the dialog was cancelled
+        self._queue_uploads(files, self._current_dir,
+                            self._names_in_current_dir())
 
     def _on_download(self):
         if self._worker is None:
@@ -665,13 +824,246 @@ class SftpTab(QWidget):
             self, _t("sftp.download_dir_title"))
         if not local_dir:  # dialog cancelled — quietly do nothing
             return
-        for it in items:
-            self._worker.queue_download(
-                it.data(0, self.PATH_ROLE), local_dir, it.data(0, self.SIZE_ROLE))
+        self._queue_downloads(items, local_dir)
 
     def _on_cancel(self):
         if self._worker is not None:
             self._worker.cancel()
+
+    # ── v1.3.3.2: the batch + the overwrite conflict (ROADMAP task 2) ────
+
+    def _names_in_current_dir(self) -> set:
+        """The names the CURRENT listing shows.
+
+        The conflict check must never be a guess, and the tree is exactly what the
+        server last answered for the shown directory (a row of another directory
+        cannot be in it).
+        """
+        names = set()
+        try:
+            for i in range(self.tree.topLevelItemCount()):
+                item = self.tree.topLevelItem(i)
+                if item is self._up_item:
+                    continue
+                names.add(item.text(0))
+        except RuntimeError:
+            pass  # the C++ object was already destroyed (a close race)
+        return names
+
+    def _ask_conflict(self, name: str, target: str, remaining: int):
+        """The overwrite question — a method so a test can replace the whole policy."""
+        return ask_conflict(self, name, target, remaining)
+
+    def _conflict_decision(self, name: str, target: str, remaining: int):
+        """The decision of ONE conflict → `(action, apply_all)`.
+
+        action ∈ `"overwrite" | "skip" | "rename"`; a cancelled dialog — and any
+        broken answer of a replaced seam — is a SKIP: the destination is left alone
+        and the batch goes on. `apply_all` asks to reuse the decision for the REST
+        of this batch (never for "rename": a batch rename needs a name per file).
+        """
+        try:
+            action, apply_all = self._ask_conflict(name, target, remaining)
+        except Exception:   # noqa: BLE001 — a dialog must never break a transfer
+            return "skip", False
+        if action not in ("overwrite", "skip", "rename"):
+            return "skip", False
+        if action == "rename":
+            return action, False
+        return action, bool(apply_all)
+
+    def _prompt_name(self, title: str, current: str = "") -> str:
+        """The name input of New folder / Rename (QInputDialog — a module attribute:
+        `STAB.QInputDialog = <fake>` is the test seam).
+
+        Returns the validated name; "" — cancelled or invalid (empty, ".", "..",
+        a path separator): the caller quietly does nothing. The worker never sees a
+        name it would have to sanitize.
+        """
+        try:
+            text, ok = QInputDialog.getText(self, title, _t("sftp.op.name_prompt"),
+                                            text=current)
+        except Exception:   # noqa: BLE001 — a dialog must never break the tab
+            return ""
+        if not ok:
+            return ""
+        name = (text or "").strip()
+        if not name or name in (".", "..") or "/" in name or "\\" in name:
+            self.message.emit(_t("sftp.op.invalid_name"))
+            return ""
+        return name
+
+    def _queue_uploads(self, files: list, target_dir: str, known: set):
+        """Queue a batch of local files into target_dir, resolving the conflicts.
+
+        `known` — the names already present in target_dir (from a LISTING of that
+        directory: the current listing for the Upload button and for a drop on the
+        body, the pre-flight listing for a drop on a directory row). "Apply to all"
+        of the dialog is remembered for the REST of this batch only.
+        """
+        worker = self._worker
+        if worker is None:
+            self.message.emit(_t("sftp.waiting_connection"))
+            return
+        apply_all = ""
+        total = len(files)
+        for index, local_path in enumerate(files):
+            name = os.path.basename(local_path)
+            if name in known:
+                if apply_all:
+                    action = apply_all
+                else:
+                    action, to_all = self._conflict_decision(
+                        name, target_dir, total - index - 1)
+                    if to_all:
+                        apply_all = action
+                if action == "skip":
+                    continue
+                if action == "rename":
+                    new_name = self._prompt_name(_t("sftp.op.rename"), name)
+                    if not new_name:
+                        continue   # cancelled → this file is skipped
+                    name = new_name
+            worker.queue_upload(local_path, target_dir, remote_name=name)
+
+    def _queue_downloads(self, items: list, local_dir: str):
+        """Queue a batch of remote files into local_dir, resolving the conflicts.
+
+        The local existence check is a plain `os.path.exists` — no listing and no
+        network, so it can never be stale.
+        """
+        worker = self._worker
+        if worker is None:
+            self.message.emit(_t("sftp.waiting_connection"))
+            return
+        apply_all = ""
+        total = len(items)
+        for index, item in enumerate(items):
+            remote_path = item.data(0, self.PATH_ROLE)
+            name = posixpath.basename(remote_path)
+            if os.path.exists(os.path.join(local_dir, name)):
+                if apply_all:
+                    action = apply_all
+                else:
+                    action, to_all = self._conflict_decision(
+                        name, local_dir, total - index - 1)
+                    if to_all:
+                        apply_all = action
+                if action == "skip":
+                    continue
+                if action == "rename":
+                    new_name = self._prompt_name(_t("sftp.op.rename"), name)
+                    if not new_name:
+                        continue
+                    name = new_name
+            worker.queue_download(remote_path, local_dir,
+                                  item.data(0, self.SIZE_ROLE), local_name=name)
+
+    # ── v1.3.3.2: the file operations (ROADMAP task 1) ───────────────────
+
+    def _on_context_menu(self, pos):
+        """The tree's context menu (the seam is `_build_context_menu(item)`)."""
+        try:
+            item = self.tree.itemAt(pos)
+        except RuntimeError:
+            return   # the C++ object is already deleted (a close race)
+        menu = self._build_context_menu(item)
+        if menu is not None:
+            menu.exec(self.tree.viewport().mapToGlobal(pos))
+
+    def _build_context_menu(self, item=None):
+        """New folder / Rename / Delete / Copy remote path (a test seam: the tests
+        trigger the QActions directly — `menu.exec()` never runs offscreen).
+
+        Rename/Delete/Copy are enabled only for a REAL row of the current listing
+        (never for the ".." row, never for empty space) — a disabled item is the
+        hint, the actions themselves stay defensive.
+        """
+        menu = QMenu(self)
+        act_new = menu.addAction(_t("sftp.op.new_folder"))
+        act_rename = menu.addAction(_t("sftp.op.rename"))
+        act_delete = menu.addAction(_t("sftp.op.delete"))
+        act_copy = menu.addAction(_t("sftp.op.copy_path"))
+        menu.addSeparator()
+        act_refresh = menu.addAction(_t("sftp.refresh"))
+
+        real = (item is not None and item is not self._up_item
+                and bool(item.data(0, self.PATH_ROLE)))
+        for act in (act_rename, act_delete, act_copy):
+            act.setEnabled(bool(real))
+
+        act_new.triggered.connect(lambda: self._op_new_folder())
+        act_refresh.triggered.connect(lambda: self._relist(self._current_dir))
+        if real:
+            act_rename.triggered.connect(lambda: self._op_rename(item))
+            act_delete.triggered.connect(lambda: self._op_delete(item))
+            act_copy.triggered.connect(lambda: self._op_copy_path(item))
+        return menu
+
+    def _op_new_folder(self):
+        """New folder in the CURRENT directory (mkdir through the worker queue)."""
+        if self._worker is None:
+            self.message.emit(_t("sftp.waiting_connection"))
+            return
+        name = self._prompt_name(_t("sftp.op.new_folder"))
+        if not name:
+            return
+        self._queue_op(self._worker.queue_mkdir(self._current_dir, name), KIND_MKDIR)
+
+    def _op_rename(self, item):
+        """Rename a row inside its own directory (only the NAME changes)."""
+        if self._worker is None:
+            self.message.emit(_t("sftp.waiting_connection"))
+            return
+        path = item.data(0, self.PATH_ROLE)
+        if not path:
+            return
+        current = posixpath.basename(path)
+        name = self._prompt_name(_t("sftp.op.rename"), current)
+        if not name or name == current:
+            return   # cancelled, or the name did not change — nothing to do
+        self._queue_op(self._worker.queue_rename(path, name), KIND_RENAME)
+
+    def _op_delete(self, item):
+        """Delete a row — with a confirmation (QMessageBox — a module attribute).
+
+        A directory is removed with rmdir: a NON-EMPTY one reports the server's
+        error (recursive delete is not in this version).
+        """
+        if self._worker is None:
+            self.message.emit(_t("sftp.waiting_connection"))
+            return
+        path = item.data(0, self.PATH_ROLE)
+        if not path:
+            return
+        is_dir = bool(item.data(0, self.ISDIR_ROLE))
+        box = QMessageBox   # the monkeypatch STAB.QMessageBox works in the tests
+        reply = box.question(
+            self, _t("sftp.op.delete"),
+            _t("sftp.op.delete_confirm", name=posixpath.basename(path)),
+            box.Yes | box.No, box.No)
+        if reply != box.Yes:
+            return
+        self._queue_op(self._worker.queue_delete(path, is_dir), KIND_DELETE)
+
+    def _op_copy_path(self, item):
+        """Copy the REMOTE path of the row to the clipboard (never a URL)."""
+        path = item.data(0, self.PATH_ROLE)
+        if not path:
+            return
+        try:
+            clipboard = QApplication.clipboard()
+            if clipboard is not None:
+                clipboard.setText(str(path))
+        except Exception:   # noqa: BLE001 — the clipboard is not critical
+            pass
+        self.message.emit(_t("sftp.op.path_copied"))
+
+    def _queue_op(self, task_id, kind: str):
+        """Remember an operation task: its answer refreshes the listing (task_done)
+        or reports a message (task_error)."""
+        if task_id is not None:
+            self._op_tasks[task_id] = kind
 
     # ── D&D: files from Explorer (v1.2.8) ────────────────────────────────
 
@@ -679,17 +1071,25 @@ class SftpTab(QWidget):
 
     def eventFilter(self, obj, event):
         """Drag events on the tab's children are forwarded to the tab's OWN
-        handlers: the drop target is the current directory regardless of where
-        exactly (a tree row, a button) the files landed. Returning True = the
-        event is consumed (QTreeWidget does not process it "its own way")."""
+        handlers. Returning True = the event is consumed (QTreeWidget does not
+        process it "its own way").
+
+        v1.3.3.2: the SOURCE widget of the event is remembered for the drop — the
+        directory under the cursor is resolved in the tree's coordinates whatever
+        child (viewport, header, button) received the event.
+        """
         etype = event.type()
         if etype in self._DRAG_TYPES and (obj is self or self.isAncestorOf(obj)):
-            if etype == QEvent.Type.DragEnter:
-                self.dragEnterEvent(event)
-            elif etype == QEvent.Type.DragMove:
-                self.dragMoveEvent(event)
-            else:  # Drop
-                self.dropEvent(event)
+            self._drag_source = obj
+            try:
+                if etype == QEvent.Type.DragEnter:
+                    self.dragEnterEvent(event)
+                elif etype == QEvent.Type.DragMove:
+                    self.dragMoveEvent(event)
+                else:  # Drop
+                    self.dropEvent(event)
+            finally:
+                self._drag_source = None
             return True
         return False
 
@@ -718,13 +1118,51 @@ class SftpTab(QWidget):
             event.acceptProposedAction()
 
     def dropEvent(self, event):
+        target = self._drop_target_dir(event)
         files = self._local_files(event.mimeData())
         if files:
             event.acceptProposedAction()
-        self._on_drop(files)
+        self._on_drop(files, target)
 
-    def _on_drop(self, files: list):
-        """Drop result: upload into the CURRENT directory (like the Upload button)."""
+    def _item_under(self, event):
+        """The listing row under a drag event (None — empty space / outside the tree).
+
+        The event may arrive from any child (the tab's eventFilter forwards it): the
+        point is mapped into the viewport's coordinates first, so the row is found
+        regardless of who received the event.
+        """
+        try:
+            pos = event.position().toPoint()
+        except AttributeError:   # an older event object without position()
+            pos = event.pos()
+        source = self._drag_source or self
+        try:
+            if source is not self.tree.viewport():
+                pos = self.tree.viewport().mapFrom(source, pos)
+            return self.tree.itemAt(pos)
+        except (RuntimeError, TypeError):
+            return None   # the C++ object is gone / the source is not an ancestor
+
+    def _drop_target_dir(self, event) -> str:
+        """v1.3.3.2 (ROADMAP task 4): the directory UNDER THE CURSOR.
+
+        A directory row (including "..") is the target; a file row and empty space
+        keep the current directory — the second half of the "drop into a specific
+        row" promise quoted in the goal of the version.
+        """
+        item = self._item_under(event)
+        if item is not None and item.data(0, self.ISDIR_ROLE):
+            return item.data(0, self.PATH_ROLE) or self._current_dir
+        return self._current_dir
+
+    def _on_drop(self, files: list, target_dir: str = ""):
+        """Drop result: upload into the directory under the cursor.
+
+        The conflict check must not be a guess, so a target directory that is NOT on
+        the screen is LISTED first (a "list" task of the same queue) and the batch is
+        queued when the answer arrives — see `_on_list_ready`.
+        """
+        target = target_dir or self._current_dir
         if not files:
             # No local files in the drag (directories/other data).
             self.message.emit(_t("sftp.drop_no_files"))
@@ -732,10 +1170,17 @@ class SftpTab(QWidget):
         if self._worker is None:
             self.message.emit(_t("sftp.waiting_connection"))
             return
-        for f in files:  # several files = sequential queue tasks (v1.1.3)
-            self._worker.queue_upload(f, self._current_dir)
-        self.message.emit(
-            _t("sftp.drop_queued", count=len(files), dir=self._current_dir))
+        if target == self._current_dir:
+            # The listing on the screen IS the answer of the server for that
+            # directory — the conflict check needs nothing else.
+            self._queue_uploads(files, target, self._names_in_current_dir())
+        else:
+            task_id = self._worker.queue_list(target)
+            if task_id is not None:
+                self._pending_batches[task_id] = (target, files)
+                return   # the hint + the uploads follow the listing answer
+            self._queue_uploads(files, target, set())
+        self.message.emit(_t("sftp.drop_queued", count=len(files), dir=target))
 
     # ── Transfer state (the "Cancel" button) ─────────────────────────────
 
@@ -743,6 +1188,22 @@ class SftpTab(QWidget):
         if kind in ("upload", "download"):
             self._transfer_tasks.add(task_id)
             self.btn_cancel.setEnabled(True)
+
+    def _on_task_done(self, task_id: int, detail: str):
+        """task_done: an OPERATION refreshes the listing (v1.3.3.2) and reports the
+        result; a transfer and a read keep their v1.1.3/v1.3.1 handling."""
+        kind = self._op_tasks.pop(task_id, None)
+        if kind is not None:
+            self.message.emit(_t("sftp.op.done", name=detail))
+            self._relist(self._current_dir)
+        self._on_task_finished(task_id)
+
+    def _on_task_cancelled(self, task_id: int, _kind: str):
+        self._op_tasks.pop(task_id, None)
+        # A cancelled pre-flight listing: its batch will never be queued (the
+        # bookkeeping must not leak into the next transport).
+        self._pending_batches.pop(task_id, None)
+        self._on_task_finished(task_id)
 
     def _on_task_finished(self, task_id: int):
         # v1.3.1: a read task that ended without an answer (cancelled) leaves no trace.

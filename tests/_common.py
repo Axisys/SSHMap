@@ -171,11 +171,16 @@ def restore_i18n_config(snap):
 # in 12 i18n files + the APP_VERSION/requirements pins in 7 release-state sections).
 # The misses of the keys themselves against the code are caught by check_i18n_keys.py.
 # ─────────────────────────────────────────────────────────────────────────────
-EXPECTED_APP_VERSION = "1.3.3.1"  # the current release (a sentinel: it catches "a bump to the wrong version")
-EXPECTED_I18N_KEYS = 460        # the parity of the TRANSLATION keys (v1.3.3.1: +2 — lang.reload
-                                # "Rescan the language files" and status.language_reloaded; the
-                                # "name"/"partial" meta keys of the language files are NOT translations
-                                # and are excluded here and in check_i18n_keys.py).
+EXPECTED_APP_VERSION = "1.3.3.2"  # the current release (a sentinel: it catches "a bump to the wrong version")
+EXPECTED_I18N_KEYS = 477        # the parity of the TRANSLATION keys (v1.3.3.2: +17 — 10 sftp.op.*
+                                # (new folder / rename / delete / confirm / copy path / copied /
+                                # error / name prompt / invalid name / done), 6 sftp.conflict.*
+                                # (title / message / overwrite / skip / rename / apply-to-all) and
+                                # the sftp.drag_hint drag-out tooltip; the "name"/"partial" meta keys
+                                # of the language files are NOT translations and are excluded here
+                                # and in check_i18n_keys.py).
+                                # v1.3.3.1: +2 — lang.reload "Rescan the language files" and
+                                # status.language_reloaded → 460;
                                 # v1.3.3: 458 (no new keys — the "name" meta key is not a translation);
                                 # v1.3.2: +5 settings.hotkeys.* / settings.tab.hotkeys → 458;
                                 # before, 453 since v1.3.1

@@ -22,6 +22,8 @@ The sections:
      viewer] with the content and the header (path + size); another file replaces the
      content; × hides it; a repeated double click reopens it; a directory still
      navigates; two rapid double clicks end on the LAST file (the staleness filter).
+     v1.3.3.2: the NEW context menu of the file operations does not shadow the
+     double-click preview (it opens no panel and queues no read).
   5. The refusals and the "no preview" markers in the listing: the translated
      messages, no panel, nothing opened — and the row marks (v1.3.1.1): the pure
      helper preview_block_reason (a session fact → the certain size → the extension
@@ -367,6 +369,29 @@ check("a double click on a directory still navigates", tab.path_label.text() == 
 check("the navigation did not open any file", client4.opened_paths() == opened_before)
 tab.go_up()
 wait_until(lambda: tab.path_label.text() == "/home", timeout_ms=5000)
+
+# ── v1.3.3.2: the file-operations CONTEXT MENU does not shadow the preview ──
+# The menu is built by the seam without exec() (Qt gotcha: no modal dialogs offscreen)
+# and must neither open the panel nor queue a read.
+tab.close_viewer()
+msgs.clear()
+reads_before = len([e for e in log4.events if e[0] == "started" and e[2] == KIND_READ])
+menu = tab._build_context_menu(item_by_name(tab, "a.txt"))
+check("v1.3.3.2: the context menu of a file row is built without opening the viewer",
+      menu is not None and tab.viewer.isHidden())
+check("v1.3.3.2: building it queued no read task",
+      len([e for e in log4.events if e[0] == "started" and e[2] == KIND_READ]) == reads_before
+      and not tab._read_tasks, f"read_tasks={tab._read_tasks}")
+check("v1.3.3.2: the menu carries the four file operations + Refresh",
+      [a.text() for a in menu.actions() if not a.isSeparator()]
+      == [i18n.t("sftp.op.new_folder"), i18n.t("sftp.op.rename"), i18n.t("sftp.op.delete"),
+          i18n.t("sftp.op.copy_path"), i18n.t("sftp.refresh")],
+      f"got={[a.text() for a in menu.actions() if not a.isSeparator()]}")
+tab._on_item_double_clicked(item_by_name(tab, "a.txt"), 0)
+wait_until(lambda: not tab.viewer.isHidden(), timeout_ms=5000)
+check("v1.3.3.2: the double-click preview still works after the menu was built",
+      tab.viewer_text.toPlainText() == "alpha\nbeta\n")
+tab.close_viewer()
 
 
 # ════════════════════════════════════════════════════════════

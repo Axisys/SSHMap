@@ -35,7 +35,9 @@ The sections:
      the button) are forwarded and consumed (True), the non-drag events pass
      by (False), the foreign widgets are not touched; the drop on a child = the same
      result as on the tab itself; an empty drop (only the directories) —
-     the hint drop_no_files.
+     the hint drop_no_files. v1.3.3.2 (ROADMAP task 4): the drop TARGET is the
+     directory under the cursor — a directory row (incl. "..") is the destination,
+     a file row and empty space keep the current directory.
   4. The errors via the drop path: no connection → waiting_connection + nothing
      into the queue; the remote directory vanished / no write permission → task_error,
      the queue lives, the following drops finish.
@@ -104,6 +106,15 @@ def upload_starts(log):
     """task_started with kind == 'upload' (the queue order)."""
     with log.lock:
         return [e for e in log.events if e[0] == "started" and e[2] == "upload"]
+
+
+def item_row(tab, name):
+    """The listing row by its visible name (None — not there yet)."""
+    for i in range(tab.tree.topLevelItemCount()):
+        it = tab.tree.topLevelItem(i)
+        if it.text(0) == name:
+            return it
+    return None
 
 
 # ════════════════════════════════════════════════════════════
@@ -241,10 +252,13 @@ print("== 3. routing via eventFilter: drag events on children ==")
 
 # a drop on the tree viewport (a child) — the filter forwards it to the handlers of the tree ITSELF
 # the tabs and consumes the event (the tree does not handle it "its own way")
+# v1.3.3.2: the point is BELOW the rows on purpose — a drop on a directory row goes
+# into THAT directory now (see the row-target block at the end of this section), so
+# "the current directory" is pinned here with a drop on empty space.
 vp = tab.tree.viewport()
 drop_c = make_local_file("drop_child.bin", 1024, b"c")
 m_c = mime_with(drop_c)
-ev_child = drop_event(m_c)
+ev_child = drop_event(m_c, QPoint(5, 5000))
 consumed = tab.eventFilter(vp, ev_child)
 check("the eventFilter(viewport, Drop): the event is consumed (True)", consumed is True,
       f"got={consumed}")
@@ -292,6 +306,54 @@ tab.dropEvent(ev_dirs)
 check("the drop without the local files: NOT accepted", not ev_dirs.isAccepted())
 check("the hint drop_no_files (the dragged directories)",
       msgs == [i18n.t("sftp.drop_no_files")], f"msgs={msgs}")
+
+# ── v1.3.3.2 (ROADMAP task 4): the drop target is the directory UNDER THE CURSOR ──
+# A directory row is a target; a file row and empty space keep the current directory.
+fs_row = FakeSftpFS()
+fs_row.add_dir("/data")
+fs_row.add_dir("/data/sub")
+fs_row.add_file("/data/plain.txt", b"p")
+worker_row = SftpWorker(FakeSftpClient(fs_row))
+log_row = EventLog()
+wire_worker(worker_row, log_row)
+worker_row.start()
+
+tab_row = SftpTab()
+msgs_row = []
+tab_row.message.connect(msgs_row.append)
+tab_row.set_worker(worker_row)
+tab_row.resize(900, 600)          # a REAL geometry: itemAt() needs laid-out rows
+tab_row.show()
+app.processEvents()
+tab_row._navigate("/data")
+wait_until(lambda: item_row(tab_row, "sub") is not None, timeout_ms=5000)
+app.processEvents()
+
+rect_row = tab_row.tree.visualItemRect(item_row(tab_row, "sub"))
+drop_to_sub = make_local_file("row_target.bin", 128, b"r")
+# The QMimeData is kept in a NAMED variable: QDropEvent does not own it, and a
+# temporary would be collected before the handler reads it (PySide6).
+mime_row_target = mime_with(drop_to_sub)
+ev_row = drop_event(mime_row_target, rect_row.center())
+check("the eventFilter(viewport, Drop) on a DIRECTORY ROW is consumed",
+      tab_row.eventFilter(tab_row.tree.viewport(), ev_row) is True)
+wait_until(lambda: fs_row.files.get("/data/sub/row_target.bin") is not None, timeout_ms=8000)
+check("v1.3.3.2: the drop on a directory ROW uploads into THAT directory",
+      fs_row.files.get("/data/sub/row_target.bin") == b"r" * 128,
+      f"files={ {k: len(v) for k, v in fs_row.files.items()} }")
+check("the file did NOT land in the current directory (/data)",
+      "/data/row_target.bin" not in fs_row.files)
+
+rect_file = tab_row.tree.visualItemRect(item_row(tab_row, "plain.txt"))
+drop_to_body = make_local_file("file_row.bin", 64, b"f")
+mime_file_row = mime_with(drop_to_body)
+ev_filerow = drop_event(mime_file_row, rect_file.center())
+tab_row.eventFilter(tab_row.tree.viewport(), ev_filerow)
+wait_until(lambda: fs_row.files.get("/data/file_row.bin") is not None, timeout_ms=8000)
+check("v1.3.3.2: a drop on a FILE row keeps the current directory",
+      fs_row.files.get("/data/file_row.bin") == b"f" * 64)
+tab_row.close()
+worker_row.shutdown(wait_ms=2000)
 
 
 # ════════════════════════════════════════════════════════════
@@ -360,8 +422,11 @@ wait_until(_ok_after_error, timeout_ms=8000)
 check("the queue is alive after the path errors: the next drop finished",
       fs2.files.get("/data/err_c.bin") == b"g" * 100)
 
-# c) no permissions: open("wb") → PermissionError; the queue is alive for the other paths
-fs3 = FakeSftpFS(deny_write=frozenset({"/ro/perm.bin"}))
+# c) no permissions: the temp file of the ATOMIC upload → PermissionError; the queue is
+#    alive for the other paths. v1.3.3.2: the denial is modelled on the DIRECTORY
+#    (deny_dirs) — the worker of the version opens `<target>.part`, so a per-FILE
+#    denial would no longer mean "this directory is read-only".
+fs3 = FakeSftpFS(deny_dirs=frozenset({"/ro"}))
 fs3.add_dir("/ro")
 fs3.add_dir("/rw")
 worker3 = SftpWorker(FakeSftpClient(fs3))

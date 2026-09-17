@@ -92,13 +92,30 @@ _d2 = server_data_from_dict({"id": "t2", "alias": "B", "host": "h2", "user": "u"
                              "os_name": "Alpine", "collapsed": True})
 check("round-trip os_name/collapsed", _d2.os_name == "Alpine" and _d2.collapsed is True)
 
-# The JSON format version — 0.9 (the single source of truth, version.py); APP_VERSION — the v1.3 series
-# (1.0 was done in v1.0RC1: Terminal v1; 1.1 — the settings dialog; 1.2 — the refactor
-# TerminalSessionPage "window → page"; 1.3rc1 — a managed pyte fork; the JSON format does NOT change)
+# The JSON format version — 0.9 (the single source of truth, version.py); APP_VERSION — the v1.3 line
+# and later (1.0 was done in v1.0RC1: Terminal v1; 1.1 — the settings dialog; 1.2 — the refactor
+# TerminalSessionPage "window → page"; 1.3rc1 — a managed pyte fork; the JSON format does NOT change).
+# v1.3.3.2: the check compares (major, minor) instead of the hardcoded "1.3" prefix — the ROADMAP plans
+# the 1.4 line, so a prefix assertion would fail the moment the release leaves 1.3 (the exact version is
+# already pinned by EXPECTED_APP_VERSION through check_release_state()).
 import version as _ver_mod
+
+
+def _major_minor(v):
+    """(major, minor) of a version string; a broken value → (0, 0)."""
+    parts = []
+    for chunk in str(v).split(".")[:2]:
+        digits = "".join(ch for ch in chunk if ch.isdigit())
+        parts.append(int(digits) if digits else 0)
+    while len(parts) < 2:
+        parts.append(0)
+    return tuple(parts)
+
+
 check("VERSION_FORMAT bumped to 0.9", getattr(_ver_mod, "VERSION_FORMAT", "") == "0.9",
       getattr(_ver_mod, "VERSION_FORMAT", "?"))
-check("APP_VERSION is 1.3.x (v1.3+)", getattr(_ver_mod, "APP_VERSION", "").startswith("1.3"),
+check("APP_VERSION is 1.3+ (the v1.3 line or later)",
+      _major_minor(getattr(_ver_mod, "APP_VERSION", "")) >= (1, 3),
       getattr(_ver_mod, "APP_VERSION", "?"))
 
 # i18n: the v0.9 keys in all three languages

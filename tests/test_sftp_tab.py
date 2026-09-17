@@ -14,6 +14,8 @@ The sections:
      directory, the upload into a nonexistent directory; the following tasks work).
   3. The cancel: the flag between the operations — the current transfer is interrupted on the chunk,
      the queue is skipped with task_cancelled, the worker lives, the flag auto-resets.
+     v1.3.3.2 rewrite of the pinned check: the upload is ATOMIC — a cancelled upload
+     leaves the EXISTING remote file byte-identical and no `.part` file behind.
   4. The shutdown: the idle (fast) and during the transfer (within the wait budget),
      the SFTPClient is closed, the queue_* after the stop — None.
   5. The SftpTab offscreen: the listing/navigation without the network ("..", the directory enter,
@@ -168,6 +170,9 @@ worker2.shutdown(wait_ms=2000)
 print("== 3. worker: cancellation ==")
 
 fs3 = FakeSftpFS()
+# v1.3.3.2: the destination EXISTS — the pin of this section is the ATOMIC upload
+# (ROADMAP task 6): a cancelled upload must not truncate the previous remote file.
+fs3.add_file("/slow.bin", b"ORIGINAL")
 client3 = FakeSftpClient(fs3, chunk_delay=0.02)  # ~10 chunks × 20 ms = 200 ms
 worker3 = SftpWorker(client3)
 log3 = EventLog()
@@ -193,9 +198,15 @@ prog_slow = [e[2] for e in log3.of_kind("progress", tid_slow)]
 check("the transfer is interrupted BEFORE the end (the progress < the total)",
       prog_slow and prog_slow[-1] < SLOW_SIZE,
       f"last={prog_slow[-1] if prog_slow else None} total={SLOW_SIZE}")
+# v1.3.3.2 (ROADMAP task 3/6): the PINNED behaviour of v1.1.3 — "a cancelled upload
+# leaves a shorter file on the server" — is DELIBERATELY GONE. The upload goes to
+# `/slow.bin.part` and is renamed on success, so a cancel leaves the previous remote
+# file byte-identical and no provisional file behind.
 partial = fs3.files.get("/slow.bin", b"")
-check("the partial file on the 'server' (shorter than the original)", len(partial) < SLOW_SIZE,
-      f"len={len(partial)}")
+check("v1.3.3.2: the cancelled upload left the EXISTING remote file intact (atomic)",
+      partial == b"ORIGINAL", f"got={bytes(partial)[:40]!r}")
+check("v1.3.3.2: the cancelled upload left no `.part` file on the 'server'",
+      not [p for p in fs3.files if p.endswith(".part")], f"files={sorted(fs3.files)}")
 check("the worker is alive after the cancellation", worker3.isRunning())
 
 tid_after = worker3.queue_upload(make_local_file("after.bin", 100, b"f"), "/")
@@ -266,6 +277,15 @@ tab = SftpTab()
 msgs = []
 tab.message.connect(msgs.append)
 tab.set_worker(worker6)  # → _relist("/")
+
+# v1.3.3.2: the BUTTON SET is unchanged — the file operations of the version live in
+# the tree's context menu, they did not add a sixth/… button to the tab.
+check("the button set of the tab is the five v1.1.3 buttons (the operations are menu items)",
+      [b.text() for b in (tab.btn_up, tab.btn_refresh, tab.btn_upload,
+                          tab.btn_download, tab.btn_cancel)]
+      == [i18n.t("sftp.up"), i18n.t("sftp.refresh"), i18n.t("sftp.upload"),
+          i18n.t("sftp.download"), i18n.t("sftp.cancel")],
+      f"got={[b.text() for b in (tab.btn_up, tab.btn_upload, tab.btn_cancel)]}")
 
 wait_until(lambda: tab.tree.topLevelItemCount() >= 2, timeout_ms=5000)
 names = [tab.tree.topLevelItem(i).text(0) for i in range(tab.tree.topLevelItemCount())]

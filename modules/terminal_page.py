@@ -44,9 +44,9 @@ except ImportError:
     from modules.terminal_widget import TerminalWidget
 
 try:
-    from .sftp_worker import SftpWorker, register_orphan_sftp_worker
+    from .sftp_worker import OP_KINDS, SftpWorker, register_orphan_sftp_worker
 except ImportError:
-    from modules.sftp_worker import SftpWorker, register_orphan_sftp_worker
+    from modules.sftp_worker import OP_KINDS, SftpWorker, register_orphan_sftp_worker
 
 try:
     from .sftp_tab import SftpTab, format_size
@@ -109,6 +109,9 @@ class TerminalSessionPage(QWidget):
     # v1.3.1: the SFTP task kinds that feed the progress bridge (the busy counter,
     # the QProgressBar and the status-bar text). "read" is the viewer's read
     # (ROADMAP v1.3.1) — its OUTCOME is rendered by the SFTP tab itself.
+    # v1.3.3.2: the file operations (OP_KINDS — mkdir/rename/delete) are outside
+    # this set on purpose: no bytes, no bar, and the tab owns both the success and
+    # the error message.
     _SFTP_PROGRESS_KINDS = ("upload", "download", "read")
 
     # ── Host bridge (window/dock): the page does not know where messages go ─
@@ -624,6 +627,8 @@ class TerminalSessionPage(QWidget):
             else:
                 key = "sftp.uploading" if kind == "upload" else "sftp.downloading"
                 self.status_message.emit(t(key, name=label), 0)
+        elif kind in OP_KINDS:
+            pass   # v1.3.3.2: a file operation — the SFTP tab reports it itself
         else:  # list — without a progress bar
             self.status_message.emit(t("sftp.listing", path=label), 0)
 
@@ -669,6 +674,10 @@ class TerminalSessionPage(QWidget):
             # v1.3.1: the message of a read error is a MACHINE code — the SFTP tab
             # translates it (its message signal → the bridge); showing it here as
             # well would duplicate the hint with an untranslated code.
+            return
+        if kind in OP_KINDS:
+            # v1.3.3.2: a file operation — the SFTP tab wraps the server's error in
+            # its own translated line (the same no-duplication rule as for "read").
             return
         prefix = t("terminal.error_prefix")
         self.status_message.emit(f"{prefix} {message}", 8000)

@@ -18,7 +18,7 @@ pipx install .                    # or pip install . → sshmap command (install
 Tests — plain Python scripts without pytest: topical `test_*.py` files + a single parallel runner; each file is an isolated process (sandbox HOME, offscreen Qt, UTF-8 stdout — nothing extra needed on cp1251 consoles or in CI):
 
 ```bash
-python tests/run_all.py               # everything (72 test files + i18n check); auto workers = cores (cap 8, --workers N); exit 0 ⇔ all green
+python tests/run_all.py               # everything (73 test files + i18n check); auto workers = cores (cap 8, --workers N); exit 0 ⇔ all green
 python tests/run_all.py --fast        # daily profile: skips files tagged slow/network
 python tests/run_all.py --tag network # only network-tagged files — real-network sections run ONLY on explicit opt-in (env SSHMAP_TEST_TAGS)
 python tests/run_all.py --failed-only # re-run only files that failed in the last run (cache test-results/last_run.json)
@@ -47,7 +47,7 @@ graphics/                    # MapScene; MapView (zoom 0.1–5.0, panning, multi
 modules/                     # ssh_worker.py — one-shot SSH worker + registry; ssh_terminal.py — terminal thread + tabbed window;
                              # terminal_page.py — session as a reusable widget (single idempotent shutdown()); terminal_dock.py — "tabs" mode dock;
                              # command_library.py — terminal macros: user command/script library panel (~/.sshmap/commands.json);
-                             # multi_input.py — multi-input broadcast hub; sftp_worker.py / sftp_tab.py — SFTP over the live transport (listing, upload/download, read-only preview with "no preview" row marks);
+                             # multi_input.py — multi-input broadcast hub; sftp_worker.py / sftp_tab.py — SFTP over the live transport (listing, upload/download, a file manager: new folder/rename/delete, an overwrite prompt, atomic transfers, drag-out of a path, read-only preview with "no preview" row marks);
                              # terminal_widget.py — cell-based canvas (full keyboard, selection, scrollback); terminal_screen.py — pyte screen + palettes;
                              # window_geometry.py; host_key_policy.py; external_terminal.py; undo_commands.py (14 QUndoCommands); logger.py
 storage/                     # project.py — JSON save/load; autosave.py — autosave + backup ring buffer; export_drawio.py — .drawio export
@@ -194,7 +194,7 @@ en (default) / ru / zh / de — plus any language you drop in: every `i18n/*.jso
 - collapsible sidebar and map panels — at most one at a time, state persists across restarts
 - context menus for all objects, fit/zoom/centering
 - built-in SSH terminal on pyte (scrollback, full keyboard, mouse selection with word/line clicks, context menu) + external system terminal
-- SFTP tab in the terminal window over the same SSH connection — listing/navigation, upload/download incl. drag & drop, read-only text preview (≤ 1 MB) with non-previewable files marked in the tree
+- SFTP tab in the terminal window over the same SSH connection — a small file manager: listing/navigation, upload/download incl. drag & drop, new folder / rename / delete, an overwrite prompt (Overwrite/Skip/Rename/Apply to all), transfers that never truncate an existing file (download to `.part` + replace, upload to `.part` + rename), drag a file row out as its remote path, read-only text preview (≤ 1 MB) with non-previewable files marked in the tree
 - multiple sessions as tabs; separate windows or a detachable "Terminals" dock on the map — switch without restart
 - multi-input: typing of the focused session is broadcast to all other open sessions (F12 exits)
 - terminal command library (macros): one click sends a saved command/script to the active terminal (single-line raw, multi-line bracketed paste)
@@ -213,8 +213,8 @@ en (default) / ru / zh / de — plus any language you drop in: every `i18n/*.jso
 - TOFU on first connect and keyring backend restrictions (§4 "Security").
 
 **Roadmap** (tasks, order, acceptance — in ROADMAP.md):
-- **v1.3.x series**: lightweight plugins (entry points + a local scripts folder); import from `~/.ssh/config`.
-- **v1.4**: syntax highlighting in the SFTP viewer (numbers, JSON/XML/YAML) — opens the 1.4 line.
+- **v1.3.x series** — the branch closes at v1.3.4: lightweight plugins (entry points + a local scripts folder).
+- **v1.4 line** — opens at v1.4.1: import from `~/.ssh/config`; minimap and a cached card drop-shadow; light theme + accent color; motion standards; a denser UI with first-run hints; list mode; syntax highlighting in the SFTP viewer.
 
 ---
 
