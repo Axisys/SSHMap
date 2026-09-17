@@ -613,12 +613,41 @@ class SshMixin:
         target = (not hub.active) if checked is None else bool(checked)
         hub.set_active(target)
 
+    def _sync_multi_shortcut(self):
+        """v1.2.3 -> v1.3.2 (ROADMAP task 4): the multi-input sequence on the QAction.
+
+        The RULE is unchanged since v1.2.3/v1.2.4-fix — the sequence is installed ONLY
+        while the mode is on (QAction has no setShortcutEnabled; an empty QKeySequence
+        = no shortcut, so the key falls through to the shell / the focused widget);
+        only the literal "F12" became configurable: the value comes from the hotkey
+        registry ("view.multi_input" — a dynamic action, apply_to() skips it).
+        A disabled (empty) configured sequence means the mode has no key at all — the
+        menu item keeps working.
+        """
+        act = getattr(self, "act_multi_input", None)
+        if act is None:
+            return
+        try:
+            try:
+                from ui.hotkey_registry import action_sequence
+            except ImportError:  # flat launch from the project root
+                from hotkey_registry import action_sequence
+            seq = action_sequence("view.multi_input",
+                                  getattr(self, "_hotkey_map", None) or None)
+        except Exception:  # noqa: BLE001 — a broken registry must not break the mode
+            seq = ""
+        hub = getattr(self, "_multi_hub", None)
+        active = bool(getattr(hub, "active", False))
+        try:
+            act.setShortcut(QKeySequence(seq) if (active and seq) else QKeySequence())
+        except RuntimeError:
+            pass  # C++ object already removed (close race) — nothing to update
+
     def _on_multi_changed(self, active: bool):
         """v1.2.3: a hub state change -> UI (tasks 2/3).
 
-        * QAction: the check + the F12 shortcut are ENABLED only in the mode
-          (F12 — exit; the mode is off -> the shortcut is disabled and the key
-          goes to the shell as \\x1b[24~);
+        * QAction: the check + the exit sequence (configurable since v1.3.2, but
+          installed ONLY in the mode — see _sync_multi_shortcut);
         * the status bar plaque "MULTI: N sessions" + the exit button —
           visibility;
         * the highlight of ALL open containers (frame + the tabs' "MULTI"
@@ -628,13 +657,10 @@ class SshMixin:
         if act is not None:
             try:
                 act.setChecked(active)
-                # F12 — exit from the mode only: the QAction shortcut lives ONLY
-                # in the mode (QAction has no setShortcutEnabled; an empty
-                # QKeySequence = no shortcut -> F12 goes to the focused widget,
-                # to the shell as \x1b[24~ per the TerminalWidget RC2 mapping).
-                act.setShortcut(QKeySequence("F12") if active else QKeySequence())
             except RuntimeError:
                 pass  # C++ object already removed (close race) — nothing to update
+        # v1.3.2 (task 4): the sequence — from the registry, still mode-conditional.
+        self._sync_multi_shortcut()
         count = len(getattr(self, "_terminal_windows", []))
         try:
             label = getattr(self, "_multi_label", None)

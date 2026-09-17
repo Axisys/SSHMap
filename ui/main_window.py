@@ -1,7 +1,7 @@
 import os
 import sys
 import copy
-from typing import Optional, List
+from typing import Optional, List, Dict
 
 try:
     from ..graphics.map_scene import MapScene
@@ -85,6 +85,7 @@ from PySide6.QtGui import (
     QFont,      # v1.1.1: UI font from config (QApplication.setFont)
     QMouseEvent,
     QUndoStack,  # v0.8.3: undo/redo
+    QKeySequence,  # v1.3.2: an empty sequence = the multi-input hotkey is not installed
     QColor, QIcon, QPainter, QPainterPath, QPen, QPixmap,  # v1.2.4.1: collapse strips/diamonds
 )
 from PySide6.QtWidgets import (
@@ -270,6 +271,16 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         self._menu_i18n: List[tuple] = []  # (widget: QMenu|QAction, key) — for re-translation
         self._sidebar_title: Optional[QLabel] = None
 
+        # ── v1.3.2 (ROADMAP v1.3.2): configurable hotkeys ─────────
+        # The registry (ui/hotkey_registry.py) is the single source of truth: every
+        # QAction/QShortcut with a hotkey is registered here under its action_id
+        # instead of carrying a literal sequence; _apply_hotkeys() (after the UI
+        # construction and after the settings dialog's OK) installs the effective
+        # sequences from ~/.sshmap/config.json ("hotkeys"). Initialized BEFORE
+        # _setup_ui/_setup_toolbar/_setup_menubar — they fill the dict.
+        self._hotkey_targets: Dict[str, list] = {}   # action_id -> [QAction|QShortcut, ...]
+        self._hotkey_map: Dict[str, str] = {}        # action_id -> the effective sequence
+
         # ── v0.8.3: Undo/Redo ─────────────────────────────────────
         # The dirty marker is bound to cleanState/stack index: save/load sets a
         # new baseline; undo/redo update the window title themselves.
@@ -295,6 +306,9 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         self._setup_ui()
         self._setup_toolbar()
         self._setup_menubar()
+        # v1.3.2 (task 3): the hotkeys — applied at startup, AFTER the whole UI
+        # (menus/toolbar/palette) exists; the same method runs after the dialog's OK.
+        self._apply_hotkeys()
         self._update_window_title()
 
         # ── i18n: apply translation to UI after setup ──
@@ -445,6 +459,48 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
     def _register_i18n(self, widget, key: str):
         """Remember a widget (QMenu/QAction) and its translation key for re-application."""
         self._menu_i18n.append((widget, key))
+
+    # ── v1.3.2 (ROADMAP v1.3.2): configurable hotkeys — the action registry ──────
+    # ui/hotkey_registry.py is the single source of truth for the global shortcuts:
+    # no literal "Ctrl+…" lives in this module any more. The methods below only
+    # collect the targets and (re)install the effective sequences from config.json.
+
+    def _register_hotkey_target(self, action_id: str, target) -> None:
+        """v1.3.2 (task 1): bind a QAction/QShortcut to a registry action_id.
+
+        Several targets per id are allowed and expected: undo/redo exist twice
+        (the toolbar button + the Edit menu item) and both must follow the
+        configured sequence.
+        """
+        self._hotkey_targets.setdefault(action_id, []).append(target)
+
+    def _apply_hotkeys(self) -> None:
+        """v1.3.2 (task 3): install the configured sequences — at startup and live.
+
+        The source is ``hotkeys`` in ~/.sshmap/config.json (merge-write; a missing /
+        broken value → the registry default, an empty string → the hotkey is
+        disabled). Called after the UI construction and from
+        ``_apply_settings_from_dialog`` — an OK in the settings dialog applies the new
+        sequences WITHOUT a restart. Never raises: a broken registry/config must not
+        break startup or the settings dialog.
+        """
+        try:
+            try:
+                from ui.hotkey_registry import configured_hotkeys, apply_to
+            except ImportError:  # flat launch from the project root
+                from hotkey_registry import configured_hotkeys, apply_to
+            self._hotkey_map = configured_hotkeys()
+            apply_to(self._hotkey_targets, self._hotkey_map)
+        except Exception as e:  # noqa: BLE001 — the hotkeys must not break the window
+            if self.log:
+                self.log.warning(f"Apply hotkeys failed: {e}")
+        # The dynamic action (multi-input) is owned by its mode: the key exists ONLY
+        # while the mode is on (v1.2.3 / v1.2.4-fix rule, v1.3.2 task 4).
+        try:
+            self._sync_multi_shortcut()
+        except Exception as e:  # noqa: BLE001
+            if self.log:
+                self.log.warning(f"Apply multi-input hotkey failed: {e}")
 
     def _apply_ui_translations(self):
         """Translate the menus, toolbar, and service labels to the current language."""
@@ -1025,11 +1081,13 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
                     pass
 
         # v0.8.3: undo/redo in the toolbar (icons + text; enabled state driven by QUndoStack)
+        # v1.3.2: the sequences come from the action registry (no literal here) —
+        # "edit.undo"/"edit.redo" are registered as hotkey targets below.
         toolbar.addSeparator()
         self.act_undo = toolbar.addAction(
             self.t("edit.undo") if self._i18n_available else "Undo",
             self._undo)
-        self.act_undo.setShortcut("Ctrl+Z")
+        self._register_hotkey_target("edit.undo", self.act_undo)
         self.act_undo.setEnabled(False)
         try:
             icon = get_icon("undo")
@@ -1042,7 +1100,7 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         self.act_redo = toolbar.addAction(
             self.t("edit.redo") if self._i18n_available else "Redo",
             self._redo)
-        self.act_redo.setShortcuts(["Ctrl+Y", "Ctrl+Shift+Z"])
+        self._register_hotkey_target("edit.redo", self.act_redo)
         self.act_redo.setEnabled(False)
         try:
             icon = get_icon("redo")
@@ -1052,22 +1110,31 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
             pass
         self.undo_stack.canRedoChanged.connect(self.act_redo.setEnabled)
 
-    def _add_menu_action(self, menu, key: str, slot, shortcut: str = ""):
-        """Add a translated menu item and register it for re-translation."""
-        action = menu.addAction(self.t(key), slot, shortcut) if shortcut \
-            else menu.addAction(self.t(key), slot)
+    def _add_menu_action(self, menu, key: str, slot, action_id: str = ""):
+        """Add a translated menu item and register it for re-translation.
+
+        v1.3.2 (ROADMAP v1.3.2, task 1): the shortcut is NOT a literal any more.
+        With an ``action_id`` the QAction becomes a hotkey target of the action
+        registry (``ui/hotkey_registry.py``) and receives its sequence from there in
+        ``_apply_hotkeys()`` — at startup and live after the settings dialog's OK.
+        Without an action_id the item has no hotkey at all.
+        """
+        action = menu.addAction(self.t(key), slot)
         self._register_i18n(action, key)
+        if action_id:
+            self._register_hotkey_target(action_id, action)
         return action
 
     def _setup_menubar(self):
         menubar = self.menuBar()
 
         # File menu
+        # v1.3.2: the Ctrl+N/O/S hints come from the hotkey registry (action_ids below).
         file_menu = menubar.addMenu(self.t("menu.file") if self._i18n_available else "File")
         self._register_i18n(file_menu, "menu.file")
-        self._add_menu_action(file_menu, "file.new_project", self._new_project, "Ctrl+N")
-        self._add_menu_action(file_menu, "file.open", self._open_project, "Ctrl+O")
-        self._add_menu_action(file_menu, "file.save", self._save_project, "Ctrl+S")
+        self._add_menu_action(file_menu, "file.new_project", self._new_project, "file.new")
+        self._add_menu_action(file_menu, "file.open", self._open_project, "file.open")
+        self._add_menu_action(file_menu, "file.save", self._save_project, "file.save")
         self._add_menu_action(file_menu, "file.save_as", self._save_project_as)
         # v0.9.7: autosave + a ring buffer of backups (ROADMAP v0.9.7 #2/#3) —
         # enabled state driven by _update_window_title (an open project file is required).
@@ -1091,20 +1158,21 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         edit_menu = menubar.addMenu(self.t("menu.edit") if self._i18n_available else "Edit")
         self._register_i18n(edit_menu, "menu.edit")
         # v0.8.3: Undo/Redo — the first items of the "Edit" menu
-        self._add_menu_action(edit_menu, "edit.undo", self._undo, "Ctrl+Z")
-        self._add_menu_action(edit_menu, "edit.redo", self._redo, "Ctrl+Y")
+        # v1.3.2: the sequences — from the registry (the menu shows the same ones as the toolbar)
+        self._add_menu_action(edit_menu, "edit.undo", self._undo, "edit.undo")
+        self._add_menu_action(edit_menu, "edit.redo", self._redo, "edit.redo")
         edit_menu.addSeparator()
-        self._add_menu_action(edit_menu, "edit.add_server", self._add_server, "Ctrl+Shift+A")
-        self._add_menu_action(edit_menu, "edit.add_group", self._add_group_at, "Ctrl+Shift+G")  # v0.8.1: node groups
-        self._add_menu_action(edit_menu, "edit.add_connection", self._add_connection, "Ctrl+Shift+C")
-        self._add_menu_action(edit_menu, "edit.properties", self._show_properties, "Ctrl+I")
+        self._add_menu_action(edit_menu, "edit.add_server", self._add_server, "edit.add_server")
+        self._add_menu_action(edit_menu, "edit.add_group", self._add_group_at, "edit.add_group")  # v0.8.1: node groups
+        self._add_menu_action(edit_menu, "edit.add_connection", self._add_connection, "edit.add_connection")
+        self._add_menu_action(edit_menu, "edit.properties", self._show_properties, "edit.properties")
         # v0.9.2: hotkeys for frequent actions on the selected node
-        self._add_menu_action(edit_menu, "ctx.ssh_connect", self._connect_ssh_to_selected, "Ctrl+Return")
-        self._add_menu_action(edit_menu, "ctx.edit_server", self._edit_selected_node, "Ctrl+E")
-        self._add_menu_action(edit_menu, "ctx.add_note", self._add_note_at_view_center, "Ctrl+Shift+N")
-        self._add_menu_action(edit_menu, "edit.delete", self._delete_selected, "Delete")
+        self._add_menu_action(edit_menu, "ctx.ssh_connect", self._connect_ssh_to_selected, "node.ssh_connect")
+        self._add_menu_action(edit_menu, "ctx.edit_server", self._edit_selected_node, "node.edit_server")
+        self._add_menu_action(edit_menu, "ctx.add_note", self._add_note_at_view_center, "node.add_note")
+        self._add_menu_action(edit_menu, "edit.delete", self._delete_selected, "edit.delete")
         # v0.9.3: duplication + multi-selection group operations
-        self._add_menu_action(edit_menu, "edit.duplicate", self._duplicate_selected_node, "Ctrl+D")
+        self._add_menu_action(edit_menu, "edit.duplicate", self._duplicate_selected_node, "edit.duplicate")
         edit_menu.addSeparator()
         self._add_menu_action(edit_menu, "edit.connect_selected", self._connect_selected_nodes)
         self._add_menu_action(edit_menu, "edit.delete_selected", self._delete_selected_nodes)
@@ -1121,10 +1189,10 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         self._add_menu_action(view_menu, "view.reset_zoom", self._reset_zoom)
         # UI polish: "Fit map" — fitInView by content (Ctrl+Shift+F: a bare F key
         # would conflict with typing into the sidebar search field)
-        self._add_menu_action(view_menu, "view.fit_map", self._fit_to_content, "Ctrl+Shift+F")
+        self._add_menu_action(view_menu, "view.fit_map", self._fit_to_content, "view.fit_map")
         # v0.9.8: map search (Ctrl+F) — a search bar over the canvas; the same
         # Ctrl argument as fit_map (bare F is taken by search-field typing)
-        self._add_menu_action(view_menu, "view.find_on_map", self._toggle_map_search, "Ctrl+F")
+        self._add_menu_action(view_menu, "view.find_on_map", self._toggle_map_search, "view.find_on_map")
         # v1.1.1 (item 5): show/hide the WHOLE sidebar; v1.2.4.1 (task 3): the item
         # becomes an expanded<->collapsed toggle (checked = expanded) — ONE
         # "collapse into a thin strip" mechanism for both panels: clicking the item, the corner
@@ -1198,8 +1266,12 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         self.act_multi_input.setCheckable(True)
         self.act_multi_input.setChecked(False)
         self.act_multi_input.toggled.connect(self._toggle_multi_input)
-        from PySide6.QtGui import QKeySequence as _QKeySequence  # locally (like QShortcut in the palette)
-        self.act_multi_input.setShortcut(_QKeySequence())  # F12 is attached by _on_multi_changed (in the mode)
+        # v1.3.2 (task 4): the sequence is configurable, the RULE is not — the key is
+        # installed ONLY while the mode is on (QAction has no setShortcutEnabled; an
+        # empty QKeySequence = no shortcut). The registry marks this action "dynamic":
+        # apply_to() skips it and _sync_multi_shortcut() owns it (mode state included).
+        self._register_hotkey_target("view.multi_input", self.act_multi_input)
+        self.act_multi_input.setShortcut(QKeySequence())
         self.act_multi_input.setShortcutContext(Qt.ShortcutContext.ApplicationShortcut)
 
         # v1.1 (ROADMAP task 2): the settings dialog (hub) — the "Settings" item BETWEEN
@@ -1263,9 +1335,12 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
             from command_palette import CommandPalette
         self._command_palette = CommandPalette(self, self)
 
+        # v1.3.2 (task 1): the sequence comes from the hotkey registry ("palette.open",
+        # Ctrl+K by default) — the QShortcut is created empty and registered as a target.
         from PySide6.QtGui import QShortcut, QKeySequence
-        self._palette_shortcut = QShortcut(QKeySequence("Ctrl+K"), self)
+        self._palette_shortcut = QShortcut(QKeySequence(), self)
         self._palette_shortcut.activated.connect(self._open_command_palette)
+        self._register_hotkey_target("palette.open", self._palette_shortcut)
 
     def _open_command_palette(self):
         if getattr(self, "_command_palette", None) is not None:
@@ -1598,6 +1673,9 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         * v1.2.2: terminal_mode ("windows"|"tabs") — applied WITHOUT a restart
           "to new sessions": _spawn_terminal_window reads the key on every call;
           open windows/the dock live on as-is until closed (task 4) — no action.
+        * v1.3.2: the configurable hotkeys — _apply_hotkeys() reinstalls the sequences
+          of the registered QActions/QShortcuts (QAction.setShortcut /
+          QShortcut.setKey) from the "hotkeys" key; the F12 multi-input rule is kept.
         """
         try:
             from storage.autosave import get_autosave_settings as _get_as
@@ -1630,6 +1708,14 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         except Exception as e:  # noqa: BLE001 — the options must not break applying
             if self.log:
                 self.log.warning(f"Apply UI options failed: {e}")
+
+        # v1.3.2 (task 3): the configurable hotkeys — QAction.setShortcut / QShortcut.setKey
+        # on the already existing objects: the new sequences work without a restart.
+        try:
+            self._apply_hotkeys()
+        except Exception as e:  # noqa: BLE001 — the hotkeys must not break applying
+            if self.log:
+                self.log.warning(f"Apply hotkeys failed: {e}")
 
         # v1.1.1 (item 1): the terminal font — into the ALREADY OPEN sessions without a restart
         # (v1.2: the registry stores pages — page.widget)

@@ -86,6 +86,7 @@ new_keys = [
     "settings.title", "settings.ok", "settings.cancel",
     "settings.tab.general", "settings.tab.terminal", "settings.tab.statuses",
     "settings.tab.autosave", "settings.tab.map", "settings.tab.language",
+    "settings.tab.hotkeys",   # v1.3.2
     "settings.open", "menu.settings", "btn.settings", "status.settings_saved",
     "settings.general.external_terminal",
     "settings.terminal.palette", "settings.terminal.palette.default",
@@ -324,17 +325,18 @@ finally:
     clear_cfg()
 
 # ════════════════════════════════════════════════════════════
-# 7. The dialog: 6 tabs, widgets, prefill from the config, collect/OK/Cancel
+# 7. The dialog: 7 tabs (v1.3.2: + Hotkeys), widgets, prefill from the config, collect/OK/Cancel
 # ════════════════════════════════════════════════════════════
 print("== settings dialog ==")
 clear_cfg()
 dlg = SettingsDialog(None)
-check("a QTabWidget with 6 tabs", dlg.tabs.count() == 6, str(dlg.tabs.count()))
+check("a QTabWidget with 7 tabs (v1.3.2: + Hotkeys)", dlg.tabs.count() == 7, str(dlg.tabs.count()))
 expected_tabs = [i18n.t(k) for k in ("settings.tab.general", "settings.tab.terminal",
                                      "settings.tab.statuses", "settings.tab.autosave",
-                                     "settings.tab.map", "settings.tab.language")]
+                                     "settings.tab.map", "settings.tab.hotkeys",
+                                     "settings.tab.language")]
 got_tabs = [dlg.tabs.tabText(i) for i in range(dlg.tabs.count())]
-check("the tab order: General / Terminal / Status Checks / Autosave / Map / Language",
+check("the tab order: General / Terminal / Status Checks / Autosave / Map / Hotkeys / Language",
       got_tabs == expected_tabs, str(got_tabs))
 
 choices = TERMINAL_CHOICES_WINDOWS if sys.platform == "win32" else TERMINAL_CHOICES_LINUX
@@ -382,13 +384,14 @@ check("'Autosave' reflects the config (off / 120 s / 3 backups)",
       not dlg2.autosave_enabled_chk.isChecked() and dlg2.autosave_interval_spin.value() == 120
       and dlg2.backup_count_spin.value() == 3)
 
-# collect(): exactly 19 config.json keys (10 in v1.1 + 7 in v1.1.1 + 1 in v1.1.2 final
-# + 1 in v1.2.2 — terminal_mode), the types are correct (language is NOT included — it is immediate)
+# collect(): exactly 20 config.json keys (10 in v1.1 + 7 in v1.1.1 + 1 in v1.1.2 final
+# + 1 in v1.2.2 — terminal_mode + 1 in v1.3.2 — hotkeys), the types are correct
+# (language is NOT included — it is immediate)
 dlg2.close_behavior_combo.setCurrentIndex(1)  # ask
 dlg2.status_interval_spin.setValue(60)
 dlg2.probe_timeout_spin.setValue(4.5)
 c = dlg2.collect()
-check("collect(): exactly 19 config.json keys (v1.1: 10 + v1.1.1: 7 + the v1.1.2 final: 1 + v1.2.2: 1)",
+check("collect(): exactly 20 config.json keys (v1.1: 10 + v1.1.1: 7 + the v1.1.2 final: 1 + v1.2.2: 1 + v1.3.2: 1)",
       set(c) == {"external_terminal", "terminal_mode", "terminal_palette",
                  "terminal_font_size",
                  "terminal_history_lines", "terminal_close_behavior",
@@ -396,7 +399,8 @@ check("collect(): exactly 19 config.json keys (v1.1: 10 + v1.1.1: 7 + the v1.1.2
                  "autosave_enabled", "autosave_interval_sec", "backup_count",
                  "ui_font_family", "ui_font_size", "terminal_font",
                  "terminal_max_open", "ui_node_double_click",
-                 "ui_show_sidebar_buttons", "ui_show_connection_type"}, str(sorted(c)))
+                 "ui_show_sidebar_buttons", "ui_show_connection_type",
+                 "hotkeys"}, str(sorted(c)))
 check("collect(): the types (int/float/bool/str) and the changed values",
       isinstance(c["terminal_font_size"], int) and isinstance(c["status_interval_sec"], int)
       and isinstance(c["status_probe_timeout_sec"], float)
@@ -409,7 +413,7 @@ applied = []
 dlg2.applied.connect(lambda: applied.append(1))
 dlg2._on_accept()
 cfg = read_cfg()
-check("OK: all the 19 keys are written into config.json",
+check("OK: all the 20 keys are written into config.json",
       cfg is not None and all(k in cfg for k in c), str(cfg))
 check("OK: the merge — the foreign keys are kept (language/terminal_font)",
       cfg.get("language") == "ru" and cfg.get("terminal_font") == "Consolas", str(cfg))

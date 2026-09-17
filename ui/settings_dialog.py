@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """v1.1: Settings dialog (hub) — ROADMAP v1.1, tasks 1–6; v1.1.1 — options around the hub.
 
-QTabWidget "General / Terminal / Statuses / Autosave / Map / Language":
+QTabWidget "General / Terminal / Statuses / Autosave / Map / Hotkeys / Language":
 centralized application settings + entry points (the "Settings" menu and the
 ⚙ sidebar button — in ui/main_window.py / ui/sidebar.py). Each next idea from
 the ROADMAP is added as a field/checkbox in an existing tab, not as a new
@@ -26,6 +26,11 @@ merge-write); all keys are optional, defaults = current behavior:
                      ui_show_connection_type (type on the connection plaque);
   * Language:         language — applied immediately (signal language_changed →
                      MainWindow._switch_language; the "Help → Language" item is kept).
+  * Hotkeys (v1.3.2): hotkeys — a nested dict action_id → sequence string
+                     ("" = the hotkey is disabled); the rows come from the action
+                     registry ui/hotkey_registry.py, the action NAMES reuse the
+                     existing menu i18n keys. Collected on OK and applied live by
+                     MainWindow._apply_hotkeys (QAction.setShortcut/QShortcut.setKey).
 
 v1.1.1: load_ui_settings() — the ui_* key validator (the get_status_settings
 pattern); live application without a restart — MainWindow
@@ -50,11 +55,21 @@ i18n: keys settings.* × en/ru/zh; the string registry — in retranslate()
 import sys
 
 from PySide6.QtCore import Signal
+from PySide6.QtGui import QColor, QKeySequence
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QFormLayout, QTabWidget, QWidget,
     QLabel, QComboBox, QSpinBox, QDoubleSpinBox, QLineEdit, QCheckBox,
-    QPushButton, QMessageBox,
+    QPushButton, QMessageBox, QTableWidget, QTableWidgetItem, QHeaderView,
+    QAbstractItemView, QKeySequenceEdit,
 )
+
+try:  # v1.2.5: central theme (colors/radii/fonts — ui/theme.py); no literals in the UI code
+    from . import theme
+except ImportError:
+    try:
+        from ui import theme
+    except ImportError:  # flat layout: the ui/ directory itself is on sys.path
+        import theme
 
 try:  # i18n — top-level package (flat run from the project root)
     from i18n import t as _translate
@@ -157,6 +172,7 @@ class SettingsDialog(QDialog):
         self._build_statuses_tab()
         self._build_autosave_tab()
         self._build_map_tab()
+        self._build_hotkeys_tab()   # v1.3.2 (ROADMAP v1.3.2, task 2)
         self._build_language_tab()
 
         # ── OK/Cancel buttons (OK = saving config.json + the applied signal) ─────
@@ -391,6 +407,105 @@ class SettingsDialog(QDialog):
 
         self.tabs.addTab(tab, _t("settings.tab.map"))
 
+    # ── "Hotkeys" tab (v1.3.2: the configurable hotkeys — the action registry) ──────
+
+    def _build_hotkeys_tab(self):
+        """v1.3.2 (ROADMAP task 2): a table [action | hotkey] over the action registry.
+
+        One row per ``ui/hotkey_registry.py`` action (declaration order) with a
+        QKeySequenceEdit; the action's NAME reuses the existing menu i18n key (no new
+        strings for the list itself). An EMPTY sequence = the hotkey is disabled, the
+        action stays available from the menu. Two actions with the same sequence are
+        BOTH marked + the warning label appears — saving is still possible (Qt
+        resolves the ambiguity at runtime, and the user may be mid-edit).
+        """
+        try:
+            from ui.hotkey_registry import (
+                action_ids, action_label_key, configured_hotkeys,
+            )
+        except ImportError:  # flat launch from the project root
+            from hotkey_registry import (
+                action_ids, action_label_key, configured_hotkeys,
+            )
+        # The registry/worker import path is fixed by the module, not by the dialog:
+        # _apply_settings_from_dialog() in MainWindow does the actual installation.
+        self._hotkey_ids = list(action_ids())
+        current = configured_hotkeys()
+
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+
+        self.hotkeys_table = QTableWidget(len(self._hotkey_ids), 2, tab)
+        self.hotkeys_table.setHorizontalHeaderLabels(
+            [_t("settings.hotkeys.action"), _t("settings.hotkeys.sequence")])
+        self.hotkeys_table.verticalHeader().setVisible(False)
+        self.hotkeys_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.hotkeys_table.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
+        self.hotkeys_table.setShowGrid(False)
+        header = self.hotkeys_table.horizontalHeader()
+        header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+
+        self.hotkey_edits = {}
+        for row, action_id in enumerate(self._hotkey_ids):
+            item = QTableWidgetItem(_t(action_label_key(action_id)))
+            self.hotkeys_table.setItem(row, 0, item)
+            edit = QKeySequenceEdit(QKeySequence(current.get(action_id, "")), self.hotkeys_table)
+            try:  # Qt >= 6.4: the built-in "clear" button — one click to disable a hotkey
+                edit.setClearButtonEnabled(True)
+            except AttributeError:
+                pass
+            # keySequenceChanged carries the new QKeySequence; the slot ignores it and
+            # re-reads every editor (the conflict set is global, one edit can clear it).
+            edit.keySequenceChanged.connect(self._on_hotkey_changed)
+            self.hotkeys_table.setCellWidget(row, 1, edit)
+            self.hotkey_edits[action_id] = edit
+
+        self._lbl_hotkeys_disabled_hint = QLabel(_t("settings.hotkeys.disabled_hint"))
+        self._lbl_hotkeys_disabled_hint.setWordWrap(True)
+        self._lbl_hotkeys_conflict = QLabel("")
+        self._lbl_hotkeys_conflict.setWordWrap(True)
+
+        layout.addWidget(self.hotkeys_table, 1)
+        layout.addWidget(self._lbl_hotkeys_disabled_hint)
+        layout.addWidget(self._lbl_hotkeys_conflict)
+
+        self.tabs.addTab(tab, _t("settings.tab.hotkeys"))
+        self._refresh_hotkey_conflicts()   # the saved config itself may already conflict
+
+    def hotkey_sequences(self) -> dict:
+        """The table's current values: {action_id: sequence string} ("" = disabled)."""
+        return {aid: edit.keySequence().toString()
+                for aid, edit in getattr(self, "hotkey_edits", {}).items()}
+
+    def _on_hotkey_changed(self, *_args):
+        """A QKeySequenceEdit changed — re-evaluate the conflicts (both rows are marked)."""
+        self._refresh_hotkey_conflicts()
+
+    def _refresh_hotkey_conflicts(self):
+        """Mark the conflicting rows + show/hide the warning. Never raises."""
+        try:
+            try:
+                from ui.hotkey_registry import action_label_key, find_conflicts
+            except ImportError:
+                from hotkey_registry import action_label_key, find_conflicts
+            conflicts = find_conflicts(self.hotkey_sequences())
+        except Exception:  # noqa: BLE001 — the marking is cosmetic
+            return
+        try:
+            for row, action_id in enumerate(self._hotkey_ids):
+                item = self.hotkeys_table.item(row, 0)
+                if item is None:
+                    continue
+                marked = action_id in conflicts
+                label = _t(action_label_key(action_id))
+                item.setText(("\u26a0 " if marked else "") + label)
+                item.setForeground(QColor(theme.STATUS_WARN if marked else theme.TEXT_PRIMARY))
+            self._lbl_hotkeys_conflict.setText(
+                _t("settings.hotkeys.conflict") if conflicts else "")
+        except RuntimeError:
+            pass  # Qt teardown — the table is already destroyed
+
     # ── "Language" tab (immediate application — before OK) ────────────────────────
 
     def _build_language_tab(self):
@@ -471,6 +586,10 @@ class SettingsDialog(QDialog):
         get_status_settings()).
         v1.2.2: +1 key — terminal_mode ("windows"|"tabs"; the combo gives
         fixed ids).
+        v1.3.2: +1 key — hotkeys (a nested dict action_id → sequence string;
+        "" = the hotkey is disabled). The values come from the QKeySequenceEdit
+        cells; MainWindow._apply_hotkeys() installs them live after the
+        applied signal (no restart). Conflict rows are saved as-is by design.
         """
         return {
             "external_terminal": self.ext_term_combo.currentData() or "auto",
@@ -496,6 +615,9 @@ class SettingsDialog(QDialog):
             "ui_node_double_click": self.node_dblclick_combo.currentData() or "properties",
             "ui_show_sidebar_buttons": bool(self.sidebar_buttons_chk.isChecked()),
             "ui_show_connection_type": bool(self.show_conn_type_chk.isChecked()),
+            # v1.3.2 (ROADMAP task 2/3): the configurable hotkeys — the table's values
+            # ({} — a dialog built without the tab, a defensive fallback)
+            "hotkeys": self.hotkey_sequences(),
         }
 
     # ── i18n: retranslating the dialog's own strings (a language change in the open dialog) ───
@@ -508,7 +630,8 @@ class SettingsDialog(QDialog):
         self.tabs.setTabText(2, _t("settings.tab.statuses"))
         self.tabs.setTabText(3, _t("settings.tab.autosave"))
         self.tabs.setTabText(4, _t("settings.tab.map"))
-        self.tabs.setTabText(5, _t("settings.tab.language"))
+        self.tabs.setTabText(5, _t("settings.tab.hotkeys"))   # v1.3.2
+        self.tabs.setTabText(6, _t("settings.tab.language"))
 
         self._lbl_ext_term.setText(_t("settings.general.external_terminal"))
         for i in range(self.ext_term_combo.count()):
@@ -577,6 +700,13 @@ class SettingsDialog(QDialog):
             if key:
                 self.node_dblclick_combo.setItemText(i, _t(key))
         self.show_conn_type_chk.setText(_t("settings.map.show_connection_type"))
+
+        # v1.3.2: the "Hotkeys" tab — the headers, the hint, the warning and the
+        # per-row action names (they reuse the existing menu i18n keys).
+        self.hotkeys_table.setHorizontalHeaderLabels(
+            [_t("settings.hotkeys.action"), _t("settings.hotkeys.sequence")])
+        self._lbl_hotkeys_disabled_hint.setText(_t("settings.hotkeys.disabled_hint"))
+        self._refresh_hotkey_conflicts()   # re-marks the rows + re-texts the warning
 
         self._lbl_language.setText(_t("settings.language.label"))
 

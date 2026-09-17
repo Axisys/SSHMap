@@ -171,9 +171,9 @@ def restore_i18n_config(snap):
 # in 12 i18n files + the APP_VERSION/requirements pins in 7 release-state sections).
 # The misses of the keys themselves against the code are caught by check_i18n_keys.py.
 # ─────────────────────────────────────────────────────────────────────────────
-EXPECTED_APP_VERSION = "1.3.1.1"  # the current release (a sentinel: it catches "a bump to the wrong version")
-EXPECTED_I18N_KEYS = 453        # the en/ru/zh parity (v1.3.1: +7 sftp.viewer.* → 453; before, 446 since v1.3;
-                                # v1.3.1.1 reuses those keys for the row tooltips — no new ones)
+EXPECTED_APP_VERSION = "1.3.2"  # the current release (a sentinel: it catches "a bump to the wrong version")
+EXPECTED_I18N_KEYS = 458        # the en/ru/zh parity (v1.3.2: +5 settings.hotkeys.* / settings.tab.hotkeys
+                                # → 458; before, 453 since v1.3.1 — v1.3.1.1 reused those keys, no new ones)
 VERSION_FORMAT_RE = re.compile(r"^\d+(\.\d+){1,3}([Rr][Cc]\d+)?$")  # "1.1.3", "1.0RC4", "0.9.9.7", "1.2.10rc1" (v1.2.10: + lowercase rc)
 
 
