@@ -10,7 +10,7 @@ try:
 except ImportError:
     from modules.ssh_worker import SSHWorker
 
-try:  # v1.2.5: центральная тема (палитра/радиусы/шрифты — ui/theme.py)
+try:  # v1.2.5: central theme (palette/radii/fonts — ui/theme.py)
     from ..ui import theme
 except ImportError:
     from ui import theme
@@ -24,7 +24,7 @@ from PySide6.QtWidgets import (
 
 
 def _t(key: str) -> str:
-    """Безопасный i18n-лук: при недоступности i18n возвращает сам ключ."""
+    """Safe i18n hook: returns the key itself if i18n is unavailable."""
     try:
         from i18n import t as _translate
         return _translate(key)
@@ -33,82 +33,82 @@ def _t(key: str) -> str:
 
 
 class ServerNode(QGraphicsItemGroup):
-    """Визуальный узел сервера на карте."""
+    """Visual server node on the map."""
 
     MIN_NODE_WIDTH = 180
     MIN_NODE_HEIGHT = 130
-    # v0.8.4 (бывш. DESIGN.md §D): высота свёрнутой плашки — одна строка:
-    # [иконка] alias @host … [●статус][SSH-точка][▾шеврон]
+    # v0.8.4 (former DESIGN.md §D): collapsed badge height — a single line:
+    # [icon] alias @host … [●status][SSH dot][▾chevron]
     COLLAPSED_HEIGHT = 46
-    # Ревью-фикс v0.8.0 (#4): потолок ширины карточки — длинный alias/host/comment
-    # больше не растягивает узел бесконечно; не влезший текст elide'ится (…), полный
-    # текст доступен в tooltip (наведение на сокращённую подпись).
+    # Review fix v0.8.0 (#4): card width cap — a long alias/host/comment
+    # no longer stretches the node endlessly; text that doesn't fit is elided (…),
+    # the full text is available in the tooltip (hover over the shortened label).
     MAX_NODE_WIDTH = 360
 
-    # Раскладка для elide: откуда стартуют подписи (см. _build_appearance) и зазор до
-    # зоны точек-индикаторов справа [W-DOT_ZONE_LEFT, W-10] — точки имеют z=5 и без
-    # ограничения накрывали бы хвост длинного alias/host (было в ревью v0.8).
-    LABEL_X = 55.0            # x подписей alias / host
-    INFO_X = 10.0             # x инфо-блока
-    DOT_ZONE_LEFT = 46.0      # левый край точки статуса: W - 46 (см. update_appearance)
-    ELIDE_GAP = 4.0           # зазор от конца текста до точек
-    # UI polish v0.9.x: иконка сервера крупновата в обоих режимах — масштабируем
-    # круг+глиф на 70% (40 px -> 28 px) вокруг центра исходного круга (30, 30).
+    # Elide layout: where the labels start (see _build_appearance) and the gap to the
+    # indicator-dots zone on the right [W-DOT_ZONE_LEFT, W-10] — the dots have z=5 and,
+    # without the cap, would cover the tail of a long alias/host (noted in the v0.8 review).
+    LABEL_X = 55.0            # x of the alias / host labels
+    INFO_X = 10.0             # x of the info block
+    DOT_ZONE_LEFT = 46.0      # left edge of the status dot: W - 46 (see update_appearance)
+    ELIDE_GAP = 4.0           # gap from the end of the text to the dots
+    # UI polish v0.9.x: the server icon is a bit large in both modes — we scale
+    # circle+glyph to 70% (40 px -> 28 px) around the center of the original circle (30, 30).
     ICON_SCALE = 0.70
-    # v0.8.4: вертикальная центровка точек в свёрнутой строке (подгонка:
-    # подняты на и сдвинуты влево, чтобы не налезали на шеврон).
+    # v0.8.4: vertical centering of the dots in the collapsed line (tuning:
+    # raised and shifted left so they don't overlap the chevron).
     COLLAPSED_DOT_Y = -7.0
-    COLLAPSED_DOT_DX = -21.0  # сдвиг точек влево относительно развёрнутой позиции
-    # Свёрнутая строка: иконка приподнята, чтобы визуально центрироваться с текстом.
+    COLLAPSED_DOT_DX = -21.0  # leftward shift of the dots relative to the expanded position
+    # Collapsed line: the icon is raised to visually center with the text.
     COLLAPSED_ICON_DY = -8.0
 
-    # UI polish: скругление углов карточки и «тень» — узкая полоска под нижним краем.
-    # Тень рисуется ВНУТРИ boundingRect (Qt клипует дочерних элементов по нему),
-    # поэтому boundingRect() расширен вниз на SHADOW_BOTTOM px; стрелки при этом
-    # доходят ровно до границы тени, а не «в вис» (edge_point работает от boundingRect).
+    # UI polish: card corner radius and "shadow" — a narrow strip under the bottom edge.
+    # The shadow is drawn INSIDE the boundingRect (Qt clips child elements by it),
+    # so boundingRect() is extended downward by SHADOW_BOTTOM px; the arrows then
+    # reach exactly the shadow boundary instead of "hanging in the air" (edge_point works from the boundingRect).
     CORNER_RADIUS = theme.RADIUS_NODE
     SHADOW_BOTTOM = 3.0
 
-    # v1.2.5: все цвета — из центральной темы (ui/theme.py); значения без изменений.
+    # v1.2.5: all colors — from the central theme (ui/theme.py); values unchanged.
     COLOR_BG = QColor(theme.NODE_BG)
     COLOR_BORDER = QColor(theme.NODE_BORDER)
     COLOR_SELECTED = QColor(theme.SELECTION_AMBER)
     COLOR_HOVER = QColor(theme.NODE_HOVER)
-    # v0.9.6: акцент «Показать на карте» (сайдбар) — рамка-вспышка. Голубой,
-    # отличимый от янтарного выделения (#f59e0b): узел уже выделен, и вспышка
-    # должна читаться как отдельный сигнал «тут он». Тот же ACCENT темы, что у
-    # рамки rectangle-выделения MapView — единый акцент приложения.
+    # v0.9.6: "Reveal on map" accent (sidebar) — a flash frame. Light blue,
+    # distinct from the amber selection (#f59e0b): the node is already selected, and the
+    # flash should read as a separate "here it is" signal. Same theme ACCENT as the
+    # MapView rectangle-selection frame — one app-wide accent.
     REVEAL_COLOR = QColor(theme.ACCENT)
-    # v0.9.8: поиск по карте (Ctrl+F) — статическая рамка совпавших узлов.
-    # Тот же ACCENT темы (единый акцент): совпадения читаются мгновенно, а текущий
-    # результат поиска дополнительно выделен янтарём + вспышка reveal_flash.
+    # v0.9.8: map search (Ctrl+F) — a static frame on matching nodes.
+    # Same theme ACCENT (one accent): matches are read instantly, while the current
+    # search result is additionally highlighted in amber + the reveal_flash.
     SEARCH_MATCH_COLOR = QColor(theme.ACCENT)
     COLOR_TEXT = QColor(theme.NODE_TEXT)
     COLOR_LABEL = QColor(theme.NODE_LABEL)
-    # UI polish: «тень» под карточкой и серый цвет точек-индикаторов до проверки.
+    # UI polish: "shadow" under the card and the gray indicator-dot color until checked.
     COLOR_SHADOW = QColor(0, 0, 0, 110)
     COLOR_DOT_IDLE = QColor(theme.DOT_IDLE)
 
-    # v0.7.1: цвета рамки по статусу доступности (StatusChecker).
-    # warn — жёлтый, отличимый от янтарного COLOR_SELECTED:
-    # в один момент времени показывается либо выделение, либо статус.
-    # v1.2.5: значения — из центральной темы (ui/theme.py).
+    # v0.7.1: frame colors by availability status (StatusChecker).
+    # warn — yellow, distinct from the amber COLOR_SELECTED:
+    # at any moment either the selection or the status is shown.
+    # v1.2.5: values — from the central theme (ui/theme.py).
     STATUS_COLORS = {k: QColor(v) for k, v in theme.STATUS_COLORS.items()}
 
-    # v0.9.4: цвета тегов/ролей окружений. Известные роли — фиксированные цвета;
-    # произвольные теги — детерминированный цвет из палитры по хэшу имени.
-    # v1.2.5: значения — из центральной темы (ui/theme.py).
+    # v0.9.4: tag/environment-role colors. Known roles — fixed colors;
+    # arbitrary tags — a deterministic palette color by name hash.
+    # v1.2.5: values — from the central theme (ui/theme.py).
     TAG_PALETTE = [QColor(c) for c in theme.TAG_PALETTE]
     TAG_COLORS = {k: QColor(v) for k, v in theme.TAG_COLORS.items()}
-    # Полоска тегов на карточке: вертикальные сегменты вдоль левого края.
+    # Tag strip on the card: vertical segments along the left edge.
     TAG_STRIP_WIDTH = 5.0
 
     @staticmethod
     def tag_color(tag: str) -> QColor:
-        """Цвет тега: известная роль — свой цвет, прочие — по хэшу из палитры.
+        """Tag color: known role — its own color, others — by hash from the palette.
 
-        zlib.crc32, а не hash(): hash() строк солёный per-process — цвета
-        произвольных тегов менялись бы от запуска к запуску.
+        zlib.crc32, not hash(): hash() for strings is salted per-process — the colors
+        of arbitrary tags would change from run to run.
         """
         import zlib
         key = (tag or "").strip().lower()
@@ -126,9 +126,9 @@ class ServerNode(QGraphicsItemGroup):
         
         self._selected = False
         self._hover = False
-        # v0.7.1: статус доступности (online/warn/offline) — "" пока не проверен
+        # v0.7.1: availability status (online/warn/offline) — "" until checked
         self._status = ""
-        # v0.9.8: поиск по карте (Ctrl+F) — True, если узел совпадает с активным запросом
+        # v0.9.8: map search (Ctrl+F) — True if the node matches the active query
         self._search_matched = False
 
         self.setFlag(QGraphicsItem.ItemIsMovable, True)
@@ -138,47 +138,47 @@ class ServerNode(QGraphicsItemGroup):
         self.setPos(data.x, data.y)
 
         self._ssh_worker: Optional[SSHWorker] = None
-        # v0.9.4: сегменты полоски тегов (создаются лениво в _rebuild_tag_strip)
+        # v0.9.4: tag-strip segments (created lazily in _rebuild_tag_strip)
         self._tag_segments: list = []
-        # v0.7.1: пульс-анимация смены статуса — fade-out оверлея (opacity 1 -> 0).
-        # Вариант QPropertyAnimation(target=QGraphicsItem) в PySide6 6.11 не работает:
-        # у C++ QGraphicsItem* нет метаобъектной интроспекции свойств ("non-existing
-        # property opacity"), поэтому используем QVariantAnimation + valueChanged.
+        # v0.7.1: status-change pulse animation — overlay fade-out (opacity 1 -> 0).
+        # The QPropertyAnimation(target=QGraphicsItem) variant doesn't work in PySide6 6.11:
+        # the C++ QGraphicsItem* has no meta-object property introspection ("non-existing
+        # property opacity"), so we use QVariantAnimation + valueChanged.
         self._pulse_anim: Optional[QVariantAnimation] = None
 
         self._build_appearance()
-        # v0.9.4: полоска тегов при создании (update_appearance может не сменить
-        # геометрию и не вызвать _rebuild_frame_paths)
+        # v0.9.4: tag strip at creation (update_appearance may not change
+        # the geometry and thus not call _rebuild_frame_paths)
         self._rebuild_tag_strip()
 
     def _build_appearance(self):
-        # UI polish: «тень» под карточкой — узкая полоска ниже нижнего края.
-        # Рисуется внутри boundingRect (Qt клипует дочерних элементов по нему),
-        # поэтому boundingRect расширен вниз на SHADOW_BOTTOM px.
+        # UI polish: "shadow" under the card — a narrow strip below the bottom edge.
+        # Drawn inside the boundingRect (Qt clips child elements by it),
+        # so the boundingRect is extended downward by SHADOW_BOTTOM px.
         self._shadow = QGraphicsPathItem(self)
         self._shadow.setPen(QPen(Qt.PenStyle.NoPen))
         self._shadow.setBrush(QBrush(self.COLOR_SHADOW))
         self._shadow.setZValue(-2)
 
-        # Фон узла (скруглённый; перо — рамка по выделению/статусу, см. _state_pen).
-        # QGraphicsRectItem заменён на PathItem: скругление углов (UI polish),
-        # pen/brush для PathItem работают так же.
+        # Node background (rounded; the pen is the selection/status frame, see _state_pen).
+        # QGraphicsRectItem replaced with PathItem: rounded corners (UI polish),
+        # pen/brush work the same for PathItem.
         self._bg = QGraphicsPathItem(self)
         self._bg.setPen(QPen(Qt.transparent, 2))
         self._bg.setBrush(QBrush(self.COLOR_BG))
         self._bg.setZValue(-1)
 
-        # v0.7.1: оверлей «пульса» при смене статуса — рамка поверх фона (скруглённая).
-        # Fade-out opacity 1 -> 0 (QVariantAnimation), затем прячется.
+        # v0.7.1: "pulse" overlay on status change — a frame over the background (rounded).
+        # Fade-out opacity 1 -> 0 (QVariantAnimation), then hidden.
         self._pulse = QGraphicsPathItem(self)
         self._pulse.setPen(QPen(self.STATUS_COLORS["offline"], 3))
         self._pulse.setBrush(QBrush(Qt.BrushStyle.NoBrush))
         self._pulse.setZValue(-0.5)
         self._pulse.hide()
 
-        # Иконка: круг + векторный глиф «сервер» (UI polish: эмодзи убраны —
-        # Segoe UI Emoji на Linux рендерится монохромно/квадратами, а при зуме
-        # пикселизуется; QPainterPath кроссплатформен и чёткий на любом масштабе).
+        # Icon: circle + vector "server" glyph (UI polish: emoji removed —
+        # Segoe UI Emoji renders monochrome/squares on Linux and pixelates on zoom;
+        # QPainterPath is cross-platform and crisp at any scale).
         self._icon = QGraphicsEllipseItem(10, 10, 40, 40, self)
         self._icon.setPen(QPen(self.COLOR_BORDER, 2))
         self._icon.setBrush(QBrush(QColor(theme.NODE_ICON_BG)))
@@ -190,8 +190,8 @@ class ServerNode(QGraphicsItemGroup):
         self._glyph.setBrush(QBrush(Qt.BrushStyle.NoBrush))
         self._glyph.setZValue(2)
         self._set_server_glyph()
-        # UI polish v0.9.x: уменьшенная иконка — масштабируем и круг, и глиф
-        # вокруг центра круга, чтобы глиф остался в центре.
+        # UI polish v0.9.x: shrunk icon — scale both the circle and the glyph
+        # around the circle center so the glyph stays centered.
         icon_tr = QTransform()
         icon_tr.translate(30.0, 30.0)
         icon_tr.scale(self.ICON_SCALE, self.ICON_SCALE)
@@ -205,52 +205,52 @@ class ServerNode(QGraphicsItemGroup):
         self._alias.setDefaultTextColor(self.COLOR_TEXT)
         self._alias.setPos(55, 18)
 
-        # Точка статуса доступности (UI polish): левее SSH-точки — в свёрнутом виде
-        # и при мелком зуме читается быстрее 2px-рамки. Серая — пока не проверялся.
+        # Availability status dot (UI polish): left of the SSH dot — in the collapsed view
+        # and at a small zoom it reads faster than the 2px frame. Gray — until checked.
         self._status_dot = QGraphicsEllipseItem(0, 23, 14, 14, self)
         self._status_dot.setPen(QPen(Qt.PenStyle.NoPen))
         self._status_dot.setBrush(QBrush(self.COLOR_DOT_IDLE))
         self._status_dot.setZValue(5)
 
-        # SSH статус индикатор (зелёный кружок - подключено)
+        # SSH status indicator (green dot - connected)
         self._ssh_status = QGraphicsEllipseItem(0, 23, 14, 14, self)
         self._ssh_status.setPen(QPen(Qt.PenStyle.NoPen))
-        self._ssh_status.setBrush(QBrush(self.COLOR_DOT_IDLE))  # Серый - не подключено
+        self._ssh_status.setBrush(QBrush(self.COLOR_DOT_IDLE))  # Gray - not connected
         self._ssh_status.setZValue(5)
 
-        # Текстовая плашка (инициализация); фон — скруглённый (UI polish)
+        # Text plaque (initialization); background — rounded (UI polish)
         self._info = QGraphicsTextItem("", self)
         self._info.setFont(QFont(theme.FONT_MONO, 8))
         self._info.setDefaultTextColor(self.COLOR_LABEL)
         self._info_bg = QGraphicsPathItem(self)
         self._info_bg.setPen(QPen(Qt.PenStyle.NoPen))
-        _info_bg_color = QColor(theme.WINDOW_BG)   # v1.2.5: WINDOW_BG + alpha (подложка инфо-плашки)
+        _info_bg_color = QColor(theme.WINDOW_BG)   # v1.2.5: WINDOW_BG + alpha (info-plaque backing)
         _info_bg_color.setAlpha(150)
         self._info_bg.setBrush(QBrush(_info_bg_color))
         self._info_bg.setZValue(0)
         self._info.setZValue(1)
 
-        # Host под алиасом
+        # Host under the alias
         self._host_label = QGraphicsTextItem(f"@{self.data.host}", self)
         self._host_label.setFont(QFont(theme.FONT_MONO, 8))
         self._host_label.setDefaultTextColor(QColor(theme.DOT_IDLE))
         self._host_label.setPos(55, 36)
 
-        # UI polish: декоративная «кнопка SSH» (🔒) удалена — она не кликалась и
-        # вводила в заблуждение; подключение SSH — по двойному клику / ПКМ-меню.
+        # UI polish: the decorative "SSH button" (🔒) was removed — it wasn't clickable and
+        # was misleading; SSH connection is via double-click / RMB menu.
 
-        # v0.8.4 (бывш. DESIGN.md §D): шеврон сворачивания в правом верхнем углу.
-        # Позиция/геометрия выставляются в update_appearance() под текущий режим.
+        # v0.8.4 (former DESIGN.md §D): collapse chevron in the top-right corner.
+        # Position/geometry are set in update_appearance() for the current mode.
         self._chevron = QGraphicsPathItem(self)
         self._chevron.setPen(QPen(self.COLOR_LABEL, 1.8))
         self._chevron.setBrush(QBrush(Qt.BrushStyle.NoBrush))
         self._chevron.setZValue(5)
 
-        # Первичный расчет высоты и позиций
+        # Initial height and positions calculation
         self.update_appearance()
 
     def _set_server_glyph(self):
-        """Векторный глиф «сервер» внутри круглой иконки (два юнита + LED)."""
+        """Vector "server" glyph inside the round icon (two units + LEDs)."""
         r = theme.RADIUS_NODE_GLYPH_UNIT
         path = QPainterPath()
         path.addRoundedRect(QRectF(21, 22, 18, 7), r, r)
@@ -261,32 +261,32 @@ class ServerNode(QGraphicsItemGroup):
 
     @staticmethod
     def _rounded(x: float, y: float, w: float, h: float, r: float) -> QPainterPath:
-        """Скруглённый прямоугольник. PySide6-нюанс: addRoundedRect() возвращает None
-        (в Qt C++ — QPainterPath&), поэтому путь собираем через отдельный объект."""
+        """Rounded rectangle. PySide6 nuance: addRoundedRect() returns None
+        (in Qt C++ it's QPainterPath&), so we build the path via a separate object."""
         path = QPainterPath()
         path.addRoundedRect(float(x), float(y), max(float(w), 1.0), max(float(h), 1.0),
                             float(r), float(r))
         return path
 
     def _rebuild_frame_paths(self, width: float, height: float):
-        """Пересобрать скруглённые пути фона/пульса/тени при смене геометрии."""
+        """Rebuild the rounded background/pulse/shadow paths on geometry change."""
         r = self.CORNER_RADIUS
         self._bg.setPath(self._rounded(0, 0, width, height, r))
-        # Тень: верх скрыт под карточкой, видна полоска y ∈ [height, height+SHADOW_BOTTOM]
+        # Shadow: the top is hidden under the card; the visible strip is y ∈ [height, height+SHADOW_BOTTOM]
         self._shadow.setPath(self._rounded(8, 5, max(width - 16, 20),
                                            height + self.SHADOW_BOTTOM - 5, r + 2))
-        # Пульс следует за фоном (v0.7.1) — та же скруглённая рамка
+        # Pulse follows the background (v0.7.1) — the same rounded frame
         self._pulse.setPath(self._rounded(0, 0, width, height, r))
 
-        # v0.9.4: полоска тегов вдоль левого края (пересобрать сегменты)
+        # v0.9.4: tag strip along the left edge (rebuild the segments)
         if getattr(self, "_tag_segments", None) is not None:
             self._rebuild_tag_strip()
 
     def _rebuild_tag_strip(self):
-        """v0.9.4: вертикальная полоска из цветных сегментов по data.tags.
+        """v0.9.4: a vertical strip of colored segments from data.tags.
 
-        Сегменты делят высоту карточки поровну (макс. 4 видимых тега — дальше
-        полоска теряет читаемость); рисуется поверх фона (z=-0.8), под контентом.
+        The segments split the card height evenly (max 4 visible tags — beyond that
+        the strip loses readability); drawn over the background (z=-0.8), under the content.
         """
         tags = (getattr(self.data, "tags", None) or [])[:4]
         n_needed = len(tags)
@@ -307,22 +307,22 @@ class ServerNode(QGraphicsItemGroup):
                 item.hide()
 
     def refresh_tags(self):
-        """v0.9.4: публичная точка обновления полоски после правки data.tags."""
+        """v0.9.4: public hook to update the strip after editing data.tags."""
         self._rebuild_tag_strip()
         self.update()
 
     def _state_pen(self):
         if self._selected:
             return QPen(self.COLOR_SELECTED, 3)
-        # v0.9.8: совпадение поиска по карте — акцентная рамка (ниже выделения:
-        # текущий результат поиска одновременно выделен и «горит» янтарём).
+        # v0.9.8: map-search match — accent frame (below the selection:
+        # the current search result is selected and "glowing" amber at the same time).
         if self._search_matched:
             return QPen(self.SEARCH_MATCH_COLOR, 3)
         if self._hover:
             color = QColor(self.COLOR_HOVER)
             color.setAlpha(160)
             return QPen(color, 2)
-        # v0.7.1: статус доступности — цвет рамки по умолчанию
+        # v0.7.1: availability status — the default frame color
         status_color = self.STATUS_COLORS.get(self._status)
         if status_color is not None:
             return QPen(status_color, 2)
@@ -332,26 +332,26 @@ class ServerNode(QGraphicsItemGroup):
         self._bg.setPen(self._state_pen())
 
     def update_appearance(self):
-        """Пересобрать текстовые элементы при изменении данных.
+        """Rebuild the text elements when the data changes.
 
-        Ревью-фикс v0.8.0 (#4): ширина карточки ограничена диапазоном
-        [MIN_NODE_WIDTH, MAX_NODE_WIDTH]. Длинный alias/host/comment больше не
-        растягивает узел бесконечно: текст, не влезший в финальную ширину,
-        elide'ится (…), полный текст — в tooltip сокращённой подписи. Alias и host
-        дополнительно не заходят под точки-индикаторы справа [W-46, W-10].
+        Review fix v0.8.0 (#4): the card width is bounded by the range
+        [MIN_NODE_WIDTH, MAX_NODE_WIDTH]. A long alias/host/comment no longer
+        stretches the node endlessly: text that doesn't fit the final width is
+        elided (…), the full text — in the tooltip of the shortened label. Alias and host
+        additionally don't go under the indicator dots on the right [W-46, W-10].
 
-        Алгоритм: ширина считается по полному тексту формулой как раньше, но с
-        потолком MAX_NODE_WIDTH; затем (одним проходом) текст, не влезший в финальную
-        ширину, сокращается под неё. Однопроходность — сознательное решение:
-        «сократил и пересчитал ширину» не сходится к чистой фиксированной точке
-        (elidedText оставляет зазор до лимита), а карточка, растянутая единственным
-        длинным полем, всё равно остаётся шире MIN — зато видимая информация
-        максимальна и геометрия детерминирована для любого шрифта/платформы.
+        Algorithm: the width is computed from the full text with the same formula as before,
+        but capped at MAX_NODE_WIDTH; then (in a single pass) the text that doesn't fit the
+        final width is shortened to it. Single pass — a deliberate decision:
+        "shrink and recompute the width" doesn't converge to a clean fixed point
+        (elidedText leaves a gap to the limit), and a card stretched by a single
+        long field is still wider than MIN — but the visible information
+        is maximal and the geometry is deterministic for any font/platform.
 
-        v0.8.4 (бывш. DESIGN.md §D): при data.collapsed рисуется одна строка — скрываются
-        _info/_info_bg/_host_label, alias объединяется с host («alias @host»), высота —
-        COLLAPSED_HEIGHT. Точки-индикаторы остаются видимыми (самое ценное в свёрнутом
-        виде). prepareGeometryChange() обязателен до смены размера.
+        v0.8.4 (former DESIGN.md §D): when data.collapsed, one line is drawn —
+        _info/_info_bg/_host_label are hidden, alias is merged with host ("alias @host"), height —
+        COLLAPSED_HEIGHT. The indicator dots stay visible (the most valuable in the
+        collapsed view). prepareGeometryChange() is required before a size change.
         """
         if getattr(self.data, "collapsed", False):
             self._update_appearance_collapsed()
@@ -361,7 +361,7 @@ class ServerNode(QGraphicsItemGroup):
         host_text = f"@{self.data.host}"
 
         info_lines = []
-        # v0.9: ОС первой строкой (осн. источник — автосбор, но поле редактируемое)
+        # v0.9: OS on the first line (main source — auto-collection, but the field is editable)
         if getattr(self.data, "os_name", ""):
             os_line = self.data.os_name
             if getattr(self.data, "cpu_model", ""):
@@ -372,7 +372,7 @@ class ServerNode(QGraphicsItemGroup):
         if self.data.disk: info_lines.append(f"DISK: {self.data.disk}")
         if self.data.ip: info_lines.append(f"IP: {self.data.ip}")
         if self.data.ssh_port != 22: info_lines.append(f"SSH:{self.data.ssh_port}")
-        # UI polish: эмодзи-префикс у комментария убран (единый стиль без эмодзи)
+        # UI polish: the emoji prefix on the comment was removed (consistent style without emoji)
         if self.data.comment: info_lines.append(self.data.comment)
 
         fm_alias = QFontMetrics(self._alias.font())
@@ -385,7 +385,7 @@ class ServerNode(QGraphicsItemGroup):
             self._info.setPlainText("\n".join(i_lines) if i_lines else _t("node.no_data"))
 
         def _needed_width() -> int:
-            """Формула ширины как до фикса: правый край контента + 24 px."""
+            """Width formula as before the fix: right edge of content + 24 px."""
             alias_right = self._alias.pos().x() + self._alias.boundingRect().width()
             host_right = self._host_label.pos().x() + self._host_label.boundingRect().width()
             info_width = self._info.boundingRect().width()
@@ -395,8 +395,8 @@ class ServerNode(QGraphicsItemGroup):
         def _clamp(w: float) -> int:
             return min(max(int(w), self.MIN_NODE_WIDTH), int(self.MAX_NODE_WIDTH))
 
-        # Первый заход — полный текст (измеряем и «наценку» QGraphicsTextItem:
-        # boundingRect.width() = horizontalAdvance + постоянные доковые маржины ~8 px).
+        # First pass — full text (we also measure the QGraphicsTextItem "markup":
+        # boundingRect.width() = horizontalAdvance + constant dock margins ~8 px).
         _set_texts(alias_text, host_text, info_lines)
         overhead = max(0.0, self._alias.boundingRect().width() - fm_alias.horizontalAdvance(alias_text))
 
@@ -404,7 +404,7 @@ class ServerNode(QGraphicsItemGroup):
         label_max = max(int(width - self.LABEL_X - self.DOT_ZONE_LEFT - self.ELIDE_GAP - overhead), 1)
         info_max = max(int(width - self.INFO_X - 24.0 - overhead), 1)
 
-        # Alias / host: сокращаем под зону, свободную от точек; полный текст — в tooltip
+        # Alias / host: elide to the zone free of dots; full text — in the tooltip
         if fm_alias.horizontalAdvance(alias_text) > label_max:
             self._alias.setPlainText(
                 fm_alias.elidedText(alias_text, Qt.TextElideMode.ElideRight, label_max))
@@ -419,8 +419,8 @@ class ServerNode(QGraphicsItemGroup):
         else:
             self._host_label.setToolTip("")
 
-        # Инфо-блок (по строкам); полный многострочный текст — в tooltip, если что-то сократили.
-        # При потолке MAX короткие строки остаются полными — режет только переполнение.
+        # Info block (line by line); full multi-line text — in the tooltip, if anything was shortened.
+        # Under the MAX cap, short lines stay full — only overflow is cut.
         if info_lines:
             elided = []
             any_elided = False
@@ -436,48 +436,48 @@ class ServerNode(QGraphicsItemGroup):
         else:
             self._info.setToolTip("")
 
-        # Расчет новой геометрии (высота — от фактического инфо-блока; elide строки
-        # не оборачивает, поэтому количество строк от сокращения не зависит).
-        # v0.9 fix: старая формула «70 + lines*fm.height()/2» была рассчитана на ~4
-        # строки; с добавлением строки ОС (6 строк) контент вылезал за карточку.
-        # Теперь высота = позиция инфо-блока (58) + его высота + нижний отступ.
+        # New geometry calculation (height — from the actual info block; elide doesn't
+        # wrap lines, so the line count doesn't depend on the shortening).
+        # v0.9 fix: the old formula "70 + lines*fm.height()/2" was tuned for ~4
+        # lines; with the OS line added (6 lines) the content spilled past the card.
+        # Now height = info-block position (58) + its height + the bottom margin.
         info_rect_h = self._info.boundingRect().height()
         needed_height = 58 + info_rect_h + 12
 
         new_width = _clamp(width)
         new_height = max(int(needed_height), self.MIN_NODE_HEIGHT)
 
-        # Если геометрия изменилась — уведомляем сцену перед перерисовкой.
-        # UI polish: boundingRect включает тень (SHADOW_BOTTOM) — prepareGeometryChange
-        # обязателен и при смене ширины, и при смене высоты, как раньше.
+        # If the geometry changed — notify the scene before repainting.
+        # UI polish: the boundingRect includes the shadow (SHADOW_BOTTOM) — prepareGeometryChange
+        # is required for both width and height changes, as before.
         if new_width != self._current_width or new_height != self._current_height:
             self.prepareGeometryChange()  
             self._current_width = new_width
             self._current_height = new_height
             self._rebuild_frame_paths(self._current_width, self._current_height)
 
-        # Позиционируем текстовый блок под иконкой/хостом; фон плашки — скруглённый путь
+        # Position the text block under the icon/host; the plaque background — a rounded path
         self._info.setPos(10, 58)
         info_rect = self._info.boundingRect()
         info_w = max(info_rect.width() + 10, self._current_width - 12)
         info_h = info_rect.height() + 8
         self._info_bg.setPath(self._rounded(6, 56, info_w, info_h, 6.0))
 
-        # Точки-индикаторы справа: [статус][SSH] (UI polish), по 14 px с зазором
+        # Indicator dots on the right: [status][SSH] (UI polish), 14 px each with a gap
         self._status_dot.setPos(self._current_width - 46, 23)
         self._ssh_status.setPos(self._current_width - 24, 23)
-        # Шеврон — от АКТУАЛЬНОЙ ширины (геометрия могла измениться выше)
+        # Chevron — from the CURRENT width (the geometry may have changed above)
         self._chevron.setPath(self._chevron_path(down=False))
         self._apply_visual_state()
 
-        # Синхронизируем стрелки связей с новой геометрией узла
+        # Sync the connection arrows with the node's new geometry
         if self.scene():
             self.scene().update_connections_for_node(self)
 
-    # ── v0.8.4 (бывш. DESIGN.md §D): сворачивание плашки в одну строку ─────────────
+    # ── v0.8.4 (former DESIGN.md §D): collapsing the badge into a single line ─────────────
 
     def _chevron_path(self, down: bool) -> QPainterPath:
-        """Глиф шеврона: ▾ (свёрнут — можно развернуть) / ▴ (развёрнут)."""
+        """Chevron glyph: ▾ (collapsed — can be expanded) / ▴ (expanded)."""
         path = QPainterPath()
         cx = float(self._current_width) - 16.0
         cy = 23.0
@@ -493,20 +493,20 @@ class ServerNode(QGraphicsItemGroup):
         return path
 
     def _show_expanded(self):
-        """Показать элементы развёрнутой карточки и восстановить отдельный host."""
+        """Show the elements of the expanded card and restore the separate host."""
         self._info.show()
         self._info_bg.show()
         self._host_label.show()
-        self._alias.setPos(55, 18)  # вернуть позицию после свёрнутой строки (y=12)
-        # Вернуть иконку в базовую позицию после свёрнутого вида
+        self._alias.setPos(55, 18)  # restore the position after the collapsed line (y=12)
+        # Return the icon to its base position after the collapsed view
         self._icon.setPos(0, 0)
         self._glyph.setPos(0, 0)
-        # Восстановить исходный (крупный) шрифт alias после свёрнутой строки.
+        # Restore the original (large) alias font after the collapsed line.
         if hasattr(self, "_alias_font_expanded"):
             self._alias.setFont(QFont(self._alias_font_expanded))
 
     def _set_geometry(self, width: int, height: int):
-        """Общая для обоих режимов смена геометрии (prepareGeometryChange до размера)."""
+        """Geometry change shared by both modes (prepareGeometryChange before resizing)."""
         if width != self._current_width or height != self._current_height:
             self.prepareGeometryChange()
             self._current_width = width
@@ -514,20 +514,20 @@ class ServerNode(QGraphicsItemGroup):
             self._rebuild_frame_paths(width, height)
 
     def _update_appearance_collapsed(self):
-        """Свёрнутый вид: одна строка [иконка] alias @host … [●статус][SSH][▾].
+        """Collapsed view: a single line [icon] alias @host … [●status][SSH][▾].
 
-        Скрываются _info/_info_bg/_host_label; точки-индикаторы остаются видимыми.
-        Ширина считается по объединённому тексту «alias @host» с теми же лимитами
-        [MIN_NODE_WIDTH, MAX_NODE_WIDTH] и elide под зону без точек. Стрелки
-        перестраиваются сами: хвост вызывает scene().update_connections_for_node(),
-        а edge_point() работает от boundingRect — дополнительной проводки не нужно.
+        _info/_info_bg/_host_label are hidden; the indicator dots stay visible.
+        The width is computed from the combined "alias @host" text with the same limits
+        [MIN_NODE_WIDTH, MAX_NODE_WIDTH] and elide to the dot-free zone. The arrows
+        rebuild themselves: the tail calls scene().update_connections_for_node(),
+        and edge_point() works from the boundingRect — no extra wiring needed.
         """
         self._info.hide()
         self._info_bg.hide()
         self._host_label.hide()
 
-        # v0.8.4: мелкий шрифт свёрнутой строки (крупный alias 11pt не читается
-        # в одну строку) — сохраняем исходный, чтобы развёрнутый вид не деградировал.
+        # v0.8.4: small font for the collapsed line (a large 11pt alias can't be read
+        # on one line) — keep the original so the expanded view doesn't degrade.
         if not hasattr(self, "_alias_font_expanded"):
             self._alias_font_expanded = QFont(self._alias.font())
         small = QFont(self._alias_font_expanded)
@@ -552,19 +552,19 @@ class ServerNode(QGraphicsItemGroup):
         else:
             self._alias.setToolTip("")
 
-        # Вертикальная центровка строки в COLLAPSED_HEIGHT; шеврон ставим ПОСЛЕ
-        # _set_geometry — путь считается от новой ширины (иначе рисуется от старой
-        # и «уезжает» за край/пропадает при смене геометрии).
+        # Vertical centering of the line within COLLAPSED_HEIGHT; the chevron is set AFTER
+        # _set_geometry — the path is computed from the new width (otherwise it's drawn from the old one
+        # and "drifts" past the edge / vanishes on a geometry change).
         self._alias.setPos(55, 12)
 
         self._set_geometry(width, self.COLLAPSED_HEIGHT)
         self._chevron.setPath(self._chevron_path(down=True))
-        # UI polish: точки подняты и сдвинуты влево, чтобы не загораживать шеврон
+        # UI polish: dots raised and shifted left so they don't cover the chevron
         dot_y = self.COLLAPSED_DOT_Y
         dot_dx = self.COLLAPSED_DOT_DX
         self._status_dot.setPos(self._current_width - 46 + dot_dx, dot_y)
         self._ssh_status.setPos(self._current_width - 24 + dot_dx, dot_y)
-        # Иконка: приподнять к строке текста (только в свёрнутом виде)
+        # Icon: raise it toward the text line (collapsed view only)
         icon_dy = self.COLLAPSED_ICON_DY
         self._icon.setPos(0, icon_dy)
         self._glyph.setPos(0, icon_dy)
@@ -573,23 +573,23 @@ class ServerNode(QGraphicsItemGroup):
             self.scene().update_connections_for_node(self)
 
     def toggle_collapsed(self):
-        """Переключить свёрнутость плашки и пересобрать вид."""
+        """Toggle the badge's collapsed state and rebuild the view."""
         self.data.collapsed = not bool(getattr(self.data, "collapsed", False))
         self.update_appearance()
         self.update()
 
     def chevron_rect(self) -> QRectF:
-        """Зона клика шеврона в локальных координатах узла (для mousePressEvent)."""
+        """Chevron click zone in the node's local coordinates (for mousePressEvent)."""
         return QRectF(float(self._current_width) - 30.0, 8.0, 28.0, 30.0)
 
     def mousePressEvent(self, event):
-        """Клик по шеврону — toggle (без драга/панорамы); остальное — стандартный путь.
+        """Click on the chevron — toggle (no drag/panning); everything else — the standard path.
 
-        MapView сам переключается в NoDrag над ItemIsMovable-объектами, поэтому
-        достаточно accept()'ить событие — драг узла при этом сохраняется.
+        MapView itself switches to NoDrag over ItemIsMovable objects, so
+        accepting the event is enough — the node drag is preserved at the same time.
         """
         if event.button() == Qt.MouseButton.LeftButton:
-            # QGraphicsSceneMouseEvent не имеет .position() — только .pos()
+            # QGraphicsSceneMouseEvent has no .position() — only .pos()
             local = QPointF(event.pos())
             if self.chevron_rect().contains(local):
                 self.toggle_collapsed()
@@ -598,33 +598,33 @@ class ServerNode(QGraphicsItemGroup):
         super().mousePressEvent(event)
 
     def boundingRect(self) -> QRectF:
-        """Явная геометрия узла.
+        """Explicit node geometry.
 
-        QGraphicsItemGroup в PySide6/Qt6 не пересчитывает boundingRect из дочерних
-        элементов автоматически (проверено: остаётся нулевым), поэтому sceneBoundingRect()
-        давал точку левого верхнего угла — стрелки v0.6 фактически шли «от угла».
-        Возвращаем прямоугольник фона узла + полоску тени снизу (UI polish); изменение
-        размеров уже защищено prepareGeometryChange() в update_appearance(). Тень входит в
-        boundingRect намеренно: Qt клипует дочерних элементов по нему, а стрелки через
-        edge_point() доходят ровно до её края — без «висящих» кончиков.
+        QGraphicsItemGroup in PySide6/Qt6 doesn't recompute boundingRect from child
+        elements automatically (verified: it stays zero), so sceneBoundingRect()
+        gave the top-left corner point — the v0.6 arrows effectively went "from the corner".
+        We return the node background rectangle + the shadow strip below (UI polish); the size
+        change is already protected by prepareGeometryChange() in update_appearance(). The shadow is in the
+        boundingRect deliberately: Qt clips child elements by it, and the arrows via
+        edge_point() reach exactly its edge — no "hanging" ends.
         """
         return QRectF(0, 0, self._current_width, self._current_height + self.SHADOW_BOTTOM)
 
     def _apply_content_opacity(self):
-        """UI polish: затемнить контент карточки у offline-узлов (рамка и точки — яркие)."""
+        """UI polish: dim the card content of offline nodes (frame and dots stay bright)."""
         opacity = 0.55 if self._status == "offline" else 1.0
         for item in (self._icon, self._glyph, self._alias, self._host_label, self._info):
             item.setOpacity(opacity)
 
-    # ── v0.9.4: затемнение узла тег-фильтром ──
+    # ── v0.9.4: dimming a node via the tag filter ──
 
-    DIM_OPACITY = 0.25  # несовпадающие с фильтром узлы — едва различимы
+    DIM_OPACITY = 0.25  # nodes not matching the filter — barely visible
 
     def set_dimmed(self, dimmed: bool):
-        """Тег-фильтр: полупрозрачная карточка у несовпадающих узлов (и обратное).
+        """Tag filter: a semi-transparent card for non-matching nodes (and the reverse).
 
-        В отличие от offline-затемнения (контент) здесь приглушается ВЕСЬ item —
-        так несовпадающие узлы уходят на второй план целиком. Выделение сохраняется.
+        Unlike the offline dimming (content), here the WHOLE item is muted —
+        so non-matching nodes recede into the background entirely. The selection is preserved.
         """
         dimmed = bool(dimmed)
         if getattr(self, "_dimmed", False) == dimmed:
@@ -632,14 +632,14 @@ class ServerNode(QGraphicsItemGroup):
         self._dimmed = dimmed
         self.setOpacity(self.DIM_OPACITY if dimmed else 1.0)
 
-    # ── v0.9.8: поиск по карте (Ctrl+F) — подсветка совпадений ──
+    # ── v0.9.8: map search (Ctrl+F) — highlight of matches ──
 
     def set_search_match(self, matched: bool):
-        """v0.9.8: поиск по карте — акцентная рамка у совпавшего узла (и снятие её).
+        """v0.9.8: map search — an accent frame on the matched node (and removing it).
 
-        Подсветка — статический pen в _state_pen (приоритет: выделение > совпадение
-        > hover > статус). Отдельно от reveal_flash (кратковременный оверлей-вспышка)
-        и set_dimmed (opacity всего item у несовпадающих). No-op при том же значении.
+        The highlight — a static pen in _state_pen (priority: selection > match
+        > hover > status). Separate from reveal_flash (a short-lived flash overlay)
+        and set_dimmed (the whole item's opacity for non-matches). No-op for the same value.
         """
         matched = bool(matched)
         if self._search_matched == matched:
@@ -649,27 +649,27 @@ class ServerNode(QGraphicsItemGroup):
 
     @property
     def search_matched(self) -> bool:
-        """v0.9.8: узел совпадает с активным запросом поиска по карте."""
+        """v0.9.8: the node matches the active map-search query."""
         return self._search_matched
 
     def set_ssh_connected(self, connected: bool):
-        """Установить статус SSH подключения."""
+        """Set the SSH connection status."""
         color = QColor(theme.STATUS_ONLINE) if connected else QColor(theme.DOT_IDLE)
         self._ssh_status.setBrush(QBrush(color))
 
     def set_status(self, status: str):
-        """v0.7.1: установить статус доступности (online/warn/offline).
+        """v0.7.1: set the availability status (online/warn/offline).
 
-        Обновляет цвет рамки (через _state_pen) и запускает короткую
-        пульс-анимацию оверлея при смене статуса. Неизвестные статусы
-        игнорируются; повторный вызов с тем же статусом — no-op.
+        Updates the frame color (via _state_pen) and starts a short
+        pulse animation of the overlay on status change. Unknown statuses
+        are ignored; a repeated call with the same status — no-op.
         """
         if status not in self.STATUS_COLORS or status == self._status:
             return
         color = self.STATUS_COLORS[status]
         self._status = status
 
-        # Tooltip со статусом (i18n, host подставляется в текст)
+        # Tooltip with the status (i18n, host is substituted into the text)
         try:
             from i18n import t as _translate
             tip = _translate(f"node.status.{status}", host=self.data.host or "")
@@ -677,22 +677,22 @@ class ServerNode(QGraphicsItemGroup):
             tip = f"{status}: {self.data.host}"
         self.setToolTip(tip if not tip.startswith("[") else f"{status} — {self.data.host}")
 
-        # UI polish: точка доступности (читается быстрее рамки при мелком зуме)
-        # + затемнение контента карточки для offline-узлов
+        # UI polish: the availability dot (reads faster than the frame at a small zoom)
+        # + dimming the card content for offline nodes
         self._status_dot.setBrush(QBrush(color))
         self._apply_content_opacity()
 
-        # Статическая рамка + пульс (fade-out оверлея: opacity 1 -> 0)
+        # Static frame + pulse (overlay fade-out: opacity 1 -> 0)
         self._apply_visual_state()
         self._start_pulse(color)
 
     def _start_pulse(self, color: QColor):
-        """v0.7.1/v0.9.6: запуск fade-out оверлея рамки заданного цвета.
+        """v0.7.1/v0.9.6: start the fade-out overlay of a frame in the given color.
 
-        Общий путь для пульса смены статуса (set_status) и акцента «Показать на
-        карте» (reveal_flash). Оверлей _pulse следует геометрии карточки
-        (_rebuild_frame_paths перестраивает его path), поэтому свёрнутый/развёрнутый
-        режим поддерживается без дополнительной работы.
+        Shared path for the status-change pulse (set_status) and the "Reveal on
+        map" accent (reveal_flash). The _pulse overlay follows the card geometry
+        (_rebuild_frame_paths rebuilds its path), so the collapsed/expanded
+        modes work without extra effort.
         """
         self._pulse.setPen(QPen(color, 3))
         if self._pulse_anim is None:
@@ -708,17 +708,17 @@ class ServerNode(QGraphicsItemGroup):
                     item.setOpacity(float(v))
                     self.update()
                 except RuntimeError:
-                    pass  # Qt teardown: узел удалён во время пульса, C++-item уже нет
+                    pass  # Qt teardown: the node was removed during the pulse, the C++ item is gone
 
             def _on_finished(item=self._pulse):
                 try:
                     item.hide()
                 except RuntimeError:
-                    pass  # Qt teardown — см. _on_value выше
+                    pass  # Qt teardown — see _on_value above
 
             anim.valueChanged.connect(_on_value)
             anim.finished.connect(_on_finished)
-            self._pulse_anim = anim  # ссылка держит анимацию в живых (no-parent binding)
+            self._pulse_anim = anim  # the reference keeps the animation alive (no-parent binding)
         self._pulse.show()
         self._pulse.setOpacity(1.0)
         anim = self._pulse_anim
@@ -726,29 +726,29 @@ class ServerNode(QGraphicsItemGroup):
         anim.start()
 
     def reveal_flash(self):
-        """v0.9.6: акцент «Показать на карте» из сайдбара — рамка-вспышка (900 мс).
+        """v0.9.6: the "Reveal on map" accent from the sidebar — a flash frame (900 ms).
 
-        Тот же паттерн, что пульс set_status (готовый оверлей + QVariantAnimation),
-        но цветом REVEAL_COLOR и БЕЗ изменения статуса: reveal — навигационный
-        сигнал, а не результат пробы доступности.
+        The same pattern as the set_status pulse (a ready overlay + QVariantAnimation),
+        but in REVEAL_COLOR and WITHOUT changing the status: reveal is a navigational
+        signal, not an availability probe result.
         """
         try:
             self._start_pulse(self.REVEAL_COLOR)
         except RuntimeError:
-            pass  # Qt teardown: C++ item уничтожен, вызов пришёл из живого Python
+            pass  # Qt teardown: the C++ item is destroyed, the call came from live Python
 
     @property
     def status(self) -> str:
-        """Текущий статус доступности ("" — ещё не проверялся)."""
+        """Current availability status ("" — not yet checked)."""
         return self._status
 
     def reset_status(self):
-        """v0.7.1: сбросить статус (например, после смены host/порта узла)."""
+        """v0.7.1: reset the status (e.g. after changing the node's host/port)."""
         if not self._status:
             return
         self._status = ""
         self.setToolTip("")
-        # UI polish: точка — серая (не проверен), контент — полная яркость
+        # UI polish: the dot — gray (not checked), the content — full brightness
         self._status_dot.setBrush(QBrush(self.COLOR_DOT_IDLE))
         self._apply_content_opacity()
         self._apply_visual_state()
@@ -760,18 +760,18 @@ class ServerNode(QGraphicsItemGroup):
             self.data.y = new_pos.y()
             if self.scene():
                 self.scene().update_connections_for_node(self)
-                # v0.8.1: узел сместился — членство групп пересчитывается по геометрии
-                # (центр карточки вошёл/вышел из рамки). ВАЖНО: itemChange вызывается ДО
-                # применения новой позиции (Qt-хук ветирования — проверено пробником):
-                # self.pos()/sceneBoundingRect() внутри ещё СТАРЫЕ, поэтому целевой rect
-                # передаём явно через overrides, иначе состав «догонял» бы на шаг.
+                # v0.8.1: the node moved — group membership is recomputed by geometry
+                # (the card center entered/left the frame). IMPORTANT: itemChange is called BEFORE
+                # the new position is applied (Qt veto hook — verified with a probe):
+                # self.pos()/sceneBoundingRect() inside are still the OLD ones, so we pass the target rect
+                # explicitly via overrides; otherwise the membership would "lag" by one step.
                 if hasattr(self.scene(), "resync_group_members"):
                     try:
                         dx = float(new_pos.x()) - float(self.pos().x())
                         dy = float(new_pos.y()) - float(self.pos().y())
                         target_rect = QRectF(self.sceneBoundingRect()).translated(dx, dy)
                         self.scene().resync_group_members({self.data.id: target_rect})
-                    except Exception:  # noqa: BLE001 — членство вторично по отношению к перемещению
+                    except Exception:  # noqa: BLE001 — membership is secondary to the move
                         pass
         return super().itemChange(change, value)
 

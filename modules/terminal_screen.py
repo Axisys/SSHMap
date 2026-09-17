@@ -1,128 +1,139 @@
-"""v0.8: TerminalScreen — ANSI-эмуляция терминала на pyte.
+"""v0.8: TerminalScreen — an ANSI terminal emulator on pyte.
 
-Полноценная замена «тупого» вывода QPlainTextEdit: pyte парсит все
-escape-последовательности (CSI/OSC/режимы курсора, цвета) и держит сетку 120x32 —
-ту же геометрию, что запрашивает SSHTerminalThread через invoke_shell(term='xterm',
-width=120, height=32). Альтернативного экрана (режим 1049) в pyte 0.8.2 НЕТ
-(проверено по установленной версии — TERMINAL.md факт №6): после vim/htop
-предыдущий экран не восстанавливается, known limitation (ROADMAP v1.0).
-→ ЗАКРЫТО v1.2.12 подклассом SshmapHistoryScreen (режимы 47/1047/1048/1049 —
-см. секцию v1.2.12 ниже и PYTE82_AUDIT.md пачка B).
+A full replacement for the "dumb" QPlainTextEdit output: pyte parses all
+escape sequences (CSI/OSC/cursor modes, colors) and keeps a 120x32 grid —
+the same geometry that SSHTerminalThread requests via invoke_shell(term='xterm',
+width=120, height=32). The alternative screen (mode 1049) is NOT in pyte 0.8.2
+(checked against the installed version — TERMINAL.md fact #6): after vim/htop
+the previous screen is not restored, a known limitation (ROADMAP v1.0).
+→ CLOSED in v1.2.12 by the SshmapHistoryScreen subclass (modes 47/1047/1048/1049 —
+see the v1.2.12 section below and PYTE82_AUDIT.md batch B).
 
-v1.0RC1: добавлен цветовой движок для посячейного холста (PALETTES +
-resolve_color, TERMINAL.md §5.1) и snapshot() — снимок сетки для
-TerminalWidget (modules/terminal_widget.py). Старый HTML-рендер render()
-помечен deprecated с v1.0RC1 и удалён в v1.2.9 (ROADMAP «Гигиена терминала»).
+v1.0RC1: added a color engine for the per-cell canvas (PALETTES +
+resolve_color, TERMINAL.md §5.1) and snapshot() — a grid snapshot for
+TerminalWidget (modules/terminal_widget.py). The old HTML renderer render()
+was marked deprecated in v1.0RC1 and removed in v1.2.9 (ROADMAP "Terminal hygiene").
 
-v1.0RC3: pyte.Screen → pyte.HistoryScreen (TERMINAL.md §5.4) — готовый
-скроллбэк (deque-история + prev_page()/next_page()) со встроенным авто-возвратом
-к live-строке при новом выводе (before_event, проверено факт №7). scroll_up()/
-scroll_down()/at_bottom() — под тем же lock'ом, что и feed(). Остальной API
-(feed/resize/snapshot/render) без изменений — duck-typing.
+v1.0RC3: pyte.Screen → pyte.HistoryScreen (TERMINAL.md §5.4) — a ready-made
+scrollback (deque history + prev_page()/next_page()) with a built-in auto-return
+to the live line on new output (before_event, verified as fact #7). scroll_up()/
+scroll_down()/at_bottom() — under the same lock as feed(). The rest of the API
+(feed/resize/snapshot/render) unchanged — duck typing.
 
-v1.1.2RC3 (AUDIT U3): application_cursor_keys() — состояние DECCKM (приватный
-режим 1) под тем же lock'ом, что и feed(): TerminalWidget по нему выбирает
-последовательности стрелок (SS3 \x1bOA… при mc/vim/htop, CSI \x1b[A… в обычном
-режиме). Проверенный факт pyte 0.8.2: приватные режимы хранятся в screen.mode
-со сдвигом влево на 5 бит (set_mode(private=True): mode << 5) — DECCKM это 32,
-а НЕ 1 (проверено прогоном на установленной версии).
+v1.1.2RC3 (AUDIT U3): application_cursor_keys() — the DECCKM state (private
+mode 1) under the same lock as feed(): TerminalWidget picks the arrow-key
+sequences from it (SS3 \x1bOA… under mc/vim/htop, CSI \x1b[A… in normal
+mode). Verified pyte 0.8.2 fact: private modes are stored in screen.mode
+shifted left by 5 bits (set_mode(private=True): mode << 5) — DECCKM is 32,
+NOT 1 (verified by a run on the installed version).
 
-v1.2.11 (PYTE82_AUDIT.md пачка A): SshmapHistoryScreen — подкласс pyte.HistoryScreen
-с двумя override'ами совместимости с УСТАНОВЛЕННОЙ pyte 0.8.2. Механизм: Stream
-привязывает методы экрана через getattr(listener, attr) при attach (streams.py,
-create_dispatcher) → переопределения подкласса парсер подхватывает автоматически;
-публичный API TerminalScreen не меняется (duck-typing). Проверенный факт №12
-(прогоном на установленной pyte 0.8.2): Vim 9+ шлёт \x1b[?4m (private SGR,
-upstream issue #202); в 0.8.2 это TypeError из feed() — Screen.select_graphic_rendition
-не принимает private, и хвост чанка после последовательности теряется (парсер
-сбрасывается; except Exception: return в _on_output глотает исключение). Подкласс
-игнорирует private SGR; в master фикс уже вмержен (PR #203, 2025-09-02) — override с
-той же семантикой оставляем до поднятия пина на pyte 0.8.3 (совместим и задокументирован;
-при 0.8.3 пункт про 'bfightmagenta' в resolve_color() помечаем legacy — в master
-опечатка BG_AIXTERM[105] уже исправлена). LNM (режим 20) включён по умолчанию:
-голый LF = CR+LF (xterm-поведение; Screen.reset() сбрасывает mode на _DEFAULT_MODE
-без LNM → явное восстановление после super().__init__ и в reset(); явные
-\x1b[20h/\x1b[20l (SM/RM 20) от удалённой программы по-прежнему работают).
+v1.2.11 (PYTE82_AUDIT.md batch A): SshmapHistoryScreen — a pyte.HistoryScreen
+subclass with two compatibility overrides for the INSTALLED pyte 0.8.2.
+Mechanism: Stream binds the screen methods via getattr(listener, attr) at
+attach (streams.py, create_dispatcher) → the subclass overrides are picked up
+by the parser automatically; the public TerminalScreen API is unchanged
+(duck typing). Verified fact #12 (a run on the installed pyte 0.8.2): Vim 9+
+sends \x1b[?4m (private SGR, upstream issue #202); in 0.8.2 that is a TypeError
+from feed() — Screen.select_graphic_rendition does not accept private, and the
+tail of the chunk after the sequence is lost (the parser resets; the
+except Exception: return in _on_output swallows the exception). The subclass
+ignores private SGR; in master the fix is already merged (PR #203, 2025-09-02) —
+the override with the same semantics stays until the pin is raised to pyte 0.8.3
+(compatible and documented; at 0.8.3 the 'bfightmagenta' item in resolve_color()
+is marked legacy — in master the BG_AIXTERM[105] typo is already fixed).
+LNM (mode 20) is ON by default: bare LF = CR+LF (xterm behavior; Screen.reset()
+drops mode to _DEFAULT_MODE without LNM → an explicit restore after
+super().__init__ and in reset(); explicit \x1b[20h/\x1b[20l (SM/RM 20) from a
+remote program still work).
 
-v1.2.12 (PYTE82_AUDIT.md пачка B): альтернативный экран в SshmapHistoryScreen —
-приватные режимы 47/1047/1048/1049, которые в 0.8.2 были инертными битами
-screen.mode со сдвигом <<5 (обработчиков нет). Семантика — по upstream PR #212
-(закрыт без мерджа, автор dwgx; код pyte LGPL-3.0 — атрибуция автору PR в
-комментарии к коду обязательна), дифференциально проверенная против tmux 3.6b
-и GNU screen: ОДИН флаг in_alt (ESC[?47l выходит из экрана, вошедшего через
-1049h); вход — сохранить основной буфер → рабочий = пустой новый (курсор НЕ
-хомится — TUI сам шлёт CUP; повторный вход идемпотентен); выход — восстановить
-сохранённый буфер с клипом под текущую ширину, альтерн-буфер отбросить
-(содержимое не переживает round-trip — поведение обоих референс-эмуляторов
-приоритетнее буквы xterm «without clearing»); курсор сохраняется/восстанавливается
-только для 1048/1049 (xterm: 1049 = 1047+1048) отдельным полем _alt_cursor, а НЕ
-стек savepoints (TUI внутри сессии сам гоняет ESC 7/ESC 8). Строки, ушедшие за
-край альтерн-буфера (index/reverse_index при in_alt), не попадают в скроллбэк —
-как less в настоящем терминале; RIS (ESC c — НЕ ESC [ c, это CSI DA) внутри alt →
-полный сброс + выход.
-Доступор: screen.in_alt + TerminalScreen.in_alt_screen() под тем же lock'ом, что
-и feed(); пока in_alt — колесо мыши и Ctrl+Shift+PgUp/PgDn не скроллят историю
-(гейт в TerminalWidget; полноценная маршрутизация колеса в TUI — v1.2.13).
+v1.2.12 (PYTE82_AUDIT.md batch B): the alternative screen in SshmapHistoryScreen —
+private modes 47/1047/1048/1049, which in 0.8.2 were inert bits of screen.mode
+with the <<5 shift (no handlers). Semantics — per upstream PR #212 (closed
+without a merge, author dwgx; the pyte code is LGPL-3.0 — attribution to the PR
+author in a code comment is mandatory), differentially checked against tmux 3.6b
+and GNU screen: a SINGLE in_alt flag (ESC[?47l leaves the screen entered via
+1049h); enter — save the main buffer → the working one = a fresh empty one
+(the cursor is NOT homed — the TUI sends CUP itself; re-entering is
+idempotent); leave — restore the saved buffer clipped to the current width,
+drop the alt buffer (the content does not survive the round-trip — the behavior
+of both reference emulators takes priority over the xterm wording "without
+clearing"); the cursor is saved/restored only for 1048/1049 (xterm: 1049 =
+1047+1048) in a separate _alt_cursor field, NOT a savepoint stack (the TUI
+inside the session runs ESC 7/ESC 8 itself). Lines that scroll out of the alt
+buffer (index/reverse_index while in_alt) do not enter the scrollback — like
+less in a real terminal; RIS (ESC c — NOT ESC [ c, that is CSI DA) inside alt →
+full reset + leave.
+Access: screen.in_alt + TerminalScreen.in_alt_screen() under the same lock as
+feed(); while in_alt — the mouse wheel and Ctrl+Shift+PgUp/PgDn do not scroll
+history (the gate in TerminalWidget; full wheel routing in the TUI — v1.2.13).
 
-v1.2.14 (PYTE82_AUDIT.md пачка D2): батчинг авто-возврата к live-строке — override
-before_event в SshmapHistoryScreen. Для каждого события кроме prev_page/next_page
-pyte крутил next_page() в цикле: при глубокой истории до ~250 итераций, каждая
-O(lines) (замер D1 v1.2.12: 68–73 мс/чанк против ~42 на live-строке; feed идёт
-через queued signal — блокировка GUI-потока). Теперь одна bulk-операция с той же
-арифметикой, что в next_page (screens.py): mid = min(len(history.bottom), size −
-position); top.extend(buffer[0:mid]); buffer сдвиг вверх; buffer[-mid:] — из
-bottom.popleft(); position += mid; dirty = все строки — O(lines) один раз. Проверенный
-факт (прогоном): инвариант len(history.bottom) == size − position → mid может
-превышать lines (глубокая история); тогда избыток mid сверх lines возвращается из
-главы bottom обратно в top (те же строки, что цикл переносил бы в промежуточных
-итерациях) — итог идентичен циклу next_page(): position == size, bottom пуст, top
-полностью восстановлен, buffer = live-экран. Обёртка вызывает self.before_event(event)
-по имени → override подхватывается (before_event не входит в _wrapped); prev_page/
-next_page — no-op, как в pyte.
+v1.2.14 (PYTE82_AUDIT.md batch D2): batching of the auto-return to the live line —
+a before_event override in SshmapHistoryScreen. For every event except
+prev_page/next_page pyte spun next_page() in a loop: with a deep history up to
+~250 iterations, each O(lines) (measurement D1 v1.2.12: 68–73 ms/chunk against
+~42 on the live line; feed comes through a queued signal — blocking the GUI
+thread). Now a single bulk operation with the same arithmetic as next_page
+(screens.py): mid = min(len(history.bottom), size − position);
+top.extend(buffer[0:mid]); the buffer shifts up; buffer[-mid:] — from
+bottom.popleft(); position += mid; dirty = all lines — O(lines) once. Verified
+fact (a run): the invariant len(history.bottom) == size − position → mid can
+exceed lines (deep history); the surplus of mid over lines returns from the
+HEAD of bottom back to top (the same lines the loop would have moved in the
+intermediate iterations) — the result is identical to the next_page() loop:
+position == size, bottom empty, top fully restored, buffer = the live screen.
+The wrapper calls self.before_event(event) by name → the override is picked up
+(before_event is not in _wrapped); prev_page/next_page — no-ops, as in pyte.
 
-Headless-friendly: сам класс Screen не требует Qt — тестируется без GUI.
-Потокобезопасность: feed() из SSH-потока, snapshot()/application_cursor_keys
-из GUI-потока (v1.1.2 final N13: мёртвое свойство cursor убрано — декларация
-совпадает с кодом; курсор отдаёт snapshot()).
+v1.3rc1 (PYTE82_AUDIT.md "managed fork"): pyte → a managed fork. The import seam —
+one line `from third_party import pyte`: the vendored pyte 0.8.2 (the PyPI sdist
+with provenance, sha256) + the explicit patches 0001–0003 in third_party/pyte/;
+the single source of truth — third_party/pyte-patches/MANIFEST.md. The batch A
+overrides (private SGR → patch 0001, LNM → patch 0002) and batch B (the
+alternative screen → patch 0003) were removed from the subclass — now they are
+patches of the fork; SshmapHistoryScreen keeps only the before_event batching
+(D2). The behavior is unchanged: the existing terminal tests are green
+unchanged (except the one-line import seam, v1.3rc1). Reverting to stock pyte
+= one line back (import pyte) — see MANIFEST.md.
+
+Headless-friendly: the Screen class itself requires no Qt — tested without a GUI.
+Thread safety: feed() from the SSH thread, snapshot()/application_cursor_keys
+from the GUI thread (v1.1.2 final N13: the dead cursor property was removed —
+the declaration matches the code; the cursor comes from snapshot()).
 """
 
-import copy
 import threading
-from collections import defaultdict
 
-try:
-    import pyte
-    from pyte.screens import Char, Margins, StaticDefaultDict
-except ImportError as e:  # pragma: no cover
-    raise ImportError(
-        "Для v0.8 терминала требуется пакет 'pyte' (pip install pyte)"
-    ) from e
+# v1.3rc1 (PYTE82_AUDIT.md "managed fork"): the import seam — the only place in
+# the code that knows about the fork: the vendored pyte 0.8.2 + the explicit
+# patches 0001–0003 in third_party/pyte/ (provenance, sha256 tables, policy —
+# third_party/pyte-patches/MANIFEST.md). Reverting to stock pyte = one line back (import pyte).
+from third_party import pyte
 
-# ── v1.0RC1: цветовой движок для посячейного холста (TERMINAL.md §5.1) ───────
-# Проверенные факты pyte 0.8.2 (прогоном на установленной версии):
-#   * SGR 33 → fg='brown', SGR 93 → fg='brightbrown' — жёлтый называется brown;
-#   * 256-цвета И truecolor хранятся как hex-строки БЕЗ '#' ('ff0000', '0a141e') —
-#     ветка isdigit() никогда не срабатывает, нужен hex-passthrough;
-#   * опечатка самого pyte: BG_AIXTERM[105] = 'bfightmagenta' (SGR 4;105 → bg='bfightmagenta').
-# Движок headless (без Qt) — тестируется без GUI (tests/test_terminal_colors.py).
+# ── v1.0RC1: the per-cell color engine (TERMINAL.md §5.1) ────────────────────
+# Verified pyte 0.8.2 facts (a run on the installed version):
+#   * SGR 33 → fg='brown', SGR 93 → fg='brightbrown' — yellow is called brown;
+#   * the 256-colors AND truecolor are stored as hex strings WITHOUT '#' ('ff0000',
+#     '0a141e') — the isdigit() branch never fires, a hex passthrough is needed;
+#   * a typo in pyte itself: BG_AIXTERM[105] = 'bfightmagenta' (SGR 4;105 → bg='bfightmagenta').
+# The engine is headless (no Qt) — tested without a GUI (tests/test_terminal_colors.py).
 
-DEFAULT_FG_HEX = "#e2e8f0"   # default-текст на тёмном фоне окна терминала
-DEFAULT_BG_HEX = "#0f172a"   # фон окна терминала (стиль QPlainTextEdit v0.8)
+DEFAULT_FG_HEX = "#e2e8f0"   # the default text on the dark terminal window background
+DEFAULT_BG_HEX = "#0f172a"   # the terminal window background (the QPlainTextEdit v0.8 style)
 
-# ── v1.0RC3: параметры скроллбэка HistoryScreen (TERMINAL.md §5.4) ───────────
-# history — глубина deque-истории (строк); ratio — размер «страницы» для
-# prev_page()/next_page() = ceil(lines * ratio): ratio=0.1 при 32 строках даёт
-# ~4 строки за тик колеса/нажатие Ctrl+Shift+PgUp/PgDn. Ключ конфига
-# terminal_history_lines подключён в финале v1.0 (ROADMAP задача 9,
-# load_terminal_settings() в modules/ssh_terminal.py) — дефолт = поведение ПОСЛЕ
-# RC3 (скроллбэк включён); явный 0 — отключение скроллбэка пользователем.
+# ── v1.0RC3: HistoryScreen scrollback parameters (TERMINAL.md §5.4) ──────────
+# history — the depth of the deque history (lines); ratio — the "page" size for
+# prev_page()/next_page() = ceil(lines * ratio): ratio=0.1 at 32 lines gives
+# ~4 lines per wheel tick / Ctrl+Shift+PgUp/PgDn press. The config key
+# terminal_history_lines was wired up in the v1.0 final (ROADMAP task 9,
+# load_terminal_settings() in modules/ssh_terminal.py) — the default = the
+# behavior AFTER RC3 (scrollback ON); an explicit 0 — the user disabling it.
 DEFAULT_HISTORY_LINES = 1000
 SCROLL_RATIO = 0.1
 
-# Палитры: ОБЯЗАТЕЛЬНЫЕ ключи black…white + br_* (8+8) — иначе SGR 33/93 и
-# bright-цвета уходят в default (критическая ошибка №2 из TERMINAL.md §3).
-# 'default' — текущая xterm-подобная палитра: дефолты = текущий вид.
-# default_fg/default_bg — цвет текста и фон экрана (reverse сводится к ним).
+# Palettes: the REQUIRED keys black…white + br_* (8+8) — otherwise the SGR 33/93
+# and the bright colors fall to default (critical error #2 from TERMINAL.md §3).
+# 'default' — the current xterm-like palette: the defaults = the current look.
+# default_fg/default_bg — the text color and the screen background (reverse folds to them).
 ANSI_COLOR_NAMES = ("black", "red", "green", "yellow", "blue", "magenta", "cyan", "white")
 
 PALETTES = {
@@ -158,19 +169,19 @@ PALETTES = {
 
 
 def resolve_color(value, palette=None, default_hex=DEFAULT_FG_HEX):
-    """pyte-цвет → hex '#rrggbb' (TERMINAL.md §5.1).
+    """pyte color → hex '#rrggbb' (TERMINAL.md §5.1).
 
-    value: None/'default' | имя ('brown', 'brightred', …) | 6-hex без '#'
-    (в pyte 0.8.2 и 256-цвета, и truecolor хранятся именно так — passthrough).
-    Особые случаи: 'brown'/'brightbrown' — жёлтый (SGR 33/93); 'bfightmagenta' —
-    опечатка самого pyte для bright magenta (BG_AIXTERM[105], SGR 4;105).
-    Неизвестное имя → default_hex.
+    value: None/'default' | a name ('brown', 'brightred', …) | a 6-hex without '#'
+    (in pyte 0.8.2 both the 256-colors and truecolor are stored exactly like that —
+    passthrough). Special cases: 'brown'/'brightbrown' — yellow (SGR 33/93);
+    'bfightmagenta' — a typo in pyte itself for bright magenta (BG_AIXTERM[105],
+    SGR 4;105). An unknown name → default_hex.
     """
     pal = PALETTES["default"] if palette is None else palette
     if value in (None, "default"):
         return default_hex
     v = str(value)
-    # 256-цвет / truecolor: hex без '#' — passthrough
+    # 256-color / truecolor: hex without '#' — passthrough
     if len(v) == 6:
         try:
             int(v, 16)
@@ -178,189 +189,110 @@ def resolve_color(value, palette=None, default_hex=DEFAULT_FG_HEX):
         except ValueError:
             pass
     name = v.lower()
-    if name == "bfightmagenta":      # опечатка pyte (SGR 4;105) → bright magenta
+    if name == "bfightmagenta":      # a pyte typo (SGR 4;105) → bright magenta
         return pal.get("br_magenta", default_hex)
     if name.startswith("bright"):
         base = name[len("bright"):]
         if base == "brown":          # SGR 93 — bright yellow
             base = "yellow"
         return pal.get("br_" + base, pal.get(base, default_hex))
-    if name == "brown":              # SGR 33 — в pyte жёлтый называется brown
+    if name == "brown":              # SGR 33 — in pyte yellow is called brown
         return pal.get("yellow", default_hex)
     return pal.get(name, default_hex)
 
 
-# ── v1.2.11 (PYTE82_AUDIT.md пачка A): совместимость с установленной pyte 0.8.2 ─
+# ── v1.3rc1: managed fork — only the D2 auto-return batching in the subclass ───────────
 class SshmapHistoryScreen(pyte.HistoryScreen):
-    """pyte.HistoryScreen + override'ы совместимости (факт №12, PYTE82_AUDIT.md)
-    и альтернативный экран (v1.2.12, пачка B).
+    """pyte.HistoryScreen + the auto-return to the live line batching (batch D2, v1.2.14).
 
-    * private SGR (CSI ? … m) — игнорируются: в 0.8.2 это TypeError из feed()
-      (Vim 9+ шлёт \\x1b[?4m, upstream issue #202; фикс уже вмержен в master —
-      PR #203, 2025-09-02). Override с той же семантикой оставляем до поднятия
-      пина на pyte 0.8.3 (совместим и задокументирован);
-    * LNM (режим 20) включён по умолчанию: голый LF = CR+LF (xterm-поведение).
-      Screen.reset() сбрасывает mode на _DEFAULT_MODE БЕЗ LNM → явное восстановление
-      в __init__ (ПОСЛЕ super().__init__) и в reset() (RIS ESC c — НЕ ESC [ c, это CSI DA); явные
-      \\x1b[20h/\\x1b[20l (SM/RM 20) от удалённой программы по-прежнему работают;
-    * альтернативный экран (v1.2.12): приватные режимы 47/1047/1048/1049 — в 0.8.2
-      это инертные биты screen.mode (сдвиг <<5), обработчиков нет. Семантика — по
-      upstream PR #212 (закрыт без мерджа, автор dwgx; код pyte LGPL-3.0 — атрибуция
-      автору PR обязательна), дифференциально проверенная против tmux 3.6b и GNU
-      screen: один флаг in_alt; вход — сохранить основной буфер → рабочий = пустой
-      новый (курсор НЕ хомится, повторный вход идемпотентен); выход — восстановить
-      сохранённый буфер с клипом под текущую ширину, альтерн-буфер отбросить; курсор
-      только для 1048/1049 — отдельное поле _alt_cursor (НЕ стек savepoints); строки,
-      ушедшие за край альтерн-буфера, не попадают в скроллбэк; RIS внутри alt →
-      полный сброс + выход.
+    v1.3rc1: the batch A overrides (private SGR — fork patch 0001; LNM on by
+    default — patch 0002) and batch B (the alternative screen 47/1047/1048/1049 —
+    patch 0003, the upstream PR #212 semantics, author dwgx) moved into the managed
+    fork third_party/pyte/ (provenance/sha256/policy — third_party/pyte-patches/
+    MANIFEST.md). Only before_event is left in the subclass: that is our
+    optimization (not a break of the xterm semantics), so it lives in our code.
 
-    Механизм подхвата: Stream привязывает методы экрана через getattr(listener, attr)
-    при attach → парсер видит переопределения этого подкласса автоматически."""
+    The pickup mechanism: HistoryScreen.__getattribute__ calls
+    self.before_event(event) by name → the subclass override is picked up
+    (before_event is not in _wrapped — no conflicts). prev_page/next_page —
+    no-ops, as in pyte."""
 
-    # Приватные коды ДО сдвига <<5 (в pyte.modes 0.8.2 констант для них нет —
-    # проверено: там только LNM/IRM/DECTCEM/DECSCNM/DECOM/DECAWM/DECCOLM).
-    ALTSCREEN_MODES = (47, 1047, 1048, 1049)
-
-    def __init__(self, *args, **kwargs):
-        # Состояние alt инициализируется ДО super().__init__: внутри конструктора
-        # Screen.__init__ вызывается self.reset(), а override ниже читает in_alt.
-        self.in_alt = False            # один флаг (не четыре): мы на альтерн-экране
-        self._saved_buffer = None      # основной буфер, пока in_alt
-        self._alt_cursor = None        # курсор для 1048/1049 (отдельное поле, НЕ savepoints)
-        super().__init__(*args, **kwargs)
-        self.mode.add(pyte.modes.LNM)   # xterm-поведение: голый LF = CR+LF
-
-    def reset(self):
-        if self.in_alt:                # RIS (ESC c) внутри alt: полный сброс + выход
-            self.in_alt = False
-            self._saved_buffer = None  # основной буфер всё равно чистится штатным reset()
-            self._alt_cursor = None
-        super().reset()                 # Screen.reset() сбрасывает mode на _DEFAULT_MODE
-        self.mode.add(pyte.modes.LNM)   # …поэтому после RIS (ESC c) LNM возвращаем
-
-    # ── v1.2.14 (PYTE82_AUDIT.md пачка D2): батчинг авто-возврата к live-строке ──
+    # ── v1.2.14 (PYTE82_AUDIT.md batch D2): live-line auto-return batching ───────
     def before_event(self, event):
-        """Батчинг авто-возврата к live-строке (замер D1, v1.2.12: 68–73 мс/чанк).
+        """The auto-return to the live line batching (measurement D1, v1.2.12: 68–73 ms/chunk).
 
-        pyte.HistoryScreen.before_event для каждого события кроме prev_page/next_page
-        крутит next_page() в цикле: при глубокой истории до ~250 итераций, каждая
-        O(lines) (замер D1 v1.2.12: 68–73 мс/чанк против ~42 на live-строке — feed
-        идёт через queued signal в GUI-потоке). Здесь — одна bulk-операция с той же
-        арифметикой, что в HistoryScreen.next_page (screens.py):
+        pyte.HistoryScreen.before_event for every event except prev_page/next_page
+        spins next_page() in a loop: with a deep history up to ~250 iterations,
+        each O(lines) (measurement D1 v1.2.12: 68–73 ms/chunk against ~42 on the
+        live line — feed comes through a queued signal in the GUI thread). Here —
+        one bulk operation with the same arithmetic as HistoryScreen.next_page
+        (screens.py):
         mid = min(len(history.bottom), size − position); top.extend(buffer[0:mid]);
-        buffer сдвиг вверх; buffer[-mid:] — из bottom.popleft(); position += mid;
-        dirty = все строки. O(lines) один раз вместо O(position/ratio × lines).
+        the buffer shifts up; buffer[-mid:] — from bottom.popleft();
+        position += mid; dirty = all lines. O(lines) once instead of
+        O(position/ratio × lines).
 
-        Проверенный факт (прогоном на установленной pyte 0.8.2): инвариант
-        len(history.bottom) == size − position (каждый prev_page/next_page переносит
-        одно и то же число строк между buffer и bottom) → mid может превышать lines
-        (глубокая история: 968 строк на 32-строчном экране). В этом случае наивный
-        цикл next_page() ломается (range(lines − mid) пуст — сдвиг не происходит, а
-        отрицательные индексы создали бы мусор в buffer): избыток mid сверх lines
-        возвращается из ГЛАВЫ bottom обратно в top (те же строки, которые цикл
-        переносил бы в промежуточных итерациях), а экран получает последние lines
-        строк последовательности (buffer[take:] + остаток bottom). Итог идентичен
-        циклу next_page(): position == size, bottom пуст, top полностью восстановлен,
-        buffer = live-экран; при mid ≤ lines код совпадает с next_page() пословно.
+        Verified fact (a run on the installed pyte 0.8.2): the invariant
+        len(history.bottom) == size − position (each prev_page/next_page moves the
+        same number of lines between buffer and bottom) → mid can exceed lines
+        (a deep history: 968 lines on a 32-line screen). In this case the naive
+        next_page() loop breaks (range(lines − mid) is empty — no shift happens,
+        and negative indices would create garbage in buffer): the surplus of mid
+        over lines returns from the HEAD of bottom back to top (the same lines
+        the loop would have moved in the intermediate iterations), and the screen
+        gets the last lines of the sequence (buffer[take:] + the rest of bottom).
+        The result is identical to the next_page() loop: position == size, bottom
+        empty, top fully restored, buffer = the live screen; at mid ≤ lines the
+        code matches next_page() word for word.
 
-        Механизм подхвата: обёртка HistoryScreen.__getattribute__ вызывает
-        self.before_event(event) по имени → переопределение подкласса подхватывается
-        (before_event не входит в _wrapped — конфликтов нет). prev_page/next_page —
-        no-op, как в pyte: ручная прокрутка колесом/PgUp-PgDn авто-возврат НЕ трогает.
+        The pickup mechanism: the HistoryScreen.__getattribute__ wrapper calls
+        self.before_event(event) by name → the subclass override is picked up
+        (before_event is not in _wrapped — no conflicts). prev_page/next_page —
+        no-ops, as in pyte: a manual wheel/PgUp-PgDn scroll does NOT touch the
+        auto-return.
         """
         if event in ("prev_page", "next_page"):
             return
         h = self.history
         if h.position < h.size and h.bottom:
             mid = min(len(h.bottom), h.size - h.position)
-            take = min(mid, self.lines)      # строк из buffer, которые уходят обратно в top
+            take = min(mid, self.lines)      # the buffer lines that go back to top
             h.top.extend(self.buffer[y] for y in range(take))
-            if mid > take:                   # глубокая история: избыток — из главы bottom в top
+            if mid > take:                   # a deep history: the surplus — from the head of bottom to top
                 h.top.extend(h.bottom.popleft() for _ in range(mid - take))
-            for y in range(self.lines - take):        # buffer сдвиг вверх (как в next_page)
+            for y in range(self.lines - take):        # the buffer shifts up (as in next_page)
                 self.buffer[y] = self.buffer[y + take]
             for y in range(self.lines - take, self.lines):
-                self.buffer[y] = h.bottom.popleft()   # нижние строки — из bottom
+                self.buffer[y] = h.bottom.popleft()   # the bottom lines — from bottom
             self.history = h._replace(position=h.position + mid)
             self.dirty = set(range(self.lines))
 
-    # ── v1.2.12: альтернативный экран (пачка B; семантика — upstream PR #212,
-    #    закрыт без мерджа, автор dwgx; код pyte LGPL-3.0 — атрибуция обязательна) ──
-    def set_mode(self, *modes, **kwargs):
-        if kwargs.get("private") and any(m in self.ALTSCREEN_MODES for m in modes):
-            self._enter_alt(save_cursor=any(m in (1048, 1049) for m in modes))
-        super().set_mode(*modes, **kwargs)      # биты складываются в mode как раньше
-
-    def reset_mode(self, *modes, **kwargs):
-        if kwargs.get("private") and any(m in self.ALTSCREEN_MODES for m in modes):
-            self._exit_alt(restore_cursor=any(m in (1048, 1049) for m in modes))
-        super().reset_mode(*modes, **kwargs)
-
-    def _enter_alt(self, save_cursor):
-        if self.in_alt:
-            return                  # повторный вход идемпотентен (основной не теряется)
-        self._saved_buffer = self.buffer
-        self.buffer = defaultdict(lambda: StaticDefaultDict[int, Char](self.default_char))
-        self.dirty.update(range(self.lines))
-        if save_cursor:             # только 1048/1049 (xterm: 1049 = 1047+1048)
-            self._alt_cursor = copy.copy(self.cursor)
-        self.in_alt = True          # курсор НЕ хомится — TUI сам шлёт CUP
-
-    def _exit_alt(self, restore_cursor):
-        if not self.in_alt:
-            return
-        saved = self._saved_buffer
-        for line in saved.values():             # клип под текущую ширину (resize-безопасность;
-            for x in [x for x in line if x >= self.columns]:   # те же границы, что в Screen.resize)
-                line.pop(x, None)
-        self.buffer = saved                     # альтерн-буфер отброшен: содержимое не
-                                                # переживает round-trip (tmux/screen так же)
-        self.in_alt = False
-        self._saved_buffer = None
-        self.dirty.update(range(self.lines))
-        if restore_cursor and self._alt_cursor is not None:
-            self.cursor = self._alt_cursor
-            self._alt_cursor = None
-            self.ensure_hbounds()               # кламп после возможного resize в alt
-            self.ensure_vbounds()
-
-    def index(self):
-        top, bottom = self.margins or Margins(0, self.lines - 1)
-        if self.cursor.y == bottom and not self.in_alt:
-            self.history.top.append(self.buffer[top])   # в alt — не сливаем в скроллбэк (less)
-        pyte.Screen.index(self)
-
-    def reverse_index(self):
-        top, bottom = self.margins or Margins(0, self.lines - 1)
-        if self.cursor.y == top and not self.in_alt:
-            self.history.bottom.append(self.buffer[bottom])
-        pyte.Screen.reverse_index(self)
-
-    def select_graphic_rendition(self, *attrs, private=False):
-        if private:
-            return  # private SGR (CSI ? … m) — игнорируем, как в pyte master (PR #203)
-        super().select_graphic_rendition(*attrs)
+    # v1.3rc1: the batch A/B overrides REMOVED — they became the fork patches
+    # 0001/0002/0003 (third_party/pyte-patches/MANIFEST.md); the behavior is the same, the provenance is explicit.
 
 
 class TerminalScreen:
-    """Сетка columns x lines на pyte + потокобезопасный вход.
+    """A columns x lines grid on pyte + thread-safe input.
 
-    v1.0RC3: screen — pyte.HistoryScreen (скроллбэк, TERMINAL.md §5.4).
-    v1.2.11: screen — SshmapHistoryScreen (подкласс, совместимость с pyte 0.8.2).
-    v1.2.12: + in_alt_screen() — состояние альтернативного экрана под lock'ом."""
+    v1.0RC3: screen — pyte.HistoryScreen (scrollback, TERMINAL.md §5.4).
+    v1.2.11: screen — SshmapHistoryScreen (a subclass, compatibility with pyte 0.8.2).
+    v1.2.12: + in_alt_screen() — the alternative screen state under the lock.
+    v1.3rc1: pyte — the managed fork third_party/pyte (the import seam, MANIFEST.md);
+             only the before_event batching is left in the subclass (D2)."""
 
     def __init__(self, columns=120, lines=32, history_lines=DEFAULT_HISTORY_LINES):
         self.columns = columns
         self.lines = lines
-        # v1.0RC3: HistoryScreen вместо Screen — готовый скроллбэк (deque-история)
-        # + авто-возврат к live-строке при новом выводе (before_event).
-        # v1.2.11: подкласс SshmapHistoryScreen (private SGR + LNM, пачка A).
+        # v1.0RC3: HistoryScreen instead of Screen — a ready-made scrollback (deque history)
+        # + the auto-return to the live line on new output (before_event).
+        # v1.2.11: the SshmapHistoryScreen subclass (private SGR + LNM, batch A).
+        # v1.3rc1: pyte — the fork third_party/pyte; only the D2 batching is left in the subclass.
         self.screen = SshmapHistoryScreen(columns, lines,
                                           history=int(history_lines), ratio=SCROLL_RATIO)
-        self.stream = pyte.ByteStream(self.screen)   # принимает байты, utf-8 внутри
+        self.stream = pyte.ByteStream(self.screen)   # accepts bytes, utf-8 inside
         self._lock = threading.Lock()
 
-    # ── вход из SSH-потока ─────────────────────────────
+    # ── input from the SSH thread ──────────────────────
     def feed(self, data: bytes):
         with self._lock:
             self.stream.feed(data)
@@ -370,14 +302,14 @@ class TerminalScreen:
             self.columns, self.lines = columns, lines
             self.screen.resize(lines, columns)
 
-    # ── v1.0RC3: скроллбэк (HistoryScreen, TERMINAL.md §5.4) ───────────────
+    # ── v1.0RC3: the scrollback (HistoryScreen, TERMINAL.md §5.4) ──────────
     def scroll_up(self):
-        """Страница истории вверх (prev_page). True — позиция изменилась.
+        """A history page up (prev_page). True — the position changed.
 
-        На верхней границе (position <= lines или история пуста) pyte делает
-        no-op → False. Вызывается из GUI-потока (колесо/Ctrl+Shift+PgUp);
-        под тем же lock'ом, что и feed() — SSH-поток не может изменить буфер
-        посреди страницы."""
+        At the top edge (position <= lines or the history is empty) pyte does a
+        no-op → False. Called from the GUI thread (the wheel / Ctrl+Shift+PgUp);
+        under the same lock as feed() — the SSH thread cannot change the buffer
+        in the middle of a page."""
         with self._lock:
             scr = self.screen
             before = scr.history.position
@@ -385,7 +317,7 @@ class TerminalScreen:
             return scr.history.position != before
 
     def scroll_down(self):
-        """Страница вниз, к live-строке (next_page). True — позиция изменилась."""
+        """A page down, toward the live line (next_page). True — the position changed."""
         with self._lock:
             scr = self.screen
             before = scr.history.position
@@ -393,86 +325,86 @@ class TerminalScreen:
             return scr.history.position != before
 
     def at_bottom(self):
-        """Мы на live-строке? (history.position == history.size — курсор виден,
-        скролл вниз запрещён; TERMINAL.md §5.4)."""
+        """Are we on the live line? (history.position == history.size — the cursor
+        is visible, the scroll down is forbidden; TERMINAL.md §5.4)."""
         with self._lock:
             return self.screen.history.position == self.screen.history.size
 
     def scroll_info(self):
-        """(position, size) для тестов/отладки."""
+        """(position, size) for tests/debugging."""
         with self._lock:
             h = self.screen.history
             return h.position, h.size
 
-    # ── v1.1.2RC3 (AUDIT U3): состояние DECCKM для ввода ────────────────────
+    # ── v1.1.2RC3 (AUDIT U3): the DECCKM state for input ────────────────────
     def application_cursor_keys(self):
-        """Включён ли DECCKM (Application Cursor Keys Mode, приватный режим 1)?
+        """Is DECCKM (Application Cursor Keys Mode, private mode 1) ON?
 
-        Полноэкранные TUI (mc/vim/htop) при запуске шлют smkx \\x1b[?1h и дальше
-        ОЖИДАЮТ стрелки в SS3-форме (\\x1bOA…\\x1bOD), а не CSI (\\x1b[A…).
-        TerminalWidget по этому флагу выбирает последовательность для стрелок
-        и Home/End (AUDIT U3: «в mc не работают стрелки»).
+        Full-screen TUIs (mc/vim/htop) send smkx \\x1b[?1h at startup and then
+        EXPECT the arrows in the SS3 form (\\x1bOA…\\x1bOD), not CSI (\\x1b[A…).
+        TerminalWidget picks the sequences for the arrows and Home/End from this
+        flag (AUDIT U3: "the arrows do not work in mc").
 
-        ВАЖНО (проверено прогоном на установленной pyte 0.8.2): приватные режимы
-        хранятся в screen.mode со сдвигом влево на 5 бит — set_mode(private=True)
-        делает mode << 5. DECCKM это **32**, а не 1: каноническая из интернета
-        проверка «1 in screen.mode» никогда не срабатывает (после \\x1b[?1h в
-        режиме появляется 32; по умолчанию включены DECAWM=7<<5=224,
-        DECTCEM=25<<5=800 и — с v1.2.11 — LNM=20: {224, 800, 20}). pyte.modes
-        константы DECCKM в 0.8.2 нет.
+        IMPORTANT (verified by a run on the installed pyte 0.8.2): private modes
+        are stored in screen.mode shifted left by 5 bits — set_mode(private=True)
+        does mode << 5. DECCKM is **32**, not 1: the canonical check from the
+        internet, "1 in screen.mode", never fires (after \\x1b[?1h the mode gains
+        32; ON by default are DECAWM=7<<5=224, DECTCEM=25<<5=800 and — since
+        v1.2.11 — LNM=20: {224, 800, 20}). The pyte.modes DECCKM constant does not
+        exist in 0.8.2.
 
-        Читается под тем же lock'ом, что и feed(): SSH-поток может менять режимы
-        параллельно с GUI-потоком (smkx/rmkx приходят в выводе приложения).
+        Read under the same lock as feed(): the SSH thread can change the modes in
+        parallel with the GUI thread (smkx/rmkx come in the application output).
         """
         with self._lock:
             return (1 << 5) in self.screen.mode
 
-    # ── v1.2.12 (PYTE82_AUDIT.md пачка B): состояние альтернативного экрана ──
+    # ── v1.2.12 (PYTE82_AUDIT.md batch B): the alternative screen state ──────
     def in_alt_screen(self):
-        """Включён ли альтернативный экран (приватные режимы 47/1047/1048/1049)?
+        """Is the alternative screen ON (private modes 47/1047/1048/1049)?
 
-        Читается под тем же lock'ом, что и feed(): SSH-поток может менять режимы
-        параллельно с GUI-потоком (htop/vim шлют \\x1b[?1049h при старте и
-        \\x1b[?1049l при выходе). Пока in_alt — TerminalWidget НЕ скроллит
-        историю колесом мыши и Ctrl+Shift+PgUp/PgDn (гейт); колесо в TUI уходит
-        в PTY только при включённом mouse tracking (v1.2.13, mouse_tracking())."""
+        Read under the same lock as feed(): the SSH thread can change the modes in
+        parallel with the GUI thread (htop/vim send \\x1b[?1049h at startup and
+        \\x1b[?1049l on exit). While in_alt — TerminalWidget does NOT scroll the
+        history with the mouse wheel and Ctrl+Shift+PgUp/PgDn (the gate); the wheel
+        in the TUI goes to the PTY only with mouse tracking ON (v1.2.13, mouse_tracking())."""
         with self._lock:
             return self.screen.in_alt
 
-    # ── v1.2.13 (PYTE82_AUDIT.md пачка C): состояние mouse tracking ──────────
+    # ── v1.2.13 (PYTE82_AUDIT.md batch C): the mouse tracking state ──────────
     def mouse_tracking(self):
-        """(enabled, sgr) — включён ли xterm mouse tracking и используется ли SGR-формат.
+        """(enabled, sgr) — is the xterm mouse tracking ON and the SGR format used.
 
-        enabled — включён любой из DECSET 1000/1002/1003 (button / button-motion /
-        all-motion tracking); sgr — включён DECSET 1006 (SGR extended encoding).
+        enabled — any of DECSET 1000/1002/1003 is ON (button / button-motion /
+        all-motion tracking); sgr — DECSET 1006 is ON (SGR extended encoding).
 
-        ВАЖНО (проверено прогоном на установленной pyte 0.8.2): приватные режимы
-        хранятся в screen.mode со сдвигом влево на 5 бит — set_mode(private=True)
-        делает mode << 5: после \\x1b[?1000h\\x1b[?1006h в режиме есть 32000 и 32192.
-        DECSET 1006 ОДИН не включает tracking — он только меняет кодировку отчётов
-        (реальный xterm без 1000/1002/1003 mouse-события не генерирует) →
-        feed(b'\\x1b[?1006h') даёт (False, True), а НЕ (True, True).
+        IMPORTANT (verified by a run on the installed pyte 0.8.2): private modes
+        are stored in screen.mode shifted left by 5 bits — set_mode(private=True)
+        does mode << 5: after \\x1b[?1000h\\x1b[?1006h the mode has 32000 and 32192.
+        DECSET 1006 ALONE does not enable tracking — it only changes the report
+        encoding (a real xterm without 1000/1002/1003 does not generate mouse-events) →
+        feed(b'\\x1b[?1006h') gives (False, True), NOT (True, True).
 
-        Читается под тем же lock'ом, что и feed(), на КАЖДОЕ событие колеса:
-        TUI меняет режимы во время сессии (htop включает 1003+1006 при старте и
-        выключает при выходе) — кэшировать нельзя. RIS (\\x1bc) сбрасывает все
-        приватные режимы → после полного reset снова (False, False) (проверено).
+        Read under the same lock as feed(), on EVERY wheel event: the TUI changes
+        the modes during the session (htop enables 1003+1006 at startup and
+        disables them on exit) — it cannot be cached. RIS (\\x1bc) resets all the
+        private modes → after a full reset it is (False, False) again (verified).
         """
         with self._lock:
             mode = self.screen.mode
             enabled = any((n << 5) in mode for n in (1000, 1002, 1003))
             return enabled, (1006 << 5) in mode
 
-    # ── рендер для GUI-потока ──────────────────────────
+    # ── rendering for the GUI thread ───────────────────
     def snapshot(self):
-        """v1.0RC1: снимок экрана для посячейного холста (TerminalWidget, GUI-поток).
+        """v1.0RC1: a screen snapshot for the per-cell canvas (TerminalWidget, the GUI thread).
 
-        Возвращает (rows, cursor_x, cursor_y, cursor_hidden): rows — список
-        lines списков Char шириной columns (пустые ячейки — default-Char pyte),
-        курсор зажат в границы сетки (cursor.x может быть == columns после wrap).
-        Читается под тем же lock'ом, что и feed(): SSH-поток не может изменить
-        буфер посреди paintEvent. Работает и с pyte.HistoryScreen (v1.0RC3) —
-        duck-typing по buffer/cursor/lines/columns.
+        Returns (rows, cursor_x, cursor_y, cursor_hidden): rows — a list of lines
+        lists of Char of width columns (the empty cells — the default Char of pyte),
+        the cursor is clamped to the grid bounds (cursor.x can be == columns after a
+        wrap). Read under the same lock as feed(): the SSH thread cannot change the
+        buffer in the middle of a paintEvent. Works with pyte.HistoryScreen (v1.0RC3)
+        too — duck typing by buffer/cursor/lines/columns.
         """
         with self._lock:
             scr = self.screen
@@ -482,10 +414,10 @@ class TerminalScreen:
             cy = min(scr.cursor.y, scr.lines - 1)
             return rows, cx, cy, bool(scr.cursor.hidden)
 
-    # v1.2.9 (ROADMAP «Гигиена терминала»): deprecated HTML-рендер render()
-    # (v1.0RC1) УДАЛЁН вместе с хелперами _color()/_esc_html() — мёртвый код с
-    # v1.0RC1, окном никогда не создавался; рендер — TerminalWidget.snapshot().
+    # v1.2.9 (ROADMAP "Terminal hygiene"): the deprecated HTML renderer render()
+    # (v1.0RC1) REMOVED together with the _color()/_esc_html() helpers — dead code
+    # since v1.0RC1, never created by the window; the render — TerminalWidget.snapshot().
 
-    # v1.1.2 final (N13): мёртвое свойство cursor() УДАЛЕНО — вызывающих в коде
-    # не было (AUDIT: только внутренние чтения screen.cursor.* под lock'ом).
-    # Курсор для рендера отдаёт snapshot() — под тем же lock'ом, что и feed().
+    # v1.1.2 final (N13): the dead cursor() property REMOVED — there were no callers
+    # in the code (AUDIT: only the internal screen.cursor.* reads under the lock).
+    # The cursor for the render comes from snapshot() — under the same lock as feed().

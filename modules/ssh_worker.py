@@ -25,17 +25,18 @@ def _get_translator():
     return _t_cache
 
 
-# ── Реестр активных worker'ов (патч v0.6.x) ─────────────────────
-# server_id → запущенный SSHWorker. Заполняется при создании потока и
-# очищается по сигналу finished(). Нужен, чтобы перед удалением ServerNode
-# проверить корректное завершение его SSH-операции (AUDIT / план v0.6.x #2):
-# иначе поток мог бы доставлять success/error в уже уничтоженный диалог или
-# продолжать «писать» в данные удалённого узла.
+# ── Registry of active workers (patch v0.6.x) ───────────────────
+# server_id → running SSHWorker. Populated when the thread is created,
+# and cleared on the finished() signal. Needed so that before removing a
+# ServerNode we can check that its SSH operation finished cleanly
+# (AUDIT / plan v0.6.x #2): otherwise the thread could deliver
+# success/error to an already-destroyed dialog, or keep "writing"
+# to data of a removed node.
 _active_workers: Dict[str, "SSHWorker"] = {}
 
 
 def get_active_worker(server_id: str) -> Optional["SSHWorker"]:
-    """Активный (ещё не завершённый) SSHWorker для сервера или None."""
+    """The server's active (still running, not yet finished) SSHWorker, or None."""
     if not server_id:
         return None
     worker = _active_workers.get(server_id)
@@ -45,12 +46,12 @@ def get_active_worker(server_id: str) -> Optional["SSHWorker"]:
 
 
 def wait_for_worker(server_id: str, timeout_ms: int = 5000) -> bool:
-    """Дождаться завершения SSHWorker сервера.
+    """Wait for the server's SSHWorker to finish.
 
-    Возвращает True, если активного потока нет (или он завершился за
-    timeout_ms). False — поток всё ещё работает; удалять узел не стоит.
-    Все операции внутри worker имеют внутренние сетевые таймауты
-    (socket 5 c / paramiko 15 c), поэтому wait() не висит бесконечно.
+    Returns True if there is no active thread (or it finished within
+    timeout_ms). False — the thread is still running; the node should not
+    be removed. Every operation inside the worker has internal network
+    timeouts (socket 5 s / paramiko 15 s), so wait() cannot hang forever.
     """
     worker = get_active_worker(server_id)
     if worker is None:
@@ -59,7 +60,7 @@ def wait_for_worker(server_id: str, timeout_ms: int = 5000) -> bool:
 
 
 class SSHWorker(QThread):
-    """Одноразовый поток для SSH-проверки/подключения без блокировки UI."""
+    """One-shot thread for an SSH check/connection without blocking the UI."""
 
     success = Signal(str)
     error = Signal(str)
@@ -72,14 +73,14 @@ class SSHWorker(QThread):
         self.host = host
         self.user = user
         self.port = port
-        self.server_id = server_id  # для загрузки из keyring
+        self.server_id = server_id  # for loading from the keyring
         self.password = password
         self.key_path = key_path
         self.test_only = test_only
         self.load_from_store = load_from_store
 
-        # Регистрация в реестре активных worker'ов (патч v0.6.x): guard для
-        # удаления узла. Авто-очистка — по finished() потока.
+        # Register in the active worker registry (patch v0.6.x): the guard for
+        # node removal. Auto-cleanup — on the thread's finished().
         if server_id:
             _active_workers[server_id] = self
             def _unregister(_=None, sid=server_id):
@@ -103,7 +104,7 @@ class SSHWorker(QThread):
                 pass
             self.success.emit(t("ssh.socket_test_ok", host=self.host, port=self.port))
         except socket.timeout:
-            # v0.9.3 fix: раньше здесь уходила хардкод-английская строка мимо i18n.
+            # v0.9.3 fix: before this a hardcoded English string went here, bypassing i18n.
             self.error.emit(t("ssh.socket_timeout", host=self.host, port=self.port))
         except OSError as e:
             msg = t("ssh.connection_failed", host=self.host, port=self.port)
@@ -117,8 +118,8 @@ class SSHWorker(QThread):
         t = _get_translator()
         from services.credential_manager import get_credential_manager
 
-        # AUDIT v0.7.2 (высокая #4): вместо AutoAddPolicy — known_hosts-пиннинг:
-        # новый ключ хоста принимается с логированием отпечатка, изменённый — отклоняется.
+        # AUDIT v0.7.2 (high #4): known_hosts pinning instead of AutoAddPolicy:
+        # a new host key is accepted with its fingerprint logged; a changed one is rejected.
         client = paramiko.SSHClient()
         policy = SshKnownHostsPolicy(hostname=self.host, port=self.port)
         policy.apply_to_client(client)
@@ -133,11 +134,11 @@ class SSHWorker(QThread):
 
         try:
             if self.key_path:
-                # v1.2.10 (AUDIT авто #1): паритет с SystemInfoCollector (system_info_collector.py:236–240) —
-                # если final_password заполнен (явный аргумент или keyring, стр. 127–132), передаём его
-                # как fallback: paramiko сначала пробует ключ, затем пароль. До фикса «Подключиться по SSH»
-                # падал там, где «Собрать информацию» работало. Пароля нет — None (paramiko пропускает,
-                # чистый key-путь без изменений).
+                # v1.2.10 (AUDIT auto #1): parity with SystemInfoCollector (system_info_collector.py:236-240) —
+                # if final_password is set (explicit argument or keyring, lines 127-132), pass it
+                # as a fallback: paramiko tries the key first, then the password. Before the fix
+                # "Connect over SSH" failed where "Gather information" worked. No password — None
+                # (paramiko skips it; the pure key path is unchanged).
                 client.connect(
                     self.host,
                     username=self.user,
@@ -149,10 +150,10 @@ class SSHWorker(QThread):
                     allow_agent=True,
                 )
             elif final_password:
-                # v1.1.2RC1 (N5): паритет с ssh_terminal.py — при попытке пароля
-                # НЕ опрашиваем локальные ключи/ssh-agent (дефолты paramiko True/True
-                # добавляли задержку и могли «подцепить» чужой ключ из agent до
-                # попытки пароля).
+                # v1.1.2RC1 (N5): parity with ssh_terminal.py — when attempting a password
+                # we do NOT probe local keys/ssh-agent (paramiko's True/True defaults
+                # added latency and could "pick up" a foreign key from the agent before
+                # the password attempt).
                 client.connect(
                     self.host,
                     username=self.user,
@@ -174,13 +175,13 @@ class SSHWorker(QThread):
                 )
 
             msg = t("ssh.connected_ok", host=self.host)
-            # AUDIT v0.7.2 (высокая #4): первое подключение — предупредить о принятом ключе
+            # AUDIT v0.7.2 (high #4): first connection — warn about the accepted key
             if policy.accepted_new_key and policy.last_fingerprint:
                 note = t("ssh.host_key_new", host=self.host, fp=policy.last_fingerprint)
                 msg += "\n" + (note if not note.startswith("[") else f"New host key accepted ({policy.last_fingerprint})")
             self.success.emit(msg if not msg.startswith("[") else f"✓ Connected to {self.host}")
         except paramiko.BadHostKeyException as e:
-            # AUDIT v0.7.2 (высокая #4): сохранённый ключ хоста изменился — вероятен MITM
+            # AUDIT v0.7.2 (high #4): the stored host key changed — a likely MITM
             try:
                 from modules.logger import get_logger as _gl
                 _gl("modules.ssh_worker").warning(f"Host key mismatch for {self.host}: {e}")

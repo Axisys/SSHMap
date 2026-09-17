@@ -1,28 +1,28 @@
 # -*- coding: utf-8 -*-
-"""v1.2.12 замер D1 (PYTE82_AUDIT.md пачка D): overhead обёрток HistoryScreen
-при глубокой истории — худший случай авто-возврата к live-строке.
+"""v1.2.12 the D1 measurement (the PYTE82_AUDIT.md pack D): the overhead of the HistoryScreen wrappers
+on a deep history — the worst case of the auto-return to the live line.
 
-НЕ часть сьюта (файлы с префиксом _ run_all.py пропускает). Протокол (D1):
-  * TerminalScreen(120, 32, history_lines=1000); напечатать ~1050 строк истории;
-  * scroll_up() до верхней границы — пользователь у верха истории (худший случай:
-    before_event авто-возвратом крутит next_page() до ~250 раз в ОДНОМ feed);
-  * замер подачи htop-подобного чанка (~19 КБ) → мс;
-  * базовые линии: тот же чанк на live-строке (без истории для возврата) +
-    чистый pyte.Screen без истории;
-  * ожидаемое число next_page ≈ (size − position) / ceil(lines × ratio)
-    (~250 при глубокой истории, ratio=0.1 → страница = 4 строки).
+NOT part of the suite (files with the _ prefix are skipped by run_all.py). The protocol (D1):
+  * TerminalScreen(120, 32, history_lines=1000); print ~1050 history lines;
+  * scroll_up() to the top edge — the user is at the top of the history (the worst case:
+    the before_event auto-return spins next_page() up to ~250 times in ONE feed);
+  * the measurement of the feed of an htop-like chunk (~19 KB) → ms;
+  * the baseline lines: the same chunk on the live line (no history to return to) +
+    the plain pyte.Screen without the history;
+  * the expected number of next_page ≈ (size − position) / ceil(lines × ratio)
+    (~250 on a deep history, ratio=0.1 → a page = 4 lines).
 
-Числа — в CHANGELOG/ROADMAP («измерено на …, v1.2.12»); порог боли ~20–50 мс на
-чанк при глубокой истории — триггер v1.2.14 (батчинг авто-возврата).
+The numbers — into CHANGELOG/ROADMAP ("measured on …, v1.2.12"); the pain threshold ~20–50 ms per
+chunk on a deep history — the trigger of v1.2.14 (the batching of the auto-return).
 
-v1.2.14: батчинг выпущен (override before_event в SshmapHistoryScreen) — сценарий A
-обязан быть ≈ B (измерено: A = 42,7 мс против B = 42,4 мс, overhead 0,25 мс). Скрипт
-остался монитором регрессии: если A снова > 50 мс или A−B велик — проверить override.
+v1.2.14: the batching is released (the override before_event in SshmapHistoryScreen) — the scenario A
+must be ≈ B (measured: A = 42.7 ms against B = 42.4 ms, the overhead 0.25 ms). The script
+stays the regression monitor: if A is again > 50 ms or A−B is large — check the override.
 
-htop-чанк: pyte/tests/captured/htop.input из master-checkout F:\\PythonAI\\pyte
-(~19 КБ); нет файла — синтетический htop-подобный чанк того же размера.
+The htop chunk: pyte/tests/captured/htop.input from the master-checkout F:\\PythonAI\\pyte
+(~19 KB); no file — a synthetic htop-like chunk of the same size.
 
-Запуск: python tests/_bench_history.py   (из корня проекта)
+Run: python tests/_bench_history.py   (from the project root)
 """
 import math
 import os
@@ -33,14 +33,14 @@ import time
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
-import pyte  # noqa: E402
+from third_party import pyte  # noqa: E402   # v1.3rc1: the fork (MANIFEST.md)
 from modules.terminal_screen import TerminalScreen  # noqa: E402
 
 COLUMNS, LINES = 120, 32
 HISTORY_LINES = 1000
-HISTORY_PRINTED = 1050        # ~1050 строк истории (заполняет deque на 1000)
-CHUNK_TARGET = 19000          # htop.input — ~19 КБ
-REPEATS = 5                   # лучший из N замеров
+HISTORY_PRINTED = 1050        # ~1050 lines of history (filling the deque at 1000)
+CHUNK_TARGET = 19000          # htop.input — ~19 KB
+REPEATS = 5                   # the best of the N measurements
 
 HTOP_INPUT_CANDIDATES = [
     os.path.join(os.path.dirname(ROOT), "pyte", "tests", "captured", "htop.input"),
@@ -48,13 +48,13 @@ HTOP_INPUT_CANDIDATES = [
 
 
 def load_chunk():
-    """htop-подобный чанк ~19 КБ: реальный захват pyte или синтетика."""
+    """An htop-like chunk of ~19 KB: a real pyte capture or synthetic data."""
     for path in HTOP_INPUT_CANDIDATES:
         if os.path.isfile(path):
             with open(path, "rb") as f:
                 data = f.read()
             return data, path
-    # Синтетика: повторяющиеся полноэкранные фреймы htop (ESC[2J + SGR-заголовки).
+    # The synthetic: repeated full-screen htop frames (ESC[2J + the SGR headers).
     header = (b"\x1b[7m\x1b[46m\x1b[30m PID USER PR NI VIRT RES SHR S %CPU %MEM "
               b"TIME+ COMMAND \x1b[0m\r\n")
     body = b""
@@ -70,14 +70,14 @@ def load_chunk():
 
 
 def to_top(t):
-    """scroll_up() до верхней границы истории (no-op на границе)."""
+    """scroll_up() to the top edge of the history (a no-op at the edge)."""
     while t.scroll_up():
         pass
 
 
 def measure(t, chunk, repeats=REPEATS, at_top=True):
-    """Лучшее время подачи чанка (мс); при at_top — перед каждым замером возврат
-    к верхней границе истории (худший случай)."""
+    """The best chunk-delivery time (ms); with at_top — the return to the top
+    of the history before each measurement (the worst case)."""
     best = None
     for _ in range(repeats):
         if at_top:
@@ -97,17 +97,17 @@ def main():
 
     chunk, chunk_src = load_chunk()
 
-    print("SSHMap bench D1 (v1.2.12): overhead HistoryScreen при глубокой истории")
+    print("SSHMap bench D1 (v1.2.12): HistoryScreen overhead with a deep history")
     print(f"  machine : {platform.system()} {platform.release()}, "
-          f"Python {sys.version.split()[0]}, pyte {getattr(pyte, '__version__', '0.8.2 (установленная)')}")
-    # Размер страницы — та же арифметика, что в pyte HistoryScreen.next_page:
+          f"Python {sys.version.split()[0]}, pyte {getattr(pyte, '__version__', '0.8.2 (installed)')}")
+    # The page size — the same arithmetic as in pyte HistoryScreen.next_page:
     # int(math.ceil(lines * ratio)) (ratio=SCROLL_RATIO=0.1).
     page = max(1, int(math.ceil(LINES * 0.1)))
     print(f"  screen  : {COLUMNS}x{LINES}, history_lines={HISTORY_LINES}, ratio=0.1 "
-          f"(страница = {page} строк)")
-    print(f"  chunk   : {len(chunk)} байт ({chunk_src})")
+          f"(page = {page} lines)")
+    print(f"  chunk   : {len(chunk)} bytes ({chunk_src})")
 
-    # Сценарий A: глубокая история, пользователь у ВЕРХНЕЙ границы (худший случай).
+    # Scenario A: a deep history, the user at the TOP boundary (the worst case).
     t_deep = TerminalScreen(COLUMNS, LINES, history_lines=HISTORY_LINES)
     for i in range(HISTORY_PRINTED):
         t_deep.feed(b"history line %d\r\n" % i)
@@ -116,16 +116,16 @@ def main():
     expected_pages = (size - pos) / float(page)
     ms_deep = measure(t_deep, chunk)
     print(f"  A deep history (user at top): position={pos}/{size}, "
-          f"ожидаемых next_page ≈ {expected_pages:.0f} → {ms_deep:.2f} мс/чанк")
+          f"expected next_page ≈ {expected_pages:.0f} → {ms_deep:.2f} ms/chunk")
 
-    # Сценарий B: тот же чанк на live-строке (авто-возврат не нужен).
+    # Scenario B: the same chunk on the live line (no auto-return needed).
     t_live = TerminalScreen(COLUMNS, LINES, history_lines=HISTORY_LINES)
     for i in range(HISTORY_PRINTED):
         t_live.feed(b"history line %d\r\n" % i)
-    ms_live = measure(t_live, chunk, at_top=False)   # на live-строке: авто-возврат не нужен
-    print(f"  B live line (no auto-return) : {ms_live:.2f} мс/чанк")
+    ms_live = measure(t_live, chunk, at_top=False)   # on the live line: the auto-return is not needed
+    print(f"  B live line (no auto-return) : {ms_live:.2f} ms/chunk")
 
-    # Сценарий C: чистый pyte.Screen без истории (нижняя граница стоимости).
+    # Scenario C: a bare pyte.Screen without history (the lower bound of the cost).
     plain = pyte.Screen(COLUMNS, LINES)
     plain_stream = pyte.ByteStream(plain)
 
@@ -139,17 +139,17 @@ def main():
         return best
 
     ms_plain = measure_plain()
-    print(f"  C plain pyte.Screen (no history): {ms_plain:.2f} мс/чанк")
+    print(f"  C plain pyte.Screen (no history): {ms_plain:.2f} ms/chunk")
 
     overhead = ms_deep - ms_live
-    # v1.2.14: батчинг авто-возврата выпущен — сценарий A обязан быть ≈ B (feed идёт
-    # в GUI-потоке через queued signal; порог боли D2 был > ~20–50 мс на чанк).
-    # Отклонение A от B или A > 50 мс — регрессия override before_event.
-    verdict = ("РЕГРЕССИЯ БАТЧИНГА (A >> B или A > 50 мс) — проверить override "
-               "before_event в SshmapHistoryScreen (v1.2.14)" if overhead > 5 or ms_deep > 50
-               else "в норме: A ≈ B — батчинг авто-возврата работает (v1.2.14)")
-    print(f"  overhead A−B (стоимость ~{expected_pages:.0f} next_page): {overhead:.2f} мс; "
-          f"A = {ms_deep:.2f} мс/чанк при глубокой истории → {verdict}")
+    # v1.2.14: the auto-return batching is released — scenario A must be ≈ B (the feed goes
+    # in the GUI thread via a queued signal; the D2 pain threshold was > ~20–50 ms per chunk).
+    # A deviation A from B or A > 50 ms — a regression of the before_event override.
+    verdict = ("BATCHING REGRESSION (A >> B or A > 50 ms) — check the "
+               "before_event override in SshmapHistoryScreen (v1.2.14)" if overhead > 5 or ms_deep > 50
+               else "OK: A ≈ B — the auto-return batching works (v1.2.14)")
+    print(f"  overhead A−B (cost of ~{expected_pages:.0f} next_page): {overhead:.2f} ms; "
+          f"A = {ms_deep:.2f} ms/chunk with a deep history → {verdict}")
     return 0
 
 

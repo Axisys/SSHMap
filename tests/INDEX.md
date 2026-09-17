@@ -1,293 +1,204 @@
-# tests/ — карта тестового сьюта SSHMap
+# tests/ — SSHMap test suite map
 
-Сьют — plain-python скрипты **без pytest**: каждый файл сам по себе запускается,
-печатает `ok`/`FAIL` по каждой проверке и завершается exit 0 (всё зелёное) или 1.
-Общая обвязка — `_common.py`; единый запуск всех файлов — `run_all.py`.
+The suite is plain-python scripts **without pytest**: each file is self-contained,
+prints `ok`/`FAIL` per check and exits 0 (all green) or 1.
+Shared harness — `_common.py`; a single run of all files — `run_all.py`.
 
-## Запуск
+## Running
 
 ```
-python tests/run_all.py              # все test_*.py + check_i18n_keys.py, параллельно (4 воркера), таблица
-python tests/run_all.py --workers 8  # число воркеров (1 = последовательно, как раньше)
-python tests/run_all.py keyring      # только файлы, чьё имя содержит подстроку
-python tests/test_tags.py            # один файл (из корня проекта)
+python tests/run_all.py                 # all test_*.py + check_i18n_keys.py, auto workers (cores, <=8), table
+python tests/run_all.py --workers 8     # number of workers (1 = sequential)
+python tests/run_all.py keyring         # only files whose name contains the substring
+python tests/run_all.py --fast          # daily profile: without slow/network tags
+python tests/run_all.py --tag network   # only files with the given tag (real network mode, see below)
+python tests/run_all.py --failed-only   # only files that failed in the previous run
+python tests/run_all.py --junit [PATH]  # JUnit XML (default test-results/junit.xml)
+python tests/test_tags.py               # a single file (from the project root)
 ```
 
-Каждый файл — отдельный процесс: `bootstrap()` внутри делает изоляцию HOME
-(тесты пишут `~/.sshmap/*` в песочницу), offscreen-платформу Qt, UTF-8 stdout
-и faulthandler-таймаут 180 c. Отключить изоляцию HOME:
-`SSHMAP_TEST_NO_HOME_ISOLATION=1`. При параллельном прогоне раннер передаёт
-каждому файлу собственный рабочий каталог (`SSHMAP_TEST_WORKDIR`, создаётся в
-%TEMP% и удаляется по завершении) — иначе `bootstrap()` соседнего процесса
-сносил бы общий `_tmp_testdata`.
+File tags: a `# tags: slow network` comment in the header (the first such line
+within the first 40 lines; read as text, without importing the file). Known tags:
+`slow` — intentionally long wait budgets/teardown (part of the spec),
+`network` — the file contains a real network section that runs ONLY under
+an explicit `--tag network`: the runner passes the tag to the child process via the
+env var `SSHMAP_TEST_TAGS`, the test switches to the real mode (test_diagnostics.py —
+a real ping of TEST-NET-1, ~10 s); a regular run of such a file is hermetic and fast.
+`--fast` excludes slow+network, `--tag NAME` selects files with the tag.
 
-## Обвязка (_common.py)
+Run artifacts — in `test-results/` (gitignored): `junit.xml` (the per-file
+JUnit report for CI) and `last_run.json` (the status cache for `--failed-only`; updated
+after each run).
 
-Паттерн файла (bootstrap — ПЕРВЫМ делом, до импортов модулей приложения):
+Each file — a separate process: `bootstrap()` inside performs HOME isolation
+(tests write `~/.sshmap/*` into a sandbox), the offscreen Qt platform, UTF-8 stdout
+and a faulthandler timeout of 180 s. Disable HOME isolation:
+`SSHMAP_TEST_NO_HOME_ISOLATION=1`. During a parallel run the runner gives
+each file its own working directory (`SSHMAP_TEST_WORKDIR`, created in
+%TEMP% and deleted on exit) — otherwise the `bootstrap()` of a neighboring process
+would clobber the shared `_tmp_testdata`.
+
+## Harness (_common.py)
+
+The file pattern (bootstrap — FIRST, before importing the app modules):
 
 ```python
 from _common import bootstrap, check, finish
-ROOT, WORK = bootstrap()          # HOME-изоляция, offscreen, sys.path, faulthandler
-...тело теста: check("имя", условие, detail)...
-finish()                          # сводка + exit code
+ROOT, WORK = bootstrap()          # HOME isolation, offscreen, sys.path, faulthandler
+...test body: check("name", condition, detail)...
+finish()                          # summary + exit code + file time
 ```
 
-Вспомогательные утилиты: `wait_until(cond)` — настоящий Qt event loop до условия;
-`viewport_point(view, scene_pos)` — сцена → координаты viewport;
-`snapshot_i18n_config()` / `restore_i18n_config()` — снимок конфига i18n
-(нужен только при SSHMAP_TEST_NO_HOME_ISOLATION=1).
+`check()` measures the time of the segment up to the check (since the previous `check()`);
+`finish()` prints "slowest checks" (top-20 segments, only if any is >= 0.1 s)
+and the total time in the summary line: `ALL PASS (N) [X.XXs]`.
 
-Пины релиза и общие проверки (внизу файла): константы `EXPECTED_APP_VERSION` /
-`EXPECTED_I18N_KEYS` — обновлять при каждом релизе ТОЛЬКО здесь;
-`load_i18n_langs(root)` — загрузка i18n/{en,ru,zh}.json; `check_i18n_parity(langs)` —
-паритет наборов ключей + число; `check_release_state(root)` — APP_VERSION
-(sentinel + формат X.Y.Z[.W][RCn]) + pyproject-сверка + заголовок requirements.txt.
+Helper utilities: `wait_until(cond)` — a real Qt event loop until the condition;
+`viewport_point(view, scene_pos)` — scene → viewport coordinates;
+`snapshot_i18n_config()` / `restore_i18n_config()` — a snapshot of the i18n config
+(needed only with SSHMAP_TEST_NO_HOME_ISOLATION=1).
 
-## Файлы сьюта (test_*.py)
+Release pins and shared checks (at the bottom of the file): the constants
+`EXPECTED_APP_VERSION` / `EXPECTED_I18N_KEYS` — update at every release ONLY here;
+`load_i18n_langs(root)` — loads i18n/{en,ru,zh}.json; `check_i18n_parity(langs)` —
+parity of the key sets + the count; `check_release_state(root)` — APP_VERSION
+(sentinel + format X.Y.Z[.W][RCn]) + the pyproject cross-check + the requirements.txt header.
 
-### Разбито из smoke_test.py (v0.6–v0.9.2, удалён в v0.9.9.x)
+## Suite files
 
-| файл | покрывает |
-|---|---|
-| `test_core.py` | compile всех модулей; i18n-паритет en/ru/zh + fallback; models.server (from_dict robustness, to_dict без пароля); ANSI-очистка; профили без паролей в JSON + keyring update(None) |
-| `test_save_load.py` | headless save/load round-trip: dirty [*]-маркер, пароль → keyring, key_path в JSON, защита от дублирующихся связей A→B |
-| `test_ssh_dialogs.py` | SSHConnectDialog (accept без success-окна v0.9.5.6, keyring-save), AddServerDialog («Подключиться по SSH» + флаг _connect_after_accept) |
-| `test_connections.py` | Безье-стрелки: геометрия cubic Bezier, edge-to-edge, A→B/B→A на противоположные стороны, 6 типов + prefill диалога, drag-режим Shift+ЛКМ (полный путь QTest-вводом), backward-compat v0.6 без поля type |
-| `test_worker_guard.py` | реестр SSHWorker: видимость после construction, исчезновение по finished; wait_for_worker; _ensure_worker_done; closeEvent диалога |
-| `test_status_checker.py` | probe_ssh на локальных сокетах (online/warn/offline); цвет рамки узла + tooltip + пульс-оверлей; полный раунд StatusChecker; интеграция с MainWindow |
-| `test_notes.py` | sticky notes: сериализация, clamp MIN/MAX, drag/resize через полный pipeline view→scene→item (QTest), edit по двойному клику, Delete-клавиша, JSON round-trip + backward-compat |
-| `test_context_menus.py` | v0.7.3 контекстные меню узла и стрелки: remove_connection, EditConnectionDialog prefill, _copy_node_info в буфер, _ping_node (headless-герметичность), _classify_at (геометрия кривой) |
-| `test_groups.py` | v0.8.1 группы: id/сериализация, геометрическое членство (верхняя группа), drag группы QTest'ом, resize с клампом, вход/выход узла из рамки, JSON round-trip + backward-compat |
-| `test_ui_polish.py` | boundingRect с тенью, точка статуса + затемнение offline, адаптивная сетка, fit_to_content, set_zoom_and_center, статус-бар (zoom %, счётчики), векторные иконки, hit-зона стрелок |
-| `test_node_labels.py` | v0.8.0: elide/макс. ширина узлов (шрифто-независимый инвариант), MIN-размер, идемпотентность update_appearance; маркеры статусов в сайдбаре (live-обновление без пересбора) |
-| `test_external_terminal.py` | v0.8.2 modules/external_terminal.py: build_ssh_args/build_command для всех терминалов, detect_terminal, настройки ~/.sshmap_settings.json (round-trip/merge/invalid→auto), launch() с моком Popen, error paths, UI-интеграция |
-| `test_system_info.py` | v0.9 services/system_info_collector.py: парсеры INFO_BATCH, bytes_to_gb, модель + backward-compat, версия формата JSON 0.9, сигналы, точки входа MainWindow |
-| `test_hotkeys_palette.py` | v0.9.2: хоткеи Ctrl+Return/Ctrl+E/Ctrl+Shift+N/Ctrl+K как QShortcut; CommandPalette fuzzy_score, сбор команд, reveal (выделение + centerOn) |
+The table below is **auto-generated** by `tests/_gen_index.py` from the files'
+docstrings and tags (the same set of test_*.py that run_all.py launches). Do not edit by hand:
+after adding/renaming a file or changing its docstring/tags —
+`python tests/_gen_index.py` (a freshness check without writing — `--check`, for CI and
+the release gate). The full coverage description of each file — in the module docstring
+of the file itself.
 
-### Переименованы из regression_v*.py (содержимое то же, обвязка — _common.py)
+<!-- AUTOGEN:BEGIN test-files -->
 
-| файл | бывший | покрывает |
+| file | tags | what it checks (first line of the docstring) |
 |---|---|---|
-| `test_ssh_terminal.py` | regression_v081 | терминал печатает bytes (Signal(bytes), pyte E2E); _add_server bool-guard; ПКМ→SSH без bool.setSelected; fingerprint SHA256 (paramiko>=5 asbytes) |
-| `test_undo_redo.py` | regression_v083 | undo/redo round-trip всех операций, merge перемещений одним жестом, dirty-маркер = индекс стека |
-| `test_export_background.py` | regression_v091 | экспорт карты в PNG/JPG + фон-изображение (JSON round-trip, legacy без ключа) |
-| `test_duplicate_multiselect.py` | regression_v093 | дублирование узла + мультивыделение + групповой drag (undo-команда) |
-| `test_tags.py` | regression_v094 | теги/цветные метки серверов: модель, JSON, UI сайдбара (тег-фильтр), backward-compat |
-| `test_keyring_fail_backend.py` | regression_v094b | CredentialManager на fail-бэкенде (NoKeyringError 25.x), атомарная запись профилей, notes() итератор |
-| `test_keyring_validation.py` | regression_v0955_keyring | безопасность: plaintext/fail-бэкенды отклоняются; гард save/load/delete; round-trip на реальном бэкенде (15–18 проверок, зависит от машины) |
-| `test_sidebar_context_menu.py` | regression_v096_sidebar_ctx | контекстное меню дерева сайдбара: состав/порядок пунктов, reveal-акцент, guarded-удаление, i18n ctx.reveal_on_map |
-| `test_autosave_backups.py` | regression_v097_autosave | автосохранение + кольцевой буфер бэкапов: project_key, кольцо N=3, restore, конфиг-дефолты/клампы, тики dirty/clean/no-file, open-промпт, BackupsDialog, откат на слот |
-| `test_map_search.py` | regression_v098_map_search | поиск по карте Ctrl+F: панель, совпадения alias/host/ip/comment, подсветка/затемнение (И с тег-фильтром), Enter/Shift+Enter навигация, счётчик k/N, retranslate, закрытие при смене проекта; PySide6-menu guard; resize-перестановка панели (v0.9.9.1) |
-| `test_selection_sync.py` | regression_v0991_selection_sync | selection sync без blockSignals: reentry-guard, внешние слоты работают во время программной смены, идемпотентный пересчёт, MapView.resized |
-| `test_ext_terminal_dialog.py` | regression_v0992_ext_terminal_ui | v0.9.9.2 UI внешнего терминала: i18n 13 ключей × en/ru/zh + паритет (пин — _common.py), состав комбобокса по платформе, сохранение пресета сразу, «Сбросить к умолчанию», detect_terminal уважает пресет |
+| `test_alt_screen.py` | — | v1.2.12 — Terminal: alternate screen (private modes 47/1047/1048/1049). |
+| `test_audit_rc1_threads.py` | slow | v1.2.10rc1 — Audit: threads and teardown (AUDIT.md auto #2 + manual #1 + a verification finding). |
+| `test_audit_rc2_robustness.py` | — | v1.2.10rc2 — Audit: robustness and code hygiene (AUDIT.md manual #5, auto #7, manual #6). |
+| `test_audit_v1210.py` | — | v1.2.10 — Audit: confirmed bugs and data (AUDIT.md): the release's themed test. |
+| `test_autosave_backups.py` | — | Regression v0.9.7 — autosave + the project backup ring buffer. |
+| `test_bidirectional_arrows.py` | — | Bidirectional arrows (v1.2.6, ROADMAP task 1). |
+| `test_collapse.py` | — | Server card collapsing v0.8.4 (former DESIGN.md §D) (former tests/smoke_collapse.py). |
+| `test_command_library.py` | — | v1.3 — "Terminal macros": a command/script library in the terminal panel (ROADMAP v1.3). |
+| `test_connections.py` | — | Connections: Bézier arrows, types, edge-to-edge, drag mode (former smoke_test.py §6b "v0.7"). |
+| `test_context_menus.py` | — | Node and arrow context menus v0.7.3 (former smoke_test.py "v0.7.3 context menus"). |
+| `test_core.py` | — | Suite core (former smoke_test.py §1–5): compile, i18n, models, ANSI, profiles/keyring. |
+| `test_diagnostics.py` | network | services/diagnostics.py: PingThread + ReverseDnsThread (v0.9.9.3). |
+| `test_drawio_export.py` | — | Map export to drawio (.drawio) v0.9.5 (former tests/smoke_v095_drawio.py). |
+| `test_duplicate_multiselect.py` | — | Regression v0.9.3: node duplication + multi-select + group drag. |
+| `test_export_background.py` | — | Regression v0.9.1: map export to image + background image. |
+| `test_ext_terminal_dialog.py` | — | Regression v0.9.9.2 — the external terminal UI (presets + reset to defaults). |
+| `test_external_terminal.py` | — | External (system) terminal v0.8.2: modules/external_terminal.py (former smoke_test). |
+| `test_groups.py` | — | Node groups on the map v0.8.1 (former smoke_test.py "v0.8.1 groups"). |
+| `test_hotkeys_palette.py` | — | Hotkeys + command palette v0.9.2 (former smoke_test "v0.9.2 hotkeys + command palette"). |
+| `test_keyring_fail_backend.py` | — | Regression v0.9.4b: the keyring fail backend + review notes. |
+| `test_keyring_validation.py` | — | Regression v0.9.5.5 (security #1): the keyring backend — validation and guard. |
+| `test_main_window_split.py` | — | v1.1.4: main_window.py hygiene — split into mixins (ROADMAP v1.1.4 acceptance). |
+| `test_map_search.py` | — | Regression v0.9.8 — map search (Ctrl+F). |
+| `test_menu_actions_regression.py` | — | v1.2.4-fix — REGRESSION: the real click path on checkable menu items (QAction.trigger()). |
+| `test_multi_input.py` | — | v1.2.3 — Multi-input (broadcast of the active session's keystrokes to all other open sessions, ROADMAP v1.2.3). |
+| `test_multi_input_e2e.py` | — | v1.2.4 — Multi-input: E2E on REAL SSH channels (paramiko), no fake threads. |
+| `test_node_labels.py` | — | Review fixes v0.8.0: node elide/max width, status markers in the sidebar (former smoke_test). |
+| `test_note_attach.py` | — | v1.2.4: attaching notes to servers + a special line (the v1.2.4 release theme). |
+| `test_notes.py` | — | Sticky notes: drag/resize/edit/delete + JSON round-trip (former smoke_test.py §6e "v0.7.2"). |
+| `test_pdf_export.py` | — | v0.9.9.7 — Map PDF export (ROADMAP v0.9.9.7). |
+| `test_pyproject.py` | — | v0.9.9.6 — pyproject.toml: installable identity for 1.0 (ROADMAP). |
+| `test_pyte_compat.py` | — | v1.2.11 — Terminal: pyte 0.8.2 compatibility (private SGR + LNM). |
+| `test_pyte_fork.py` | — | v1.3rc1 — Terminal: the managed pyte fork (vendored 0.8.2 + patch manifest). |
+| `test_quick_launch.py` | — | v1.0RC4 — Quick launch (server links/commands): the release's themed test. |
+| `test_rc2_map_import_sidebar.py` | — | v1.1.2RC2 — Map, import, sidebar (release theme). |
+| `test_rc3_terminal_window.py` | — | v1.1.2RC3 — Terminal windows (ROADMAP v1.1.2RC3, AUDIT §4/§5). |
+| `test_rubber_band_perf.py` | — | v1.2.10rc3 — rubber-band selection performance on large maps (AUDIT auto #9). |
+| `test_save_load.py` | — | Headless project save/load + keyring passwords (former smoke_test.py §6 "main window"). |
+| `test_scrollback_batching.py` | — | v1.2.14 — Scrollback: batching of the auto-return to the live line (PYTE82_AUDIT.md batch D2). |
+| `test_selection_sync.py` | — | Regression v0.9.9.1 — selection sync without blockSignals (reentry guard). |
+| `test_settings_dialog.py` | — | v1.1 — Settings dialog (hub): the release's themed test. |
+| `test_settings_options.py` | — | v1.1.1 — Small options around the hub: the release's themed test (ROADMAP v1.1.1). |
+| `test_sftp_dnd.py` | — | v1.2.8 — D&D of files from Windows Explorer into the SFTP tab (ROADMAP v1.2.8). |
+| `test_sftp_tab.py` | — | v1.1.3 — SFTP tab in the terminal window (ROADMAP v1.1.3, tasks 1–5). |
+| `test_sidebar_context_menu.py` | — | Regression v0.9.6 — the context menu in the sidebar (server list). |
+| `test_sidebar_panel.py` | — | ui/sidebar.py: SidebarPanel — a MainWindow facade + retranslate (v0.9.9.4). |
+| `test_ssh_dialogs.py` | — | SSH dialogs: assembly, keyring save v0.9.5.6, the "Connect" button (former smoke_test §6a+§7). |
+| `test_ssh_terminal.py` | — | Regression tests v0.8.1 — four fixes: |
+| `test_ssh_undo_lifecycle.py` | — | v1.1.2RC1 — the SSH path: undo, paramiko defaults, thread lifecycle (release theme). |
+| `test_status_checker.py` | — | Server statuses: probe_ssh, node colors, pulse, StatusChecker (former smoke_test §6d). |
+| `test_status_parallel.py` | — | v1.1.2 final — Parallel status probes (release theme, ROADMAP v1.1.2 final). |
+| `test_system_info.py` | — | Auto-fill of server data v0.9: services/system_info_collector.py (former smoke_test). |
+| `test_tags.py` | — | Regression v0.9.4: server tags/color labels. |
+| `test_terminal_acceptance.py` | — | v1.0 — Terminal v1, final: full acceptance of all RCs + terminal_* config (ROADMAP tasks 9–10). |
+| `test_terminal_colors.py` | — | v1.0RC1 — the color engine + per-cell canvas (ROADMAP v1.0RC1). |
+| `test_terminal_dock.py` | — | v1.2.2 — Terminals docked in the map window (terminal.mode: windows/tabs, ROADMAP v1.2.2). |
+| `test_terminal_input.py` | — | v1.0RC2 — keyboard + selection/copy (ROADMAP v1.0RC2). |
+| `test_terminal_mouse.py` | — | v1.2.13 — the mouse wheel in the full-screen TUI (SGR/X10 passthrough) (ROADMAP v1.2.13, PYTE82_AUDIT.md batch C). |
+| `test_terminal_page.py` | — | v1.2 — TerminalSessionPage refactor (window → page) + per-session tracking. |
+| `test_terminal_scroll.py` | — | v1.0RC3 — PTY resize + scrollback + dirty rendering (ROADMAP v1.0RC3). |
+| `test_terminal_selection_menu.py` | — | v1.2.7 — Terminal: double/triple-click selection + context menu (ROADMAP v1.2.7). |
+| `test_terminal_tabs.py` | — | v1.2.1 — Multiple SSH sessions as tabs in one terminal window (ROADMAP v1.2.1). |
+| `test_theme.py` | — | v1.2.5 — The central theme ui/theme.py (release theme, ROADMAP v1.2.5). |
+| `test_ui_polish.py` | — | UI polish: nodes, grid, fit/zoom, status bar, icons, arrow hit zones (former smoke_test). |
+| `test_undo_redo.py` | — | Regression tests v0.8.3 — Undo/Redo. |
+| `test_view_toggles.py` | — | v1.2.4.1 — Collapsing the sidebar and the map into a thin line (buttons + menu, ROADMAP v1.2.4.1). |
+| `test_wcwidth_cjk.py` | — | v1.2.9 — full wcwidth(3) for CJK (ROADMAP "Terminal hygiene", task 2). |
+| `test_worker_guard.py` | slow | SSHWorker: the active threads registry + the node deletion guard (former smoke_test.py §6c). |
 
-### Новые в серии v0.9.9.x (без предшественника)
+<!-- AUTOGEN:END test-files -->
 
-| файл | покрывает |
+## Helper files
+
+| file | role |
 |---|---|
-| `test_diagnostics.py` | v0.9.9.3 services/diagnostics.py: перенесённые PingThread/ReverseDnsThread (подклассы QThread, сигнатуры сигналов), командные строки ping'а по ОС + CREATE_NO_WINDOW, ok/fail/exception-пути (фейковый subprocess.run), гигиена main_window.py (вложенные классы исчезли; v1.1.4: source-проверка импортов потоков — против ui/main_window_node_ops.py, где живут _ping_node/_copy_node_info), регрессия _ping_node (старт/финиш/cleanup, guard AUDIT v0.7.2 #8) и _copy_node_info(hostname/ip) |
-| `test_sidebar_panel.py` | v0.9.9.4 ui/sidebar.py: фасад MainWindow (панель встроена, win.tree/tag_filter/search_edit/btn_* — виджеты панели, методы окна), сигналы кнопок → слоты окна, гигиена main_window.py, refresh через фасад (строки/маркеры/поиск/тег-фильтр + AND-затемнение), unit-уровень (translate_fn=None, ValueError на недостающий колбэк, fill_context_menu 9+4), регрессия бага v0.9.2: retranslate при смене языка ru→en→ru |
-| `test_pyproject.py` | v0.9.9.6 pyproject.toml (без установки): парсится (tomllib/tomli); имя ↔ APP_NAME из version.py (нормализация «SSH Map» → sshmap); версия == APP_VERSION; deps ↔ requirements.txt (набор имя+пин); entry point sshmap = main:main → существующая top-level `def main` в main.py (ast, без импорта) + модуль в сборке ([tool.setuptools]); [build-system] присутствует |
-| `test_pdf_export.py` | v0.9.9.7 PDF-экспорт карты: MapScene.render_to_pdf (QPdfWriter, offscreen, без парсинга содержимого) — существование/размер > 1 KB/заголовок %PDF/%%EOF, возвращённое значение == размеру на диске; пустая сцена (fallback-rect) + портретная карта (portrait-страница); привязка MainWindow (_export_map_pdf, i18n-реестр меню «Файл»); i18n 2 ключа × en/ru/zh + паритет (пин — _common.py) |
+| `_common.py` | the harness: bootstrap/check/finish/wait_until etc. (not a test — run_all skips it); check() times the segment, finish() prints "slowest checks" + the file time |
+| `_fakes.py` | shared test fakes (suite optimization phase 2): FakeSSHChannel/FakeSSHThread/BlockingFakeSSHThread (the same API as SSHTerminalThread; RECORD — the channel capture mode "list"/"last"/None), CaptureMenu (captures exec/exec_ offscreen, the list — a class attribute captured), a fake SFTP (FakeSftpFS/File/Client + EventLog + wire_worker), FakeSSHClient/FakeTransport (the paramiko surface for the terminal window), FakeLineEdit/FakeSpinBox/DummySignal/FakeTermWin, FakeWidgetThread (the TerminalWidget level). Not a test — run_all skips it; each test file is a separate process, so class attributes are configured without cross-interference |
+| `run_all.py` | the single runner: collects exactly `test_*.py` + `check_i18n_keys.py` (itself and other meta-scripts are NOT included — otherwise recursion), in parallel (ThreadPoolExecutor, auto workers = cores ≤ 8; `--workers N`), each file — a separate process, a table + a single exit code. Flags: `--fast` (without the slow/network tags), `--tag NAME`, `--failed-only` (by the test-results/last_run.json cache), `--junit [PATH]` (JUnit XML into test-results/junit.xml). File tags — a `# tags: …` line in the header |
+| `check_i18n_keys.py` | parity of the i18n keys en/ru/zh (the keys used in code × 3 languages) — included in run_all |
+| `_gen_index.py` | auto-generation of the "Suite files" table below from the test_*.py docstrings and tags (ast, without importing; the file set and tag parsing — the same functions as in run_all.py). `python tests/_gen_index.py` — rewrites the block between the AUTOGEN markers; `--check` — a freshness check without writing (exit 1 on mismatch, for CI/gate). Not a test — run_all skips it |
+| `_bench_rubber.py` | the v1.2.10rc3 measurement: a rubber-band drag over a 500-node map, ms before/after the fix (numbers — CHANGELOG.md); NOT part of the suite (files with the _ prefix are skipped by run_all) |
+| `_bench_history.py` | the v1.2.12 measurement D1 (PYTE82_AUDIT.md batch D) + since v1.2.14 — a batching regression monitor: the HistoryScreen overhead with deep history — TerminalScreen(120, 32, history_lines=1000), ~1050 lines, the user at the top border (≈242 next_page in one feed), feeding an htop chunk (htop.input, 19 KB) → ms + baselines (the live line, a plain pyte.Screen); numbers — CHANGELOG.md v1.2.12 (the > 50 ms/chunk pain confirmed → v1.2.14) and v1.2.14 (after batching A ≈ B: 42.67 vs 42.42 ms, overhead 0.25 ms); verdict: "A ≈ B — batching works" / "BATCHING REGRESSION" (overhead > 5 ms or A > 50 ms); NOT part of the suite |
 
-### Новые в v1.0RC (Терминал v1)
+## Conventions
 
-| файл | покрывает |
-|---|---|
-| `test_terminal_colors.py` | v1.0RC1 цветовой движок + посячейный холст: resolve_color headless (brown/brightbrown → yellow/br_yellow, hex-passthrough 256/truecolor, опечатка pyte bfightmagenta, default-fallback, структура палитр black…white + br_* × 4); E2E через pyte (SGR 33/93/38;5;196/38;2;… → Char → resolve_color — путь `ls --color`); кэш форматов (hit/различие/лимит→clear, TERMINAL.md §5.1); рендер runs offscreen (split_row_runs — чистая функция: широкие глифы/заглушки, пиксельные цвета ячеек SGR 31/33/93/41/256/truecolor, блок-курсор через свап + cursor.hidden ESC[?25l/h, счётчик drawText — runs а не по-символьно); интеграция (SSHTerminalWindow → TerminalWidget, render() помечен DEPRECATED) |
-| `test_terminal_input.py` | v1.0RC2 клавиатура + выделение/копирование: selection_cells без GUI (однострочное/многострочное/инвертированные границы/зажим колонок + regression на ошибку черновика №4 — координаты (row,col), построчный порядок); клавиатура offscreen (F1–F12 xterm-последовательности SS3/CSI, PageUp/Down/Home/End/Delete, базовый набор RC1, Ctrl+C без выделения → \x03, Ctrl+D/Z, AltGr-guard Ctrl+Alt → ничего, thread=None — без исключений); bracketed paste Ctrl+V (многострочный буфер со смешанными EOL — единый блок \x1b[200~…\x1b[201~, пустой буфер → ничего); мышь/копирование (drag в обе стороны, мульти-строчное копирование в буфер, Ctrl+C при выделении → канал не получает байты, простой клик → сброс + SIGINT, clamp за сетью); рендер подсветки offscreen (пиксели оверлея + stats); Tab/Shift+Tab полным путём QApplication.sendEvent (§2b, regression v1.2.9-fix: Qt 6 не передаёт их keyPressEvent — \t/\x1b[Z до канала, фокус остаётся на терминале) |
-| `test_terminal_scroll.py` | v1.0RC3 resize PTY + скроллбэк + dirty-рендер: HistoryScreen headless (ввод только \r\n — факт №10: рост истории, страница = ceil(lines×ratio), авто-возврат к live при новом выводе, границы no-op, лимит глубины); resize-guard offscreen (фейковый channel считает resize_pty: 10 событий с одной сеткой → ровно 1 вызов PTY; invoke_shell 120×32 до первого resizeEvent; серия быстрых смен → один вызов с последними размерами; закрытый канал → guard); клавиатура (Ctrl+Shift+PgUp/PgDn → скроллбэк ДО голых PageUp/Down, голые PgUp/PgDn и Shift+PgUp без Ctrl → \x1b[5~/\x1b[6~ в shell, AltGr-guard); колесо (вверх/вниз/no-op на границах, thread=None — локально); dirty-рендер (нет _render_timer/_dirty, E2E через окно, paintEvent прошёл); мигание курсора (QTimer: show/hide, реальное переключение фазы, пиксели фаз); кнопка «Закрыть терминал» убрана (все QPushButton окна — внутри SFTP-вкладки v1.1.3; close_terminal() сохранён) |
-
-### Новые в v1.0RC4
-
-| файл | покрывает |
-|---|---|
-| `test_quick_launch.py` | v1.0RC4 Быстрый запуск: модель (дефолт [], порядок, старые JSON → [], sanitize битых записей/типов, round-trip без пароля); QuickLaunchDialog (prefill таблицы, валидация name/value/http(s)-схемы/дубликата, добавление url+command, удаление строки, пустой диалог нового сервера); AddServerDialog (кнопка «Быстрый запуск…», quick_launch переживает правку других полей, подхват результата QuickLaunchDialog); E2E сайдбар (подменю ПЕРВЫМ пунктом выше SSH, состав Webmin/K9S/«Настроить…», URL → webbrowser.open с точным URL); E2E карта (синтетический QContextMenuEvent: подменю первым, command-пункт → терминал с initial_command="k9s" при key auth); SSHTerminalWindow с фейковым потоком (до connected_signal байты не уходят, после — ровно b"k9s\n", повторный emit не дублирует, окно без команды сигнал игнорирует); настройка из подменю (undo восстанавливает список, _do_save пишет quick_launch в JSON, перезагрузка восстанавливает); v1.0-fix §7b: KeyError "name" in LogRecord — логирование успеха URL/команды без extra-коллизии с LogRecord.name; i18n 22 ключа × en/ru/zh + паритет (пин — _common.py) |
-
-### Новые в v1.0 (финал)
-
-| файл | покрывает |
-|---|---|
-| `test_terminal_acceptance.py` | v1.0 финал — полный acceptance всех RC одним прогоном без сети: состояние релиза (APP_VERSION == "1.1.4", pyproject-сверка, TerminalScreen.render() на месте и DEPRECATED — удаление не раньше v1.2, i18n-паритет 398: +33 в v1.1, +14 в v1.1.1, +2 в v1.1.2RC2, +2 в v1.1.2 final, +21 в v1.1.3 (sftp.*); в v1.1.2RC3 новых ключей нет; окно показано через show() как в продакшене — offscreen-окно без show() откладывает resize до первого paint); bash (промпт + ls --color через окно: SGR 34/93/256/truecolor → пиксельные чернила холста, ввод только \r\n); vim (ESC[?25l/h — курсор скрыт/виден по пустой строке, SGR 41-фон, known limitation: режима 1049 нет — экран не восстанавливается); htop (повторяющиеся полноэкранные фреймы ESC[2J, dirty-рендер без таймера); копирование (выделение мышью → буфер, Ctrl+C при выделении = копирование/в канал ничего, без выделения = \x03, Ctrl+V = bracketed paste единым блоком); конфиг задачи 9 + v1.1 + v1.1.1 (load_terminal_settings: дефолты/валидные/битые/явный 0, в т.ч. terminal_close_behavior — trim/"ask", битое → "close"; v1.1.1: terminal_max_open — дефолт 4, кламп 1..32, str/99 → дефолт; окно: nord → фон #2e3440, Consolas 12, глубина истории 50, неизвестная палитра → default, без конфига → скроллбэк включён 1000) |
-
-### Новые в v1.1
-
-| файл | покрывает |
-|---|---|
-| `test_settings_dialog.py` | v1.1 диалог настроек (хаб): i18n (+33 ключа, паритет 398 = 377 на v1.1.2 final + 21 sftp.* в v1.1.3), векторная иконка шестерёнки (`_DRAWERS["settings"]`), 6-я кнопка ⚙ сайдбара (кортеж в `_BUTTONS`, сигнал `settings_clicked`); миграция external_terminal (legacy `~/.sshmap_settings.json` → config.json: копирование, приоритет конфига, best-effort-удаление); StatusChecker (`get_status_settings()` клампы/битые значения, `set_interval()`/`set_probe_timeout()`); terminal_close_behavior (фейковый поток + patched QMessageBox.question: "ask" + живая сессия → подтверждение, Отмена держит окно, "close"/завершённая сессия — без диалога); SettingsDialog (порядок 6 вкладок, диапазоны виджетов, prefill из конфига (вкл. terminal_mode v1.2.2), `collect()` ровно 19 ключей = v1.1:10 + v1.1.1:7 + v1.1.2 final:1 (status_max_parallel) + v1.2.2:1 (terminal_mode) + типы, OK → merge-запись + `applied()`, Cancel no-op); вкладка языка (немедленный `language_changed` + retranslate через `i18n.set_language`; сценарий ru→en — с v1.1.1 дефолтный язык en, стартовая точка ставится явно); точки входа MainWindow (меню «Настройки» между «Вид»/«Помощь», act_settings в actions меню, автоподхват CommandPalette, кнопка сайдбара открывает диалог, live-применение: StatusChecker 45 s / 2.5 s + таймер автосохранения stop/start) |
-
-### Новые в v1.1.1 (опции вокруг хаба)
-
-| файл | покрывает |
-|---|---|
-| `test_settings_options.py` | v1.1.1 тематический тест релиза (ROADMAP v1.1.1, 50 проверок): i18n (+14 ключей, паритет 359→373→377→398); дефолтный язык en — новый пользователь (без config.json) vs существующий (сохранённый ru через `get_last_language`), `i18n._default_language == "en"`; шрифты — валидатор `load_ui_settings()` (дефолты/trim/битые типы/0=системный/вне диапазона), поля «Общих»/«Терминала»/«Карта» + prefill, live-применение (`QApplication.setFont` без перезапуска + `widget.set_font()` в открытое окно; без ключей — не меняется); лимит своих терминалов — `terminal_max_open` (дефолт 4): ниже лимита без диалога, на лимите QMessageBox «закрыть старейшую» (Close → `close_terminal`+`_force_close` старейшей + новое окно; Cancel → None, реестр не тронут), `terminal_max_open=2` из конфига; двойной клик по узлу — `ui_node_double_click` properties/connect/битое→properties, кэш `_node_double_click_mode`, "connect" → `_run_ssh_connect`; кнопки сайдбара — `set_buttons_visible(False/True)` (6 кнопок), конфиг через `_apply_settings_from_dialog()` (дерево/поиск при этом видны), меню «Вид → Сайдбар» (PySide6 6.11: `trigger()` = клик — сам инвертирует checked и эмитит triggered с новым состоянием); плашка связи — `label_display_text` (выкл → только метка, вкл → «SSH · <метка>», без метки → тип), E2E стрелка + `refresh_label()` без пересоздания, maxLength 20 + подсказка `connection.label_hint`, старая 30-символьная метка НЕ обрезана (`_LabelLineEdit` — Qt setMaxLength обрезает существующий текст); состояние релиза (APP_VERSION == "1.1.4", pyproject) |
-
-### Новые в серии v1.1.2 (RC + final)
-
-| файл | покрывает |
-|---|---|
-| `test_ssh_undo_lifecycle.py` | v1.1.2RC1 SSH-путь (тема релиза, 47 проверок): N1 — `_on_worker_success()` не пишет в node.data сам (unit: реальный диалог + фейковый worker), E2E `_run_ssh_connect` → `CmdEditNodeData` на стеке → Ctrl+Z откатывает user/key/port → Ctrl+Y применяет; N2 — «conhost» вне TERMINAL_CHOICES_WINDOWS/комбобокса/detect, конфиг `"conhost"` читается как `"cmd"` без перезаписи файла (non-Windows → `"auto"`), legacy-миграция нормализует в config.json + удаляет legacy-файл, `build_command("conhost") == build_command("cmd")` (`[0] == "cmd.exe"`); N5 — password-ветка look_for_keys=False/allow_agent=False (фейковый SSHClient на месте paramiko.SSHClient) + контрольные key-ветка (False/True) и чистая key/agent-ветка (True/True) не тронуты; N4 — guard: stop() до ошибки → error_signal не эмитится, живой поток ошибку доставляет; реестр орфано-потоков `_orphan_threads`: окно закрыто во время подключения → поток зарегистрирован и жив, после finished() реестр самочищается; бонус-N11 — стэш keyring-пароля при создании CmdAddRemoveNode(mode="add"), undo удаляет узел + keyring-запись, redo восстанавливает пароль, свежее добавление — пустой стэш (без «фантомного» пароля), E2E `_duplicate_node` → Ctrl+Z → Ctrl+Y с паролем; состояние релиза (APP_VERSION == "1.1.4", pyproject, заголовок requirements v1.1.4) |
-| `test_rc2_map_import_sidebar.py` | v1.1.2RC2 карта/импорт/сайдбар (тема релиза, 52 проверки): N3 — сброс «залипшего» drag-состояния MapView при потере фокуса/активации: реальный QTest mousePress по узлу → focusOutEvent (PySide6 6.11: blurEvent не существует) в середине перетаскивания → mouseReleaseEvent НЕ коммитит сдвиг, `_move_drag_node`/`_group_drag_olds` очищены, dragMode вернулась в ScrollHandDrag; changeEvent(ActivationChange) — то же самое, посторонние QEvent-типы игнорируются, чистое состояние (без drag) не ломает view; N6 — HostResolverThread (services/host_importer.py): unit — resolve_host вызывается вне GUI-потока (проверка thread id), прогресс (1,3)/(2,3)/(3,3), resolved_map с None для битых имён, stop() отменяет до следующего имени; E2E MainWindow — patched QFileDialog/QMessageBox + фейковый резолвер 150 мс/имя: GUI не блокируется (elapsed < 250 мс при 3 именах), статус-бар «Резолвим имена хостов… done/total», результат added=3/skipped=0, undo одной пачкой CmdAddRemoveNodeBatch удаляет все узлы; IP-only путь — синхронно без потока; N8/N9 — мёртвый код сайдбара: source-проверка через tokenize (COMMENT-фильтр — сами комментарии упоминают убранные вызовы) + поведение (ForegroundRole None на тегированной строке, DecorationRole комбо None); U1 — все 6 кнопок `_BUTTONS` с text-align: left + padding-left: 12px, иконки не null, высота 34; N10 — msg.confirm_delete_profile × en/ru/zh (перевод через i18n.set_language на каждый язык), ProfileManagerDialog: patched QMessageBox.question → точный текст «Удалить профиль '<alias>'?», удаление происходит; состояние релиза (APP_VERSION == "1.1.4", pyproject-сверка, заголовок requirements v1.1.4, паритет 398 = 377 на v1.1.2 final + 21 sftp.* в v1.1.3) |
-| `test_rc3_terminal_window.py` | v1.1.2RC3 окна терминала (тема релиза, 79 проверок): §1–4 U3 (стрелки в mc — DECCKM/SS3; факт pyte 0.8.2: приватные режимы в screen.mode со сдвигом <<5 — DECCKM = 32, а не 1, дефолтный mode {224, 800, 20} = DECAWM+DECTCEM+LNM (LNM с v1.2.11); `application_cursor_keys()` под lock; клавиатура CSI/SS3 в обоих режимах + независимые PageUp/Down/Delete/F-клавиши, цикл smkx/rmkx, thread=None, потокобезопасность feed/чтение); §5 N7 — сброс выделения при авто-возврате скроллбэка к live (окно с фейковым SSH-потоком: 60 строк истории → scroll_page_up → drag-выделение мышью → новый вывод → позиция history сменилась → clear_selection; регрессии: Ctrl+C после сброса → \x03, вывод при live — выделение живёт, Ctrl+C с выделением копирует и в канал ничего, E2E через output_signal); §6 колесо — `terminal_wheel` ("scrollback" дефолт | "off", strip+lower/битое/int → дефолт): виджет "off" — позиция не меняется + event.ignore + в PTY ничего, "scrollback" — prev/next_page + accept, окно: конфиг → widget._wheel_mode; §7 U2 — modules/window_geometry.py (helper round-trip 700×500 против дефолта QMainWindow 640×480, битый base64/не-dict/нет ключа → False + дефолтный размер; E2E терминал: closeEvent → ui_window_geometry_terminal {geometry,state} → новое окно 640×480 вместо 800×600; E2E MainWindow: closeEvent → ui_window_geometry_main → новый MainWindow 700×500); §8 состояние релиза (APP_VERSION == "1.1.4", pyproject-сверка, заголовок requirements v1.1.4) |
-| `test_status_parallel.py` | v1.1.2 final параллельные пробы статусов (тема релиза, 51 проверка): §1–4 ThreadPoolExecutor в `_ProbeThread.run()` с фейковыми пробами (monkeypatch `probe_ssh`, без сети) — пик параллельности > 1 и ≤ max_parallel, ровно N вызовов без дублей, раунд короче последовательного (elapsed < baseline); результаты ПО МЕРЕ ГОТОВНОСТИ (быстрая проба прилетела первой, а не первой в списке целей; разбег во времени ≥ 0.15 c); семантика `_busy` не меняется (повторный `start_round()` игнорируется — ни второго потока, ни лишних проб; после round_finished новый раунд стартует); отмена — stop() выводит раунд быстрее полного параллельного цикла, отменённые до начала пробы результата не дают; §5 ключ `status_max_parallel` (нет конфига → дефолт 16, валидное читается, клампы 0→1 / 9999→64, битые str/bool → дефолт; конструктор max_parallel, set_max_parallel на лету с клампом); §6 мягкий авто-интервал для больших карт (N=50 — базовый интервал, N=51 — удвоенный `effective_interval_ms()`; таймер реально переключён после раунда и в set_interval(); ниже порога — возврат к базовому); §7 E2E MainWindow (51 узел → is_large_map True, одноразовая подсказка с числом узлов в статус-баре, повторный sync не сбрасывает флаг, ниже порога — сброс); §8 диалог «Статусы» (спин 1..64, prefill из конфига, retranslate — лейбл переведён, collect() ровно 18 ключей = 17 + status_max_parallel, тип int); §9 i18n (+2 ключа × en/ru/zh не пусты, паритет 398 — было 375→377 в v1.1.2); §10 состояние релиза (APP_VERSION == "1.1.4", pyproject-сверка, заголовок requirements v1.1.4) |
-
-### Новые в v1.1.3
-
-| файл | покрывает |
-|---|---|
-| `test_sftp_tab.py` | v1.1.3 SFTP-вкладка в окне терминала (тема релиза, 85 проверок): ВСЕ без сети — фейковый SFTPClient с in-memory ФС (поверхность API paramiko: listdir_attr/open/close/get_channel; ошибки IOError "No such file" = SSH_FX_NO_SUCH_FILE); §1–2 worker-очередь: два upload'а СТРОГО последовательно, прогресс-сигналы по порядку (монотонность, финал == total, контент), ошибка пути → error-сигнал БЕЗ падения очереди (list/upload несуществующего каталога, следующие задачи работают); §3 отмена: флаг между операциями — текущая передача прерывается на чанке, очередь пропускается с task_cancelled, worker живёт, флаг автосбрасывается; §4 shutdown: idle и во время передачи (в пределах wait-бюджета), SFTPClient закрыт, queue_* после стопа — None; §5 SftpTab offscreen: листинг/переходы («..», вход в каталог, Refresh, stale-фильтр устаревших ответов), upload/download выбранных (QFileDialog подменён; ожидание по task_done-сигналам, а не по существованию файла — гонка open("wb") до записи чанков), кнопка «Отменить»; §6 SSHTerminalWindow: QTabWidget [Терминал | Файлы], ленивый open_sftp() на том же transport, connected_signal-подхват, ошибка open_sftp → статус-бар, прогресс в статус-баре, closeEvent-teardown; §7 i18n: 21 ключ sftp.* × en/ru/zh, паритет 377→398; §8 состояние релиза (APP_VERSION == "1.1.4", pyproject-сверка, заголовок requirements v1.1.4) |
-
-### Новые в v1.1.4
-
-| файл | покрывает |
-|---|---|
-| `test_main_window_split.py` | v1.1.4 гигиена main_window.py — разрез на миксины (тема релиза, 29 проверок): §1 структура (MRO MainWindow → ProjectIOMixin → NodeOpsMixin → SshMixin → QMainWindow; все 39 методов плана ROADMAP определены в своих миксинах и отсутствуют в `MainWindow.__dict__`; source-scan: миксины не импортируют main_window — нет цикла; host_attr видит атрибут модуля-фасада И тестовую подмену — шов для offscreen); §2 ProjectIOMixin save/load/restore (`_save_project_as` с подменённым QFileDialog → `_project_file` + сброс dirty, JSON без паролей; `_autosave_tick` → файл автосохранения; `_restore_from_autosave` → содержимое записано в файл проекта + сцена перезагружена; `_load_project_at` во втором окне — узлы восстановлены, dirty сброшен); §3 NodeOpsMixin add/duplicate/delete (`_add_server` с фейковым AddServerDialog через host_attr-шов, включая bool-guard v0.8.1 `_add_server(True)` без падения, по undo-команде на узел; `_duplicate_selected_node` — копия +40/+40 с новым id, выделение перешло к копии; групповое `_delete_selected_nodes` с одним подтверждением → сцена пуста); §4 SshMixin ssh-dialog flow (`_run_ssh_connect` с фейковыми SSHConnectDialog/SSHTerminalWindow: поля через `_apply_ssh_dialog_fields` → `CmdEditNodeData` на undo-стеке, узел в `_ssh_connected_nodes`, терминальное окно создано и зарегистрировано, пароль передан окну и не хранится в модели, автосбор информации (auto=True), `_forget_terminal_window` очищает реестр; без выделения — information без падения) |
-
-### Новые в v1.2
-
-| файл | покрывает |
-|---|---|
-| `test_terminal_page.py` | v1.2 рефактор TerminalSessionPage «окно → страница» + трекинг по сессиям (тема релиза, 76 проверок; offscreen, ВСЕ без сети — фейковые потоки с тем же API, что у SSHTerminalThread): §1 конструкция страницы (сессия как переиспользуемый виджет: thread+screen+холст+статус+SFTP-вкладка, конфиг terminal_* из config.json, тестовый шов класса потока ST.SSHTerminalThread); §2 ВСЕ teardown-пути через единый `page.shutdown()` (идемпотентен) — штатный путь (PTY-таймер остановлен, сигналы потока/worker'а отвязаны, поздние emit no-op, поток стопнут, реестры орфано пустые), орфано-путь N4 (блокирующийся поток: wait(1500) не дождался → `_orphan_threads`, поздний finished() самочищает реестр), SFTP-worker (ленивый старт на живом transport'е, стоп в бюджете, сигналы отвязаны), error-путь (`error_signal` → QMessageBox.critical + статус-строка + close_terminal без хоста), close_terminal с хост-окном; §3 confirm_close — gate «ask» (Cancel держит / Close закрывает), «close» и завершённая сессия без диалога, `_force_close` (путь лимита); §4 регрессия жизненного цикла окна (режим `windows` = v1.1.x: тонкая обёртка WA_DeleteOnClose/заголовок/геометрия window_geometry.py, compat-свойства live-ссылаются на страницу, ресайз холста → сетка через eventFilter, мост статус-бара sticky+SFTP-прогресс, round-trip ui_window_geometry_terminal, E2E WA_DeleteOnClose — C++-объект уничтожен после close); §5 трекинг по СЕССИЯМ в MainWindow (реестр хранит TerminalSessionPage, а не окна; зелёная точка узла горит пока жива хотя бы одна сессия и гаснет когда все закрыты; лимит «4 терминала» по сессиям: Cancel → None, Close → старейшая `_force_close`+закрыта, реестр обновлён); §6 i18n-паритет (398) + состояние релиза |
-
-### Новые в v1.2.1
-
-| файл | покрывает |
-|---|---|
-| `test_terminal_tabs.py` | v1.2.1 несколько SSH-сессий табами в одном окне терминала (тема релиза, 63 проверки; offscreen, ВСЕ без сети — фейковые потоки с тем же API, что у SSHTerminalThread): §1 структура окна (QTabWidget `session_tabs` — центральный виджет, табы закрываемые, заголовок таба = alias узла, tooltip `terminal.tab_close_tooltip`, WA_DeleteOnClose/заголовок сохранены, compat-атрибуты — live-ссылки на АКТИВНЫЙ таб; add_session: второй таб активен, мост переключился; close_page: НЕпоследний таб оставляет окно с соседом, ПОСЛЕДНИЙ → WA_DeleteOnClose E2E); §2 новая сессия = новый таб (первое подключение — новое окно v1.2, повторное к тому же узлу — ТАБ в том же окне + статус `terminal.session_new_tab`, другой узел — новое окно; реестр хранит СЕССИИ; зелёная точка горит при 2 сессиях); §3 закрытие таба = cleanup страницы (gate «ask» Cancel держит / Close закрывает только этот таб; сосед жив и печатает; последний таб → окно уничтожено, точка погасла, `_ssh_connected_nodes` сброшен; крестик tabCloseRequested — тот же путь); §4 error-путь в табовом окне (QMessageBox.critical с хост-окном, закрыт ТОЛЬКО таб с ошибкой, соседняя сессия жива и печатает); §5 лимит `terminal_max_open` по СЕССИЯМ во всех окнах (2 таба + 1 окно = 3; Cancel → None, Close → `_force_close` старейшей — закрыт ЕЁ таб, её окно живо с соседней); §6 мост «статус-бар» — только активный таб (сообщения неактивных не доходят, переключение переподключает, SFTP-прогресс следует за активным); §7 i18n-паритет (400 = 398 + 2 terminal.*) + состояние релиза. Обновлён `test_terminal_page.py` под табы: центральный виджет — QTabWidget, две сессии узла = два таба одного окна (закрытие таба не гаснет точку пока жив сосед), лимит — закрыт таб старейшей, её окно живо (76 → 77 проверок) |
-
-### Новые в v1.2.2
-
-| файл | покрывает |
-|---|---|
-| `test_terminal_dock.py` | v1.2.2 терминалы как док окна карты (тема релиза, 76 проверок; offscreen, ВСЕ без сети — фейковые потоки с тем же API, что у SSHTerminalThread): §1 ключ конфига `terminal_mode` (нет ключа → "windows"; "tabs"/" TABS " strip+lower → "tabs"; битое значение/чужой тип int → дефолт; прочие ключи читаются параллельно); §2 структура дока + spawn в режиме "tabs" (ленивое создание QDockWidget: objectName `terminals_dock`, заголовок `terminal.dock_title`; контент — QTabWidget из TerminalSessionPage, табы закрываемые, заголовок таба = alias, tooltip; страница привязана к хосту-контенту; карта остаётся центральным виджетом — self.view не тронут; второй узел = второй таб в ТОМ ЖЕ доке + статус `terminal.session_new_tab`; реестр хранит СЕССИИ); §3 применение без перезапуска (tabs→windows: новая сессия — отдельное окно, доковые живут как есть; windows→tabs: сессия в доке, старое окно узла НЕ переиспользуется и живо); §4 cleanup постранично (закрытие таба не затрагивает соседний — жив и печатает; последний таб → док прячется НЕ уничтожается; скрытый док показывается на новую сессию; крестик tabCloseRequested — тот же путь; gate «ask» Cancel держит / Close закрывает только этот таб; зелёная точка); §5 статус-строка дока — только активный таб (сообщения неактивных не доходят, переключение переподключает, таймауты с token-guard — sticky-сообщение не затирается старым таймаутом, SFTP-прогресс за активным табом, статус-бар карты изолирован); §6 отрыв дока в окно и обратно (setFloating True/False, сессии печатают, состояние не меняется); §7 шатдаун MainWindow — ВСЕ сессии реестра (док + окна: потоки стопнуты, реестр пуст, док скрыт, окно уничтожено); §8 лимит `terminal_max_open` по СЕССИЯМ во всех контейнерах (1 окно + 1 таб дока = лимит; Cancel → None; Close → `_force_close` старейшей в её контейнере, новая сессия — в выбранный режим); §9 i18n-паритет (404 = 400 + 4) + состояние релиза. Обновлены: `test_terminal_acceptance.py` (load_terminal_settings: +ключ mode в expected-dict'ах + валидация terminal_mode), `test_settings_dialog.py` (комбо режима, prefill, collect() 18→19), `test_status_parallel.py` (collect() 18→19) |
-
-### Новые в v1.2.3
-
-| файл | покрывает |
-|---|---|
-| `test_multi_input.py` | v1.2.3 мультинабор — broadcast ввода активной сессии во все остальные открытые (тема релиза, 53 проверки; offscreen, ВСЕ без сети — фейковые потоки с тем же API, что у SSHTerminalThread, тестовый шов ST.SSHTerminalThread): §1 хаб юнит MultiInputHub/_thread_alive (слушатели ТОЛЬКО при реальной смене состояния, toggle, broadcast: источник пропущен/мёртвые потоки отфильтрованы/мёртвый C++-объект в реестре не роняет broadcast, reset); §2 включение через MainWindow (3 сессии window-режима; checkable QAction «Вид» + F12-шорткат ApplicationShortcut живёт только в режиме, плашка статус-бара «MULTI: N сессий» со счётчиком и кнопкой выхода, бейджи вкладок «MULTI · <alias>», рамка QTabWidget (objectName+QSS), префикс заголовка окна, статус-сообщение); §3 broadcast в единственной точке ввода `_send` (клавиша → те же байты во ВСЕХ остальных потоках, источник получает ровно один раз — нет эха, Return дублируется, режим выключен → дублей нет); §4 F12-выход (в режиме не доходит до shell — RC2-маппинг `\x1b[24~` приостановлен, шорткат снят; вне режима маппинг восстановлен; Esc в режиме — НЕ выход: уходит в shell как `\x1b` и дублируется); §5 Ctrl+V bracketed paste дублируется единым блоком во все потоки; §6 мёртвая сессия (реестр штатным путём destroyed → _forget_terminal_window, зелёная точка погасла, счётчик плашки обновлён, broadcast продолжается, мёртвый канал байты не получает); §7 явный multi_hub в конструкторе — изоляция от singleton'а приложения; §8 i18n-паритет (411 = 404 + 7) + состояние релиза. Обновлён `_common.py` (пины 1.2.3/411) |
-
-### Новые в v1.2.4
-
-| файл | покрывает |
-|---|---|
-| `test_multi_input_e2e.py` | v1.2.3 мультинабор — E2E на РЕАЛЬНЫХ SSH-каналах (paramiko), без фейковых потоков; аддендум 2026-09-07: инцидент «ручной тест не подтвердил broadcast» → последний непокрытый отрезок (настоящий paramiko Transport/Channel, реальная аутентификация + known_hosts-пиннинг). In-process echo-shell сервер (важно: pty/shell-запросы требуют TRUTHY-возврата — OPEN_SUCCEEDED==0 falsy дал бы CHANNEL_FAILURE; ВАЖНО: поток НА СОЕДИНЕНИЕ — _handle блокируется в recv-цикле, однопоточный accept обслужил бы только первого клиента): §1 window-режим 3 реальных терминала (включение через путь меню → клавиша в активном виджете → те же байты во ВСЕХ остальных каналах, источник ровно один раз — нет эха; режим выключен → дублей нет; + «реальный путь событий» v1.2.4-fix: клавиши postEvent'ом через Qt event loop (focus + QWidget::event), не только прямые keyPressEvent-вызовы); §2 док-режим (terminal_mode=tabs) 2 сессии — broadcast во все остальные табы дока; §3 диагностика v1.2.4-fix: смена режима (INFO enabled/disabled) и broadcast-строки (DEBUG, "-> N session(s)") в файле лога под изолированным HOME |
-| `test_menu_actions_regression.py` | v1.2.3 мультинабор — РЕГРЕССИЯ реального пути клика по checkable-пункту меню (`QAction.trigger()` = Qt сам инвертирует checked и эмитит сигналы); аддендум №2 2026-09-07: корень «ставлю галочку Вид → Мультинабор — ничего не происходит»: PySide6 6.11 — `QMenu.addAction(text, slot)` (авто-подключение `_add_menu_action`) эмитит `triggered` в Python-слот БЕЗ аргументов (явный `.triggered.connect` передаёт новое состояние; авто-подключение не отключается disconnect()). Фикс: пункт создаётся вручную и подключён к `toggled(bool)`. 15 проверок, SSH не нужен (один duck-typed фейк-контейнер в реестре): §1 клик → хаб активен + галочка + плашка со счётчиком + рамка/бейдж/префикс заголовка + статус-сообщение + F12 вешен; §2 повторный клик (= F12) → всё сброшено (плашка скрыта, подсветка снята, шорткат удалён); §3 безаргументный `_toggle_multi_input()` = реальный toggle (до фикса — no-op); §4 кнопка ✕ на плашке. Проверено красным: против оригинальной обвязки тест падает ровно с симптомами инцидента |
-| `test_note_attach.py` | v1.2.4 крепление заметок к серверам + особая линия (тема релиза, 77 проверок; offscreen; обновлён под аддендум 2026-09-07 — замечания тестировщиков): §1 формат и сериализация (`server_id` в to_dict() только если задан, _do_save → JSON, backward-compat старых файлов, битая ссылка → свободная заметка на сохранённой позиции); §2 механика сцены (якорь = правый верхний угол узла + 12,12; линия QGraphicsPathItem: пунктир [4,3] #eedd9f — цвет тела стикера, z=-1, концы — edge_point; движение узла — одношаговый лаг ровно как у стрелок (itemChange ДО применения позиции) + точное совпадение на следующем шаге; **v1.2.4-fix: drag закреплённой НЕ открепляет — anchor_offset хранится, линия следует live, узел ведёт заметку с сохранением смещения**; collapse/expand — якорь+offset и пересчёт линии; detach — позиция не меняется; remove_server/clear_all без сирот-линий); §3 undo/redo (attach/detach round-trip через win.undo_stack; LIFO «открепление + удаление сервера» — undo×2 возвращает узел И переприкрепляет заметку; мёртвый C++-объект audit #8 — _resolve_note по id); §4 контекстное меню (синтетический QContextMenuEvent + capture: свободная заметка → подменю со всеми узлами / прямой пункт с alias над узлом; закреплённая → открепить; «Удалить заметку» на месте); §5 drag & drop E2E QTest'ом (drag на узел = прикрепить в точный якорь + CmdAttachNote на стеке; **v1.2.4-fix: сдвиг закреплённой = перемещение без открепления — крепление живёт, позиция отпускания, offset сохранён, undo-команд нет; drag на другой узел = ОДНА команда пере-крепления**; клик без движения — no-op); §6 save/load round-trip (крепление восстанавливается; **v1.2.4-fix: сохранённая x/y закреплённой доверяется — offset вычисляется от неё, необычная позиция загружается как есть с креплением и линией**; старый формат → свободные); §7 i18n-паритет (417 = 411 + 6) + состояние релиза. Пины `_common.py` (1.2.4/417) без изменений — версия не меняется |
-| `test_view_toggles.py` | v1.2.4.1 сворачивание сайдбара и карты в тонкую линию (тема релиза + аддендум v1.2.4.1-fix, 72 проверки; offscreen, без сети; терминальные сессии на фейковых потоках): §1 структура (QSplitter[container_sidebar \| container_map], setCollapsible(0/1)=False, полоски `_CollapseStrip` 18px скрыты в развёрнутом состоянии, угловые кнопки с ромбом «◇» — нижний ряд SidebarPanel / overlay в правом НИЖНЕМ углу MapView (v1.2.4.1-fix: верх зарезервирован под миникарту), act_show_sidebar/act_show_map checkable с иконками пары); §2–3 сворачивание/разворачивание КАЖДОЙ панели тремя путями (угловая кнопка click, клик по полоске QTest.mouseClick, пункт меню trigger() — PySide6 6.11: клик инвертирует checked сам; каждый путь — hide/show панели, полоска на месте, галочка = состояние, config-ключ) + перепозиция overlay-кнопки по resize (правый нижний угол); §4 запрет двойного сворачивания (v1.2.4.1-fix): первая панель сворачивается, вторая отклоняется ВСЕМИ ТРЁМЯ путями (меню/кнопка/setChecked) — галочка не расходится с механикой, статус-подсказка `status.collapse_both_forbidden`, config не пишет True; после развёртывания первой вторая снова сворачивается; §5 guard no-op при свёрнутой карте (fit/center/reveal/навигация поиска Enter/Shift+Enter — без исключений, карта не показывается автоматически; reveal выделяет узел; статусы scene-based в фоне, точка появляется при разворачивании); §6 экспорт PNG/PDF/drawio при свёрнутой карте (файлы создаются — рендер scene-based); §7 terminal_mode="tabs": карта свёрнута → док жив, сессия печатает, отрыв/возврат дока работают; §8 персистентность (ключ в config.json, merge-write не сбрасывает чужие; ручная запись обоих True — при старте применяется только сайдбар, карта остаётся развёрнутой (инвариант §4); новое окно применяет состояние при старте ПОСЛЕ restoreState; частичный возврат пишет только свой ключ); §9 ручка сплиттера до нуля не дотягивается (setSizes([0,…]) клампится minimumWidth 160/240); §10 i18n-паритет (421 = 417 + 3 + 1: `status.collapse_both_forbidden`) + состояние релиза (версия без изменений — v1.2.4.1) |
-
-### Новые в v1.2.5
-
-| файл | покрывает |
-|---|---|
-| `test_theme.py` | v1.2.5 центральная тема `ui/theme.py` (тема релиза, 48 проверок; offscreen, без сети): §1 модуль темы — чистые данные (импорт БЕЗ PySide6 и без единого импорта, все константы палитры — строчные hex #rrggbb); §2 семантические dict'ы/радиусы/шрифты = литералам до рефакторинга (ключи, значения и ПОРЯДОК: TAG_COLORS/TAG_PALETTE/STATUS_COLORS/ARROW_TYPE_COLORS — его итерует комбобокс диалога связи; RADIUS_* 10.0/10.0/12.0/8/5.0/3.0/2.0; FONT_UI/FONT_MONO); §3 потребители — те же цвета/радиусы/шрифты, что до v1.2.5 (карточка узла/статусы/теги/шрифты alias+info+host; стрелка: CONNECTION_TYPES is theme.ARROW_TYPE_COLORS + 6 типов + дефолт ssh + COLOR_HOVER #6ee7b7 v0.6-compat; группа: рамка/hover/selected/title + заливки-цвета темы с альфой 16/28/20; заметка: палитра + шрифт редактора; сцена: сетка minor/major; рендер-пиксели: фон между линиями сетки CANVAS_BG #020617 + сетка рисуется (drawBackground вызывается QGraphicsScene.render — поведение с v0.9.1); вью: холст CANVAS_BG; поиск: QSS карточка/акцент/8px/текст; полоска сворачивания BASE_BG пикселями; иконки ICON_COLOR; диалоги AddServer/SSHConnect/ProfileManager QSS; статус-лейблы дока/SFTP TEXT_MUTED; мультинабор MULTI_ACCENT + рамка контейнера); §4 AST-аудит 25 целевых файлов — ни одного «сырого» hex-литерала палитры в строковых константах (регрессия «новый литерал вместо константы темы»); §5 вне охвата без изменений (палитры terminal_screen default/nord/dracula/tokyo_night, TerminalWidget.CURSOR_COLOR, цвета export_drawio — формат экспорта); §6 i18n-паритет (421 — новых ключей в v1.2.5 нет) + состояние релиза (пины 1.2.5/421) |
-
-### Новые в v1.2.6
-
-| файл | покрывает |
-|---|---|
-| `test_bidirectional_arrows.py` | v1.2.6 двухсторонние стрелки (тема релиза, 37 проверок; offscreen, без сети): §1 геометрия — наконечники на ОБОИХ концах кривой, кончики ровно на границах узлов (замкнутый треугольник = elementCount 4: moveTo + 2×lineTo + closeSubpath; PySide6: у `QPainterPath.Element` `.x`/`.y` — свойства, не методы), ориентация — каждый наконечник смотрит НА СВОЙ узел (←——→): центроид крыльев строго на стороне кривой (регрессия перевёрнутого исходного наконечника — тело уходило под узел и связь визуально не отличалась от односторонней), стандартный режим — путь исходного наконечника пуст (item невидим); §2 set_bidirectional — переключение + идемпотентность без пересоздания item'а; §3 диалоги — чекбокс `connection.bidirectional` (дефолт не отмечен), prefill из стрелки, кортежи get_connection() 5/3 элемента; §4 JSON — опциональное поле "bidirectional" пишется только когда true (паттерн server_id), round-trip save/load, backward-compat старых файлов (нет поля → односторонняя); §5 undo/redo — CmdAddRemoveConnection(bidirectional=...) redo/undo/redo с флагом, CmdEditConnection (label/type/bidir одной командой, undo возвращает прежнее состояние), удаление узла — E2E стэша 5-кортежей (_remove_node_guarded с patched QMessageBox.question: undo восстанавливает двухстороннюю связь); §6 drawio-экспорт — startArrow=classic у двухстороннего ребра, отсутствует у обычного; §7 i18n-паритет (422 = 421 + 1 connection.bidirectional) + состояние релиза (пины 1.2.6/422). Обновлены: `test_connections.py` (drag-режим: фейковый диалог → 5-кортеж — старый 4-кортеж ронял `_add_connection` ValueError'ом, а модалка QMessageBox.critical зависала offscreen на faulthandler-таймаут 180 c), `test_context_menus.py` (EditConnectionDialog → 3-кортеж) |
-
-### Новые в v1.2.7
-
-| файл | покрывает |
-|---|---|
-| `test_terminal_selection_menu.py` | v1.2.7 терминал: выделение двойным/тройным кликом + контекстное меню ПКМ (тема релиза, 58 проверок; offscreen, без сети — синтетические QMouseEvent по паттерну test_terminal_input.py): §1 word_units() чистая функция (слова/пробелы по краям и подряд/пунктуация в слове/пусто/CJK «a中b» = глиф+заглушка в одном слове, E2E через реальный TerminalScreen); §2 двойной клик — слово (клик-счётчик считает виджет: QMouseEvent не несёт click-count; границы слова + selected_text(), отпускание при count>=2 не затирает выделение, клик по пробелу — бездействия, пауза > DOUBLE_CLICK_MS → сброс счётчика и простого клика); §3 тройной клик — вся строка 0..columns-1 (вкл. пустую строку); §4 drag после двойного клика — фиксатор _click_sel_end = дальний конец слова (оба края), ячейки = selection_cells(); §5 контекстное меню (_build_context_menu — тестовый шов без menu.exec): состав/порядок [Copy|Paste|Select All], Копировать disabled без выделения → буфер «world» при выделении (в PTY ничего), ПКМ не сбрасывает выделение, настоящий путь ПКМ (регрессия v1.2.7-fix: реальный QContextMenuEvent → contextMenuEvent → menu.exec в глобальных координатах), Вставить → ровно \x1b[200~…\x1b[201~ в PTY / пустой буфер → ничего / thread=None → disabled (сентинел-хелпер make_widget), Выделить всё → вся сетка; §6 подписи меню en/ru/zh + i18n-паритет (425 = 422 + 3 terminal.menu.*) + состояние релиза (пины 1.2.7/425) |
-
-### Новые в v1.2.8
-
-| файл | покрывает |
-|---|---|
-| `test_sftp_dnd.py` | v1.2.8 D&D файлов из Проводника в SFTP-вкладку (тема релиза, 45 проверок; offscreen, без сети — фейковый SFTPClient с in-memory ФС + симуляция drag синтетическими QDragEnterEvent/QDropEvent с QMimeData (URL реальных локальных файлов); offscreen-нюанс, установленный пробами: синтетические drag-события НЕ проходят по реальному DnD-пути Qt notify() — доставка «виджету под курсором» недоступна из Python и обходит event-фильтры, поэтому доставка прямыми виртуальными вызовами `tab.dragEnterEvent(ev)`/`tab.dropEvent(ev)` и прямым `tab.eventFilter(child, ev)` — ровно та логика, что обслуживает настоящий drop из Проводника): §1 `_local_files` (файлы/каталоги/не-локальные https/несуществующие/без URL/None); §2 drag на вкладке: dragEnter принимает с файлами / отклоняет без, drop → upload'ы СТРОГО последовательно через worker-очередь (task id последовательные, ВСЕ события A раньше ЛЮБЫХ B), прогресс-сигналы по порядку (монотонность, финал == total), контент на «сервере» в ТЕКУЩЕМ каталоге, подсказка `sftp.drop_queued` (count+dir); §3 маршрутизация eventFilter: drag-события на детях (viewport дерева, кнопка) пересылаются и потребляются (True), не-drag — проход (False), чужой виджет не трогаем, DragMove = тот же ответ, что dragEnter, пустой drop (только каталоги) → `sftp.drop_no_files`; §4 ошибки через drop-путь: нет соединения → waiting_connection + в очередь ничего, удалённый каталог исчез между листингом и drop'ом → task_error × 2 «No such file» + очередь жива (следующий drop завершился), нет прав на запись → task_error PermissionError + drop в записываемый каталог завершился; §5 i18n: `sftp.drop_queued`/`sftp.drop_no_files` × en/ru/zh (форматирование {count}/{dir}), паритет 427 = 425 + 2 sftp.drop_*; §6 состояние релиза (пины 1.2.8/427) |
-
-### Новые в v1.2.9
-
-| файл | покрывает |
-|---|---|
-| `test_wcwidth_cjk.py` | v1.2.9 полный wcwidth(3) для CJK (тема релиза, 40 проверок; headless — без Qt-виджетов): §1 таблица char_width (wide: CJK/Fullwidth/Hangul/кана/CJK-пунктуация/fullwidth space/emoji → 2; narrow: ASCII/precomposed é/halfwidth katakana → 1; ambiguous: ¿°№α → 1 — узкие в wcwidth(3), C locale; zero-width: combining U+0301/variation selector U+FE0F → 0; контрольный BEL (-1) → кламп 0; пустая строка (заглушка) → 0; NFC-кластер «e»+U+0301 → 1, а не 2 по старой эвристике); §2 is_wide_char + сверка с библиотекой wcwidth на выборке из 16 символов (классификация холста = раскладка pyte) + гигиена: в source terminal_widget.py нет `import unicodedata`/`.east_asian_width`; §3 E2E через реальный TerminalScreen (сетка = wcwidth: «a中b» = [a][中][''][b], ширина ячеек 1/2/0/1, суммарная = wcswidth = 4; NFC-кластер → одна ячейка 'é' шириной 1; «¿°№α» — ровно 4 ячейки); §4 split_row_runs/word_units на CJK (заглушка не входит ни в один run, широкий глиф в конце строки x=cols-1 — без IndexError, «a中b» = одно слово на 4 ячейках, «中 a» — два слова). Обновлены: `test_ssh_terminal.py` (§3c клавиатура — TerminalWidget вместо удалённого SSHTerminalTextEdit), `test_terminal_acceptance.py`, `test_terminal_colors.py` (render() удалён — check отсутствия мёртвого кода) |
-
-### Новые в v1.2.10
-
-| файл | покрывает |
-|---|---|
-| `test_audit_v1210.py` | v1.2.10 аудит: подтверждённые баги и данные (тема релиза, 41 проверка; offscreen, без реальной сети — paramiko-клиент mock'ом): §1 credential manager (get_logger() без аргумента → TypeError — якорь корня AUDIT ручной #2; фейковый отклонённый бэкенд plaintext/keyrings.alt.file → is_available False + warning «Rejected keyring backend» в log-capture); §2 get_data(): strip host/user/alias + пустой alias → «Server»; §3 SSHWorker key-ветка: явный пароль и пароль из keyring (фейковый credential manager) → connect с key_filename И password, чистый key-путь — password=None; §4 _on_accept: исключение save_config → QMessageBox.warning (шов — модульный глобал ui.settings_dialog) + applied() не эмитится + диалог не закрыт, успешный путь — applied+accept без warning; §5 wcwidth: импортируется, установленная версия >= 0.2.9, декларация с одинаковым пином в requirements.txt и pyproject.toml; §6 BackupsDialog с элементом без «path» → без KeyError, данные строки («», label); §7 VERSION_FORMAT_RE: принимает 1.2.10/1.2.10rc1/1.2.10RC1/1.0RC4/0.9.9.7 (нижний регистр rc с v1.2.10), отклоняет «1.2.10rc»/«1.2.10rcx1»; §8 состояние релиза + i18n-паритет (427) |
-
-### Новые в v1.2.10rc1
-
-| файл | покрывает |
-|---|---|
-| `test_audit_rc1_threads.py` | v1.2.10rc1 аудит: потоки и teardown (тема релиза, 25 проверок; offscreen, фейковые потоки — без сети): §1 DNS-guard (AUDIT авто #2: два быстрых «Copy Hostname» → ОДИН ReverseDnsThread, повторный запрос игнорируется со статус-сообщением — без затирания работающего потока; parent=MainWindow; после finished() — cleanup self._dns_thread + буфер обмена; guard снят — следующий запрос стартует новый поток); §2 closeEvent с висящим фейковым DNS-потоком (без метода stop() — как реальные ReverseDnsThread/PingThread, находка верификации): окно закрывается в wait-бюджете (~2 c, не зависает), переживший поток — в services/diagnostics._orphan_threads (не оставлен на GC: «QThread: Destroyed while thread is still running»), реестр самочищается по finished(); §3 шатдаун с 2 активными терминальными сессиями при terminal_close_behavior="ask" (ручной #1, реальный баг; фейковый блокирующий поток, игнорирующий stop() — как paramiko-подключение): НОЛЬ QMessageBox.question (шов ST.QMessageBox подменён — до фикса: 2 вызова, по одному на сессию), главное окно закрыто, пережившие потоки — в ST._orphan_threads (N4-путь page.shutdown); §4 состояние релиза + i18n-паритет (427 — без новых ключей) |
-
-### Новые в v1.2.10rc2
-
-| файл | покрывает |
-|---|---|
-| `test_audit_rc2_robustness.py` | v1.2.10rc2 аудит: робастность и гигиена кода (тема релиза, 28 проверок; offscreen/headless — без сети): §1 server_data_from_dict с int-id (ручной #5e): явный "id": 123 в JSON → str("123") + регрессии (отсутствующий/пустой id — генерируется, строковый id проходит); §2 PingThread с хостом «-x» (ручной #5d): subprocess.run НЕ вызывается (mock), finished_ping(False, …) — Windows ping не поддерживает «--», guard ДО запуска процесса + регрессия: обычный хост запускает subprocess как раньше; §3 поздние worker-сигналы на уничтоженный диалог (ручной #5c): close() при живом фейковом worker'е ждёт ~2 c wait-бюджет и отвязывает его setParent(None) (стр. 497), C++-объект диалога уничтожен (WA_DeleteOnClose, паттерн test_terminal_page.py) — прямой вызов _on_worker_success/_on_worker_error БЕЗ RuntimeError (до фикса — RuntimeError из слота), worker доживает подключение, поздний emit обработан event loop'ом без краха; §4 delete_password при фейковом keyring.errors БЕЗ PasswordDeleteError (ручной #6): общий обработчик → False, без падения; класс на месте → True (то же поведение, что до фикса); NoKeyringError → True (регрессия) + авто #7: source-проверка явного `import keyring` в _try_init; §5 source-проверки: file_dups-призрак убран (ручной #5b) + комментарий к ANSI_ESCAPE_RE — tests/test_core.py + «Не трогать» (ручной #5a, код не меняется); §6 состояние релиза + i18n-паритет (427 — без новых ключей) |
-
-### Новые в v1.2.10rc3
-
-| файл | покрывает |
-|---|---|
-| `test_rubber_band_perf.py` | v1.2.10rc3 аудит: производительность на больших картах (тема релиза, 26 проверок; offscreen — без сети): синтетическая сцена 520 ServerNode (сетка 26×20) + связи и заметки; §1 неаддитивный драг: live-выделение на каждом шаге = референс (алгоритм ДО v1.2.10rc3 — полный обход scene.items() + intersects + base_ids), финал = ровно пересекаемые узлы, заметки/стрелки рамкой НЕ выделяются; §2 аддитивный режим (Shift): итог = база ∪ пересечение, 3 узла базы вне рамки сохранены; §3 неаддитивный режим — семантика замены (база вне рамки снята); §4 клик без движения мыши выделение не меняет; §5 полный путь мыши через QTest (Ctrl+ЛКМ по пустому месту → драг → отпускание; Ctrl+Shift — аддитивный) — wiring модификаторов end-to-end; §6 состояние релиза + i18n-паритет (427 — без новых ключей). Обновлён `test_terminal_colors.py` (+4 проверки: whitespace-only run с явным фоном — SGR 47-пробелы залиты белым палитры, незакрашенная строка — базовая заливка) |
-
-### Новые в v1.2.11
-
-| файл | покрывает |
-|---|---|
-| `test_pyte_compat.py` | v1.2.11 совместимость с pyte 0.8.2 (тема релиза, 23 проверки; headless — без Qt): §1 wiring (TerminalScreen создаёт SshmapHistoryScreen, по-прежнему isinstance pyte.HistoryScreen, LNM в дефолтном mode); §2 private SGR (Vim 9+ \x1b[?4m — upstream issue #202: в 0.8.2 TypeError из feed() и потеря хвоста чанка; теперь — без исключений, display/mode/cursor не изменились, б'AB\x1b[?4mCD\r\n' → "ABCD" — регрессия на хвост, private SGR с параметрами \x1b[?4;11m → "XY", обычный SGR не задет: \x1b[31m → fg='red', SGR 0 сбрасывает); §3 LNM по умолчанию (б'ab\ncd' → ["ab","cd"]; после \x1b[20l — cd со смещением x=2; после \x1b[20h — снова CR+LF; после RIS ESC[c — LNM восстановлен; опечатка плана \x1b[2h/\x1b[2l → фактически SM/RM 20); §4 состояние релиза + i18n-паритет (427 — без новых ключей) |
-
-### Новые в v1.2.12
-
-| файл | покрывает |
-|---|---|
-| `test_alt_screen.py` | v1.2.12 альтернативный экран 47/1047/1048/1049 (тема релиза, 44 проверки; headless — синтетические последовательности байтов, без Qt/сети; семантика — upstream PR #212, дифференциально против tmux 3.6b и GNU screen): §0 wiring (константа ALTSCREEN_MODES, свежий экран in_alt False, бит 1049<<5 в mode до/после); §1 round-trip (вывод shell с SGR-цветами → снимок G0; \x1b[?1049h — рабочий буфер ПУСТОЙ, сетка = TUI-каркас, shell-контента нет; \x1b[?1049l — сетка посимвольно равна G0 включая fg/bg, курсор+hidden восстановлены); §2 матрица 4×4 по ВСЕМ комбинациям {47, 1047, 1048, 1049} (вход a → выход b — всегда возврат к основному экрану) + повторный вход идемпотентен (сохранённый буфер не заменён) + кросс-выход 1049h…47l (один флаг) + двойной вход 1049h 1049h (основной не потерян, один выход возвращает); §3 курсор: (5,3) → 1049h (НЕ хомится — остаётся (5,3)) → TUI гоняет курсор в (18,6) → 1049l → снова (5,3); для 47/1047 — НЕ восстанавливается (закреплено по спецификации: остался в позиции TUI (19,9)); §4 изоляция истории: 40 строк основного + 60 TUI-строк в 10-строчном alt (скроллинг за край) → history.top не вырос, позиция не изменилась, TUI-строк в скроллбэке нет; §5 RIS в alt (\x1bc — НЕ \x1b[c): выход из alt, сетка полностью дефолтная, mode == {DECAWM, DECTCEM, LNM}, история очищена; §6 resize в alt (вход при 120 колонках → resize(80) → выход: строки основного экрана обрезаны до 80, «переширокого» восстановления нет, содержимое сохранилось); §7 вход при просмотре истории (авто-возврат к live сработал — position == size, alt активен, после выхода основной экран на месте); §8 состояние релиза + i18n-паритет (427 — без новых ключей). Инвертирован `test_terminal_acceptance.py` (vim: docstring + секция — вместо «known limitation: режима 1049 нет» ожидается восстановление посимвольно включая fg/bg) |
-
-### Новые в v1.2.13
-
-| файл | покрывает |
-|---|---|
-| `test_terminal_mouse.py` | v1.2.13 колесо мыши в полноэкранном TUI (тема релиза, 49 проверок; headless + offscreen — без сети): §1 headless-матрица `mouse_tracking()` (DECSET 1000/1002/1003 × 1006: включение/выключение, несколько режимов одновременно; 1006 ОДИН → `(False, True)` — SGR-кодировка без 1000/1002/1003 tracking НЕ включает (xterm-семантика, исправленное acceptance ROADMAP'а); htop-стиль переключения во время сессии — чтение на каждое событие (кэша нет); RIS `\x1bc` чистит режимы); §2 SGR-passthrough offscreen (фейковый поток, паттерн test_terminal_input.py): колесо вверх/вниз при 1006 → в `send_data` ровно `b'\x1b[<64;5;3M'`/`b'\x1b[<65;5;3M'` (up=64/down=65 — ctlseqs: кнопки 4/5 = коды событий кнопок 1/2 + 64), событие потреблено, скроллбэк не тронут, координаты за сетью зажаты в [1..cols]×[1..lines]; §3 X10-passthrough (tracking БЕЗ 1006): `b'\x1b[M' + [96|97, 32+col, 32+row]` вверх/вниз; §4 X10-лимит протокола 223 (=255−32, ctlseqs «Extended coordinates»: расширения только через UTF-8 1005/SGR 1006): col=230 на сетке 260 колонок → кламп в байт 255; SGR на той же сетке — без клампа (`b'\x1b[<64;230;3M'`); §5 alt-экран БЕЗ tracking → no-op (регрессия гейта v1.2.12: в PTY ничего, скроллбэк не тронут, событие НЕ потреблено — пропагация безвредна, предков-QScrollArea нет); alt + tracking → passthrough SGR; §6 passthrough приоритетнее `terminal_wheel="off"` (+ регрессия "off" без tracking v1.1.2RC3: event.ignore, ничего не шлётся, скроллбэк не тронут); §7 скроллбэк-регрессия (без режимов): вверх → prev_page / вниз → next_page, в PTY ничего; §8 мультинабор: байты колеса НЕ проходят `hub.broadcast` (координаты сессионно-локальны — явный хаб + чужая сессия в реестре их не получает); §9 terminal_thread=None + tracking — без исключений; §10 состояние релиза + i18n-паритет (427) |
-
-### Новые в v1.2.14
-
-| файл | покрывает |
-|---|---|
-| `test_scrollback_batching.py` | v1.2.14 батчинг авто-возврата к live-строке (тема релиза, 36 проверок; headless — без Qt/сети; время — только в отчёте замера, БЕЗ жёстких ms-ассертов): §0 wiring (override before_event существует; before_event НЕ входит в HistoryScreen._wrapped; spy доказывает: обёртка Stream вызывает метод подкласса по имени на каждое событие); §1 базовый авто-возврат k ≤ lines (страница вверх → событие → position == size, вывод виден); §2 глубокая история + чанк — D1-сценарий (120×32, history=1000, ~1050 строк, у верхней границы position=32/1000; реальный htop-чанк 19223 B из pyte/tests/captured): позиция вернулась к size, bottom пуст, top полностью восстановлен (== capacity), полное состояние (pos/top/bottom/buffer посимвольно с fg/bg + курсор) идентично референсу БЕЗ прокрутки; отчёт замера в выводе (42–44 мс/чанк против 68–73 без батчинга); §3 эквивалентность штатному циклу next_page() на 5 геометриях — k ≤ lines (4 и 20), k >> lines (45 на 5-строчной сетке, D1: 968 на 32-строчной, частичная прокрутка 77 > 24); §4 ручная прокрутка не захвачена авто-возвратом (next_page — ровно одна страница, а не прыжок к live; следующее событие доводит остаток пути); §5 границы и регрессии: событие на live-строке при полной истории (no-op), пустая история, history_lines=0 (deque maxlen=0 — отключённый скроллбэк), два чанка подряд из глубокой истории без дрейфа состояния, вход в alt из глубокой истории (регрессия v1.2.12 через bulk-путь: авто-возврат сработал, alt активен, выход — основной экран на месте), dirty после bulk = все строки; §6 состояние релиза + i18n-паритет (427) |
-
-### Отдельные смоуки (перенесены на _common.py)
-
-| файл | бывший | покрывает |
-|---|---|---|
-| `test_collapse.py` | smoke_collapse | сворачивание плашек v0.8.4: toggle_collapsed/boundingRect, JSON round-trip collapsed, legacy без ключа, идемпотентность update_appearance, клик по шеврону |
-| `test_drawio_export.py` | smoke_v095_drawio | экспорт drawio v0.9.5: валидный XML, структура (узлы/связи/группы/заметки/слои), координаты членов групп относительно parent, метки узлов |
-
-## Вспомогательные файлы
-
-| файл | роль |
-|---|---|
-| `_common.py` | обвязка: bootstrap/check/finish/wait_until и т.д. (не тест — run_all его пропускает) |
-| `run_all.py` | единый раннер: собирает ровно `test_*.py` + `check_i18n_keys.py` (сам себя и прочие мета-скрипты НЕ включает — иначе рекурсия), параллельно (ThreadPoolExecutor, по умолчанию 4 воркера; `--workers N`), каждый файл — отдельный процесс, таблица + единый exit code |
-| `check_i18n_keys.py` | паритет i18n-ключей en/ru/zh (используемые в коде ключи × 3 языка) — входит в run_all |
-| `_bench_rubber.py` | v1.2.10rc3 замер: драг rubber-band по карте 500 узлов, мс до/после фикса (числа — CHANGELOG.md); НЕ часть сьюта (файлы с префиксом _ run_all пропускает) |
-| `_bench_history.py` | v1.2.12 замер D1 (PYTE82_AUDIT.md пачка D) + с v1.2.14 — монитор регрессии батчинга: overhead HistoryScreen при глубокой истории — TerminalScreen(120, 32, history_lines=1000), ~1050 строк, пользователь у верхней границы (≈242 next_page в одном feed), подача htop-чанка (htop.input, 19 КБ) → мс + базовые линии (live-строка, чистый pyte.Screen); числа — CHANGELOG.md v1.2.12 (боль > 50 мс/чанк подтверждена → v1.2.14) и v1.2.14 (после батчинга A ≈ B: 42,67 против 42,42 мс, overhead 0,25 мс); verdict: «A ≈ B — батчинг работает» / «РЕГРЕССИЯ БАТЧИНГА» (overhead > 5 мс или A > 50 мс); НЕ часть сьюта |
-
-## Конвенции
-
-1. **Новая версия → новый тематический файл** `test_<тема>.py` (не «regression_vXXX»):
-   имя говорит, ЧТО проверяется, а не когда добавлено; провенанс — в докстроке
-   («бывш. regression_v098_map_search.py»). Файл самодостаточен: `bootstrap()` →
-   проверки → `finish()`.
-2. **Мышиный ввод** — только через `PySide6.QtTest.QTest` (widget) или синтетический
-   `QGraphicsSceneMouseEvent` для QGraphicsItem (вывод v0.7.3, см. test_collapse.py).
-3. **Пины релиза:** при каждом релизе обновить только `tests/_common.py` —
-   `EXPECTED_APP_VERSION` (версия) и `EXPECTED_I18N_KEYS` (паритет en/ru/zh);
-   release-state-секции тематических файлов вызывают общий
-   `check_release_state()`, паритет — `check_i18n_parity()` (ранее: число
-   «N ключей» в 12 файлах + версионные пины в 7 секциях). Пропуски самих
-   i18n-ключей против кода ловит `check_i18n_keys.py`.
-4. **HOME-изоляция обязательна** для всех тестов, пишущих в `~/.sshmap*`
-   (bootstrap делает это сам); реальный home пользователя не трогать.
-5. **Не трогать:** публичный API MainWindow, undo-стек, keyring-путь паролей,
-   i18n-ключи (только добавление) — общие «Не трогать» серии v0.9.9.x.
-6. Сьют обязан быть зелёным (`run_all.py` exit 0) в каждом релизе — конвенция
-   ROADMAP; offscreen-режим не оставляет фоновых потоков.
+1. **New version → new themed file** `test_<topic>.py` (not "regression_vXXX"):
+   the name says WHAT is checked, not when it was added; the provenance — in the docstring
+   ("former regression_v098_map_search.py"). The file is self-contained: `bootstrap()` →
+   checks → `finish()`.
+2. **Mouse input** — only via `PySide6.QtTest.QTest` (widget) or a synthetic
+   `QGraphicsSceneMouseEvent` for a QGraphicsItem (the v0.7.3 conclusion, see test_collapse.py).
+3. **Release pins:** at each release update only `tests/_common.py` —
+   `EXPECTED_APP_VERSION` (the version) and `EXPECTED_I18N_KEYS` (en/ru/zh parity);
+   the release-state sections of themed files call the shared
+   `check_release_state()`, parity — `check_i18n_parity()` (earlier: the
+   "N keys" count in 12 files + version pins in 7 sections). Missing
+   i18n keys against the code are caught by `check_i18n_keys.py`.
+4. **HOME isolation is mandatory** for all tests writing to `~/.sshmap*`
+   (bootstrap does it itself); do not touch the user's real home.
+5. **Do not touch:** the MainWindow public API, the undo stack, the keyring password path,
+   i18n keys (additions only) — the shared "Do not touch" of the v0.9.9.x series.
+6. The suite must be green (`run_all.py` exit 0) at every release — a ROADMAP
+   convention; the offscreen mode leaves no background threads.
+7. **File tags:** `# tags: slow network` — a comment in the header (the first such
+   line within the first 40 lines; in it — only tag names, the explanation — a separate
+   comment nearby: everything after `# tags:` is parsed as tags).
+   `slow` = intentionally long wait budgets/teardown,
+   `network` = the file contains a real network section. The section runs only under
+   an explicit `run_all.py --tag network` (the runner passes the tag into the env `SSHMAP_TEST_TAGS`,
+   the test switches to the real mode by it); a regular run — hermetic/fast.
+   `--fast` skips the slow/network files (daily profile), `--tag NAME` selects
+   by tag. New slow/network tests are marked at creation; the network section
+   of a new test must have a hermetic branch by default.
+8. **Shared fakes — in `_fakes.py`:** a fake needed by a second test file
+   is moved to `_fakes.py` (import with an alias: `from _fakes import FakeSSHThread
+   as _FakeThread`) — duplicating class bodies across files is not allowed.
+   File-specific values (passwords/paths/capture lists) stay in the test;
+   configurable class attributes (CaptureMenu.captured, FakeTermWin.spawned,
+   FakeWidgetThread.sent) are assigned before the scenario.
+9. **INDEX.md is auto-generated:** the "Suite files" table between the AUTOGEN markers —
+   the output of `tests/_gen_index.py` (each file's first docstring line + tags);
+   the module docstring is the single source of truth about coverage. After adding/
+   renaming a test file or changing its docstring/tags run the generator;
+   CI can keep `--check` (exit 1 if INDEX.md is stale). The first line of the module
+   docstring must be a self-contained summary — it lands in the table as-is.

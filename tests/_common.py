@@ -1,28 +1,29 @@
-"""Общая обвязка тестов SSHMap (скрипты без pytest).
+"""The common harness of the SSHMap tests (the scripts without pytest).
 
-Паттерн для каждого файла tests/test_*.py:
+The pattern of every file tests/test_*.py:
 
     from _common import bootstrap, check, finish
-    ROOT, WORK = bootstrap()   # ПЕРВЫМ делом — до импортов модулей приложения
+    ROOT, WORK = bootstrap()   # FIRST — before the imports of the app modules
 
-...тело теста с check("имя", условие, detail) ...
+...the body of the test with check("name", condition, detail) ...
 
-    finish()   # сводка + exit code (0 = все проверки прошли)
+    finish()   # the summary + the exit code (0 = all the checks passed); prints the time of the file
+               # and the "slowest checks" (segments >= 0.1 s — the top-20, see SLOW_REPORT_THRESHOLD)
 
-Запуск всех тестов:  python tests/run_all.py
-Карта файлов и конвенции:  tests/INDEX.md
+Run all the tests:  python tests/run_all.py
+The map of the files and the conventions:  tests/INDEX.md
 
-Что делает bootstrap():
-  * UTF-8 stdout/stderr — cp1251-консоль (типичная русская Windows) не роняет
-    прогон UnicodeEncodeError'ом на «→» в отчёте;
-  * изоляция HOME/USERPROFILE во временную директорию ДО импорта модулей
-    приложения: тесты пишут ~/.sshmap/config.json, ~/.sshmap_settings.json и т.п. —
-    весь ввод-вывод уходит в песочницу, реальный home не трогается (отключается
+What bootstrap() does:
+  * UTF-8 stdout/stderr — the cp1251 console (the typical Russian Windows) does not
+    drop the run with a UnicodeEncodeError on the "→" in the report;
+  * the isolation of HOME/USERPROFILE into a temporary directory BEFORE the imports
+    of the app modules: the tests write ~/.sshmap/config.json, ~/.sshmap_settings.json and the like —
+    all the I/O goes to the sandbox, the real home is untouched (disabled by
     SSHMAP_TEST_NO_HOME_ISOLATION=1);
-  * QT_QPA_PLATFORM=offscreen по умолчанию (если пользователь не выставил свой);
-  * sys.path: корень проекта; рабочая папка — свежая на каждый прогон
-    (_tmp_testdata, либо $SSHMAP_TEST_WORKDIR при параллельном run_all.py);
-  * faulthandler-таймаут 180 c: зависший offscreen (модалка) — дамп стеков и выход.
+  * QT_QPA_PLATFORM=offscreen by default (if the user did not set their own);
+  * sys.path: the root of the project; the working folder — a fresh one per run
+    (_tmp_testdata, or $SSHMAP_TEST_WORKDIR under the parallel run_all.py);
+  * the faulthandler timeout of 180 s: the hung offscreen (the modal) — the dump of the stacks and the exit.
 """
 import json
 import os
@@ -30,18 +31,28 @@ import re
 import shutil
 import sys
 import tempfile
+import time
 
 PASS = []
 FAIL = []
 
+# Suite optimization phase 1: the time measurement. check() records how long it took
+# the test segment BEFORE this check (time since the previous check()); finish()
+# prints the "slowest checks" (only if there are checks >= SLOW_REPORT_THRESHOLD)
+# and the total file time in the ALL PASS/FAILURES line. The check() signature is unchanged.
+_T0 = None      # the file run start (sets bootstrap())
+_LAST = None    # the moment of the last check()
+_SLOW = []      # [(dt, name), …] — the segment time for every check
+SLOW_REPORT_THRESHOLD = 0.1   # sec; the "slowest checks" output threshold
+
 
 def bootstrap(faulthandler_timeout=180):
-    """Инициализация окружения теста. Вызвать до импортов модулей приложения."""
+    """Initialize the test environment. Call before the imports of the app modules."""
     for stream in (sys.stdout, sys.stderr):
         try:
             stream.reconfigure(encoding="utf-8", errors="replace")
         except Exception:
-            pass  # старый Python без reconfigure — живём как раньше
+            pass  # an old Python without reconfigure — we live as before
 
     if os.environ.get("SSHMAP_TEST_NO_HOME_ISOLATION") != "1":
         _home = tempfile.mkdtemp(prefix="sshmap_test_home_")
@@ -54,9 +65,9 @@ def bootstrap(faulthandler_timeout=180):
     if root not in sys.path:
         sys.path.insert(0, root)
 
-    # Параллельный run_all.py передаёт уникальный каталог на файл через
-    # SSHMAP_TEST_WORKDIR (иначе bootstrap() соседнего процесса сотрёт scratch);
-    # одиночный запуск — фиксированный _tmp_testdata (gitignored).
+    # A parallel run_all.py passes a per-file unique directory via
+    # SSHMAP_TEST_WORKDIR (otherwise the bootstrap() of the neighbouring process would wipe the scratch);
+    # a single run — the fixed _tmp_testdata (gitignored).
     work = os.environ.get("SSHMAP_TEST_WORKDIR") or os.path.join(root, "_tmp_testdata")
     shutil.rmtree(work, ignore_errors=True)
     os.makedirs(work, exist_ok=True)
@@ -65,29 +76,46 @@ def bootstrap(faulthandler_timeout=180):
         import faulthandler
         faulthandler.dump_traceback_later(faulthandler_timeout, exit=True)
 
+    global _T0, _LAST
+    _T0 = time.monotonic()
+    _LAST = _T0
+
     return root, work
 
 
 def check(name, cond, detail=""):
-    """Одна проверка: печатает ok/FAIL и копит в PASS/FAIL."""
+    """One check: prints ok/FAIL and accumulates into PASS/FAIL.
+
+    Additionally measures the time of the segment up to this check (since the previous
+    check()) — finish() prints the top-20 of the slowest segments."""
+    global _LAST
+    dt = time.monotonic() - _LAST if _LAST is not None else 0.0
+    _LAST = time.monotonic()
+    _SLOW.append((dt, name))
     (PASS if cond else FAIL).append((name, detail))
     print(("  ok  " if cond else "  FAIL ") + name + (f" — {detail}" if detail and not cond else ""))
 
 
 def finish():
-    """Сводка и exit code: 0 = все проверки прошли."""
+    """The summary and the exit code: 0 = all the checks passed."""
     total = len(PASS) + len(FAIL)
+    elapsed = time.monotonic() - _T0 if _T0 is not None else 0.0
     print()
     if FAIL:
-        print(f"FAILURES ({len(FAIL)}) из {total}:")
+        print(f"FAILURES ({len(FAIL)}) of {total}:")
         for name, detail in FAIL:
             print(f"  - {name}: {detail}")
+        print(f"(file time: {elapsed:.2f} s)")
         sys.exit(1)
-    print(f"ALL PASS ({total})")
+    if _SLOW and max(dt for dt, _ in _SLOW) >= SLOW_REPORT_THRESHOLD:
+        print("== slowest checks ==")
+        for dt, name in sorted(_SLOW, reverse=True)[:20]:
+            print(f"  {dt:8.3f}s  {name}")
+    print(f"ALL PASS ({total}) [{elapsed:.2f}s]")
 
 
 def wait_until(cond, timeout_ms=3000, tick_ms=50):
-    """Настоящий Qt event loop до cond() или дедлайна (паттерн regression_v081)."""
+    """The real Qt event loop until cond() or the deadline (the regression_v081 pattern)."""
     from PySide6.QtCore import QEventLoop, QTimer
     loop = QEventLoop()
     ticks = {"n": 0}
@@ -107,18 +135,18 @@ def wait_until(cond, timeout_ms=3000, tick_ms=50):
 
 
 def viewport_point(view, scene_pos):
-    """Сцена → QPoint в координатах viewport (Qt 6.11: mapFromScene может дать QPoint или QPointF)."""
+    """The scene → a QPoint in the coordinates of the viewport (Qt 6.11: mapFromScene can give a QPoint or a QPointF)."""
     from PySide6.QtCore import QPoint
     q = view.mapFromScene(scene_pos)
     return QPoint(int(q.x()), int(q.y()))
 
 
 def snapshot_i18n_config():
-    """Снимок ~/.sshmap/config.json (None, если файла нет).
+    """The snapshot of ~/.sshmap/config.json (None, if the file is absent).
 
-    Тесты, переключающие язык (set_language), пишут в конфиг; под изолированным
-    HOME это песочница и снимок не нужен, но при SSHMAP_TEST_NO_HOME_ISOLATION=1
-    он сохраняет реальный конфиг пользователя.
+    The tests switching the language (set_language) write into the config; under the isolated
+    HOME this is the sandbox and the snapshot is not needed, but with SSHMAP_TEST_NO_HOME_ISOLATION=1
+    it preserves the real config of the user.
     """
     p = os.path.join(os.path.expanduser("~"), ".sshmap", "config.json")
     if not os.path.exists(p):
@@ -128,7 +156,7 @@ def snapshot_i18n_config():
 
 
 def restore_i18n_config(snap):
-    """Возврат конфига i18n по снимку из snapshot_i18n_config()."""
+    """The restore of the i18n config from the snapshot of snapshot_i18n_config()."""
     if snap is None:
         return
     try:
@@ -139,17 +167,17 @@ def restore_i18n_config(snap):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Пины релиза: при каждом релизе обновлять ТОЛЬКО ЗДЕСЬ (ранее: число «N ключей»
-# в 12 i18n-файлах + APP_VERSION/requirements-пины в 7 release-state-секциях).
-# Пропуски самих ключей против кода ловит check_i18n_keys.py.
+# The release pins: at every release update ONLY HERE (earlier: the "N keys" number
+# in 12 i18n files + the APP_VERSION/requirements pins in 7 release-state sections).
+# The misses of the keys themselves against the code are caught by check_i18n_keys.py.
 # ─────────────────────────────────────────────────────────────────────────────
-EXPECTED_APP_VERSION = "1.2.14"  # текущий релиз (sentinel: ловит «бамп не в ту версию»)
-EXPECTED_I18N_KEYS = 427        # паритет en/ru/zh (v1.2.13: без новых ключей — 427 с v1.2.8)
-VERSION_FORMAT_RE = re.compile(r"^\d+(\.\d+){1,3}([Rr][Cc]\d+)?$")  # "1.1.3", "1.0RC4", "0.9.9.7", "1.2.10rc1" (v1.2.10: + нижний регистр rc)
+EXPECTED_APP_VERSION = "1.3"     # the current release (a sentinel: it catches "a bump to the wrong version")
+EXPECTED_I18N_KEYS = 446        # the en/ru/zh parity (v1.3: +19 terminal.cmdlib.* → 446; before, 427 since v1.2.8)
+VERSION_FORMAT_RE = re.compile(r"^\d+(\.\d+){1,3}([Rr][Cc]\d+)?$")  # "1.1.3", "1.0RC4", "0.9.9.7", "1.2.10rc1" (v1.2.10: + lowercase rc)
 
 
 def load_i18n_langs(root):
-    """i18n/{en,ru,zh}.json → {code: dict} (общая загрузка для parity-проверок)."""
+    """i18n/{en,ru,zh}.json → {code: dict} (the shared loading for the parity checks)."""
     langs = {}
     for code in ("en", "ru", "zh"):
         with open(os.path.join(root, "i18n", f"{code}.json"), encoding="utf-8") as f:
@@ -158,27 +186,27 @@ def load_i18n_langs(root):
 
 
 def check_i18n_parity(langs):
-    """Паритет en/ru/zh: наборы ключей равны и число == EXPECTED_I18N_KEYS."""
+    """The en/ru/zh parity: the sets of the keys are equal and the count == EXPECTED_I18N_KEYS."""
     check(
-        f"i18n-паритет en/ru/zh ({EXPECTED_I18N_KEYS} keys each)",
+        f"i18n parity en/ru/zh ({EXPECTED_I18N_KEYS} keys each)",
         set(langs["en"]) == set(langs["ru"]) == set(langs["zh"])
         and all(len(d) == EXPECTED_I18N_KEYS for d in langs.values()),
         str({c: len(d) for c, d in langs.items()}))
 
 
 def check_release_state(root):
-    """Состояние релиза из version.py (единая точка истины): sentinel
-    EXPECTED_APP_VERSION + формат + pyproject-сверка + заголовок requirements.txt.
-    Вызывать ПОСЛЕ bootstrap() — version импортируется внутри функции."""
+    """The state of the release from version.py (the single source of truth): the sentinel
+    EXPECTED_APP_VERSION + the format + the pyproject cross-check + the header of requirements.txt.
+    Call AFTER bootstrap() — the version is imported inside the function."""
     try:
         from version import APP_VERSION
     except Exception as e:  # noqa: BLE001
-        check("release: version.py читается", False, repr(e))
+        check("release: version.py is readable", False, repr(e))
         return
 
     check(f"release: APP_VERSION == '{EXPECTED_APP_VERSION}'",
           APP_VERSION == EXPECTED_APP_VERSION, APP_VERSION)
-    check("release: APP_VERSION формат (X.Y.Z[.W][RCn])",
+    check("release: APP_VERSION format (X.Y.Z[.W][RCn])",
           bool(VERSION_FORMAT_RE.match(APP_VERSION)), APP_VERSION)
     try:
         try:

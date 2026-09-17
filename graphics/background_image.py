@@ -1,21 +1,21 @@
-"""Фоновое изображение карты (v0.9.1): схема здания / план дата-центра ПОД всеми узлами.
+"""Map background image (v0.9.1): a building diagram / data-center floor plan UNDER all nodes.
 
-BackgroundImage — QGraphicsPixmapItem с z = Z_VALUE (-10), ниже групп (-5),
-стрелок (-2) и узлов (0). Позиция и размер — в координатах СЦЕНЫ; ручные жесты
-в стиле StickyNote/NodeGroup (ItemIsMovable НЕ ставится — см. docstring
-sticky_note.py про ScrollHandDrag):
+BackgroundImage — a QGraphicsPixmapItem with z = Z_VALUE (-10), below groups (-5),
+arrows (-2) and nodes (0). Position and size — in SCENE coordinates; manual gestures
+in the style of StickyNote/NodeGroup (ItemIsMovable is NOT set — see the docstring
+in sticky_note.py about ScrollHandDrag):
 
-    drag  — за любое место перемещает фон;
-    resize — за правый нижний угол (CORNER_HIT px) меняет размер (пропорции
-            НЕ сохраняются принудительно, но по умолчанию размер равен
-            нативному размеру картинки, поэтому угол тянет «по картинке»).
+    drag  — dragging by any point moves the background;
+    resize — dragging the bottom-right corner (CORNER_HIT px) changes the size (aspect
+            ratio is NOT enforced, but by default the size equals the native image
+            size, so the corner pulls "along the image").
 
-В проекте (JSON "background") хранится ПУТЬ к изображению + геометрия:
-{path, x, y, width, height}. Файл НЕ встраивается в JSON (проект остаётся
-лёгким); при загрузке отсутствующий файл просто игнорируется с warning.
+In the project (JSON "background") a PATH to the image is stored + geometry:
+{path, x, y, width, height}. The file is NOT embedded in the JSON (the project stays
+light); on load a missing file is simply ignored with a warning.
 
-QGraphicsObject (не чистый QGraphicsPixmapItem-наследник без сигналов) —
-нужны сигналы changed для dirty-маркера MainWindow, как у заметок/групп.
+QGraphicsObject (not a plain QGraphicsPixmapItem subclass without signals) —
+the changed signals are needed for the MainWindow dirty marker, as with notes/groups.
 """
 import os
 
@@ -23,22 +23,22 @@ from PySide6.QtCore import Qt, QRectF, QPointF, Signal
 from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen, QPixmap
 from PySide6.QtWidgets import QGraphicsItem, QGraphicsObject
 
-try:  # v1.2.5: центральная тема (палитра/радиусы/шрифты — ui/theme.py)
+try:  # v1.2.5: central theme (palette/radii/fonts — ui/theme.py)
     from ..ui import theme
 except ImportError:
     from ui import theme
 
 
 class BackgroundImage(QGraphicsObject):
-    """Фоновое изображение под всеми элементами карты; drag + resize за угол."""
+    """Background image under all map elements; drag + resize by the corner."""
 
-    Z_VALUE = -10.0          # ниже всего: группы -5, стрелки -2, узлы 0
-    CORNER_HIT = 18.0        # зона «за угол» для resize (px, паттерн NodeGroup)
-    MIN_SIZE = 64.0          # минимальная сторона при resize
-    MAX_SIDE = 20000.0       # защита от абсурдных размеров
-    BORDER_ALPHA = 90        # прозрачность тонкой рамки-подсказки
+    Z_VALUE = -10.0          # lowest of all: groups -5, arrows -2, nodes 0
+    CORNER_HIT = 18.0        # "grab the corner" zone for resize (px, NodeGroup pattern)
+    MIN_SIZE = 64.0          # minimal side when resizing
+    MAX_SIDE = 20000.0       # guard against absurd sizes
+    BORDER_ALPHA = 90        # opacity of the thin hint border
 
-    # Сигналы для MainWindow (dirty-маркер проекта)
+    # Signals for MainWindow (project dirty marker)
     moved = Signal()
     resized = Signal()
 
@@ -56,7 +56,7 @@ class BackgroundImage(QGraphicsObject):
         self._width = self._clamp_dim(width if width else native_w, native_w)
         self._height = self._clamp_dim(height if height else native_h, native_h)
 
-        # Ручное перемещение/resize (паттерн StickyNote/NodeGroup)
+        # Manual move/resize (StickyNote/NodeGroup pattern)
         self._drag_mode = None
         self._drag_start_scene = None
         self._size_start = None
@@ -81,7 +81,7 @@ class BackgroundImage(QGraphicsObject):
         return self._path
 
     def size(self):
-        """Текущий размер (w, h) в координатах сцены."""
+        """Current size (w, h) in scene coordinates."""
         return float(self._width), float(self._height)
 
     def boundingRect(self) -> QRectF:
@@ -93,12 +93,12 @@ class BackgroundImage(QGraphicsObject):
         return path
 
     def _in_corner(self, local: QPointF) -> bool:
-        """Правый нижний угол — зона resize (паттерн NodeGroup/StickyNote)."""
+        """Bottom-right corner — the resize zone (NodeGroup/StickyNote pattern)."""
         return (self._width - self.CORNER_HIT <= local.x() <= self._width and
                 self._height - self.CORNER_HIT <= local.y() <= self._height)
 
     def set_bg_size(self, width: float, height: float):
-        """Изменить размер фона (clamp MIN/MAX). Возвращает True, если изменился."""
+        """Change the background size (clamped MIN/MAX). Returns True if it changed."""
         w = max(self.MIN_SIZE, min(self.MAX_SIDE, float(width)))
         h = max(self.MIN_SIZE, min(self.MAX_SIDE, float(height)))
         if abs(w - self._width) < 0.5 and abs(h - self._height) < 0.5:
@@ -109,7 +109,7 @@ class BackgroundImage(QGraphicsObject):
         self.resized.emit()
         return True
 
-    # ── Отрисовка ──────────────────────────────────────────────
+    # ── Rendering ──────────────────────────────────────────────
 
     def paint(self, painter: QPainter, option, widget=None):
         if self._pixmap.isNull():
@@ -118,15 +118,15 @@ class BackgroundImage(QGraphicsObject):
         painter.drawPixmap(QRectF(0, 0, self._width, self._height),
                            self._pixmap, QRectF(self._pixmap.rect()))
 
-        # Тонкая полупрозрачная рамка — чтобы фон был различим на тёмной сетке.
-        # v1.2.5: цвета — из центральной темы (ui/theme.py); значения без изменений.
+        # A thin translucent border — so the background is distinguishable on the dark grid.
+        # v1.2.5: colors — from the central theme (ui/theme.py); values unchanged.
         color = QColor(theme.SELECTION_AMBER) if self.isSelected() else QColor(theme.TEXT_MUTED)
         color.setAlpha(self.BORDER_ALPHA if not self.isSelected() else 180)
         painter.setPen(QPen(color, 1.5))
         painter.setBrush(Qt.BrushStyle.NoBrush)
         painter.drawRect(QRectF(0, 0, self._width, self._height))
 
-    # ── Mouse (ручной drag/resize — паттерн NodeGroup) ──────────
+    # ── Mouse (manual drag/resize — NodeGroup pattern) ──────────
 
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
@@ -142,7 +142,7 @@ class BackgroundImage(QGraphicsObject):
             else:
                 self._drag_mode = "move"
             self._drag_start_scene = scene_pos
-            event.accept()  # НЕ передаём в сцену — ScrollHandDrag заберёт жест
+            event.accept()  # do NOT pass it to the scene — ScrollHandDrag would steal the gesture
             return
         super().mousePressEvent(event)
 
@@ -157,7 +157,7 @@ class BackgroundImage(QGraphicsObject):
                     self.setPos(self.pos() + delta)
                     self.moved.emit()
                 self._drag_start_scene = scene_pos
-            else:  # resize за правый нижний угол
+            else:  # resize by the bottom-right corner
                 w0, h0 = self._size_start or (self._width, self._height)
                 start_local = self.mapFromScene(self._drag_start_scene or scene_pos)
                 cur_local = self.mapFromScene(scene_pos)
@@ -175,11 +175,11 @@ class BackgroundImage(QGraphicsObject):
         super().mouseReleaseEvent(event)
 
     def mouseDoubleClickEvent(self, event):
-        # Двойной клик ничего не делает (фон — пассивный слой), но жест не
-        # проваливается в сцену, чтобы не начинать rubber-band.
+        # A double click does nothing (the background — a passive layer), but the
+        # gesture does not fall through to the scene, to avoid starting a rubber band.
         event.accept()
 
-    # ── Hover: курсоры, паттерн NodeGroup ───────────────────────
+    # ── Hover: cursors, NodeGroup pattern ───────────────────────
 
     def hoverEnterEvent(self, event):
         self.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -214,10 +214,10 @@ class BackgroundImage(QGraphicsObject):
 
     @classmethod
     def try_from_dict(cls, raw: dict) -> "Optional[BackgroundImage]":
-        """Создать фон из записи JSON или None (файла нет / битая запись).
+        """Create the background from a JSON entry, or None (no file / corrupt entry).
 
-        Отсутствующее изображение — НЕ ошибка загрузки проекта: предупреждение
-        логируется вызывающей стороной, карта открывается без фона.
+        A missing image is NOT a project load error: the warning is logged by the
+        caller, and the map opens without the background.
         """
         if not isinstance(raw, dict):
             return None
@@ -236,4 +236,4 @@ class BackgroundImage(QGraphicsObject):
             return None
 
 
-# Qt-импорты выше; хвост файла — сериализация/утилиты только.
+# Qt imports above; the tail of the file — serialization/utilities only.

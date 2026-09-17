@@ -20,11 +20,11 @@ from typing import Optional, Dict
 # ── Configuration ──────────────────────────────────────────────
 
 _i18n_dir = os.path.dirname(__file__)  # Points to i18n/ folder
-# v1.1.1 (ROADMAP пункт 2): английский по умолчанию — влияет только на НОВЫХ
-# пользователей (без сохранённого config.json); у существующих в ~/.sshmap/
-# config.json уже записан выбранный язык (get_last_language() его вернёт).
-# Вернуть русский: «Помощь → Язык» или вкладка «Язык» диалога настроек.
-_default_language = "en"  # English is default (v1.1.1; раньше "ru")
+# v1.1.1 (ROADMAP item 2): English by default — affects only NEW
+# users (without a saved config.json); existing users already have the chosen
+# language recorded in ~/.sshmap/config.json (get_last_language() returns it).
+# Restore Russian: "Help → Language" or the "Language" tab of the settings dialog.
+_default_language = "en"  # English is default (v1.1.1; previously "ru")
 _current_language: str = _default_language
 _translations: Dict[str, str] = {}
 
@@ -175,8 +175,8 @@ def t(key: str, **kwargs) -> str:
         try:
             translated = translated.format(**kwargs)
         except (KeyError, IndexError, ValueError) as fmt_err:
-            # AUDIT v0.7.2 (низкая #20): не глотаем ошибки форматирования перевода в тишине —
-            # минимум DEBUG-лог (раньше здесь было молчаливое pass на всех путях вызова).
+            # AUDIT v0.7.2 (low #20): do not swallow translation formatting errors silently —
+            # at minimum a DEBUG log (previously a silent pass on all call paths).
             try:
                 from modules.logger import get_logger as _gl
                 _gl("i18n").debug(f"t({key!r}) format failed with {kwargs}: {fmt_err}")

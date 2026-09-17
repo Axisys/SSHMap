@@ -1,17 +1,18 @@
-# AUDIT v0.8.3 (средняя #11, #7): игнор артефактов сборки и тестовых временных файлов
+# AUDIT v0.8.3 (medium #11, #7): ignore build artifacts and test temp files
 
-# Виртуальное окружение
+# Virtual environment
 venv/
 env/
 ENV/
 
-# Файлы Python
+# Python files
 __pycache__/
 *.py[cod]
 *$py.class
 *.so
 
-# Избыточная в подробностях документация, все основное в README.md
+# Overly detailed documentation; all the essentials are in README.md
+AGENTS.md
 AUDIT.md
 PYTE82_AUDIT.md
 CHANGELOG.md
@@ -20,7 +21,7 @@ CHANGELOG_HISTORY_PREV1.md
 DOCUMENTATION.md
 ROADMAP.md
 
-# Секреты и конфигурации
+# Secrets and configuration
 .env
 *.key
 config_secret.json
@@ -31,22 +32,25 @@ config_secret.json
 *.swp
 *.swo
 
-# Временные файлы smoke-тестов (v1.1.2 final N12: wildcard — все _tmp_testdata*)
+# Smoke-test temp files (v1.1.2 final N12: wildcard — all _tmp_testdata*)
 _tmp_testdata*/
 
-# Логи приложения
+# Test runner artifacts (JUnit XML + --failed-only cache)
+test-results/
+
+# Application logs
 *.log
 
-# Данные карт: содержат топологию/хосты реальной сети — не публиковать
+# Map data: contains real network topology/hosts — do not publish
 server_map1.json
 server_map2.json
 server_map1.drawio
 *.sshmap.json
 
-# Профили SSH (на случай запуска из корня проекта)
+# SSH profiles (in case of running from the project root)
 .sshmap_profiles.json
 
-# Артефакты сборки / инструменты
+# Build artifacts / tooling
 build/
 dist/
 *.egg-info/

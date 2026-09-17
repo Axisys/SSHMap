@@ -1,16 +1,16 @@
-"""Host Importer — массовый импорт серверов из текстового файла (v0.9.5.5).
+"""Host Importer — bulk import of servers from a text file (v0.9.5.5).
 
-Формат файла: по одному серверу в строке — IP-адрес или DNS-имя хоста.
-Пустые строки и комментарии (# ...) игнорируются.
+File format: one server per line — an IP address or a host DNS name.
+Empty lines and comments (# ...) are ignored.
 
-Логика:
-  • строка похожа на IPv4/IPv6 → берём как есть (host = IP);
-  • иначе это DNS-имя → резолвим через socket.getaddrinfo(); при успехе
-    найденный IP сохраняется в поле `ip` узла, а `host` остаётся именем
-    (SSH-подключение в дальнейшем пойдёт по имени); при неудаче узел всё
-    равно создаётся с host=имя, ip="" — пользователь разберётся вручную.
+Logic:
+  • a line looks like an IPv4/IPv6 → take it as-is (host = IP);
+  • otherwise it is a DNS name → resolve it via socket.getaddrinfo(); on success
+    the found IP is stored in the node's `ip` field, and `host` stays the name
+    (the SSH connection will use the name from then on); on failure the node is
+    still created with host=name, ip="" — the user will sort it out manually.
 
-Пароли/пользователи не трогаем — пользователь настраивает их после импорта.
+Passwords/users are not touched — the user sets them up after the import.
 """
 
 import ipaddress
@@ -22,20 +22,20 @@ from PySide6.QtCore import QThread, Signal
 
 
 def parse_hosts_file(text: str) -> List[str]:
-    """Разобрать текст файла: непустые строки без '#' и '//' (trim)."""
+    """Parse the file text: non-empty lines without '#' and '//' (trimmed)."""
     hosts = []
     for line in text.splitlines():
         entry = line.strip()
         if not entry or entry.startswith("#") or entry.startswith("//"):
             continue
-        # В строке может быть "host ip" табом/пробелом — берём первое слово
+        # A line may be "host ip" separated by a tab/space — take the first word
         entry = entry.split()[0]
         hosts.append(entry)
     return hosts
 
 
 def is_ip_address(entry: str) -> bool:
-    """True, если строка — корректный IPv4/IPv6 адрес."""
+    """True if the string is a valid IPv4/IPv6 address."""
     try:
         ipaddress.ip_address(entry)
         return True
@@ -44,12 +44,12 @@ def is_ip_address(entry: str) -> bool:
 
 
 def resolve_host(hostname: str) -> Optional[str]:
-    """DNS-резолв имени → IP-строка или None."""
+    """DNS-resolve a name → an IP string or None."""
     try:
         infos = socket.getaddrinfo(hostname, None, proto=socket.IPPROTO_TCP)
         for family, _stype, _proto, _canonname, sockaddr in infos:
             addr = sockaddr[0]
-            # Для IPv6 link-local отрежем %zone — в поле ip он не нужен
+            # For an IPv6 link-local address, strip the %zone — not needed in the ip field
             return addr.split("%")[0]
         return None
     except OSError:
@@ -57,22 +57,22 @@ def resolve_host(hostname: str) -> Optional[str]:
 
 
 class HostResolverThread(QThread):
-    """v1.1.2RC2 (N6): пакетный DNS-резолв импорта из TXT вне GUI-потока.
+    """v1.1.2RC2 (N6): batch DNS resolution of a TXT import, outside the GUI thread.
 
-    Файл с десятками имён при недоступном резолвере не должен замораживать
-    интерфейс: каждый getaddrinfo() блокирует до таймаута резолвера, поэтому
-    весь список резолвится в отдельном потоке (паттерн _ProbeThread из
-    services/status_checker.py). Прогресс — сигнал progress(done, total) для
-    статус-бара; итог — resolved_map(dict): {имя: IP или None}.
+    A file with dozens of names must not freeze the UI when the resolver is
+    unreachable: each getaddrinfo() blocks until the resolver timeout, so the
+    whole list is resolved in a separate thread (the _ProbeThread pattern from
+    services/status_checker.py). Progress — the progress(done, total) signal for
+    the status bar; the result — resolved_map(dict): {name: IP or None}.
 
-    Отмена: stop() выставляет threading.Event — цикл выходит между именами
-    (текущий getaddrinfo доживает свой таймаут); в этом случае resolved_map
-    приходит частичным, отсутствующие имена потребитель трактует как «не
-    резолвлено» (ip="").
+    Cancellation: stop() sets a threading.Event — the loop exits between names
+    (the current getaddrinfo runs out its timeout); in that case resolved_map
+    arrives partial, and the consumer treats the missing names as "not resolved"
+    (ip="").
     """
 
-    progress = Signal(int, int)   # (done, total) — для статус-бара
-    resolved_map = Signal(dict)   # {имя: IP или None}
+    progress = Signal(int, int)   # (done, total) — for the status bar
+    resolved_map = Signal(dict)   # {name: IP or None}
 
     def __init__(self, hostnames, parent=None):
         super().__init__(parent)
@@ -80,7 +80,7 @@ class HostResolverThread(QThread):
         self._cancel = threading.Event()
 
     def stop(self):
-        """Запросить отмену (проверяется между именами)."""
+        """Request cancellation (checked between names)."""
         self._cancel.set()
 
     def run(self):
@@ -88,18 +88,19 @@ class HostResolverThread(QThread):
         total = len(self._hostnames)
         for i, name in enumerate(self._hostnames, start=1):
             if self._cancel.is_set():
-                break  # отмена (stop при закрытии окна) — не продолжаем резолв
+                break  # cancellation (stop on window close) — stop resolving
             try:
                 result[name] = resolve_host(name)
             except Exception:
-                result[name] = None  # резолв не должен ронять поток
+                result[name] = None  # a resolution failure must not kill the thread
             self.progress.emit(i, total)
         self.resolved_map.emit(result)
 
 
-# v1.0-fix (audit #14): удалены мёртвые build_server_data() и import_from_text() —
-# нигде не вызывались (фактический импорт в MainWindow._import_servers собирает
-# ServerData инлайном: там же дедупликация по существующим узлам карты), а
-# аннотация/докстринг import_from_text расходились с кодом. Оставлены реально
-# используемые parse_hosts_file / is_ip_address / resolve_host; v1.1.2RC2 (N6):
-# processEvents при длинном резолве заменён HostResolverThread (вне GUI-потока).
+# v1.0-fix (audit #14): removed the dead build_server_data() and import_from_text() —
+# they were never called anywhere (the actual import in MainWindow._import_servers
+# builds ServerData inline: deduplication against existing map nodes happens there
+# too), and the annotation/docstring of import_from_text disagreed with the code.
+# The actually used parse_hosts_file / is_ip_address / resolve_host are kept;
+# v1.1.2RC2 (N6): processEvents during a long resolution is replaced by
+# HostResolverThread (outside the GUI thread).

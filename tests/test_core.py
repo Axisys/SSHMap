@@ -1,11 +1,11 @@
-"""Ядро сьюта (бывш. smoke_test.py §1–5): compile, i18n, models, ANSI, profiles/keyring.
+"""Suite core (former smoke_test.py §1–5): compile, i18n, models, ANSI, profiles/keyring.
 
-Часть сьюта, разбитого из smoke_test.py v0.6–v0.9.2 (см. INDEX.md).
-Проверяет ключевые пункты бывш. AUDIT.md (расшифровка — в CHANGELOG.md): компиляцию всех модулей, i18n-паритет en/ru/zh
-+ fallback на английский, models.server (from_dict robustness / to_dict без пароля),
-ANSI-очистку терминала, профили без паролей в JSON + семантику keyring update(None).
+A part of the suite split out of smoke_test.py v0.6–v0.9.2 (see INDEX.md).
+Checks the key items of the former AUDIT.md (the decoding — in CHANGELOG.md): the compilation of all the modules, the i18n parity en/ru/zh
++ the fallback to the English, models.server (the robustness of the from_dict / the to_dict without the password),
+the ANSI clearing of the terminal, the profiles without the passwords in the JSON + the semantics of the keyring update(None).
 
-Запуск: python tests/test_core.py   (из корня проекта) или python tests/run_all.py
+Run: python tests/test_core.py   (from the project root) or python tests/run_all.py
 """
 import json
 import os
@@ -13,17 +13,21 @@ import sys
 
 from _common import bootstrap, check, finish, snapshot_i18n_config, restore_i18n_config
 
-ROOT, WORK = bootstrap()  # ДО импортов модулей приложения
+ROOT, WORK = bootstrap()  # BEFORE the app module imports
 
 
 # ── 1. Compile all modules ───────────────────────────────
 print("== compile ==")
 import py_compile
 bad = []
-# v1.1.4: cfile — в рабочую папку процесса (WORK уникальна на файл при параллельном
-# run_all.py): запись .pyc в ОБЩИЙ __pycache__ из 4 процессов гонится на Windows
-# (WinError 5 «Access is denied» при rename .pyc, пока другой процесс его держит) —
-# флейк «all .py compile». Семантика та же: полная компиляция каждого модуля.
+# v1.1.4: the cfile — into the process working folder (WORK is unique per file under a parallel
+# run_all.py): writing .pyc into the SHARED __pycache__ from 4 processes races on Windows
+# (WinError 5 "Access is denied" on renaming the .pyc while another process holds it) —
+# the "all .py compile" flake. The semantics are the same: a full compile of every module.
+# v1.3-fix: `*os.path.dirname(rel)` unpacked a STRING PER CHARACTER (a join with a single
+# "\" = an absolute path → the prefix was dropped): the cfiles of nested modules went to the root
+# disk (C:\p\y\t\e\… with WORK on C: — Permission denied; F:\p\y\t\e\… for a single
+# run — "passed", leaving the junk). split(os.sep) — the real components.
 _pyc_dir = os.path.join(WORK, "pyc")
 for dirpath, _, files in os.walk(ROOT):
     if "__pycache__" in dirpath:
@@ -33,7 +37,8 @@ for dirpath, _, files in os.walk(ROOT):
             p = os.path.join(dirpath, f)
             try:
                 rel = os.path.relpath(p, ROOT)
-                cfile = os.path.join(_pyc_dir, *os.path.dirname(rel), os.path.basename(rel)[:-3] + "c")
+                cfile = os.path.join(_pyc_dir, *os.path.dirname(rel).split(os.sep),
+                                     os.path.basename(rel)[:-3] + "c")
                 os.makedirs(os.path.dirname(cfile), exist_ok=True)
                 py_compile.compile(p, cfile=cfile, doraise=True)
             except Exception as e:
@@ -51,7 +56,7 @@ check("key sets identical across en/ru/zh",
       str(set(langs["en"]).symmetric_difference(set(langs["ru"])))[:200])
 
 from i18n import t, set_language
-# Тест переключает языки и пишет в ~/.sshmap/config.json — сохраняем/возвращаем конфиг пользователя
+# The test switches languages and writes to ~/.sshmap/config.json — we save/restore the user config
 _cfg_snap = snapshot_i18n_config()
 check("t() imported from i18n module", t.__module__ == "i18n")  # sanity import
 set_language("zh")
@@ -88,7 +93,7 @@ samples = {
     "\x1b[Hhome": "home",
     "\x1b[?25lhidden\x1b[?25hshown": "hiddenshown",
     "\x1b]0;vim\x07prompt": "prompt",      # OSC (title) + BEL terminator
-    "\x1b]8;;http://x\x1b\\link text plain": "link text plain",  # OSC 8: удаляется до ST, видимый текст остаётся
+    "\x1b]8;;http://x\x1b\\link text plain": "link text plain",  # OSC 8: removed up to ST, the visible text remains
 }
 for src, want in samples.items():
     got = ANSI_ESCAPE_RE.sub("", src)
@@ -98,7 +103,7 @@ for src, want in samples.items():
 print("== profiles ==")
 import models.profile as P
 prof_path = os.path.join(WORK, "sshmap_profiles.json")
-P._profiles_path = lambda: prof_path  # тест не трогает реальный файл пользователя
+P._profiles_path = lambda: prof_path  # the test does not touch the user's real file
 
 from services.credential_manager import get_credential_manager
 cm = get_credential_manager()
@@ -123,7 +128,7 @@ else:
     up = P.update_profile(p.id, name="TestProf2", user="tester2", password=None)
     check("update_profile(password=None) no exception (no keyring)", up is not None)
 
-# cleanup test profile (файл в WORK удалится вместе с рабочей папкой)
+# the test profile cleanup (the file in WORK is deleted with the working folder)
 P.delete_profile(p.id)
 
 restore_i18n_config(_cfg_snap)

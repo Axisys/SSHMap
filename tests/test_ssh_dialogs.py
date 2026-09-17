@@ -1,13 +1,13 @@
-"""SSH-диалоги: сборка, keyring-save v0.9.5.6, кнопка «Подключиться» (бывш. smoke_test §6a+§7).
+"""SSH dialogs: assembly, keyring save v0.9.5.6, the "Connect" button (former smoke_test §6a+§7).
 
-Часть сьюта, разбитого из smoke_test.py v0.6–v0.9.2 (см. INDEX.md).
-  * SSHConnectDialog: accept без success-окна (v0.9.5.6), пароль в keyring через
-    плоский импорт, warning при неудачном save (машина без keyring);
-  * AddServerDialog: кнопка «Подключиться по SSH» — валидация host + флаг
-    _connect_after_accept; обычный OK без флага;
-  * оба диалога собираются без ошибок (пути кнопок).
+A part of the suite split out of smoke_test.py v0.6–v0.9.2 (see INDEX.md).
+  * SSHConnectDialog: accept without the success window (v0.9.5.6), the password into the keyring via
+    a flat import, a warning on a failed save (a machine without a keyring);
+  * AddServerDialog: the "Connect via SSH" button — the host validation + the
+    _connect_after_accept flag; a plain OK without the flag;
+  * both dialogs assemble without errors (the button paths).
 
-Запуск: python tests/test_ssh_dialogs.py   (из корня проекта) или python tests/run_all.py
+Run: python tests/test_ssh_dialogs.py   (from the project root) or python tests/run_all.py
 """
 import os
 import sys
@@ -15,7 +15,7 @@ import traceback
 
 from _common import bootstrap, check, finish
 
-ROOT, WORK = bootstrap()  # ДО импортов модулей приложения
+ROOT, WORK = bootstrap()  # BEFORE the app module imports
 
 from PySide6.QtWidgets import QApplication, QMessageBox, QDialog as _QDialog
 app = QApplication(sys.argv)
@@ -36,10 +36,10 @@ from models.server import ServerData
 from services.credential_manager import get_credential_manager
 cm = get_credential_manager()
 
-win = MW.MainWindow()  # parent для диалогов
+win = MW.MainWindow()  # the parent for the dialogs
 
-# ── v0.9.5.6: SSH-диалог (keyring save через плоский импорт, без success-окна)
-# и «Подключиться по SSH» в диалоге свойств ──
+# ── v0.9.5.6: the SSH dialog (the keyring save via a flat import, no success window)
+# and "Connect over SSH" in the properties dialog ──
 print("== v0.9.5.6 ssh dialog fixes ==")
 from dialogs.ssh_connect_dialog import SSHConnectDialog
 from dialogs.add_server_dialog import AddServerDialog
@@ -51,8 +51,8 @@ class _FakeWorker:
     test_only = False
 cdlg._ssh_worker = _FakeWorker()
 
-# v0.9.5.6: success-info-окно УБРАНО — патчим information() и убеждаемся,
-# что _on_worker_success его не вызывает (иначе был бы лишний кликабельный блок)
+# v0.9.5.6: the success-info window is REMOVED — we patch information() and make sure
+# that _on_worker_success does not invoke it (otherwise there would be an extra clickable block)
 _info_calls = []
 _orig_info = MW.QMessageBox.information
 MW.QMessageBox.information = staticmethod(lambda *a, **k: _info_calls.append(a))
@@ -79,7 +79,7 @@ else:
     check("connect dialog (no keyring): save-failure warning shown",
           len([b for b in boxes[_boxes_before:] if b[0] == "warning"]) >= 1)
 
-# «Подключиться по SSH» в диалоге свойств: слева, с валидацией host
+# "Connect over SSH" in the properties dialog: on the left, with host validation
 adlg = AddServerDialog(win)
 check("properties dialog: 'Connect via SSH' button exists",
       getattr(adlg, "ssh_connect_btn", None) is not None)

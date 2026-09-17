@@ -1,24 +1,24 @@
 # -*- coding: utf-8 -*-
-"""Регрессия v0.9.5.5 (безопасность #1): keyring-бэкенд — валидация и гард.
+"""Regression v0.9.5.5 (security #1): the keyring backend — validation and guard.
 
-Запуск: python tests/test_keyring_validation.py или python tests/run_all.py
+Run: python tests/test_keyring_validation.py or python tests/run_all.py
 
-Проверяет:
-  1. plaintext-бэкенд (keyrings.alt.*) отклоняется на Windows И на Linux —
-     save/load/delete не пишут/не читают в него;
-  2. fail-бэкенд (keyring.backends.fail) отклоняется на Linux;
-  3. при отклонённом бэкенде: save→False, load→None, delete→True
-     (semantics v094b: «ничего не хранилось — удалять нечего»);
-  4. реальный бэкенд этой машины (если принят): round-trip save/load/delete
-     и delete отсутствующей записи → True (keyring 25.x бросает
-     PasswordDeleteError — перехватывается).
+Checks:
+  1. the plaintext backend (keyrings.alt.*) is rejected on Windows AND on Linux —
+     save/load/delete do not write/read into it;
+  2. the fail-backend (keyring.backends.fail) is rejected on Linux;
+  3. with the rejected backend: save→False, load→None, delete→True
+     (the semantics v094b: "nothing was stored — there is nothing to delete");
+  4. the real backend of this machine (if accepted): the round-trip save/load/delete
+     and the delete of the missing entry → True (keyring 25.x raises
+     PasswordDeleteError — it is caught).
 """
 import os
 import sys
 
 from _common import bootstrap, check, finish
 
-ROOT, WORK = bootstrap()  # ДО импортов модулей приложения (HOME-изоляция и faulthandler внутри)
+ROOT, WORK = bootstrap()  # BEFORE the app module imports (the HOME isolation and faulthandler inside)
 
 import keyring
 
@@ -27,9 +27,9 @@ from services.credential_manager import CredentialManager
 
 
 def _make_fake(module_name, cls_name="FakeKeyring"):
-    """Бэкенд-заглушка с заданным __module__/именем класса (для валидации).
+    """A backend stub with a given __module__/the class name (for the validation).
 
-    Методы — страховка: при правильной работе гарда они не должны вызываться.
+    The methods — a safety net: with the guard working correctly they must not be called.
     """
 
     def _forbidden_write(self, service, username, password):
@@ -49,7 +49,7 @@ def _make_fake(module_name, cls_name="FakeKeyring"):
 
 
 def _with_backend(fake, platform_name):
-    """CredentialManager, инициализированный под заданный бэкенд и ОС."""
+    """A CredentialManager initialized for a given backend and OS."""
     orig_system = CM_MOD._platform_mod.system
     orig_get = keyring.get_keyring
     try:
@@ -64,7 +64,7 @@ def _with_backend(fake, platform_name):
 def main():
     print("== v0.9.5.5: keyring backend validation + guard ==")
 
-    # ── 1. Plaintext-бэкенд (keyrings.alt.file) отклоняется на любой ОС ──
+    # ── 1. The Plaintext backend (keyrings.alt.file) is rejected on any OS ──
     plaintext = _make_fake("keyrings.alt.file", "PlaintextKeyring")
     for plat in ("Windows", "Linux"):
         cm = _with_backend(plaintext, plat)
@@ -73,13 +73,13 @@ def main():
         check(f"load None on {plat}", cm.load_password("sid1") is None)
         check(f"delete True (nothing stored) on {plat}", cm.delete_password("sid1") is True)
 
-    # ── 2. Fail-бэкенд (keyring.backends.fail) отклоняется на Linux ──
+    # ── 2. The Fail backend (keyring.backends.fail) is rejected on Linux ──
     fail_be = _make_fake("keyring.backends.fail", "FailKeyring")
     cm = _with_backend(fail_be, "Linux")
     check("fail backend REJECTED on Linux", cm.is_available is False)
     check("save refused (fail backend)", cm.save_password("sid2", "pw") is False)
 
-    # ── 3. Реальный бэкенд этой машины: round-trip (если принят валидацией) ──
+    # ── 3. This machine's real backend: the round-trip (if accepted by the validation) ──
     cm_real = CredentialManager()
     if cm_real.is_available:
         print(f"  (real backend: {type(cm_real._keyring_backend).__module__}"

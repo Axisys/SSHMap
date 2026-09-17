@@ -1,37 +1,37 @@
 # -*- coding: utf-8 -*-
-"""v1.0RC2 — клавиатура + выделение/копирование (ROADMAP v1.0RC2).
+"""v1.0RC2 — keyboard + selection/copy (ROADMAP v1.0RC2).
 
-  * selection_cells (чистая функция, без GUI): однострочное/многострочное/
-    инвертированные границы/одна ячейка/вся сетка/зажим колонок; regression на
-    ошибку черновика №4 (TERMINAL.md §3) — координаты ВСЕГДА (row, col),
-    построчный порядок: колоночная интерпретация черновика ((col, row)) не даёт
-    тот же набор ячеек;
-  * клавиатура (offscreen-виджет + фейковый thread): полная таблица F1–F12
-    (xterm-последовательности SS3/CSI), PageUp/PageDown, Home/End/Delete
-    (семантика старого SSHTerminalTextEdit сохранена), базовый набор RC1
-    (печатные/utf-8/Return/Backspace/Tab/Shift+Tab/Esc/стрелки); Ctrl+C без выделения →
-    b'\\x03' (Acceptance: «Ctrl+C роняет top»); Ctrl+D → \\x04, Ctrl+Z → \\x1a;
-    AltGr-guard (Ctrl+Alt зажат → ничего не шлётся — TERMINAL.md §3.12);
-  * Tab/Shift+Tab ПОЛНЫМ путём (QApplication.sendEvent через notify, §2b):
-    regression v1.2.9-fix — Qt 6 перехватывает их ДО keyPressEvent
-    (focus-change-механизм), \t/\x1b[Z должны дойти до канала, а фокус остаться
-    на терминале (сценарий mc: серии Tab без дрейфа фокуса);
-  * bracketed paste Ctrl+V (перенос из v0.9.4): многострочный буфер с
-    смешанными EOL — ЕДИНЫЙ блок \\x1b[200~...\\x1b[201~ с нормализованными
-    переводами строк; пустой буфер → ничего не шлётся;
-  * выделение мышью + копирование (offscreen, синтетические QMouseEvent):
-    drag ЛКМ в обе стороны, простой клик = сброс выделения, Ctrl+C при
-    выделении → копирование мульти-строчного текста в буфер (Acceptance),
-    без выделения → \\x03; drag за пределы сетки → clamp; полупрозрачная
-    подсветка рендерится (пиксели + stats).
+  * selection_cells (a pure function, no GUI): the single-line/multi-line/
+    the inverted boundaries/one cell/the whole grid/the column clamp; a regression on
+    the draft error #4 (TERMINAL.md §3) — the coordinates are ALWAYS (row, col),
+    the line-by-line order: the column interpretation of the draft ((col, row)) does not give
+    the same set of cells;
+  * the keyboard (an offscreen widget + a fake thread): the full F1–F12 table
+    (the xterm sequences SS3/CSI), PageUp/PageDown, Home/End/Delete
+    (the semantics of the old SSHTerminalTextEdit are preserved), the basic RC1 set
+    (the printable/utf-8/Return/Backspace/Tab/Shift+Tab/Esc/the arrows); the Ctrl+C without the selection →
+    b'\\x03' (the Acceptance: "Ctrl+C kills top"); the Ctrl+D → \\x04, the Ctrl+Z → \\x1a;
+    the AltGr guard (Ctrl+Alt held → nothing is sent — TERMINAL.md §3.12);
+  * Tab/Shift+Tab by the FULL path (QApplication.sendEvent through notify, §2b):
+    the regression v1.2.9-fix — Qt 6 intercepts them BEFORE the keyPressEvent
+    (the focus-change mechanism), the \t/\x1b[Z must reach the channel, and the focus must stay
+    on the terminal (the mc scenario: the series of Tabs without the focus drift);
+  * the bracketed paste Ctrl+V (the move from v0.9.4): the multi-line clipboard with
+    mixed EOL — a SINGLE block \\x1b[200~...\\x1b[201~ with the normalized
+    line breaks; an empty clipboard → nothing is sent;
+  * the mouse selection + the copying (offscreen, the synthetic QMouseEvents):
+    the LMB drag in both directions, a plain click = the selection reset, the Ctrl+C with the
+    selection → the copy of the multi-line text to the clipboard (the Acceptance),
+    without the selection → \\x03; the drag beyond the grid → the clamp; the semi-transparent
+    highlight renders (the pixels + the stats).
 
-Запуск:  python tests/test_terminal_input.py   (из корня проекта) или python tests/run_all.py
+Run:  python tests/test_terminal_input.py   (from the project root) or python tests/run_all.py
 """
 import sys
 
 from _common import bootstrap, check, finish
 
-ROOT, WORK = bootstrap()  # ДО импортов модулей приложения (HOME-изоляция и faulthandler внутри)
+ROOT, WORK = bootstrap()  # BEFORE the app module imports (the HOME isolation and faulthandler inside)
 
 from PySide6.QtCore import Qt, QEvent, QPointF
 from PySide6.QtGui import QKeyEvent, QMouseEvent
@@ -44,63 +44,57 @@ from modules.terminal_widget import TerminalWidget, selection_cells
 
 
 # ════════════════════════════════════════════════════════════
-# 1. selection_cells — чистая функция (regression на ошибку черновика №4)
+# 1. selection_cells — a pure function (a regression for draft error №4)
 # ════════════════════════════════════════════════════════════
 print("== selection_cells (pure) ==")
 
-check("однострочное: (2,1)-(2,5) → 5 ячеек",
+check("the single-line: (2,1)-(2,5) → the 5 cells",
       selection_cells((2, 1), (2, 5), 10) == [(2, c) for c in range(1, 6)],
       repr(selection_cells((2, 1), (2, 5), 10)))
 
 exp_multi = ([(1, c) for c in range(3, 8)] +
              [(r, c) for r in (2, 3) for c in range(8)] +
              [(4, c) for c in range(0, 8)])
-check("многострочное: (1,3)-(4,7) cols=8 — первая с col 3, средние всю ширину, последняя до col 7",
+check("the multi-line: (1,3)-(4,7) cols=8 — the first one from the col 3, the middle ones the full width, the last one up to the col 7",
       selection_cells((1, 3), (4, 7), 8) == exp_multi,
       f"got={selection_cells((1, 3), (4, 7), 8)}")
 
-check("инвертированные границы: (4,7)-(1,3) → тот же набор",
+check("the inverted bounds: (4,7)-(1,3) → the same set",
       selection_cells((4, 7), (1, 3), 8) == exp_multi,
       f"got={selection_cells((4, 7), (1, 3), 8)}")
 
-check("одна ячейка: (0,0)-(0,0)", selection_cells((0, 0), (0, 0), 5) == [(0, 0)])
+check("one cell: (0,0)-(0,0)", selection_cells((0, 0), (0, 0), 5) == [(0, 0)])
 
-check("вся сетка 3x10 → 30 ячеек",
+check("the whole grid 3x10 → the 30 cells",
       len(selection_cells((0, 0), (2, 9), 10)) == 30
       and selection_cells((0, 0), (2, 9), 10)[-1] == (2, 9))
 
-check("зажим колонок: c2=99 → cols-1",
+check("the clamp of the columns: c2=99 → cols-1",
       selection_cells((0, 0), (1, 99), 8) == [(r, c) for r in (0, 1) for c in range(8)],
       f"got={selection_cells((0, 0), (1, 99), 8)}")
 
-# REGRESSION на ошибку №4 (TERMINAL.md §3): черновик хранил (col, row) и сравнивал
-# кортежно — колоночный порядок. start=(0,5), end=(2,1), cols=8: построчно это
-# строка 0 с col 5..7, строка 1 целиком, строка 2 до col 1 (13 ячеек).
+# A REGRESSION for error №4 (TERMINAL.md §3): the draft stored (col, row) and compared
+# as a tuple — column order. start=(0,5), end=(2,1), cols=8: line by line this is
+# line 0 with col 5..7, line 1 in full, line 2 up to col 1 (13 cells).
 cells4 = selection_cells((0, 5), (2, 1), 8)
 exp4 = ([(0, c) for c in range(5, 8)] + [(1, c) for c in range(8)]
         + [(2, c) for c in range(2)])
-check("regression №4: построчный порядок (row-major), а не колоночный",
+check("the regression №4: the line-by-line order (row-major), not the column one",
       cells4 == exp4, f"got={cells4}")
-check("regression №4: ячейки колоночной интерпретации черновика отсутствуют",
+check("the regression №4: the cells of the column interpretation of the draft are absent",
       (3, 0) not in cells4 and (0, 6) in cells4 and len(cells4) == 13, f"got={cells4}")
 
 check("columns=0 → [] (defensive)", selection_cells((0, 0), (2, 5), 0) == [])
 
 
 # ════════════════════════════════════════════════════════════
-# 2. Клавиатура: полная таблица (offscreen + фейковый thread)
+# 2. Keyboard: the full table (offscreen + a fake thread)
 # ════════════════════════════════════════════════════════════
 print("== keyboard (offscreen) ==")
 
-sent = []
-
-
-class FakeThread:
-    def send_data(self, b):
-        sent.append(b)
-
-    def stop(self):
-        pass
+from _fakes import FakeWidgetThread as FakeThread
+FakeThread.sent = []
+sent = FakeThread.sent   # the same list — for the checks below
 
 
 def make_widget(cols=20, lines=5, thread=None):
@@ -117,7 +111,7 @@ ALT = Qt.KeyboardModifier.AltModifier
 
 scr, w = make_widget()
 
-# F1–F12 — полная таблица (xterm: F1–F4 SS3, F5–F12 CSI)
+# F1–F12 — the full table (xterm: F1–F4 SS3, F5–F12 CSI)
 f_keys = [Qt.Key.Key_F1, Qt.Key.Key_F2, Qt.Key.Key_F3, Qt.Key.Key_F4,
           Qt.Key.Key_F5, Qt.Key.Key_F6, Qt.Key.Key_F7, Qt.Key.Key_F8,
           Qt.Key.Key_F9, Qt.Key.Key_F10, Qt.Key.Key_F11, Qt.Key.Key_F12]
@@ -128,7 +122,7 @@ for i, (k, e) in enumerate(zip(f_keys, f_expect), 1):
     press_key(w, k)
     check(f"F{i} → {e!r}", sent == [e], f"sent={sent!r}")
 
-# PageUp/PageDown/Home/End/Delete (Home/End/Delete — семантика SSHTerminalTextEdit)
+# PageUp/PageDown/Home/End/Delete (Home/End/Delete — the SSHTerminalTextEdit semantics)
 for label, k, e in (("PageUp", Qt.Key.Key_PageUp, b"\x1b[5~"),
                     ("PageDown", Qt.Key.Key_PageDown, b"\x1b[6~"),
                     ("Home", Qt.Key.Key_Home, b"\x1b[H"),
@@ -138,11 +132,11 @@ for label, k, e in (("PageUp", Qt.Key.Key_PageUp, b"\x1b[5~"),
     press_key(w, k)
     check(f"{label} → {e!r}", sent == [e], f"sent={sent!r}")
 
-# Базовый набор (перенос из RC1): печатные/utf-8 и служебные
+# The basic set (moved from RC1): printable/utf-8 and the function keys
 for ch in ("a", "é"):
     sent.clear()
     press_key(w, ord(ch), text=ch)
-    check(f"печатный {ch!r} → utf-8", sent == [ch.encode("utf-8")], f"sent={sent!r}")
+    check(f"the printable {ch!r} → utf-8", sent == [ch.encode("utf-8")], f"sent={sent!r}")
 
 for label, k, e in (("Return", Qt.Key.Key_Return, b"\r"),
                     ("Enter", Qt.Key.Key_Enter, b"\r"),
@@ -158,45 +152,45 @@ for label, k, e in (("Return", Qt.Key.Key_Return, b"\r"),
     press_key(w, k)
     check(f"{label} → {e!r}", sent == [e], f"sent={sent!r}")
 
-# Ctrl+C БЕЗ выделения → SIGINT (Acceptance: «Ctrl+C роняет top»)
+# Ctrl+C WITHOUT a selection → SIGINT (Acceptance: "Ctrl+C kills top")
 sent.clear()
 press_key(w, Qt.Key.Key_C, mod=CTRL)
-check("Ctrl+C без выделения → b'\\x03'", sent == [b"\x03"], f"sent={sent!r}")
+check("Ctrl+C without the selection → b'\\x03'", sent == [b"\x03"], f"sent={sent!r}")
 
-# Ctrl+D / Ctrl+Z (явные, как в RC1)
+# Ctrl+D / Ctrl+Z (explicit, as in RC1)
 for label, k, e in (("Ctrl+D", Qt.Key.Key_D, b"\x04"), ("Ctrl+Z", Qt.Key.Key_Z, b"\x1a")):
     sent.clear()
     press_key(w, k, mod=CTRL)
     check(f"{label} → {e!r}", sent == [e], f"sent={sent!r}")
 
-# AltGr-guard (TERMINAL.md §3.12): на Windows AltGr = Ctrl+Alt — ничего не шлётся
+# The AltGr guard (TERMINAL.md §3.12): on Windows AltGr = Ctrl+Alt — nothing is sent
 for label, k in (("C", Qt.Key.Key_C), ("D", Qt.Key.Key_D), ("V", Qt.Key.Key_V),
                  ("Z", Qt.Key.Key_Z), ("2", Qt.Key.Key_2)):
     sent.clear()
     press_key(w, k, mod=CTRL | ALT)
-    check(f"AltGr-guard: Ctrl+Alt+{label} → ничего не шлётся", sent == [], f"sent={sent!r}")
+    check(f"AltGr-guard: Ctrl+Alt+{label} → nothing is sent", sent == [], f"sent={sent!r}")
 
-# terminal_thread=None — ввод отключён, без исключений
+# terminal_thread=None — the input is disabled, no exceptions
 scr0, w0 = make_widget(thread=None)
 try:
     press_key(w0, Qt.Key.Key_Return)
     press_key(w0, Qt.Key.Key_F1)
     press_key(w0, ord("x"), text="x")
-    check("terminal_thread=None: клавиши не роняют и ничего не шлют", True)
+    check("terminal_thread=None: the keys do not crash and send nothing", True)
 except Exception as e:
-    check("terminal_thread=None: клавиши не роняют и ничего не шлют", False, repr(e))
+    check("terminal_thread=None: the keys do not crash and send nothing", False, repr(e))
 
 
 # ════════════════════════════════════════════════════════════
-# 2b. Tab/Shift+Tab — ПОЛНЫЙ путь доставки (regression v1.2.9-fix)
-#     Qt 6 перехватывает голые Tab/Shift+Tab на уровне focus-change ДО
-#     keyPressEvent (документация QWidget: «To force those keys to be processed
-#     by your widget, you must reimplement QWidget::event()»). Прямой вызов
-#     keyPressEvent (таблица выше) этот путь НЕ покрывал — поэтому баг прожил
-#     с v1.0RC2 по v1.2.9: в реальном окне Tab гонял фокус по кнопкам/табам,
-#     а \t не доходил до shell (bash-автозаполнение, панели mc).
-#     Здесь — QApplication.sendEvent (через notify) + второй фокусируемый
-#     виджет в том же окне = реальная цепочка фокуса.
+# 2b. Tab/Shift+Tab — the FULL delivery path (the v1.2.9-fix regression)
+#     Qt 6 intercepts bare Tab/Shift+Tab at the focus-change level BEFORE
+#     keyPressEvent (QWidget docs: "To force those keys to be processed
+#     by your widget, you must reimplement QWidget::event()"). A direct call
+#     keyPressEvent (the table above) this path did NOT cover — so the bug survived
+#     from v1.0RC2 to v1.2.9: in a real window Tab drove focus across buttons/tabs,
+#     and \t never reached the shell (bash autocompletion, mc panels).
+#     Here — QApplication.sendEvent (via notify) + a second focusable
+#     widget in the same window = a real focus chain.
 # ════════════════════════════════════════════════════════════
 print("== Tab/Shift+Tab focus retention (full delivery path) ==")
 
@@ -213,7 +207,7 @@ class _FocusThread:
 
 
 def _focus_setup():
-    """TerminalWidget + кнопка в одном окне (цепочка фокуса), фокус — на холсте."""
+    """TerminalWidget + a button in one window (the focus chain), the focus — on the canvas."""
     scr_ = TerminalScreen(columns=20, lines=5)
     th = _FocusThread()
     w_ = TerminalWidget(scr_, th)
@@ -236,26 +230,26 @@ ev_tab = QKeyEvent(QEvent.Type.KeyPress, int(Qt.Key.Key_Tab),
                    Qt.KeyboardModifier.NoModifier, "\t")
 QApplication.sendEvent(w_f, ev_tab)
 app.processEvents()
-check("Tab (полный путь): \\t дошёл до канала", th_f.sent == [b"\t"], f"sent={th_f.sent!r}")
-check("Tab (полный путь): фокус ОСТАЛСЯ на терминале (не ушёл в кнопку)",
+check("Tab (the full path): \\t reached the channel", th_f.sent == [b"\t"], f"sent={th_f.sent!r}")
+check("Tab (the full path): the focus STAYED on the terminal (did not go to the button)",
       app.focusWidget() is w_f, f"focus={app.focusWidget()}")
 
 ev_btab = QKeyEvent(QEvent.Type.KeyPress, int(Qt.Key.Key_Backtab),
                     Qt.KeyboardModifier.ShiftModifier, "")
 QApplication.sendEvent(w_f, ev_btab)
 app.processEvents()
-check("Shift+Tab (полный путь): \\x1b[Z дошёл до канала",
+check("Shift+Tab (the full path): \\x1b[Z reached the channel",
       th_f.sent == [b"\t", b"\x1b[Z"], f"sent={th_f.sent!r}")
-check("Shift+Tab (полный путь): фокус остался на терминале", app.focusWidget() is w_f,
+check("Shift+Tab (the full path): the focus stayed on the terminal", app.focusWidget() is w_f,
       f"focus={app.focusWidget()}")
 
-# Сценарий mc: серии Tab — фокус не дрейфует, каждый \t доходит до канала
+# The mc scenario: Tab series — the focus does not drift, every \t reaches the channel
 for _ in range(3):
     QApplication.sendEvent(w_f, QKeyEvent(QEvent.Type.KeyPress, int(Qt.Key.Key_Tab),
                                           Qt.KeyboardModifier.NoModifier, "\t"))
     app.processEvents()
-check("5 Tab подряд: фокус стабилен на терминале", app.focusWidget() is w_f)
-check("5 Tab подряд: 5 × \\t в канале (панели mc переключаются)", len(th_f.sent) == 5,
+check("the 5 Tabs in a row: the focus is stable on the terminal", app.focusWidget() is w_f)
+check("the 5 Tabs in a row: the 5 × \\t in the channel (the mc panels are switched)", len(th_f.sent) == 5,
       f"sent={th_f.sent!r}")
 
 host_f.close()
@@ -263,26 +257,26 @@ app.processEvents()
 
 
 # ════════════════════════════════════════════════════════════
-# 3. Bracketed paste Ctrl+V (перенос из v0.9.4)
+# 3. Bracketed paste Ctrl+V (moved from v0.9.4)
 # ════════════════════════════════════════════════════════════
 print("== bracketed paste Ctrl+V ==")
 
 scr, w = make_widget()
 cb = app.clipboard()
-cb.setText("one\r\ntwo\nthree")   # смешанные EOL — нормализуются в \n
+cb.setText("one\r\ntwo\nthree")   # mixed EOL — normalized to \n
 sent.clear()
 press_key(w, Qt.Key.Key_V, mod=CTRL)
-check("Ctrl+V: многострочный буфер — ЕДИНЫЙ блок с нормализованными переводами",
+check("Ctrl+V: the multi-line buffer — a SINGLE block with the normalized line breaks",
       sent == [b"\x1b[200~one\ntwo\nthree\x1b[201~"], f"sent={sent!r}")
 
 cb.setText("")
 sent.clear()
 press_key(w, Qt.Key.Key_V, mod=CTRL)
-check("Ctrl+V с пустым буфером → ничего не шлётся", sent == [], f"sent={sent!r}")
+check("Ctrl+V with the empty buffer → nothing is sent", sent == [], f"sent={sent!r}")
 
 
 # ════════════════════════════════════════════════════════════
-# 4. Выделение мышью + копирование (синтетические QMouseEvent)
+# 4. Mouse selection + copy (synthetic QMouseEvent)
 # ════════════════════════════════════════════════════════════
 print("== mouse selection + copy ==")
 
@@ -316,66 +310,66 @@ scr.feed(b"hello world\r\nsecond line\r\nthird row")
 cw, chh = w.cell_size
 w.resize(cw * 20, chh * 5)
 
-# drag (0,0) → (2,4): строка 0 целиком, строка 1 целиком, строка 2 до col 4
+# a drag (0,0) → (2,4): row 0 entirely, row 1 entirely, row 2 up to col 4
 press_lmb(w, 0, 0)
 move_lmb(w, 1, 2)
 release_lmb(w, 2, 4)
 exp_sel = selection_cells((0, 0), (2, 4), 20)
-check("drag (0,0)→(2,4): выделение активно", w.has_selection())
-check("якорь/конец хранятся как (row, col)",
+check("the drag (0,0)→(2,4): the selection is active", w.has_selection())
+check("the anchor/the end are stored as (row, col)",
       (w._sel_anchor, w._sel_active) == ((0, 0), (2, 4)),
       f"got=({w._sel_anchor}, {w._sel_active})")
-check("ячейки выделения = selection_cells()", w._selected_cells() == exp_sel,
+check("the cells of the selection = selection_cells()", w._selected_cells() == exp_sel,
       f"got={w._selected_cells()}")
 
-# Acceptance: копирование мульти-строчного выделения
-exp_text = "hello world\nsecond line\nthird"   # строка 2 cols 0..4 → 'third' (5 символов)
-check("selected_text: мульти-строчный текст, \\n, хвостовые пробелы обрезаны",
+# Acceptance: copying a multi-line selection
+exp_text = "hello world\nsecond line\nthird"   # line 2 cols 0..4 → 'third' (5 characters)
+check("selected_text: the multi-line text, \\n, the trailing spaces are trimmed",
       w.selected_text() == exp_text, repr(w.selected_text()))
 
 sent.clear()
 ok = w.copy_selection()
 check("copy_selection() → True", ok is True)
-check("буфер обмена == мульти-строчное выделение", app.clipboard().text() == exp_text,
+check("the clipboard == the multi-line selection", app.clipboard().text() == exp_text,
       repr(app.clipboard().text()))
 
-# Ctrl+C при выделении — копирует (semantics v0.9.3), в канал ничего не уходит
+# Ctrl+C with a selection — copies (the v0.9.3 semantics), nothing goes into the channel
 sent.clear()
 press_key(w, Qt.Key.Key_C, mod=CTRL)
-check("Ctrl+C при выделении → в канал ничего", sent == [], f"sent={sent!r}")
-check("Ctrl+C при выделении → буфер обновлён", app.clipboard().text() == exp_text)
+check("Ctrl+C with the selection → nothing into the channel", sent == [], f"sent={sent!r}")
+check("Ctrl+C with the selection → the clipboard is updated", app.clipboard().text() == exp_text)
 
-# Инвертированный drag (2,4) → (0,0): те же ячейки
+# An inverted drag (2,4) → (0,0): the same cells
 w.clear_selection()
 press_lmb(w, 2, 4)
 move_lmb(w, 1, 0)
 release_lmb(w, 0, 0)
-check("инвертированный drag (2,4)→(0,0) → те же ячейки", w._selected_cells() == exp_sel,
+check("the inverted drag (2,4)→(0,0) → the same cells", w._selected_cells() == exp_sel,
       f"got={w._selected_cells()}")
 
-# Простой клик (без drag) — сброс выделения; Ctrl+C снова SIGINT
+# A simple click (without a drag) — the selection is reset; Ctrl+C is SIGINT again
 w.clear_selection()
 press_lmb(w, 1, 3)
 release_lmb(w, 1, 3)
-check("простой клик (без drag) → выделения нет", not w.has_selection())
+check("a plain click (without the drag) → no selection", not w.has_selection())
 sent.clear()
 press_key(w, Qt.Key.Key_C, mod=CTRL)
-check("Ctrl+C после простого клика → b'\\x03' (роняет top)", sent == [b"\x03"],
+check("Ctrl+C after the plain click → b'\\x03' (kills the top)", sent == [b"\x03"],
       f"sent={sent!r}")
 
-# Drag за пределы сетки — clamp к последней ячейке (4,19)
+# A drag beyond the grid — clamped to the last cell (4,19)
 w.clear_selection()
 press_lmb(w, 0, 0)
-far = QPointF(30 * cw, 30 * chh)   # далеко за границей виджета/сетки
+far = QPointF(30 * cw, 30 * chh)   # far beyond the widget/grid boundary
 w.mouseMoveEvent(QMouseEvent(QEvent.Type.MouseMove, far, far, Qt.MouseButton.NoButton,
                              Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier))
-check("drag за пределы сетки → clamp к (4,19)", w._sel_active == (4, 19),
+check("the drag beyond the grid → the clamp to (4,19)", w._sel_active == (4, 19),
       f"got={w._sel_active}")
 w.clear_selection()
 
 
 # ════════════════════════════════════════════════════════════
-# 5. Подсветка выделения (offscreen-рендер)
+# 5. The selection highlight (an offscreen render)
 # ════════════════════════════════════════════════════════════
 print("== selection highlight (offscreen) ==")
 
@@ -385,7 +379,7 @@ def pixel(img, x, y):
     return ((p >> 16) & 0xFF, (p >> 8) & 0xFF, p & 0xFF)
 
 
-scr2, w2 = make_widget(cols=20, lines=5)   # пустой экран — чистый фон
+scr2, w2 = make_widget(cols=20, lines=5)   # an empty screen — a clean background
 cw2, chh2 = w2.cell_size
 w2.resize(cw2 * 20, chh2 * 5)
 img_base = w2.grab().toImage()
@@ -393,20 +387,20 @@ px_base = pixel(img_base, 5 * cw2 + cw2 // 2, 2 * chh2 + chh2 // 2)
 
 press_lmb(w2, 1, 0)
 move_lmb(w2, 2, 5)
-release_lmb(w2, 3, 9)   # (1,0)-(3,9): строка 1 всю ширину (20), строка 2 всю (20), строка 3 до col 9 (10)
+release_lmb(w2, 3, 9)   # (1,0)-(3,9): row 1 full width (20), row 2 full (20), row 3 up to col 9 (10)
 img_sel = w2.grab().toImage()
 px_sel = pixel(img_sel, 5 * cw2 + cw2 // 2, 2 * chh2 + chh2 // 2)
-check("подсветка: выбранный пиксель отличается от фона", px_sel != px_base,
+check("the highlight: the chosen pixel differs from the background", px_sel != px_base,
       f"base={px_base} sel={px_sel}")
 r_, g_, b_ = px_sel
-check("подсветка: синеватый оверлей (b > r и b > g на тёмном фоне)",
+check("the highlight: the bluish overlay (b > r and b > g on the dark background)",
       b_ > r_ + 20 and b_ > g_ + 20, f"sel={px_sel}")
-check("paint stats: подсчитаны ячейки выделения (20+20+10 = 50)",
+check("the paint stats: the cells of the selection are counted (20+20+10 = 50)",
       w2.last_paint_stats["selection_cells"] == 50, f"stats={w2.last_paint_stats}")
 
 
 # ════════════════════════════════════════════════════════════
-# 6. Интеграция: SSHTerminalWindow → TerminalWidget с API выделения
+# 6. Integration: SSHTerminalWindow → TerminalWidget with the selection API
 # ════════════════════════════════════════════════════════════
 print("== SSHTerminalWindow integration ==")
 import modules.ssh_terminal as ST
@@ -418,7 +412,7 @@ class _FakeTerm(ST.SSHTerminalThread):
         super().__init__("127.0.0.1", "u", 9, "", "")
 
     def run(self):
-        pass  # без сети
+        pass  # without network
 
 
 _orig_thread_cls = ST.SSHTerminalThread
@@ -426,7 +420,7 @@ ST.SSHTerminalThread = _FakeTerm
 win = None
 try:
     win = ST.SSHTerminalWindow(ServerData(id="rc2w", alias="T", host="127.0.0.1", user="u"), None)
-    check("окно создаёт TerminalWidget с API выделения/копирования",
+    check("the window creates the TerminalWidget with the selection/copying API",
           isinstance(win.widget, TerminalWidget)
           and all(hasattr(win.widget, m) for m in
                   ("has_selection", "copy_selection", "selected_text",

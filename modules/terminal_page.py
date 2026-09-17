@@ -1,32 +1,33 @@
 # -*- coding: utf-8 -*-
-"""v1.2 (ROADMAP v1.2): TerminalSessionPage — SSH-сессия как переиспользуемый виджет.
+"""v1.2 (ROADMAP v1.2): TerminalSessionPage — an SSH session as a reusable widget.
 
-Рефактор «окно → страница»: вся сессия (терминальный поток + pyte-экран +
-терминальный холст + статус-строка + SFTP-вкладка) вынесена из SSHTerminalWindow
-в QWidget, который не знает о QMainWindow. Окно терминала стало тонкой обёрткой
-(WA_DeleteOnClose, заголовок, геометрия — см. modules/ssh_terminal.py), и на этой
-странице строится остальная серия v1.2.x: вкладки в одном окне (v1.2.1) и док
-окна карты (v1.2.2).
+Refactor "window → page": the whole session (terminal thread + pyte screen +
+terminal canvas + status line + SFTP tab) was moved out of SSHTerminalWindow
+into a QWidget that does not know about QMainWindow. The terminal window became
+a thin wrapper (WA_DeleteOnClose, title, geometry — see modules/ssh_terminal.py),
+and on this page the rest of the v1.2.x series is built: tabs in one window
+(v1.2.1) and a dock in the map window (v1.2.2).
 
-Один teardown-метод — `shutdown()` (идемпотентен): все teardown-пути (закрытие
-окна, ошибка сессии, шатдаун MainWindow, лимит «4 своих терминала») проходят
-через него. Осознанные guard'ы v1.1.x сохранены:
-  * PTY-дебаунс-таймер останавливается ПЕРВЫМ (визги resize_pty в мёртвый канал);
-  * SFTP-worker отключается и стопится ДО терминального потока (зависит от его
-    transport'а), не дождавшийся wait — в реестр орфано-worker'ов;
-  * сигналы потока отвязываются от страницы, потом stop() + wait(1500); поток,
-    переживший ожидание (paramiko блокируется до ~15 c на connect), уходит в
-    модульный реестр орфано-потоков `_orphan_threads` (v1.1.2RC1 N4) — живой
-    QThread без QObject parent нельзя оставлять на GC;
-  * RuntimeError C++-объектов не блокирует закрытие (teardown-устойчивость).
+A single teardown method — `shutdown()` (idempotent): every teardown path
+(window close, session error, MainWindow shutdown, the "4 own terminals" limit)
+goes through it. The deliberate v1.1.x guards are kept:
+  * the PTY debounce timer is stopped FIRST (resize_pty shrieks into a dead channel);
+  * the SFTP worker is disconnected and stopped BEFORE the terminal thread (it
+    depends on the thread's transport); a worker wait that does not finish goes
+    to the orphan worker registry;
+  * the thread's signals are disconnected from the page, then stop() + wait(1500);
+    a thread that outlives the wait (paramiko blocks up to ~15 s on connect) goes
+    to the module-level orphan thread registry `_orphan_threads` (v1.1.2RC1 N4) —
+    a live QThread without a QObject parent must not be left to GC;
+  * RuntimeError on C++ objects does not block the close (teardown robustness).
 
-Мост в хост (окно/док): Qt-сигналы `status_message`/`progress_*` — страница НЕ
-знает, куда они идут. В режиме `windows` SSHTerminalWindow подсоединяет их к
-своему статус-бару и QProgressBar — отображение идентично v1.1.x.
+Bridge to the host (window/dock): the Qt signals `status_message`/`progress_*` —
+the page does NOT know where they go. In `windows` mode SSHTerminalWindow attaches
+them to its status bar and QProgressBar — the display is identical to v1.1.x.
 
-Тестовые швы (паттерн v1.1.4 host_attr): класс потока и QMessageBox берутся из
-модуля ssh_terminal в момент вызова — подмена `ST.SSHTerminalThread`/
-`ST.QMessageBox.question` в тестах работает без изменений.
+Test seams (the v1.1.4 host_attr pattern): the thread class and QMessageBox are
+fetched from the ssh_terminal module at call time — monkeypatching
+`ST.SSHTerminalThread`/`ST.QMessageBox.question` in tests works unchanged.
 """
 
 from PySide6.QtCore import Qt, QEvent, QTimer, Signal
@@ -52,18 +53,18 @@ try:
 except ImportError:
     from modules.sftp_tab import SftpTab, format_size
 
-try:  # v1.2.5: центральная тема (статус-лейблы — ui/theme.py)
+try:  # v1.2.5: the central theme (status labels — ui/theme.py)
     from ..ui import theme
 except ImportError:
     from ui import theme
 
 
 def _st_module():
-    """Модуль ssh_terminal в момент вызова (тестовый шов подмены атрибутов).
+    """The ssh_terminal module at call time (a test seam for attribute substitution).
 
-    Ленивый импорт: terminal_page не импортирует ssh_terminal на уровне модуля
-    (SSHTerminalWindow импортирует ЭТОТ модуль — прямой импорт дал бы цикл при
-    старте с terminal_page).
+    Lazy import: terminal_page does not import ssh_terminal at module level
+    (SSHTerminalWindow imports THIS module — a direct import would create a cycle
+    when starting from terminal_page).
     """
     try:
         from . import ssh_terminal as _st
@@ -73,66 +74,69 @@ def _st_module():
 
 
 def get_translator():
-    """Safe i18n helper — returns cached translator or fallback (как в ssh_terminal)."""
+    """Safe i18n helper — returns cached translator or fallback (as in ssh_terminal)."""
     mod = _st_module()
     return mod.get_translator()
 
 
 class TerminalSessionPage(QWidget):
-    """v1.2: SSH-сессия как переиспользуемый виджет.
+    """v1.2: an SSH session as a reusable widget.
 
-    Состав: terminal_thread (SSHTerminalThread) + tscreen (TerminalScreen) +
-    widget (TerminalWidget, холст) + статус-строка (status_label) + QTabWidget
-    [Терминал | Файлы] (SftpTab, ленивый worker). Конфиг terminal_* читается из
-    config.json при создании (load_terminal_settings — дефолты = поведение v1.0).
+    Composition: terminal_thread (SSHTerminalThread) + tscreen (TerminalScreen) +
+    widget (TerminalWidget, the canvas) + the status line (status_label) + a
+    QTabWidget [Terminal | Files] (SftpTab, a lazy worker). The terminal_* config
+    is read from config.json at creation time (load_terminal_settings — defaults
+    = the v1.0 behaviour).
 
-    Хост (SSHTerminalWindow / будущий док) создаёт страницу с parent и может:
-      * подсоединить мостовые сигналы status_message/progress_* к своему UI;
-      * вызвать set_host_window(w) — close_terminal() закроет таб этой сессии на
-        хосте (v1.2.1: последний таб закрывает окно);
-      * пройти teardown через shutdown() (единый метод, идемпотентен).
+    The host (SSHTerminalWindow / a future dock) creates the page with a parent
+    and may:
+      * attach the bridge signals status_message/progress_* to its own UI;
+      * call set_host_window(w) — close_terminal() will close this session's tab
+        on the host (v1.2.1: the last tab closes the window);
+      * run the teardown through shutdown() (a single method, idempotent).
     """
 
-    # v1.0RC3: resize PTY — guard по смене сетки + дебаунс ~150 мс перед
-    # channel.resize_pty (TERMINAL.md §5.5); начальный invoke_shell 120×32,
-    # первый resize холста синхронизирует с реальным размером.
+    # v1.0RC3: resize PTY — a grid-change guard + a ~150 ms debounce before
+    # channel.resize_pty (TERMINAL.md §5.5); the initial invoke_shell is 120×32,
+    # the first canvas resize syncs it with the real size.
     PTY_RESIZE_DEBOUNCE_MS = 150
 
-    # v1.0RC4: Быстрый запуск — задержка отправки первой команды после invoke_shell
-    # (login-скрипты/motd; PTY-ввод буферизуется, команда не теряется).
+    # v1.0RC4: Quick Launch — a delay before sending the first command after
+    # invoke_shell (login scripts/motd; PTY input is buffered, the command is
+    # not lost).
     INITIAL_COMMAND_DELAY_MS = 500
 
-    # ── Мост в хост (окно/док): страница не знает, куда идут сообщения ──────
-    status_message = Signal(str, int)   # (text, timeout_ms); 0 — sticky (без таймаута)
-    progress_busy = Signal()            # SFTP: показать индетерминированный бар
-    progress_update = Signal(int, int)  # SFTP: (done, total); total<=0 — индетерминированный
-    progress_hidden = Signal()          # SFTP: скрыть бар
+    # ── Host bridge (window/dock): the page does not know where messages go ─
+    status_message = Signal(str, int)   # (text, timeout_ms); 0 — sticky (no timeout)
+    progress_busy = Signal()            # SFTP: show the indeterminate bar
+    progress_update = Signal(int, int)  # SFTP: (done, total); total<=0 — indeterminate
+    progress_hidden = Signal()          # SFTP: hide the bar
 
     def __init__(self, server_data, parent=None, password: str = None,
                  initial_command: str = ""):
         super().__init__(parent)
         self.server_data = server_data
-        self._host_window = None     # хост-окно (SSHTerminalWindow); close_terminal() его закрывает
-        self._force_close = False    # v1.1.1: путь лимита — подтверждённое решение, «ask» не спрашивает повторно
-        self._shut_down = False      # shutdown() идемпотентен (все teardown-пути через один метод)
+        self._host_window = None     # the host window (SSHTerminalWindow); close_terminal() closes it
+        self._force_close = False    # v1.1.1: the limit path — a confirmed decision, "ask" does not ask again
+        self._shut_down = False      # shutdown() is idempotent (all teardown paths go through one method)
 
         t = get_translator()
         layout = QVBoxLayout(self)
 
         self.status_label = QLabel(t("terminal.initializing"))
-        # v1.2.5: цвет — из центральной темы (ui/theme.py); значение без изменений
+        # v1.2.5: the colour — from the central theme (ui/theme.py); the value is unchanged
         self.status_label.setStyleSheet(f"color: {theme.TEXT_MUTED}; padding: 4px 0;")
         layout.addWidget(self.status_label)
 
-        # AUDIT v0.7.2 (средняя #7): явный пароль приоритетнее node.data.password —
-        # модель не загрязняется открытым текстом до записи в keyring/сохранения проекта.
+        # AUDIT v0.7.2 (medium #7): an explicit password takes priority over node.data.password —
+        # the model is not polluted with plaintext before the keyring write/project save.
         if password is not None:
             pwd = password or ""
         else:
             pwd = getattr(server_data, 'password', '') or ""
 
-        # Тестовый шов: класс потока берётся из модуля ssh_terminal в момент
-        # вызова (подмена ST.SSHTerminalThread в тестах работает без изменений).
+        # Test seam: the thread class is fetched from the ssh_terminal module at
+        # call time (monkeypatching ST.SSHTerminalThread in tests works unchanged).
         thread_cls = _st_module().SSHTerminalThread
         self.terminal_thread = thread_cls(
             host=server_data.host,
@@ -142,25 +146,25 @@ class TerminalSessionPage(QWidget):
             key_path=server_data.key_path,
         )
 
-        # v1.0 финал (ROADMAP задача 9): terminal_* ключи из ~/.sshmap/config.json —
-        # все опциональны, дефолты = текущее поведение (вид RC4). UI — v1.1.
+        # v1.0 final (ROADMAP task 9): terminal_* keys from ~/.sshmap/config.json —
+        # all optional, defaults = the current behaviour (the RC4 look). UI — v1.1.
         term_cfg = _st_module().load_terminal_settings()
-        # v1.1 (ROADMAP задача 3): поведение закрытия сессии — используется в confirm_close().
+        # v1.1 (ROADMAP task 3): the session close behaviour — used in confirm_close().
         self._close_behavior = term_cfg["close_behavior"]
 
-        # v0.8: pyte-экран — сетка 120x32, та же геометрия, что у invoke_shell;
-        # глубина скроллбэка HistoryScreen — terminal_history_lines (дефолт 1000).
+        # v0.8: the pyte screen — a 120x32 grid, the same geometry as invoke_shell;
+        # the HistoryScreen scrollback depth — terminal_history_lines (default 1000).
         self.tscreen = TerminalScreen(columns=120, lines=32,
                                       history_lines=term_cfg["history_lines"])
 
-        # v1.0RC1: посячейный холст (QWidget + QPainter) вместо QPlainTextEdit+HTML.
-        # Шрифт — системный моноширинный pt 10, палитра 'default' = текущий вид;
-        # runs/курсор/широкие глифы — см. terminal_widget.py. v1.1.2RC3 (AUDIT U3):
-        # режим колеса из конфига (terminal_wheel).
+        # v1.0RC1: a per-cell canvas (QWidget + QPainter) instead of QPlainTextEdit+HTML.
+        # The font — system monospace pt 10, the 'default' palette = the current look;
+        # runs/cursor/wide glyphs — see terminal_widget.py. v1.1.2RC3 (AUDIT U3):
+        # the wheel mode from the config (terminal_wheel).
         self.widget = TerminalWidget(self.tscreen, self.terminal_thread,
                                      wheel_mode=term_cfg["wheel"])
-        # v1.0 финал: применение конфига (неизвестная палитра → set_palette() False
-        # → остаётся "default"; битые значения отброшены в load_terminal_settings).
+        # v1.0 final: applying the config (an unknown palette → set_palette() False
+        # → "default" stays; corrupt values were dropped in load_terminal_settings).
         if term_cfg["palette"] is not None:
             self.widget.set_palette(term_cfg["palette"])
         if term_cfg["font_family"] or term_cfg["font_size"] is not None:
@@ -168,29 +172,30 @@ class TerminalSessionPage(QWidget):
                 family=term_cfg["font_family"],
                 size=term_cfg["font_size"] if term_cfg["font_size"] is not None else 10)
 
-        # v1.1.3 (ROADMAP задача 4): QTabWidget [Терминал | Файлы]. SFTP-вкладка
-        # переиспользует тот же transport (terminal_thread.client.open_sftp() —
-        # без второй аутентификации и known_hosts-прохода); worker создаётся
-        # лениво — при первом переходе на «Файлы» / после connected_signal.
+        # v1.1.3 (ROADMAP task 4): QTabWidget [Terminal | Files]. The SFTP tab
+        # reuses the same transport (terminal_thread.client.open_sftp() —
+        # without a second authentication and known_hosts pass); the worker is
+        # created lazily — on the first switch to "Files" / after connected_signal.
         self.tabs = QTabWidget()
         self.tabs.addTab(self.widget, t("sftp.tab_terminal"))
         self.sftp_tab = SftpTab()
         self.tabs.addTab(self.sftp_tab, t("sftp.tab_files"))
         layout.addWidget(self.tabs)
 
-        # v1.1.3: состояние SFTP (worker ленивый; реестр задач для прогресс-текста).
-        # Визуализация — мостовые сигналы progress_* (в режиме windows окно
-        # подсоединяет их к своему QProgressBar в статус-баре — вид v1.1.x).
+        # v1.1.3: the SFTP state (the worker is lazy; a task registry for the progress text).
+        # Visualisation — the bridge signals progress_* (in windows mode the window
+        # attaches them to its QProgressBar in the status bar — the v1.1.x look).
         self._sftp_worker = None
         self._sftp_tasks = {}      # task_id → (kind, label)
-        self._sftp_busy = 0        # сколько upload/download в полёте
+        self._sftp_busy = 0        # how many uploads/downloads are in flight
         self.tabs.currentChanged.connect(self._on_tab_changed)
         self.sftp_tab.message.connect(self._on_sftp_tab_message)
 
-        # v1.0RC3: resize PTY — guard по смене сетки + дебаунс ~150 мс. Холст живёт
-        # внутри таба (а не в resizeEvent окна): eventFilter на самом виджете ловит
-        # РЕАЛЬНЫЙ ресайз холста — пересчёт отложен на singleShot(0), пока layout
-        # устоится (паттерн v1.1.x: транзитный размер не должен менять сетку).
+        # v1.0RC3: resize PTY — a grid-change guard + a ~150 ms debounce. The canvas
+        # lives inside the tab (not in the window's resizeEvent): the eventFilter on
+        # the widget itself catches the REAL canvas resize — the recompute is
+        # deferred with singleShot(0) until the layout settles (the v1.1.x pattern:
+        # a transitional size must not change the grid).
         self._last_cols, self._last_rows = 120, 32
         self._pending_pty = None
         self._pty_timer = QTimer(self)
@@ -202,15 +207,16 @@ class TerminalSessionPage(QWidget):
         self.terminal_thread.error_signal.connect(self._show_error)
         self.terminal_thread.status_signal.connect(self._set_status)
         self.terminal_thread.closed_signal.connect(self._on_closed)
-        # v1.1.3: пользователь мог уже стоять на вкладке «Файлы» во время
-        # подключения — открываем SFTP, как только клиент появится в потоке.
+        # v1.1.3: the user may already be sitting on the "Files" tab during the
+        # connection — open SFTP as soon as the client appears in the thread.
         self.terminal_thread.connected_signal.connect(self._on_connected_for_sftp)
 
-        # v1.0RC4: Быстрый запуск — первая команда отправляется после подключения
-        # (connected_signal), а не до него: при неудачной аутентификации команда
-        # просто не уходит, ошибка показывается штатным error-путём. Connection
-        # храним — shutdown() отвязывает ТОЛЬКО если подключение было (PySide6 6.11:
-        # disconnect неподключённого слота бросает RuntimeWarning).
+        # v1.0RC4: Quick Launch — the first command is sent after the connection
+        # (connected_signal), not before: on a failed authentication the command
+        # simply does not go out, the error is shown via the regular error path.
+        # The Connection is kept — shutdown() disconnects ONLY if the connection
+        # was made (PySide6 6.11: disconnecting an unconnected slot raises
+        # RuntimeWarning).
         self._initial_command = (initial_command or "").strip()
         self._initial_cmd_conn = None
         if self._initial_command:
@@ -220,31 +226,40 @@ class TerminalSessionPage(QWidget):
         self.terminal_thread.start()
         self.widget.setFocus()
 
-    # ── Хост ────────────────────────────────────────────────────────────────
+    # ── Host ────────────────────────────────────────────────────────────────
 
     def set_host_window(self, window):
-        """Хост-окно (SSHTerminalWindow): close_terminal() закроет его, а
-        QMessageBox получат его как parent. Без хоста — teardown напрямую."""
+        """The host window (SSHTerminalWindow): close_terminal() will close it, and
+        QMessageBox will get it as their parent. Without a host — teardown directly."""
         self._host_window = window
 
-    # ── v1.2: teardown — один метод на все пути ─────────────────────────────
+    def send_macro(self, text) -> bool:
+        """v1.3 (ROADMAP v1.3): a command-library macro → the terminal canvas
+        (widget.send_macro: a direct send_data of its own session, not a broadcast).
+        RuntimeError — a close race (the C++ object was destroyed) → False."""
+        try:
+            return self.widget.send_macro(text)
+        except RuntimeError:
+            return False
+
+    # ── v1.2: teardown — one method for all paths ───────────────────────────
 
     def confirm_close(self) -> bool:
-        """Gate перед teardown (v1.1, ROADMAP задача 3): terminal_close_behavior.
+        """The gate before teardown (v1.1, ROADMAP task 3): terminal_close_behavior.
 
-        "ask": активная сессия (SSH-поток ещё работает) → подтверждение; отмена —
-        False (хост должен event.ignore() и жить дальше). "close" (дефолт) и уже
-        завершённая сессия — без диалога. _force_close (путь лимита v1.1.1:
-        решение «закрыть старейшую» уже подтверждено пользователем) — тоже без
-        диалога. Teardown-устойчивость: RuntimeError C++-объектов не блокирует
-        закрытие."""
+        "ask": an active session (the SSH thread is still running) → a
+        confirmation; a cancel — False (the host must event.ignore() and keep
+        living). "close" (default) and an already-finished session — no dialog.
+        _force_close (the v1.1.1 limit path: the "close the oldest" decision is
+        already confirmed by the user) — also no dialog. Teardown robustness:
+        RuntimeError on C++ objects does not block the close."""
         try:
             if getattr(self, "_close_behavior", "close") == "ask" \
                     and not getattr(self, "_force_close", False):
                 _thread = self.terminal_thread
                 if _thread is not None and _thread.isRunning():
                     t = get_translator()
-                    box = _st_module().QMessageBox   # тестовый шов (ST.QMessageBox)
+                    box = _st_module().QMessageBox   # test seam (ST.QMessageBox)
                     reply = box.question(
                         self._host_window, t("msg.close_session_title"),
                         t("msg.confirm_close_session"),
@@ -252,24 +267,25 @@ class TerminalSessionPage(QWidget):
                     if reply != box.Close:
                         return False
         except RuntimeError:
-            pass  # Qt teardown — закрываем без вопросов (как раньше)
+            pass  # a Qt teardown — close without asking (as before)
         return True
 
     def stop_thread(self):
-        """Остановить поток БЕЗ ожидания (close_terminal-путь; wait() — в shutdown())."""
+        """Stop the thread WITHOUT waiting (the close_terminal path; wait() — in shutdown())."""
         try:
             thread = getattr(self, "terminal_thread", None)
             if thread is not None:
                 thread.stop()
         except RuntimeError:
-            pass  # C++-объект уже удалён (гонка закрытия)
+            pass  # the C++ object was already destroyed (a close race)
 
     def close_terminal(self):
-        """Закрыть сессию (v1.2.1): стоп потока + закрытие СВОЕГО таба на хосте
-        (window.close_page → confirm_close → shutdown; последний таб закрывает окно).
-        Путь MainWindow._shutdown_background_threads и лимита «4 своих терминала»:
-        в табовом окне закрытие сессии НЕ затрагивает соседние табы. Без хоста /
-        у хоста нет close_page (фейк) — teardown напрямую."""
+        """Close the session (v1.2.1): stop the thread + close THIS session's tab
+        on the host (window.close_page → confirm_close → shutdown; the last tab
+        closes the window). The MainWindow._shutdown_background_threads path and
+        the "4 own terminals" limit: in a tabbed window, closing a session does
+        NOT touch the neighbouring tabs. Without a host / the host has no
+        close_page (a fake) — teardown directly."""
         self.stop_thread()
         w = getattr(self, "_host_window", None)
         if w is not None:
@@ -279,42 +295,44 @@ class TerminalSessionPage(QWidget):
                     close_page_fn(self)
                     return
                 except RuntimeError:
-                    pass  # хост уже уничтожен — teardown напрямую
+                    pass  # the host was already destroyed — teardown directly
         self.shutdown()
 
     def shutdown(self):
-        """ЕДИНЫЙ teardown-метод (v1.2, ROADMAP задача 3): все teardown-пути
-        (закрытие окна, ошибка сессии, шатдаун MainWindow, путь лимита) проходят
-        через него. Идемпотентен (повторный вызов — no-op).
+        """The SINGLE teardown method (v1.2, ROADMAP task 3): every teardown path
+        (window close, session error, MainWindow shutdown, the limit path) goes
+        through it. Idempotent (a repeated call — no-op).
 
-        Порядок (порядок v1.1.x closeEvent сохранён):
-          1. SFTP-worker ПЕРВЫМ (зависит от transport'а терминального потока):
-             отвязываем слоты страницы, stop с ограниченным ожиданием; не дождался
-             (передача встала на мёртвой сети) — реестр орфано-worker'ов держит
-             поток до finished();
-          2. PTY-дебаунс-таймер стопим (resize_pty в мёртвый канал);
-          3. сигналы потока отвязываем от страницы и stop() + wait(1500): recv-цикл
-             имеет msleep(30) — после stop() поток выходит за ~100 мс, wait на
-             практике всегда успевает; окно/страница после этого события может быть
-             уничтожена (WA_DeleteOnClose), а paramiko ещё может подключаться до 15 c
-             → переживший ожидание поток регистрируется в реестре орфано-потоков
-             `_orphan_threads` (v1.1.2RC1 N4): живой QThread без QObject parent нельзя
-             оставлять на GC, поздние emit без приёмников — безопасный no-op.
+        Order (the v1.1.x closeEvent order is kept):
+          1. the SFTP worker FIRST (it depends on the terminal thread's transport):
+             disconnect the page's slots, stop with a bounded wait; a wait that does
+             not finish (a transfer stalled on a dead network) — the orphan worker
+             registry keeps the thread alive until finished();
+          2. stop the PTY debounce timer (resize_pty into a dead channel);
+          3. disconnect the thread's signals from the page and stop() + wait(1500):
+             the recv loop has msleep(30) — after stop() the thread exits in ~100 ms,
+             the wait always makes it in practice; the window/page may be destroyed
+             after this event (WA_DeleteOnClose), while paramiko may still be
+             connecting for up to 15 s → a thread that outlives the wait is
+             registered in the orphan thread registry `_orphan_threads`
+             (v1.1.2RC1 N4): a live QThread without a QObject parent must not be
+             left to GC, and late emits without receivers are a safe no-op.
         """
         if self._shut_down:
             return
         self._shut_down = True
 
-        # ВАЖНО (проверено прогоном, PySide6 6.11): signal.disconnect(объект-приёмник)
-        # бросает TypeError — отвязка идёт по ТОЧНОМУ слоту (bound method); TypeError
-        # ловим только для «слот не был подключён» (conditional-подключения).
+        # IMPORTANT (verified by running, PySide6 6.11): signal.disconnect(receiver)
+        # raises TypeError — the disconnection is done by the EXACT slot (bound
+        # method); TypeError is caught only for "the slot was not connected"
+        # (conditional connections).
         def _dissig(sig, slot):
             try:
                 sig.disconnect(slot)
             except TypeError:
-                pass  # слот не был подключён — делать нечего
+                pass  # the slot was not connected — nothing to do
 
-        # v1.1.3: SFTP-worker ПЕРВЫМ (зависит от transport'а терминального потока).
+        # v1.1.3: the SFTP worker FIRST (it depends on the terminal thread's transport).
         sftp_worker = getattr(self, "_sftp_worker", None)
         if sftp_worker is not None:
             _dissig(sftp_worker.task_started, self._on_sftp_task_started)
@@ -330,7 +348,7 @@ class TerminalSessionPage(QWidget):
         try:
             self._pty_timer.stop()
         except Exception:
-            pass  # RuntimeError C++-объекта (teardown) — не блокирует закрытие
+            pass  # a C++ object RuntimeError (teardown) — does not block the close
 
         thread = getattr(self, "terminal_thread", None)
         if thread is not None:
@@ -338,11 +356,12 @@ class TerminalSessionPage(QWidget):
             _dissig(thread.error_signal, self._show_error)
             _dissig(thread.status_signal, self._set_status)
             _dissig(thread.closed_signal, self._on_closed)
-            # v1.0-fix (audit #6): + connected_signal — раньше не отвязывался; при
-            # закрытии до завершения connect орфано-поток после успешного подключения
-            # всё же отправлял первую команду Быстрого запуска в пустоту.
+            # v1.0-fix (audit #6): + connected_signal — it was not disconnected before;
+            # on a close before the connect finished, the orphan thread would still
+            # send the first Quick Launch command into the void after a successful
+            # connection.
             _dissig(thread.connected_signal, self._on_connected_for_sftp)
-            # Быстрый запуск — только если был подключён (connection-объект из __init__)
+            # Quick Launch — only if the connection was made (the Connection object from __init__)
             if getattr(self, "_initial_cmd_conn", None) is not None:
                 try:
                     thread.connected_signal.disconnect(self._initial_cmd_conn)
@@ -351,82 +370,83 @@ class TerminalSessionPage(QWidget):
             thread.stop()
             if thread.isRunning():
                 thread.wait(1500)
-                # v1.1.2RC1 (N4): страница после этого события может быть уничтожена
-                # (окно — WA_DeleteOnClose), а paramiko ещё может подключаться (до 15 c).
+                # v1.1.2RC1 (N4): the page may be destroyed after this event
+                # (the window — WA_DeleteOnClose), while paramiko may still be connecting (up to 15 s).
                 if thread.isRunning():
                     _st_module().register_orphan_thread(thread)
 
-        # Слота вкладок «Файлы» тоже отвязываем (list_ready worker'а идёт во
-        # вкладку напрямую — она умрёт вместе со страницей).
+        # The "Files" tab's slot is disconnected too (the worker's list_ready goes
+        # straight into the tab — it will die together with the page).
         _dissig(self.sftp_tab.message, self._on_sftp_tab_message)
 
-    # ── v1.0RC3: dirty-рендер без таймера (ROADMAP задача 8) ────────────────
+    # ── v1.0RC3: dirty rendering without a timer (ROADMAP task 8) ───────────
 
     def eventFilter(self, obj, event):
-        """v1.2: ресайз холста (внутри таба) → пересчёт сетки. Раньше —
-        SSHTerminalWindow.resizeEvent; guard по смене сетки и дебаунс те же."""
+        """v1.2: a canvas resize (inside the tab) → a grid recompute. Before —
+        SSHTerminalWindow.resizeEvent; the grid-change guard and the debounce are the same."""
         if obj is self.widget and event.type() == QEvent.Type.Resize:
             QTimer.singleShot(0, self._sync_grid)
         return super().eventFilter(obj, event)
 
     def _on_output(self, data: bytes):
-        """Слот из SSH-потока (queued signal — уже в GUI-потоке): сырые байты
-        в pyte + прямой update() холста. 30 FPS-таймер не нужен: Qt сам
-        коалесит несколько update() за один цикл событий; paintEvent читает
-        сетку сам (TerminalWidget._paint). Авто-снап скроллбэка к live-строке
-        при новом выводе — внутри pyte (HistoryScreen.before_event), поэтому
-        новый вывод виден сразу, даже если пользователь смотрел историю.
+        """A slot from the SSH thread (a queued signal — already in the GUI thread):
+        raw bytes into pyte + a direct canvas update(). A 30 FPS timer is not
+        needed: Qt coalesces several update() calls within one event cycle by
+        itself; paintEvent reads the grid itself (TerminalWidget._paint). The
+        scrollback auto-snap to the live line on new output — inside pyte
+        (HistoryScreen.before_event), so new output is visible immediately, even
+        if the user was viewing the history.
 
-        v1.1.2RC3 (N7): если этот вывод авто-вернул скроллбэк к live (позиция
-        history изменилась) — выделение сбрасывается: координаты (row, col)
-        зафиксированы в release на ИСТОРИЧЕСКОМ экране, а после возврата они
-        указывают на ДРУГИЕ ячейки live-экрана — Ctrl+C скопировал бы чужой
-        текст. Без нового вывода / без активного выделения поведение простого
-        клика и Ctrl+C не меняется."""
+        v1.1.2RC3 (N7): if this output auto-returned the scrollback to live
+        (the history position changed) — the selection is reset: the (row, col)
+        coordinates were pinned on the HISTORICAL screen in the release, and after
+        the return they point at OTHER cells of the live screen — Ctrl+C would
+        copy someone else's text. Without new output / without an active selection,
+        the behaviour of a plain click and of Ctrl+C does not change."""
         try:
             pos_before = self.tscreen.scroll_info()[0]
             self.tscreen.feed(data)
         except Exception:
             return
-        # v1.1.2RC3 (N7): смена позиции history ⇔ авто-возврат к live (feed() —
-        # единственный путь, меняющий позицию без ручного скролла). Активное
-        # выделение на «старом» экране сбрасываем до копирования.
+        # v1.1.2RC3 (N7): a history position change ⇔ an auto-return to live (feed() —
+        # the only path that changes the position without a manual scroll). An active
+        # selection on the "old" screen is reset before copying.
         try:
             if self.tscreen.scroll_info()[0] != pos_before \
                     and self.widget.has_selection():
                 self.widget.clear_selection()
         except RuntimeError:
-            pass  # C++-объект уже удалён (гонка WA_DeleteOnClose при закрытии)
+            pass  # the C++ object was already destroyed (a WA_DeleteOnClose close race)
         try:
             self.widget.update()
         except RuntimeError:
-            pass  # C++-объект уже удалён (гонка WA_DeleteOnClose при закрытии)
+            pass  # the C++ object was already destroyed (a WA_DeleteOnClose close race)
 
-    # ── v1.0RC3: resize PTY — guard по сетке + дебаунс (ROADMAP задача 6) ───
+    # ── v1.0RC3: resize PTY — a grid guard + debounce (ROADMAP task 6) ──────
 
     def _visible_grid(self):
-        """(cols, rows) видимой сетки: размер холста / метрики ячейки."""
+        """(cols, rows) of the visible grid: the canvas size / the cell metrics."""
         cw, chh = self.widget.cell_size
         cols = max(2, self.widget.width() // cw)
         rows = max(1, self.widget.height() // chh)
         return cols, rows
 
     def _sync_grid(self):
-        """Пересчёт видимой сетки (после устоявшегося layout)."""
+        """A recompute of the visible grid (after the layout settled)."""
         try:
             cols, rows = self._visible_grid()
             if (cols, rows) == (self._last_cols, self._last_rows):
-                return  # сетка не изменилась — ни pyte.resize, ни PTY-сигнал
+                return  # the grid did not change — no pyte.resize, no PTY signal
             self._last_cols, self._last_rows = cols, rows
-            self.tscreen.resize(cols, rows)   # pyte: no-op при том же размере (факт №9)
-            self.widget.update()              # сетка изменилась — перерисовать холст
+            self.tscreen.resize(cols, rows)   # pyte: a no-op at the same size (fact #9)
+            self.widget.update()              # the grid changed — repaint the canvas
             self._pending_pty = (cols, rows)
-            self._pty_timer.start()           # перезапуск отсчёта 150 мс (дебаунс)
+            self._pty_timer.start()           # restart the 150 ms countdown (debounce)
         except RuntimeError:
-            pass  # C++-объект уже удалён (гонка WA_DeleteOnClose при закрытии)
+            pass  # the C++ object was already destroyed (a WA_DeleteOnClose race on close)
 
     def _on_pty_debounce(self):
-        """Дебаунс истёк — resize_pty с ПОСЛЕДНЕЙ сеткой (только живой канал)."""
+        """The debounce expired — resize_pty with the LAST grid (only a live channel)."""
         if self._pending_pty is None:
             return
         cols, rows = self._pending_pty
@@ -438,7 +458,7 @@ class TerminalSessionPage(QWidget):
         try:
             channel.resize_pty(width=cols, height=rows)
         except Exception:
-            pass  # канал умер во время дебаунса — нечего делать
+            pass  # the channel died during the debounce — nothing to do
 
     def _set_status(self, text: str):
         self.status_label.setText(text)
@@ -447,7 +467,7 @@ class TerminalSessionPage(QWidget):
     def _show_error(self, error: str):
         t = get_translator()
         self.status_label.setText(f"{t('terminal.error_prefix')} {error}")
-        box = _st_module().QMessageBox   # тестовый шов (ST.QMessageBox)
+        box = _st_module().QMessageBox   # test seam (ST.QMessageBox)
         box.critical(
             self._host_window,
             t("msg.ssh_error"),
@@ -460,44 +480,45 @@ class TerminalSessionPage(QWidget):
         self.status_label.setText(t("terminal.session_closed"))
         self.status_message.emit(t("terminal.session_closed"), 0)
 
-    # ── v1.0RC4: Быстрый запуск ─────────────────────────────────────────────
+    # ── v1.0RC4: Quick Launch ───────────────────────────────────────────────
 
     def _send_initial_command(self):
-        """v1.0RC4: отправить первую команду (Быстрый запуск) в shell после подключения.
+        """v1.0RC4: send the first command (Quick Launch) to the shell after the connection.
 
-        Отложенный вызов (INITIAL_COMMAND_DELAY_MS): invoke_shell возвращает канал
-        сразу, а удалённый shell может ещё дописывать motd/login-скрипты; PTY-ввод
-        буферизуется ядром, так что команда выполнится при появлении промпта.
-        Отправляется ровно один раз; мёртвый/закрытый канал — тихий no-op.
+        A deferred call (INITIAL_COMMAND_DELAY_MS): invoke_shell returns the channel
+        immediately, while the remote shell may still be writing motd/login scripts;
+        PTY input is buffered by the kernel, so the command will run once the prompt
+        appears. Sent exactly once; a dead/closed channel — a quiet no-op.
         """
         def _do():
             try:
                 cmd = getattr(self, "_initial_command", "")
                 if not cmd:
                     return
-                self._initial_command = ""  # только один раз
+                self._initial_command = ""  # only once
                 thread = getattr(self, "terminal_thread", None)
                 channel = getattr(thread, "channel", None) if thread is not None else None
                 if channel is None or channel.closed:
                     return
                 thread.send_data((cmd + "\n").encode("utf-8"))
-            except Exception:  # noqa: BLE001 — окно могло закрыться (WA_DeleteOnClose)
+            except Exception:  # noqa: BLE001 — the window may have closed (WA_DeleteOnClose)
                 pass
         QTimer.singleShot(self.INITIAL_COMMAND_DELAY_MS, _do)
 
-    # ── v1.1.3: SFTP-вкладка (ROADMAP задачи 2–4) ───────────────────────────
+    # ── v1.1.3: the SFTP tab (ROADMAP tasks 2-4) ────────────────────────────
 
     def _ensure_sftp(self) -> bool:
-        """Открыть SFTP-канал поверх живого transport'а и запустить worker.
+        """Open an SFTP channel over a live transport and start the worker.
 
-        Переиспользует `terminal_thread.client.open_sftp()` — без второй
-        аутентификации и второго known_hosts-прохода (ROADMAP задача 3):
-        policy уже применён к client при connect, open_sftp лишь открывает
-        новый канал на том же Transport. Ленивый вызов: первый переход на
-        вкладку «Файлы» / connected_signal, если пользователь уже там.
-        Сессия ещё не подключена → False (вкладка ждёт). SFTP-подсистема на
-        сервере недоступна → ошибка в статус (мост status_message), worker не
-        создаётся (повторная попытка — при следующем переходе на вкладку).
+        It reuses `terminal_thread.client.open_sftp()` — without a second
+        authentication and a second known_hosts pass (ROADMAP task 3):
+        the policy was already applied to the client at connect; open_sftp just
+        opens a new channel on the same Transport. A lazy call: the first switch
+        to the "Files" tab / connected_signal, if the user is already there.
+        The session is not connected yet → False (the tab waits). The server's
+        SFTP subsystem is unavailable → an error in the status (the
+        status_message bridge), the worker is not created (a retry — on the next
+        switch to the tab).
         """
         t = get_translator()
         worker = getattr(self, "_sftp_worker", None)
@@ -515,15 +536,16 @@ class TerminalSessionPage(QWidget):
             return False
         try:
             sftp = client.open_sftp()
-        except Exception as e:  # noqa: BLE001 — подсистема SFTP может быть выключена
+        except Exception as e:  # noqa: BLE001 — the SFTP subsystem may be disabled
             msg = t("sftp.open_failed", error=str(e))
             self.status_message.emit(
                 msg if not msg.startswith("[") else f"Failed to open SFTP channel: {e}",
                 8000)
             return False
-        # БЕЗ QObject parent: окно WA_DeleteOnClose, а висящая передача может
-        # пережить его — реестр орфано-worker'ов (паттерн N4 v1.1.2RC1) держит
-        # поток до finished(); все слоты отвязаны в shutdown().
+        # WITHOUT a QObject parent: the window has WA_DeleteOnClose, and a hanging
+        # transfer may outlive it — the orphan worker registry (the N4 v1.1.2RC1
+        # pattern) keeps the thread alive until finished(); all slots are
+        # disconnected in shutdown().
         new_worker = SftpWorker(sftp)
         self._sftp_worker = new_worker
         new_worker.task_started.connect(self._on_sftp_task_started)
@@ -537,21 +559,21 @@ class TerminalSessionPage(QWidget):
         return True
 
     def _on_tab_changed(self, index: int):
-        """Переход на вкладку «Файлы» — ленивый старт SFTP (идемпотентно)."""
+        """A switch to the "Files" tab — a lazy SFTP start (idempotent)."""
         if self.tabs.widget(index) is self.sftp_tab:
             self._ensure_sftp()
 
     def _on_sftp_tab_message(self, msg: str):
-        """Сообщение вкладки (выбор файлов и пр.) → мост status_message (5 c)."""
+        """A tab message (a file selection and the like) → the status_message bridge (5 s)."""
         self.status_message.emit(msg, 5000)
 
     def _on_connected_for_sftp(self):
-        """connected_signal: пользователь мог уже стоять на «Файлы»."""
+        """connected_signal: the user may already be sitting on "Files"."""
         try:
             if self.tabs.currentWidget() is self.sftp_tab:
                 self._ensure_sftp()
         except RuntimeError:
-            pass  # C++-объект уже удалён (гонка закрытия)
+            pass  # the C++ object was already destroyed (a close race)
 
     def _on_sftp_task_started(self, task_id: int, kind: str, label: str):
         t = get_translator()
@@ -561,7 +583,7 @@ class TerminalSessionPage(QWidget):
             self.progress_busy.emit()   # v1.1.x: setRange(0,0)+setValue(0)+show()
             key = "sftp.uploading" if kind == "upload" else "sftp.downloading"
             self.status_message.emit(t(key, name=label), 0)
-        else:  # list — без прогресс-бара
+        else:  # list — without a progress bar
             self.status_message.emit(t("sftp.listing", path=label), 0)
 
     def _on_sftp_progress(self, task_id: int, done: int, total: int):
@@ -574,7 +596,7 @@ class TerminalSessionPage(QWidget):
             self.progress_update.emit(done, total)   # v1.1.x: setRange(0,total)+setValue
             text = t("sftp.progress", name=label, pct=int(done * 100 // total),
                      done=format_size(done), total=format_size(total))
-        else:  # total неизвестен — только имя (индетерминированный бар)
+        else:  # total unknown — name only (an indeterminate bar)
             self.progress_update.emit(done, 0)
             key = "sftp.uploading" if entry[0] == "upload" else "sftp.downloading"
             text = t(key, name=label)
@@ -609,9 +631,9 @@ class TerminalSessionPage(QWidget):
         self.status_message.emit(t("sftp.transfer_cancelled"), 5000)
 
     def _on_sftp_worker_finished(self):
-        """Worker остановился сам (transport умер — сессия закрыта/упала):
-        сброс состояния; вкладка возвращается в «ожидание», повторный старт —
-        при следующем переходе на неё, если появится живое соединение."""
+        """The worker stopped on its own (the transport died — the session
+        closed/crashed): a state reset; the tab returns to "waiting", a restart —
+        on the next switch to it, if a live connection appears."""
         try:
             self._sftp_worker = None
             self._sftp_tasks.clear()
@@ -619,4 +641,4 @@ class TerminalSessionPage(QWidget):
             self.progress_hidden.emit()
             self.sftp_tab.set_worker(None)
         except RuntimeError:
-            pass  # C++-объект уже удалён (гонка закрытия)
+            pass  # the C++ object was already destroyed (a close race)

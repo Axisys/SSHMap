@@ -1,7 +1,7 @@
-"""Стрелки связей между узлами (v0.7).
+"""Connection arrows between nodes (v0.7).
 
-Кривые Безье от края ноды к краю ноды + типизация связей с цветовой кодировкой:
-SSH / VPN / HTTP / Database / NFS / Kubernetes.
+Bezier curves from the edge of a node to the edge of a node + typed connections
+with a color code: SSH / VPN / HTTP / Database / NFS / Kubernetes.
 """
 import math
 
@@ -10,7 +10,7 @@ try:
 except ImportError:
     from server_node import ServerNode
 
-try:  # v1.2.5: центральная тема (палитра/радиусы/шрифты — ui/theme.py)
+try:  # v1.2.5: central theme (palette/radii/fonts — ui/theme.py)
     from ..ui import theme
 except ImportError:
     from ui import theme
@@ -23,7 +23,7 @@ from PySide6.QtWidgets import (
 
 
 def _t(key: str, **kwargs) -> str:
-    """Безопасный i18n-хук: при недоступности i18n возвращает сам ключ."""
+    """Safe i18n hook: returns the key itself when i18n is unavailable."""
     try:
         from i18n import t as _translate
         return _translate(key, **kwargs)
@@ -36,12 +36,13 @@ def _t(key: str, **kwargs) -> str:
 
 
 def _show_type_on_label() -> bool:
-    """v1.1.1 (ROADMAP пункт 6): опция «всегда показывать тип на плашке связи».
+    """v1.1.1 (ROADMAP item 6): the "always show the type on the connection label" option.
 
-    Ключ ui_show_connection_type из ~/.sshmap/config.json (дефолт False — поведение
-    v1.1: на плашке только метка, тип несёт цвет). Удобно для экспорта PNG/PDF,
-    где цвет менее заметен. Читается при каждом перерисовывании текста метки —
-    после ОК в диалоге настроек MainWindow вызывает refresh_label() на стрелках.
+    The ui_show_connection_type key from ~/.sshmap/config.json (default False —
+    the v1.1 behavior: only the label on the plate, the type is carried by the
+    color). Useful for PNG/PDF export, where color is less noticeable. It is read
+    on every re-render of the label text — after OK in the settings dialog
+    MainWindow calls refresh_label() on the arrows.
     """
     try:
         from i18n import load_config
@@ -52,10 +53,11 @@ def _show_type_on_label() -> bool:
 
 
 def label_display_text(ctype: str, label: str) -> str:
-    """Текст плашки связи с учётом опции «тип на плашке» (v1.1.1).
+    """Connection label text taking the "type on the label" option into account (v1.1.1).
 
-    Опция выключена — только метка (как в v1.1). Включена — «SSH · <метка>»;
-    без метки — сам тип («SSH»), чтобы на экспорте тип был виден у каждой связи.
+    Option off — only the label (as in v1.1). On — "SSH · <label>"; without a
+    label — the type itself ("SSH"), so the type is visible on each exported
+    connection.
     """
     text = (label or "").strip()
     if not _show_type_on_label():
@@ -64,26 +66,26 @@ def label_display_text(ctype: str, label: str) -> str:
     return f"{type_name} · {text}" if text else type_name
 
 
-# ── Типы связей (v0.7): id → базовый цвет стрелки ────────────────
-# SSH сохраняет зелёный цвет v0.6 и остаётся типом по умолчанию —
-# старые проекты без поля "type" загружаются как SSH-связи.
-# v1.2.5: цвета — центральная тема (ui/theme.py); CONNECTION_TYPES — тот же
-# dict (порядок объявления = порядок комбобокса диалога связи).
+# ── Connection types (v0.7): id → base arrow color ────────────────
+# SSH keeps the v0.6 green and remains the default type —
+# old projects without the "type" field load as SSH connections.
+# v1.2.5: colors — the central theme (ui/theme.py); CONNECTION_TYPES — the same
+# dict (declaration order = combobox order in the connection dialog).
 CONNECTION_TYPES = theme.ARROW_TYPE_COLORS
 
 DEFAULT_CONNECTION_TYPE = "ssh"
 
 
 def type_color(ctype: str) -> QColor:
-    """Базовый цвет типа связи; неизвестный тип → цвет по умолчанию."""
+    """Base color of the connection type; unknown type → the default color."""
     return QColor(CONNECTION_TYPES.get(ctype, CONNECTION_TYPES[DEFAULT_CONNECTION_TYPE]))
 
 
 def edge_point(rect: QRectF, center: QPointF, toward: QPointF) -> QPointF:
-    """Точка пересечения луча (из `center` в сторону `toward`) с границей rect.
+    """The point where the ray (from `center` toward `toward`) intersects the rect boundary.
 
-    Используется для «стрелки от края к краю»: пучок выходит из границы узла,
-    а не из его центра (бывш. AUDIT.md / док §7, проблема #7).
+    Used for the "edge-to-edge arrow": the beam leaves the node boundary
+    instead of its center (former AUDIT.md / doc §7, problem #7).
     """
     dx = toward.x() - center.x()
     dy = toward.y() - center.y()
@@ -103,11 +105,11 @@ def edge_point(rect: QRectF, center: QPointF, toward: QPointF) -> QPointF:
 
 
 def build_curve(p0: QPointF, p3: QPointF):
-    """Кубическая кривая Безье из p0 в p3 с симметричным изгибом.
+    """A cubic Bezier curve from p0 to p3 with a symmetric bend.
 
-    Возвращает (path, c1, c2). Изгиб растёт с дистанцией, но ограничен;
-    направление выбирается перпендикуляром k сегменту p0→p3, поэтому A→B и B→A
-    прогибаются на противоположные стороны — двунаправленные связи не перекрываются.
+    Returns (path, c1, c2). The bend grows with distance, but is bounded;
+    the direction is chosen perpendicular to the p0→p3 segment, so A→B and B→A
+    bend to opposite sides — bidirectional connections do not overlap.
     """
     path = QPainterPath()
     path.moveTo(p0)
@@ -117,12 +119,12 @@ def build_curve(p0: QPointF, p3: QPointF):
     if seg_len < 1e-6:
         path.lineTo(p3)
         return path, QPointF(p0), QPointF(p3)
-    nx = -dy / seg_len   # нормаль (поворот на +90°): для B→A укажет в противоположную сторону
+    nx = -dy / seg_len   # normal (a +90° rotation): for B→A it points the opposite way
     ny = dx / seg_len
     bend = min(48.0, max(12.0, seg_len * 0.15))
     qx = (p0.x() + p3.x()) / 2.0 + nx * bend
     qy = (p0.y() + p3.y()) / 2.0 + ny * bend
-    # Квадратичная Безье с контрольной точкой q → точное кубическое представление:
+    # A quadratic Bezier with control point q → the exact cubic representation:
     c1 = QPointF(p0.x() / 3.0 + qx * 2.0 / 3.0, p0.y() / 3.0 + qy * 2.0 / 3.0)
     c2 = QPointF(p3.x() / 3.0 + qx * 2.0 / 3.0, p3.y() / 3.0 + qy * 2.0 / 3.0)
     path.cubicTo(c1, c2, p3)
@@ -130,7 +132,7 @@ def build_curve(p0: QPointF, p3: QPointF):
 
 
 def curve_midpoint(p0: QPointF, c1: QPointF, c2: QPointF, p3: QPointF) -> QPointF:
-    """Точка кубической Безье при t=0.5 (позиционирование метки)."""
+    """The point of the cubic Bezier at t=0.5 (label positioning)."""
     return QPointF(
         (p0.x() + 3 * c1.x() + 3 * c2.x() + p3.x()) / 8.0,
         (p0.y() + 3 * c1.y() + 3 * c2.y() + p3.y()) / 8.0,
@@ -138,10 +140,10 @@ def curve_midpoint(p0: QPointF, c1: QPointF, c2: QPointF, p3: QPointF) -> QPoint
 
 
 class ConnectionArrow(QGraphicsPathItem):
-    """Кривая стрелка (cubic Bezier) от края одного узла к краю другого."""
+    """A curved arrow (cubic Bezier) from the edge of one node to the edge of another."""
 
     COLOR_IDLE = QColor(CONNECTION_TYPES[DEFAULT_CONNECTION_TYPE])
-    COLOR_HOVER = QColor(theme.ARROW_HOVER_COMPAT)  # сохранено для совместимости с v0.6
+    COLOR_HOVER = QColor(theme.ARROW_HOVER_COMPAT)  # kept for v0.6 compatibility
 
     def __init__(self, source: ServerNode, target: ServerNode, label: str = "",
                  ctype: str = DEFAULT_CONNECTION_TYPE, bidirectional: bool = False, parent=None):
@@ -149,16 +151,16 @@ class ConnectionArrow(QGraphicsPathItem):
         self.source = source
         self.target = target
         self.label_text = label
-        # Неизвестный тип (например, из чужого/старого файла проекта) → дефолт
+        # Unknown type (e.g. from someone else's / an old project file) → default
         if ctype not in CONNECTION_TYPES:
             ctype = DEFAULT_CONNECTION_TYPE
         self.connection_type = ctype
         self._base_color = type_color(ctype)
-        # v1.2.6: двухсторонняя связь — наконечники на ОБАХ концах кривой
-        # (двухсторонний обмен данными); стандартный режим — только целевой.
+        # v1.2.6: bidirectional connection — arrowheads on BOTH ends of the curve
+        # (two-way data exchange); standard mode — the target end only.
         self.bidirectional = bool(bidirectional)
-        # UI polish: контрольные точки кривой для расширенной зоны hit-testing (contains());
-        # None до первого успешного update_position() — contains() тогда в базовом режиме.
+        # UI polish: curve control points for the extended hit-testing zone (contains());
+        # None until the first successful update_position() — contains() is in basic mode then.
         self._curve_pts = None
         self._hover = False
         self.setAcceptHoverEvents(True)
@@ -166,18 +168,18 @@ class ConnectionArrow(QGraphicsPathItem):
         self.setToolTip(_t(f"connection.type.{self.connection_type}"))
 
         self._arrow_head = QGraphicsPathItem(self)
-        # v1.2.6: наконечник у ИСХОДНОГО узла (двухсторонний режим); в стандартном
-        # режиме путь пуст — item невидим, но живёт вместе с родителем (без утечек).
+        # v1.2.6: the arrowhead at the SOURCE node (bidirectional mode); in standard
+        # mode the path is empty — the item is invisible but lives with its parent (no leaks).
         self._arrow_head_src = QGraphicsPathItem(self)
 
-        # UI polish: скруглённый фон метки (PathItem вместо RectItem)
+        # UI polish: rounded label background (a PathItem instead of a RectItem)
         self._label_bg = QGraphicsPathItem(self)
         self._label_bg.setPen(QPen(Qt.PenStyle.NoPen))
-        _label_bg_color = QColor(theme.CANVAS_BG)  # v1.2.5: CANVAS_BG + alpha (фон метки связи)
+        _label_bg_color = QColor(theme.CANVAS_BG)  # v1.2.5: CANVAS_BG + alpha (the connection label background)
         _label_bg_color.setAlpha(190)
         self._label_bg.setBrush(QBrush(_label_bg_color))
 
-        # Текст метки (v1.1.1: с учётом опции «тип на плашке» — label_display_text)
+        # Label text (v1.1.1: taking the "type on the label" option into account — label_display_text)
         self._label = QGraphicsTextItem(label_display_text(ctype, label), self)
         self._label.setFont(QFont(theme.FONT_MONO, 9))
 
@@ -194,15 +196,15 @@ class ConnectionArrow(QGraphicsPathItem):
         self.setPen(QPen(color, width))
         self._arrow_head.setPen(QPen(color, 1.5))
         self._arrow_head.setBrush(QBrush(color))
-        # v1.2.6: второй наконечник держит то же оформление (в стандартном режиме путь пуст)
+        # v1.2.6: the second arrowhead keeps the same styling (in standard mode the path is empty)
         self._arrow_head_src.setPen(QPen(color, 1.5))
         self._arrow_head_src.setBrush(QBrush(color))
         self._label.setDefaultTextColor(color)
 
-    # ── Геометрия (v0.7): Безье + край-к-краю ───────────────────
+    # ── Geometry (v0.7): Bezier + edge-to-edge ───────────────────
 
     def _compute_geometry(self):
-        """Возвращает (path, p0, p3, c1, c2) или None в вырожденном случае."""
+        """Returns (path, p0, p3, c1, c2), or None in the degenerate case."""
         src_rect = self.source.sceneBoundingRect()
         tgt_rect = self.target.sceneBoundingRect()
         src_center = src_rect.center()
@@ -210,7 +212,7 @@ class ConnectionArrow(QGraphicsPathItem):
 
         if math.hypot(tgt_center.x() - src_center.x(),
                       tgt_center.y() - src_center.y()) < 1e-6:
-            return None  # узлы в одной точке — нечего рисовать (мгновенно при перетаскивании)
+            return None  # the nodes are at the same point — nothing to draw (instant during a drag)
 
         p0 = edge_point(src_rect, src_center, tgt_center)
         p3 = edge_point(tgt_rect, tgt_center, src_center)
@@ -220,15 +222,15 @@ class ConnectionArrow(QGraphicsPathItem):
     def update_position(self):
         geom = self._compute_geometry()
         if geom is None:
-            return  # вырожденный случай — держим предыдущий путь
+            return  # degenerate case — keep the previous path
         path, p0, p3, c1, c2 = geom
         self.setPath(path)
-        # UI polish: запоминаем контрольные точки для contains() — зоны hit-testing
+        # UI polish: remember the control points for contains() — the hit-testing zone
         self._curve_pts = (p0, c1, c2, p3)
 
-        # Наконечник ориентирован по касательной к концу кривой (направление p3 - c2);
-        # кончик — ровно на границе целевого узла. Заполненный треугольник перекрывает
-        # конец линии, поэтому зазор не нужен.
+        # The arrowhead is oriented along the tangent to the end of the curve (direction p3 - c2);
+        # the tip — exactly on the boundary of the target node. The filled triangle covers
+        # the end of the line, so no gap is needed.
         tx = p3.x() - c2.x()
         ty = p3.y() - c2.y()
         if math.hypot(tx, ty) < 1e-9:
@@ -251,13 +253,13 @@ class ConnectionArrow(QGraphicsPathItem):
         head_path.closeSubpath()
         self._arrow_head.setPath(head_path)
 
-        # v1.2.6: двухсторонний режим — второй наконечник у начала кривой (p0).
-        # Ориентация ПРОТИВ направления движения: кончик ровно на границе исходного
-        # узла, крылья — на стороне кривой (отсюда «+», а не «-» как у целевого
-        # наконечника): наконечник смотрит НА свой узел, и оба конца дают ←——→.
-        # С «-» треугольник указывал в сторону цели и его тело уходило под узел
-        # (стрелки zValue -2) — визуально второй наконечник был невидим.
-        # Стандартный режим — пустой путь (item невидим).
+        # v1.2.6: bidirectional mode — the second arrowhead at the start of the curve (p0).
+        # Orientation AGAINST the direction of travel: the tip exactly on the boundary of
+        # the source node, the wings — on the side of the curve (hence "+" instead of "-"
+        # as with the target arrowhead): the arrowhead points AT its own node, and both
+        # ends give ←——→. With "-" the triangle pointed toward the target and its body
+        # went under the node (the arrows have zValue -2) — visually the second arrowhead
+        # was invisible. Standard mode — an empty path (the item is invisible).
         if self.bidirectional:
             sx = c1.x() - p0.x()
             sy = c1.y() - p0.y()
@@ -277,7 +279,7 @@ class ConnectionArrow(QGraphicsPathItem):
         else:
             self._arrow_head_src.setPath(QPainterPath())
 
-        # Метка — в середине кривой, со смещением на сторону, противоположную изгибу
+        # The label — in the middle of the curve, offset to the side opposite the bend
         mid = curve_midpoint(p0, c1, c2, p3)
         dx_seg = p3.x() - p0.x()
         dy_seg = p3.y() - p0.y()
@@ -289,29 +291,30 @@ class ConnectionArrow(QGraphicsPathItem):
         label_x = label_center.x() - label_rect.width() / 2
         label_y = label_center.y() - label_rect.height() / 2
         self._label.setPos(label_x, label_y)
-        # UI polish: скруглённый фон под текстом метки (PySide6: addRoundedRect() → None,
-        # путь собираем через объект — как в ServerNode._rounded)
+        # UI polish: rounded background under the label text (PySide6: addRoundedRect() → None,
+        # the path is built via an object — as in ServerNode._rounded)
         r = theme.RADIUS_ARROW_LABEL
         bg_path = QPainterPath()
         bg_path.addRoundedRect(label_x - 6, label_y - 2,
                                label_rect.width() + 12, label_rect.height() + 4, r, r)
         self._label_bg.setPath(bg_path)
 
-    # ── Тип и метка ─────────────────────────────────────────────
+    # ── Type and label ─────────────────────────────────────────────
 
-    # UI polish: зона hit-testing шире видимого штриха (см. contains()).
+    # UI polish: the hit-testing zone is wider than the visible stroke (see contains()).
     HIT_HALF_WIDTH = 5.0
 
     def contains(self, localPoint):
-        """Расширенная зона клика/ховера вокруг кривой (UI polish).
+        """Extended click/hover zone around the curve (UI polish).
 
-        Почему не shape().strokeToFill(): в PySide6/Qt 6.11 у QPainterPath нет
-        strokeToFill/strokedPath (не пробиндены), а fill-only contains() точку ровно
-        на тонкой линии без заливки НЕ ловит — проверено эмпирически: scene.items()
-        и scene.itemAt() в точке кривой возвращали пусто, и ПКМ по стрелке не работал.
-        Поэтому расстояние до кривой считаем сами по сохранённым контрольным точкам
-        (единая кубическая Безье — см. update_position). Бонус: линия 1.8 px
-        физически трудно кликается мышью — лента ~10 px исправляет и это.
+        Why not shape().strokeToFill(): in PySide6/Qt 6.11 QPainterPath has no
+        strokeToFill/strokedPath (not bound), and a fill-only contains() does NOT catch
+        a point exactly on a thin unfilled line — verified empirically: scene.items()
+        and scene.itemAt() at a point on the curve returned nothing, and the right mouse
+        button on the arrow did not work. So the distance to the curve is computed by
+        ourselves from the stored control points (a single cubic Bezier — see
+        update_position). Bonus: a 1.8 px line is physically hard to click with a mouse
+        — a ~10 px band fixes that too.
         """
         pts = getattr(self, "_curve_pts", None)
         if pts is None or localPoint is None:
@@ -320,7 +323,7 @@ class ConnectionArrow(QGraphicsPathItem):
         px = float(localPoint.x())
         py = float(localPoint.y())
         hw = self.HIT_HALF_WIDTH
-        # Число сэмплирований растёт с длиной хорды (шаг <= ~4 px), с потолком.
+        # The number of samples grows with the chord length (step <= ~4 px), with a ceiling.
         seg_len = math.hypot(p3.x() - p0.x(), p3.y() - p0.y()) or 1.0
         n = max(64, min(512, int(seg_len / 4.0)))
         for i in range(1, n + 1):
@@ -335,21 +338,21 @@ class ConnectionArrow(QGraphicsPathItem):
         return False
 
     def set_type(self, ctype: str):
-        """Сменить тип связи (цвет + tooltip). Неизвестные типы игнорируются."""
+        """Change the connection type (color + tooltip). Unknown types are ignored."""
         if ctype not in CONNECTION_TYPES or ctype == self.connection_type:
             return
         self.connection_type = ctype
         self._base_color = type_color(ctype)
         self.setToolTip(_t(f"connection.type.{ctype}"))
         self._apply_visual_state()
-        # v1.1.1: тип на плашке мог появиться/измениться — пересобираем текст метки
+        # v1.1.1: the type on the label may have appeared/changed — rebuild the label text
         self.refresh_label()
 
     def set_bidirectional(self, flag: bool):
-        """v1.2.6: включить/выключить двухсторонний режим (наконечник на обоих концах).
+        """v1.2.6: enable/disable the bidirectional mode (arrowheads on both ends).
 
-        Идемпотентно при том же значении; переключение пересчитывает геометрию —
-        второй наконечник появляется/исчезает без пересоздания item'а.
+        Idempotent for the same value; toggling recomputes the geometry — the second
+        arrowhead appears/disappears without recreating the item.
         """
         flag = bool(flag)
         if flag == self.bidirectional:
@@ -362,7 +365,7 @@ class ConnectionArrow(QGraphicsPathItem):
         self.refresh_label()
 
     def refresh_label(self):
-        """v1.1.1: пересобрать текст плашки (опция «тип на плашке») и геометрию."""
+        """v1.1.1: rebuild the label text (the "type on the label" option) and the geometry."""
         self._label.setPlainText(label_display_text(self.connection_type, self.label_text))
         self.update_position()
 

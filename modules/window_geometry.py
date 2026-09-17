@@ -1,98 +1,100 @@
 # -*- coding: utf-8 -*-
-"""v1.1.2RC3 (AUDIT U2): сохранение/восстановление размеров окон.
+"""v1.1.2RC3 (AUDIT U2): saving/restoring window sizes.
 
-Пользовательское замечание U2 («сохранение размеров окна, главное окно и терминал»):
-окна каждый старт получали дефолтный размер (главное — resize(1200, 850), терминал —
-resize(800, 600)), и растяжка не переживала перезапуск. Фикс: при закрытии окна
-saveGeometry()/saveState() пишутся в ~/.sshmap/config.json под ключом, при старте /
-создании окна — восстанавливаются.
+User remark U2 ("saving window sizes, the main window and the terminal"):
+windows got a default size on every start (the main one — resize(1200, 850), the
+terminal — resize(800, 600)), and stretching did not survive a restart. Fix: on
+window close, saveGeometry()/saveState() are written to ~/.sshmap/config.json
+under a key; on start / window creation — they are restored.
 
-Ключи (один на окно, оба значения внутри):
-  * ui_window_geometry_main      — главное окно (MainWindow);
-  * ui_window_geometry_terminal  — окна терминала (SSHTerminalWindow; все терминалы
-                                   делят ключ — запоминается последний закрытый).
+Keys (one per window, both values inside):
+  * ui_window_geometry_main      — the main window (MainWindow);
+  * ui_window_geometry_terminal  — the terminal windows (SSHTerminalWindow; all
+                                   terminals share the key — the last closed
+                                   one is remembered).
 
-Значение ключа — JSON-объект {"geometry": <base64>, "state": <base64>}:
-  * geometry — QByteArray saveGeometry() (позиция + размер окна);
-  * state    — QByteArray saveState() (состояние QMainWindow: максимизировано/норма,
-               layout доков/тулбаров).
+The key value — a JSON object {"geometry": <base64>, "state": <base64>}:
+  * geometry — the QByteArray saveGeometry() (window position + size);
+  * state    — the QByteArray saveState() (QMainWindow state: maximized/normal,
+               the docks/toolbars layout).
 
-QByteArray не JSON-сериализуется напрямую → base64. restoreGeometry()/restoreState()
-принимают QByteArray обратно (симметричная пара Qt API).
+QByteArray is not directly JSON-serializable → base64. restoreGeometry()/
+restoreState() take a QByteArray back (a symmetric pair of Qt APIs).
 
-Headless-friendly и teardown-устойчив: обе функции НИКОГДА не бросают — нет ключа /
-битое значение / RuntimeError C++-объекта → no-op + False. Сохранение/восстановление
-геометрии не должно ронять старт или закрытие приложения.
+Headless-friendly and teardown-robust: both functions NEVER raise — no key /
+a broken value / a C++ object RuntimeError → no-op + False. Saving/restoring
+geometry must not break the application start or close.
 """
 
 import base64
 
 
 def _qba_to_b64(qbytearray) -> str:
-    """QByteArray → base64-строка (ASCII). Пусто/None → ''."""
+    """QByteArray → a base64 string (ASCII). Empty/None → ''."""
     try:
         return base64.b64encode(bytes(qbytearray)).decode("ascii")
-    except Exception:  # noqa: BLE001 — teardown/битый объект не роняет сохранение
+    except Exception:  # noqa: BLE001 — teardown/a broken object does not break saving
         return ""
 
 
 def _b64_to_qba(b64str):
-    """base64-строка → QByteArray; битое/пусто → None.
+    """A base64 string → QByteArray; broken/empty → None.
 
-    ВАЖНО (проверено прогоном, PySide6 6.11): fromBase64 ждёт BASe64-ТЕКСТ
-    (ascii-байты строки), а НЕ уже декодированные сырые байты — сырые байты
-    Qt интерпретирует как base64-алфавит и молча вернёт ПУСТОЙ QByteArray.
-    Python-валидация (validate=True) — быстрая проверка «это вообще base64»
-    до вызова Qt; сам декод делает Qt по исходной строке.
+    IMPORTANT (verified by a run, PySide6 6.11): fromBase64 expects BASE64 TEXT
+    (the ascii bytes of the string), NOT already-decoded raw bytes — raw bytes
+    are interpreted by Qt as the base64 alphabet and it silently returns an
+    EMPTY QByteArray.
+    The Python validation (validate=True) — a quick "is this even base64" check
+    before calling Qt; Qt itself does the decode from the original string.
     """
     from PySide6.QtCore import QByteArray
     if not isinstance(b64str, str) or not b64str:
         return None
     try:
         raw = base64.b64decode(b64str.encode("ascii"), validate=True)
-    except Exception:  # noqa: BLE001 — не-base64 → нет данных
+    except Exception:  # noqa: BLE001 — not base64 → no data
         return None
     if not raw:
         return None
     qba = QByteArray.fromBase64(b64str.encode("ascii"))
-    if len(qba) == 0:   # Qt-декодер всё равно отказался — битые данные
+    if len(qba) == 0:   # the Qt decoder still refused — broken data
         return None
     return qba
 
 
 def save_window_geometry(key: str, window) -> bool:
-    """Сохранить saveGeometry()/saveState() окна в config.json под ключом key.
+    """Save the window's saveGeometry()/saveState() to config.json under key.
 
-    window — QMainWindow (MainWindow / SSHTerminalWindow). True — записано;
-    False — окно не дало данных или запись конфига не удалась. Никогда не бросает.
+    window — a QMainWindow (MainWindow / SSHTerminalWindow). True — written;
+    False — the window gave no data or the config write failed. Never raises.
     """
     try:
         from i18n import save_config
-    except Exception:  # noqa: BLE001 — flat-раскладка без i18n — нет куда писать
+    except Exception:  # noqa: BLE001 — a flat layout without i18n — nothing to write to
         return False
     try:
         geom = _qba_to_b64(window.saveGeometry())
         state = _qba_to_b64(window.saveState())
-    except Exception:  # noqa: BLE001 — RuntimeError C++-объекта (teardown) и пр.
+    except Exception:  # noqa: BLE001 — a C++ object RuntimeError (teardown) etc.
         return False
     if not geom and not state:
         return False
     try:
         return bool(save_config({key: {"geometry": geom, "state": state}}))
-    except Exception:  # noqa: BLE001 — save_config сам не бросает, но на всякий случай
+    except Exception:  # noqa: BLE001 — save_config does not raise itself, but just in case
         return False
 
 
 def restore_window_geometry(key: str, window) -> bool:
-    """Восстановить геометрию/состояние окна из config.json (ключ key).
+    """Restore the window's geometry/state from config.json (key key).
 
-    True — что-то восстановлено (geometry и/или state); False — ключа нет, значение
-    битое или окно не приняло данные. Никогда не бросает; при False окно остаётся с
-    дефолтным размером (вызванный ранее resize()).
+    True — something was restored (geometry and/or state); False — no key, a
+    broken value, or the window did not accept the data. Never raises; on False
+    the window keeps its default size (the resize() called earlier).
     """
     try:
         from i18n import load_config
-    except Exception:  # noqa: BLE001 — flat-раскладка без i18n
+    except Exception:  # noqa: BLE001 — a flat layout without i18n
         return False
     try:
         data = load_config().get(key)
@@ -107,7 +109,7 @@ def restore_window_geometry(key: str, window) -> bool:
         try:
             window.restoreGeometry(geom)
             restored = True
-        except Exception:  # noqa: BLE001 — teardown/битый QByteArray
+        except Exception:  # noqa: BLE001 — teardown/a broken QByteArray
             pass
     state = _b64_to_qba(data.get("state"))
     if state is not None:

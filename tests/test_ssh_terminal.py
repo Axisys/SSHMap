@@ -1,44 +1,44 @@
-"""Регрессионные тесты v0.8.1 — четыре исправления:
+"""Regression tests v0.8.1 — four fixes:
 
-  #3 терминал не печатал   — output_signal = Signal(str) получал bytes;
-                              теперь Signal(bytes), pyte получает сырые данные,
-                              экран рендерится (E2E-проверка окна).
-  #1 «Добавить сервер» падал на bool.x — QAction.triggered шлёт checked=bool
-                              в _add_server(at_scene_pos); позиция принимается
-                              только если это точка сцены.
-  #2 ПКМ→SSH падал на bool.setSelected — замыкания контекстного меню MapView
-                              теперь принимают `checked` первым параметром
-                              (проверяется настоящий путь: contextMenuEvent →
+  #3 the terminal did not print   — output_signal = Signal(str) got the bytes;
+                              now Signal(bytes), pyte gets the raw data,
+                              the screen renders (the E2E check of the window).
+  #1 "Add server" crashed on bool.x — QAction.triggered sends checked=bool
+                              into _add_server(at_scene_pos); the position is accepted
+                              only if it is a point of the scene.
+  #2 the RMB→SSH crashed on bool.setSelected — the closures of the MapView context menu
+                              now take `checked` as the first parameter
+                              (the real path is checked: contextMenuEvent →
                               QMenu → trigger()).
-  #4 fingerprint «unavailable»/неверный SHA256 — paramiko>=5 asbytes() возвращает
-                              сырые wire-байты, а не base64.
+  #4 the fingerprint "unavailable"/the wrong SHA256 — paramiko>=5 asbytes() returns
+                              the raw wire bytes, not base64.
 
-v1.2.9: §3c клавиатура — через TerminalWidget (deprecated SSHTerminalTextEdit
-удалён вместе с HTML-путём; семантика та же: печатные/Return/Backspace → канал).
+v1.2.9: §3c the keyboard — through TerminalWidget (the deprecated SSHTerminalTextEdit
+is removed together with the HTML path; the same semantics: printable/Return/Backspace → the channel).
 
-Запуск:  python tests/test_ssh_terminal.py   (из корня проекта) или python tests/run_all.py
+Run:  python tests/test_ssh_terminal.py   (from the project root) or python tests/run_all.py
 """
 import os, sys, hashlib, traceback
 
 from _common import bootstrap, check, finish
 
-ROOT, WORK = bootstrap()  # ДО импортов модулей приложения (HOME-изоляция и faulthandler внутри)
+ROOT, WORK = bootstrap()  # BEFORE the app module imports (the HOME isolation and faulthandler inside)
 
 from PySide6.QtCore import Qt, QPointF, QTimer, QEventLoop
 from PySide6.QtGui import QKeyEvent, QContextMenuEvent
-from PySide6.QtWidgets import QApplication, QDialog, QMenu
+from PySide6.QtWidgets import QApplication, QDialog
 
 app = QApplication(sys.argv)
 
 
 def _key(text="", key_code=None):
-    """QKeyEvent в актуальной сигнатуре PySide6 (modifiers — enum'ом, по позиции)."""
+    """A QKeyEvent in the current PySide6 signature (modifiers — as an enum, by position)."""
     return QKeyEvent(QKeyEvent.Type.KeyPress, int(key_code), Qt.NoModifier, text)
 
 
 def wait_until(cond, timeout_ms=2000, tick_ms=50):
-    """Настоящий event loop до cond() или дедлайна (processEvents не гарантирует
-    время жизни таймеров — для offscreen-рендера нужен реальный цикл)."""
+    """The real event loop until cond() or the deadline (processEvents does not guarantee
+    the lifetime of the timers — the offscreen render needs the real loop)."""
     loop = QEventLoop()
     ticks = {"n": 0}
 
@@ -57,17 +57,17 @@ def wait_until(cond, timeout_ms=2000, tick_ms=50):
 
 
 # ════════════════════════════════════════════════════════════
-# #3a. Сигнал bytes: сквозная доставка из QThread в GUI-поток
-#      (именно этот путь давал «Shiboken::Conversions ... Cannot copy-convert (bytes)»)
+# #3a. bytes signal: end-to-end delivery from the QThread to the GUI thread
+#      (this very path used to give "Shiboken::Conversions ... Cannot copy-convert (bytes)")
 # ════════════════════════════════════════════════════════════
 print("== terminal signal (bug #3) ==")
 from modules.ssh_terminal import SSHTerminalThread
 
-PAYLOAD = b"\x1b[0m\x1b[31mhello\xff\xfe\r\n"  # ANSI + не-UTF8 байты + CRLF
+PAYLOAD = b"\x1b[0m\x1b[31mhello\xff\xfe\r\n"  # ANSI + non-UTF8 bytes + CRLF
 
 
 class _FakeTerm(SSHTerminalThread):
-    """Наследуем реальный класс (с реальными сигнатурами сигналов), но без paramiko."""
+    """Inherit the real class (with the real signal signatures), but without paramiko."""
     def __init__(self, *a, **k):
         super().__init__("127.0.0.1", "u", 9, "", "")
 
@@ -86,7 +86,7 @@ def _on_out(data):
         return
     loop.quit()
 
-t3.output_signal.connect(_on_out)          # queued (разные потоки) — как в окне терминала
+t3.output_signal.connect(_on_out)          # queued (different threads) — as in the terminal window
 to = QTimer(); to.setSingleShot(True); to.start(4000); to.timeout.connect(loop.quit)
 t3.start()
 loop.exec()
@@ -96,9 +96,9 @@ check("delivered arg is bytes (not str)", bool(received) and isinstance(received
       f"type={type(received[0]).__name__ if received else 'n/a'}")
 
 # ════════════════════════════════════════════════════════════
-# #3b. E2E: SSHTerminalWindow рендерит байты в экран (до фикса — пустой экран).
-#      v1.0RC1: окно использует посячейный холст TerminalWidget (не QPlainTextEdit);
-#      проверка — через widget.visible_text() (текст pyte-сетки).
+# #3b. E2E: SSHTerminalWindow renders bytes to the screen (before the fix — an empty screen).
+#      v1.0RC1: the window uses the per-cell canvas TerminalWidget (not QPlainTextEdit);
+#      checking — via widget.visible_text() (the pyte grid text).
 # ════════════════════════════════════════════════════════════
 import modules.ssh_terminal as ST
 
@@ -107,13 +107,13 @@ _orig_thread_cls = ST.SSHTerminalThread
 class _FakeTerm2(_FakeTerm):
     pass
 
-ST.SSHTerminalThread = _FakeTerm2  # окно создаст «поток» без сети
+ST.SSHTerminalThread = _FakeTerm2  # the window will create a "thread" without network
 from models.server import ServerData
 try:
     tdata = ServerData(id="termw1", alias="T", host="127.0.0.1", user="u")
     w3 = ST.SSHTerminalWindow(tdata, None)
     w3.show()
-    # ждём, пока render-таймер (33 мс) перерисует холст после emit из потока
+    # we wait until the render timer (33 ms) repaints the canvas after the emit from the thread
     wait_until(lambda: "hello" in w3.widget.visible_text(), timeout_ms=1500)
     check("terminal window renders streamed bytes into the screen",
           "hello" in w3.widget.visible_text(), f"text={w3.widget.visible_text()!r}"[:200])
@@ -126,8 +126,8 @@ finally:
     ST.SSHTerminalThread = _orig_thread_cls
 
 # ════════════════════════════════════════════════════════════
-# #3c. Клавиатура: печатные символы/Return/Backspace уходят в канал
-#     (v1.2.9: путь — TerminalWidget; deprecated SSHTerminalTextEdit удалён)
+# #3c. Keyboard: printable characters/Return/Backspace go into the channel
+#     (v1.2.9: the path — TerminalWidget; the deprecated SSHTerminalTextEdit is removed)
 # ════════════════════════════════════════════════════════════
 sent = []
 
@@ -149,8 +149,8 @@ check("key events encode to channel bytes (printable/utf8/tab)",
 check("Return -> CR, Backspace -> DEL(0x7f)", sent[3:] == [b"\r", b"\x7f"], f"sent={sent[3:]!r}")
 
 # ════════════════════════════════════════════════════════════
-# #1. MainWindow._add_server(True) — bool из QAction.triggered не роняет метод
-#     и точка сцены всё ещё уважается
+# #1. MainWindow._add_server(True) — a bool from QAction.triggered does not crash the method
+#     and the scene point is still honoured
 # ════════════════════════════════════════════════════════════
 print("== _add_server (bug #1) ==")
 import ui.main_window as MW
@@ -171,7 +171,7 @@ try:
     win = MW.MainWindow()
     win.show(); app.processEvents()
 
-    # (a) ровно то, что шлёт QAction.triggered из тулбара/меню: bool
+    # (a) exactly what QAction.triggered sends from the toolbar/menu: a bool
     try:
         win._add_server(True)
         check("_add_server(True) does not raise", True)
@@ -180,15 +180,15 @@ try:
     check("_add_server(True) created node at viewport center", len(added) == 1 and len(win.scene._nodes) == 1,
           f"added={len(added)}, nodes={list(win.scene._nodes)}")
     if added and win.scene._nodes:
-        # Ревью-фикс v0.8.0 (#1): узел центрируется под курсором — оффсеты равны
-        # половинам MIN_NODE_WIDTH/MIN_NODE_HEIGHT (90/65), а не старым -70/-55.
+        # The review fix v0.8.0 (#1): the node is centered under the cursor — the offsets are equal
+        # halves of MIN_NODE_WIDTH/MIN_NODE_HEIGHT (90/65), not the old -70/-55.
         exp = win.view.mapToScene(win.view.viewport().rect().center())
         nd = list(win.scene._nodes.values())[0]
         check("node centered under viewport center (x-90, y-65)",
               abs(nd.data.x - (exp.x() - 90)) < 0.6 and abs(nd.data.y - (exp.y() - 65)) < 0.6,
               f"got ({nd.data.x},{nd.data.y}) want ({exp.x()-90:.1f},{exp.y()-65:.1f})")
 
-    # (b) настоящая точка сцены (путь ПКМ-меню по пустому месту)
+    # (b) the real scene point (the right-click-menu path on empty space)
     win.scene.clear_all()
     added.clear()
     win._add_server(QPointF(500, 400))
@@ -199,31 +199,25 @@ finally:
     MW.AddServerDialog = _orig_add_dlg
 
 # ════════════════════════════════════════════════════════════
-# #2. Контекстное меню MapView: настоящий путь ПКМ → QMenu → trigger()
-#     (до фикса замыкания получали checked=True вместо объекта)
+# #2. MapView context menu: the real right-click path → QMenu → trigger()
+#     (before the fix the closures got checked=True instead of the object)
 # ════════════════════════════════════════════════════════════
 print("== map context menu (bug #2) ==")
 import graphics.map_view as MVm
 from i18n import t as it
+from _fakes import CaptureMenu as _CaptureMenu
 
 captured_menus = []
-
-class _CaptureMenu(QMenu):
-    def exec(self, *a, **k):           # Qt6: exec(pos) — перехватываем, не блокируемся
-        captured_menus.append(self)
-        return 0
-    def exec_(self, *a, **k):          # legacy-имя — тот же перехват
-        captured_menus.append(self)
-        return 0
+_CaptureMenu.captured = captured_menus   # the exec/exec_ interception offscreen (_fakes)
 
 _orig_menu_cls = MVm.QMenu
 MVm.QMenu = _CaptureMenu
 
 
 def _ctx(view, scene_pos):
-    """Синтетический QContextMenuEvent в координатах viewport.
+    """The synthetic QContextMenuEvent in the coordinates of the viewport.
 
-    PySide6 6.11: конструктор (reason, pos: QPoint [, globalPos: QPoint]).
+    PySide6 6.11: the constructor (reason, pos: QPoint [, globalPos: QPoint]).
     """
     from PySide6.QtCore import QPoint
     vp = view.mapFromScene(scene_pos)   # Qt6/PySide: -> QPoint
@@ -245,11 +239,11 @@ try:
     view2 = win2.view
     view2.resize(900, 700); app.processEvents()
 
-    # (a) ПКМ по пустому месту → «Добавить сервер» (позиция клика должна дойти)
+    # (a) right-click on empty space → "Add server" (the click position must arrive)
     added.clear()
     MW.AddServerDialog = _FakeAddDlg
     captured_menus.clear()
-    click_scene = QPointF(450, 320)   # точка сцены в пределах viewport
+    click_scene = QPointF(450, 320)   # a scene point within the viewport
     _ctx(view2, click_scene)
     check("context menu on empty space captured", len(captured_menus) == 1)
     if captured_menus:
@@ -262,7 +256,7 @@ try:
               f"nodes={[(n.data.alias, n.data.x, n.data.y) for n in win2.scene._nodes.values()]}")
     MW.AddServerDialog = _orig_add_dlg
 
-    # (b) ПКМ по узлу → «Подключить SSH» — раньше: 'bool' has no setSelected
+    # (b) right-click on a node → "Connect SSH" — previously: 'bool' has no setSelected
     ndata = ServerData(id="ctxnode1", alias="N1", host="10.0.0.2", user="u")
     win2.scene.clear_all()
     node2 = win2.scene.add_server(ndata)
@@ -290,7 +284,7 @@ try:
     finally:
         MW.SSHConnectDialog = _orig_ssh_dlg
 
-    # (c) ПКМ по заметке → «Удалить» — раньше n затирался checked=True
+    # (c) right-click on a note → "Delete" — previously n was clobbered by checked=True
     note_id_box = {}
     note2 = win2.scene.add_note("tmp", x=600, y=150)
     note_id_box["id"] = note2.note_id
@@ -304,7 +298,7 @@ try:
     else:
         check("context menu over note captured", False)
 
-    # (d) ПКМ по узлу → «Удалить сервер» — guarded-путь с подтверждением
+    # (d) right-click on a node → "Delete server" — the guarded path with confirmation
     from PySide6.QtWidgets import QMessageBox as _QMB
     _orig_question = _QMB.question
     _QMB.question = staticmethod(lambda *a, **k: _QMB.Yes)
@@ -325,7 +319,7 @@ finally:
     MVm.QMenu = _orig_menu_cls
 
 # ════════════════════════════════════════════════════════════
-# #4. fingerprint(): paramiko>=5 (asbytes -> bytes) и legacy (asbytes -> base64 str)
+# #4. fingerprint(): paramiko>=5 (asbytes -> bytes) and legacy (asbytes -> base64 str)
 # ════════════════════════════════════════════════════════════
 print("== host key fingerprint (bug #4) ==")
 from modules.host_key_policy import fingerprint
@@ -339,7 +333,7 @@ def _sha256_fp(blob: bytes) -> str:
 try:
     from paramiko import RSAKey
     rk = RSAKey.generate(2048)
-    raw_bytes = rk.asbytes()  # paramiko>=5: сырые wire-байты
+    raw_bytes = rk.asbytes()  # paramiko>=5: raw wire bytes
     fp_new = fingerprint(rk)
     check("fingerprint works for real key (paramiko>=5, asbytes->bytes)",
           fp_new.startswith("SHA256:") and len(fp_new) > 10, fp_new)
@@ -349,7 +343,7 @@ try:
 except Exception as e:
     check("fingerprint with real paramiko key", False, repr(e))
 
-# legacy-компонента: asbytes() возвращает base64-строку (paramiko<5)
+# the legacy component: asbytes() returns a base64 string (paramiko<5)
 class _LegacyKey:
     def __init__(self, blob): self._blob = blob
     def asbytes(self): return _b64.b64encode(self._blob).decode("ascii")
@@ -358,12 +352,12 @@ legacy_blob = bytes(range(200))
 fp_leg = fingerprint(_LegacyKey(legacy_blob))
 check("fingerprint legacy base64-string path", fp_leg == _sha256_fp(legacy_blob), fp_leg)
 
-# только get_base64() (asbytes отсутствует/падает)
+# only get_base64() (asbytes is missing/crashes)
 class _B64Only:
     def get_base64(self): return _b64.b64encode(legacy_blob).decode("ascii")
 check("fingerprint falls back to get_base64()", fingerprint(_B64Only()) == _sha256_fp(legacy_blob))
 
-# совсем без данных — честный fallback-текст, а не ложный SHA256
+# with no data at all — an honest fallback text, not a bogus SHA256
 class _DeadKey: pass
 check("fingerprint '<unavailable>' only when nothing usable",
       fingerprint(_DeadKey()) == "<fingerprint unavailable>")

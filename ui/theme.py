@@ -1,144 +1,148 @@
 # -*- coding: utf-8 -*-
-"""Центральная тема интерфейса SSH Map (v1.2.5, ROADMAP v1.2.5).
+"""Central UI theme for SSH Map (v1.2.5, ROADMAP v1.2.5).
 
-Единая точка истины для всех цветов, радиусов скругления и семейств шрифтов
-интерфейса приложения: ноды, стрелки, заметки, группы, диалоги, статус-лейблы,
-QSS-строки, базовая палитра окна (main.py). До v1.2.5 значения были разбросаны
-по класс-константам и paint-коду: ~50 точек цвета в ~14 файлах с дублями
-(#94a3b8 — 6+ мест, #e2e8f0 — ~8, #38bdf8 — 5, #f59e0b — 4).
+Single source of truth for all colors, corner radii and font families of
+the application UI: nodes, arrows, notes, groups, dialogs, status labels,
+QSS strings, the base window palette (main.py). Before v1.2.5 the values
+were scattered across class constants and paint code: ~50 color points in
+~14 files with duplicates (#94a3b8 — 6+ places, #e2e8f0 — ~8, #38bdf8 — 5,
+#f59e0b — 4).
 
-Модуль — чистые данные: БЕЗ импорта PySide6 (импортируется без QApplication —
-удобно для тестов). Цвета — hex-строки "#rrggbb" (совместимы с QSS); потребители
-заворачивают в QColor() там, где нужно. Каждое уникальное значение определено
-ровно ОДИН раз; значения, общие для нескольких ролей, связаны алиасами
-(одна константа вместо двух литералов) — «единая палитра».
+The module is pure data: NO PySide6 import (importable without
+QApplication — convenient for tests). Colors are "#rrggbb" hex strings
+(QSS-compatible); consumers wrap them in QColor() where needed. Each
+unique value is defined exactly ONCE; values shared by several roles are
+tied together with aliases (one constant instead of two literals) —
+"a single palette".
 
-НЕ охват темы (осознанно):
-  * палитры modules/terminal_screen.py (default/nord/dracula/tokyo_night) — данные
-    пользовательски выбираемых схем цветов ВЫВОДА терминала, а не UI-тема приложения;
-  * цвета storage/export_drawio.py — формат экспорта (свои тёмные/светлые варианты
-    в draw.io XML);
-  * TerminalWidget.CURSOR_COLOR — блок-курсор привязан к default-тексту схемы
-    терминала («классический вид»), часть внешнего вида вывода, а не UI-хрома.
+Out of scope (deliberately):
+  * the palettes in modules/terminal_screen.py (default/nord/dracula/
+    tokyo_night) — user-selectable color schemes for TERMINAL OUTPUT, not
+    the app UI theme;
+  * the colors in storage/export_drawio.py — the export format (its own
+    dark/light variants in draw.io XML);
+  * TerminalWidget.CURSOR_COLOR — the block cursor is tied to the
+    terminal scheme's default text ("classic look"), part of the output
+    appearance, not UI chrome.
 
-Следующий шаг (задача 3 ROADMAP v1.2.5, здесь не планируется): акцентный цвет и
-светлая тема добавляются переназначением констант этого модуля — потребители уже
-не знают литералов.
+Next step (ROADMAP v1.2.5 task 3, not planned here): the accent color and
+a light theme are added by reassigning this module's constants — consumers
+already know no literals.
 """
 
-# ── Поверхности (тёмная тема, slate-шкала) ────────────────────────────────
+# ── Surfaces (dark theme, slate scale) ────────────────────────────────
 
-CANVAS_BG = "#020617"      # фон холста: фон MapView + MapScene.drawBackground (виден и в экспорте)
-RENDER_BG = "#0b1220"      # начальный fill pixmap в render_to_pixmap (поверх него drawBackground
-                           # рисует CANVAS_BG + сетку — как в интерактивном виде, с v0.9.1)
-WINDOW_BG = "#0f172a"      # QPalette Window; сетка minor-линии; карточка строки поиска
-BASE_BG = "#1e293b"        # QPalette Base; фон карточки узла; сетка major-линии; полоска сворачивания
-SURFACE_ALT = "#334155"    # QPalette AlternateBase/Button; разделители диалогов; полоска при hover
+CANVAS_BG = "#020617"      # canvas background: MapView background + MapScene.drawBackground (visible in export too)
+RENDER_BG = "#0b1220"      # initial pixmap fill in render_to_pixmap (drawBackground paints
+                           # CANVAS_BG + grid on top — like the interactive view, since v0.9.1)
+WINDOW_BG = "#0f172a"      # QPalette Window; minor grid lines; search bar card
+BASE_BG = "#1e293b"        # QPalette Base; node card background; major grid lines; collapse strip
+SURFACE_ALT = "#334155"    # QPalette AlternateBase/Button; dialog separators; hover strip
 
-# ── Текст и иконки ────────────────────────────────────────────────────────
+# ── Text and icons ────────────────────────────────────────────────────────
 
-TEXT_PRIMARY = "#e2e8f0"   # основной текст: QPalette WindowText/Text/ButtonText, текст узла,
-                           # заголовки диалогов, zoom-лейбл статус-бара
-TEXT_MUTED = "#94a3b8"     # приглушённый текст: подписи узлов, счётчики статус-бара,
-                           # статус-лейблы терминального UI (страница/SFTP/док), подзаголовок профилей
-ICON_COLOR = "#cbd5e1"     # контур векторных иконок (ui/icons.py) + ромбы полосок сворачивания
+TEXT_PRIMARY = "#e2e8f0"   # primary text: QPalette WindowText/Text/ButtonText, node text,
+                           # dialog titles, status-bar zoom label
+TEXT_MUTED = "#94a3b8"     # muted text: node labels, status-bar counters,
+                           # terminal UI status labels (page/SFTP/dock), profile subtitle
+ICON_COLOR = "#cbd5e1"     # vector icon outlines (ui/icons.py) + collapse-strip rhombi
 
-# ── Акцент и выделение ────────────────────────────────────────────────────
+# ── Accent and selection ────────────────────────────────────────────────────
 
-ACCENT = "#38bdf8"             # акцент приложения: вспышка reveal, рамка совпадений поиска,
-                               # rubber-band выделения, рамка/выделение строки поиска (sky-400)
-SELECTION_AMBER = "#f59e0b"    # янтарное выделение: выбранный узел/группа, рамка фона-изображения,
-                               # бейдж/рамка режима мультинабора (amber-500)
+ACCENT = "#38bdf8"             # app accent: reveal flash, search match frame,
+                               # rubber-band selection, search bar frame/selection (sky-400)
+SELECTION_AMBER = "#f59e0b"    # amber selection: selected node/group, background-image frame,
+                               # multi-select mode badge/frame (amber-500)
 
-# ── Узел сервера (карточка) ───────────────────────────────────────────────
+# ── Server node (card) ───────────────────────────────────────────────────
 
-NODE_BG = BASE_BG             # фон карточки (тот же, что QPalette Base)
-NODE_BORDER = "#3b82f6"       # рамка по умолчанию (blue-500)
-NODE_HOVER = "#60a5fa"        # рамка при hover (blue-400; то же значение, что стрелка "vpn")
-NODE_ICON_BG = "#2563eb"      # заливка круга иконки (blue-600)
-NODE_TEXT = TEXT_PRIMARY      # alias-текст карточки
-NODE_LABEL = TEXT_MUTED       # подпись @host, шеврон сворачивания
-DOT_IDLE = "#64748b"          # точки статуса/SSH до проверки (slate-500); тон подписи @host
+NODE_BG = BASE_BG             # card background (same as QPalette Base)
+NODE_BORDER = "#3b82f6"       # default border (blue-500)
+NODE_HOVER = "#60a5fa"        # hover border (blue-400; same value as the "vpn" arrow)
+NODE_ICON_BG = "#2563eb"      # icon circle fill (blue-600)
+NODE_TEXT = TEXT_PRIMARY      # card alias text
+NODE_LABEL = TEXT_MUTED       # @host label, collapse chevron
+DOT_IDLE = "#64748b"          # status/SSH dots before checking (slate-500); @host label tone
 
-# ── Статусы доступности (StatusChecker) ───────────────────────────────────
+# ── Availability statuses (StatusChecker) ───────────────────────────────────
 
-STATUS_ONLINE = "#22c55e"     # зелёный: TCP + SSH баннер
-STATUS_WARN = "#facc15"       # жёлтый: порт открыт, баннера нет
-STATUS_OFFLINE = "#ef4444"    # красный: недоступен
+STATUS_ONLINE = "#22c55e"     # green: TCP + SSH banner
+STATUS_WARN = "#facc15"       # yellow: port open, no banner
+STATUS_OFFLINE = "#ef4444"    # red: unreachable
 
-# Цвета рамки по статусу (v0.7.1): warn — жёлтый, отличимый от янтарного
-# SELECTION_AMBER — в один момент времени показывается либо выделение, либо статус.
+# Border colors by status (v0.7.1): warn — yellow, distinct from the amber
+# SELECTION_AMBER — only one of selection or status is shown at a time.
 STATUS_COLORS = {
-    "online": STATUS_ONLINE,   # зелёный: TCP + SSH баннер
-    "warn": STATUS_WARN,       # жёлтый: порт открыт, баннера нет
-    "offline": STATUS_OFFLINE,  # красный: недоступен
+    "online": STATUS_ONLINE,   # green: TCP + SSH banner
+    "warn": STATUS_WARN,       # yellow: port open, no banner
+    "offline": STATUS_OFFLINE,  # red: unreachable
 }
 
-# ── Теги / роли окружений (v0.9.4) ────────────────────────────────────────
+# ── Tags / environment roles (v0.9.4) ────────────────────────────────────────
 
-TAG_TEST = "#a855f7"          # фиолетовый — тестовый контур (тег + хэш-палитра)
-TAG_BACKUP = "#06b6d4"        # голубой — бэкап-реплика (тег + хэш-палитра)
-TAG_DMZ = "#f97316"           # оранжевый — демилитаризованная зона (тег + хэш-палитра)
-TAG_PINK = "#ec4899"          # розовый — произвольные теги по хэшу
+TAG_TEST = "#a855f7"          # purple — test perimeter (tag + hash palette)
+TAG_BACKUP = "#06b6d4"        # cyan — backup replica (tag + hash palette)
+TAG_DMZ = "#f97316"           # orange — demilitarized zone (tag + hash palette)
+TAG_PINK = "#ec4899"          # pink — arbitrary tags by hash
 
-# Известные роли — фиксированные цвета (порядок — как в v0.9.4).
+# Known roles — fixed colors (order — as in v0.9.4).
 TAG_COLORS = {
-    "prod": STATUS_OFFLINE,   # красный — боевое окружение
-    "staging": STATUS_WARN,   # жёлтый — предпрод
-    "dev": STATUS_ONLINE,     # зелёный — разработка
-    "test": TAG_TEST,         # фиолетовый — тестовый контур
-    "backup": TAG_BACKUP,     # голубой — бэкап-реплика
-    "dmz": TAG_DMZ,           # оранжевый — демилитаризованная зона
+    "prod": STATUS_OFFLINE,   # red — production environment
+    "staging": STATUS_WARN,   # yellow — staging
+    "dev": STATUS_ONLINE,     # green — development
+    "test": TAG_TEST,         # purple — test perimeter
+    "backup": TAG_BACKUP,     # cyan — backup replica
+    "dmz": TAG_DMZ,           # orange — demilitarized zone
 }
 
-# Хэш-палитра произвольных тегов (crc32(name) % len): порядок фиксирован.
+# Hash palette for arbitrary tags (crc32(name) % len): order fixed.
 TAG_PALETTE = [STATUS_ONLINE, NODE_BORDER, TAG_TEST, TAG_DMZ, TAG_BACKUP, TAG_PINK]
 
-# ── Группы (кластеры/папки, v0.8.1) ───────────────────────────────────────
+# ── Groups (clusters/folders, v0.8.1) ───────────────────────────────────────
 
-GROUP_BORDER = "#7c3aed"         # violet-600 — отличается от синего узлов (#3b82f6)
-GROUP_HOVER = "#a78bfa"          # violet-400 (то же значение, что стрелка "database")
-GROUP_TITLE = "#c4b5fd"          # violet-300 — читается на тёмной карте
-GROUP_TITLE_SELECTED = "#fde68a"  # заголовок при выделении (amber-200)
-GROUP_TITLE_HOVER = "#e9d5ff"     # заголовок при hover (violet-200)
+GROUP_BORDER = "#7c3aed"         # violet-600 — distinct from the nodes' blue (#3b82f6)
+GROUP_HOVER = "#a78bfa"          # violet-400 (same value as the "database" arrow)
+GROUP_TITLE = "#c4b5fd"          # violet-300 — readable on the dark map
+GROUP_TITLE_SELECTED = "#fde68a"  # title when selected (amber-200)
+GROUP_TITLE_HOVER = "#e9d5ff"     # title on hover (violet-200)
 
-# ── Стрелки связей: типы (v0.7) ───────────────────────────────────────────
+# ── Connection arrows: types (v0.7) ───────────────────────────────────────────
 
-ARROW_SSH = "#34d399"            # зелёный — по умолчанию
-ARROW_HTTP = "#fbbf24"           # янтарный
-ARROW_NFS = "#f472b6"            # розовый
-ARROW_KUBERNETES = "#22d3ee"     # бирюзовый (Kubernetes)
-ARROW_HOVER_COMPAT = "#6ee7b7"   # hover-цвет, сохранён для совместимости с v0.6
+ARROW_SSH = "#34d399"            # green — default
+ARROW_HTTP = "#fbbf24"           # amber
+ARROW_NFS = "#f472b6"            # pink
+ARROW_KUBERNETES = "#22d3ee"     # turquoise (Kubernetes)
+ARROW_HOVER_COMPAT = "#6ee7b7"   # hover color, kept for compatibility with v0.6
 
-# id → базовый цвет стрелки; порядок — порядок объявления (комбобокс диалога
-# связи итерует его). SSH остаётся типом по умолчанию (старые проекты без
-# поля "type" загружаются как SSH-связи).
+# id → base arrow color; order — declaration order (the connection dialog
+# combobox iterates it). SSH stays the default type (old projects without
+# a "type" field load as SSH connections).
 ARROW_TYPE_COLORS = {
-    "ssh": ARROW_SSH,                    # зелёный — по умолчанию
-    "vpn": NODE_HOVER,                   # синий (то же значение, что hover-рамка узла)
-    "http": ARROW_HTTP,                  # янтарный
-    "database": GROUP_HOVER,             # фиолетовый (то же значение, что hover-рамка группы)
-    "nfs": ARROW_NFS,                    # розовый
-    "kubernetes": ARROW_KUBERNETES,      # бирюзовый (Kubernetes)
+    "ssh": ARROW_SSH,                    # green — default
+    "vpn": NODE_HOVER,                   # blue (same value as the node hover border)
+    "http": ARROW_HTTP,                  # amber
+    "database": GROUP_HOVER,             # violet (same value as the group hover border)
+    "nfs": ARROW_NFS,                    # pink
+    "kubernetes": ARROW_KUBERNETES,      # turquoise (Kubernetes)
 }
 
-# ── Заметки (стикеры, приглушённая палитра v1.2.4-fix) ────────────────────
+# ── Notes (stickies, muted palette v1.2.4-fix) ────────────────────
 
-NOTE_BG = "#eedd9f"        # тело заметки
-NOTE_BORDER = "#a9853d"    # рамка
-NOTE_TEXT = "#403a2b"      # текст (редактор прозрачный)
+NOTE_BG = "#eedd9f"        # note body
+NOTE_BORDER = "#a9853d"    # border
+NOTE_TEXT = "#403a2b"      # text (editor is transparent)
 
-# ── Радиусы скругления (px) ───────────────────────────────────────────────
+# ── Corner radii (px) ───────────────────────────────────────────────
 
-RADIUS_NODE = 10.0            # карточка узла сервера (ServerNode.CORNER_RADIUS)
-RADIUS_NOTE = 10.0            # окно заметки (StickyNote.CORNER_RADIUS)
-RADIUS_GROUP = 12.0           # рамка группы (NodeGroup.CORNER_RADIUS)
-RADIUS_SEARCH_BAR = 8         # QSS border-radius строки поиска по карте (целые px в QSS)
-RADIUS_ARROW_LABEL = 5.0      # скруглённый фон под текстом метки связи
-RADIUS_RESIZE_MARK = 3.0      # маркер resize-угла группы
-RADIUS_NODE_GLYPH_UNIT = 2.0  # углы «юнитов» глифа иконки сервера
+RADIUS_NODE = 10.0            # server node card (ServerNode.CORNER_RADIUS)
+RADIUS_NOTE = 10.0            # note window (StickyNote.CORNER_RADIUS)
+RADIUS_GROUP = 12.0           # group frame (NodeGroup.CORNER_RADIUS)
+RADIUS_SEARCH_BAR = 8         # QSS border-radius of the map search bar (integer px in QSS)
+RADIUS_ARROW_LABEL = 5.0      # rounded background behind the connection label text
+RADIUS_RESIZE_MARK = 3.0      # group resize-corner marker
+RADIUS_NODE_GLYPH_UNIT = 2.0  # "unit" corner radius in the server icon glyph
 
-# ── Семейства шрифтов ─────────────────────────────────────────────────────
+# ── Font families ─────────────────────────────────────────────────────
 
-FONT_UI = "Segoe UI"    # шрифт UI: alias узла, заголовок группы, редактор заметки
-FONT_MONO = "Consolas"  # моноширинный: инфо/host узла, метка связи
+FONT_UI = "Segoe UI"    # UI font: node alias, group title, note editor
+FONT_MONO = "Consolas"  # monospace: node info/host, connection label

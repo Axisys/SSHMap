@@ -1,15 +1,15 @@
 # -*- coding: utf-8 -*-
-"""Регрессия v0.9.3: дублирование узла + мультивыделение + групповой drag.
+"""Regression v0.9.3: node duplication + multi-select + group drag.
 
-Запуск: python tests/test_duplicate_multiselect.py или python tests/run_all.py
-Без pytest: общая обвязка tests/_common.py.
+Run: python tests/test_duplicate_multiselect.py or python tests/run_all.py
+Without pytest: the common harness tests/_common.py.
 """
 import os
 import sys
 
 from _common import bootstrap, check, finish
 
-ROOT, WORK = bootstrap()  # ДО импортов модулей приложения (HOME-изоляция и faulthandler внутри)
+ROOT, WORK = bootstrap()  # BEFORE the app module imports (the HOME isolation and faulthandler inside)
 
 from PySide6.QtCore import QPointF
 from PySide6.QtWidgets import QApplication
@@ -18,7 +18,7 @@ app = QApplication.instance() or QApplication([])
 
 
 class _FakeWin:
-    """Минимальный double для MainWindow (как в regression_v081)."""
+    """The minimal double for MainWindow (as in regression_v081)."""
 
     def __init__(self):
         self.refreshed = 0
@@ -45,7 +45,7 @@ def main():
 
     scene = make_scene()
 
-    # ── #1 Дублирование данных узла (копия полей + смещение) ──
+    # ── #1 Duplicating the node data (a copy of the fields + an offset) ──
     data = ServerData(id="aaa11111", alias="web", host="10.0.0.1", user="root",
                       x=100.0, y=50.0, ssh_port=2222, os_name="Ubuntu", cpu_model="Xeon")
     n1 = scene.add_server(data)
@@ -64,7 +64,7 @@ def main():
     n2 = scene.add_server(dup)
     check("both nodes on scene", scene.node_count() == 2)
 
-    # ── #2 CmdMoveNodes: групповое перемещение одной командой ──
+    # ── #2 CmdMoveNodes: a group move in a single command ──
     win = _FakeWin()
     old1, old2 = QPointF(140.0, 90.0), QPointF(100.0, 50.0)
     new1, new2 = QPointF(300.0, 300.0), QPointF(260.0, 260.0)
@@ -76,7 +76,7 @@ def main():
     check("group move undo restored",
           n1.pos() == old1 and n2.pos() == old2)
 
-    # ── #3 CmdConnectSelected: связи между выделенными одной операцией ──
+    # ── #3 CmdConnectSelected: connections between the selected ones in a single operation ──
     pairs = [("aaa11111", "bbb22222")]
     cc = CmdConnectSelected(win, scene, pairs)
     check("no connection before", not scene.has_connection("aaa11111", "bbb22222"))
@@ -90,13 +90,13 @@ def main():
     check("connection re-created",
           scene.has_connection("aaa11111", "bbb22222"))
 
-    # ── #4 Мультивыделение: несколько ServerNode могут быть выделены ──
+    # ── #4 The multi-selection: several ServerNodes can be selected ──
     n1.setSelected(True)
     n2.setSelected(True)
     sel = [i for i in scene.selectedItems() if isinstance(i, ServerNode)]
     check("multi-selection works", len(sel) == 2)
 
-    # ── #5 MapView: сигналы и состояние рамки выделения ──
+    # ── #5 MapView: the signals and the selection-frame state ──
     view_cls_loaded = False
     try:
         from graphics.map_view import MapView
@@ -105,7 +105,7 @@ def main():
               hasattr(v, "nodes_drag_committed"))
         check("rubber-select state initialized",
               v._rubber_select_item is None and v._group_drag_olds == [])
-        # рамка: старт → обновление → завершение
+        # the frame: start → update → finish
         v._start_rubber_select(QPointF(0, 0))
         check("rubber item added to scene", v._rubber_select_item is not None
               and v._rubber_select_item.scene() is scene)
@@ -119,12 +119,12 @@ def main():
         FAIL += 1
     check("MapView loaded", view_cls_loaded)
 
-    # ── #6 Удаление выделенных через guarded-путь (без диалога — сцена напрямую) ──
+    # ── #6 Deleting the selected via the guarded path (no dialog — the scene directly) ──
     for nid in ("aaa11111", "bbb22222"):
         scene.remove_server(nid)
     check("scene empty after cleanup", scene.node_count() == 0)
 
-    # ── #7 CmdAddRemoveNode: undo/redo дубликата (данные копии) ──
+    # ── #7 CmdAddRemoveNode: undo/redo of the duplicate (the copy's data) ──
     d = ServerData(id="ccc33333", alias="db", host="10.0.0.9", user="root")
     add_cmd = CmdAddRemoveNode(win, scene, d, "add")
     add_cmd.redo()

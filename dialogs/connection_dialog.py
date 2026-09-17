@@ -16,40 +16,40 @@ from PySide6.QtWidgets import (
 
 
 class _LabelLineEdit(QLineEdit):
-    """QLineEdit с лимитом ВВОДА, который не обрезает уже установленный текст.
+    """QLineEdit with an INPUT limit that does not truncate already-set text.
 
-    v1.1.1 (ROADMAP пункт 6): Qt setMaxLength() ОБРЕЗАЕТ текущий текст при установке
-    лимита (проверено на PySide6 6.11: оба порядка — setText→setMaxLength и
-    setMaxLength→setText дают обрезку), и старые проекты с метками длиннее 20 символов
-    теряли хвост в EditConnectionDialog («лимит только на ввод» — старые метки читаются
-    без изменений). Поэтому лимит держит guard на textChanged: программный setText
-    (загрузка старой метки) проходит как есть, пользовательский ввод, выводящий текст
-    за max(лимит, длина при загрузке), обрезается хвостом. maxLength() отчитывает
-    установленное значение.
+    v1.1.1 (ROADMAP item 6): Qt setMaxLength() TRUNCATES the current text when the
+    limit is set (verified on PySide6 6.11: both orders — setText→setMaxLength and
+    setMaxLength→setText result in truncation), and old projects with labels longer
+    than 20 characters lost their tail in EditConnectionDialog ("limit only for input"
+    — old labels are read unchanged). So the limit is enforced by a guard on
+    textChanged: programmatic setText (loading an old label) passes through as-is,
+    while user input pushing the text past max(limit, length at load time) is cut
+    from the tail. maxLength() reports the set value.
     """
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self._input_max = 16777215   # дефолт Qt — без лимита
-        self._loaded_len = 0         # длина текста при программном setText (старая метка)
+        self._input_max = 16777215   # Qt default — no limit
+        self._loaded_len = 0         # text length at programmatic setText (old label)
         self._guarding = False
         self.textChanged.connect(self._enforce_input_limit)
-        # Текст из КОНСТРУКТОРА прошёл до подключения textChanged — считаем его
-        # загруженной (старой) меткой, иначе guard обрежет ввод по лимиту, а не
-        # по её длине.
+        # Text from the CONSTRUCTOR arrived before textChanged was connected — treat it
+        # as a loaded (old) label, otherwise the guard would cut input by the limit
+        # instead of by its length.
         self._loaded_len = len(self.text())
 
     def setMaxLength(self, n: int):
-        """Запомнить лимит ввода, не обрезая существующий текст (Qt это делает)."""
+        """Remember the input limit without truncating existing text (Qt does)."""
         self._input_max = max(0, int(n))
 
     def maxLength(self) -> int:
         return self._input_max
 
     def setText(self, text: str):
-        # Программная установка (загрузка старой метки) — не под лимит ввода;
-        # guard-флаг: textChanged от super().setText() долетает ДО обновления
-        # _loaded_len и без флага обрезал бы саму загружаемую метку.
+        # Programmatic set (loading an old label) — exempt from the input limit;
+        # guard flag: textChanged from super().setText() arrives BEFORE _loaded_len
+        # is updated and without the flag would cut the loaded label itself.
         self._guarding = True
         super().setText(text)
         self._loaded_len = len(text)
@@ -61,7 +61,7 @@ class _LabelLineEdit(QLineEdit):
         ceiling = max(self._input_max, self._loaded_len)
         if len(text) <= ceiling:
             return
-        # Избыток от ввода (печать/вставка) — обрезаем хвост; курсор — в пределах допустимого.
+        # Excess from input (typing/paste) — cut from the tail; cursor stays within the allowed range.
         self._guarding = True
         cur = min(self.cursorPosition(), ceiling)
         super().setText(text[:ceiling])
@@ -70,10 +70,10 @@ class _LabelLineEdit(QLineEdit):
 
 
 class ConnectionDialog(QDialog):
-    """Диалог создания связи между двумя узлами.
+    """Dialog for creating a connection between two nodes.
 
-    v0.7: добавлен выбор типа связи (QComboBox) и возможность префилла
-    source/target — используется режимом «перетаскивание» из MapView.
+    v0.7: added connection type selection (QComboBox) and source/target prefill
+    capability — used by the "drag" mode from MapView.
     """
 
     def __init__(self, nodes: List[ServerNode], parent=None,
@@ -103,20 +103,20 @@ class ConnectionDialog(QDialog):
         self.source = QComboBox()
         self.target = QComboBox()
         self.label = QLineEdit()
-        # v1.1.1 (ROADMAP пункт 6): лимит 20 символов — только на ВВОД (новый диалог);
-        # подсказка в i18n (connection.label_hint).
+        # v1.1.1 (ROADMAP item 6): 20-character limit — for INPUT only (new dialog);
+        # hint in i18n (connection.label_hint).
         self.label.setMaxLength(20)
         if self._i18n_available:
             self.label.setPlaceholderText(self.t("connection.label_hint"))
 
-        # Тип связи (v0.7): порядок = порядок объявления в CONNECTION_TYPES
+        # Connection type (v0.7): order = declaration order in CONNECTION_TYPES
         self.type_combo = QComboBox()
         for cid in CONNECTION_TYPES:
             display = self.t(f"connection.type.{cid}") if self._i18n_available else cid
             self.type_combo.addItem(display, cid)
 
-        # v1.2.6: двухсторонняя связь (наконечники на обоих концах). Чекбокс со
-        # СВОЕЙ подписью — addRow(widget) растягивает его на обе колонки формы.
+        # v1.2.6: bidirectional connection (arrowheads on both ends). The checkbox has
+        # ITS OWN label — addRow(widget) stretches it across both form columns.
         self.bidirectional_check = QCheckBox(
             self.t("connection.bidirectional") if self._i18n_available else "Bidirectional")
 
@@ -127,7 +127,7 @@ class ConnectionDialog(QDialog):
             self.source.addItem(text, n.data.id)
             self.target.addItem(text, n.data.id)
 
-        # Префилл source/target (drag-режим, v0.7)
+        # Prefill source/target (drag mode, v0.7)
         if default_source_id is not None:
             idx = self.source.findData(default_source_id)
             if idx >= 0:
@@ -137,20 +137,20 @@ class ConnectionDialog(QDialog):
             if idx >= 0:
                 self.target.setCurrentIndex(idx)
 
-        # Тип по умолчанию (или из старых проектов / drag-режима)
+        # Default type (or from old projects / drag mode)
         type_idx = self.type_combo.findData(
             default_type if default_type in CONNECTION_TYPES else DEFAULT_CONNECTION_TYPE)
         if type_idx >= 0:
             self.type_combo.setCurrentIndex(type_idx)
 
-        layout.addRow(self.t("connection.from") if self._i18n_available else "От:", self.source)
-        layout.addRow(self.t("connection.to") if self._i18n_available else "К:", self.target)
-        layout.addRow(self.t("connection.label") if self._i18n_available else "Метка:", self.label)
+        layout.addRow(self.t("connection.from") if self._i18n_available else "From:", self.source)
+        layout.addRow(self.t("connection.to") if self._i18n_available else "To:", self.target)
+        layout.addRow(self.t("connection.label") if self._i18n_available else "Label:", self.label)
         layout.addRow(
-            self.t("connection.type_label") if self._i18n_available else "Тип связи:",
+            self.t("connection.type_label") if self._i18n_available else "Connection type:",
             self.type_combo,
         )
-        # v1.2.6: чекбокс на всю ширину формы (подпись — текст самого чекбокса)
+        # v1.2.6: checkbox spans the full form width (label — the checkbox's own text)
         layout.addRow(self.bidirectional_check)
 
         btns = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
@@ -159,9 +159,9 @@ class ConnectionDialog(QDialog):
         layout.addRow(btns)
 
     def get_connection(self):
-        """Возвращает (source_id, target_id, label, connection_type, bidirectional).
+        """Returns (source_id, target_id, label, connection_type, bidirectional).
 
-        v1.2.6: 5-й элемент — двухсторонний режим (bool); до v1.2.6 было 4 элемента.
+        v1.2.6: the 5th element — bidirectional mode (bool); before v1.2.6 it had 4 elements.
         """
         return (
             self.source.currentData(),
@@ -173,16 +173,16 @@ class ConnectionDialog(QDialog):
 
 
 class EditConnectionDialog(QDialog):
-    """Диалог редактирования существующей связи (v0.7.3).
+    """Dialog for editing an existing connection (v0.7.3).
 
-    В отличие от ConnectionDialog узлы менять нельзя (source/target показаны
-    read-only) — редактируются только метка и тип связи.
+    Unlike ConnectionDialog, the nodes cannot be changed (source/target are shown
+    read-only) — only the label and the connection type are edited.
     """
 
     def __init__(self, arrow: "ConnectionArrow", parent=None):
         super().__init__(parent)
 
-        # ── i18n support (единообразно с ConnectionDialog) ──
+        # ── i18n support (consistent with ConnectionDialog) ──
         self._i18n_available = False
         try:
             from i18n import get_current_language as _get_lang, t as __t
@@ -198,7 +198,7 @@ class EditConnectionDialog(QDialog):
         self.setMinimumWidth(300)
         layout = QFormLayout(self)
 
-        # Source/Target — read-only (связь между конкретными узлами не меняется)
+        # Source/Target — read-only (the connection between specific nodes does not change)
         src_text = f"{arrow.source.data.alias} ({arrow.source.data.host})"
         tgt_text = f"{arrow.target.data.alias} ({arrow.target.data.host})"
         self.source = QLineEdit(src_text)
@@ -206,10 +206,10 @@ class EditConnectionDialog(QDialog):
         self.target = QLineEdit(tgt_text)
         self.target.setReadOnly(True)
 
-        # v1.1.1 (ROADMAP пункт 6): лимит 20 символов — только на ВВОД. _LabelLineEdit:
-        # Qt setMaxLength() сразу обрезает существующий текст (проверено PySide6 6.11),
-        # поэтому старые проекты с длинными метками читаются без изменений, а лимит
-        # держит guard на вводе (см. класс).
+        # v1.1.1 (ROADMAP item 6): 20-character limit — for INPUT only. _LabelLineEdit:
+        # Qt setMaxLength() immediately truncates existing text (verified on PySide6 6.11),
+        # so old projects with long labels are read unchanged, while the limit is
+        # enforced by a guard on input (see the class).
         self.label = _LabelLineEdit(getattr(arrow, "label_text", "") or "")
         self.label.setMaxLength(20)
         if self._i18n_available:
@@ -224,25 +224,25 @@ class EditConnectionDialog(QDialog):
         if type_idx >= 0:
             self.type_combo.setCurrentIndex(type_idx)
 
-        # v1.2.6: двухсторонний режим — prefill из состояния стрелки (getattr-гард:
-        # объект без атрибута, например тестовый двойник, читается как стандартный).
+        # v1.2.6: bidirectional mode — prefilled from the arrow's state (getattr guard:
+        # an object without the attribute, e.g. a test double, reads as the default).
         self.bidirectional_check = QCheckBox(
             self.t("connection.bidirectional") if self._i18n_available else "Bidirectional")
         self.bidirectional_check.setChecked(bool(getattr(arrow, "bidirectional", False)))
 
         layout.addRow(
-            self.t("connection.from") if self._i18n_available else "От:",
+            self.t("connection.from") if self._i18n_available else "From:",
             self.source)
         layout.addRow(
-            self.t("connection.to") if self._i18n_available else "К:",
+            self.t("connection.to") if self._i18n_available else "To:",
             self.target)
         layout.addRow(
-            self.t("connection.label") if self._i18n_available else "Метка:",
+            self.t("connection.label") if self._i18n_available else "Label:",
             self.label)
         layout.addRow(
-            self.t("connection.type_label") if self._i18n_available else "Тип связи:",
+            self.t("connection.type_label") if self._i18n_available else "Connection type:",
             self.type_combo)
-        # v1.2.6: чекбокс на всю ширину формы (подпись — текст самого чекбокса)
+        # v1.2.6: checkbox spans the full form width (label — the checkbox's own text)
         layout.addRow(self.bidirectional_check)
 
         btns = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
@@ -251,9 +251,9 @@ class EditConnectionDialog(QDialog):
         layout.addRow(btns)
 
     def get_connection(self):
-        """Возвращает (label, connection_type, bidirectional) — узлы фиксированы.
+        """Returns (label, connection_type, bidirectional) — the nodes are fixed.
 
-        v1.2.6: 3-й элемент — двухсторонний режим (bool); до v1.2.6 было 2 элемента.
+        v1.2.6: the 3rd element — bidirectional mode (bool); before v1.2.6 it had 2 elements.
         """
         return (self.label.text(), self.type_combo.currentData(),
                 self.bidirectional_check.isChecked())

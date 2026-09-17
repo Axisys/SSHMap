@@ -1,35 +1,39 @@
 # -*- coding: utf-8 -*-
-"""v1.2.2 (ROADMAP v1.2.2): «Терминалы» как док окно карты (terminal.mode = "tabs").
+"""v1.2.2 (ROADMAP v1.2.2): "Terminals" as a dock of the map window (terminal.mode = "tabs").
 
-TerminalDockContent — встраиваемый контейнер сессий, аналог SSHTerminalWindow.
-session_tabs (v1.2.1), но для MainWindow: QTabWidget из TerminalSessionPage +
-собственная статус-строка (label + SFTP-прогресс-бар). Контракт тот же: каждый
-таб = одна сессия, заголовок таба — alias узла, tooltip — terminal.tab_close_tooltip;
-закрытие таба = cleanup ЛОКАЛЬНОЙ страницы (gate «ask» confirm_close → единый
-teardown shutdown, соседние табы не затрагиваются). Отличие от окна: закрытие
-ПОСЛЕДНЕГО таба НЕ уничтожает контейнер — сигнал last_tab_closed (TerminalsDock
-прячет док); сессии закрываются постранично, контейнер переживает их.
+TerminalDockContent — an embeddable session container, the analog of
+SSHTerminalWindow (v1.2.1 session_tabs) but for MainWindow: a QTabWidget of
+TerminalSessionPage + its own status line (label + SFTP progress bar). The
+contract is the same: each tab = one session, tab title — the node alias,
+tooltip — terminal.tab_close_tooltip; closing a tab = cleanup of the LOCAL
+page (the "ask" confirm_close gate → unified teardown shutdown, neighboring
+tabs are untouched). Difference from the window: closing the LAST tab does
+NOT destroy the container — the last_tab_closed signal (TerminalsDock hides
+the dock); sessions are closed page by page, the container outlives them.
 
-Мост «статус-бар» — только АКТИВНЫЙ таб (паттерн v1.2.1), но в статус-строку
-САМОГО ДОКА, а не в статус-бар карты: при отрыве дока в отдельное окно сообщения
-и прогресс следуют за контейнером и не конфликтуют со статус-баре MainWindow.
+The "status bar" bridge — only the ACTIVE tab (v1.2.1 pattern), but into the
+dock's OWN status line, not the map's status bar: when the dock is floated
+into a separate window, messages and progress follow the container and do not
+conflict with MainWindow's status bar.
 
-TerminalsDock(QDockWidget) — отрываемый док (флаги по умолчанию Movable|Closable|
-Floatable): float → отдельное окно с вкладками, возврат → обратно на карту; из
-одного механизма получаются и «вкладки», и «окна». Карта остаётся центральным
-виджетом MainWindow — self.view не трогается. WA_DeleteOnClose НЕ ставится:
-контейнер живёт до закрытия MainWindow (создаётся лениво на первую сессию в
-режиме "tabs", повторное создание при переключении режима не нужно).
+TerminalsDock(QDockWidget) — a detachable dock (default flags
+Movable|Closable|Floatable): float → a separate window with tabs, back →
+back on the map; from a single mechanism come both "tabs" and "windows". The
+map remains the central widget of MainWindow — self.view is untouched.
+WA_DeleteOnClose is NOT set: the container lives until MainWindow closes
+(created lazily on the first session in "tabs" mode; recreating it on mode
+switches is not needed).
 
-Тестовые швы — те же, что у страницы (v1.2): класс потока и QMessageBox берутся
-из модуля ssh_terminal в момент вызова (TerminalSessionPage._st_module()).
+Test seams — the same as for the page (v1.2): the thread class and QMessageBox
+are taken from the ssh_terminal module at call time
+(TerminalSessionPage._st_module()).
 """
 import itertools
 
-from PySide6.QtCore import QTimer, Signal
+from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QTabWidget, QLabel, QProgressBar,
-    QDockWidget,
+    QDockWidget, QSplitter,
 )
 
 try:
@@ -37,14 +41,21 @@ try:
 except ImportError:
     from modules.terminal_page import TerminalSessionPage
 
-try:  # v1.2.5: центральная тема (статус-лейблы — ui/theme.py)
+# v1.3 (ROADMAP v1.3): the "Terminal Macros" panel — the same one as in
+# SSHTerminalWindow (a single config key ui_cmdlib_collapsed for both containers).
+try:
+    from .command_library import CommandLibraryPanel
+except ImportError:
+    from modules.command_library import CommandLibraryPanel
+
+try:  # v1.2.5: central theme (status labels — ui/theme.py)
     from ..ui import theme
 except ImportError:
     from ui import theme
 
 
 def _st_module():
-    """Модуль ssh_terminal в момент вызова (тестовый шов подмены атрибутов)."""
+    """The ssh_terminal module at call time (a test seam for attribute substitution)."""
     try:
         from . import ssh_terminal as _st
     except ImportError:
@@ -53,26 +64,27 @@ def _st_module():
 
 
 def get_translator():
-    """Safe i18n helper — как в terminal_page/ssh_terminal."""
+    """Safe i18n helper — as in terminal_page/ssh_terminal."""
     return _st_module().get_translator()
 
 
 class TerminalDockContent(QWidget):
-    """v1.2.2: контейнер сессий для дока «Терминалы» (QTabWidget из страниц).
+    """v1.2.2: session container for the "Terminals" dock (a QTabWidget of pages).
 
-    Состав: session_tabs (QTabWidget, табы закрываемые) + статус-строка
-    (status_label + sftp_progress). Страницы создаются с parent=session_tabs
-    (уничтожаются вместе с контейнером) и привязываются к контенту через
-    set_host_window(self) — close_terminal() страницы вызывает close_page(self),
-    т.е. тот же путь, что у SSHTerminalWindow (v1.2.1).
+    Composition: session_tabs (QTabWidget, closable tabs) + a status line
+    (status_label + sftp_progress). Pages are created with parent=session_tabs
+    (destroyed together with the container) and bound to the content via
+    set_host_window(self) — the page's close_terminal() calls close_page(self),
+    i.e. the same path as in SSHTerminalWindow (v1.2.1).
 
-    Мост сигналов АКТИВНОЙ страницы: status_message → status_label (timeout_ms > 0
-    — авто-очистка по таймеру с token-guard'ом), progress_busy/update/hidden →
-    sftp_progress. При переключении табов мост переподключается; сообщения
-    неактивных табов в статус-строку не доходят (вид v1.2.1).
+    Signal bridge of the ACTIVE page: status_message → status_label
+    (timeout_ms > 0 — timer-based auto-clear with a token-guard),
+    progress_busy/update/hidden → sftp_progress. On tab switch the bridge is
+    reconnected; messages of inactive tabs do not reach the status line
+    (v1.2.1 behavior).
     """
 
-    # v1.2.2: последний таб закрыт — контейнер пуст (TerminalsDock прячет док)
+    # v1.2.2: the last tab was closed — the container is empty (TerminalsDock hides the dock)
     last_tab_closed = Signal()
 
     def __init__(self, parent=None):
@@ -82,20 +94,37 @@ class TerminalDockContent(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
 
-        # v1.2.2 (задача 2): QTabWidget из TerminalSessionPage — каждый таб = одна
-        # SSH-сессия; табы закрываемые: закрытие таба = cleanup ЛОКАЛЬНОЙ страницы.
+        # v1.2.2 (task 2): a QTabWidget of TerminalSessionPage — each tab = one
+        # SSH session; tabs are closable: closing a tab = cleanup of the LOCAL page.
         self.session_tabs = QTabWidget()
         self.session_tabs.setTabsClosable(True)
         self.session_tabs.tabCloseRequested.connect(self._on_tab_close_requested)
         self.session_tabs.currentChanged.connect(self._on_current_tab_changed)
-        layout.addWidget(self.session_tabs, 1)
 
-        # Статус-строка самого дока (не статус-бар карты): при отрыве дока в окно
-        # сообщения/прогресс следуют за контейнером. Вид — как у окна терминала:
-        # sticky-текст слева, SFTP-прогресс справа (скрыт, когда передач нет).
+        # v1.3 (ROADMAP v1.3): the "Terminal Macros" panel to the left of the tabs —
+        # the same one as in SSHTerminalWindow (QSplitter [cmdlib_panel |
+        # session_tabs]; a single config key ui_cmdlib_collapsed for both
+        # containers). The panel's status messages go to the DOCK's status line
+        # via the existing _on_page_status_message bridge (token-guard; the
+        # (str, int) signature matches — no new bridge code).
+        self.cmdlib_panel = CommandLibraryPanel(self.session_tabs, parent=self)
+        self.cmdlib_panel.status_message.connect(self._on_page_status_message)
+        splitter = QSplitter(Qt.Orientation.Horizontal)
+        splitter.addWidget(self.cmdlib_panel)
+        splitter.addWidget(self.session_tabs)
+        # setCollapsible AFTER addWidget (Qt: the index would otherwise be out of range):
+        # the panel cannot be "lost" by dragging the splitter handle to zero (v1.2.4.1).
+        splitter.setCollapsible(0, False)
+        splitter.setCollapsible(1, False)
+        layout.addWidget(splitter, 1)
+
+        # The dock's own status line (not the map's status bar): when the dock is
+        # floated into a window, the messages/progress follow the container.
+        # Appearance — as in the terminal window: sticky text on the left, SFTP
+        # progress on the right (hidden when there are no transfers).
         row = QHBoxLayout()
         self.status_label = QLabel("")
-        # v1.2.5: цвет — из центральной темы (ui/theme.py); значение без изменений
+        # v1.2.5: color — from the central theme (ui/theme.py); value unchanged
         self.status_label.setStyleSheet(f"color: {theme.TEXT_MUTED}; padding: 2px 0;")
         self.sftp_progress = QProgressBar()
         self.sftp_progress.setFixedWidth(180)
@@ -105,20 +134,21 @@ class TerminalDockContent(QWidget):
         row.addWidget(self.sftp_progress)
         layout.addLayout(row)
 
-        self._bridged_page = None      # активная страница (мост статус-строки)
-        self._status_tokens = itertools.count()   # token-guard авто-очистки label
+        self._bridged_page = None      # the active page (status-line bridge)
+        self._status_tokens = itertools.count()   # token-guard for label auto-clear
         self._status_token = None
 
-    # ── v1.2.2: табы = сессии (контракт SSHTerminalWindow, v1.2.1) ────────────
+    # ── v1.2.2: tabs = sessions (SSHTerminalWindow contract, v1.2.1) ─────────
 
     def add_session(self, server_data, password: str = None,
                     initial_command: str = "") -> "TerminalSessionPage":
-        """Новая сессия = новый таб (существующий путь «подключиться к узлу»).
+        """A new session = a new tab (the existing "connect to node" path).
 
-        Страница создаётся с parent=session_tabs, привязывается к хосту
-        (set_host_window(self) — close_page живёт на контенте) и добавляется как
-        таб: заголовок — alias узла, tooltip — terminal.tab_close_tooltip. Новый
-        таб явно активируется (Qt: addTab делает текущим только ПЕРВЫЙ таб)."""
+        The page is created with parent=session_tabs, bound to the host
+        (set_host_window(self) — close_page lives on the content) and added as
+        a tab: title — the node alias, tooltip — terminal.tab_close_tooltip.
+        The new tab is activated explicitly (Qt: addTab makes only the FIRST
+        tab current)."""
         t = get_translator()
         page = TerminalSessionPage(
             server_data, parent=self.session_tabs,
@@ -129,54 +159,54 @@ class TerminalDockContent(QWidget):
         try:
             self.session_tabs.setTabToolTip(idx, t("terminal.tab_close_tooltip"))
         except RuntimeError:
-            pass  # C++-объект уже удалён (гонка закрытия) — tooltip не критичен
+            pass  # C++ object already deleted (close race) — the tooltip is not critical
         return page
 
     def close_page(self, page):
-        """Закрыть ОДИН таб — cleanup ЛОКАЛЬНОЙ страницы (gate «ask» confirm_close
-        → единый teardown shutdown); соседние табы не затрагиваются. Закрытие
-        ПОСЛЕДНЕГО таба НЕ уничтожает контейнер: сигнал last_tab_closed
-        (TerminalsDock прячет док; следующая сессия в режиме "tabs" покажет его)."""
+        """Close ONE tab — cleanup of the LOCAL page (the "ask" confirm_close gate
+        → unified teardown shutdown); neighboring tabs are untouched. Closing the
+        LAST tab does NOT destroy the container: the last_tab_closed signal
+        (TerminalsDock hides the dock; the next session in "tabs" mode will show it)."""
         idx = self.session_tabs.indexOf(page)
         if idx < 0:
-            return  # таб уже удалён (гонка teardown)
+            return  # the tab was already removed (teardown race)
         try:
             if not page.confirm_close():
-                return  # «ask» + Cancel — таб остаётся открытым
+                return  # "ask" + Cancel — the tab stays open
         except RuntimeError:
-            pass  # C++-объект уже удалён — закрываем без вопросов (как раньше)
+            pass  # C++ object already deleted — close without asking (as before)
         try:
             page.shutdown()
-        except Exception:  # noqa: BLE001 — teardown-устойчивость
+        except Exception:  # noqa: BLE001 — teardown robustness
             pass
-        self.session_tabs.removeTab(idx)   # currentChanged → мост переподключается
+        self.session_tabs.removeTab(idx)   # currentChanged → the bridge reconnects
         page.deleteLater()
         if self.session_tabs.count() == 0:
             self.last_tab_closed.emit()
 
     def _on_tab_close_requested(self, index: int):
-        """Крестик на табе (setTabsClosable) → close_page."""
+        """The X on a tab (setTabsClosable) → close_page."""
         try:
             page = self.session_tabs.widget(index)
         except RuntimeError:
-            return  # C++-объект уже удалён (гонка закрытия)
+            return  # C++ object already deleted (close race)
         if page is not None:
             self.close_page(page)
 
-    # ── v1.2.2: мост «статус-строка» — только активный таб (паттерн v1.2.1) ───
+    # ── v1.2.2: "status line" bridge — only the active tab (v1.2.1 pattern) ───
 
     def _on_current_tab_changed(self, index: int):
         try:
             page = (self.session_tabs.widget(index)
                     if 0 <= index < self.session_tabs.count() else None)
         except RuntimeError:
-            page = None  # C++-объект уже удалён (гонка закрытия)
+            page = None  # C++ object already deleted (close race)
         self._set_bridged_page(page)
 
     def _set_bridged_page(self, page):
-        """Мост сигналов АКТИВНОГО таба в статус-строку дока; при смене таба —
-        переподключение (сообщения неактивных табов не доходят). SFTP-прогресс
-        синхронизируется со состоянием активного таба."""
+        """Bridge of the ACTIVE tab's signals into the dock's status line; on tab
+        switch — reconnection (inactive tabs' messages do not arrive). SFTP
+        progress is synchronized with the active tab's state."""
         old = self._bridged_page
         if old is not None and old is not page:
             try:
@@ -185,7 +215,7 @@ class TerminalDockContent(QWidget):
                 old.progress_update.disconnect(self._on_page_progress_update)
                 old.progress_hidden.disconnect(self.sftp_progress.hide)
             except (TypeError, RuntimeError):
-                pass  # слот не был подключён / C++-объект удалён — делать нечего
+                pass  # the slot was not connected / the C++ object deleted — nothing to do
         self._bridged_page = page
         if page is None:
             return
@@ -195,48 +225,48 @@ class TerminalDockContent(QWidget):
             page.progress_update.connect(self._on_page_progress_update)
             page.progress_hidden.connect(self.sftp_progress.hide)
         except RuntimeError:
-            return  # C++-объект уже удалён (гонка закрытия) — мостить нечего
+            return  # C++ object already deleted (close race) — nothing to bridge
         try:
             if getattr(page, "_sftp_busy", 0) > 0:
-                self.sftp_progress.setRange(0, 0)   # пока не прилетел total — busy
+                self.sftp_progress.setRange(0, 0)   # until total arrives — busy
                 self.sftp_progress.setValue(0)
                 self.sftp_progress.show()
             else:
                 self.sftp_progress.hide()
         except RuntimeError:
-            pass  # C++-объект уже удалён (гонка закрытия)
+            pass  # C++ object already deleted (close race)
 
     def _on_page_status_message(self, text: str, timeout_ms: int):
-        """Сообщение активной страницы → статус-строка дока. timeout_ms > 0 —
-        авто-очистка по таймеру (token-guard: ЛЮБОЕ новое сообщение, включая
-        sticky (timeout_ms = 0), инвалидирует отложенный таймаут предыдущего)."""
+        """The active page's message → the dock's status line. timeout_ms > 0 —
+        timer-based auto-clear (token-guard: ANY new message, including sticky
+        (timeout_ms = 0), invalidates the previous pending timeout)."""
         try:
             self.status_label.setText(text)
         except RuntimeError:
-            return  # C++-объект уже удалён (гонка закрытия)
+            return  # C++ object already deleted (close race)
         token = next(self._status_tokens)
         self._status_token = token
         if timeout_ms > 0:
             try:
                 QTimer.singleShot(timeout_ms, lambda tk=token: self._expire_status(tk))
             except RuntimeError:
-                pass  # C++-объект уже удалён (гонка закрытия)
+                pass  # C++ object already deleted (close race)
 
     def _expire_status(self, token):
-        """Таймаут истёк — очистить label только если не пришло более новое."""
+        """The timeout expired — clear the label only if nothing newer arrived."""
         try:
             if token == self._status_token:
                 self.status_label.setText("")
         except RuntimeError:
-            pass  # C++-объект уже удалён (гонка закрытия)
+            pass  # C++ object already deleted (close race)
 
     def _on_page_progress_busy(self):
         try:
-            self.sftp_progress.setRange(0, 0)   # пока не прилетел total — busy
+            self.sftp_progress.setRange(0, 0)   # until total arrives — busy
             self.sftp_progress.setValue(0)
             self.sftp_progress.show()
         except RuntimeError:
-            pass  # C++-объект уже удалён (гонка закрытия)
+            pass  # C++ object already deleted (close race)
 
     def _on_page_progress_update(self, done: int, total: int):
         try:
@@ -244,25 +274,25 @@ class TerminalDockContent(QWidget):
                 self.sftp_progress.setRange(0, total)
                 self.sftp_progress.setValue(done)
             else:
-                self.sftp_progress.setRange(0, 0)   # total неизвестен — busy
+                self.sftp_progress.setRange(0, 0)   # total unknown — busy
         except RuntimeError:
-            pass  # C++-объект уже удалён (гонка закрытия)
+            pass  # C++ object already deleted (close race)
 
 
 class TerminalsDock(QDockWidget):
-    """v1.2.2 (задача 2): док «Терминалы» в MainWindow (terminal.mode = "tabs").
+    """v1.2.2 (task 2): the "Terminals" dock in MainWindow (terminal.mode = "tabs").
 
-    Отрываемый (флаги QDockWidget по умолчанию: Movable|Closable|Floatable):
-    float → отдельное окно с вкладками, возврат → обратно на карту — из одного
-    механизма получаются и «вкладки», и «окна». Карта остаётся центральным
-    виджетом MainWindow (self.view не трогается).
+    Detachable (default QDockWidget flags: Movable|Closable|Floatable): float →
+    a separate window with tabs, back → back on the map — from a single
+    mechanism come both "tabs" and "windows". The map remains the central
+    widget of MainWindow (self.view is untouched).
 
-    WA_DeleteOnClose НЕ ставится: закрытие дока (крестик в заголовке) только
-    прячет его — сессии продолжают жить (как скрытое окно; вернуть док можно из
-    контекстного меню menubar'а QMainWindow). Закрытие ПОСЛЕДНЕГО таба тоже
-    прячет док (last_tab_closed → hide), а не уничтожает: следующая сессия в
-    режиме "tabs" покажет тот же контейнер. Teardown сессий — постраничный
-    (page.shutdown()), контейнер переживает свои сессии."""
+    WA_DeleteOnClose is NOT set: closing the dock (the X in the title) only
+    hides it — the sessions keep living (like a hidden window; the dock can be
+    restored from the QMainWindow menubar's context menu). Closing the LAST tab
+    also hides the dock (last_tab_closed → hide), not destroys: the next session
+    in "tabs" mode will show the same container. Session teardown — page by page
+    (page.shutdown()); the container outlives its sessions."""
 
     def __init__(self, main_window=None):
         t = get_translator()
@@ -271,6 +301,7 @@ class TerminalsDock(QDockWidget):
         self.content = TerminalDockContent(self)
         self.setWidget(self.content)
         self.setMinimumWidth(300)
-        # v1.2.2 (задача 3): последний таб закрыт — сессии уже очищены постранично,
-        # контейнер пуст: прячем док (не уничтожаем — см. docstring).
+        # v1.2.2 (task 3): the last tab was closed — the sessions were already
+        # cleaned up page by page, the container is empty: hide the dock (do not
+        # destroy it — see the docstring).
         self.content.last_tab_closed.connect(self.hide)

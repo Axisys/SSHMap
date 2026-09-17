@@ -1,21 +1,21 @@
-"""Ревью-фиксы v0.8.0: elide/макс. ширина узлов, маркеры статусов в сайдбаре (бывш. smoke_test).
+"""Review fixes v0.8.0: node elide/max width, status markers in the sidebar (former smoke_test).
 
-Часть сьюта, разбитого из smoke_test.py v0.6–v0.9.2 (см. INDEX.md).
-  * #4 узел с длинным alias/host/comment → потолок MAX_NODE_WIDTH + полный текст в tooltip'ах
-    (elide-инвариант шрифто-независимый: либо полный текст без tooltip, либо elided + tooltip;
-    правый край не заходит под точки [W-46, W-10]);
-  * узел с крошечным контентом → MIN-размер; идемпотентность update_appearance;
-  * #3 маркеры статусов в дереве сайдбара: иконка строки + live-обновление без пересбора
-    (idle серый → online зелёный, tooltip i18n с host, неизвестный статус игнорируется,
-    refresh_sidebar пересобирает строки с текущими маркерами).
+A part of the suite split out of smoke_test.py v0.6–v0.9.2 (see INDEX.md).
+  * #4 the node with a long alias/host/comment → the cap MAX_NODE_WIDTH + the full text in the tooltips
+    (the elide invariant is font-independent: either the full text without the tooltip, or elided + the tooltip;
+    the right edge does not slip under the dots [W-46, W-10]);
+  * the node with a tiny content → the MIN size; the idempotency of update_appearance;
+  * #3 the status markers in the sidebar tree: the icon of the row + the live update without the rebuild
+    (the idle gray → the online green, the i18n tooltip with the host, the unknown status is ignored,
+    refresh_sidebar rebuilds the rows with the current markers).
 
-Запуск: python tests/test_node_labels.py   (из корня проекта) или python tests/run_all.py
+Run: python tests/test_node_labels.py   (from the project root) or python tests/run_all.py
 """
 import sys
 
 from _common import bootstrap, check, finish
 
-ROOT, WORK = bootstrap()  # ДО импортов модулей приложения
+ROOT, WORK = bootstrap()  # BEFORE the app module imports
 
 from PySide6.QtWidgets import QApplication
 app = QApplication(sys.argv)
@@ -24,19 +24,19 @@ import ui.main_window as MW
 from models.server import ServerData
 from graphics.server_node import ServerNode as _SN
 
-# ══ Ревью-фиксы v0.8.0: elide/макс.ширина узлов, маркеры статусов в сайдбаре ═══
-# (#1 центрирование _add_server покрыт test_ssh_terminal.py; #2 версия — test_connections.py)
+# ══ The review fixes v0.8.0: the elide/the max width of the nodes, the status markers in the sidebar ═══
+# (#1 centering of _add_server is covered by test_ssh_terminal.py; #2 the version — test_connections.py)
 print("== review fixes v0.8.0 ==")
 
-from PySide6.QtGui import QFontMetrics as _QFM  # ревью-фикс v0.8.0 (#4)
+from PySide6.QtGui import QFontMetrics as _QFM  # the review fix v0.8.0 (#4)
 
 win_rev = MW.MainWindow()
 win_rev.show(); app.processEvents()
 
 
 def _label_invariant(node, item, fm, source):
-    """Elide-инвариант подписи (шрифто-независимый): либо полный текст без tooltip,
-    либо elided + полный текст в tooltip; правый край не заходит под точки [W-46, W-10]."""
+    """The elide invariant of the caption (font-independent): either the full text with no tooltip,
+    or elided + the full text in the tooltip; the right edge does not slip under the dots [W-46, W-10]."""
     rendered = item.toPlainText()
     ovh = max(0.0, item.boundingRect().width() - fm.horizontalAdvance(rendered)) if rendered else 0.0
     end = 55 + fm.horizontalAdvance(rendered) + ovh
@@ -47,7 +47,7 @@ def _label_invariant(node, item, fm, source):
     return item.toolTip() == "" and rendered == source and zone_ok, detail
 
 
-# #4: узел с длинным alias/host/comment → потолок MAX_NODE_WIDTH + полный текст в tooltip'ах
+# #4: a node with a long alias/host/comment → the MAX_NODE_WIDTH ceiling + full text in the tooltips
 rev_alias = "production-web-server-04-eu-west-1-cluster-node"
 rev_host = "very-long-hostname.example.corp.internal-dns-name"
 rev_comment = "x" * 300
@@ -68,7 +68,7 @@ check("info tooltip carries the full (unelided) text block",
       bool(n_rev._info.toolTip()) and rev_comment in n_rev._info.toolTip() and "RAM: 512 gb" in n_rev._info.toolTip(),
       f"tip_len={len(n_rev._info.toolTip() or '')}")
 
-# #4: узел с крошечным контентом → MIN-размер, elide не нужен; идемпотентность пересборки
+# #4: a node with tiny content → MIN size, no elide needed; rebuild idempotency
 n_tiny = win_rev.scene.add_server(ServerData(id="revtiny", alias="A", host="h", user="u"))
 check("tiny node keeps MIN width (no stretch)", n_tiny._current_width == _SN.MIN_NODE_WIDTH, str(n_tiny._current_width))
 _snap = (n_rev._current_width, n_rev._alias.toPlainText(), n_rev._info.toPlainText())
@@ -76,7 +76,7 @@ n_rev.update_appearance()
 check("update_appearance idempotent (width+texts stable)",
       (n_rev._current_width, n_rev._alias.toPlainText(), n_rev._info.toPlainText()) == _snap)
 
-# #3: маркеры статусов в дереве сайдбара — иконка строки + live-обновление без пересбора
+# #3: status markers in the sidebar tree — row icon + live update without a rebuild
 win_rev.refresh_sidebar()
 check("sidebar has a row per node with status icon",
       win_rev.tree.topLevelItemCount() == 2 and not win_rev.tree.topLevelItem(0).icon(0).isNull())

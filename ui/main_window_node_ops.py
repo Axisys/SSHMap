@@ -1,25 +1,29 @@
-"""NodeOpsMixin — кластер «операции над узлами и связями карты».
+"""NodeOpsMixin — the "operations on the map's nodes and connections" cluster.
 
-v1.1.4 (ROADMAP v1.1.4, задача 2): вынесен из ui/main_window.py в рамках серии
-«Гигиена main_window.py». Паттерн «модуль + колбэки» (прецеденты v0.9.9.4 сайдбар,
-v0.9.9.3 diagnostics): миксин — только методы, MainWindow остаётся фасадом,
-публичный API не меняется; имена методов и точки вызова не трогались.
+v1.1.4 (ROADMAP v1.1.4, task 2): moved out of ui/main_window.py as part of
+the "main_window.py hygiene" series. "Module + callbacks" pattern
+(precedents: v0.9.9.4 sidebar, v0.9.9.3 diagnostics): the mixin holds only
+methods, MainWindow remains the facade, the public API is unchanged; method
+names and call sites were not touched.
 
-В кластер вошёл весь импорт из TXT (``_import_servers_from_txt`` + слоты потока
-``_on_import_resolve_progress``/``_on_import_resolved`` и сборка
-``_finish_import_from_txt``) — это одна фича, разорвать её по файлам нельзя.
+The cluster includes the entire TXT import (``_import_servers_from_txt`` +
+the thread slots ``_on_import_resolve_progress``/``_on_import_resolved`` and
+the assembly ``_finish_import_from_txt``) — it is one feature and cannot be
+split across files.
 
-Владение общим состоянием (AUDIT §3): узлы/связи живут на ``self.scene``,
-undo-стек и ``_dirty`` — в ядре (MainWindow); потоки ping/DNS/import держатся
-на инстансе (``self._ping_thread``/``self._dns_thread``/``self._import_resolve_thread``
-+ контекст пачки ``self._import_pending/_import_path/_import_skipped``).
-Миксин НЕ импортирует ui.main_window (цикл) — только duck-typing по инстансу;
-диалоги (AddServerDialog/ConnectionDialog) берутся из модуля-фасада в момент
-вызова (host_attr) — тестовый шов подмены ``MW.AddServerDialog``/``MW.ConnectionDialog``.
+Ownership of shared state (AUDIT §3): the nodes/connections live on
+``self.scene``, the undo stack and ``_dirty`` — in the core (MainWindow);
+the ping/DNS/import threads are held on the instance
+(``self._ping_thread``/``self._dns_thread``/``self._import_resolve_thread``
++ the batch context ``self._import_pending/_import_path/_import_skipped``).
+The mixin does NOT import ui.main_window (cycle) — duck-typing on the
+instance only; the dialogs (AddServerDialog/ConnectionDialog) are taken
+from the facade module at call time (host_attr) — the test seam for
+``MW.AddServerDialog``/``MW.ConnectionDialog`` monkeypatching.
 
-``_is_scene_point`` переехал сюда вместе с кластером (AUDIT §3: «модульные
-глобальные едут в свой миксин или остаются в ядре»); main_window.py импортирует
-его обратно — ``_add_group_at`` (группы, ядро) пользуется тем же guard'ом.
+``_is_scene_point`` moved here with the cluster (AUDIT §3: "module-level
+globals go to their own mixin or stay in the core"); main_window.py imports
+it back — ``_add_group_at`` (groups, the core) uses the same guard.
 """
 from PySide6.QtWidgets import QDialog, QMessageBox, QApplication
 
@@ -28,19 +32,19 @@ try:
 except ImportError:
     from graphics.server_node import ServerNode
 
-try:  # v1.1.4: общий шов подмены глобальных модуля-фасада (см. mixin_support)
+try:  # v1.1.4: the common seam for monkeypatching the facade module's globals (see mixin_support)
     from .mixin_support import host_attr
 except ImportError:
     from mixin_support import host_attr
 
 
 def _is_scene_point(value) -> bool:
-    """v0.8.1: передана ли точка сцены (QPoint/QPointF), а не что-то другое.
+    """v0.8.1: is a scene point (QPoint/QPointF) passed, and not something else.
 
-    QAction.triggered передаёт Python-слоту bool `checked` — при прямом
-    подключении действия (тулбар/меню) он приходит первым позиционным
-    аргументом. Без этой проверки `_add_server(True)` падал на `center.x()`
-    («'bool' object has no attribute 'x'»).
+    QAction.triggered passes the bool `checked` to a Python slot — when the
+    action is connected directly (toolbar/menu) it arrives as the first
+    positional argument. Without this check `_add_server(True)` crashed on
+    `center.x()` ("'bool' object has no attribute 'x'").
     """
     if value is None or isinstance(value, bool):
         return False
@@ -50,43 +54,43 @@ def _is_scene_point(value) -> bool:
 
 
 class NodeOpsMixin:
-    """Методы узлов/связей: add/import/duplicate/delete/connect/copy/ping."""
+    """Node/connection methods: add/import/duplicate/delete/connect/copy/ping."""
 
     def _add_server(self, at_scene_pos=None):
-        """Создать сервер (атрибут `at_scene_pos` — точка клика из контекстного меню)."""
-        data = None  # чтобы except-ветка не падала на несуществующей переменной (бывш. AUDIT.md)
+        """Create a server (the `at_scene_pos` attribute — the click point from the context menu)."""
+        data = None  # so the except branch does not fall over a nonexistent variable (former AUDIT.md)
         try:
             dlg_cls = host_attr(self, "AddServerDialog")
             if dlg_cls is None:
-                raise RuntimeError("AddServerDialog недоступен в модуле MainWindow")
+                raise RuntimeError("AddServerDialog is not available in the MainWindow module")
             dlg = dlg_cls(self)
             if dlg.exec() == QDialog.Accepted:
                 data = dlg.get_data()
-                # Позиция: точка клика (ПКМ-меню, v0.7.2) или центр видимой области.
-                # v0.8.1: принимаем позицию только если это действительно точка —
-                # QAction.triggered (тулбар/меню) шлёт в слот bool `checked`, который
-                # раньше попадал сюда как at_scene_pos и ронял `center.x()`.
+                # Position: the click point (right-click menu, v0.7.2) or the center of the visible area.
+                # v0.8.1: accept the position only if it really is a point —
+                # QAction.triggered (toolbar/menu) sends the bool `checked` to the slot,
+                # which earlier landed here as at_scene_pos and crashed `center.x()`.
                 if _is_scene_point(at_scene_pos):
                     center = at_scene_pos
                 else:
                     center = self.view.mapToScene(self.view.viewport().rect().center())
-                # Ревью-фикс v0.8.0 (#1): оффсеты — половины базового размера узла
-                # (MIN_NODE_WIDTH=180 / MIN_NODE_HEIGHT=130 → 90/65), чтобы новый узел
-                # центрировался под точкой клика, а не смещался вправо-вниз от курсора.
+                # Review fix v0.8.0 (#1): the offsets are half the base node size
+                # (MIN_NODE_WIDTH=180 / MIN_NODE_HEIGHT=130 → 90/65), so the new node
+                # is centered under the click point, not shifted down-right from the cursor.
                 data.x = center.x() - ServerNode.MIN_NODE_WIDTH / 2
                 data.y = center.y() - ServerNode.MIN_NODE_HEIGHT / 2
-                # v0.8.3: узел создаёт команда undo (push сам выполняет redo)
+                # v0.8.3: the node is created by an undo command (the push itself performs the redo)
                 from modules.undo_commands import CmdAddRemoveNode
                 self._push_command(CmdAddRemoveNode(self, self.scene, data, "add"))
                 node = self.scene.get_node(data.id)
                 self.refresh_sidebar()
-                self._sync_status_targets()  # v0.7.1: новый узел — в план проверок
+                self._sync_status_targets()  # v0.7.1: the new node — into the check plan
                 if self.log:
                     self.log.info("Server added", extra={"alias": data.alias, "host": data.host})
                 self.statusBar().showMessage(self.t("status.server_added", alias=data.alias))
                 self._mark_dirty()  # ← unsaved changes
-                # v0.9.5.6: «Подключиться по SSH» из диалога добавления — узел
-                # уже создан, сразу открываем SSH-диалог (пароль предзаполнен).
+                # v0.9.5.6: "Connect via SSH" from the add dialog — the node
+                # is already created; open the SSH dialog right away (the password is prefilled).
                 if getattr(dlg, "_connect_after_accept", False):
                     self._run_ssh_connect(node, prefill_password=dlg.password.text())
         except Exception as e:
@@ -95,16 +99,18 @@ class NodeOpsMixin:
             QMessageBox.critical(self, self.t("msg.error_title"), self.t("msg.add_failed", error=str(e)))
 
     def _import_servers_from_txt(self):
-        """v0.9.5.5: массовый импорт серверов из текстового файла.
+        """v0.9.5.5: bulk import of servers from a text file.
 
-        Формат: по одному хосту в строке (IP или DNS-имя), '#'/'//' — комментарии.
-        IP → host=IP; имя → резолвим в IP (поле `ip`), host остаётся именем.
-        Дубликаты (уже на карте или повтор в файле) пропускаются. Один узел undo —
-        вся пачка добавляется/откатывается одной командой CmdAddRemoveNodeBatch.
+        Format: one host per line (IP or DNS name), '#'/'//' — comments.
+        IP → host=IP; a name → resolved to an IP (the `ip` field), host stays
+        the name. Duplicates (already on the map or repeated in the file) are
+        skipped. A single undo unit — the whole batch is added/rolled back by
+        one CmdAddRemoveNodeBatch command.
 
-        v1.1.2RC2 (N6): DNS-резолв имён — вне GUI-потока (HostResolverThread,
-        прогресс в статус-баре): файл с десятками имён при недоступном резолвере
-        не замораживает интерфейс. IP-адреса резолва не требуют — добавляются сразу.
+        v1.1.2RC2 (N6): the DNS name resolution — off the GUI thread
+        (HostResolverThread, the progress in the status bar): a file with
+        dozens of names with an unavailable resolver no longer freezes the
+        interface. IP addresses need no resolution — they are added immediately.
         """
         from PySide6.QtWidgets import QFileDialog
 
@@ -122,11 +128,12 @@ class NodeOpsMixin:
             return
 
         from services.host_importer import parse_hosts_file, is_ip_address
-        # v1.2.10rc2 (AUDIT ручной #5b): убран file_dups-призрак — раньше рядом жила
-        # переменная, всегда равная пустому списку; реальная дедупликация делается
-        # руками ниже (case-insensitive + хосты, уже на карте).
+        # v1.2.10rc2 (AUDIT manual #5b): the file_dups ghost is removed — earlier a
+        # variable living nearby was always equal to an empty list; the real
+        # deduplication is done manually below (case-insensitive + hosts already
+        # on the map).
         entries = parse_hosts_file(text)
-        # Дедупликация строк файла (без учёта регистра)
+        # Deduplication of the file lines (case-insensitive)
         seen, unique_entries = set(), []
         for e in entries:
             if e.lower() in seen:
@@ -134,7 +141,7 @@ class NodeOpsMixin:
             seen.add(e.lower())
             unique_entries.append(e)
 
-        # Хосты/IP, уже присутствующие на карте — тоже дубликаты
+        # Hosts/IPs already present on the map — also duplicates
         existing = set()
         for node in self.scene.nodes():
             d = node.data
@@ -142,7 +149,7 @@ class NodeOpsMixin:
             if d.ip:
                 existing.add(d.ip.lower())
 
-        pending, skipped = [], 0   # v1.2.10rc2 (#5b): file_dups-призрак убран — счётчик с нуля
+        pending, skipped = [], 0   # v1.2.10rc2 (#5b): the file_dups ghost is removed — the counter starts at zero
         for entry in unique_entries:
             if entry.lower() in existing:
                 skipped += 1
@@ -157,16 +164,17 @@ class NodeOpsMixin:
 
         dns_entries = [e for e in pending if not is_ip_address(e)]
         if not dns_entries:
-            # Только IP-адреса — резолв не нужен, собираем синхронно (без потока)
+            # IP addresses only — no resolution needed, assemble synchronously (no thread)
             self._finish_import_from_txt(pending, {}, path, skipped)
             return
 
-        # v1.1.2RC2 (N6): имена — в отдельный поток; GUI остаётся отзывчивым,
-        # прогресс резолва виден в статус-баре. Контекст пачки держим на окне —
-        # resolved_map придёт queued-сигналом уже после возврата из этого метода.
+        # v1.1.2RC2 (N6): the names — to a separate thread; the GUI stays
+        # responsive, the resolution progress is visible in the status bar.
+        # The batch context is held on the window — resolved_map arrives as a
+        # queued signal only after this method has returned.
         from services.host_importer import HostResolverThread
         thread = HostResolverThread(dns_entries, parent=self)
-        self._import_resolve_thread = thread  # держим ссылку — поток не должен стать orphan'ом
+        self._import_resolve_thread = thread  # hold the reference — the thread must not become an orphan
         self._import_pending = pending
         self._import_path = path
         self._import_skipped = skipped
@@ -177,20 +185,20 @@ class NodeOpsMixin:
         thread.start()
 
     def _on_import_resolve_progress(self, done: int, total: int):
-        """v1.1.2RC2 (N6): прогресс DNS-резолва импорта — в статус-баре."""
+        """v1.1.2RC2 (N6): the DNS resolution progress of the import — in the status bar."""
         try:
             self.statusBar().showMessage(
                 self.t("status.import_resolving", done=done, total=total))
         except RuntimeError:
-            pass  # Qt teardown — окно уже уничтожено
+            pass  # Qt teardown — the window is already destroyed
 
     def _on_import_resolved(self, resolved_map):
-        """v1.1.2RC2 (N6): резолв завершён (GUI-поток) — собираем узлы и добавляем."""
+        """v1.1.2RC2 (N6): the resolution is finished (GUI thread) — assemble the nodes and add them."""
         thread = getattr(self, "_import_resolve_thread", None)
         if thread is not None:
             self._import_resolve_thread = None
             try:
-                thread.deleteLater()  # run() завершён — поток можно отдать Qt
+                thread.deleteLater()  # run() is done — the thread can be handed to Qt
             except RuntimeError:
                 pass  # Qt teardown
         pending = list(getattr(self, "_import_pending", None) or [])
@@ -200,17 +208,18 @@ class NodeOpsMixin:
         self._import_path = None
         self._import_skipped = 0
         if not pending:
-            return  # окно закрылось во время резолва (stop()) — импорт не доведён
+            return  # the window was closed during the resolution (stop()) — the import was not completed
         try:
             self._finish_import_from_txt(pending, dict(resolved_map or {}), path, skipped)
         except RuntimeError:
-            pass  # Qt teardown — виджеты уже уничтожены
+            pass  # Qt teardown — the widgets are already destroyed
 
     def _finish_import_from_txt(self, pending, resolved_map, path, skipped):
-        """v1.1.2RC2 (N6): сборка ServerData + раскладка сеткой + одна undo-команда.
+        """v1.1.2RC2 (N6): the ServerData assembly + the grid layout + one undo command.
 
-        `resolved_map` — {имя: IP или None} из HostResolverThread; IP-адреса в
-        нём отсутствуют (резолва не требовали) и берутся как есть.
+        `resolved_map` — {name: IP or None} from HostResolverThread; IP
+        addresses are absent from it (they needed no resolution) and are
+        taken as-is.
         """
         import uuid as _uuid
         from services.host_importer import is_ip_address
@@ -232,7 +241,7 @@ class NodeOpsMixin:
             )
             added_data.append(data)
 
-        # Раскладка импортированных узлов сеткой от центра видимой области
+        # The imported nodes are laid out in a grid from the center of the visible area
         center = self.view.mapToScene(self.view.viewport().rect().center())
         col_w, row_h, cols = ServerNode.MIN_NODE_WIDTH + 30, ServerNode.MIN_NODE_HEIGHT + 30, 6
         for i, data in enumerate(added_data):
@@ -254,9 +263,9 @@ class NodeOpsMixin:
                                        added=len(added_data), skipped=skipped))
 
     def _add_connection(self, default_source_id=None, default_target_id=None):
-        """Создать связь: диалог с выбором узлов, метки и типа (v0.7).
+        """Create a connection: the dialog with the node, label and type choice (v0.7).
 
-        Параметры prefill используются drag-режимом MapView (Shift+перетаскивание).
+        The prefill parameters are used by the MapView drag mode (Shift+drag).
         """
         nodes = list(self.scene.nodes())
         if len(nodes) < 2:
@@ -267,26 +276,26 @@ class NodeOpsMixin:
         try:
             dlg_cls = host_attr(self, "ConnectionDialog")
             if dlg_cls is None:
-                raise RuntimeError("ConnectionDialog недоступен в модуле MainWindow")
+                raise RuntimeError("ConnectionDialog is not available in the MainWindow module")
             dlg = dlg_cls(
                 nodes, self,
                 default_source_id=default_source_id,
                 default_target_id=default_target_id,
             )
             if dlg.exec() == QDialog.Accepted:
-                # get_connection() возвращает id узлов (строки), а не объекты ServerNode;
-                # 4-й элемент — тип связи (v0.7), 5-й — двухсторонний режим (v1.2.6)
+                # get_connection() returns the node ids (strings), not ServerNode objects;
+                # the 4th element — the connection type (v0.7), the 5th — the bidirectional mode (v1.2.6)
                 src, tgt, lbl, ctype, bidir = dlg.get_connection()
                 if src == tgt:
                     QMessageBox.warning(self, self.t("msg.error_title"), 
                                       self.t("validation.self_connection"))
                     return
-                # v0.8.3: связь создаёт undo-команда (push сам выполняет redo)
+                # v0.8.3: the connection is created by an undo command (the push itself performs the redo)
                 from modules.undo_commands import CmdAddRemoveConnection
                 self._push_command(CmdAddRemoveConnection(
                     self, self.scene, src, tgt, lbl, ctype, "add", bidirectional=bidir))
                 if not self.scene.has_connection(src, tgt):
-                    # команда не смогла создать (узлы исчезли?) — как раньше, предупреждение
+                    # the command could not create it (the nodes vanished?) — the warning, as before
                     QMessageBox.warning(self, self.t("msg.error_title"),
                                         self.t("validation.connection_error"))
                     return
@@ -297,7 +306,7 @@ class NodeOpsMixin:
                     if src_node and tgt_node:
                         self.log.info("Connection added", extra={"source": src_node.data.alias, "target": tgt_node.data.alias})
                 self.statusBar().showMessage(self.t("status.connection_added"))
-                self._update_counts_label()  # UI polish: счётчик связей в статус-баре
+                self._update_counts_label()  # UI polish: the connection counter in the status bar
                 self._mark_dirty()  # ← unsaved changes
         except Exception as e:
             if self.log:
@@ -305,11 +314,12 @@ class NodeOpsMixin:
             QMessageBox.critical(self, self.t("msg.error_title"), self.t("msg.create_connection_failed", error=str(e)))
 
     def _duplicate_node(self, node: "ServerNode", offset: float = 40.0):
-        """Ctrl+D / ПКМ: копия узла (все поля, кроме id) со смещением.
+        """Ctrl+D / right click: a copy of the node (all fields except id) with an offset.
 
-        Пароль в JSON не хранится — он лежит в keyring по server_id, поэтому
-        для копии загружаем пароль исходника и сохраняем под НОВЫМ id.
-        Возвращает новый ServerNode или None (узел не найден).
+        The password is not stored in the JSON — it lives in the keyring by
+        server_id, so for the copy we load the original's password and save
+        it under the NEW id. Returns the new ServerNode or None (the node was
+        not found).
         """
         if node is None or node.scene() is None:
             return None
@@ -317,21 +327,21 @@ class NodeOpsMixin:
         data = _copy.deepcopy(node.data)
         data.x = float(node.data.x) + offset
         data.y = float(node.data.y) + offset
-        # новый уникальный id
+        # a new unique id
         import uuid as _uuid
         while True:
             new_id = str(_uuid.uuid4())[:8]
             if not self.scene.has_node(new_id):
                 break
         data.id = new_id
-        # v0.9.3: пароль из keyring по server_id нового узла (задача #1)
+        # v0.9.3: the password from the keyring by the new node's server_id (task #1)
         try:
             from services.credential_manager import get_credential_manager
             cm = get_credential_manager()
             pw = cm.load_password(node.data.id)
             if pw:
                 cm.save_password(new_id, pw)
-        except Exception:  # noqa: BLE001 — keyring недоступен: копия без пароля
+        except Exception:  # noqa: BLE001 — the keyring is unavailable: the copy has no password
             pass
         from modules.undo_commands import CmdAddRemoveNode
         self._push_command(CmdAddRemoveNode(self, self.scene, data, "add"))
@@ -345,7 +355,7 @@ class NodeOpsMixin:
         return new_node
 
     def _duplicate_selected_node(self):
-        """Ctrl+D: продублировать выделенный узел; новый узел становится выделенным."""
+        """Ctrl+D: duplicate the selected node; the new node becomes selected."""
         node = self.scene.get_selected_node()
         if not node:
             QMessageBox.information(self, self.t("msg.info_title"),
@@ -357,20 +367,20 @@ class NodeOpsMixin:
         return new_node
 
     def selected_nodes(self) -> list:
-        """v0.9.3: все выделенные узлы карты (в порядке сцены)."""
+        """v0.9.3: all selected map nodes (in scene order)."""
         try:
             return [i for i in self.scene.selectedItems() if isinstance(i, ServerNode)]
         except RuntimeError:
             return []
 
     def _delete_selected_nodes(self):
-        """v0.9.3: удалить ВСЕ выделенные узлы (каждый через guarded-путь)."""
+        """v0.9.3: delete ALL selected nodes (each via the guarded path)."""
         nodes = self.selected_nodes()
         if not nodes:
             QMessageBox.information(self, self.t("msg.info_title"),
                                     self.t("msg.select_server_edit"))
             return False
-        # одно подтверждение на всю группу; v1.2.4 (D7): + закреплённые заметки (сумма)
+        # a single confirmation for the whole group; v1.2.4 (D7): + attached notes (the sum)
         attached_total = sum(
             len(self.scene.notes_attached_to(n.data.id)) for n in nodes)
         if self._i18n_available:
@@ -379,10 +389,10 @@ class NodeOpsMixin:
                 confirm_text += "\n" + self.t("msg.delete_server_with_notes").format(
                     count=attached_total)
         else:
-            confirm_text = f"Удалить серверы ({len(nodes)})?"
+            confirm_text = f"Delete {len(nodes)} selected servers?\nEach will be checked for running SSH sessions."
         reply = QMessageBox.question(
             self,
-            self.t("dialog.confirm_delete") if self._i18n_available else "Подтверждение",
+            self.t("dialog.confirm_delete") if self._i18n_available else "Confirm Deletion",
             confirm_text,
             QMessageBox.Yes | QMessageBox.No,
             QMessageBox.No
@@ -392,17 +402,17 @@ class NodeOpsMixin:
         deleted = 0
         for node in list(nodes):
             if node.scene() is None:
-                continue  # уже удалён вместе со своей стрелкой ранее в цикле
+                continue  # already deleted with its arrow earlier in the loop
             if not self._ensure_worker_done(node.data.id):
                 continue
             alias = node.data.alias
-            # v1.2.4 (D7): detach-команды этого узла — ПЕРЕД его удалением (LIFO:
-            # undo вернёт сначала узел, затем переприкрепит заметки)
+            # v1.2.4 (D7): this node's detach commands — BEFORE its removal (LIFO:
+            # undo will first restore the node, then re-attach the notes)
             from modules.undo_commands import CmdAttachNote
             for n in list(self.scene.notes_attached_to(node.data.id)):
                 self._push_command(CmdAttachNote(self, n, node.data.id, "detach"))
             arrows = [
-                # v1.2.6: 5-й элемент — двухсторонний режим (undo вернёт связь как была)
+                # v1.2.6: the 5th element — the bidirectional mode (undo restores the connection as it was)
                 (a.source.data.id, a.target.data.id, a.label_text, a.connection_type,
                  bool(getattr(a, "bidirectional", False)))
                 for a in self.scene.arrows()
@@ -424,10 +434,11 @@ class NodeOpsMixin:
         return True
 
     def _connect_selected_nodes(self):
-        """v0.9.3: создать связи между всеми парами выделенных узлов (полный граф).
+        """v0.9.3: create connections between all pairs of selected nodes (a full graph).
 
-        Каждый узел соединяется с каждым (без петель и дублей); тип связи —
-        по умолчанию, метка пустая. Undo откатывает всё одной командой.
+        Each node is connected to each (no self-loops and no duplicates); the
+        connection type — the default, the label is empty. Undo rolls back
+        everything with a single command.
         """
         nodes = self.selected_nodes()
         if len(nodes) < 2:
@@ -456,11 +467,12 @@ class NodeOpsMixin:
         return True
 
     def _copy_node_info(self, node: "ServerNode", what: str = "ip"):
-        """Скопировать IP или hostname узла в буфер обмена (v0.7.3).
+        """Copy the node's IP or hostname to the clipboard (v0.7.3).
 
-        AUDIT v0.7.2 (средняя #6): обратный DNS (gethostbyaddr) выполняется в отдельном
-        потоке — при недоступном резолвере GUI-поток раньше замерзал на таймауте DNS.
-        v0.9.9.3: поток вынесен в services/diagnostics.py (ReverseDnsThread).
+        AUDIT v0.7.2 (medium #6): the reverse DNS (gethostbyaddr) runs in a
+        separate thread — with an unavailable resolver the GUI thread earlier
+        froze on the DNS timeout.
+        v0.9.9.3: the thread was moved to services/diagnostics.py (ReverseDnsThread).
         """
         if node is None:
             return
@@ -473,24 +485,27 @@ class NodeOpsMixin:
 
         if what == "hostname":
             host = node.data.host
-            from services.diagnostics import ReverseDnsThread  # v0.9.9.3: был вложенным классом
+            from services.diagnostics import ReverseDnsThread  # v0.9.9.3: was a nested class
 
-            # AUDIT v1.2.10 (авто #2): не затираем ещё работающий DNS-поток — тот же
-            # guard, что у ping (_ping_node ниже): второй «Copy Hostname», пока первый
-            # запрос жив (getaddrinfo может висеть до таймаута резолвера), раньше
-            # перезаписывал self._dns_thread, и старый поток становился orphan'ом
-            # (closeEvent останавливает только ТЕКУЩИЙ _dns_thread). Игнорируем и
-            # показываем статус-сообщение. i18n: без новых ключей — существующий
-            # status.import_resolving («Резолвим имена хостов… 0/1»).
+            # AUDIT v1.2.10 (auto #2): do not clobber a still-running DNS thread —
+            # the same guard as for ping (_ping_node below): a second "Copy
+            # Hostname" while the first request is alive (getaddrinfo may hang
+            # until the resolver timeout) earlier overwrote self._dns_thread,
+            # and the old thread became an orphan (closeEvent stops only the
+            # CURRENT _dns_thread). We ignore it and show a status message.
+            # i18n: no new keys — the existing status.import_resolving
+            # ("Resolving host names… 0/1").
             if self._dns_thread is not None and self._dns_thread.isRunning():
                 self.statusBar().showMessage(
                     self.t("status.import_resolving", done=0, total=1))
                 return
 
-            # v1.2.10rc1: parent=self — C++-объект потока имеет владельца, пока живо
-            # окно (гонки GC на живом QThread исключены); переживший wait-бюджет
-            # шатдауна поток регистрируется в orphan-реестре (services/diagnostics.
-            # register_orphan_thread — паттерн N4, как _orphan_threads ssh_terminal).
+            # v1.2.10rc1: parent=self — the thread's C++ object has an owner
+            # while the window is alive (GC races on a live QThread are
+            # excluded); a thread that outlives the shutdown wait budget is
+            # registered in the orphan registry (services/diagnostics.
+            # register_orphan_thread — the N4 pattern, like ssh_terminal's
+            # _orphan_threads).
             thread = ReverseDnsThread(host, parent=self)
 
             def _on_dns_done(name):
@@ -499,35 +514,37 @@ class NodeOpsMixin:
                         self._dns_thread = None
                     _copy(name, "hostname")
                 except RuntimeError:
-                    # v1.2.10rc1 (AUDIT авто #2): доставка сигнала после teardown —
-                    # C++-объекты statusBar()/clipboard() уже удалены; поздний emit
-                    # без живого окна безопасен (окно закрыто, копировать некуда).
+                    # v1.2.10rc1 (AUDIT auto #2): the signal delivered after teardown —
+                    # the statusBar()/clipboard() C++ objects are already deleted;
+                    # a late emit without a live window is safe (the window is
+                    # closed, there is nowhere to copy).
                     pass
 
             thread.resolved.connect(_on_dns_done)
-            self._dns_thread = thread  # держим ссылку — поток не должен стать orphan'ом
+            self._dns_thread = thread  # hold the reference — the thread must not become an orphan
             thread.start()
             return
 
-        # "ip" и прочие варианты: сетевых вызовов нет — синхронно (и так ожидает smoke-тест)
+        # "ip" and the other variants: no network calls — synchronous (the smoke test expects it anyway)
         _copy(node.data.ip.strip() or node.data.host, what)
 
     def _ping_node(self, node: "ServerNode"):
-        """Ping узла в отдельном потоке без блокировки GUI (v0.7.3).
+        """Ping the node in a separate thread without blocking the GUI (v0.7.3).
 
-        Windows: `ping -n 3`, POSIX: `ping -c 3`. Результат — в статус-бар.
-        v0.9.9.3: поток вынесен в services/diagnostics.py (PingThread).
+        Windows: `ping -n 3`, POSIX: `ping -c 3`. The result — in the status bar.
+        v0.9.9.3: the thread was moved to services/diagnostics.py (PingThread).
         """
         if node is None:
             return
 
-        # AUDIT v0.7.2 (средняя #8): не затираем ещё работающий ping — повторный запрос
-        # игнорируем (раньше ссылка перезаписывалась, а старый поток оставался orphan'ом).
+        # AUDIT v0.7.2 (medium #8): do not clobber a still-running ping — a
+        # repeated request is ignored (earlier the reference was overwritten
+        # and the old thread was left as an orphan).
         if self._ping_thread is not None and self._ping_thread.isRunning():
             self.statusBar().showMessage(self.t("status.ping_running", host=node.data.host))
             return
 
-        from services.diagnostics import PingThread  # v0.9.9.3: был вложенным классом
+        from services.diagnostics import PingThread  # v0.9.9.3: was a nested class
         ping_thread = PingThread(node.data.host)
 
         def _on_ping_done(ok, text):
@@ -535,8 +552,8 @@ class NodeOpsMixin:
                 self.statusBar().showMessage(text)
             else:
                 QMessageBox.information(self, self.t("msg.info_title"), text)
-            # Чистим ссылку только на СВОЙ поток: запоздалый старый ping не должен
-            # обнулять ссылку уже запущенного нового (AUDIT v0.7.2, средняя #8).
+            # Clear the reference only for OUR thread: a late old ping must not
+            # null the reference of the already-started new one (AUDIT v0.7.2, medium #8).
             if getattr(self, "_ping_thread", None) is ping_thread:
                 self._ping_thread = None
 
@@ -546,16 +563,16 @@ class NodeOpsMixin:
         self.statusBar().showMessage(self.t("status.ping_running", host=node.data.host))
 
     def _edit_connection(self, arrow):
-        """Диалог изменения метки и типа связи (v0.7.3)."""
+        """The dialog for changing the connection label and type (v0.7.3)."""
         if arrow is None:
             return
         try:
             from dialogs.connection_dialog import EditConnectionDialog
             dlg = EditConnectionDialog(arrow, self)
             if dlg.exec() == QDialog.Accepted:
-                # v1.2.6: 3-й элемент — двухсторонний режим (был 2-хэлементный кортеж)
+                # v1.2.6: the 3rd element — the bidirectional mode (it used to be a 2-tuple)
                 label, ctype, bidir = dlg.get_connection()
-                # v0.8.3: правка связи (метка/тип/направление) — undo-команда
+                # v0.8.3: editing the connection (label/type/direction) — an undo command
                 from modules.undo_commands import CmdEditConnection
                 self._push_command(CmdEditConnection(
                     self, arrow,
@@ -571,21 +588,21 @@ class NodeOpsMixin:
                                  self.t("msg.update_failed", error=str(e)))
 
     def _remove_connection(self, arrow) -> bool:
-        """Удалить связь с подтверждением (v0.7.3). Возвращает True при удалении."""
+        """Delete the connection with a confirmation (v0.7.3). Returns True if deleted."""
         if arrow is None:
             return False
         src_alias = arrow.source.data.alias
         tgt_alias = arrow.target.data.alias
         reply = QMessageBox.question(
             self,
-            self.t("dialog.confirm_delete") if self._i18n_available else "Подтверждение",
+            self.t("dialog.confirm_delete") if self._i18n_available else "Confirm Deletion",
             self.t("msg.confirm_delete_connection").format(src=src_alias, tgt=tgt_alias)
-            if self._i18n_available else f"Удалить связь '{src_alias}' → '{tgt_alias}'?",
+            if self._i18n_available else f"Delete connection '{src_alias}' → '{tgt_alias}'?",
             QMessageBox.Yes | QMessageBox.No,
             QMessageBox.No)
         if reply != QMessageBox.Yes:
             return False
-        # v0.8.3: удаление связи — undo-команда
+        # v0.8.3: deleting the connection — an undo command
         from modules.undo_commands import CmdAddRemoveConnection
         src_id = arrow.source.data.id
         tgt_id = arrow.target.data.id
@@ -594,7 +611,7 @@ class NodeOpsMixin:
         self._push_command(CmdAddRemoveConnection(self, self.scene, src_id, tgt_id,
                                                   lbl, ctype, "remove"))
         self.statusBar().showMessage(self.t("status.connection_deleted"))
-        self._update_counts_label()  # UI polish: счётчик связей в статус-баре
+        self._update_counts_label()  # UI polish: the connection counter in the status bar
         self._mark_dirty()  # ← unsaved changes
         if self.log:
             self.log.info("Connection deleted",
@@ -602,11 +619,11 @@ class NodeOpsMixin:
         return True
 
     def _ensure_worker_done(self, server_id: str) -> bool:
-        """Патч v0.6.x: дождаться завершения SSHWorker перед удалением узла.
+        """The v0.6.x patch: wait for the SSHWorker to finish before deleting the node.
 
-        Если поток всё ещё выполняется и не успевает завершиться за таймаут —
-        показать предупреждение и отменить удаление (иначе success/error могли бы
-        прилететь в уничтоженный диалог / данные удалённого узла).
+        If the thread is still running and does not finish in time — show a
+        warning and cancel the deletion (otherwise success/error could land
+        in a destroyed dialog / the data of a deleted node).
         """
         try:
             from modules.ssh_worker import wait_for_worker as _wait_worker
@@ -614,16 +631,16 @@ class NodeOpsMixin:
                 QMessageBox.warning(self, self.t("msg.error_title"), self.t("msg.worker_busy"))
                 return False
         except Exception:
-            pass  # реестр недоступен — не блокируем удаление из-за этого
+            pass  # the registry is unavailable — do not block the deletion over this
         return True
 
     def _remove_node_guarded(self, node: "ServerNode") -> bool:
-        """Единый путь удаления узла: подтверждение → guard SSHWorker → remove.
+        """The single node-deletion path: confirmation → SSHWorker guard → remove.
 
-        Используется кнопкой сайдбара, клавишей Delete (MapView) и контекстным
-        меню узла (v0.7.3). Возвращает True, если удаление произошло.
+        Used by the sidebar button, the Delete key (MapView) and the node
+        context menu (v0.7.3). Returns True if the deletion happened.
         """
-        # v1.2.4 (D7): закреплённые заметки — расширяем ТЕКСТ подтверждения (не два диалога)
+        # v1.2.4 (D7): attached notes — extend the CONFIRMATION TEXT (not two dialogs)
         attached = self.scene.notes_attached_to(node.data.id)
         if self._i18n_available:
             confirm_text = self.t("msg.confirm_delete").format(alias=node.data.alias)
@@ -631,10 +648,10 @@ class NodeOpsMixin:
                 confirm_text += "\n" + self.t("msg.delete_server_with_notes").format(
                     count=len(attached))
         else:
-            confirm_text = f"Удалить сервер '{node.data.alias}'?"
+            confirm_text = f"Delete server '{node.data.alias}'?"
         reply = QMessageBox.question(
             self,
-            self.t("dialog.confirm_delete") if self._i18n_available else "Подтверждение",
+            self.t("dialog.confirm_delete") if self._i18n_available else "Confirm Deletion",
             confirm_text,
             QMessageBox.Yes | QMessageBox.No,
             QMessageBox.No
@@ -645,14 +662,14 @@ class NodeOpsMixin:
             return False
         alias = node.data.alias
         host = node.data.host
-        # v1.2.4 (D7): открепление ДО удаления — LIFO: undo сначала вернёт узел,
-        # потом переприкрепит заметки (узел к тому моменту уже жив)
+        # v1.2.4 (D7): the detach BEFORE the removal — LIFO: undo will first
+        # restore the node, then re-attach the notes (the node is alive by then)
         from modules.undo_commands import CmdAttachNote
         for n in list(attached):
             self._push_command(CmdAttachNote(self, n, node.data.id, "detach"))
-        # v0.8.3: захват стрелок узла ДО удаления — undo восстановит их вместе с узлом
+        # v0.8.3: capturing the node's arrows BEFORE the removal — undo will restore them with the node
         arrows = [
-            # v1.2.6: 5-й элемент — двухсторонний режим (undo вернёт связь как была)
+            # v1.2.6: the 5th element — the bidirectional mode (undo restores the connection as it was)
             (a.source.data.id, a.target.data.id, a.label_text, a.connection_type,
              bool(getattr(a, "bidirectional", False)))
             for a in self.scene.arrows()
@@ -661,7 +678,7 @@ class NodeOpsMixin:
         from modules.undo_commands import CmdAddRemoveNode
         self._push_command(CmdAddRemoveNode(self, self.scene, node.data, "remove", arrows))
         self.refresh_sidebar()
-        self._sync_status_targets()  # v0.7.1: узла больше нет — убрать из плана проверок
+        self._sync_status_targets()  # v0.7.1: the node is gone — remove it from the check plan
         if self.log:
             self.log.info("Server deleted", extra={"alias": alias, "host": host})
         self.statusBar().showMessage(self.t("status.server_deleted", alias=alias))

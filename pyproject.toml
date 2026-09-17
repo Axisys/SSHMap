@@ -1,35 +1,38 @@
-# SSH Map (NodeVisualSSH) — installable-идентичность для 1.0 (ROADMAP v0.9.9.6).
+# SSH Map (NodeVisualSSH) — installable identity for 1.0 (ROADMAP v0.9.9.6).
 #
-# Минимальный набор: имя, версия, зависимости, entry point — открывает
-# `pipx install .` / `pip install .` и PyInstaller без переделок.
-# Единая точка истины версии — version.py (APP_VERSION): значение ниже обязано
-# совпадать с ней; deps обязаны соответствовать requirements.txt — сверяет
-# tests/test_pyproject.py (часть сьюта, python tests/run_all.py).
+# Minimal set: name, version, dependencies, entry point — enables
+# `pipx install .` / `pip install .` and PyInstaller without rework.
+# The single source of truth for the version is version.py (APP_VERSION): the value below
+# must match it; deps must correspond to requirements.txt — verified by
+# tests/test_pyproject.py (part of the suite, python tests/run_all.py).
 
 [build-system]
 requires = ["setuptools>=64"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "sshmap"                  # нормализованный APP_NAME из version.py ("SSH Map") — сверяет tests/test_pyproject.py
-version = "1.2.14"               # ОБЯЗАН совпадать с APP_VERSION в version.py — сверяет tests/test_pyproject.py
+name = "sshmap"                  # normalized APP_NAME from version.py ("SSH Map") — verified by tests/test_pyproject.py
+version = "1.3"                  # MUST match APP_VERSION in version.py — verified by tests/test_pyproject.py
 description = "SSH Map (NodeVisualSSH): visual infrastructure map with direct SSH connections to nodes"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
-    # ОБЯЗАНЫ соответствовать requirements.txt (набор имя+пин) — сверяет tests/test_pyproject.py
+    # MUST correspond to requirements.txt (the name+pin set) — verified by tests/test_pyproject.py
     "PySide6>=6.5",     # GUI framework (Qt 6): QGraphicsScene/View, QThread
-    "paramiko>=3.0",    # SSH-клиент (подключения и интерактивный терминал)
-    "keyring>=24.0",    # Системное хранилище паролей (Credential Manager)
-    "pyte>=0.8.0",      # ANSI-эмуляция терминала v0.8 (modules/terminal_screen.py — жёсткая зависимость)
-    "wcwidth>=0.2.9",   # ширина Unicode-символов (modules/terminal_widget.py импортирует напрямую; транзитивно через pyte без пина — v1.2.10 AUDIT ручной #4)
+    "paramiko>=3.0",    # SSH client (connections and interactive terminal)
+    "keyring>=24.0",    # System password store (Credential Manager)
+    # pyte — vendored in third_party/pyte (fork of 0.8.2 + 3 patches), see MANIFEST.md
+    "wcwidth>=0.2.9",   # Unicode character width (modules/terminal_widget.py imports it directly; transitively via pyte without a pin — v1.2.10 manual AUDIT #4)
 ]
 
 [project.scripts]
-sshmap = "main:main"             # консольный entry point → существующая main() в main.py (QApplication + MainWindow)
+sshmap = "main:main"             # console entry point → the existing main() in main.py (QApplication + MainWindow)
 
-# Flat layout: 8 топ-пакетов + 2 модуля в корне — автообнаружение здесь не
-# сработает, поэтому список явный. tests/ и _tmp_testdata*/ в дистрибутив НЕ входят.
+# Flat layout: 10 top-level packages + 2 modules in the root — auto-discovery would not
+# work here, so the list is explicit. tests/ and _tmp_testdata*/ are NOT included in the distribution.
+# third_party.pyte — a managed pyte fork (v1.3rc1): without an explicit list the fork would
+# not make it into `pip install .` / PyInstaller (MANIFEST.md). pyte-patches/ is data,
+# not a package (no __init__.py) — not included in the build.
 [tool.setuptools]
 py-modules = ["main", "version"]
 packages = [
@@ -40,8 +43,10 @@ packages = [
     "modules",
     "services",
     "storage",
+    "third_party",
+    "third_party.pyte",
     "ui",
 ]
 
 [tool.setuptools.package-data]
-i18n = ["*.json"]                # переводы en/ru/zh — часть дистрибутива
+i18n = ["*.json"]                # en/ru/zh translations — part of the distribution

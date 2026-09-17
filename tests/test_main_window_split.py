@@ -1,19 +1,19 @@
 # -*- coding: utf-8 -*-
-"""v1.1.4: гигиена main_window.py — разрез на миксины (acceptance ROADMAP v1.1.4).
+"""v1.1.4: main_window.py hygiene — split into mixins (ROADMAP v1.1.4 acceptance).
 
-Тематический тест разреза: offscreen-MainWindow + прогон каждого кластера:
-  * структура: все методы плана определены в ProjectIOMixin/NodeOpsMixin/SshMixin
-    (не в MainWindow.__dict__), MRO-порядок, миксины НЕ импортируют main_window
-    (цикл), шов host_attr видит подмены модуля-фасада (MW.<имя> = Fake);
-  * ProjectIOMixin: save/load/restore — _save_project_as → _autosave_tick →
-    _restore_from_autosave → _load_project_at во втором окне;
-  * NodeOpsMixin: add/duplicate/delete node — _add_server (фейковый AddServerDialog,
-    включая bool-гард v0.8.1), _duplicate_selected_node, групповое _delete_selected_nodes;
-  * SshMixin: ssh-dialog flow — _run_ssh_connect с фейковыми SSHConnectDialog/
-    SSHTerminalWindow: поля через undo-стек, индикатор, реестр окон,
-    _forget_terminal_window; быстрый запуск живёт в том же миксине.
+The thematic test of the split: the offscreen MainWindow + the run of each cluster:
+  * the structure: all the methods of the plan are defined in ProjectIOMixin/NodeOpsMixin/SshMixin
+    (not in MainWindow.__dict__), the MRO order, the mixins do NOT import main_window
+    (the cycle), the seam host_attr sees the swaps of the facade module (MW.<name> = Fake);
+  * ProjectIOMixin: the save/load/restore — _save_project_as → _autosave_tick →
+    _restore_from_autosave → _load_project_at in the second window;
+  * NodeOpsMixin: the add/duplicate/delete of a node — _add_server (the fake AddServerDialog,
+    including the bool guard v0.8.1), _duplicate_selected_node, the group _delete_selected_nodes;
+  * SshMixin: the ssh-dialog flow — _run_ssh_connect with the fakes of the SSHConnectDialog/
+    SSHTerminalWindow: the fields via the undo stack, the indicator, the registry of the windows,
+    _forget_terminal_window; the quick launch lives in the same mixin.
 
-Запуск: python tests/test_main_window_split.py   (из корня проекта) или python tests/run_all.py
+Run: python tests/test_main_window_split.py   (from the project root) or python tests/run_all.py
 """
 import json
 import os
@@ -22,14 +22,14 @@ import sys
 
 from _common import bootstrap, check, finish
 
-ROOT, WORK = bootstrap()  # ДО импортов модулей приложения
+ROOT, WORK = bootstrap()  # BEFORE the app module imports
 
 from PySide6.QtWidgets import QApplication, QDialog, QMessageBox, QFileDialog
 
 app = QApplication(sys.argv)
 
-# Сеть в тестах запрещена: пробы статусов возвращают результат мгновенно
-# (иначе _load_project_at → start_round плодил бы потоки с сетевыми таймаутами).
+# Network is forbidden in tests: the status probes return the result instantly
+# (otherwise _load_project_at → start_round would spawn threads with network timeouts).
 import services.status_checker as _SC
 _SC.probe_ssh = lambda host, port, timeout=3.0: "offline"
 
@@ -42,9 +42,9 @@ import ui.main_window_node_ops as NO
 import ui.main_window_ssh as SS
 from ui.mixin_support import host_attr
 
-# ── QMessageBox: без модалок в offscreen, вызовы логируются; question — управляемый ──
+# ── QMessageBox: no modals in offscreen, the calls are logged; question — controlled ──
 boxes = []
-question_replies = []  # очередь готовых ответов для question()
+question_replies = []  # the queue of the ready answers for question()
 
 
 def _fake_question(*a, **k):
@@ -52,8 +52,8 @@ def _fake_question(*a, **k):
     return question_replies.pop(0) if question_replies else QMessageBox.Yes
 
 
-# QMessageBox — один класс на все модули (main_window и миксины импортируют его
-# из PySide6): патч через MW.QMessageBox действует везде, включая перенесённые методы.
+# QMessageBox — one class for all modules (main_window and the mixins import it
+# from PySide6): the patch via MW.QMessageBox works everywhere, including the moved methods.
 MW.QMessageBox.question = staticmethod(_fake_question)
 MW.QMessageBox.critical = staticmethod(lambda *a, **k: boxes.append(("critical", str(a[1]), str(a[2]))))
 MW.QMessageBox.warning = staticmethod(lambda *a, **k: boxes.append(("warning", str(a[1]), str(a[2]))))
@@ -61,13 +61,13 @@ MW.QMessageBox.information = staticmethod(lambda *a, **k: boxes.append(("informa
 
 
 def make_window():
-    """Offscreen-MainWindow с остановленным autosave-таймером (тики вызываем руками)."""
+    """An offscreen MainWindow with a stopped autosave timer (we call the ticks by hand)."""
     win = MW.MainWindow()
-    win._autosave_timer.stop()  # детерминизм: _autosave_tick ниже вызывается явно
+    win._autosave_timer.stop()  # the determinism: _autosave_tick below is called explicitly
     return win
 
 
-# ══ 1. Структура: кластеры в миксинах, MainWindow — фасад ═══════════════════
+# ══ 1. The structure: the clusters in the mixins, MainWindow — the facade ═══════════════════
 print("== 1. structure: clusters live in mixins ==")
 
 _mro = [c.__name__ for c in MW.MainWindow.__mro__]
@@ -75,7 +75,7 @@ check("MRO: MainWindow → ProjectIOMixin → NodeOpsMixin → SshMixin → QMai
       _mro[:5] == ["MainWindow", "ProjectIOMixin", "NodeOpsMixin", "SshMixin", "QMainWindow"],
       str(_mro[:6]))
 
-# Полный список методов плана (ROADMAP v1.1.4, задачи 1–3; quick launch — в SSH-кластере)
+# The full list of the plan methods (ROADMAP v1.1.4, tasks 1–3; quick launch — in the SSH cluster)
 PLAN = {
     "ProjectIOMixin": [
         "_new_project", "_import_project_raw", "_open_project", "_load_project_at",
@@ -103,36 +103,36 @@ for mixin_name, methods in PLAN.items():
     for m in methods:
         fn = getattr(MW.MainWindow, m, None)
         if fn is None:
-            _bad.append(f"{m}: отсутствует")
+            _bad.append(f"{m}: missing")
         elif m in MW.MainWindow.__dict__:
-            _bad.append(f"{m}: остался в MainWindow.__dict__")
+            _bad.append(f"{m}: still in MainWindow.__dict__")
         elif fn.__qualname__.split(".")[0] != mixin_name:
-            _bad.append(f"{m}: владелец {fn.__qualname__}")
-check(f"все методы плана ({sum(len(v) for v in PLAN.values())}) определены в своих миксинах",
+            _bad.append(f"{m}: owner {fn.__qualname__}")
+check(f"all the planned methods ({sum(len(v) for v in PLAN.values())}) are defined in their own mixins",
       not _bad, "; ".join(_bad[:6]))
 
-# AUDIT §3: миксины НЕ импортируют main_window (цикл) — только duck-typing.
+# AUDIT §3: the mixins do NOT import main_window (a cycle) — duck typing only.
 _circ = []
 for mod in (PI, NO, SS):
     with open(mod.__file__, encoding="utf-8") as f:
         for i, line in enumerate(f, 1):
             if re.match(r"\s*(from|import)\b", line) and "main_window" in line:
                 _circ.append(f"{os.path.basename(mod.__file__)}:{i}: {line.strip()}")
-check("миксины не импортируют main_window (нет цикла)", not _circ, "; ".join(_circ))
+check("the mixins do not import main_window (no cycle)", not _circ, "; ".join(_circ))
 
 win0 = make_window()
-check("host_attr видит атрибут модуля-фасада",
+check("host_attr sees the facade module's attribute",
       host_attr(win0, "SSHConnectDialog") is MW.SSHConnectDialog)
 
 
-class _Sentinel:  # маркер подмены
+class _Sentinel:  # the substitution marker
     pass
 
 
 _orig_dlg = MW.SSHConnectDialog
 MW.SSHConnectDialog = _Sentinel
 try:
-    check("host_attr видит тестовую подмену (шов для offscreen)",
+    check("host_attr sees the test replacement (the seam for offscreen)",
           host_attr(win0, "SSHConnectDialog") is _Sentinel)
 finally:
     MW.SSHConnectDialog = _orig_dlg
@@ -151,41 +151,41 @@ try:
     saved = win0._save_project_as()
 finally:
     QFileDialog.getSaveFileName = _orig_savefn
-check("_save_project_as: сохранено, _project_file установлен",
+check("_save_project_as: saved, _project_file is set",
       saved is True and win0._project_file == path)
-check("_save_project_as: dirty-маркер сброшен",
+check("_save_project_as: the dirty flag is reset",
       not win0._dirty and " [*]" not in win0.windowTitle(), win0.windowTitle())
 with open(path, encoding="utf-8") as f:
     disk = json.load(f)
-check("JSON на диске: оба узла (паролей нет)",
+check("the JSON on disk: the two nodes (no passwords)",
       {s["id"] for s in disk["servers"]} == {"splita1", "splitb2"}
       and all(not s.get("password") for s in disk["servers"]), str(disk["servers"]))
 
-# автосохранение: третий узел + ручной тик (таймер остановлен)
+# the autosave: the third node + a manual tick (the timer is stopped)
 win0.scene.add_server(ServerData(id="splitc3", alias="SplitC", host="10.6.0.3", user="root"))
 win0._mark_dirty()
 win0._autosave_tick()
 auto_path = AS.autosave_path_for(path)
-check("_autosave_tick: файл автосохранения появился", os.path.isfile(auto_path), auto_path)
+check("_autosave_tick: the autosave file appears", os.path.isfile(auto_path), auto_path)
 
-# restore: третий узел удаляем из памяти, восстанавливаем из автосохранения
+# restore: the third node is deleted from memory, restored from the autosave
 win0.scene.remove_server("splitc3")
-question_replies.append(QMessageBox.Yes)  # подтверждение восстановления
+question_replies.append(QMessageBox.Yes)  # the restoration confirmation
 win0._restore_from_autosave()
-check("_restore_from_autosave: сцена снова с тремя узлами",
+check("_restore_from_autosave: the scene is back to three nodes",
       win0.scene.node_count() == 3, str(win0.scene.node_count()))
 with open(path, encoding="utf-8") as f:
     disk2 = json.load(f)
-check("restore: содержимое автосохранения записано в файл проекта",
+check("restore: the autosave content is written to the project file",
       {s["id"] for s in disk2["servers"]} == {"splita1", "splitb2", "splitc3"},
       str([s["id"] for s in disk2["servers"]]))
 
-# load во втором окне (общий путь Файл→Открыть)
+# a load in the second window (the shared File→Open path)
 win2 = make_window()
 loaded = win2._load_project_at(path)
-check("_load_project_at: загружено, _project_file установлен",
+check("_load_project_at: loaded, _project_file is set",
       loaded is True and win2._project_file == path)
-check("_load_project_at: узлы восстановлены, dirty сброшен",
+check("_load_project_at: the nodes are restored, the dirty flag is reset",
       win2.scene.node_count() == 3 and not win2._dirty,
       f"nodes={win2.scene.node_count()} dirty={win2._dirty}")
 
@@ -198,8 +198,8 @@ app.processEvents()
 
 
 class _FakeAddDlg:
-    """Фейк AddServerDialog: подменяется на модуле-фасад (MW.AddServerDialog),
-    миксин берёт его через host_attr в момент вызова."""
+    """The fake AddServerDialog: it is replaced on the facade module (MW.AddServerDialog),
+    the mixin takes it through the host_attr at the moment of the call."""
     instances = []
 
     def __init__(self, parent=None):
@@ -219,41 +219,41 @@ class _FakeAddDlg:
 _orig_add = MW.AddServerDialog
 MW.AddServerDialog = _FakeAddDlg
 try:
-    winN._add_server()      # путь тулбара (без позиции)
-    winN._add_server(True)  # регрессия v0.8.1: bool из QAction.triggered — без падения
+    winN._add_server()      # the toolbar path (without a position)
+    winN._add_server(True)  # the v0.8.1 regression: a bool from QAction.triggered — no crash
 finally:
     MW.AddServerDialog = _orig_add
-check("_add_server (миксин): два узла на сцене", winN.scene.node_count() == 2,
+check("_add_server (the mixin): two nodes on the scene", winN.scene.node_count() == 2,
       str(winN.scene.node_count()))
-check("_add_server: dirty + по команде undo на узел",
+check("_add_server: the dirty flag + one undo command for the node",
       winN._dirty and winN.undo_stack.count() == 2,
       f"dirty={winN._dirty} undo={winN.undo_stack.count()}")
 
-# дублирование выделенного (Ctrl+D)
+# duplicating the selected (Ctrl+D)
 na = winN.scene.get_node("splitadd01")
 winN._select_node(na)
 ndup = winN._duplicate_selected_node()
-check("_duplicate_selected_node: копия создана (новый id, те же поля)",
+check("_duplicate_selected_node: the copy is created (a new id, the same fields)",
       ndup is not None and ndup.data.id != "splitadd01"
       and ndup.data.alias == "SplitAdd" and ndup.data.host == "10.7.0.1",
       f"id={ndup.data.id if ndup else None}")
-check("дубликат смещён на +40/+40",
+check("the duplicate is offset by +40/+40",
       ndup is not None
       and abs(ndup.data.x - na.data.x - 40.0) < 1e-6
       and abs(ndup.data.y - na.data.y - 40.0) < 1e-6,
       f"orig=({na.data.x},{na.data.y}) dup=({ndup.data.x if ndup else None},{ndup.data.y if ndup else None})")
-check("дубликат стал выделенным", winN.scene.get_selected_node() is ndup)
+check("the duplicate is selected", winN.scene.get_selected_node() is ndup)
 
-# групповое удаление всех трёх (один вопрос на всю группу)
+# a group removal of all three (one question for the whole group)
 for node in winN.scene.nodes():
     node.setSelected(True)
-check("мультивыделение: три узла выбраны", len(winN.selected_nodes()) == 3,
+check("the multi-selection: three nodes are selected", len(winN.selected_nodes()) == 3,
       str(len(winN.selected_nodes())))
 question_replies.append(QMessageBox.Yes)
 ok = winN._delete_selected_nodes()
-check("_delete_selected_nodes (миксин): все удалены",
+check("_delete_selected_nodes (the mixin): all are deleted",
       ok is True and winN.scene.node_count() == 0, str(winN.scene.node_count()))
-check("групповое удаление: dirty-маркер установлен", winN._dirty)
+check("the bulk delete: the dirty flag is set", winN._dirty)
 
 # ══ 4. SshMixin: ssh-dialog flow ════════════════════════════════════════════
 print("== 4. SshMixin: ssh-dialog flow ==")
@@ -265,15 +265,7 @@ ns = winS.scene.add_server(
     ServerData(id="splitssh1", alias="SplitSSH", host="10.8.0.1", user="root"))
 
 
-class _FL:  # мини-заглушка QLineEdit
-    def __init__(self, v): self._v = v
-    def text(self): return self._v
-    def setText(self, v): self._v = v
-
-
-class _FS:  # мини-заглушка QSpinBox
-    def __init__(self, v): self._v = v
-    def value(self): return self._v
+from _fakes import FakeLineEdit as _FL, FakeSpinBox as _FS, FakeTermWin as _FakeTermWin
 
 
 class _FakeSSHDialog:
@@ -287,25 +279,11 @@ class _FakeSSHDialog:
         return QDialog.Accepted
 
 
-class _DummySignal:
-    def connect(self, *a, **k): pass
-
-
 spawned_terms = []
+_FakeTermWin.spawned = spawned_terms   # the window fake records the created windows (_fakes)
 
 
-class _FakeTermWin:
-    def __init__(self, server_data, parent=None, password=None, initial_command=""):
-        self.server_data = server_data
-        self.password = password
-        self.initial_command = initial_command
-        self.destroyed = _DummySignal()
-        spawned_terms.append(self)
-
-    def show(self): pass
-
-
-# автосбор информации — логируем вместо реального коллектора (сеть в тестах запрещена)
+# the auto collection of information — we log it instead of the real collector (network is forbidden in tests)
 collect_calls = []
 winS._collect_node_info = lambda node, password="", auto=False: \
     collect_calls.append((node.data.id, password, auto))
@@ -319,31 +297,31 @@ finally:
     MW.SSHConnectDialog = _orig_sshdlg
     MW.SSHTerminalWindow = _orig_termwin
 
-check("ssh flow: поля диалога применены к узлу (_apply_ssh_dialog_fields)",
+check("ssh flow: the dialog's fields are applied to the node (_apply_ssh_dialog_fields)",
       ns.data.user == "split-user" and ns.data.ssh_port == 2244
       and ns.data.key_path == "/keys/split.pem",
       f"user={ns.data.user!r} port={ns.data.ssh_port} key={ns.data.key_path!r}")
 _top = winS.undo_stack.command(winS.undo_stack.count() - 1) if winS.undo_stack.count() else None
-check("ssh flow: поля прошли через undo-стек (CmdEditNodeData)",
+check("ssh flow: the fields go through the undo stack (CmdEditNodeData)",
       isinstance(_top, CmdEditNodeData), f"{type(_top).__name__ if _top else None}")
-check("ssh flow: узел в _ssh_connected_nodes (индикатор подключения)",
+check("ssh flow: the node is in _ssh_connected_nodes (the connection indicator)",
       ns.data.id in winS._ssh_connected_nodes)
-check("ssh flow: терминальное окно создано и зарегистрировано",
+check("ssh flow: the terminal window is created and registered",
       len(spawned_terms) == 1 and len(winS._terminal_windows) == 1,
       f"spawned={len(spawned_terms)} registry={len(winS._terminal_windows)}")
 if spawned_terms:
-    check("ssh flow: пароль передан окну, в модели не хранится",
+    check("ssh flow: the password is passed to the window, not stored in the model",
           spawned_terms[0].password == "SplitPw123" and ns.data.password == "")
-check("ssh flow: автосбор информации после подключения (auto=True, с паролем)",
+check("ssh flow: the auto-info gathering after the connection (auto=True, with the password)",
       collect_calls == [("splitssh1", "SplitPw123", True)], str(collect_calls))
 winS._forget_terminal_window(spawned_terms[0])
-check("_forget_terminal_window: реестр очищен", winS._terminal_windows == [])
+check("_forget_terminal_window: the registry is cleared", winS._terminal_windows == [])
 
-# без выделения — information, без падения
+# without a selection — an information message, no crash
 boxes.clear()
 winS.scene.clear_all()
 winS._connect_ssh_to_selected()
-check("без выделения: information показан, исключения нет",
+check("no selection: the information is shown, no exception",
       any(b[0] == "information" for b in boxes), str(boxes))
 
 finish()

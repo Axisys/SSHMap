@@ -1,0 +1,154 @@
+Subject: [sshmap fork 0003] alternate screen buffer (private modes 47/1047/1048/1049)
+
+Provenance: semantics of upstream pyte PR #212 "Alternate screen buffer", author
+            dwgx, closed WITHOUT merge on 2026-08-14 (issue #90, open since 2017).
+            Differentially verified against tmux 3.6b and GNU screen (see
+            PYTE82_AUDIT.md patch B). pyte is LGPL-3.0 — attribution to the PR
+            author (dwgx) in this header and in code comments is MANDATORY.
+Implemented: v1.2.12 as SshmapHistoryScreen overrides (sshmap); moved verbatim into
+            the forked screens.py in v1.3rc1: ALTSCREEN_MODES (class attribute of
+            Screen — subclasses see it via MRO); Screen.set_mode/reset_mode hooks
+            -> _enter_alt/_exit_alt; state fields in Screen.__init__ (BEFORE
+            self.reset()); HistoryScreen.reset — RIS inside alt = full reset + exit;
+            HistoryScreen.index/reverse_index — lines scrolled off the alt buffer do
+            not enter scrollback (like less). One in_alt flag (47l exits a screen
+            entered via 1049h); entry idempotent; cursor NOT homed on entry; cursor
+            saved/restored only for 1048/1049 (xterm: 1049 = 1047+1048) in a separate
+            _alt_cursor field, NOT the savepoints stack; exit clips the saved buffer
+            to current width (resize safety); alt contents do not survive the
+            round-trip.
+Base:       pyte 0.8.2, pyte/screens.py.
+Policy:     PERMANENT — PR #212 was never merged; upstream will not absorb this patch.
+Applied:    2026-09-10, sshmap v1.3rc1.
+
+diff --git a/pyte/screens.py b/pyte/screens.py
+--- a/pyte/screens.py
++++ b/pyte/screens.py
+@@ -207,6 +207,13 @@
+        for a description of the presentational component, implemented
+        by ``Screen``.
+     """
++
++    # sshmap fork (patch 0003): alternate screen — private modes 47/1047/1048/1049.
++    # Private codes BEFORE the <<5 shift; pyte.modes has no constants for them
++    # (checked: only LNM/IRM/DECTCEM/DECSCNM/DECOM/DECAWM/DECCOLM). Class attribute
++    # (not module global) so subclasses see it via MRO.
++    ALTSCREEN_MODES = (47, 1047, 1048, 1049)
++
+     @property
+     def default_char(self) -> Char:
+         """An empty character with default foreground and background colors."""
+@@ -219,6 +226,11 @@
+         self.lines = lines
+         self.buffer: Dict[int, StaticDefaultDict[int, Char]] = defaultdict(lambda: StaticDefaultDict[int, Char](self.default_char))
+         self.dirty: Set[int] = set()
++        # sshmap fork (patch 0003): alternate screen state (semantics — PR #212, dwgx).
++        # Initialized BEFORE self.reset(): HistoryScreen.reset reads in_alt.
++        self.in_alt = False            # one flag (not four): we're on the alt screen
++        self._saved_buffer: Optional[Dict[int, StaticDefaultDict[int, Char]]] = None
++        self._alt_cursor: Optional[Cursor] = None
+         self.reset()
+         self.mode = _DEFAULT_MODE.copy()
+         self.margins: Optional[Margins] = None
+@@ -365,6 +377,10 @@
+         :param list modes: modes to set, where each mode is a constant
+                            from :mod:`pyte.modes`.
+         """
++        # sshmap fork (patch 0003): private modes 47/1047/1048/1049 — alternate screen.
++        if kwargs.get("private") and any(m in self.ALTSCREEN_MODES for m in modes):
++            self._enter_alt(save_cursor=any(m in (1048, 1049) for m in modes))
++
+         mode_list = list(modes)
+         # Private mode codes are shifted, to be distinguished from non
+         # private ones.
+@@ -406,6 +422,10 @@
+         :param list modes: modes to reset -- hopefully, each mode is a
+                            constant from :mod:`pyte.modes`.
+         """
++        # sshmap fork (patch 0003): private modes 47/1047/1048/1049 — alternate screen.
++        if kwargs.get("private") and any(m in self.ALTSCREEN_MODES for m in modes):
++            self._exit_alt(restore_cursor=any(m in (1048, 1049) for m in modes))
++
+         mode_list = list(modes)
+         # Private mode codes are shifted, to be distinguished from non
+         # private ones.
+@@ -438,6 +458,45 @@
+         # Hide the cursor.
+         if mo.DECTCEM in mode_list:
+             self.cursor.hidden = True
++
++    # ── sshmap fork (patch 0003): alternate screen buffer ───────────────────────
++    # Semantics — upstream PR #212 (author dwgx, closed without merge on
++    # 2026-08-14; pyte is LGPL-3.0 — attribution to the PR author is mandatory),
++    # differentially verified against tmux 3.6b and GNU screen: one in_alt flag
++    # (ESC[?47l exits a screen entered via 1049h); entry — save the main buffer,
++    # working = empty new (cursor is NOT homed — the TUI sends CUP itself; re-entry
++    # is idempotent); exit — restore the saved buffer clipped to current width,
++    # discard the alt buffer (contents do not survive a round-trip); cursor is
++    # saved/restored only for 1048/1049 (xterm: 1049 = 1047+1048) in a separate
++    # _alt_cursor field, NOT the savepoints stack.
++
++    def _enter_alt(self, save_cursor: bool) -> None:
++        if self.in_alt:
++            return  # re-entry is idempotent (main buffer is not lost)
++        self._saved_buffer = self.buffer
++        self.buffer = defaultdict(lambda: StaticDefaultDict[int, Char](self.default_char))
++        self.dirty.update(range(self.lines))
++        if save_cursor:  # only 1048/1049 (xterm: 1049 = 1047+1048)
++            self._alt_cursor = copy.copy(self.cursor)
++        self.in_alt = True  # cursor is NOT homed — the TUI sends CUP itself
++
++    def _exit_alt(self, restore_cursor: bool) -> None:
++        if not self.in_alt:
++            return
++        saved = self._saved_buffer
++        for line in saved.values():  # clip to current width (resize safety;
++            for x in [x for x in line if x >= self.columns]:  # same bounds as Screen.resize)
++                line.pop(x, None)
++        self.buffer = saved  # alt buffer discarded: contents do not survive a round-trip
++                             # (tmux/screen behave the same)
++        self.in_alt = False
++        self._saved_buffer = None
++        self.dirty.update(range(self.lines))
++        if restore_cursor and self._alt_cursor is not None:
++            self.cursor = self._alt_cursor
++            self._alt_cursor = None
++            self.ensure_hbounds()  # clamp after a possible resize while in alt
++            self.ensure_vbounds()
+ 
+     def define_charset(self, code: str, mode: str) -> None:
+         """Define ``G0`` or ``G1`` charset.
+@@ -1206,6 +1265,13 @@
+         is reset to bottom of both queues;  queues themselves are
+         emptied.
+         """
++        # sshmap fork (patch 0003): RIS (ESC c) inside alt — full reset + exit:
++        # the main buffer is cleared by the regular reset() anyway, so we just
++        # drop the saved reference.
++        if self.in_alt:
++            self.in_alt = False
++            self._saved_buffer = None
++            self._alt_cursor = None
+         super(HistoryScreen, self).reset()
+         self._reset_history()
+ 
+@@ -1220,7 +1286,8 @@
+         """Overloaded to update top history with the removed lines."""
+         top, bottom = self.margins or Margins(0, self.lines - 1)
+ 
+-        if self.cursor.y == bottom:
++        if self.cursor.y == bottom and not self.in_alt:
++            # sshmap fork (patch 0003): inside alt — do not merge into scrollback (less).
+             self.history.top.append(self.buffer[top])
+ 
+         super(HistoryScreen, self).index()
+@@ -1229,7 +1296,8 @@
+         """Overloaded to update bottom history with the removed lines."""
+         top, bottom = self.margins or Margins(0, self.lines - 1)
+ 
+-        if self.cursor.y == top:
++        if self.cursor.y == top and not self.in_alt:
++            # sshmap fork (patch 0003): inside alt — do not merge into scrollback (less).
+             self.history.bottom.append(self.buffer[bottom])
+ 
+         super(HistoryScreen, self).reverse_index()

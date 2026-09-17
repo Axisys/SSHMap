@@ -1,35 +1,35 @@
-"""v1.2.4: крепление заметок к серверам + особая линия (тема релиза v1.2.4).
+"""v1.2.4: attaching notes to servers + a special line (the v1.2.4 release theme).
 
-Тематический тест нового релиза (см. INDEX.md):
-  * §1 Формат и сериализация: "server_id" в to_dict() пишется только если задан;
-    _do_save → JSON; backward-compat старых файлов; битая ссылка → свободная заметка;
-  * §2 Механика сцены: якорь (правый верхний угол узла + 12,12), линия-якорь
-    (DashLine #eedd9f — цвет тела стикера, z=-1, концы — edge_point), движение узла
-    (одношаговый лаг ровно как у стрелок — itemChange ДО применения позиции; точное
-    совпадение на следующем шаге), v1.2.4-fix: offset якоря — закреплённую заметку
-    можно двигать (dragUpdated → линия следует live, узел ведёт заметку с сохранением
-    смещения), collapse/expand, detach, очистки remove_server/clear_all;
-  * §3 Undo/Redo: attach/detach round-trip через win.undo_stack; LIFO-цепочка
-    «открепление + удаление сервера»; мёртвый C++-объект (audit #8) — разрешение по id;
-  * §4 Контекстное меню: свободная заметка → подменю со всеми узлами / прямой пункт
-    над узлом; закреплённая → открепить; «Удалить заметку» на месте (синтетический
-    QContextMenuEvent + capture-паттерн test_groups.py);
-  * §5 Drag & drop E2E (QTest, полный pipeline view→scene→item): drag на узел = прикрепить,
-    v1.2.4-fix: сдвиг закреплённой = ПЕРЕМЕЩЕНИЕ без открепления (линия следует,
-    offset сохраняется), drag на другой узел = пере-крепление (одна команда),
-    клик без движения — no-op;
-  * §6 Save/Load round-trip: крепление восстанавливается, v1.2.4-fix: сохранённая
-    позиция закреплённой заметки доверяется (offset от якоря вычисляется от неё);
-  * §7 i18n-паритет (417 ключей) + состояние релиза v1.2.4.
+The thematic test of the new release (see INDEX.md):
+  * §1 The format and the serialization: "server_id" in to_dict() is written only if set;
+    _do_save → JSON; the backward-compat of the old files; a broken reference → a free note;
+  * §2 The mechanics of the scene: the anchor (the top-right corner of the node + 12,12), the anchor line
+    (the DashLine #eedd9f — the color of the body of the sticker, z=-1, the ends — edge_point), the movement of the node
+    (the one-step lag exactly as with the arrows — the itemChange BEFORE the apply of the position; the exact
+    match on the next step), v1.2.4-fix: the offset of the anchor — the attached note
+    can be moved (dragUpdated → the line follows live, the node leads the note with the preserved
+    offset), the collapse/expand, the detach, the cleanups remove_server/clear_all;
+  * §3 Undo/Redo: the attach/detach round-trip via win.undo_stack; the LIFO chain
+    "the detach + the removal of the server"; the dead C++ object (audit #8) — the resolution by id;
+  * §4 The context menu: a free note → the submenu with all the nodes / the direct item
+    over the node; an attached one → the detach; "Delete the note" in place (the synthetic
+    QContextMenuEvent + the capture pattern of test_groups.py);
+  * §5 The drag & drop E2E (QTest, the full pipeline view→scene→item): the drag onto a node = the attach,
+    v1.2.4-fix: the shift of the attached one = THE MOVE without the detach (the line follows,
+    the offset is preserved), the drag onto another node = the re-attach (one command),
+    the click without the movement — a no-op;
+  * §6 The Save/Load round-trip: the attachment is restored, v1.2.4-fix: the saved
+    position of the attached note is trusted (the offset from the anchor is computed from it);
+  * §7 The i18n parity (417 keys) + the release state v1.2.4.
 
-Запуск: python tests/test_note_attach.py   (из корня проекта) или python tests/run_all.py
+Run: python tests/test_note_attach.py   (from the project root) or python tests/run_all.py
 """
 import sys
 
 from _common import bootstrap, check, finish, viewport_point as _vp, \
     load_i18n_langs, check_i18n_parity, check_release_state
 
-ROOT, WORK = bootstrap()  # ДО импортов модулей приложения
+ROOT, WORK = bootstrap()  # BEFORE the app module imports
 
 from PySide6.QtWidgets import QApplication, QMessageBox
 app = QApplication(sys.argv)
@@ -46,7 +46,7 @@ import os
 
 
 def _anchor(node):
-    """Якорная позиция заметки: правый верхний угол узла + (12, 12)."""
+    """The anchor position of the note: the top-right corner of the node + (12, 12)."""
     r = node.sceneBoundingRect()
     return (r.right() + 12.0, r.top() + 12.0)
 
@@ -57,7 +57,7 @@ def _at(pos, exp):
 
 print("== v1.2.4 note attach ==")
 
-# ══ §1 Формат и сериализация ═════════════════════════════════════════
+# ══ §1 The format and the serialization ═════════════════════════════════════════
 win_m = MW.MainWindow()
 n_a = win_m.scene.add_server(server_data_from_dict(
     {"alias": "att-a", "host": "10.0.0.1", "user": "u", "x": 100, "y": 100}))
@@ -77,7 +77,7 @@ win_m.scene.detach_note_from_node(note_f)
 d2 = note_f.to_dict()
 check("§1 detach: server_id key disappears again", "server_id" not in d2, str(d2))
 
-# Сохранение: у закреплённой — ключ, у свободной — нет
+# Saving: the attached one — the key, the free one — none
 win_m.scene.attach_note_to_node(note_f, n_a)
 note_free2 = win_m.scene.add_note(text="free2", x=900.0, y=300.0)
 p1 = os.path.join(WORK, "attach_v124.json")
@@ -90,7 +90,7 @@ check("§1 saved JSON: attached note has server_id",
 check("§1 saved JSON: free note has no server_id key",
       "server_id" not in notes_j.get(note_free2.note_id, {}), str(notes_j))
 
-# Backward-compat: старый файл (заметки без server_id) → свободные
+# Backward-compat: an old file (notes without server_id) → free notes
 win_l = MW.MainWindow()
 old_raw = {"version": "0.9",
            "servers": [{"alias": "lc", "host": "10.0.0.3", "user": "u", "id": "lcnode01"}],
@@ -103,7 +103,7 @@ check("§1 old file (no server_id) loads: note is free",
       n_old is not None and getattr(n_old, "server_id", None) is None,
       str(getattr(n_old, "server_id", "MISSING")))
 
-# Битая ссылка: server_id на несуществующий узел → свободная на сохранённой позиции
+# A broken link: server_id to a non-existent node → a free note at the saved position
 win_b = MW.MainWindow()
 bad_raw = {"version": "0.9",
            "servers": [{"alias": "lc2", "host": "10.0.0.4", "user": "u", "id": "lcnode02"}],
@@ -117,7 +117,7 @@ check("§1 broken server_id ref: note stays free at saved position",
       and abs(n_bad.pos().x() - 77.0) < 0.5 and abs(n_bad.pos().y() - 88.0) < 0.5,
       f"pos=({n_bad.pos().x() if n_bad else '?'}, {n_bad.pos().y() if n_bad else '?'})")
 
-# ══ §2 Механика сцены: якорь, линия, следование, очистки ══════════════
+# ══ §2 The scene mechanics: the anchor, the line, the following, the cleanups ══════════════
 win_x = MW.MainWindow()
 n_x = win_x.scene.add_server(server_data_from_dict(
     {"alias": "mech", "host": "10.0.0.7", "user": "u", "x": 100, "y": 100}))
@@ -132,8 +132,8 @@ check("§2 attach places note exactly at topRight+(12,12)",
 line = win_x.scene._note_anchor_lines.get(note_x.note_id)
 check("§2 anchor line exists in _note_anchor_lines", line is not None)
 pen = line.pen()
-# setDashPattern([4,3]) переводит стиль в CustomDashLine — визуально тот же пунктир;
-# цвет = тело стикера (v1.2.4-fix: приглушённый #eedd9f)
+# setDashPattern([4,3]) switches the style to CustomDashLine — visually the same dash;
+# the color = the body of the sticker (v1.2.4-fix: a muted #eedd9f)
 check("§2 line pen: dashed, #eedd9f, width 1.2",
       pen.style() in (_Qt.PenStyle.DashLine, _Qt.PenStyle.CustomDashLine)
       and pen.color().name().lower() == "#eedd9f"
@@ -144,10 +144,10 @@ check("§2 line dash pattern [4,3]", list(pen.dashPattern()) == [4.0, 3.0],
 check("§2 line zValue == -1 (above arrows -2, below nodes/notes 0)",
       abs(line.zValue() + 1.0) < 0.001, str(line.zValue()))
 
-# Концы линии — edge_point на границах обоих rect'ов
+# The line ends — edge_point on the borders of both rects
 nr, rr = note_x.sceneBoundingRect(), n_x.sceneBoundingRect()
-exp_p0 = _ep(nr, nr.center(), rr.center())   # сторона заметки (moveTo)
-exp_p1 = _ep(rr, rr.center(), nr.center())   # сторона узла (lineTo → currentPosition)
+exp_p0 = _ep(nr, nr.center(), rr.center())   # the note side (moveTo)
+exp_p1 = _ep(rr, rr.center(), nr.center())   # the node side (lineTo → currentPosition)
 path = line.path()
 e0 = path.elementAt(0)
 start = (e0.x, e0.y)
@@ -159,9 +159,9 @@ check("§2 line node-side endpoint matches edge_point",
       abs(end[0] - exp_p1.x()) < 0.5 and abs(end[1] - exp_p1.y()) < 0.5,
       f"end={end} expected={exp_p1.x()},{exp_p1.y()}")
 
-# Движение узла: itemChange вызывается ДО применения позиции (Qt-нюанс) — заметка
-# ведёт себя ровно как стрелки: после одиночного setPos отстаёт на шаг, на следующем
-# шаге (повторный setPos — «release-самоисцеление» CmdMoveNode) — точное совпадение.
+# Moving a node: itemChange is called BEFORE the position is applied (a Qt nuance) — the note
+# behaves exactly like the arrows: after a single setPos it lags by one step, on the next
+# step (a repeated setPos — the "release self-healing" of CmdMoveNode) — an exact match.
 r_before = n_x.sceneBoundingRect()
 anchor_before = (r_before.right() + 12.0, r_before.top() + 12.0)
 n_x.setPos(n_x.pos().x() + 100, n_x.pos().y() + 50)
@@ -176,10 +176,10 @@ check("§2 next setPos: note exactly at previous geometry anchor",
       _at((note_x.pos().x(), note_x.pos().y()), (r_mid.right() + 12.0, r_mid.top() + 12.0)),
       f"note=({note_x.pos().x()}, {note_x.pos().y()})")
 
-# v1.2.4-fix: закреплённую заметку можно двигать — dragUpdated пересчитывает offset
-# (относительно ТЕКУЩЕЙ геометрии узла), линия-якорь следует live; узел дальше ведёт
-# заметку С сохранением смещения
-r_off0 = n_x.sceneBoundingRect()   # геометрия узла в момент драга
+# v1.2.4-fix: an attached note can be moved — dragUpdated recomputes the offset
+# (relative to the CURRENT node geometry), the anchor line follows live; the node leads on
+# the note WITH the offset preserved
+r_off0 = n_x.sceneBoundingRect()   # the node geometry at the moment of the drag
 note_x.prepareGeometryChange()
 note_x.setPos(note_x.pos().x() + 80.0, note_x.pos().y() + 40.0)
 note_x.dragUpdated.emit(note_x)
@@ -208,8 +208,8 @@ check("§2 node move: attached note follows WITH offset",
            r_off_mid.top() + 12.0 + note_x.anchor_offset[1])),
       f"note=({note_x.pos().x()}, {note_x.pos().y()}) offset={note_x.anchor_offset}")
 
-# Collapse/expand: update_appearance применяет геометрию ДО хука — точное совпадение;
-# концы линии пересчитаны под новую высоту карточки; offset заметки сохраняется
+# Collapse/expand: update_appearance applies the geometry BEFORE the hook — an exact match;
+# the line ends are recomputed for the new card height; the note offset is preserved
 n_x.toggle_collapsed()
 app.processEvents()
 rc = n_x.sceneBoundingRect()
@@ -232,7 +232,7 @@ check("§2 expand back: note exactly at restored anchor + offset",
           (re_.right() + 12.0 + note_x.anchor_offset[0],
            re_.top() + 12.0 + note_x.anchor_offset[1])))
 
-# Detach: позиция не меняется, линия убирается
+# Detach: the position is unchanged, the line is removed
 pos_attached = (note_x.pos().x(), note_x.pos().y())
 ok_d = win_x.scene.detach_note_from_node(note_x)
 check("§2 detach keeps note position",
@@ -241,14 +241,14 @@ check("§2 detach keeps note position",
 check("§2 detach removes the anchor line",
       note_x.note_id not in win_x.scene._note_anchor_lines)
 
-# remove_server: страховка — заметки снимаются, линии не остаются сиротами
+# remove_server: a safety net — the notes are detached, no orphan lines remain
 win_x.scene.attach_note_to_node(note_x, n_x)
 win_x.scene.remove_server(n_x.data.id)
 check("§2 remove_server: note freed and no orphan lines",
       note_x.server_id is None and len(win_x.scene._note_anchor_lines) == 0,
       f"server_id={note_x.server_id} lines={list(win_x.scene._note_anchor_lines)}")
 
-# clear_all: то же самое (чистая сцена без окна)
+# clear_all: the same (a clean scene without a window)
 from graphics.map_scene import MapScene as _MS
 sc = _MS()
 nd = sc.add_server(server_data_from_dict(
@@ -261,7 +261,7 @@ check("§2 clear_all: anchor lines cleared (no orphans)",
       len(sc._note_anchor_lines) == 0 and len(sc.items()) == 0,
       f"lines={list(sc._note_anchor_lines)} items={len(sc.items())}")
 
-# ══ §3 Undo/Redo: round-trip, LIFO-удаление, мёртвый объект (audit #8) ══
+# ══ §3 Undo/Redo: the round-trip, the LIFO removal, the dead object (audit #8) ══
 win_u = MW.MainWindow()
 n_u = win_u.scene.add_server(server_data_from_dict(
     {"alias": "ur-a", "host": "10.0.0.5", "user": "u", "x": 100, "y": 100}))
@@ -293,33 +293,33 @@ ok_d2 = win_u._detach_note(note_u)
 check("§3 detach: command pushed, note stays in place",
       ok_d2 and note_u.server_id is None
       and _at((note_u.pos().x(), note_u.pos().y()), (axu, ayu)))
-win_u.undo_stack.undo()   # undo(detach) → повторный attach
+win_u.undo_stack.undo()   # undo(detach) → the attach again
 check("§3 undo(detach): re-attached at anchor",
       note_u.server_id == n_u.data.id
       and _at((note_u.pos().x(), note_u.pos().y()), (axu, ayu)))
-win_u.undo_stack.redo()   # redo(detach) → свободная на том же месте
+win_u.undo_stack.redo()   # redo(detach) → free at the same place
 check("§3 redo(detach): free, position unchanged",
       note_u.server_id is None
       and _at((note_u.pos().x(), note_u.pos().y()), (axu, ayu)))
 
-# LIFO: «открепление + удаление сервера» откатывается полностью
+# LIFO: "detach + delete server" is reverted completely
 n_c = win_u.scene.add_server(server_data_from_dict(
     {"alias": "ur-c", "host": "10.0.0.6", "user": "u", "x": 400, "y": 300}))
-win_u._add_note_at(_QP(900, 500))            # [Add note] (метод не возвращает заметку)
+win_u._add_note_at(_QP(900, 500))            # [Add note] (the method does not return the note)
 note_l = win_u.scene._notes[-1]
 win_u._attach_note_to_node(note_l, n_c)      # [Attach note]
 axc, ayc = _anchor(n_c)
 _real_q = QMessageBox.question
 QMessageBox.question = staticmethod(lambda *a, **k: QMessageBox.Yes)
 try:
-    ok_rm = win_u._remove_node_guarded(n_c)  # [Detach note, Remove node] (LIFO-порядок)
+    ok_rm = win_u._remove_node_guarded(n_c)  # [Detach note, Remove node] (LIFO order)
 finally:
     QMessageBox.question = _real_q
 check("§3 LIFO: delete with attached note — node gone, note free",
       ok_rm and win_u.scene.get_node(n_c.data.id) is None and note_l.server_id is None,
       f"node={win_u.scene.get_node(n_c.data.id)} server_id={note_l.server_id}")
-win_u.undo_stack.undo()   # undo(Remove node) → узел возвращается
-win_u.undo_stack.undo()   # undo(Detach) → переприкрепление (узел уже жив)
+win_u.undo_stack.undo()   # undo(Remove node) → the node comes back
+win_u.undo_stack.undo()   # undo(Detach) → re-attachment (the node is already alive)
 n_c_back = win_u.scene.get_node(n_c.data.id)
 check("§3 LIFO: undo×2 — node alive AND note re-attached at anchor",
       n_c_back is not None and note_l.server_id == n_c.data.id
@@ -330,7 +330,7 @@ win_u.undo_stack.redo()
 check("§3 LIFO: redo×2 — node gone, note free again",
       win_u.scene.get_node(n_c.data.id) is None and note_l.server_id is None)
 
-# Мёртвый C++-объект (audit #8): «создать → прикрепить → удалить» + undo×2
+# A dead C++ object (audit #8): "create → attach → remove" + undo×2
 n_d = win_u.scene.add_server(server_data_from_dict(
     {"alias": "ur-d", "host": "10.0.0.11", "user": "u", "x": 700, "y": 300}))
 win_u._add_note_at(_QP(1100, 500))            # [Add note]
@@ -339,14 +339,14 @@ old_d = (note_d.pos().x(), note_d.pos().y())
 win_u._attach_note_to_node(note_d, n_d)        # [Attach note]
 note_d_id = note_d.note_id
 win_u._remove_note(note_d)                     # [Delete note] → deleteLater
-app.processEvents()                            # C++-объект уничтожен (RuntimeError-путь)
-win_u.undo_stack.undo()                        # undo(Delete) → НОВАЯ заметка с тем же id
+app.processEvents()                            # The C++ object is destroyed (the RuntimeError path)
+win_u.undo_stack.undo()                        # undo(Delete) → a NEW note with the same id
 note_d2 = win_u.scene.get_note_by_id(note_d_id)
 check("§3 dead obj: undo(delete) recreates note with same id",
       note_d2 is not None and note_d2 is not note_d,
       f"resolved={note_d2}")
 try:
-    win_u.undo_stack.undo()                    # undo(Attach) — _resolve_note по id
+    win_u.undo_stack.undo()                    # undo(Attach) — _resolve_note by id
     crashed = ""
 except Exception as e:  # noqa: BLE001
     crashed = repr(e)
@@ -356,9 +356,9 @@ check("§3 dead obj: resolved note free at pre-attach position",
       and _at((note_d2.pos().x(), note_d2.pos().y()), old_d),
       f"pos=({note_d2.pos().x() if note_d2 else '?'}, {note_d2.pos().y() if note_d2 else '?'})")
 
-# ══ §4 Контекстное меню заметки (синтетический QContextMenuEvent) ═════
+# ══ §4 The note context menu (a synthetic QContextMenuEvent) ═════
 import graphics.map_view as _MVm
-from PySide6.QtWidgets import QMenu as _QMenuBase
+from _fakes import CaptureMenu as _CaptureMenu
 
 win_c = MW.MainWindow()
 c_a = win_c.scene.add_server(server_data_from_dict(
@@ -367,16 +367,7 @@ c_b = win_c.scene.add_server(server_data_from_dict(
     {"alias": "cm-b", "host": "10.0.0.22", "user": "u", "x": 500, "y": 400}))
 
 captured = []
-
-
-class _CaptureMenu(_QMenuBase):
-    def exec(self, *a, **k):      # offscreen: перехватываем — не блокируемся
-        captured.append(self)
-        return 0
-
-    def exec_(self, *a, **k):     # legacy-имя
-        captured.append(self)
-        return 0
+_CaptureMenu.captured = captured   # the exec/exec_ interception offscreen (_fakes)
 
 
 def _ctx(view, sp):
@@ -397,11 +388,11 @@ def _find_act(menu, text):
 _orig_menu_cls = _MVm.QMenu
 _MVm.QMenu = _CaptureMenu
 try:
-    # Случай A: свободная заметка, узла под курсором нет, выделения нет → подменю
+    # Case A: a free note, no node under the cursor, no selection → the submenu
     note_m1 = win_c.scene.add_note(text="menu-a", x=700.0, y=100.0)
     win_c.scene.clearSelection()
     captured.clear()
-    _ctx(win_c.view, _QP(820, 180))   # центр заметки (rect 700..940 × 100..260)
+    _ctx(win_c.view, _QP(820, 180))   # the center of the note (rect 700..940 × 100..260)
     check("§4 ctx menu over free note captured", len(captured) == 1)
     if captured:
         m = captured[-1]
@@ -422,11 +413,11 @@ try:
               and _at((note_m1.pos().x(), note_m1.pos().y()), _anchor(c_a)),
               f"server_id={note_m1.server_id}")
 
-    # Случай B: свободная заметка НАД узлом → прямой пункт с alias
-    note_m2 = win_c.scene.add_note(text="menu-b", x=520.0, y=420.0)  # пересекает c_b
+    # Case B: a free note OVER a node → the direct item with the alias
+    note_m2 = win_c.scene.add_note(text="menu-b", x=520.0, y=420.0)  # intersects c_b
     win_c.scene.clearSelection()
     captured.clear()
-    _ctx(win_c.view, _QP(600, 470))   # точка в пересечении заметки и карточки c_b
+    _ctx(win_c.view, _QP(600, 470))   # a point at the intersection of the note and the c_b card
     if captured:
         m = captured[-1]
         act_att = _find_act(m, _t("ctx.note_attach_to").format(alias="cm-b"))
@@ -441,10 +432,10 @@ try:
               and _at((note_m2.pos().x(), note_m2.pos().y()), _anchor(c_b)),
               f"server_id={note_m2.server_id}")
 
-    # Случай C: закреплённая заметка → пункт открепления; позиция не меняется
+    # Case C: an attached note → the detach item; the position is unchanged
     pos_c = (note_m2.pos().x(), note_m2.pos().y())
     captured.clear()
-    _ctx(win_c.view, _QP(pos_c[0] + 50, pos_c[1] + 40))   # тело закреплённой заметки
+    _ctx(win_c.view, _QP(pos_c[0] + 50, pos_c[1] + 40))   # the body of a pinned note
     if captured:
         m = captured[-1]
         act_det = _find_act(m, _t("ctx.note_detach"))
@@ -460,19 +451,19 @@ try:
 finally:
     _MVm.QMenu = _orig_menu_cls
 
-# ══ §5 Drag & drop E2E (QTest, полный pipeline view→scene→item) ═══════
+# ══ §5 The drag & drop E2E (QTest, the full pipeline view→scene→item) ═══════
 win_e = MW.MainWindow()
 n_e = win_e.scene.add_server(server_data_from_dict(
     {"alias": "e2e-a", "host": "10.0.0.31", "user": "u", "x": -400, "y": -100}))
 n_f = win_e.scene.add_server(server_data_from_dict(
     {"alias": "e2e-b", "host": "10.0.0.32", "user": "u", "x": 200, "y": -100}))
-win_e._add_note_at(_QP(0, 250))             # заметка через окно — сигналы подключены
+win_e._add_note_at(_QP(0, 250))             # the note via the window — the signals are connected
 note_e = win_e.scene._notes[-1]
 vp = win_e.view.viewport()
 
 
 def _drag(view, vp_, from_sp, to_sp, steps=6):
-    """QTest drag: press в from_sp → шаги к to_sp → release (паттерн test_notes.py)."""
+    """A QTest drag: a press at from_sp → steps to to_sp → release (the test_notes.py pattern)."""
     _QTest.mousePress(vp_, _Qt.LeftButton, pos=_vp(view, from_sp))
     app.processEvents()
     for i in range(1, steps + 1):
@@ -484,9 +475,9 @@ def _drag(view, vp_, from_sp, to_sp, steps=6):
     app.processEvents()
 
 
-# Drag 1: свободная заметка → release над узлом = прикрепить
+# Drag 1: a free note → release over a node = attach
 ne_cx, ne_cy = n_e.sceneBoundingRect().center().x(), n_e.sceneBoundingRect().center().y()
-drag1_from = _QP(note_e.pos().x() + 120, note_e.pos().y() + 80)   # центр заметки
+drag1_from = _QP(note_e.pos().x() + 120, note_e.pos().y() + 80)   # the center of the note
 _drag(win_e.view, vp, drag1_from, _QP(ne_cx, ne_cy))
 check("§5 E2E: drag free note onto node attaches it",
       note_e.server_id == n_e.data.id, f"server_id={note_e.server_id}")
@@ -495,23 +486,23 @@ check("§5 E2E: attached at exact anchor",
       f"pos=({note_e.pos().x()}, {note_e.pos().y()}) expected={_anchor(n_e)}")
 check("§5 E2E: line created on attach",
       note_e.note_id in win_e.scene._note_anchor_lines)
-# Нюанс биндинга: в этой сборке PySide6 index() возвращает count (не count-1) —
-# верхняя команда на позиции count()-1.
+# A binding nuance: in this PySide6 build index() returns count (not count-1) —
+# the top command at the position count()-1.
 top = win_e.undo_stack.count() - 1
 check("§5 E2E: CmdAttachNote is the last undo command",
       top >= 1 and win_e.undo_stack.text(top) == "Attach note",
       f"count={win_e.undo_stack.count()} text={win_e.undo_stack.text(top)!r}")
 
-# Drag 2 (v1.2.4-fix): сдвиг закреплённой заметки = ПЕРЕМЕЩЕНИЕ без открепления;
-# release вне узлов — заметка остаётся закреплённой на позиции отпускания, линия
-# следует live, offset сохраняется, undo-команд не появляется
+# Drag 2 (v1.2.4-fix): moving an attached note = a MOVE without detaching;
+# a release outside the nodes — the note stays attached at the release position, the line
+# it follows live, the offset is preserved, no undo command appears
 count2 = win_e.undo_stack.count()
-press2 = _QP(note_e.pos().x() + 100, note_e.pos().y() + 50)   # тело (не над n_e)
+press2 = _QP(note_e.pos().x() + 100, note_e.pos().y() + 50)   # the body (not over n_e)
 rel2 = _QP(0, 250)
 _drag(win_e.view, vp, press2, rel2)
 check("§5 E2E: moving attached note does NOT detach it",
       note_e.server_id == n_e.data.id, f"server_id={note_e.server_id}")
-exp2 = (rel2.x() - 100.0, rel2.y() - 50.0)   # точка нажатия в локальных координатах заметки
+exp2 = (rel2.x() - 100.0, rel2.y() - 50.0)   # the click point in the note's local coordinates
 check("§5 E2E: attached note stays at drop position",
       abs(note_e.pos().x() - exp2[0]) < 3 and abs(note_e.pos().y() - exp2[1]) < 3,
       f"pos=({note_e.pos().x()}, {note_e.pos().y()}) expected≈{exp2}")
@@ -526,10 +517,10 @@ check("§5 E2E: no undo command for a plain move",
       win_e.undo_stack.count() == count2,
       f"count={win_e.undo_stack.count()} was={count2}")
 
-# Drag 3 (v1.2.4-fix): закреплённая → drag на ДРУГОЙ узел = пере-крепление: ОДНА
-# команда Attach note (server_id перезаписывается), заметка «встает» в якорь нового
-win_e._attach_note_to_node(note_e, n_f)   # [Attach note] — заметка у n_f
-press3 = _QP(note_e.pos().x() + 100, note_e.pos().y() + 50)   # тело (не над n_f)
+# Drag 3 (v1.2.4-fix): attached → a drag onto ANOTHER node = re-attach: ONE
+# the Attach note command (server_id is overwritten), the note "settles" into the anchor of the new
+win_e._attach_note_to_node(note_e, n_f)   # [Attach note] — a note at n_f
+press3 = _QP(note_e.pos().x() + 100, note_e.pos().y() + 50)   # the body (not over n_f)
 count_before = win_e.undo_stack.count()
 _drag(win_e.view, vp, press3, _QP(ne_cx, ne_cy))
 top3 = win_e.undo_stack.count() - 1
@@ -543,8 +534,8 @@ check("§5 E2E: ends attached to the NEW node at its anchor",
       and _at((note_e.pos().x(), note_e.pos().y()), _anchor(n_e)),
       f"server_id={note_e.server_id} pos=({note_e.pos().x()}, {note_e.pos().y()})")
 
-# Drag 4: клик без движения по закреплённой заметке НЕ открепляет
-press4 = _QP(note_e.pos().x() + 60, note_e.pos().y() + 50)   # тело (не над n_e)
+# Drag 4: a click without movement on an attached note does NOT detach it
+press4 = _QP(note_e.pos().x() + 60, note_e.pos().y() + 50)   # the body (not over n_e)
 pos4 = (note_e.pos().x(), note_e.pos().y())
 count4 = win_e.undo_stack.count()
 _QTest.mousePress(vp, _Qt.LeftButton, pos=_vp(win_e.view, press4))
@@ -557,7 +548,7 @@ check("§5 E2E: click without movement does NOT detach",
       and win_e.undo_stack.count() == count4,
       f"server_id={note_e.server_id} count={win_e.undo_stack.count()}")
 
-# ══ §6 Save/Load round-trip с креплением ══════════════════════════════
+# ══ §6 The Save/Load round-trip with the attachment ══════════════════════════════
 win_s = MW.MainWindow()
 n_s = win_s.scene.add_server(server_data_from_dict(
     {"alias": "sl-a", "host": "10.0.0.41", "user": "u", "x": 100, "y": 100}))
@@ -566,8 +557,8 @@ win_s._connect_note_signals(note_s_free)
 note_s_att = win_s.scene.add_note(text="att-s", x=600.0, y=300.0)
 win_s._connect_note_signals(note_s_att)
 win_s.scene.attach_note_to_node(note_s_att, n_s)
-# v1.2.4-fix: сдвигаем закреплённую заметку (drag без открепления) — сохранённая
-# позиция больше НЕ равна якорю; при загрузке она доверяется (offset вычисляется от неё)
+# v1.2.4-fix: we move an attached note (a drag without detaching) — the saved
+# the position is NO LONGER equal to the anchor; on load it is trusted (the offset is computed from it)
 note_s_att.prepareGeometryChange()
 note_s_att.setPos(note_s_att.pos().x() + 60.0, note_s_att.pos().y() - 35.0)
 note_s_att.dragUpdated.emit(note_s_att)
@@ -589,7 +580,7 @@ a2x, a2y = _anchor(n_s2)
 check("§6 reload: note re-attached to its server",
       att2 is not None and att2.server_id == n_s.data.id,
       f"server_id={getattr(att2, 'server_id', 'MISSING')}")
-# v1.2.4-fix: сохранённая x/y доверяется (заметку можно двигать) — НЕ прыжок в угол
+# v1.2.4-fix: the saved x/y is trusted (the note can be moved) — NOT a jump to the corner
 check("§6 reload: saved position trusted (not snapped to corner)",
       att2 is not None
       and abs(att2.pos().x() - n6[att2.note_id]["x"]) < 0.5
@@ -607,9 +598,9 @@ check("§6 reload: free note unchanged (position + no server_id)",
       and abs(free2.pos().y() - n6[note_s_free.note_id]["y"]) < 0.5,
       f"pos=({free2.pos().x() if free2 else '?'}, {free2.pos().y() if free2 else '?'})")
 
-# v1.2.4-fix: сохранённая x/y закреплённой заметки доверяется как есть (даже необычная)
-# — позиция первична (её двигал пользователь), крепление и линия восстанавливаются,
-# offset вычисляется от этой позиции относительно якоря узла
+# v1.2.4-fix: the saved x/y of an attached note is trusted as-is (even unusual)
+# — the position is primary (the user moved it), the attachment and the line are restored,
+# the offset is computed from this position relative to the node's anchor
 j6b = json.loads(json.dumps(j6))
 for rec in j6b["notes"]:
     if rec["id"] == note_s_att.note_id:
@@ -624,7 +615,7 @@ check("§6 reload: unusual saved position trusted as-is, attachment + line resto
       f"pos=({att3.pos().x() if att3 else '?'}, {att3.pos().y() if att3 else '?'}) "
       f"server_id={getattr(att3, 'server_id', 'MISSING')}")
 
-# Файл старого формата через полный путь _import_project_raw
+# An old-format file via the full _import_project_raw path
 win_s4 = MW.MainWindow()
 old_raw6 = {"version": "0.9",
             "servers": [{"alias": "sl-b", "host": "10.0.0.42", "user": "u", "x": 100, "y": 100}],
@@ -636,7 +627,7 @@ n_old6 = win_s4.scene.get_note_by_id("oldfmt1")
 check("§6 old-format file via full path: note loads free",
       n_old6 is not None and getattr(n_old6, "server_id", None) is None)
 
-# ══ §7 i18n + состояние релиза v1.2.4 ═════════════════════════════════
+# ══ §7 i18n + the release state v1.2.4 ═════════════════════════════════
 langs = load_i18n_langs(ROOT)
 check_i18n_parity(langs)
 for k in ("ctx.note_attach", "ctx.note_attach_to", "ctx.note_detach",

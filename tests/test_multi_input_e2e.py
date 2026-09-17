@@ -1,31 +1,31 @@
 # -*- coding: utf-8 -*-
-"""v1.2.4 — Мультинабор: E2E на РЕАЛЬНЫХ SSH-каналах (paramiko), без фейковых потоков.
+"""v1.2.4 — Multi-input: E2E on REAL SSH channels (paramiko), no fake threads.
 
-Почему отдельный файл: тематический test_multi_input.py доказывает цепочку
+Why a separate file: the thematic test_multi_input.py proves the chain
 TerminalWidget.keyPressEvent → _send → hub.broadcast → page.terminal_thread.send_data()
-на фейках (тот же API, что у SSHTerminalThread). Этот файл закрывает последний
-непокрытый отрезок — НАСТОЯЩИЙ paramiko: реальный Transport/Channel на стороне
-сервера (in-process echo-shell), реальный SSHTerminalThread клиента, реальная
-аутентификация и known_hosts-пиннинг. Инцидент v1.2.4: ручное тестирование не
-подтвердило broadcast при живых сессиях — E2E фиксирует поведение на реальных
-каналах и ловит регрессии в send_data/живости потоков, которые фейки не видят.
+on the fakes (the same API as SSHTerminalThread). This file closes the last
+uncovered segment — the REAL paramiko: the real Transport/Channel on the
+server side (the in-process echo-shell), the real SSHTerminalThread of the client, the real
+authentication and the known_hosts pinning. The incident of v1.2.4: the manual testing did not
+confirm the broadcast on the live sessions — the E2E pins down the behavior on the real
+channels and catches the regressions in send_data/the liveness of the threads that the fakes do not see.
 
-§1 Window-режим (как у пользователя: terminal_mode=windows), 3 терминала:
-   включение через путь меню (_toggle_multi_input(True)) → клавиша в активном
-   виджете → те же байты во ВСЕХ остальных реальных каналах; источник получает
-   ровно один раз (нет эха). Режим выключен → дублей нет (поведение v1.2.2).
-   Плюс «реальный путь событий» (v1.2.4-fix): клавиши postEvent'ом через Qt
-   event loop (focus + QWidget::event) — не только прямые keyPressEvent-вызовы.
+§1 The window mode (as the user: terminal_mode=windows), 3 terminals:
+   the enabling via the menu path (_toggle_multi_input(True)) → a key in the active
+   widget → the same bytes into ALL the other real channels; the source receives
+   exactly once (no echo). The mode is disabled → no duplicates (the behavior of v1.2.2).
+   Plus the "real event path" (v1.2.4-fix): the keys by postEvent through the Qt
+   event loop (the focus + QWidget::event) — not only the direct keyPressEvent calls.
 
-§2 Док-режим (terminal_mode=tabs, TerminalDockContent): 2 сессии в доке —
-   broadcast во все остальные табы дока.
+§2 The dock mode (terminal_mode=tabs, TerminalDockContent): 2 sessions in the dock —
+   the broadcast into all the other tabs of the dock.
 
-§3 Диагностика (v1.2.4-fix): смена состояния режима пишется в лог приложения
-   (INFO «Multi-input mode enabled/disabled»), broadcast — DEBUG-строка на каждый
-   ввод; файл лога под изолированным HOME проверяется по содержимому.
+§3 The diagnostics (v1.2.4-fix): the state change of the mode is written to the log of the application
+   (the INFO "Multi-input mode enabled/disabled"), the broadcast — the DEBUG line on every
+   input; the log file under the isolated HOME is checked by the content.
 
-Запуск:  python tests/test_multi_input_e2e.py   (из корня проекта) или python tests/run_all.py
-Сеть не нужна: SSH-сервер живёт в процессе (paramiko ServerInterface, echo-shell).
+Run:  python tests/test_multi_input_e2e.py   (from the project root) or python tests/run_all.py
+The network is not needed: the SSH server lives in the process (the paramiko ServerInterface, the echo-shell).
 """
 import os
 import socket
@@ -35,7 +35,7 @@ import time
 
 from _common import bootstrap, check, finish, wait_until
 
-ROOT, WORK = bootstrap()  # ДО импортов модулей приложения (HOME-изоляция и faulthandler внутри)
+ROOT, WORK = bootstrap()  # BEFORE the app module imports (the HOME isolation and faulthandler inside)
 
 from PySide6.QtCore import Qt  # noqa: E402
 from PySide6.QtGui import QKeyEvent  # noqa: E402
@@ -51,26 +51,26 @@ import ui.main_window as MW  # noqa: E402
 from modules.multi_input import get_hub  # noqa: E402
 from modules.logger import setup_logging, get_log_file_path  # noqa: E402
 
-setup_logging()   # лог в изолированный HOME (~/.sshmap/logs/sshmap.log) — нужен для §3
+setup_logging()   # the log into the isolated HOME (~/.sshmap/logs/sshmap.log) — needed for §3
 
 
 # ════════════════════════════════════════════════════════
-# Обвязка: in-process SSH echo-сервер (реальные paramiko transport/channel)
+# The harness: an in-process SSH echo server (a real paramiko transport/channel)
 # ════════════════════════════════════════════════════════
 
 HOST_KEY = paramiko.RSAKey.generate(2048)
 
 
 class EchoServer(paramiko.ServerInterface):
-    """Echo-shell: весь ввод клиента возвращается обратно (как bash-эхо).
+    """Echo-shell: every client input is echoed back (like a bash echo).
 
-    ВАЖНО (проверено прогоном, paramiko 5.0): для channel REQUEST'ов (pty/shell)
-    результат должен быть TRUTHY — OPEN_SUCCEEDED == 0 (falsy!) дал бы
-    CHANNEL_FAILURE, и клиент сам закрывал канал («Channel closed.»)."""
+    IMPORTANT (verified by a run, paramiko 5.0): for the channel REQUESTs (pty/shell)
+    the result must be TRUTHY — OPEN_SUCCEEDED == 0 (falsy!) would give
+    CHANNEL_FAILURE, and the client closed the channel itself ("Channel closed.")."""
 
     def __init__(self):
         self.shell_channel = None
-        self.data_log = []   # весь ввод клиента (для assert'ов broadcast'а)
+        self.data_log = []   # the whole client input (for the broadcast asserts)
 
     def check_auth_password(self, username, password):
         return paramiko.AUTH_SUCCESSFUL
@@ -95,12 +95,12 @@ class EchoServer(paramiko.ServerInterface):
         return True
 
 
-SERVERS = []       # EchoServer на соединение (порядок accept'ов)
-TRANSPORTS = []    # живые ссылки: без них GC убьёт Transport вместе с каналом
+SERVERS = []       # An EchoServer on the connection (the order of accepts)
+TRANSPORTS = []    # the live references: without them the GC would kill the Transport together with the channel
 
 
 def _handle(conn):
-    """Одно соединение — свой поток (accept-цикл не блокируется)."""
+    """One connection — its own thread (the accept loop is not blocked)."""
     try:
         transport = paramiko.Transport(conn)
         transport.add_server_key(HOST_KEY)
@@ -108,7 +108,7 @@ def _handle(conn):
         SERVERS.append(srv)
         TRANSPORTS.append(transport)
         transport.start_server(server=srv)
-        # auth + open channel + shell request приходят ПОСЛЕ start_server — ждём
+        # auth + open channel + the shell request come AFTER start_server — we wait
         deadline = time.time() + 20
         while srv.shell_channel is None and time.time() < deadline:
             if not transport.is_active():
@@ -122,11 +122,11 @@ def _handle(conn):
                 data = chan.recv(4096)
                 if data:
                     srv.data_log.append(data)
-                    chan.sendall(data)   # echo обратно в терминал клиента
+                    chan.sendall(data)   # an echo back into the client terminal
             else:
                 time.sleep(0.02)
     except Exception:
-        pass  # сервер-обвязка: сбой соединения не должен ронять тест
+        pass  # the server harness: a connection failure must not crash the test
 
 
 _listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -137,23 +137,23 @@ _listener.listen(8)
 
 
 def _serve():
-    # ВАЖНО (v1.2.4-fix): ПОТОК НА СОЕДИНЕНИЕ — _handle блокируется в recv-цикле
-    # до закрытия канала; однопоточный accept-цикл обслужил бы только ПЕРВОГО
-    # клиента, остальные ждали бы баннер («Error reading SSH protocol banner»).
+    # IMPORTANT (v1.2.4-fix): THE THREAD ON THE CONNECTION — _handle is blocked in the recv loop
+    # before closing the channel; a single-threaded accept loop would have served only the FIRST
+    # client, the others would have been waiting for the banner ("Error reading SSH protocol banner").
     while True:
         try:
             conn, _addr = _listener.accept()
         except OSError:
-            return  # сокет закрыт (выход) — accept-цикл завершён
+            return  # the socket is closed (exit) — the accept loop is done
         threading.Thread(target=_handle, args=(conn,), daemon=True).start()
 
 
 threading.Thread(target=_serve, daemon=True).start()
 
 
-# Тестовый шов (паттерн v1.1.x): QMessageBox из ssh_terminal берётся в момент
-# вызова — подменяем на НЕМОДАЛЬНЫЙ фейк, чтобы ошибка сессии не блокировала
-# offscreen-прогон; все вызовы фиксируем (check: диалогов быть не должно).
+# The test seam (the v1.1.x pattern): QMessageBox from ssh_terminal is taken at the moment
+# call — we replace it with a NON-MODAL fake so a session error does not block
+# an offscreen run; we record every call (check: there must be no dialogs).
 DIALOGS = []
 
 
@@ -185,11 +185,11 @@ def key_event(key, text="", mod=Qt.KeyboardModifier.NoModifier):
 
 
 def type_text(widget, text):
-    """Клавиши в единственной точке ввода (keyPressEvent → _send).
+    """Keys at the single input point (keyPressEvent → _send).
 
-    Физическая клавиатура идёт тем же путём: шорткаты приложения — только
-    F12 (в режиме)/Ctrl+Z/Ctrl+Y/Ctrl+K, ни один не перехватывает печатные
-    клавиши/Enter/Backspace (аудит setShortcut/QKeySequence по ui/)."""
+    The physical keyboard goes through the same path: the app shortcuts are only
+    F12 (in the mode)/Ctrl+Z/Ctrl+Y/Ctrl+K, none intercepts printable
+    keys/Enter/Backspace (the setShortcut/QKeySequence audit over ui/)."""
     for ch in text:
         widget.keyPressEvent(QKeyEvent(
             QKeyEvent.Type.KeyPress, ord(ch.upper()),
@@ -204,11 +204,11 @@ def all_logs():
 
 
 # ════════════════════════════════════════════════════════
-# 1. Window-режим: 3 реальных терминала, broadcast во все остальные
+# 1. Window mode: 3 real terminals, broadcast to all the others
 # ════════════════════════════════════════════════════════
 print("== 1. windows mode, 3 real SSH terminals ==")
 
-hub_app = get_hub()   # singleton процесса (тот же, что у виджетов и MainWindow)
+hub_app = get_hub()   # the process singleton (the same one as in the widgets and MainWindow)
 hub_app.reset()
 
 mw = MW.MainWindow()
@@ -216,7 +216,7 @@ mw._autosave_timer.stop()
 mw.show()
 app.processEvents()
 
-check("окно держит хаб singleton + provider", mw._multi_hub is hub_app
+check("the window holds the hub singleton + the provider", mw._multi_hub is hub_app
       and hub_app.session_provider is not None)
 
 nodes, wins = [], {}
@@ -237,15 +237,15 @@ def all_connected():
 
 
 wait_until(all_connected, timeout_ms=25000)
-check("3 сессии в реестре + все РЕАЛЬНЫЕ каналы открыты (paramiko)",
+check("3 sessions in the registry + all the REAL channels are open (paramiko)",
       all_connected() and len(SERVERS) == 3,
       f"registry={len(mw._terminal_windows)} servers={len(SERVERS)}")
-check("ошибок сессий нет (диалогов не было)", DIALOGS == [], repr(DIALOGS))
+check("no session errors (there were no dialogs)", DIALOGS == [], repr(DIALOGS))
 
-# включение — путь checkable QAction («Вид» → Multi Input)
+# enabling — the checkable QAction path ("View" → Multi Input)
 mw._toggle_multi_input(True)
 app.processEvents()
-check("режим включён: хаб активен, плашка «MULTI: 3 sessions»",
+check("the mode is on: the hub is active, the plaque 'MULTI: 3 sessions'",
       hub_app.active is True and not mw._multi_plaque.isHidden()
       and mw._multi_label.text() == i18n.t("terminal.multi_status", count=3),
       repr(mw._multi_label.text()))
@@ -256,12 +256,12 @@ wait_until(lambda: all(b"hello-multi\r" in log for log in all_logs()),
            timeout_ms=5000)
 
 logs = all_logs()
-check("broadcast: те же байты во ВСЕХ реальных каналах (3 сервера)",
+check("the broadcast: the same bytes into ALL the real channels (3 servers)",
       all(b"hello-multi\r" in log for log in logs), repr(logs))
-check("каждый канал получил ввод ровно один раз (нет дублей/эха)",
+check("each channel received the input exactly once (no duplicates / no echo)",
       all(log.count(b"hello-multi\r") == 1 for log in logs), repr(logs))
 
-# режим выключен → поведение v1.2.2: только активная сессия
+# the mode is off → the v1.2.2 behaviour: only the active session
 mw._toggle_multi_input(False)
 app.processEvents()
 for s in SERVERS:
@@ -270,16 +270,16 @@ type_text(pages["e2e-a"].widget, "solo-only")
 wait_until(lambda: any(b"solo-only\r" in log for log in all_logs()), timeout_ms=5000)
 logs = all_logs()
 got = [i for i, log in enumerate(logs) if b"solo-only\r" in log]
-check("режим выключен: байты получили ровно ОДИН канал (источник), дублей нет",
+check("the mode is off: exactly ONE channel (the source) received the bytes, no duplicates",
       len(got) == 1 and all(b"solo-only\r" not in log or i in got
                             for i, log in enumerate(logs)), repr(logs))
 
-# ── Реальный путь событий (v1.2.4-fix): клавиши через Qt event loop ───────────
-# Прямые вызовы keyPressEvent() выше обходят фокус и цепочку QWidget::event();
-# postEvent + setFocus ближе к физической клавиатуре (событие идёт через
-# очередь Qt → QWidget::event() → keyPressEvent). Шорткаты приложения на
-# печатные клавиши/Enter не зарегистрированы (аудит QKeySequence по ui/:
-# Ctrl+K палитра, F12 — только в режиме и только ВЫХОД) — перехвата нет.
+# ── The real event path (v1.2.4-fix): the keys via the Qt event loop ───────────
+# The direct keyPressEvent() calls above bypass the focus and the QWidget::event() chain;
+# postEvent + setFocus is closer to a physical keyboard (the event goes through
+# the Qt queue → QWidget::event() → keyPressEvent). The app shortcuts on
+# the printable keys/Enter are not registered (the QKeySequence audit over ui/:
+# The Ctrl+K palette, F12 — only in the mode and only EXIT) — no interception.
 mw._toggle_multi_input(True)
 app.processEvents()
 for s in SERVERS:
@@ -298,7 +298,7 @@ QApplication.postEvent(src_w, QKeyEvent(QKeyEvent.Type.KeyPress,
 wait_until(lambda: all(b"realpath\r" in b"".join(s.data_log) for s in SERVERS),
            timeout_ms=5000)
 logs = all_logs()
-check("реальный путь событий (postEvent+focus через Qt loop): broadcast во все каналы",
+check("the real event path (postEvent + the focus through the Qt loop): the broadcast into all the channels",
       all(b"realpath\r" in log for log in logs), repr(logs))
 mw._toggle_multi_input(False)
 app.processEvents()
@@ -311,7 +311,7 @@ app.processEvents()
 
 
 # ════════════════════════════════════════════════════════
-# 2. Док-режим (terminal_mode=tabs): broadcast во все табы дока
+# 2. Dock mode (terminal_mode=tabs): broadcast to all dock tabs
 # ════════════════════════════════════════════════════════
 print("== 2. tabs (dock) mode, 2 real sessions ==")
 
@@ -331,7 +331,7 @@ mw2 = MW.MainWindow()
 mw2._autosave_timer.stop()
 mw2.show()
 app.processEvents()
-check("хаб общий для всех окон (singleton процесса)", get_hub() is mw2._multi_hub)
+check("the hub is shared for all the windows (the process's singleton)", get_hub() is mw2._multi_hub)
 
 for alias in ("dock-a", "dock-b"):
     node = mw2.scene.add_server(ServerData(
@@ -344,7 +344,7 @@ wait_until(lambda: len(mw2._terminal_windows) == 2 and all(
     getattr(s.terminal_thread, "channel", None) is not None
     and not s.terminal_thread.channel.closed
     for s in mw2._terminal_windows), timeout_ms=25000)
-check("док-режим: 2 сессии в реестре + каналы открыты",
+check("the dock mode: 2 sessions in the registry + the channels are open",
       len(mw2._terminal_windows) == 2 and len(SERVERS) == n_before + 2,
       f"registry={len(mw2._terminal_windows)} servers={len(SERVERS)}")
 
@@ -356,7 +356,7 @@ type_text(dock_pages[src_alias].widget, "dock-broadcast")
 wait_until(lambda: all(b"dock-broadcast\r" in log for log in
                        (b"".join(s.data_log) for s in SERVERS[n_before:])),
            timeout_ms=5000)
-check("док-режим: broadcast во ВСЕ остальные табы дока",
+check("the dock mode: the broadcast into ALL the other tabs of the dock",
       all(b"dock-broadcast\r" in b"".join(s.data_log) for s in SERVERS[n_before:]),
       repr([b"".join(s.data_log) for s in SERVERS[n_before:]]))
 
@@ -370,7 +370,7 @@ ST.load_terminal_settings = _orig_load_ts
 
 
 # ════════════════════════════════════════════════════════
-# 3. Диагностика (v1.2.4-fix): смена режима и broadcast — в файле лога
+# 3. Diagnostics (v1.2.4-fix): mode switching and broadcast — in the log file
 # ════════════════════════════════════════════════════════
 print("== 3. diagnostics in app log ==")
 
@@ -379,14 +379,14 @@ try:
         log_text = f.read()
 except OSError as e:
     log_text = ""
-    check("файл лога читается", False, repr(e))
+    check("the log file is readable", False, repr(e))
 
-check("лог: смена состояния режима записана (enabled + disabled)",
+check("the log: the mode state change is written (the enabled + the disabled)",
       "Multi-input mode enabled" in log_text
       and "Multi-input mode disabled" in log_text)
-check("лог: broadcast-строки на каждый ввод в режиме (DEBUG)",
+check("the log: the broadcast lines for every input in the mode (DEBUG)",
       "multi-input broadcast:" in log_text
-      and "-> 2 session(s)" in log_text,   # 3 сессии − источник = 2 получателя
+      and "-> 2 session(s)" in log_text,   # 3 sessions − the source = 2 receivers
       f"log tail: {log_text[-400:]!r}" if log_text else "(empty)")
 
 finish()

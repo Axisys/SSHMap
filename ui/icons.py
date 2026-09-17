@@ -1,29 +1,29 @@
-"""Векторные иконки интерфейса (замена эмодзи, UI polish).
+"""Vector UI icons (emoji replacement, UI polish).
 
-Все иконки рисуются QPainterPath на прозрачном QPixmap: кроссплатформенно
-(не зависят от эмодзи-шрифтов), чётко при любом DPI/зуме и в едином стиле —
-монохромный контур 20×20. Используется для кнопок сайдбара, тулбара и меню:
-QAction/QPushButton получают QIcon из get_icon(name).
+All icons are drawn with QPainterPath onto a transparent QPixmap:
+cross-platform (independent of emoji fonts), crisp at any DPI/zoom and in a
+consistent style — monochrome 20×20 outline. Used for the sidebar, toolbar
+and menu buttons: QAction/QPushButton receive a QIcon from get_icon(name).
 """
 from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QColor, QIcon, QPainter, QPainterPath, QPen, QPixmap
 
-try:  # v1.2.5: центральная тема (палитра/радиусы/шрифты — ui/theme.py)
+try:  # v1.2.5: central theme (palette/radii/fonts — ui/theme.py)
     from . import theme
 except ImportError:
     try:
         from ui import theme
-    except ImportError:  # flat-раскладка: каталог ui/ сам на sys.path
+    except ImportError:  # flat layout: the ui/ directory itself is on sys.path
         import theme
 
-# Базовый цвет иконок (slate-300) — читается на тёмной палитре Fusion (#1e293b).
-# v1.2.5: значение — из центральной темы; имя сохранено (публичная константа модуля).
+# Base icon color (slate-300) — readable on the dark Fusion palette (#1e293b).
+# v1.2.5: the value comes from the central theme; the name is kept (public module constant).
 ICON_COLOR = theme.ICON_COLOR
 ICON_SIZE = 20
 
 
 def _canvas(size: int = ICON_SIZE):
-    """Прозрачный QPixmap + подготовленный QPainter (антиалиасинг, контурный стиль)."""
+    """Transparent QPixmap + prepared QPainter (antialiasing, outline style)."""
     pm = QPixmap(size, size)
     pm.fill(QColor(0, 0, 0, 0))
     p = QPainter(pm)
@@ -43,10 +43,10 @@ def _icon(pm, painter) -> QIcon:
     return icon
 
 
-# ── Рисовальщики (канвас 20×20, рабочая область ~3..17) ─────────────
+# ── Drawers (20×20 canvas, working area ~3..17) ─────────────
 
 def _draw_new(p):
-    """Документ: страница со срезанным углом и сгибом."""
+    """Document: a page with a clipped corner and a fold."""
     path = QPainterPath()
     path.moveTo(6.5, 3.0)
     path.lineTo(12.0, 3.0)
@@ -63,7 +63,7 @@ def _draw_new(p):
 
 
 def _draw_open(p):
-    """Папка."""
+    """Folder."""
     path = QPainterPath()
     path.moveTo(3.0, 6.0)
     path.lineTo(7.5, 6.0)
@@ -76,7 +76,7 @@ def _draw_open(p):
 
 
 def _draw_save(p):
-    """Дискета: корпус + шторка сверху + ярлык снизу."""
+    """Floppy disk: body + top shutter + bottom label."""
     body = QPainterPath()
     body.addRoundedRect(QRectF(3.5, 3.0, 13.0, 14.0), 1.5, 1.5)
     p.drawPath(body)
@@ -89,14 +89,14 @@ def _draw_save(p):
 
 
 def _draw_add_server(p):
-    """Сервер: две стопки-юниты с индикаторами."""
+    """Server: two stacked units with indicator LEDs."""
     top = QPainterPath()
     top.addRoundedRect(QRectF(3.5, 4.0, 13.0, 5.0), 1.5, 1.5)
     p.drawPath(top)
     bottom = QPainterPath()
     bottom.addRoundedRect(QRectF(3.5, 11.0, 13.0, 5.0), 1.5, 1.5)
     p.drawPath(bottom)
-    # LED-точки (штрих тонкого круга читается как точка)
+    # LED dots (a thin-circle stroke reads as a dot)
     for cy in (6.5, 13.5):
         led = QPainterPath()
         led.addEllipse(QPointF(14.0, float(cy)), 0.7, 0.7)
@@ -104,7 +104,7 @@ def _draw_add_server(p):
 
 
 def _draw_connection(p):
-    """Два узла и линия между ними."""
+    """Two nodes and a line between them."""
     a = QPainterPath()
     a.addEllipse(QPointF(5.8, 14.2), 2.6, 2.6)
     p.drawPath(a)
@@ -118,7 +118,7 @@ def _draw_connection(p):
 
 
 def _draw_ssh(p):
-    """Терминал: рамка + приглашение «>_»."""
+    """Terminal: frame + the ">_" prompt."""
     frame = QPainterPath()
     frame.addRoundedRect(QRectF(2.5, 3.5, 15.0, 13.0), 1.8, 1.8)
     p.drawPath(frame)
@@ -134,7 +134,7 @@ def _draw_ssh(p):
 
 
 def _draw_properties(p):
-    """Слайдеры (свойства/настройки)."""
+    """Sliders (properties/settings)."""
     for y in (5.5, 10.0, 14.5):
         track = QPainterPath()
         track.moveTo(3.5, float(y))
@@ -148,7 +148,7 @@ def _draw_properties(p):
 
 
 def _draw_delete(p):
-    """Корзина: крышка с ручкой + корпус со штифтами."""
+    """Trash can: lid with a handle + body with ribs."""
     lid = QPainterPath()
     lid.moveTo(3.5, 6.0)
     lid.lineTo(16.5, 6.0)
@@ -173,12 +173,12 @@ def _draw_delete(p):
 
 
 def _draw_fit(p):
-    """Четыре угловые скобки «вписать по рамке»."""
+    """Four corner brackets for "fit to frame"."""
     corners = (
-        ((3.0, 7.5), (3.0, 3.0), (7.5, 3.0)),    # верх-лево
-        ((12.5, 3.0), (17.0, 3.0), (17.0, 7.5)),  # верх-право
-        ((3.0, 12.5), (3.0, 17.0), (7.5, 17.0)),  # низ-лево
-        ((17.0, 12.5), (17.0, 17.0), (12.5, 17.0)),  # низ-право
+        ((3.0, 7.5), (3.0, 3.0), (7.5, 3.0)),    # top-left
+        ((12.5, 3.0), (17.0, 3.0), (17.0, 7.5)),  # top-right
+        ((3.0, 12.5), (3.0, 17.0), (7.5, 17.0)),  # bottom-left
+        ((17.0, 12.5), (17.0, 17.0), (12.5, 17.0)),  # bottom-right
     )
     for (x1, y1), (xm, ym), (x2, y2) in corners:
         path = QPainterPath()
@@ -189,7 +189,7 @@ def _draw_fit(p):
 
 
 def _draw_center(p):
-    """Прицел: круг + перекрестие с зазорами."""
+    """Crosshair: ring + cross ticks with gaps."""
     ring = QPainterPath()
     ring.addEllipse(QPointF(10.0, 10.0), 4.5, 4.5)
     p.drawPath(ring)
@@ -206,7 +206,7 @@ def _draw_center(p):
 
 
 def _draw_undo(p):
-    """Стрелка влево с хвостом-дугой (undo)."""
+    """Left-pointing arrow with an arc tail (undo)."""
     arc = QPainterPath()
     arc.moveTo(6.0, 6.5)
     arc.arcTo(QRectF(4.0, 5.0, 12.0, 10.0), 90.0, -180.0)
@@ -219,7 +219,7 @@ def _draw_undo(p):
 
 
 def _draw_redo(p):
-    """Зеркальный undo — стрелка вправо (redo)."""
+    """Mirrored undo — right-pointing arrow (redo)."""
     arc = QPainterPath()
     arc.moveTo(14.0, 6.5)
     arc.arcTo(QRectF(4.0, 5.0, 12.0, 10.0), 90.0, 180.0)
@@ -232,24 +232,25 @@ def _draw_redo(p):
 
 
 def _draw_settings(p):
-    """Шестерёнка (настройки, v1.1): контур из 8 зубцов + центральное кольцо.
+    """Gear (settings, v1.1): an 8-tooth outline + a central ring.
 
-    Полигон считается аналитически (cos/sin в экранных координатах, y вниз):
-    на каждом зубце два узла на внешнем радиусе, между зубцами — один на
-    внутреннем; Qt-конвенции углов arcTo не используются (прямые сегменты).
-    Геометрия подобрана под 20×20: при мелких радиусах/широких зубцах контур
-    «залипает» в блин (проверено рендером) — глубокие впадины + узкие зубцы.
+    The polygon is computed analytically (cos/sin in screen coordinates,
+    y down): two vertices per tooth on the outer radius, one between
+    teeth on the inner radius; Qt's arcTo angle conventions are not used
+    (straight segments only). The geometry is tuned for 20×20: small
+    radii/wide teeth make the outline "splat" into a blob (verified by
+    rendering) — deep valleys + narrow teeth.
     """
     import math
     cx, cy = 10.0, 10.0
     r_out, r_in = 8.0, 5.0
-    tooth_half = math.radians(9.0)   # полуширина зубца (узкие зубцы — впадины читаются)
+    tooth_half = math.radians(9.0)   # tooth half-width (narrow teeth — valleys read clearly)
     pts = []
     for i in range(8):
         base = math.radians(i * 45.0)
         a_start = base - tooth_half
         a_end = base + tooth_half
-        a_valley = base + math.radians(45.0 - 9.0)  # конец впадины = старт след. зубца
+        a_valley = base + math.radians(45.0 - 9.0)  # end of valley = start of next tooth
         pts.append((cx + r_out * math.cos(a_start), cy + r_out * math.sin(a_start)))
         pts.append((cx + r_out * math.cos(a_end), cy + r_out * math.sin(a_end)))
         pts.append((cx + r_in * math.cos(a_valley), cy + r_in * math.sin(a_valley)))
@@ -258,8 +259,8 @@ def _draw_settings(p):
     for x, y in pts[1:]:
         path.lineTo(x, y)
     path.closeSubpath()
-    # Шестерёнка чуть жирнее базового контура (1.6): на 20×20 тонкий штрих
-    # скругляет впадины и зубцы перестают читаться.
+    # The gear is slightly bolder than the base outline (1.6): on 20×20
+    # a thin stroke rounds the valleys and the teeth stop reading.
     pen = QPen(QColor(ICON_COLOR), 1.8)
     pen.setCapStyle(Qt.PenCapStyle.RoundCap)
     pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
@@ -271,10 +272,11 @@ def _draw_settings(p):
 
 
 def _draw_sidebar_panel(p):
-    """v1.2.4.1: окно с выделенной левой колонкой (сайдбар) + метки строк.
+    """v1.2.4.1: window with a highlighted left column (sidebar) + row marks.
 
-    Пара к map_panel: тот же контур-рамка 14×13, тот же штрих — читается как
-    «панель слева» в меню «Вид» и на угловой кнопке сворачивания сайдбара.
+    The pair to map_panel: the same 14×13 frame outline, the same stroke —
+    reads as "panel on the left" in the View menu and on the corner
+    sidebar-collapse button.
     """
     frame = QPainterPath()
     frame.addRoundedRect(QRectF(3.0, 3.5, 14.0, 13.0), 1.8, 1.8)
@@ -291,10 +293,11 @@ def _draw_sidebar_panel(p):
 
 
 def _draw_map_panel(p):
-    """v1.2.4.1: окно с мини-картой внутри (два узла и линия между ними).
+    """v1.2.4.1: window with a mini-map inside (two nodes and a line).
 
-    Пара к sidebar_panel: та же рамка; внутренность — эхо иконки connection
-    (узел-линия-узел), но в масштабе «карты» — для пункта/кнопки карты.
+    The pair to sidebar_panel: the same frame; the interior echoes the
+    connection icon (node-line-node), but at "map" scale — for the map
+    menu item/button.
     """
     frame = QPainterPath()
     frame.addRoundedRect(QRectF(3.0, 3.5, 14.0, 13.0), 1.8, 1.8)
@@ -324,22 +327,22 @@ _DRAWERS = {
     "center": _draw_center,
     "undo": _draw_undo,
     "redo": _draw_redo,
-    "settings": _draw_settings,  # v1.1: шестерёнка — кнопка/пункт «Настройки»
-    # v1.2.4.1: пара иконок сворачивания панелей (меню «Вид» + угловые кнопки)
+    "settings": _draw_settings,  # v1.1: gear — the Settings button/menu item
+    # v1.2.4.1: panel-collapse icon pair (View menu + corner buttons)
     "sidebar_panel": _draw_sidebar_panel,
     "map_panel": _draw_map_panel,
 }
 
 
 def get_icon(name: str) -> QIcon:
-    """Иконка по имени; неизвестное имя — пустой QIcon (кнопка останется текстовой)."""
+    """Icon by name; unknown name — empty QIcon (the button stays text-only)."""
     drawer = _DRAWERS.get(name)
     if drawer is None:
         return QIcon()
     pm, painter = _canvas()
     try:
         drawer(painter)
-    except Exception:  # noqa: BLE001 — иконка не должна ронять интерфейс
+    except Exception:  # noqa: BLE001 — an icon must not crash the UI
         painter.end()
         return QIcon()
     return _icon(pm, painter)

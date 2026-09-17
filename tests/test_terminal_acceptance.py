@@ -1,27 +1,27 @@
 # -*- coding: utf-8 -*-
-"""v1.0 — Терминал v1, финал: полный acceptance всех RC + конфиг terminal_* (ROADMAP задачи 9–10).
+"""v1.0 — Terminal v1, final: full acceptance of all RCs + terminal_* config (ROADMAP tasks 9–10).
 
-Один прогон БЕЗ сети покрывает Acceptance v1.0 на симулированном TUI-выводе:
-  * bash — промпт + `ls --color` (SGR 34/93/256/truecolor) через окно терминала;
-  * vim  — скрытие курсора ESC[?25l, альтернативный экран \x1b[?1049h (v1.2.12:
-           SshmapHistoryScreen), полноэкранный перерисов с цветами; выход \x1b[?1049l —
-           предыдущий экран восстанавливается посимвольно включая fg/bg (known
-           limitation закрыт v1.2.12, зафиксировано тестом);
-  * htop — повторяющиеся полноэкранные фреймы + dirty-рендер без таймера;
-  * копирование — выделение мышью → буфер обмена; Ctrl+C при выделении = копирование,
-    без выделения = \\x03 (SIGINT, «роняет top»);
-  * Ctrl+V — bracketed paste из буфера единым блоком.
-Плюс задача 9: ключи terminal_palette / terminal_font / terminal_font_size /
-terminal_history_lines из ~/.sshmap/config.json (все опциональны, дефолты = текущее
-поведение) + v1.1.1: terminal_max_open (лимит своих терминалов) и состояние релиза —
-_common.check_release_state() (пин EXPECTED_APP_VERSION — в tests/_common.py),
-v1.2.9: TerminalScreen.render() (HTML-путь) удалён (мёртвый код с v1.0RC1),
-i18n-паритет — _common.check_i18n_parity() (пин EXPECTED_I18N_KEYS; +33 ключа v1.1,
-+14 в v1.1.1, +2 в v1.1.2RC2: msg.confirm_delete_profile и status.import_resolving;
-в v1.1.2RC3 новых ключей нет — terminal_wheel только конфиг; +2 в v1.1.2 final:
-settings.statuses.max_parallel и status.auto_interval_hint; +21 в v1.1.3: sftp.*).
+One run WITHOUT the network covers the Acceptance v1.0 on a simulated TUI output:
+  * bash — the prompt + `ls --color` (SGR 34/93/256/truecolor) through the terminal window;
+  * vim  — the cursor hiding ESC[?25l, the alternate screen \x1b[?1049h (v1.2.12:
+           SshmapHistoryScreen), the full-screen repaint with the colors; the exit \x1b[?1049l —
+           the previous screen is restored character by character including the fg/bg (the known
+           limitation was closed in v1.2.12, pinned down by the test);
+  * htop — the repeating full-screen frames + the dirty render without the timer;
+  * the copying — the mouse selection → the clipboard; the Ctrl+C with the selection = the copying,
+    without the selection = \\x03 (SIGINT, "it kills top");
+  * Ctrl+V — the bracketed paste of the clipboard as a single block.
+Plus task 9: the terminal_palette / terminal_font / terminal_font_size /
+terminal_history_lines keys from ~/.sshmap/config.json (all optional, the defaults = the current
+behavior) + v1.1.1: terminal_max_open (the limit of one's own terminals) and the release state —
+_common.check_release_state() (the pin EXPECTED_APP_VERSION — in tests/_common.py),
+v1.2.9: TerminalScreen.render() (the HTML path) removed (the dead code since v1.0RC1),
+the i18n parity — _common.check_i18n_parity() (the pin EXPECTED_I18N_KEYS; +33 keys v1.1,
++14 in v1.1.1, +2 in v1.1.2RC2: msg.confirm_delete_profile and status.import_resolving;
+in v1.1.2RC3 no new keys — terminal_wheel is only the config; +2 in v1.1.2 final:
+settings.statuses.max_parallel and status.auto_interval_hint; +21 in v1.1.3: sftp.*).
 
-Запуск: python tests/test_terminal_acceptance.py   (из корня проекта) или python tests/run_all.py
+Run: python tests/test_terminal_acceptance.py   (from the project root) or python tests/run_all.py
 """
 import json
 import os
@@ -29,9 +29,9 @@ import sys
 
 from _common import bootstrap, check, finish, wait_until, load_i18n_langs, check_i18n_parity, check_release_state
 
-ROOT, WORK = bootstrap()  # ДО импортов модулей приложения
+ROOT, WORK = bootstrap()  # BEFORE the app module imports
 
-from PySide6.QtCore import Qt, QThread, QPointF, QEvent, Signal as QtSignal
+from PySide6.QtCore import Qt, QPointF, QEvent
 from PySide6.QtGui import QKeyEvent, QMouseEvent
 from PySide6.QtWidgets import QApplication
 app = QApplication(sys.argv)
@@ -46,40 +46,8 @@ D = PALETTES["default"]
 NORD = PALETTES["nord"]
 
 
-# ── обвязка: фейковый SSH-поток (тот же API, что у SSHTerminalThread) ─────────
-class _FakeChannel:
-    closed = False
-
-    def __init__(self):
-        self.sent = []
-
-    def send(self, data):
-        self.sent.append(data)
-
-
-class _FakeSSHThread(QThread):
-    output_signal = QtSignal(bytes)
-    error_signal = QtSignal(str)
-    status_signal = QtSignal(str)
-    closed_signal = QtSignal()
-    connected_signal = QtSignal()
-
-    def __init__(self, host, user, port, password="", key_path=""):
-        super().__init__()
-        self.channel = _FakeChannel()
-        self.running = True
-
-    def run(self):  # реальный SSH не нужен
-        pass
-
-    def stop(self):
-        self.running = False
-
-    def send_data(self, data_bytes):  # тот же API, что у реального SSHTerminalThread
-        if not data_bytes:
-            return
-        if self.channel and not self.channel.closed:
-            self.channel.send(data_bytes)
+# ── the harness: a fake SSH thread (the same API as SSHTerminalThread) — _fakes.py ──
+from _fakes import FakeSSHThread as _FakeSSHThread
 
 
 _orig_thread_cls = ST.SSHTerminalThread
@@ -89,25 +57,25 @@ _windows = []
 
 
 def make_window(alias):
-    """Окно терминала с фейковым потоком + синхронизация сетки с окном."""
+    """The terminal window with the fake thread + the grid synchronization with the window."""
     w = ST.SSHTerminalWindow(
         ServerData(id=f"acc-{alias}", alias=alias, host="10.99.0.1", user="root"),
         None, password="pw")
     _windows.append(w)
-    # v1.1.3: окно ПОКАЗАНО (как в продакшене — MainWindow.show()). Без show()
-    # offscreen-окно обрабатывает resize() отложенно: поздний _sync_grid →
-    # tscreen.resize() случился бы уже после нарисованного контента и сдвинул
-    # его за край видимой сетки (vim/1049). show() заставляет layout устаканиться
-    # ДО любого вывода.
+    # v1.1.3: the window is SHOWN (as in production — MainWindow.show()). Without show()
+    # an offscreen window processes resize() lazily: a late _sync_grid →
+    # tscreen.resize() would have happened after the painted content and shifted
+    # it to the edge of the visible grid (vim/1049). show() makes the layout settle
+    # BEFORE any output.
     w.show()
-    w.resize(700, 500)   # resizeEvent → singleShot(0) → _sync_grid (guard по сетке)
+    w.resize(700, 500)   # resizeEvent → singleShot(0) → _sync_grid (a guard on the grid)
     wait_until(lambda: (w._last_cols, w._last_rows) != (120, 32), timeout_ms=3000)
     app.processEvents()
     return w
 
 
 def feed(win, data):
-    """Симуляция вывода SSH-канала: через output_signal → _on_output (feed+update)."""
+    """The simulation of the SSH-channel output: through output_signal → _on_output (the feed+update)."""
     win.terminal_thread.output_signal.emit(data)
     app.processEvents()
 
@@ -118,7 +86,7 @@ def emit_out(win, data, until_substr=None, timeout_ms=3000):
         wait_until(lambda: until_substr in win.widget.visible_text(), timeout_ms=timeout_ms)
 
 
-# ── пиксельные проверки (паттерн tests/test_terminal_colors.py) ───────────────
+# ── the pixel checks (the tests/test_terminal_colors.py pattern) ───────────────
 def hex_rgb(h):
     h = h.lstrip("#")
     return tuple(int(h[i:i + 2], 16) for i in (0, 2, 4))
@@ -134,7 +102,7 @@ def close_enough(rgb, ref, tol=32):
 
 
 def ink_count(img, cw, chh, x, y, ref_hex, tol=48):
-    """Число пикселей ячейки (row=y, col=x), близких к ref (чернила/фон глифа)."""
+    """The count of the pixels of the cell (row=y, col=x), close to the ref (the ink/the background of the glyph)."""
     ref = hex_rgb(ref_hex)
     n = 0
     for yy in range(y * chh, (y + 1) * chh):
@@ -151,7 +119,7 @@ def grab(win):
     return img, cw, chh
 
 
-# ── конфиг ~/.sshmap/config.json (HOME изолирован bootstrap'ом) ───────────────
+# ── the config ~/.sshmap/config.json (the HOME is isolated by the bootstrap) ───────────────
 def _cfg_path():
     return os.path.join(os.path.expanduser("~"), ".sshmap", "config.json")
 
@@ -171,25 +139,25 @@ def clear_config():
 
 
 # ════════════════════════════════════════════════════════════
-# 0. Состояние релиза (пины — tests/_common.py: EXPECTED_APP_VERSION)
+# 0. Release state (pins — tests/_common.py: EXPECTED_APP_VERSION)
 # ════════════════════════════════════════════════════════════
 print("== release state ==")
 check_release_state(ROOT)
 
-check("v1.2.9: TerminalScreen.render() (HTML-путь) удалён — мёртвый код с v1.0RC1",
+check("v1.2.9: TerminalScreen.render() (the HTML path) is removed — the dead code since v1.0RC1",
       not hasattr(TS.TerminalScreen, "render"))
 
 check_i18n_parity(load_i18n_langs(ROOT))
 
 # ════════════════════════════════════════════════════════════
-# 1. bash: промпт + ls --color (SGR 34/93/256/truecolor) через окно
+# 1. bash: the prompt + ls --color (SGR 34/93/256/truecolor) through the window
 # ════════════════════════════════════════════════════════════
 print("== bash ==")
 
 clear_config()
 win = make_window("bash")
-# Ввод — только \r\n (конвенция с v1.0RC3; факт №10 закрыт v1.2.11: LNM теперь
-# включён по умолчанию и голый \n = CR+LF, но конвенция \r\n остаётся).
+# Input — \r\n only (the convention since v1.0RC3; fact №10 was closed in v1.2.11: LNM is now
+# is enabled by default and a bare \n = CR+LF, but the \r\n convention remains).
 bash_out = (
     b"\x1b[1;32mroot@master\x1b[0m:\x1b[1;34m~\x1b[0m$ ls --color=auto\r\n"
     # row 1: docs(0–3, SGR 34) '  ' notes.txt(6–14, SGR 93) '  ' all.xml(17–23, 38;5;196)
@@ -201,21 +169,21 @@ bash_out = (
 emit_out(win, bash_out, until_substr="secret.key")
 
 txt = win.widget.visible_text()
-check("bash: промпт + вывод ls видны на холсте",
+check("bash: the prompt + the ls output are visible on the canvas",
       all(s in txt for s in ("root@master", "ls --color=auto", "docs",
                              "notes.txt", "all.xml", "secret.key")), txt[:120])
 
 img, cw, chh = grab(win)
-check("bash: промпт — зелёные чернила (SGR 1;32)",
+check("bash: the prompt — the green ink (SGR 1;32)",
       ink_count(img, cw, chh, 0, 0, D["green"]) >= 5,
       f"ink={ink_count(img, cw, chh, 0, 0, D['green'])}")
-check("bash: 'docs' — синие чернила (SGR 34)",
+check("bash: 'docs' — the blue ink (SGR 34)",
       ink_count(img, cw, chh, 0, 1, D["blue"]) >= 5,
       f"ink={ink_count(img, cw, chh, 0, 1, D['blue'])}")
-check("bash: 'notes.txt' — bright-жёлтые чернила (SGR 93 → br_yellow)",
+check("bash: 'notes.txt' — the bright-yellow ink (SGR 93 → br_yellow)",
       ink_count(img, cw, chh, 6, 1, D["br_yellow"]) >= 5,
       f"ink={ink_count(img, cw, chh, 6, 1, D['br_yellow'])}")
-check("bash: 'all.xml' — 256-цвет #ff0000 (38;5;196, hex-passthrough)",
+check("bash: 'all.xml' — the 256-color #ff0000 (38;5;196, the hex-passthrough)",
       ink_count(img, cw, chh, 17, 1, "#ff0000") >= 5,
       f"ink={ink_count(img, cw, chh, 17, 1, '#ff0000')}")
 check("bash: 'secret.key' — truecolor #c86432 (38;2;200;100;50)",
@@ -224,63 +192,63 @@ check("bash: 'secret.key' — truecolor #c86432 (38;2;200;100;50)",
 win.close()
 
 # ════════════════════════════════════════════════════════════
-# 2. vim: ESC[?25l + альтернативный экран (v1.2.12) + полноэкранный перерисов;
-#    выход \x1b[?1049l — предыдущий экран восстанавливается посимвольно
+# 2. vim: ESC[?25l + the alternate screen (v1.2.12) + a full-screen repaint;
+#    exit \x1b[?1049l — the previous screen is restored character by character
 # ════════════════════════════════════════════════════════════
 print("== vim ==")
 
 win = make_window("vim")
-# Промпт shell ДО vim — основной экран, который должен быть сохранён и восстановлен.
+# The shell prompt BEFORE vim — the main screen that must be saved and restored.
 emit_out(win, b"\x1b[1;32mroot@master\x1b[0m:\x1b[1;34m~\x1b[0m$ vim notes.txt\r\n",
          until_substr="vim notes.txt")
-g0 = win.tscreen.snapshot()   # (rows, cx, cy, hidden) — снимок с цветами ДО входа в alt
+g0 = win.tscreen.snapshot()   # (rows, cx, cy, hidden) — a snapshot with colors BEFORE entering alt
 
-# Курсор в конце — на ПУСТОЙ строке 4: пиксельные проверки курсора должны идти по
-# ячейке без глифов (в offscreen-окружении шрифт без глифов рисует «тофу» цветом
-# default_fg, который совпадает с CURSOR_COLOR — на строках с текстом проверка
-# была бы некорректной).
-# vim входит в альтернативный экран (v1.2.12): \x1b[?25l + \x1b[?1049h + полноэкранный
-# перерисов с цветами (рабочий буфер — пустой новый, основной сохранён).
+# The cursor at the end — on the EMPTY line 4: the cursor pixel checks must go by
+# a cell without glyphs (in the offscreen environment a font without glyphs draws "tofu" in the color
+# default_fg, which matches CURSOR_COLOR — the check on the lines with text
+# would have been incorrect).
+# vim enters the alternate screen (v1.2.12): \x1b[?25l + \x1b[?1049h + a full-screen
+# a repaint with the colors (the work buffer — a fresh empty one, the main one is saved).
 emit_out(win, b"\x1b[?25l\x1b[?1049h\x1b[2J\x1b[H\x1b[41m vim session \x1b[0m\r\nvim content line\x1b[5H",
          until_substr="vim session")
 
-check("vim: в альтернативном экране (in_alt_screen True)", win.tscreen.in_alt_screen() is True)
+check("vim: in the alternate screen (the in_alt_screen is True)", win.tscreen.in_alt_screen() is True)
 rows, cx, cy, hidden = win.tscreen.snapshot()
-check("vim: курсор скрыт (ESC[?25l)", hidden is True)
-check("vim: курсор на пустой строке 4 (позиция для пиксельной проверки)",
+check("vim: the cursor is hidden (ESC[?25l)", hidden is True)
+check("vim: the cursor is on the empty line 4 (the position for the pixel check)",
       (cx, cy) == (0, 4), f"cursor=({cx},{cy})")
 
 img, cw, chh = grab(win)
 cur_ink = ink_count(img, cw, chh, cx, cy, TerminalWidget.CURSOR_COLOR, tol=16)
-check("vim: блок-курсор НЕ рисуется, пока скрыт", cur_ink == 0, f"ink={cur_ink}")
+check("vim: the block cursor is NOT drawn while hidden", cur_ink == 0, f"ink={cur_ink}")
 red_bg = ink_count(img, cw, chh, 5, 0, D["red"], tol=32)
-check("vim: SGR 41 — красный фон строки ' vim session '", red_bg >= 10, f"ink={red_bg}")
-check("vim: alt-экран — отдельный буфер (промпт shell на сетке не виден)",
+check("vim: SGR 41 — the red background of the line ' vim session '", red_bg >= 10, f"ink={red_bg}")
+check("vim: the alt screen — a separate buffer (the shell prompt is not visible on the grid)",
       "vim notes.txt" not in win.widget.visible_text())
 
 emit_out(win, b"\x1b[?25h")
 rows, cx, cy, hidden = win.tscreen.snapshot()
-check("vim: курсор снова виден (ESC[?25h)", hidden is False)
+check("vim: the cursor is visible again (ESC[?25h)", hidden is False)
 img, cw, chh = grab(win)
 p = pixel(img, cx * cw + cw // 2, cy * chh + chh // 2)
-check("vim: блок-курсор нарисован в позиции курсора",
+check("vim: the block cursor is drawn at the cursor position",
       close_enough(p, hex_rgb(TerminalWidget.CURSOR_COLOR), tol=16), f"got={p}")
 
-# v1.2.12 (known limitation закрыт): \x1b[?1049l — выход из alt-экрана: предыдущий
-# экран восстанавливается посимвольно включая fg/bg (SshmapHistoryScreen; семантика —
-# upstream PR #212, дифференциально проверено против tmux 3.6b и GNU screen).
+# v1.2.12 (known limitation closed): \x1b[?1049l — exit from the alt screen: the previous
+# the screen is restored character by character including fg/bg (SshmapHistoryScreen; the semantics —
+# upstream PR #212, verified differentially against tmux 3.6b and GNU screen).
 emit_out(win, b"\x1b[?1049l")
-check("vim: выход из alt-экрана (in_alt_screen False)", win.tscreen.in_alt_screen() is False)
+check("vim: the exit from the alt screen (the in_alt_screen is False)", win.tscreen.in_alt_screen() is False)
 g1 = win.tscreen.snapshot()
-check("vim: предыдущий экран восстановлен посимвольно включая fg/bg (снимок == G0)",
+check("vim: the previous screen is restored character by character including the fg/bg (the snapshot == G0)",
       g1 == g0, f"cursor=({g1[1]},{g1[2]}) hidden={g1[3]}")
-check("vim: 'vim session' исчез, промпт shell вернулся",
+check("vim: 'vim session' is gone, the shell prompt is back",
       "vim session" not in win.widget.visible_text()
       and "vim notes.txt" in win.widget.visible_text())
 win.close()
 
 # ════════════════════════════════════════════════════════════
-# 3. htop: повторяющиеся полноэкранные фреймы + dirty-рендер без таймера
+# 3. htop: repeated full-screen frames + a dirty render without a timer
 # ════════════════════════════════════════════════════════════
 print("== htop ==")
 
@@ -296,25 +264,25 @@ for i in (1, 2, 3):
     emit_out(win, _htop_frame(i))
 
 txt = win.widget.visible_text()
-check("htop: отрендерился ПОСЛЕДНИЙ фрейм", "LOAD AVG: 3" in txt and "CPU bar ###" in txt,
+check("htop: the LAST frame is rendered", "LOAD AVG: 3" in txt and "CPU bar ###" in txt,
       txt[:80])
-check("htop: старые фреймы заменены (ESC[2J)", "LOAD AVG: 1" not in txt)
+check("htop: the old frames are replaced (ESC[2J)", "LOAD AVG: 1" not in txt)
 
 rows, cx, cy, hidden = win.tscreen.snapshot()
-check("htop: курсор скрыт во время работы TUI", hidden is True)
+check("htop: the cursor is hidden while the TUI is running", hidden is True)
 
 img, cw, chh = grab(win)
 cyan_bg = ink_count(img, cw, chh, 0, 1, D["cyan"], tol=32)
-check("htop: SGR 46 — голубой фон полосы CPU", cyan_bg >= 10, f"ink={cyan_bg}")
+check("htop: SGR 46 — the light-blue background of the CPU bar", cyan_bg >= 10, f"ink={cyan_bg}")
 
-check("dirty-рендер: 33 мс таймер удалён (нет _render_timer/_dirty)",
+check("the dirty render: the 33 ms timer is removed (no _render_timer/_dirty)",
       not hasattr(win, "_render_timer") and not hasattr(win, "_dirty"))
-check("dirty-рендер: paintEvent прошёл по выводу (last_paint_stats.rows > 0)",
+check("the dirty render: the paintEvent passed on the output (last_paint_stats.rows > 0)",
       win.widget.last_paint_stats["rows"] > 0, str(win.widget.last_paint_stats))
 win.close()
 
 # ════════════════════════════════════════════════════════════
-# 4. Копирование: выделение мышью + Ctrl+C (копирование/SIGINT) + Ctrl+V (bracketed paste)
+# 4. Copying: mouse selection + Ctrl+C (copy/SIGINT) + Ctrl+V (bracketed paste)
 # ════════════════════════════════════════════════════════════
 print("== copy / Ctrl+C / Ctrl+V ==")
 
@@ -353,55 +321,55 @@ win = make_window("copy")
 emit_out(win, b"alpha beta gamma\r\ndelta epsilon zeta\r\neta theta iota kappa",
          until_substr="kappa")
 
-# drag (0,0) → (1,4): строка 0 целиком + строка 1 с col 0 по col 4 ВКЛЮЧИТЕЛЬНО
+# a drag (0,0) → (1,4): row 0 entirely + row 1 from col 0 to col 4 INCLUSIVE
 w = win.widget
 press_lmb(w, 0, 0)
 move_lmb(w, 1, 2)
 release_lmb(w, 1, 4)
-check("копирование: выделение мышью активно", w.has_selection())
+check("the copying: the mouse selection is active", w.has_selection())
 exp_sel = "alpha beta gamma\ndelta"
-check("копирование: selected_text() — мульти-строчный текст (row-major)",
+check("the copying: selected_text() — the multi-line text (row-major)",
       w.selected_text() == exp_sel, repr(w.selected_text()))
 
 sent_before = len(win.terminal_thread.channel.sent)
 w.copy_selection()
 cb = app.clipboard()
-check("копирование: буфер обмена == выделению", cb.text() == exp_sel, repr(cb.text()))
+check("the copying: the clipboard == the selection", cb.text() == exp_sel, repr(cb.text()))
 
-press_key(w, Qt.Key.Key_C, mod=CTRL)  # Ctrl+C ПРИ выделении → копирование, не SIGINT
-check("Ctrl+C при выделении: в канал ничего не уходит (копирование, а не \\x03)",
+press_key(w, Qt.Key.Key_C, mod=CTRL)  # Ctrl+C WITH a selection → a copy, not SIGINT
+check("Ctrl+C with the selection: nothing goes into the channel (the copying, not \\x03)",
       len(win.terminal_thread.channel.sent) == sent_before,
       repr(win.terminal_thread.channel.sent[sent_before:]))
-check("Ctrl+C при выделении: буфер обновлён", cb.text() == exp_sel)
+check("Ctrl+C with the selection: the clipboard is updated", cb.text() == exp_sel)
 
 w.clear_selection()
-press_key(w, Qt.Key.Key_C, mod=CTRL)  # Ctrl+C БЕЗ выделения → SIGINT («роняет top»)
-check("Ctrl+C без выделения → b'\\x03' (SIGINT)",
+press_key(w, Qt.Key.Key_C, mod=CTRL)  # Ctrl+C WITHOUT a selection → SIGINT ("kills top")
+check("Ctrl+C without the selection → b'\\x03' (SIGINT)",
       win.terminal_thread.channel.sent[-1] == b"\x03",
       repr(win.terminal_thread.channel.sent[-1]))
 
-cb.setText("restart\nservice nginx")  # Ctrl+V — bracketed paste единым блоком
+cb.setText("restart\nservice nginx")  # Ctrl+V — a bracketed paste as a single block
 press_key(w, Qt.Key.Key_V, mod=CTRL)
-check("Ctrl+V: буфер уходит ЕДИНЫМ bracketed-блоком (\\x1b[200~…\\x1b[201~)",
+check("Ctrl+V: the clipboard goes as a SINGLE bracketed block (\\x1b[200~…\\x1b[201~)",
       win.terminal_thread.channel.sent[-1] == b"\x1b[200~restart\nservice nginx\x1b[201~",
       repr(win.terminal_thread.channel.sent[-1]))
 cb.setText("")
 win.close()
 
 # ════════════════════════════════════════════════════════════
-# 5. Задача 9: ключи terminal_* из ~/.sshmap/config.json
+# 5. Task 9: the terminal_* keys from ~/.sshmap/config.json
 # ════════════════════════════════════════════════════════════
 print("== config: terminal_* keys ==")
 
 from modules.ssh_terminal import load_terminal_settings
 
-# v1.1: load_terminal_settings() дополнительно возвращает close_behavior
-# ("close" по умолчанию; "ask" — подтверждение закрытия активной сессии);
-# v1.1.1: + max_open (лимит своих терминалов, дефолт 4);
-# v1.2.2: + mode (режим отображения: "windows" дефолт | "tabs" — док на карте).
+# v1.1: load_terminal_settings() also returns close_behavior
+# ("close" by default; "ask" — confirmation for closing an active session);
+# v1.1.1: + max_open (the limit of own terminals, default 4);
+# v1.2.2: + mode (the display mode: "windows" the default | "tabs" — the dock on the map).
 clear_config()
 s = load_terminal_settings()
-check("нет конфига → дефолты (палитра default, pt 10, история 1000 — скроллбэк включён, close_behavior=close, max_open=4, wheel=scrollback, mode=windows)",
+check("no config → the defaults (the palette default, pt 10, the history 1000 — the scrollback is on, close_behavior=close, max_open=4, wheel=scrollback, mode=windows)",
       s == {"palette": None, "font_family": "", "font_size": None,
             "history_lines": TS.DEFAULT_HISTORY_LINES, "close_behavior": "close",
             "max_open": 4, "wheel": "scrollback", "mode": "windows"}, str(s))
@@ -409,7 +377,7 @@ check("нет конфига → дефолты (палитра default, pt 10, 
 write_config({"terminal_palette": " nord ", "terminal_font": " Consolas ",
               "terminal_font_size": 12, "terminal_history_lines": 50})
 s = load_terminal_settings()
-check("валидные значения читаются (trim пробелов)",
+check("the valid values are read (the trimming of the spaces)",
       s == {"palette": "nord", "font_family": "Consolas", "font_size": 12,
             "history_lines": 50, "close_behavior": "close", "max_open": 4,
             "wheel": "scrollback", "mode": "windows"}, str(s))
@@ -417,109 +385,109 @@ check("валидные значения читаются (trim пробелов
 write_config({"terminal_palette": 42, "terminal_font": 7,
               "terminal_font_size": "big", "terminal_history_lines": -5})
 s = load_terminal_settings()
-check("битые значения (чужие типы/вне диапазона) → дефолты",
+check("the broken values (the foreign types / out of the range) → the defaults",
       s == {"palette": None, "font_family": "", "font_size": None,
             "history_lines": TS.DEFAULT_HISTORY_LINES, "close_behavior": "close",
             "max_open": 4, "wheel": "scrollback", "mode": "windows"}, str(s))
 
-# v1.1.1: terminal_max_open — лимит своих терминалов (дефолт 4, диапазон 1..32)
+# v1.1.1: terminal_max_open — the limit of own terminals (default 4, the range 1..32)
 write_config({"terminal_max_open": 8})
-check("v1.1.1: terminal_max_open=8 читается", load_terminal_settings()["max_open"] == 8)
+check("v1.1.1: the terminal_max_open=8 is read", load_terminal_settings()["max_open"] == 8)
 write_config({"terminal_max_open": "many"})
-check("v1.1.1: битое terminal_max_open (str) → дефолт 4",
+check("v1.1.1: the broken terminal_max_open (str) → the default 4",
       load_terminal_settings()["max_open"] == 4)
 write_config({"terminal_max_open": 99})
-check("v1.1.1: terminal_max_open вне диапазона (99) → дефолт 4",
+check("v1.1.1: the terminal_max_open out of the range (99) → the default 4",
       load_terminal_settings()["max_open"] == 4)
 
-# v1.2.2: terminal_mode — режим отображения ("windows" дефолт | "tabs" — док на карте);
-# валидация по паттерну остальных ключей (битое значение/чужой тип → дефолт)
+# v1.2.2: terminal_mode — the display mode ("windows" the default | "tabs" — the dock on the map);
+# the validation following the pattern of the other keys (a corrupt value/a foreign type → the default)
 write_config({"terminal_mode": "tabs"})
-check("v1.2.2: terminal_mode='tabs' читается", load_terminal_settings()["mode"] == "tabs")
+check("v1.2.2: the terminal_mode='tabs' is read", load_terminal_settings()["mode"] == "tabs")
 write_config({"terminal_mode": " TABS "})
 check("v1.2.2: terminal_mode ' TABS ' (strip+lower) → 'tabs'",
       load_terminal_settings()["mode"] == "tabs")
 write_config({"terminal_mode": 123})
-check("v1.2.2: битый terminal_mode (int) → дефолт 'windows'",
+check("v1.2.2: the broken terminal_mode (int) → the default 'windows'",
       load_terminal_settings()["mode"] == "windows")
 
 write_config({"terminal_close_behavior": " ask "})
-check("v1.1: terminal_close_behavior='ask' читается (trim пробелов)",
+check("v1.1: the terminal_close_behavior='ask' is read (the trimming of the spaces)",
       load_terminal_settings()["close_behavior"] == "ask")
 
 write_config({"terminal_close_behavior": "yell"})
-check("v1.1: битое terminal_close_behavior → дефолт 'close'",
+check("v1.1: the broken terminal_close_behavior → the default 'close'",
       load_terminal_settings()["close_behavior"] == "close")
 
 write_config({"terminal_history_lines": 0})
-check("явный terminal_history_lines=0 — отключение скроллбэка (сознательный выбор)",
+check("the explicit terminal_history_lines=0 — the scrollback is off (a deliberate choice)",
       load_terminal_settings()["history_lines"] == 0)
 
-# v1.1.2RC3 (U3 остаток): terminal_wheel — "scrollback" (дефолт) | "off";
-# полный SGR-passthrough колеса в TUI отложен на v1.2+ (pyte не трекает DECSET
-# 1000/1002/1006). Ключ только конфиг — без UI в диалоге настроек.
+# v1.1.2RC3 (U3 remainder): terminal_wheel — "scrollback" (the default) | "off";
+# the full wheel SGR passthrough in a TUI is deferred to v1.2+ (pyte does not track DECSET
+# 1000/1002/1006). The key is config only — no UI in the settings dialog.
 write_config({"terminal_wheel": "off"})
-check("v1.1.2RC3: terminal_wheel='off' читается", load_terminal_settings()["wheel"] == "off")
+check("v1.1.2RC3: the terminal_wheel='off' is read", load_terminal_settings()["wheel"] == "off")
 write_config({"terminal_wheel": "bogus"})
-check("v1.1.2RC3: битое terminal_wheel → дефолт 'scrollback'",
+check("v1.1.2RC3: the broken terminal_wheel → the default 'scrollback'",
       load_terminal_settings()["wheel"] == "scrollback")
 
-# Окно с полным конфигом: палитра nord + Consolas 12 + глубина истории 50
+# A window with a full config: the nord palette + Consolas 12 + the history depth of 50
 write_config({"terminal_palette": "nord", "terminal_font": "Consolas",
               "terminal_font_size": 12, "terminal_history_lines": 50})
 win = make_window("cfg")
-check("конфиг: палитра nord применена к холсту", win.widget._palette_name == "nord",
+check("the config: the palette nord is applied to the canvas", win.widget._palette_name == "nord",
       win.widget._palette_name)
-check("конфиг: _bg_color = default_bg палитры nord",
+check("the config: _bg_color = the default_bg of the palette nord",
       win.widget._bg_color.name().lower() == NORD["default_bg"],
       win.widget._bg_color.name())
 img, cw, chh = grab(win)
-# Пиксель — по ПОЛНОСТЬЮ пустой строке 15 (строка 0 занята блок-курсором в (0,0),
-# строки с текстом в offscreen рисуют «тофу» — фон между глифами не детерминирован).
+# The pixel — over the COMPLETELY empty line 15 (line 0 is occupied by the block cursor at (0,0),
+# lines with text in offscreen render "tofu" — the background between glyphs is not deterministic).
 bg = pixel(img, cw // 2, 15 * chh + chh // 2)
-check("конфиг: фон экрана на холсте = default_bg палитры nord (#2e3440)",
+check("the config: the screen background on the canvas = the default_bg of the palette nord (#2e3440)",
       close_enough(bg, hex_rgb(NORD["default_bg"]), tol=8), f"got={bg}")
-check("конфиг: шрифт Consolas 12 применён",
+check("the config: the font Consolas 12 is applied",
       win.widget._font.family() == "Consolas" and win.widget._font.pointSize() == 12,
       f"{win.widget._font.family()} pt{win.widget._font.pointSize()}")
 for _ in range(200):
     win.tscreen.feed(b"x\r\n")
 pos, size = win.tscreen.scroll_info()
-check("конфиг: глубина истории 50 (deque-лимит terminal_history_lines)",
+check("the config: the history depth 50 (the deque limit terminal_history_lines)",
       size == 50 and pos == 50, f"pos={pos} size={size}")
 win.close()
 
-# Неизвестная палитра → тихо остаётся "default" (set_palette() False)
+# An unknown palette → silently stays "default" (set_palette() False)
 write_config({"terminal_palette": "neon"})
 win = make_window("cfgbad")
-check("конфиг: неизвестная палитра → 'default' (без ошибки)",
+check("the config: the unknown palette → 'default' (without an error)",
       win.widget._palette_name == "default", win.widget._palette_name)
 img, cw, chh = grab(win)
-bg = pixel(img, cw // 2, 15 * chh + chh // 2)   # пустая строка — чистый фон
-check("конфиг: фон остался default-палитрой (#0f172a)",
+bg = pixel(img, cw // 2, 15 * chh + chh // 2)   # an empty line — a clean background
+check("the config: the background is the default palette (#0f172a)",
       close_enough(bg, hex_rgb(D["default_bg"]), tol=8), f"got={bg}")
 win.close()
 
-# Битые значения в окне → дефолты (pt 10, история 1000)
+# Corrupt values in the window → the defaults (pt 10, history 1000)
 write_config({"terminal_palette": 42, "terminal_font_size": "big",
               "terminal_history_lines": -5})
 win = make_window("cfgbad2")
-check("конфиг: битые значения → шрифт pt 10 (дефолт)",
+check("the config: the broken values → the font pt 10 (the default)",
       win.widget._font.pointSize() == 10, f"pt{win.widget._font.pointSize()}")
 for _ in range(1200):
     win.tscreen.feed(b"x\r\n")
 pos, size = win.tscreen.scroll_info()
-check("конфиг: битое terminal_history_lines → дефолт 1000 (скроллбэк включён)",
+check("the config: the broken terminal_history_lines → the default 1000 (the scrollback is on)",
       size == TS.DEFAULT_HISTORY_LINES and pos == size, f"pos={pos} size={size}")
 win.close()
 
-# Конфига нет вовсе → поведение ПОСЛЕ RC3: HistoryScreen со встроенной глубиной
+# No config at all → the behaviour AFTER RC3: a HistoryScreen with the built-in depth
 clear_config()
 win = make_window("cfgnone")
 for _ in range(1200):
     win.tscreen.feed(b"x\r\n")
 pos, size = win.tscreen.scroll_info()
-check("конфиг отсутствует → дефолт: скроллбэк включён, глубина 1000 (поведение RC3)",
+check("the config is absent → the default: the scrollback is on, the depth 1000 (the RC3 behavior)",
       size == TS.DEFAULT_HISTORY_LINES and pos == size, f"pos={pos} size={size}")
 win.close()
 

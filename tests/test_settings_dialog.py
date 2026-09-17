@@ -1,31 +1,31 @@
-"""v1.1 — Диалог настроек (хаб): тематический тест релиза.
+"""v1.1 — Settings dialog (hub): the release's themed test.
 
-ROADMAP v1.1 (задачи 1–7):
-  #1 Каркас — QTabWidget «Общие / Терминал / Статусы / Автосохранение / Карта / Язык»
-     (вкладка «Горячие клавиши» появится в v1.3);
-  #2 Точки входа — пункт меню «Настройки» МЕЖДУ «Вид» и «Помощь» + кнопка ⚙ внизу
-     сайдбара (6-я в ui/sidebar.py _BUTTONS, сигнал settings_clicked) + векторная
-     шестерёнка (ui/icons.py); палитра команд (Ctrl+K) подхватывает пункт автоматически;
-  #3 Вкладка «Терминал» — палитра/размер шрифта/глубина истории (ключи v1.0 terminal_*)
-     + поведение закрытия сессии (новый ключ terminal_close_behavior: "close"|"ask";
-     "ask" → подтверждение в closeEvent, только для активной сессии);
-  #4 Вкладка «Статусы» — интервал проверок и таймаут пробы StatusChecker
-     (status_interval_sec / status_probe_timeout_sec; дефолты 30 c / 3.0 c = v1.0;
-     на лету — set_interval/set_probe_timeout после ОК);
-  #5 Вкладка «Автосохранение» — вкл/выкл, интервал, число бэкапов (ключи v0.9.7);
-  #6 Вкладка «Язык» — переключатель en/ru/zh с немедленным применением
-     (сигнал language_changed ДО ОК; пункт «Помощь → Язык» сохранён);
-  #7 Единый файл настроек — ключ external_terminal перенесён из отдельного
-     ~/.sshmap_settings.json в config.json (миграция при чтении, старый файл удаляется).
+ROADMAP v1.1 (tasks 1–7):
+  #1 The frame — the QTabWidget "General / Terminal / Statuses / Autosave / Map / Language"
+     (the "Hotkeys" tab will appear in v1.3);
+  #2 The entry points — the "Settings" menu item BETWEEN "View" and "Help" + the ⚙ button at the bottom
+     of the sidebar (the 6th in ui/sidebar.py _BUTTONS, the settings_clicked signal) + the vector
+     gear (ui/icons.py); the command palette (Ctrl+K) picks up the item automatically;
+  #3 The "Terminal" tab — the palette/font size/history depth (the v1.0 terminal_* keys)
+     + the session close behavior (the new key terminal_close_behavior: "close"|"ask";
+     "ask" → the confirmation in closeEvent, only for the active session);
+  #4 The "Statuses" tab — the probe interval and the timeout of the StatusChecker
+     (status_interval_sec / status_probe_timeout_sec; the defaults 30 s / 3.0 s = v1.0;
+     on the fly — set_interval/set_probe_timeout after the OK);
+  #5 The "Autosave" tab — on/off, the interval, the number of backups (the v0.9.7 keys);
+  #6 The "Language" tab — the en/ru/zh switch with the immediate apply
+     (the language_changed signal BEFORE the OK; the "Help → Language" item is kept);
+  #7 The single settings file — the external_terminal key is moved from the separate
+    ~/.sshmap_settings.json into config.json (the migration on the read, the old file is removed).
 
-Хранение — ЕДИНЫЙ ~/.sshmap/config.json (i18n.load_config/save_config, атомарная
-merge-запись); все ключи опциональны, дефолты = текущее поведение. i18n: +33 ключа ×
-en/ru/zh в v1.1 (паритет 326 → 359) + 14 в v1.1.1 (опции вокруг хаба — паритет 373;
-+2 в v1.1.2RC2 — msg.confirm_delete_profile, status.import_resolving — паритет 375;
-+2 в v1.1.2 final — settings.statuses.max_parallel, status.auto_interval_hint — паритет 377;
-свой тематический тест — tests/test_settings_options.py).
+The storage — the SINGLE ~/.sshmap/config.json (i18n.load_config/save_config, the atomic
+merge write); all the keys are optional, the defaults = the current behavior. i18n: +33 keys ×
+en/ru/zh in v1.1 (the parity 326 → 359) + 14 in v1.1.1 (the options around the hub — the parity 373;
++2 in v1.1.2RC2 — msg.confirm_delete_profile, status.import_resolving — the parity 375;
++2 in v1.1.2 final — settings.statuses.max_parallel, status.auto_interval_hint — the parity 377;
+its own thematic test — tests/test_settings_options.py).
 
-Запуск: python tests/test_settings_dialog.py   (из корня проекта) или python tests/run_all.py
+Run: python tests/test_settings_dialog.py   (from the project root) or python tests/run_all.py
 """
 import json
 import os
@@ -33,9 +33,8 @@ import sys
 
 from _common import bootstrap, check, finish, load_i18n_langs, check_i18n_parity
 
-ROOT, WORK = bootstrap()  # ДО импортов модулей приложения (HOME-изоляция внутри)
+ROOT, WORK = bootstrap()  # BEFORE the app module imports (the HOME isolation inside)
 
-from PySide6.QtCore import QThread, Signal as QtSignal
 from PySide6.QtWidgets import QApplication, QMessageBox
 
 app = QApplication(sys.argv)
@@ -79,7 +78,7 @@ def clear_cfg():
 
 
 # ════════════════════════════════════════════════════════════
-# 1. i18n: +33 ключа × en/ru/zh, паритет 326 → 359 → … → 377 (с v1.1.2 final)
+# 1. i18n: +33 keys × en/ru/zh, parity 326 → 359 → … → 377 (since v1.1.2 final)
 # ════════════════════════════════════════════════════════════
 print("== i18n ==")
 langs = load_i18n_langs(ROOT)
@@ -101,166 +100,139 @@ new_keys = [
 ]
 missing = [k for k in new_keys
            if any(not langs[c].get(k, "").strip() for c in ("en", "ru", "zh"))]
-check("33 новых ключа v1.1 есть и не пусты в en/ru/zh", not missing, str(missing))
+check("the 33 new v1.1 keys are present and non-empty in en/ru/zh", not missing, str(missing))
 check_i18n_parity(langs)
 
 # ════════════════════════════════════════════════════════════
-# 2. Иконка шестерёнки (ui/icons.py)
+# 2. The gear icon (ui/icons.py)
 # ════════════════════════════════════════════════════════════
 print("== gear icon ==")
 ic = get_icon("settings")
 pm = ic.pixmap(20, 20)
-check("get_icon('settings') — непустой QIcon с pixmap 20×20",
+check("get_icon('settings') — a non-null QIcon with a 20×20 pixmap",
       not ic.isNull() and not pm.isNull() and (pm.width(), pm.height()) == (20, 20))
 img = pm.toImage()
 ink = sum(1 for y in range(img.height()) for x in range(img.width())
           if img.pixelColor(x, y).alpha() > 0)
-check("шестерёнка нарисована (чернила на прозрачном канвасе)", ink > 40, f"ink={ink}")
+check("the gear is drawn (the ink on the transparent canvas)", ink > 40, f"ink={ink}")
 
 # ════════════════════════════════════════════════════════════
-# 3. Кнопка ⚙ сайдбара: 6-я в _BUTTONS + сигнал settings_clicked
+# 3. The ⚙ sidebar button: 6th in _BUTTONS + the settings_clicked signal
 # ════════════════════════════════════════════════════════════
 print("== sidebar button ==")
-check("_BUTTONS: ровно 6 кнопок, 6-я — (btn_settings, settings, btn.settings)",
+check("_BUTTONS: exactly 6 buttons, the 6th — (btn_settings, settings, btn.settings)",
       len(_BUTTONS) == 6 and _BUTTONS[-1] == ("btn_settings", "settings",
-                                              "btn.settings", "Настройки"),
+                                              "btn.settings", "Settings"),
       str(_BUTTONS))
 _actions = {k: (lambda node, _k=k: None) for k in
             ("ssh", "external", "edit", "copy_ip", "copy_hostname", "ping",
              "collect_info", "reveal", "delete")}
 sb = SidebarPanel(translate_fn=i18n.t, actions=_actions)
-check("btn_settings существует и несёт векторную шестерёнку",
+check("btn_settings exists and carries the vector gear",
       hasattr(sb, "btn_settings") and not sb.btn_settings.icon().isNull())
 clicks = []
 sb.settings_clicked.connect(lambda: clicks.append(1))
 sb.btn_settings.click()
-check("клик по ⚙ → settings_clicked (ровно один раз)", len(clicks) == 1, str(clicks))
-check("подпись кнопки переведена (btn.settings)",
+check("a click on the ⚙ → settings_clicked (exactly once)", len(clicks) == 1, str(clicks))
+check("the button's label is translated (btn.settings)",
       sb.btn_settings.text() == i18n.t("btn.settings"), sb.btn_settings.text())
 
 # ════════════════════════════════════════════════════════════
-# 4. Задача 7: external_terminal — единый config.json + миграция
+# 4. Task 7: external_terminal — a single config.json + migration
 # ════════════════════════════════════════════════════════════
 print("== external terminal: single config.json ==")
 clear_cfg()
-check("свежий HOME: load → 'auto', файл не создаётся",
+check("a fresh HOME: load → 'auto', the file is not created",
       load_external_terminal_setting() == "auto" and read_cfg() is None)
 
 with open(LEGACY_PATH, "w", encoding="utf-8") as f:
     json.dump({"external_terminal": "cmd"}, f)
 v = load_external_terminal_setting()
 cfg = read_cfg()
-check("legacy 'cmd' из ~/.sshmap_settings.json → миграция в config.json",
+check("the legacy 'cmd' from ~/.sshmap_settings.json → the migration into config.json",
       v == "cmd" and cfg is not None and cfg.get("external_terminal") == "cmd",
       f"v={v!r} cfg={cfg}")
-check("старый файл удалён после успешной миграции", not os.path.exists(LEGACY_PATH))
+check("the old file is removed after the successful migration", not os.path.exists(LEGACY_PATH))
 
-# Ключ уже в config.json → legacy игнорируется (ничего не перезаписывается).
-# v1.1.2RC1 (N2): старое значение "conhost" больше не пресет — читается как "cmd"
-# (backward-compat при чтении; файл на диске остаётся с исходным значением).
+# The key is already in config.json → the legacy is ignored (nothing is overwritten).
+# v1.1.2RC1 (N2): the old value "conhost" is no longer a preset — it is read as "cmd"
+# (backward-compat on read; the on-disk file keeps its original value).
 write_cfg({"external_terminal": "conhost"})
 with open(LEGACY_PATH, "w", encoding="utf-8") as f:
     json.dump({"external_terminal": "cmd"}, f)
 v = load_external_terminal_setting()
-check("config.json приоритетнее legacy (без перезаписи); 'conhost' читается как 'cmd' (N2)",
+check("config.json takes priority over the legacy (no overwrite); 'conhost' is read as 'cmd' (N2)",
       v == "cmd" and read_cfg().get("external_terminal") == "conhost", f"v={v!r}")
 
-# save пишет ТОЛЬКО в config.json (legacy не создаётся)
+# save writes ONLY to config.json (no legacy is created)
 os.remove(LEGACY_PATH)
 save_val = "cmd" if sys.platform == "win32" else "gnome-terminal"
 ok = save_external_terminal_setting(save_val)
-check("save_external_terminal_setting → config.json, legacy не создаётся",
+check("save_external_terminal_setting → config.json, the legacy is not created",
       ok and read_cfg().get("external_terminal") == save_val
       and not os.path.exists(LEGACY_PATH))
 
 write_cfg({"external_terminal": "no-such-terminal"})
-check("битое значение в config.json → 'auto'", load_external_terminal_setting() == "auto")
+check("a broken value in config.json → 'auto'", load_external_terminal_setting() == "auto")
 clear_cfg()
 
 # ════════════════════════════════════════════════════════════
-# 5. Задача 4: настройки статусов (get_status_settings + на лету)
+# 5. Task 4: the status settings (get_status_settings + live)
 # ════════════════════════════════════════════════════════════
 print("== status settings ==")
 clear_cfg()
 st = get_status_settings()
-check("нет конфига → дефолты v1.0 (30 c / 3.0 c / 16 параллельных, v1.1.2 final)",
+check("no config → the v1.0 defaults (30 s / 3.0 s / 16 parallel, the v1.1.2 final)",
       st == {"interval_sec": 30, "probe_timeout_sec": 3.0, "max_parallel": 16}, str(st))
 write_cfg({"status_interval_sec": 45, "status_probe_timeout_sec": 2.5})
 st = get_status_settings()
-check("валидные значения читаются (45 c / 2.5 c)",
+check("the valid values are read (45 s / 2.5 s)",
       st == {"interval_sec": 45, "probe_timeout_sec": 2.5, "max_parallel": 16}, str(st))
 write_cfg({"status_interval_sec": 1, "status_probe_timeout_sec": 99})
 st = get_status_settings()
-check("клампы: interval ≥ 5 c, timeout ≤ 60 c",
+check("the clamps: interval ≥ 5 s, timeout ≤ 60 s",
       st == {"interval_sec": 5, "probe_timeout_sec": 60.0, "max_parallel": 16}, str(st))
 write_cfg({"status_interval_sec": True, "status_probe_timeout_sec": "abc"})
 st = get_status_settings()
-check("битые значения (bool/str) → дефолты",
+check("the broken values (bool/str) → the defaults",
       st == {"interval_sec": 30, "probe_timeout_sec": 3.0, "max_parallel": 16}, str(st))
-# v1.1.2 final: клампы status_max_parallel (детально — tests/test_status_parallel.py)
+# v1.1.2 final: the clamps of status_max_parallel (details — tests/test_status_parallel.py)
 write_cfg({"status_max_parallel": 9999})
 st = get_status_settings()
-check("кламп status_max_parallel сверху → 64", st["max_parallel"] == 64, str(st))
+check("the status_max_parallel clamp from above → 64", st["max_parallel"] == 64, str(st))
 
 chk = StatusChecker(parent=None)
 chk.set_interval(1000)
-check("set_interval: кламп не чаще раза в 5 c", chk.interval_ms == 5000,
+check("set_interval: the clamp not more often than once in 5 s", chk.interval_ms == 5000,
       str(chk.interval_ms))
 chk.set_interval(60000)
 chk.set_probe_timeout(0.01)
-check("set_interval/set_probe_timeout применяются (timeout-кламп ≥ 0.2)",
+check("set_interval/set_probe_timeout are applied (the timeout clamp ≥ 0.2)",
       chk.interval_ms == 60000 and abs(chk.probe_timeout - 0.2) < 1e-9,
       f"interval={chk.interval_ms} timeout={chk.probe_timeout}")
 clear_cfg()
 
 # ════════════════════════════════════════════════════════════
-# 6. Задача 3: поведение закрытия сессии (terminal_close_behavior)
+# 6. Task 3: the session closing behaviour (terminal_close_behavior)
 # ════════════════════════════════════════════════════════════
 print("== terminal close behavior ==")
 
 
-class _FakeChannel:
-    closed = False
-
-    def __init__(self):
-        self.sent = []
-
-    def send(self, data):
-        self.sent.append(data)
+from _fakes import FakeSSHThread as _FakeSSHThreadBase
 
 
-class _FakeSSHThread(QThread):
-    """Фейковый SSH-поток (паттерн test_terminal_acceptance.py) + детерминированный
-    isRunning: активная сессия симулируется флагом _running_override."""
-
-    output_signal = QtSignal(bytes)
-    error_signal = QtSignal(str)
-    status_signal = QtSignal(str)
-    closed_signal = QtSignal()
-    connected_signal = QtSignal()
+class _FakeSSHThread(_FakeSSHThreadBase):
+    """+ a deterministic isRunning: the active session is simulated with the
+    _running_override flag (the test_terminal_acceptance.py pattern)."""
 
     def __init__(self, host, user, port, password="", key_path=""):
-        super().__init__()
-        self.channel = _FakeChannel()
-        self.running = True
+        super().__init__(host, user, port, password, key_path)
         self._running_override = False
 
     def isRunning(self):
         if self._running_override:
             return True
         return super().isRunning()
-
-    def run(self):  # реальный SSH не нужен
-        pass
-
-    def stop(self):
-        self.running = False
-
-    def send_data(self, data_bytes):
-        if not data_bytes:
-            return
-        if self.channel and not self.channel.closed:
-            self.channel.send(data_bytes)
 
 
 _orig_thread_cls = ST.SSHTerminalThread
@@ -269,7 +241,7 @@ term_windows = []
 
 
 def alive(w):
-    """Жив ли C++-объект окна (WA_DeleteOnClose: после accept — уже уничтожен)."""
+    """Is the C++ object of the window alive (WA_DeleteOnClose: after the accept — already destroyed)."""
     try:
         w.windowTitle()
         return True
@@ -278,9 +250,9 @@ def alive(w):
 
 
 def make_term(alias):
-    # ВАЖНО: show() ДО close() — WA_DeleteOnClose удаляет окно только если оно
-    # хотя бы раз было видимо (проверено offscreen, Qt 6.11: close() невидимого
-    # окна принимает событие, но C++-объект живёт).
+    # IMPORTANT: show() BEFORE close() — WA_DeleteOnClose removes the window only if it is
+    # was visible at least once (verified offscreen, Qt 6.11: close() of an invisible
+    # the window accepts the event, but the C++ object lives).
     w = ST.SSHTerminalWindow(
         ServerData(id=f"set-{alias}", alias=alias, host="10.98.0.1", user="root"),
         None, password="pw")
@@ -304,47 +276,47 @@ def _fake_question(*a, **k):
 ST.QMessageBox.question = staticmethod(_fake_question)
 
 try:
-    # "ask" + активная сессия → подтверждение; Cancel → окно живёт
+    # "ask" + an active session → confirmation; Cancel → the window survives
     write_cfg({"terminal_close_behavior": "ask"})
     w = make_term("ask1")
-    check("окно читает terminal_close_behavior из конфига ('ask')",
+    check("the window reads terminal_close_behavior from the config ('ask')",
           getattr(w, "_close_behavior", None) == "ask",
           str(getattr(w, "_close_behavior", None)))
-    w.terminal_thread._running_override = True  # активная сессия
+    w.terminal_thread._running_override = True  # the active session
     w.close()
     app.processEvents()
-    check("'ask' + активная сессия: показано подтверждение (msg.confirm_close_session)",
+    check("'ask' + an active session: the confirmation is shown (msg.confirm_close_session)",
           len(asked) == 1 and asked[0] == i18n.t("msg.close_session_title"), str(asked))
-    check("Cancel → окно живёт (event.ignore, WA_DeleteOnClose не сработал)",
+    check("Cancel → the window survives (event.ignore, WA_DeleteOnClose did not fire)",
           alive(w))
 
     _question_result[0] = QMessageBox.StandardButton.Close
     asked.clear()
     w.close()
     app.processEvents()
-    check("'ask' + Close: подтверждение снова, окно закрывается",
+    check("'ask' + Close: the confirmation again, the window closes",
           len(asked) == 1 and not alive(w), f"asked={asked}")
 
-    # "close" (дефолт v1.0) + активная сессия → без диалога
+    # "close" (the v1.0 default) + an active session → no dialog
     clear_cfg()
     w2 = make_term("cl1")
-    check("нет конфига → дефолт 'close' (поведение v1.0)",
+    check("no config → the default 'close' (the v1.0 behavior)",
           getattr(w2, "_close_behavior", None) == "close")
     w2.terminal_thread._running_override = True
     asked.clear()
     w2.close()
     app.processEvents()
-    check("'close' + активная сессия: без диалога, окно закрывается",
+    check("'close' + an active session: no dialog, the window closes",
           len(asked) == 0 and not alive(w2), f"asked={asked}")
 
-    # "ask", но сессия уже завершена → без диалога
+    # "ask", but the session is already finished → no dialog
     write_cfg({"terminal_close_behavior": "ask"})
     w3 = make_term("ask2")
-    w3.terminal_thread.wait(2000)  # гарантированно неактивная сессия (без гонки)
+    w3.terminal_thread.wait(2000)  # a guaranteed inactive session (no race)
     asked.clear()
     w3.close()
     app.processEvents()
-    check("'ask' + завершённая сессия: без диалога", len(asked) == 0 and not alive(w3),
+    check("'ask' + a finished session: no dialog", len(asked) == 0 and not alive(w3),
           f"asked={asked}")
 finally:
     ST.QMessageBox.question = _orig_question
@@ -352,45 +324,45 @@ finally:
     clear_cfg()
 
 # ════════════════════════════════════════════════════════════
-# 7. Диалог: 6 вкладок, виджеты, prefill из конфига, collect/OK/Cancel
+# 7. The dialog: 6 tabs, widgets, prefill from the config, collect/OK/Cancel
 # ════════════════════════════════════════════════════════════
 print("== settings dialog ==")
 clear_cfg()
 dlg = SettingsDialog(None)
-check("QTabWidget с 6 вкладками", dlg.tabs.count() == 6, str(dlg.tabs.count()))
+check("a QTabWidget with 6 tabs", dlg.tabs.count() == 6, str(dlg.tabs.count()))
 expected_tabs = [i18n.t(k) for k in ("settings.tab.general", "settings.tab.terminal",
                                      "settings.tab.statuses", "settings.tab.autosave",
                                      "settings.tab.map", "settings.tab.language")]
 got_tabs = [dlg.tabs.tabText(i) for i in range(dlg.tabs.count())]
-check("порядок вкладок: Общие / Терминал / Статусы / Автосохранение / Карта / Язык",
+check("the tab order: General / Terminal / Status Checks / Autosave / Map / Language",
       got_tabs == expected_tabs, str(got_tabs))
 
 choices = TERMINAL_CHOICES_WINDOWS if sys.platform == "win32" else TERMINAL_CHOICES_LINUX
-check("«Общие»: комбо внешнего терминала — пресеты платформы",
+check("'General': the combo of the external terminal — the platform presets",
       dlg.ext_term_combo.count() == len(choices), str(dlg.ext_term_combo.count()))
-check("«Терминал»: палитры (default/nord/dracula/tokyo_night)",
+check("'Terminal': the palettes (default/nord/dracula/tokyo_night)",
       [dlg.palette_combo.itemData(i) for i in range(dlg.palette_combo.count())]
       == ["default", "nord", "dracula", "tokyo_night"])
-check("«Терминал»: размер шрифта 6–72 pt (диапазон валидатора)",
+check("'Terminal': the font size 6–72 pt (the validator's range)",
       dlg.font_size_spin.minimum() == 6 and dlg.font_size_spin.maximum() == 72)
-check("«Терминал»: глубина истории от 0 (0 = скроллбэк выключен)",
+check("'Terminal': the history depth from 0 (0 = the scrollback is off)",
       dlg.history_spin.minimum() == 0)
-check("«Терминал»: поведение закрытия (close/ask)",
+check("'Terminal': the close behavior (close/ask)",
       [dlg.close_behavior_combo.itemData(i) for i in range(dlg.close_behavior_combo.count())]
       == ["close", "ask"])
-check("«Терминал»: режим отображения (windows/tabs, v1.2.2)",
+check("'Terminal': the display mode (windows/tabs, v1.2.2)",
       [dlg.mode_combo.itemData(i) for i in range(dlg.mode_combo.count())]
       == ["windows", "tabs"] and dlg.mode_combo.currentData() == "windows")
-check("«Статусы»: интервал (≥5 c) + таймаут пробы (≤60 c)",
+check("'Status Checks': the interval (≥5 s) + the probe timeout (≤60 s)",
       dlg.status_interval_spin.minimum() >= 5 and dlg.probe_timeout_spin.maximum() <= 60.0)
-check("«Автосохранение»: чекбокс вкл/выкл + интервал + число бэкапов",
+check("'Autosave': the on/off checkbox + the interval + the number of backups",
       hasattr(dlg, "autosave_enabled_chk") and hasattr(dlg, "autosave_interval_spin")
       and hasattr(dlg, "backup_count_spin"))
-check("«Язык»: комбо en/ru/zh",
+check("'Language': the en/ru/zh combo",
       sorted(dlg.language_combo.itemData(i) for i in range(dlg.language_combo.count()))
       == ["en", "ru", "zh"])
 
-# Prefill из конфига (все ключи опциональны — значения ниже валидны по построению)
+# Prefill from the config (all keys are optional — the values below are valid by construction)
 write_cfg({"terminal_palette": "dracula", "terminal_font_size": 14,
            "terminal_history_lines": 250, "status_interval_sec": 90,
            "status_probe_timeout_sec": 5.0, "autosave_enabled": False,
@@ -398,25 +370,25 @@ write_cfg({"terminal_palette": "dracula", "terminal_font_size": 14,
            "language": "ru", "terminal_font": "Consolas",
            "terminal_mode": "tabs"})   # v1.2.2
 dlg2 = SettingsDialog(None)
-check("«Терминал» отражает конфиг (dracula / 14 pt / 250 строк)",
+check("'Terminal' reflects the config (dracula / 14 pt / 250 lines)",
       dlg2.palette_combo.currentData() == "dracula" and dlg2.font_size_spin.value() == 14
       and dlg2.history_spin.value() == 250)
-check("«Терминал» отражает terminal_mode (tabs, v1.2.2)",
+check("'Terminal' reflects the terminal_mode (tabs, v1.2.2)",
       dlg2.mode_combo.currentData() == "tabs", str(dlg2.mode_combo.currentData()))
-check("«Статусы» отражают конфиг (90 c / 5.0 c)",
+check("'Status Checks' reflect the config (90 s / 5.0 s)",
       dlg2.status_interval_spin.value() == 90
       and abs(dlg2.probe_timeout_spin.value() - 5.0) < 1e-6)
-check("«Автосохранение» отражает конфиг (выкл / 120 c / 3 бэкапа)",
+check("'Autosave' reflects the config (off / 120 s / 3 backups)",
       not dlg2.autosave_enabled_chk.isChecked() and dlg2.autosave_interval_spin.value() == 120
       and dlg2.backup_count_spin.value() == 3)
 
-# collect(): ровно 19 ключей config.json (10 в v1.1 + 7 в v1.1.1 + 1 в v1.1.2 final
-# + 1 в v1.2.2 — terminal_mode), типы корректны (language НЕ входит — он сразу)
+# collect(): exactly 19 config.json keys (10 in v1.1 + 7 in v1.1.1 + 1 in v1.1.2 final
+# + 1 in v1.2.2 — terminal_mode), the types are correct (language is NOT included — it is immediate)
 dlg2.close_behavior_combo.setCurrentIndex(1)  # ask
 dlg2.status_interval_spin.setValue(60)
 dlg2.probe_timeout_spin.setValue(4.5)
 c = dlg2.collect()
-check("collect(): ровно 19 ключей config.json (v1.1: 10 + v1.1.1: 7 + v1.1.2 final: 1 + v1.2.2: 1)",
+check("collect(): exactly 19 config.json keys (v1.1: 10 + v1.1.1: 7 + the v1.1.2 final: 1 + v1.2.2: 1)",
       set(c) == {"external_terminal", "terminal_mode", "terminal_palette",
                  "terminal_font_size",
                  "terminal_history_lines", "terminal_close_behavior",
@@ -425,69 +397,69 @@ check("collect(): ровно 19 ключей config.json (v1.1: 10 + v1.1.1: 7 +
                  "ui_font_family", "ui_font_size", "terminal_font",
                  "terminal_max_open", "ui_node_double_click",
                  "ui_show_sidebar_buttons", "ui_show_connection_type"}, str(sorted(c)))
-check("collect(): типы (int/float/bool/str) и изменённые значения",
+check("collect(): the types (int/float/bool/str) and the changed values",
       isinstance(c["terminal_font_size"], int) and isinstance(c["status_interval_sec"], int)
       and isinstance(c["status_probe_timeout_sec"], float)
       and isinstance(c["autosave_enabled"], bool)
       and c["terminal_close_behavior"] == "ask" and c["status_interval_sec"] == 60
       and abs(c["status_probe_timeout_sec"] - 4.5) < 1e-9, str(c))
 
-# OK: merge-запись в config.json + сигнал applied
+# OK: a merged write to config.json + the applied signal
 applied = []
 dlg2.applied.connect(lambda: applied.append(1))
 dlg2._on_accept()
 cfg = read_cfg()
-check("ОК: все 19 ключей записаны в config.json",
+check("OK: all the 19 keys are written into config.json",
       cfg is not None and all(k in cfg for k in c), str(cfg))
-check("ОК: merge — чужие ключи сохранены (language/terminal_font)",
+check("OK: the merge — the foreign keys are kept (language/terminal_font)",
       cfg.get("language") == "ru" and cfg.get("terminal_font") == "Consolas", str(cfg))
-check("ОК: signal applied эмитирован (MainWindow применяет на лету)", len(applied) == 1)
+check("OK: the signal applied is emitted (the MainWindow applies it live)", len(applied) == 1)
 
-# Cancel: без записи, без applied
+# Cancel: no write, no applied
 cfg_before = read_cfg()
 dlg3 = SettingsDialog(None)
 applied3 = []
 dlg3.applied.connect(lambda: applied3.append(1))
 dlg3.font_size_spin.setValue(42)
 dlg3.reject()
-check("Отмена: конфиг не изменился, applied не эмитирован",
+check("Cancel: the config is unchanged, the applied is not emitted",
       read_cfg() == cfg_before and not applied3)
 
 # ════════════════════════════════════════════════════════════
-# 8. Вкладка «Язык»: немедленное применение (до ОК) + retranslate диалога
+# 8. The "Language" tab: immediate application (before OK) + retranslating the dialog
 # ════════════════════════════════════════════════════════════
 print("== language tab ==")
 clear_cfg()
-# Сценарий «ru → en» требует явной стартовой точки: с v1.1.1 язык по умолчанию — en
-# (новые пользователи), и без этого комбо уже стоит на en, setCurrentIndex("en") —
-# no-op без сигнала (проверяемое здесь немедленное применение слепнет).
+# The "ru → en" scenario requires an explicit starting point: since v1.1.1 the default language — en
+# (new users), and without this the combo already sits on en, so setCurrentIndex("en") —
+# a no-op without a signal (the immediate application checked here would go blind).
 i18n.set_language("ru")
 dlg4 = SettingsDialog(None)
 lang_events = []
 
 
-def _apply_lang(code):  # то, что делает MainWindow._switch_language по сигналу
+def _apply_lang(code):  # what MainWindow._switch_language does on the signal
     lang_events.append(code)
     i18n.set_language(code)
 
 
 dlg4.language_changed.connect(_apply_lang)
-check("комбо начинается с текущего языка (ru)",
+check("the combo starts with the current language (ru)",
       dlg4.language_combo.currentData() == i18n.get_current_language())
 tab0_ru = dlg4.tabs.tabText(0)
 dlg4.language_combo.setCurrentIndex(dlg4.language_combo.findData("en"))
-check("смена на en: language_changed немедленно (до ОК)", lang_events == ["en"],
+check("the switch to en: the language_changed is immediate (before the OK)", lang_events == ["en"],
       str(lang_events))
-check("диалог ре-транслирует сам себя (вкладки на английском)",
+check("the dialog re-translates itself (the tabs in English)",
       dlg4.tabs.tabText(0) == i18n.t("settings.tab.general") and tab0_ru != i18n.t("settings.tab.general"),
       f"ru={tab0_ru!r} en={dlg4.tabs.tabText(0)!r}")
 dlg4.language_combo.setCurrentIndex(dlg4.language_combo.findData("ru"))
-check("возврат на ru (сигнал + текущий язык)",
+check("the return to ru (the signal + the current language)",
       lang_events[-1] == "ru" and i18n.get_current_language() == "ru")
 
 # ════════════════════════════════════════════════════════════
-# 9. MainWindow: меню «Настройки» между «Вид» и «Помощь», палитра, кнопка ⚙,
-#    применение на лету (_apply_settings_from_dialog)
+# 9. MainWindow: the "Settings" menu between "View" and "Help", the palette, the ⚙ button,
+#    live application (_apply_settings_from_dialog)
 # ════════════════════════════════════════════════════════════
 print("== main window entry points ==")
 clear_cfg()
@@ -507,11 +479,11 @@ def _idx(t):
 
 i_view, i_set, i_help = (_idx(i18n.t("menu.view")), _idx(i18n.t("menu.settings")),
                          _idx(i18n.t("menu.help")))
-check("меню «Настройки» МЕЖДУ «Вид» и «Помощь»", 0 <= i_view < i_set < i_help, str(titles))
-# Членство — через список действий меню (PySide6 6.11: QAction.menu() возвращает
-# None даже для добавленного пункта — свойство привязки, см. diag при v1.1).
+check("the 'Settings' menu is BETWEEN the 'View' and the 'Help'", 0 <= i_view < i_set < i_help, str(titles))
+# The membership — via the list of menu actions (PySide6 6.11: QAction.menu() returns
+# None even for the added item — a property of the binding, see the diag at v1.1).
 _reg_settings = [w for w, k in win._menu_i18n if k == "menu.settings"]
-check("act_settings: пункт settings.open внутри меню «Настройки»",
+check("act_settings: the settings.open item is inside the 'Settings' menu",
       getattr(win, "act_settings", None) is not None
       and win.act_settings.text() == i18n.t("settings.open")
       and len(_reg_settings) == 1 and win.act_settings in _reg_settings[0].actions())
@@ -520,7 +492,7 @@ from ui.command_palette import CommandPalette
 pal = CommandPalette(win)
 pal._collect_commands()
 labels = [l for l, _k, _f in pal._commands]
-check("палитра команд (Ctrl+K) подхватила пункт настроек автоматически",
+check("the command palette (Ctrl+K) picked up the settings item automatically",
       i18n.t("settings.open") in labels, str(labels[:20]))
 
 opened = []
@@ -531,28 +503,28 @@ try:
     win.act_settings.trigger()
 finally:
     win._open_settings_dialog = _orig_open
-check("кнопка ⚙ сайдбара И пункт меню открывают диалог настроек", len(opened) == 2,
+check("the ⚙ sidebar button AND the menu item open the settings dialog", len(opened) == 2,
       str(opened))
 
-# Применение на лету после ОК: статусы (StatusChecker) + автосохранение (QTimer)
+# Live application after OK: the statuses (StatusChecker) + the autosave (QTimer)
 write_cfg({"status_interval_sec": 45, "status_probe_timeout_sec": 2.5,
            "autosave_enabled": False, "autosave_interval_sec": 120})
 win._apply_settings_from_dialog()
 chk = win._status_checker
-check("applied: StatusChecker — интервал 45 c / таймаут пробы 2.5 c",
+check("applied: the StatusChecker — the interval 45 s / the probe timeout 2.5 s",
       chk is not None and chk.interval_ms == 45000 and abs(chk.probe_timeout - 2.5) < 1e-9,
       f"interval={chk.interval_ms if chk else None} "
       f"timeout={chk.probe_timeout if chk else None}")
-check("applied: автосохранение остановлено (enabled=False), интервал 120 c",
+check("applied: the autosave is stopped (enabled=False), the interval 120 s",
       not win._autosave_timer.isActive() and win._autosave_timer.interval() == 120000,
       f"active={win._autosave_timer.isActive()} interval={win._autosave_timer.interval()}")
 write_cfg({"status_interval_sec": 30, "status_probe_timeout_sec": 3.0,
            "autosave_enabled": True, "autosave_interval_sec": 60})
 win._apply_settings_from_dialog()
-check("applied: автосохранение перезапущено (enabled=True, 60 c)",
+check("applied: the autosave is restarted (enabled=True, 60 s)",
       win._autosave_timer.isActive() and win._autosave_timer.interval() == 60000)
 
-# Cleanup: без dirty — closeEvent не пойдёт в диалог сохранения
+# Cleanup: no dirty — closeEvent will not go to the save dialog
 win._dirty = False
 win.close()
 app.processEvents()

@@ -1,6 +1,6 @@
 """Profile Manager Dialog — manage reusable SSH profiles (login + password).
 
-Access via Меню → Профиль → Управление профилями.
+Access via Menu → Profiles → Manage profiles.
 """
 
 from typing import Optional, List
@@ -12,7 +12,7 @@ except ImportError:
     from models.profile import (Profile, load_profiles, save_profiles, add_profile,
                                 update_profile, delete_profile, get_profile_password)
 
-try:  # v1.2.5: центральная тема (палитра/радиусы/шрифты — ui/theme.py)
+try:  # v1.2.5: central theme (palette/radii/fonts — ui/theme.py)
     from ..ui import theme
 except ImportError:
     from ui import theme
@@ -51,15 +51,15 @@ class ProfileManagerDialog(QDialog):
         layout = QVBoxLayout(self)
 
         # Title
-        title = QLabel(self.t("dialog.manage_profiles")) if self._i18n_available else QLabel("Профили SSH-подключения")
-        title.setStyleSheet(f"font-size: 13pt; font-weight: bold; color: {theme.TEXT_PRIMARY};")  # v1.2.5: тема
+        title = QLabel(self.t("dialog.manage_profiles")) if self._i18n_available else QLabel("Manage SSH Profiles")
+        title.setStyleSheet(f"font-size: 13pt; font-weight: bold; color: {theme.TEXT_PRIMARY};")  # v1.2.5: theme
         layout.addWidget(title)
 
         subtitle = QLabel(self.t("dialog.manage_profiles_desc")) if self._i18n_available else QLabel(
-            "Профили позволяют хранить пару логин/пароль и подставлять\n"
-            "их в свойства сервера одним кликом."
+            "Profiles store a login/password pair and can be applied\n"
+            "with one click to server properties."
         )
-        subtitle.setStyleSheet(f"color: {theme.TEXT_MUTED}; font-size: 10pt;")  # v1.2.5: тема
+        subtitle.setStyleSheet(f"color: {theme.TEXT_MUTED}; font-size: 10pt;")  # v1.2.5: theme
         layout.addWidget(subtitle)
 
         layout.addSpacing(8)
@@ -83,15 +83,15 @@ class ProfileManagerDialog(QDialog):
         # Buttons row
         btn_layout = QHBoxLayout()
 
-        # UI polish: эмодзи из значений i18n dialog.* убраны — префиксы не добавляем
-        self.btn_add = QPushButton(self.t("dialog.add_profile") if self._i18n_available else "Добавить")
+        # UI polish: emojis removed from the i18n dialog.* values — no prefixes added
+        self.btn_add = QPushButton(self.t("dialog.add_profile") if self._i18n_available else "Add")
         self.btn_add.clicked.connect(lambda: self._on_edit_profile(None))
 
-        self.btn_edit = QPushButton(self.t("dialog.edit_profile") if self._i18n_available else "Редактировать")
+        self.btn_edit = QPushButton(self.t("dialog.edit_profile") if self._i18n_available else "Edit")
         self.btn_edit.clicked.connect(self._on_edit_selected)
         self.btn_edit.setEnabled(False)
 
-        self.btn_delete = QPushButton(self.t("dialog.delete_profile") if self._i18n_available else "Удалить")
+        self.btn_delete = QPushButton(self.t("dialog.delete_profile") if self._i18n_available else "Delete")
         self.btn_delete.clicked.connect(self._on_delete_selected)
         self.btn_delete.setEnabled(False)
 
@@ -102,7 +102,7 @@ class ProfileManagerDialog(QDialog):
         layout.addLayout(btn_layout)
 
         # Close button
-        close_btn = QPushButton((self.t("ssh.cancel") if self._i18n_available else "Закрыть"))
+        close_btn = QPushButton((self.t("ssh.cancel") if self._i18n_available else "Cancel"))
         close_btn.clicked.connect(self.accept)
         layout.addWidget(close_btn)
 
@@ -122,7 +122,7 @@ class ProfileManagerDialog(QDialog):
         for i, p in enumerate(profiles):
             name_item = QTableWidgetItem(p.name)
             user_item = QTableWidgetItem(p.user)
-            # Пароль живёт в keyring — подгружаем его для отображения (маскированно)
+            # The password lives in the keyring — loaded for display only (masked)
             pw = get_profile_password(p.id) or ""
             pw_display = "•" * max(len(pw), 1) if pw else self.t("profile.password_empty")
             password_item = QTableWidgetItem(pw_display)
@@ -153,25 +153,25 @@ class ProfileManagerDialog(QDialog):
         
         if self._i18n_available:
             try:
-                # v1.1.2RC2 (N10): свой ключ удаления ПРОФИЛЯ — раньше здесь был
-                # серверный msg.confirm_delete («Delete server ...?»), кривая ветка i18n.
+                # v1.1.2RC2 (N10): its own key for deleting a PROFILE — earlier this used
+                # the server msg.confirm_delete ("Delete server ...?"), a crooked i18n branch.
                 reply = QMessageBox.question(
-                    self, (self.t("dialog.delete_profile") if self._i18n_available else "Удалить профиль"),
+                    self, (self.t("dialog.delete_profile") if self._i18n_available else "Delete"),
                     self.t("msg.confirm_delete_profile", alias=profile.name),
                     QMessageBox.Yes | QMessageBox.No,
                     QMessageBox.No
                 )
             except Exception:
                 reply = QMessageBox.question(
-                    self, "Удалить профиль",
-                    f"Удалить профиль «{profile.name}»? (Логин {profile.user})",
+                    self, "Delete",
+                    f"Delete profile '{profile.name}'? (Login {profile.user})",
                     QMessageBox.Yes | QMessageBox.No,
                     QMessageBox.No
                 )
         else:
             reply = QMessageBox.question(
-                self, "Удалить профиль",
-                f"Удалить профиль «{profile.name}»? (Логин {profile.user})",
+                self, "Delete",
+                f"Delete profile '{profile.name}'? (Login {profile.user})",
                 QMessageBox.Yes | QMessageBox.No,
                 QMessageBox.No
             )
@@ -226,25 +226,25 @@ class ProfileEditDialog(QDialog):
         if existing:
             self.name_edit.setText(existing.name)
             self.user_edit.setText(existing.user)
-            # Пароль НЕ подставляем: пустое поле означает «не менять текущий пароль»
+            # The password is NOT prefilled: an empty field means "keep the current password"
             self.password_edit.setPlaceholderText(self.t("profile.password_keep_hint"))
 
     def _build_ui(self):
         layout = QVBoxLayout(self)
 
-        name_label = QLabel((self.t("profile.name") if self._i18n_available else "Имя профиля:"))
+        name_label = QLabel((self.t("profile.name") if self._i18n_available else "Profile name:"))
         layout.addWidget(name_label)
         self.name_edit = QLineEdit()
         self.name_edit.setPlaceholderText("admin, dev-team, production...")
         layout.addWidget(self.name_edit)
 
-        user_label = QLabel((self.t("profile.username_label") if self._i18n_available else "Логин (SSH user):"))
+        user_label = QLabel((self.t("profile.username_label") if self._i18n_available else "SSH user (login):"))
         layout.addWidget(user_label)
         self.user_edit = QLineEdit()
         self.user_edit.setPlaceholderText("root, ubuntu, deploy...")
         layout.addWidget(self.user_edit)
 
-        pw_label = QLabel((self.t("profile.password_optional") if self._i18n_available else "Пароль (необязательно):"))
+        pw_label = QLabel((self.t("profile.password_optional") if self._i18n_available else "Password (optional):"))
         layout.addWidget(pw_label)
         self.password_edit = QLineEdit()
         self.password_edit.setEchoMode(QLineEdit.Password)
@@ -262,18 +262,18 @@ class ProfileEditDialog(QDialog):
         password = self.password_edit.text()
 
         if not name:
-            QMessageBox.warning(self, (self.t("msg.error_title") if self._i18n_available else "Ошибка"), 
+            QMessageBox.warning(self, (self.t("msg.error_title") if self._i18n_available else "Error"), 
                               self.t("validation.name_empty"))
             return
         if not user:
-            QMessageBox.warning(self, (self.t("msg.error_title") if self._i18n_available else "Ошибка"), 
+            QMessageBox.warning(self, (self.t("msg.error_title") if self._i18n_available else "Error"), 
                               self.t("validation.user_empty"))
             return
 
         if self.existing is None:
             add_profile(name=name, user=user, password=password)
         else:
-            # Пустое поле = «не менять» (None), чтобы не стирать пароль из keyring
+            # Empty field = "keep" (None), so we don't wipe the password from the keyring
             update_profile(
                 profile_id=self.existing.id,
                 name=name,

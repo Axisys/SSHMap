@@ -1,34 +1,37 @@
 # -*- coding: utf-8 -*-
-"""v0.8.2: Запуск SSH-сессии в альтернативном (системном) терминале ОС.
+"""v0.8.2: Launching an SSH session in an alternative (system) terminal.
 
-Приложение лишь порождает процесс (subprocess.Popen) с ssh-клиентом ОС
-(`ssh.exe` входит в Windows 10/11 и почти во все Linux) — после запуска
-связь с окном не нужна.
+The application only spawns a process (subprocess.Popen) with the OS ssh
+client (`ssh.exe` ships with Windows 10/11 and nearly all Linux distros) —
+after launch no link to the window is needed.
 
-БЕЗОПАСНОСТЬ: пароль НЕ передаётся через аргументы командной строки
-(он виден в `ps`/диспетчере задач). Внешний терминал = ssh ОС: пароль
-пользователь вводит сам либо используется key auth (`ssh -i key -p port user@host`).
+SECURITY: the password is NOT passed through command-line arguments
+(it would be visible in `ps`/task manager). External terminal = OS ssh:
+the user types the password themselves, or key auth is used
+(`ssh -i key -p port user@host`).
 
-Настройки — единый ~/.sshmap/config.json (i18n.load_config/save_config, атомарная
-запись), ключ:
+Settings — the single ~/.sshmap/config.json file (i18n.load_config/save_config,
+atomic write), key:
     "external_terminal": "auto" | "windows_terminal" | "cmd"
                          | "x-terminal-emulator" | "gnome-terminal" | "konsole"
                          | "xfce4-terminal" | "alacritty" | "kitty"
-Отсутствие ключа = "auto".
+Key absent = "auto".
 
-v1.1.2RC1 (N2): пресет «conhost» УБРАН — conhost.exe не лаунчер (не принимает /c,
-позиционные аргументы трактует как handle консоли/процесс-сервер), собранная команда
-гарантированно не работала. Старое значение конфига "conhost" трактуется как "cmd"
-(окно cmd.exe — это и есть классический conhost): маппинг в
-load_external_terminal_setting() + нормализация при миграции legacy-файла;
-build_command("conhost", ...) остаётся алиасом "cmd" для прямых вызовов.
+v1.1.2RC1 (N2): the "conhost" preset was REMOVED — conhost.exe is not a launcher
+(it does not accept /c; positional arguments are interpreted as console/process
+server handles), so the assembled command was guaranteed not to work. The old
+config value "conhost" is treated as "cmd" (the cmd.exe window IS the classic
+conhost): the mapping lives in load_external_terminal_setting() + normalization
+during legacy-file migration; build_command("conhost", ...) remains an alias
+for "cmd" for direct calls.
 
-v1.1 (ROADMAP задача 7): до v1.0 настройка жила в отдельном ~/.sshmap_settings.json —
-у приложения было два источника настроек. Теперь при чтении выполняется миграция:
-если ключа нет в config.json, но есть в старом файле — значение копируется в
-config.json (save_config), старый файл удаляется (best effort). Запись идёт ТОЛЬКО
-в config.json. UI выбора пресета — секция SSHConnectDialog (v0.9.9.2) и вкладка
-«Общие» диалога настроек (v1.1).
+v1.1 (ROADMAP task 7): before v1.0 the setting lived in a separate
+~/.sshmap_settings.json — the application had two sources of settings. Now a
+migration runs on read: if the key is missing from config.json but present in
+the old file — the value is copied into config.json (save_config), and the old
+file is deleted (best effort). Writes go ONLY to config.json. The preset-picker
+UI — the SSHConnectDialog section (v0.9.9.2) and the "General" tab of the
+settings dialog (v1.1).
 """
 
 import os
@@ -44,16 +47,16 @@ except ImportError:
 
 log = get_logger(__name__)
 
-# ── Настройки (единый ~/.sshmap/config.json; v1.1 — ROADMAP задача 7) ─────────
+# ── Settings (single ~/.sshmap/config.json; v1.1 — ROADMAP task 7) ────────────
 
-# Имя СТАРОГО файла настроек (v0.8.2–v1.0): нужен только для миграции при чтении.
+# Name of the OLD settings file (v0.8.2–v1.0): needed only for migration on read.
 SETTINGS_FILENAME = ".sshmap_settings.json"
-LEGACY_SETTINGS_FILENAME = SETTINGS_FILENAME  # псевдоним — яснее по смыслу
+LEGACY_SETTINGS_FILENAME = SETTINGS_FILENAME  # alias — clearer by meaning
 
-# Ключи настроек внешнего терминала (значения settings key ↔ id терминала).
-# v1.1.2RC1 (N2): «conhost» убран из списка — conhost.exe не лаунчер (см. докстринг
-# модуля); старое сохранённое значение "conhost" маппится на "cmd" в
-# load_external_terminal_setting() (backward-compat).
+# External terminal setting keys (settings key values ↔ terminal ids).
+# v1.1.2RC1 (N2): "conhost" removed from the list — conhost.exe is not a
+# launcher (see the module docstring); the old stored value "conhost" is
+# mapped to "cmd" in load_external_terminal_setting() (backward-compat).
 TERMINAL_CHOICES_WINDOWS = ["auto", "windows_terminal", "cmd"]
 TERMINAL_CHOICES_LINUX = [
     "auto", "x-terminal-emulator", "gnome-terminal", "konsole",
@@ -62,17 +65,17 @@ TERMINAL_CHOICES_LINUX = [
 
 
 def _settings_path() -> str:
-    """v1.1: путь ЕДИНОГО файла настроек — ~/.sshmap/config.json (был .sshmap_settings.json)."""
+    """v1.1: path to the SINGLE settings file — ~/.sshmap/config.json (was .sshmap_settings.json)."""
     return os.path.join(os.path.expanduser("~"), ".sshmap", "config.json")
 
 
 def _legacy_settings_path() -> str:
-    """Путь СТАРОГО отдельного файла (v0.8.2–v1.0) — только для миграции."""
+    """Path to the OLD separate file (v0.8.2–v1.0) — for migration only."""
     return os.path.join(os.path.expanduser("~"), LEGACY_SETTINGS_FILENAME)
 
 
 def _read_legacy_settings() -> Optional[dict]:
-    """Содержимое старого ~/.sshmap_settings.json (None — отсутствует/бит)."""
+    """Contents of the old ~/.sshmap_settings.json (None — missing/corrupt)."""
     try:
         import json
         with open(_legacy_settings_path(), "r", encoding="utf-8") as f:
@@ -83,45 +86,45 @@ def _read_legacy_settings() -> Optional[dict]:
 
 
 def _migrate_legacy_settings() -> Optional[str]:
-    """v1.1 (ROADMAP задача 7): разовая миграция ключа из старого файла в config.json.
+    """v1.1 (ROADMAP task 7): one-time migration of the key from the old file into config.json.
 
-    Вызывается при чтении, когда ключа ещё нет в config.json: значение копируется
-    в config.json (save_config — атомарная merge-запись), затем старый файл
-    удаляется (best effort; если запись не удалась — файл остаётся и миграция
-    повторится при следующем чтении). Возвращает смигрированное значение или None.
+    Called on read when the key is still absent from config.json: the value is
+    copied into config.json (save_config — atomic merge-write), then the old
+    file is deleted (best effort; if the write failed — the file stays and the
+    migration will repeat on the next read). Returns the migrated value or None.
     """
     legacy = _read_legacy_settings()
     if not legacy or "external_terminal" not in legacy:
         return None
     raw = str(legacy["external_terminal"]).strip().lower()
-    # v1.1.2RC1 (N2): «conhost» больше не пресет — нормализуем в "cmd" ДО записи,
-    # чтобы мёртвое значение не закреплялось в config.json.
+    # v1.1.2RC1 (N2): "conhost" is no longer a preset — normalize to "cmd" BEFORE
+    # writing, so the dead value does not get baked into config.json.
     if raw == "conhost":
         raw = "cmd"
     try:
         from i18n import save_config as _save_cfg
         if not _save_cfg({"external_terminal": raw}):
-            return raw  # запись не удалась — значение отдаём, файл оставляем
+            return raw  # write failed — return the value, keep the file
     except Exception:
         return raw
     try:
         os.remove(_legacy_settings_path())
     except OSError:
-        pass  # удалить не удалось (read-only home и т.п.) — ключ уже в config.json
+        pass  # could not delete (read-only home, etc.) — the key is already in config.json
     log.info("Migrated external_terminal setting from %s to config.json",
              LEGACY_SETTINGS_FILENAME)
     return raw
 
 
 def load_external_terminal_setting() -> str:
-    """Прочитать настройку терминала из ~/.sshmap/config.json ('auto' по умолчанию).
+    """Read the terminal setting from ~/.sshmap/config.json ('auto' by default).
 
-    v1.1 (ROADMAP задача 7): единый файл настроек. Если ключа нет в config.json,
-    но есть в старом ~/.sshmap_settings.json — миграция при чтении
-    (_migrate_legacy_settings()). Невалидное значение → 'auto'.
+    v1.1 (ROADMAP task 7): single settings file. If the key is absent from
+    config.json but present in the old ~/.sshmap_settings.json — migration on
+    read (_migrate_legacy_settings()). Invalid value → 'auto'.
 
-    v1.1.2RC1 (N2): backward-compat — старое сохранённое значение "conhost"
-    трактуется как "cmd" (конфиг на диске НЕ перезаписывается, маппинг при чтении).
+    v1.1.2RC1 (N2): backward-compat — the old stored value "conhost" is
+    treated as "cmd" (the config on disk is NOT rewritten, mapping on read).
     """
     value = None
     try:
@@ -135,7 +138,7 @@ def load_external_terminal_setting() -> str:
         return "auto"
     if value is None:
         value = "auto"
-    # v1.1.2RC1 (N2): «conhost» убран из пресетов — старые конфиги читаются как "cmd".
+    # v1.1.2RC1 (N2): "conhost" removed from presets — old configs are read as "cmd".
     if value == "conhost":
         value = "cmd"
     valid = set(TERMINAL_CHOICES_WINDOWS if sys.platform == "win32"
@@ -144,11 +147,11 @@ def load_external_terminal_setting() -> str:
 
 
 def save_external_terminal_setting(value: str) -> bool:
-    """Сохранить настройку в ~/.sshmap/config.json (атомарная merge-запись).
+    """Save the setting to ~/.sshmap/config.json (atomic merge-write).
 
-    v1.1 (ROADMAP задача 7): старый ~/.sshmap_settings.json больше НЕ пишется;
-    если он ещё существует с ключом — load_external_terminal_setting() смигрирует
-    его и удалит файл. False при ошибке записи.
+    v1.1 (ROADMAP task 7): the old ~/.sshmap_settings.json is NO LONGER written;
+    if it still exists with the key — load_external_terminal_setting() migrates
+    it and deletes the file. False on a write error.
     """
     try:
         from i18n import save_config as _save_cfg
@@ -168,23 +171,24 @@ def _which(name: str) -> Optional[str]:
 
 
 def detect_terminal() -> Optional[str]:
-    """Найти доступный эмулятор терминала на текущей ОС.
+    """Find an available terminal emulator on the current OS.
 
-    Windows: wt.exe → cmd.exe (всегда есть).
+    Windows: wt.exe → cmd.exe (always present).
     Linux: x-terminal-emulator / gnome-terminal / konsole / xfce4-terminal /
            alacritty / kitty.
-    Возвращает id ("windows_terminal"/"cmd"/... ) или None, если ничего нет.
+    Returns an id ("windows_terminal"/"cmd"/...) or None if nothing is found.
 
-    v1.1.2RC1 (N2): «conhost» из fallback-цепочки убран — conhost.exe не лаунчер
-    (см. докстринг модуля); окно cmd.exe и есть классический conhost, а cmd.exe
-    на Windows всегда есть, так что цепочка wt → cmd покрывает все случаи.
+    v1.1.2RC1 (N2): "conhost" removed from the fallback chain — conhost.exe is
+    not a launcher (see the module docstring); the cmd.exe window IS the classic
+    conhost, and cmd.exe is always present on Windows, so the wt → cmd chain
+    covers all cases.
     """
     forced = load_external_terminal_setting()
     if sys.platform == "win32":
         order = {
             "windows_terminal": lambda: _which("wt.exe"),
             "cmd": lambda: _which("cmd.exe"),
-            # auto: wt есть почти на всех Win10/11; cmd — гарантированный fallback
+            # auto: wt is present on nearly all Win10/11; cmd — the guaranteed fallback
             "auto": lambda: _which("wt.exe") or _which("cmd.exe"),
         }
         finder = order.get(forced, order["auto"])
@@ -192,7 +196,7 @@ def detect_terminal() -> Optional[str]:
         if result:
             return forced if forced in order and forced != "auto" else (
                 "windows_terminal" if _which("wt.exe") else "cmd")
-        # Явно выбранный терминал не найден через which → общий fallback.
+        # Explicitly chosen terminal not found via which → generic fallback.
         for tid in ("windows_terminal", "cmd"):
             if order[tid]():
                 return tid
@@ -206,7 +210,7 @@ def detect_terminal() -> Optional[str]:
     for name in candidates:
         if _which(name):
             return name
-    # macOS fallback: Terminal.app через open
+    # macOS fallback: Terminal.app via open
     if sys.platform == "darwin":
         return "open_terminal"
     return None
@@ -221,9 +225,9 @@ def ssh_client_available() -> bool:
 def build_ssh_args(host: str, user: str, port: int = 22,
                    key_path: Optional[str] = None,
                    jump: Optional[str] = None) -> List[str]:
-    """Аргументы ssh-клиента ОС (без самого 'ssh').
+    """Arguments for the OS ssh client (without 'ssh' itself).
 
-    known_hosts — системный (~/.ssh/known_hosts), НЕ ~/.sshmap.
+    known_hosts — the system one (~/.ssh/known_hosts), NOT ~/.sshmap.
     """
     args = ["ssh"]
     if port and int(port) != 22:
@@ -238,38 +242,39 @@ def build_ssh_args(host: str, user: str, port: int = 22,
 
 
 def _sh_quote(s: str) -> str:
-    """Экранирование одного аргумента для bash -c '...' (POSIX single-quote).
+    """Escape a single argument for bash -c '...' (POSIX single-quote).
 
-    v0.9.4-fix: пути к ключу с пробелами/кавычками ломали shell-команду,
-    собранную конкатенацией. Используется ТОЛЬКО для Linux/macOS-веток,
-    где команда передаётся строкой в `bash -c`.
+    v0.9.4-fix: key paths with spaces/quotes broke the shell command assembled
+    by concatenation. Used ONLY for the Linux/macOS branches where the command
+    is passed as a string to `bash -c`.
     """
     return "'" + s.replace("'", "'\"'\"'") + "'"
 
 
 def _shell_join(args: List[str]) -> str:
-    """Склеить argv в безопасную sh-строку."""
+    """Join argv into a safe sh string."""
     return " ".join(_sh_quote(a) for a in args)
 
 
 def build_command(terminal: str, host: str, user: str, port: int = 22,
                   key_path: Optional[str] = None,
                   jump: Optional[str] = None) -> List[str]:
-    """Полная команда запуска внешнего терминала с ssh внутри.
+    """The full launch command for an external terminal running ssh inside.
 
     - Windows Terminal: `wt.exe ssh ...`
-    - cmd:              `cmd /c start "" ssh ...` (пустой заголовок окна —
-                        обязательный positional-аргумент start)
-    - Linux gnome-terminal и родственные: `<term> -- bash -c "ssh ...; exec bash"`
-      (окно не закрывается при разрыве сессии).
-    Пароль никогда не входит в команду (см. докстринг модуля).
+    - cmd:              `cmd /c start "" ssh ...` (the empty window title is a
+                        required positional argument of start)
+    - Linux gnome-terminal and relatives: `<term> -- bash -c "ssh ...; exec bash"`
+      (the window does not close when the session drops).
+    The password never enters the command (see the module docstring).
 
-    v1.1.2RC1 (N2): ветка «conhost» удалена — команда `["conhost.exe", "cmd.exe",
-    "/c", ssh_exe]` была нерабочей (conhost не лаунчер, /c не принимает; прежний
-    докстринг «cmd/conhost: cmd /c start» расходился с реальной веткой). Старый id
-    "conhost" маппится на "cmd" — окно cmd.exe и есть классический conhost.
+    v1.1.2RC1 (N2): the "conhost" branch removed — the command `["conhost.exe",
+    "cmd.exe", "/c", ssh_exe]` was not working (conhost is not a launcher,
+    /c is not accepted; the old docstring "cmd/conhost: cmd /c start" disagreed
+    with the real branch). The old id "conhost" is mapped to "cmd" — the
+    cmd.exe window IS the classic conhost.
     """
-    # v1.1.2RC1 (N2): backward-compat для прямых вызовов со старым id.
+    # v1.1.2RC1 (N2): backward-compat for direct calls with the old id.
     if terminal == "conhost":
         terminal = "cmd"
 
@@ -278,20 +283,20 @@ def build_command(terminal: str, host: str, user: str, port: int = 22,
     if terminal == "windows_terminal":
         return ["wt.exe"] + ssh_args
     if terminal == "cmd":
-        # `start "" prog args`: пустой заголовок обязателен, иначе первый
-        # аргумент съедается как заголовок окна. Путь к ssh берём полный —
-        # `start` ищет в текущем каталоге первым.
+        # `start "" prog args`: the empty title is mandatory, otherwise the first
+        # argument is eaten as the window title. We take the full path to ssh —
+        # `start` looks in the current directory first.
         ssh_exe = _which("ssh") or "ssh"
         return ["cmd.exe", "/c", "start", "", ssh_exe] + ssh_args[1:]
     if terminal == "open_terminal":  # macOS
-        # v0.9.4-fix: `open -a Terminal bash -c ...` не работает — open так
-        # аргументы не передаёт. Корректный способ — osascript: открываем
-        # Terminal.app и выполняем в нём команду (окно переживает разрыв
-        # сессии за счёт `exec bash`).
+        # v0.9.4-fix: `open -a Terminal bash -c ...` does not work — open does
+        # not pass arguments that way. The correct way is osascript: open
+        # Terminal.app and run the command in it (the window survives the
+        # session drop thanks to `exec bash`).
         script = f"{_shell_join(ssh_args)}; exec bash"
         return ["osascript", "-e",
                 'tell application "Terminal" to do script ' + _sh_quote(script)]
-    # Linux-семейство: gnome-terminal/konsole/xfce4-terminal/alacritty/kitty/
+    # Linux family: gnome-terminal/konsole/xfce4-terminal/alacritty/kitty/
     # x-terminal-emulator
     shell_cmd = f"{_shell_join(ssh_args)}; exec bash"
     if terminal in ("gnome-terminal", "konsole", "xfce4-terminal",
@@ -313,16 +318,16 @@ def build_command(terminal: str, host: str, user: str, port: int = 22,
 def launch(command: Optional[List[str]] = None, host: str = "", user: str = "",
            port: int = 22, key_path: Optional[str] = None,
            jump: Optional[str] = None) -> bool:
-    """Породить процесс внешнего терминала (subprocess.Popen).
+    """Spawn the external terminal process (subprocess.Popen).
 
-    Два режима (AUDIT v0.8.3 #4 — явная сигнатура вместо kwargs.pop):
-      - command задан  → запустить его как есть;
-      - command=None   → detect_terminal() + build_command(host, user, ...);
-        вызов без host теперь даёт внятную ошибку, а не KeyError.
-    Windows: CREATE_NEW_CONSOLE — окно живёт своей жизнью
-    (AUDIT v0.8.3 #2: DETACHED_PROCESS из старого кода убран — флаги
-    взаимно исключающие, работала только вторая перезапись).
-    Возвращает True/False; исключение Popen логируется и превращается в False.
+    Two modes (AUDIT v0.8.3 #4 — explicit signature instead of kwargs.pop):
+      - command is given  → launch it as-is;
+      - command=None      → detect_terminal() + build_command(host, user, ...);
+        a call without host now gives a clear error instead of KeyError.
+    Windows: CREATE_NEW_CONSOLE — the window lives its own life
+    (AUDIT v0.8.3 #2: DETACHED_PROCESS from the old code was removed — the
+    flags are mutually exclusive, only the second overwrite took effect).
+    Returns True/False; a Popen exception is logged and turned into False.
     """
     if command is None:
         if not host:
@@ -357,9 +362,9 @@ def launch(command: Optional[List[str]] = None, host: str = "", user: str = "",
 def connect_external(host: str, user: str, port: int = 22,
                      key_path: Optional[str] = None,
                      jump: Optional[str] = None) -> tuple:
-    """Полный путь: detect → build → launch.
+    """The full path: detect → build → launch.
 
-    Возвращает (ok: bool, error_code: str|None):
+    Returns (ok: bool, error_code: str|None):
       error_code ∈ {None, 'no_ssh_client', 'no_terminal', 'popen_failed'}.
     """
     if not ssh_client_available():

@@ -1,19 +1,19 @@
 # -*- coding: utf-8 -*-
-"""v1.0RC4 — Быстрый запуск (ссылки/команды на сервер): тематический тест релиза.
+"""v1.0RC4 — Quick launch (server links/commands): the release's themed test.
 
-Фича (по просьбе коллег, вне исходного ROADMAP v1.0):
-  * ServerData.quick_launch — список пунктов {"type": "url"|"command", "name", "value"};
-    хранится в JSON проекта как массив "quick_launch" (backward-compat: старые файлы
-    читаются пустым списком, битые записи отбрасываются);
-  * ПКМ по серверу (строка сайдбара И узел карты) — подменю «Быстрый запуск» ПЕРВЫМ
-    пунктом (выше «Подключиться по SSH»): пункты + разделитель + «Настроить…»;
-  * URL открывается в браузере по умолчанию (webbrowser); команда отправляется
-    первой командой в SSH-терминал сервера (SSHTerminalWindow(initial_command=...),
-    отправка после connected_signal с задержкой INITIAL_COMMAND_DELAY_MS);
-  * настройка — кнопка «Быстрый запуск…» в свойствах сервера (под «Управление
-    профилями…») + «Настроить…» из подменю; изменения через undo-стек.
+The feature (at the colleagues' request, outside the original ROADMAP v1.0):
+  * ServerData.quick_launch — a list of items {"type": "url"|"command", "name", "value"};
+    stored in the project JSON as the "quick_launch" array (backward-compat: the old files
+    are read as an empty list, the broken records are dropped);
+  * the right click on the server (the sidebar row AND the map node) — the "Quick launch" submenu FIRST
+    (above "Connect via SSH"): the items + a separator + "Configure…";
+  * a URL opens in the default browser (webbrowser); a command is sent
+    as the first command into the server's SSH terminal (SSHTerminalWindow(initial_command=...),
+    the send after connected_signal with the INITIAL_COMMAND_DELAY_MS delay);
+  * the configuration — the "Quick launch…" button in the server properties (below
+    "Manage profiles…") + "Configure…" from the submenu; the changes via the undo stack.
 
-Запуск: python tests/test_quick_launch.py   (из корня проекта) или python tests/run_all.py
+Run: python tests/test_quick_launch.py   (from the project root) or python tests/run_all.py
 """
 import json
 import os
@@ -22,7 +22,7 @@ import traceback
 
 from _common import bootstrap, check, finish, wait_until, viewport_point, load_i18n_langs, check_i18n_parity
 
-ROOT, WORK = bootstrap()  # ДО импортов модулей приложения
+ROOT, WORK = bootstrap()  # BEFORE the app module imports
 
 from PySide6.QtCore import Qt, QPoint
 from PySide6.QtGui import QContextMenuEvent
@@ -36,7 +36,10 @@ from models.server import (ServerData, server_data_from_dict,
                            server_data_to_dict, sanitize_quick_launch)
 from i18n import t as it
 
-# ══ 1. Модель: ServerData.quick_launch + сериализация ═══════════════════════
+from _fakes import (CaptureMenu as _CaptureMenu, FakeTermWin as _FakeTermWin,
+                    FakeSSHThread as _FakeSSHThreadBase)
+
+# ══ 1. The model: ServerData.quick_launch + the serialization ═══════════════════════
 print("== model ==")
 
 d_def = ServerData(id="qlm1", alias="def", host="h", user="u")
@@ -55,14 +58,14 @@ check("from_dict keeps entries in order",
           {"type": "url", "name": "Webmin", "value": "http://192.168.3.76:10000/"},
           {"type": "command", "name": "K9S", "value": "k9s"}], str(d_ql.quick_launch))
 
-check("from_dict without the key → [] (старые проекты)",
+check("from_dict without the key → [] (the old projects)",
       server_data_from_dict({"id": "qlm3", "alias": "old", "host": "h"}).quick_launch == [])
 
 bad = sanitize_quick_launch([
     "not-a-dict", 42,
-    {"type": "url"},                      # пустые name/value → drop
-    {"name": "NoValue", "value": ""},     # пусто → drop
-    {"type": "ftp", "name": "X", "value": "ftp://x"},  # неизвестный type → url
+    {"type": "url"},                      # empty name/value → a drop
+    {"name": "NoValue", "value": ""},     # empty → a drop
+    {"type": "ftp", "name": "X", "value": "ftp://x"},  # an unknown type → url
     {"type": "URL ", "name": " Spaced ", "value": " https://a.b /"},
 ])
 check("sanitize drops broken entries and normalizes types/whitespace",
@@ -76,7 +79,7 @@ check("to_dict: quick_launch serialized, password stripped",
       sd.get("quick_launch") == [{"type": "command", "name": "K9S", "value": "k9s"}]
       and "password" not in sd, str(sd.keys()))
 
-# ══ 2. Диалог QuickLaunchDialog: prefill, добавление, валидация, удаление ═══
+# ══ 2. The QuickLaunchDialog: the prefill, the add, the validation, the remove ═══
 print("== dialog ==")
 
 from dialogs.quick_launch_dialog import QuickLaunchDialog
@@ -101,27 +104,27 @@ try:
     check("get_entries returns copies of the loaded list",
           dlg.get_entries() == src.quick_launch and dlg.get_entries() is not src.quick_launch)
 
-    # Валидация: пустое название → warning, пункт не добавлен
+    # Validation: an empty name → a warning, the item is not added
     dlg.name_edit.setText("")
     dlg.value_edit.setText("http://x")
     dlg._add_entry()
     check("empty name rejected (warning, no row)",
           len(warned) == 1 and dlg.table.rowCount() == 2, f"warned={len(warned)}")
 
-    # Валидация: пустое значение
+    # Validation: an empty value
     dlg.name_edit.setText("Grafana")
     dlg.value_edit.setText("   ")
     dlg._add_entry()
     check("empty value rejected", len(warned) == 2 and dlg.table.rowCount() == 2,
           f"warned={len(warned)}")
 
-    # Валидация: URL без http(s)://
+    # Validation: a URL without http(s)://
     dlg.value_edit.setText("ftp://192.168.3.76/pub")
     dlg._add_entry()
     check("non-http(s) URL rejected", len(warned) == 3 and dlg.table.rowCount() == 2,
           f"warned={len(warned)}")
 
-    # Дубликат (тип+название)
+    # A duplicate (type+name)
     dlg.type_combo.setCurrentIndex(0)  # url
     dlg.name_edit.setText("Webmin")
     dlg.value_edit.setText("http://192.168.3.76:10000/")
@@ -129,14 +132,14 @@ try:
     check("duplicate (type+name) rejected", len(warned) == 4 and dlg.table.rowCount() == 2,
           f"warned={len(warned)}")
 
-    # Корректное добавление URL
+    # A correct URL addition
     dlg.name_edit.setText("Grafana")
     dlg.value_edit.setText("http://192.168.3.76:3000")
     dlg._add_entry()
     check("valid URL added and fields cleared",
           dlg.table.rowCount() == 3 and dlg.name_edit.text() == "" and dlg.value_edit.text() == "")
 
-    # Добавление команды (тип — второй элемент комбобокса)
+    # Adding a command (the type — the second item of the combobox)
     dlg.type_combo.setCurrentIndex(1)
     check("type combo offers url+command",
           [dlg.type_combo.itemData(i) for i in range(dlg.type_combo.count())] == ["url", "command"])
@@ -147,20 +150,20 @@ try:
     check("command entry added with type=command",
           {"type": "command", "name": "Docker", "value": "docker ps"} in entries, str(entries))
 
-    # Удаление выбранной строки (первая — Webmin)
+    # Removing the selected row (the first — Webmin)
     dlg.table.selectRow(0)
     dlg._remove_selected()
     check("remove selected row drops the entry",
           dlg.table.rowCount() == 3
           and all(e["name"] != "Webmin" for e in dlg.get_entries()), str(dlg.get_entries()))
 
-    # Новый сервер (server_data=None) — пустой диалог, без падений
+    # A new server (server_data=None) — an empty dialog, no crashes
     dlg_new = QuickLaunchDialog(None, server_data=None)
     check("dialog for a NEW server starts empty", dlg_new.table.rowCount() == 0)
 finally:
     QMessageBox.warning = _real_warn
 
-# ══ 3. Свойства сервера (AddServerDialog): кнопка + сохранение списка ═══════
+# ══ 3. The server properties (AddServerDialog): the button + the list save ═══════
 print("== add_server_dialog integration ==")
 
 from dialogs.add_server_dialog import AddServerDialog
@@ -171,17 +174,17 @@ asdlg = AddServerDialog(None, edit_data=node_src)
 from PySide6.QtWidgets import QPushButton
 ql_btn = next((b for b in asdlg.findChildren(QPushButton)
                if b.text() == it("ql.configure_button")), None)
-check("properties dialog has the 'Быстрый запуск…' button", ql_btn is not None,
+check("properties dialog has the 'Quick Launch…' button", ql_btn is not None,
       str([b.text() for b in asdlg.findChildren(QPushButton)]))
 
-# Правка ДРУГИХ полей не сбрасывает quick_launch (регрессия на обнуление)
+# Editing OTHER fields does not reset quick_launch (a regression on the zeroing)
 asdlg.alias.setText("master-node-2")
 got = asdlg.get_data()
 check("get_data preserves quick_launch when the dialog was not opened",
       got.quick_launch == [{"type": "command", "name": "K9S", "value": "k9s"}],
       str(got.quick_launch))
 
-# Кнопка открывает QuickLaunchDialog и подхватывает результат (фейк диалога)
+# The button opens the QuickLaunchDialog and picks up the result (a dialog fake)
 import dialogs.quick_launch_dialog as QLD_MOD
 _real_ql_dlg = QLD_MOD.QuickLaunchDialog
 class _FakeQLDlg:
@@ -201,7 +204,7 @@ check("_open_quick_launch stores the dialog result",
           {"type": "url", "name": "HomeAssistant", "value": "http://192.168.3.76:32110"}],
       str(asdlg.get_data().quick_launch))
 
-# ══ 4. MainWindow E2E: сайдбар — подменю первым, URL → webbrowser ═══════════
+# ══ 4. The MainWindow E2E: the sidebar — the submenu first, the URL → webbrowser ═══════════
 print("== main window: sidebar menu + url run ==")
 
 win = MW.MainWindow()
@@ -223,11 +226,7 @@ def _item_for(node_id):
     return None
 
 captured = []
-class _CaptureMenu(MW.QMenu):
-    def exec(self, *a, **k):
-        captured.append(self); return 0
-    def exec_(self, *a, **k):
-        captured.append(self); return 0
+_CaptureMenu.captured = captured   # _fakes.CaptureMenu: intercepting exec/exec_ offscreen
 
 _orig_menu_cls = MW.QMenu
 MW.QMenu = _CaptureMenu
@@ -242,16 +241,16 @@ try:
         check("sidebar context menu captured", menu is not None)
         if menu:
             first = menu.actions()[0]
-            check("sidebar: 'Быстрый запуск' submenu is the FIRST item (above SSH)",
+            check("sidebar: 'Quick Launch' submenu is the FIRST item (above SSH)",
                   first.menu() is not None and first.text() == it("ctx.quick_launch"),
                   f"first={first.text()!r}")
             if first.menu() is not None:
                 ql_actions = list(first.menu().actions())
                 ql_items = [a.text() for a in ql_actions if not a.isSeparator()]
-                check("sidebar submenu: Webmin, K9S, separator, 'Настроить…'",
+                check("sidebar submenu: Webmin, K9S, separator, 'Configure…'",
                       ql_items == ["Webmin", "K9S", it("ql.configure")]
                       and sum(1 for a in ql_actions if a.isSeparator()) == 1, str(ql_items))
-                # URL-пункт → webbrowser.open (monkeypatch)
+                # The URL item → webbrowser.open (a monkeypatch)
                 import webbrowser
                 opened = []
                 _real_open = webbrowser.open
@@ -266,38 +265,24 @@ try:
 finally:
     MW.QMenu = _orig_menu_cls
 
-# ══ 5. MainWindow E2E: карта — подменю первым, команда → терминал ═══════════
+# ══ 5. The MainWindow E2E: the map — the submenu first, the command → the terminal ═══════════
 print("== main window: map menu + command run ==")
 
 captured_m = []
-class _CaptureMapMenu(MV.QMenu):
-    def exec(self, *a, **k):
-        captured_m.append(self); return 0
-    def exec_(self, *a, **k):
-        captured_m.append(self); return 0
-
-class _DummySignal:
-    def connect(self, *a, **k): pass
+_CaptureMenu.captured = captured_m
 
 fake_windows = []
-class _FakeTermWin:
-    def __init__(self, server_data, parent=None, password=None, initial_command=""):
-        self.server_data = server_data
-        self.password = password
-        self.initial_command = initial_command
-        self.destroyed = _DummySignal()
-        fake_windows.append(self)
-    def show(self): pass
+_FakeTermWin.spawned = fake_windows
 
 _orig_mv_menu = MV.QMenu
 _orig_mw_win = MW.SSHTerminalWindow
-MV.QMenu = _CaptureMapMenu
+MV.QMenu = _CaptureMenu
 MW.SSHTerminalWindow = _FakeTermWin
 try:
-    # key_path задан → прямой запуск терминала без SSH-диалога (key auth)
+    # key_path is set → a direct terminal launch without the SSH dialog (key auth)
     n_ql.data.key_path = r"C:\keys\test.pem"
     center = n_ql.sceneBoundingRect().center()
-    local = viewport_point(win.view, center)  # Qt 6.11: mapFromScene может дать QPointF
+    local = viewport_point(win.view, center)  # Qt 6.11: mapFromScene may return a QPointF
     evt = QContextMenuEvent(QContextMenuEvent.Mouse, local, QPoint(0, 0))
     captured_m.clear()
     win.view.contextMenuEvent(evt)
@@ -306,13 +291,13 @@ try:
     check("map context menu captured on right-click of the node", mmenu is not None)
     if mmenu:
         mfirst = mmenu.actions()[0]
-        check("map: 'Быстрый запуск' submenu is the FIRST item (above SSH)",
+        check("map: 'Quick Launch' submenu is the FIRST item (above SSH)",
               mfirst.menu() is not None and mfirst.text() == it("ctx.quick_launch"),
               f"first={mfirst.text()!r}")
         if mfirst.menu() is not None:
             mq_actions = list(mfirst.menu().actions())
             ql_items = [a.text() for a in mq_actions if not a.isSeparator()]
-            check("map submenu: Webmin, K9S, separator, 'Настроить…'",
+            check("map submenu: Webmin, K9S, separator, 'Configure…'",
                   ql_items == ["Webmin", "K9S", it("ql.configure")]
                   and sum(1 for a in mq_actions if a.isSeparator()) == 1, str(ql_items))
             fake_windows.clear()
@@ -327,37 +312,11 @@ finally:
     MV.QMenu = _orig_mv_menu
     MW.SSHTerminalWindow = _orig_mw_win
 
-# ══ 6. SSHTerminalWindow: initial_command уходит в канал после подключения ══
+# ══ 6. SSHTerminalWindow: initial_command goes to the channel after the connection ══
 print("== terminal window: initial command delivery ==")
 
-from PySide6.QtCore import QThread, Signal as QtSignal
-
-class _FakeChannel:
-    closed = False
-    def __init__(self): self.sent = None
-    def send(self, data): self.sent = data
-
-class _FakeSSHThread(QThread):
-    output_signal = QtSignal(bytes)
-    error_signal = QtSignal(str)
-    status_signal = QtSignal(str)
-    closed_signal = QtSignal()
-    connected_signal = QtSignal()
-    def __init__(self, host, user, port, password="", key_path=""):
-        super().__init__()
-        self.host, self.user, self.port = host, user, port
-        self.password, self.key_path = password, key_path
-        self.channel = _FakeChannel()
-        self.running = True
-    def run(self):  # реальный SSH не нужен
-        pass
-    def stop(self):
-        self.running = False
-    def send_data(self, data_bytes):  # тот же API, что у реального SSHTerminalThread
-        if not data_bytes:
-            return
-        if self.channel and not self.channel.closed:
-            self.channel.send(data_bytes)
+class _FakeSSHThread(_FakeSSHThreadBase):
+    RECORD = "last"   # the channel accumulates only the last send (the initial_command scenario)
 
 _orig_thread_cls = ST.SSHTerminalThread
 ST.SSHTerminalThread = _FakeSSHThread
@@ -366,15 +325,15 @@ try:
                        ssh_port=22)
     twin = ST.SSHTerminalWindow(tdata, None, password="pw123", initial_command="k9s")
     check("window passes password to the thread", twin.terminal_thread.password == "pw123")
-    # До connected_signal команда НЕ уходит
+    # Before connected_signal the command does NOT go
     check("no data sent before connected_signal", twin.terminal_thread.channel.sent is None)
     twin.terminal_thread.connected_signal.emit()
     wait_until(lambda: twin.terminal_thread.channel.sent is not None, timeout_ms=2000)
     check("after connected_signal the first command reaches the channel ('k9s\\n')",
           twin.terminal_thread.channel.sent == b"k9s\n",
           repr(twin.terminal_thread.channel.sent))
-    # Повторный emit — ровно одна отправка (guard _initial_command): ждём, пока
-    # сработает и второй таймер (500 мс), и убеждаемся, что канал не получил дубль.
+    # A repeated emit — exactly one send (the _initial_command guard): we wait until
+    # the second timer (500 ms) will fire too, and we make sure the channel did not get a duplicate.
     twin.terminal_thread.connected_signal.emit()
     from PySide6.QtTest import QTest
     QTest.qWait(700)
@@ -385,7 +344,7 @@ try:
 finally:
     ST.SSHTerminalThread = _orig_thread_cls
 
-# Окно БЕЗ initial_command — connected_signal никто не слушает, падений нет
+# A window WITHOUT initial_command — no one listens to connected_signal, no crashes
 ST.SSHTerminalThread = _FakeSSHThread
 try:
     twin2 = ST.SSHTerminalWindow(tdata, None)
@@ -396,7 +355,7 @@ try:
 finally:
     ST.SSHTerminalThread = _orig_thread_cls
 
-# ══ 7. Настройка из подменю: undo-стек + персистентность в JSON ═════════════
+# ══ 7. The setting from the submenu: the undo stack + the persistence in the JSON ═════════════
 print("== configure dialog: undo + persistence ==")
 
 class _FakeQLDlg2:
@@ -424,7 +383,7 @@ win.undo_stack.undo()
 check("undo restores the previous quick_launch list",
       n_ql.data.quick_launch == before, f"got={n_ql.data.quick_launch} want={before}")
 
-# Персистентность: сохранение проекта пишет "quick_launch" в JSON
+# Persistence: saving the project writes "quick_launch" to the JSON
 path = os.path.join(WORK, "ql_save.json")
 ok_saved = win._do_save(path)
 with open(path, encoding="utf-8") as f:
@@ -439,18 +398,18 @@ check("reload via server_data_from_dict restores the entries",
 # ══ 7b. v1.0-fix: KeyError "name" in LogRecord (extra={"name": ...}) ═══════
 print("== v1.0-fix: quick launch logging ==")
 
-# До фикса extra={"name": name} в log.info() коллидировал со встроенным атрибутом
-# LogRecord.name (имя логгера) → makeRecord() бросал KeyError ПОСЛЕ успешного
-# открытия URL/запуска команды; _run_quick_launch_entry ловил его как
-# «Quick launch failed for …» + QMessageBox.critical, хотя фича сработала.
+# Before the fix, extra={"name": name} in log.info() collided with the built-in attribute
+# LogRecord.name (the logger name) → makeRecord() raised KeyError AFTER the successful
+# opening a URL/launching a command; _run_quick_launch_entry caught it as
+# "Quick launch failed for …" + QMessageBox.critical, although the feature worked.
 import webbrowser as _wb_mod
 opened_urls = []
 _real_wb_open = _wb_mod.open
 _wb_mod.open = staticmethod(lambda url, **k: (opened_urls.append(url), True)[1])
 try:
-    win._quick_launch_url("http://example.com/", "TestURL")   # до фикса — KeyError из logging
+    win._quick_launch_url("http://example.com/", "TestURL")   # before the fix — a KeyError from logging
     app.processEvents()
-    check("url entry: логирование без KeyError (extra 'name' → 'ql_name')",
+    check("url entry: the logging without a KeyError (extra 'name' → 'ql_name')",
           opened_urls == ["http://example.com/"], str(opened_urls))
 finally:
     _wb_mod.open = _real_wb_open
@@ -460,15 +419,15 @@ _orig_spawn = win._spawn_terminal_window
 win._spawn_terminal_window = lambda node, password=None, initial_command="": \
     spawned_calls.append((node.data.alias, initial_command))
 try:
-    n_ql.data.key_path = r"C:\keys\test.pem"   # key auth → прямой запуск терминала
-    win._quick_launch_command(n_ql, "k9s", "K9S")  # до фикса — KeyError из logging
+    n_ql.data.key_path = r"C:\keys\test.pem"   # key auth → a direct terminal launch
+    win._quick_launch_command(n_ql, "k9s", "K9S")  # before the fix — a KeyError from logging
     app.processEvents()
-    check("command entry: логирование без KeyError (extra 'name' → 'ql_name')",
+    check("command entry: the logging without a KeyError (extra 'name' → 'ql_name')",
           spawned_calls == [("master", "k9s")], str(spawned_calls))
 finally:
     win._spawn_terminal_window = _orig_spawn
 
-# ══ 8. i18n: 22 новых ключа × en/ru/zh (паритет — _common.check_i18n_parity) ══════
+# ══ 8. i18n: 22 new keys × en/ru/zh (the parity — _common.check_i18n_parity) ══════
 print("== i18n ==")
 langs = load_i18n_langs(ROOT)
 new_keys = ["ctx.quick_launch", "ql.configure", "ql.configure_button",
@@ -480,10 +439,10 @@ new_keys = ["ctx.quick_launch", "ql.configure", "ql.configure_button",
             "status.ql_opened", "status.ql_command", "msg.ql_no_browser",
             "msg.ql_open_failed"]
 missing = [k for k in new_keys if any(not langs[c].get(k, "").strip() for c in ("en", "ru", "zh"))]
-check("22 новых ключа v1.0RC4 есть и не пусты в en/ru/zh", not missing, str(missing))
+check("the 22 new v1.0RC4 keys are present and non-empty in en/ru/zh", not missing, str(missing))
 check_i18n_parity(langs)
 
-# Cleanup: dirty сбрасываем — иначе closeEvent уйдёт в диалог сохранения.
+# Cleanup: we reset dirty — otherwise closeEvent would go to the save dialog.
 try:
     win._dirty = False
     win.close(); win.destroy()

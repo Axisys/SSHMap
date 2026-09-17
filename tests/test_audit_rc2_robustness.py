@@ -1,33 +1,33 @@
 # -*- coding: utf-8 -*-
-"""v1.2.10rc2 — Аудит: робастность и гигиена кода (AUDIT.md ручной #5, авто #7, ручной #6).
+"""v1.2.10rc2 — Audit: robustness and code hygiene (AUDIT.md manual #5, auto #7, manual #6).
 
-Тематический тест релиза (ROADMAP v1.2.10rc2; offscreen/headless — без сети):
+The thematic test of the release (ROADMAP v1.2.10rc2; offscreen/headless — without the network):
 
-§1 server_data_from_dict с int-id (ручной #5e): явный "id": 123 в JSON → str("123");
-   отсутствующий/пустой id — генерируется как раньше (регрессия); строковый id
-   проходит без изменений.
+§1 server_data_from_dict with an int id (manual #5e): an explicit "id": 123 in the JSON → str("123");
+   a missing/empty id — generated as before (the regression); a string id
+   passes unchanged.
 
-§2 PingThread с хостом «-x» (ручной #5d): subprocess.run НЕ вызывается (mock),
-   сигнал finished_ping(False, …) — Windows ping не поддерживает «--», а такой
-   хост невалиден как DNS-имя и так; guard срабатывает ДО запуска процесса.
-   Регрессия: обычный хост запускает subprocess как раньше.
+§2 PingThread with the host "-x" (manual #5d): subprocess.run is NOT called (the mock),
+   the signal finished_ping(False, …) — the Windows ping does not support "--", and such
+   a host is an invalid DNS name anyway; the guard fires BEFORE the process start.
+   The regression: a regular host starts the subprocess as before.
 
-§3 Поздние worker-сигналы на уничтоженный диалог (ручной #5c): closeEvent отвязал
-   worker'а setParent(None) (стр. 497), C++-объект диалога уничтожен — поздний
-   success/error БЕЗ RuntimeError (guard в слоте); worker доживает подключение,
-   поздний emit обрабатывается event loop'ом без краха.
+§3 The late worker signals on the destroyed dialog (manual #5c): closeEvent detached
+   the worker via setParent(None) (line 497), the C++ object of the dialog is destroyed — the late
+   success/error WITHOUT a RuntimeError (the guard in the slot); the worker finishes the connection,
+   the late emit is handled by the event loop without a crash.
 
-§4 delete_password при фейковом keyring.errors БЕЗ PasswordDeleteError (ручной #6):
-   общий обработчик, возвращает False, без падения; класс на месте → True (то же
-   поведение, что до фикса); NoKeyringError → True (регрессия). Явный `import keyring`
-   в _try_init (авто #7) — source-проверка.
+§4 delete_password with the fake keyring.errors WITHOUT a PasswordDeleteError (manual #6):
+   the generic handler, returns False, without a crash; the class is in place → True (the same
+   behavior as before the fix); NoKeyringError → True (the regression). The explicit `import keyring`
+   in _try_init (auto #7) — a source check.
 
-§5 file_dups-призрак (ручной #5b) + комментарий к ANSI_ESCAPE_RE (ручной #5a):
-   source-проверки (код ANSI_ESCAPE_RE не меняется — защищён конвенцией).
+§5 the file_dups phantom (manual #5b) + the comment to ANSI_ESCAPE_RE (manual #5a):
+   the source checks (the code of ANSI_ESCAPE_RE is unchanged — protected by the convention).
 
-§6 Состояние релиза + i18n-паритет (427 — новых ключей НЕТ).
+§6 The release state + the i18n parity (427 — no NEW keys).
 
-Запуск:  python tests/test_audit_rc2_robustness.py   (из корня проекта) или python tests/run_all.py
+Run:  python tests/test_audit_rc2_robustness.py   (from the project root) or python tests/run_all.py
 """
 import os
 import re
@@ -39,7 +39,7 @@ import types
 from _common import (bootstrap, check, finish, wait_until,
                      load_i18n_langs, check_i18n_parity, check_release_state)
 
-ROOT, WORK = bootstrap()  # ДО импортов модулей приложения
+ROOT, WORK = bootstrap()  # BEFORE the app module imports
 
 from PySide6.QtCore import QThread, Qt, Signal as QtSignal
 from PySide6.QtWidgets import QApplication
@@ -54,7 +54,7 @@ from services.credential_manager import CredentialManager
 
 
 # ════════════════════════════════════════════════════════════
-# 1. server_data_from_dict: int-id → str (AUDIT ручной #5e)
+# 1. server_data_from_dict: int id → str (AUDIT manual #5e)
 # ════════════════════════════════════════════════════════════
 print("== §1 server_data_from_dict: int id → str ==")
 
@@ -62,25 +62,25 @@ d = server_data_from_dict({"id": 123, "alias": "a", "host": "h", "user": "u"})
 check("int id 123 → '123' (str)", d.id == "123" and type(d.id) is str, repr(d.id))
 
 d2 = server_data_from_dict({"id": "abcd1234", "alias": "a", "host": "h", "user": "u"})
-check("строковый id проходит без изменений", d2.id == "abcd1234", repr(d2.id))
+check("a string id passes through unchanged", d2.id == "abcd1234", repr(d2.id))
 
 d3 = server_data_from_dict({"alias": "a", "host": "h", "user": "u"})
-check("отсутствующий id — генерируется (регрессия)",
+check("a missing id — generated (regression)",
       isinstance(d3.id, str) and len(d3.id) == 8, repr(d3.id))
 
 d4 = server_data_from_dict({"id": "", "alias": "a", "host": "h", "user": "u"})
-check("пустой id — генерируется (регрессия)",
+check("an empty id — generated (regression)",
       isinstance(d4.id, str) and len(d4.id) == 8, repr(d4.id))
 
 
 # ════════════════════════════════════════════════════════════
-# 2. PingThread с хостом «-x»: guard ДО subprocess (AUDIT ручной #5d)
+# 2. PingThread with the host "-x": the guard BEFORE subprocess (AUDIT manual #5d)
 # ════════════════════════════════════════════════════════════
 print("== §2 PingThread host '-x': no subprocess ==")
 
 
 def _run_ping(host):
-    """PingThread.run() напрямую, без start() — паттерн test_diagnostics.py."""
+    """PingThread.run() directly, without start() — the test_diagnostics.py pattern."""
     got = []
     t = diag.PingThread(host)
     t.finished_ping.connect(lambda ok, text: got.append((ok, text)))
@@ -88,14 +88,14 @@ def _run_ping(host):
     return got
 
 
-# Хост «-x»: subprocess запускать нельзя (Windows ping не знает «--»).
+# The host "-x": subprocess must not be launched (the Windows ping does not know "--").
 calls = []
 _orig_run = _subprocess.run
 
 
 def _boom(cmd, *a, **k):
     calls.append(cmd)
-    raise AssertionError(f"subprocess.run вызван для хоста '-x': {cmd}")
+    raise AssertionError(f"subprocess.run called for the host '-x': {cmd}")
 
 
 _subprocess.run = _boom
@@ -103,10 +103,10 @@ try:
     got = _run_ping("-x")
 finally:
     _subprocess.run = _orig_run
-check("хост «-x»: subprocess.run не вызван", calls == [])
-check("хост «-x»: finished_ping(False, …)", len(got) == 1 and got[0][0] is False, repr(got))
+check("host '-x': subprocess.run is not called", calls == [])
+check("host '-x': finished_ping(False, …)", len(got) == 1 and got[0][0] is False, repr(got))
 
-# Регрессия: обычный хост — subprocess запускается как раньше.
+# Regression: an ordinary host — subprocess launches as before.
 calls2 = []
 
 
@@ -125,13 +125,13 @@ try:
     got2 = _run_ping("192.0.2.7")
 finally:
     _subprocess.run = _orig_run
-check("обычный хост: subprocess.run вызван один раз", len(calls2) == 1, repr(calls2))
-check("обычный хост: finished_ping(True, …)", len(got2) == 1 and got2[0][0] is True, repr(got2))
-check("хост на командной строке ping'а", "192.0.2.7" in calls2[0], repr(calls2[0]))
+check("an ordinary host: subprocess.run is called once", len(calls2) == 1, repr(calls2))
+check("an ordinary host: finished_ping(True, …)", len(got2) == 1 and got2[0][0] is True, repr(got2))
+check("the host is on the ping command line", "192.0.2.7" in calls2[0], repr(calls2[0]))
 
 
 # ════════════════════════════════════════════════════════════
-# 3. Поздние worker-сигналы на уничтоженный диалог (AUDIT ручной #5c)
+# 3. Late worker signals on a destroyed dialog (AUDIT manual #5c)
 # ════════════════════════════════════════════════════════════
 print("== §3 late worker signals on destroyed dialog ==")
 
@@ -139,8 +139,8 @@ import dialogs.ssh_connect_dialog as SCD_mod
 
 
 class _FakeWorker(QThread):
-    """Фейковый SSHWorker (те же сигналы/конструктор): run() висит до release() —
-    как paramiko-подключение, доживающее дольше 2 c wait-бюджета closeEvent."""
+    """The fake SSHWorker (the same signals/the constructor): run() hangs until the release() —
+    as the paramiko connection outliving the wait budget of 2 s of the closeEvent."""
 
     success = QtSignal(str)
     error = QtSignal(str)
@@ -152,19 +152,19 @@ class _FakeWorker(QThread):
         self._release = threading.Event()
 
     def run(self):
-        self._release.wait(30)   # «подключение» — живёт дольше бюджета closeEvent
+        self._release.wait(30)   # "connection" — it lives longer than the closeEvent budget
         try:
             self.success.emit("late success")
         except RuntimeError:
-            pass  # диалог уничтожен — поздний emit без приёмников безопасен
+            pass  # the dialog is destroyed — a late emit without receivers is safe
 
     def release(self):
         self._release.set()
 
 
 def _alive(w):
-    """Жив ли C++-объект (паттерн test_terminal_page.py: после уничтожения любой
-    C++-вызов на Python-обёртке бросает «Internal C++ object already deleted»)."""
+    """Is the C++ object alive (the pattern test_terminal_page.py: after the destruction any
+    C++ call on the Python wrapper raises "Internal C++ object already deleted")."""
     try:
         w.windowTitle()
         return True
@@ -175,36 +175,36 @@ def _alive(w):
 _orig_worker_cls = SCD_mod.SSHWorker
 worker = None
 try:
-    SCD_mod.SSHWorker = _FakeWorker   # шов: имя класса в namespace модуля dialogs
+    SCD_mod.SSHWorker = _FakeWorker   # the seam: the class name in the dialogs module's namespace
     dlg = SCD_mod.SSHConnectDialog(
         ServerData(id="rc2late", alias="late", host="10.99.8.1", user="root"), None)
-    dlg.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)   # C++-объект умрёт после close()
+    dlg.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)   # The C++ object will die after close()
     dlg._start_worker(test_only=False)
     worker = dlg._ssh_worker
     wait_until(lambda: worker is not None and worker.isRunning(), timeout_ms=3000)
-    check("fixture: фейковый worker запущен (parent=диалог)",
+    check("fixture: the fake worker is running (parent=the dialog)",
           worker is not None and worker.isRunning() and worker.parent() is dlg,
           repr(worker))
 
-    # Закрытие диалога при живом worker'е: closeEvent ждёт ~2 c wait-бюджет и
-    # отвязывает worker'а setParent(None) (стр. 497) — он переживёт диалог;
-    # WA_DeleteOnClose уничтожает C++-объект после closeEvent.
+    # Closing the dialog with a live worker: closeEvent waits the ~2 s wait budget and
+    # detaches the worker setParent(None) (line 497) — it will outlive the dialog;
+    # WA_DeleteOnClose destroys the C++ object after closeEvent.
     _t0 = time.monotonic()
     dlg.close()
     _el = time.monotonic() - _t0
-    check("close() дождался бюджета (~2 c), не завис", 1.8 <= _el < 6.0, f"{_el:.2f}s")
-    check("worker отвязан: parent == None (setParent(None))", worker.parent() is None)
+    check("close() waited for the budget (~2 s), did not hang", 1.8 <= _el < 6.0, f"{_el:.2f}s")
+    check("the worker is detached: parent == None (setParent(None))", worker.parent() is None)
     wait_until(lambda: not _alive(dlg), timeout_ms=4000)
-    check("fixture: C++-объект диалога уничтожен", not _alive(dlg))
+    check("fixture: the C++ object of the dialog is destroyed", not _alive(dlg))
 
-    # Поздний success/error на уничтоженный диалог: до фикса — RuntimeError из слота
-    # (PySide печатает и глотает в Qt-диспетче), после — guard молча проглатывает.
+    # A late success/error on a destroyed dialog: before the fix — a RuntimeError from the slot
+    # (PySide prints and swallows in the Qt dispatch), afterwards the guard swallows it silently.
     try:
         dlg._on_worker_success("late success")
         _ok_s, _err_s = True, ""
     except RuntimeError as e:
         _ok_s, _err_s = False, str(e)
-    check("поздний _on_worker_success на уничтоженный диалог — без RuntimeError",
+    check("a late _on_worker_success on a destroyed dialog — no RuntimeError",
           _ok_s, _err_s)
 
     try:
@@ -212,32 +212,32 @@ try:
         _ok_e, _err_e = True, ""
     except RuntimeError as e:
         _ok_e, _err_e = False, str(e)
-    check("поздний _on_worker_error на уничтоженный диалог — без RuntimeError",
+    check("a late _on_worker_error on a destroyed dialog — no RuntimeError",
           _ok_e, _err_e)
 
-    # E2E: worker доживает подключение и эмитит поздний success из своего потока;
-    # Qt-соединения с мёртвым диалогом сняты при его уничтожении — доставка no-op,
-    # event loop обрабатывает всё без краха процесса.
+    # E2E: the worker outlives the connection and emits a late success from its thread;
+    # The Qt connections to the dead dialog are removed on its destruction — delivery is a no-op,
+    # the event loop processes everything without crashing the process.
     worker.release()
     wait_until(lambda: not worker.isRunning(), timeout_ms=8000)
-    check("worker завершён, процесс жив (поздний emit обработан)", not worker.isRunning())
+    check("the worker has finished, the process is alive (the late emit is handled)", not worker.isRunning())
 finally:
     SCD_mod.SSHWorker = _orig_worker_cls
     if worker is not None:
         try:
-            worker.release()   # ВСЕГДА — незакрытый фейк не даёт warning на выходе
+            worker.release()   # ALWAYS — an unclosed fake gives no warning on exit
         except RuntimeError:
             pass
 
 
 # ════════════════════════════════════════════════════════════
-# 4. delete_password: фейковый keyring.errors (AUDIT ручной #6 + авто #7)
+# 4. delete_password: a fake keyring.errors (AUDIT manual #6 + auto #7)
 # ════════════════════════════════════════════════════════════
 print("== §4 delete_password with fake keyring.errors ==")
 
 
 class _FakeBackend:
-    """Фейковый бэкенд: delete_password всегда бросает заданное исключение."""
+    """The fake backend: delete_password always raises the given exception."""
 
     def __init__(self, exc):
         self._exc = exc
@@ -249,7 +249,7 @@ class _FakeBackend:
 
 
 def _make_cm(exc):
-    cm = CredentialManager.__new__(CredentialManager)  # мимо _try_init — реальный keyring не в деле
+    cm = CredentialManager.__new__(CredentialManager)  # past _try_init — the real keyring is not involved
     cm._keyring_backend = _FakeBackend(exc)
     cm._backend_available = True
     return cm
@@ -260,8 +260,8 @@ class _NoKeyringError(Exception):
 
 
 def _swap_keyring_errors(fake_mod):
-    """Подмена sys.modules['keyring.errors'] И атрибута пакета keyring (оба пути:
-    `import keyring.errors` берёт из sys.modules, `keyring.errors.X` — через атрибут)."""
+    """The replacement of sys.modules['keyring.errors'] AND the attribute of the keyring package (both paths:
+    `import keyring.errors` takes from sys.modules, `keyring.errors.X` — through the attribute)."""
     orig_mod = sys.modules.get("keyring.errors")
     orig_attr = getattr(_kr_mod, "errors", None)
     sys.modules["keyring.errors"] = fake_mod
@@ -278,20 +278,20 @@ def _restore_keyring_errors(saved):
     _kr_mod.errors = orig_attr
 
 
-# (a) keyring БЕЗ PasswordDeleteError → общий обработчик, False, без падения.
+# (a) keyring WITHOUT PasswordDeleteError → the generic handler, False, no crash.
 fake_a = types.ModuleType("keyring.errors")
-fake_a.NoKeyringError = _NoKeyringError   # PasswordDeleteError намеренно НЕТ
+fake_a.NoKeyringError = _NoKeyringError   # No PasswordDeleteError on purpose
 saved_a = _swap_keyring_errors(fake_a)
 try:
-    cm_a = _make_cm(RuntimeError)         # чужое исключение — не NoKeyringError
+    cm_a = _make_cm(RuntimeError)         # a foreign exception — not NoKeyringError
     res_a = cm_a.delete_password("rc2del")
-    check("без PasswordDeleteError → общий обработчик, возвращает False",
+    check("without PasswordDeleteError → the generic handler, returns False",
           res_a is False, repr(res_a))
-    check("бэкенд вызван (исключение из delete_password)", cm_a._keyring_backend.calls == 1)
+    check("the backend is called (the exception from delete_password)", cm_a._keyring_backend.calls == 1)
 finally:
     _restore_keyring_errors(saved_a)
 
-# (b) keyring С PasswordDeleteError → True (то же поведение, что до фикса).
+# (b) keyring WITH PasswordDeleteError → True (the same behaviour as before the fix).
 class _PasswordDeleteError(Exception):
     pass
 
@@ -303,44 +303,44 @@ saved_b = _swap_keyring_errors(fake_b)
 try:
     cm_b = _make_cm(_PasswordDeleteError)
     res_b = cm_b.delete_password("rc2del")
-    check("PasswordDeleteError на месте → True (запись отсутствовала)",
+    check("PasswordDeleteError is present → True (the entry was absent)",
           res_b is True, repr(res_b))
 finally:
     _restore_keyring_errors(saved_b)
 
-# (c) NoKeyringError → True (регрессия существующего поведения, реальный модуль).
+# (c) NoKeyringError → True (regression of the existing behaviour, the real module).
 import keyring.errors as _kre_real
 cm_c = _make_cm(_kre_real.NoKeyringError)
 res_c = cm_c.delete_password("rc2del")
-check("NoKeyringError → True (удалять нечего)", res_c is True, repr(res_c))
+check("NoKeyringError → True (nothing to delete)", res_c is True, repr(res_c))
 
-# (d) авто #7: явный `import keyring` в _try_init — source-проверка.
+# (d) auto #7: the explicit `import keyring` in _try_init — a source check.
 _src_cm = open(os.path.join(ROOT, "services", "credential_manager.py"), encoding="utf-8").read()
 _m = re.search(r"def _try_init\(self\):(.*?)(?=\n    @property|\n    def )", _src_cm, re.S)
 _body = _m.group(1) if _m else ""
-check("авто #7: явный 'import keyring' в _try_init (не только keyring.errors)",
+check("auto #7: an explicit 'import keyring' in _try_init (not only keyring.errors)",
       re.search(r"^\s+import keyring\s*$", _body, re.M) is not None)
 
 
 # ════════════════════════════════════════════════════════════
-# 5. Гигиена: file_dups-призрак + комментарий к ANSI_ESCAPE_RE (source)
+# 5. Hygiene: the file_dups ghost + the ANSI_ESCAPE_RE comment (source)
 # ════════════════════════════════════════════════════════════
 print("== §5 hygiene: file_dups ghost + ANSI_ESCAPE_RE comment ==")
 
 _src_ops = open(os.path.join(ROOT, "ui", "main_window_node_ops.py"), encoding="utf-8").read()
-# Призрак — именно эти две конструкции (комментарий с историей упоминать вправе).
-check("ручной #5b: file_dups-призрак убран (кодовых ссылок нет)",
+# The ghost — exactly these two constructs (a comment may mention the history).
+check("manual #5b: the file_dups ghost is removed (no code references)",
       "entries, file_dups" not in _src_ops and "len(file_dups)" not in _src_ops)
 
 _src_term = open(os.path.join(ROOT, "modules", "ssh_terminal.py"), encoding="utf-8").read()
 _i = _src_term.find("ANSI_ESCAPE_RE = re.compile")
 _head = _src_term[max(0, _i - 700):_i] if _i >= 0 else ""
-check("ручной #5a: комментарий к ANSI_ESCAPE_RE — tests/test_core.py + «Не трогать»",
-      "tests/test_core.py" in _head and "Не трогать" in _head, _head[-200:])
+check("manual #5a: ANSI_ESCAPE_RE comment — tests/test_core.py + 'Do not touch'",
+      "tests/test_core.py" in _head and "Do not touch" in _head, _head[-200:])
 
 
 # ════════════════════════════════════════════════════════════
-# 6. Состояние релиза + i18n-паритет (427 — новых ключей НЕТ)
+# 6. Release state + i18n parity (427 — NO new keys)
 # ════════════════════════════════════════════════════════════
 print("== §6 release state + i18n parity ==")
 

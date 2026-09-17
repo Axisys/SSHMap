@@ -10,7 +10,7 @@ class ServerData:
     host: str
     user: str
     password: str = ""
-    key_path: str = ""  # Путь к приватному ключу SSH
+    key_path: str = ""  # path to the SSH private key
     x: float = 0.0
     y: float = 0.0
     cpu: str = ""
@@ -18,25 +18,25 @@ class ServerData:
     disk: str = ""
     ip: str = ""
     comment: str = ""
-    ssh_port: int = 22  # SSH порт
-    # v0.8.4 (бывш. DESIGN.md §D): свёрнутая плашка — одна строка. Сохраняется через
-    # asdict(); старые проекты читаются развёрнутыми (server_data_from_dict дефолтит
-    # отсутствующие ключи), а старые версии приложения новый ключ игнорируют.
+    ssh_port: int = 22  # SSH port
+    # v0.8.4 (former DESIGN.md §D): collapsed card — a single row. Saved via
+    # asdict(); old projects are read as expanded (server_data_from_dict defaults
+    # missing keys), and old application versions ignore the new key.
     collapsed: bool = False
-    # v0.9: автосбор данных о сервере (Linux). Заполняются вручную или
-    # SystemInfoCollector'ом; хранятся в JSON (server_data_to_dict через asdict).
-    os_name: str = ""     #PRETTY_NAME из /etc/os-release, напр. "Ubuntu 24.04 LTS"
-    cpu_model: str = ""   # модель CPU из /proc/cpuinfo
-    # v0.9.4: теги/роли окружений (prod/staging/dev/...). Список строк; хранится в
-    # JSON как массив "tags" (server_data_to_dict через asdict). Backward-compat:
-    # старые JSON без ключа читаются пустым списком (server_data_from_dict).
+    # v0.9: auto-collected server data (Linux). Filled in manually or
+    # by SystemInfoCollector; stored in JSON (server_data_to_dict via asdict).
+    os_name: str = ""     #PRETTY_NAME from /etc/os-release, e.g. "Ubuntu 24.04 LTS"
+    cpu_model: str = ""   # CPU model from /proc/cpuinfo
+    # v0.9.4: tags/environment roles (prod/staging/dev/...). A list of strings; stored in
+    # JSON as the "tags" array (server_data_to_dict via asdict). Backward-compat:
+    # old JSON without the key is read as an empty list (server_data_from_dict).
     tags: "list | None" = None
-    # v1.0RC4: Быстрый запуск — список пунктов меню для сервера. Каждый пункт:
-    # {"type": "url"|"command", "name": str, "value": str}. URL открывается в
-    # браузере по умолчанию; command отправляется первой командой в SSH-терминал.
-    # Хранится в JSON как массив "quick_launch" (asdict). Backward-compat: старые
-    # JSON без ключа читаются пустым списком (server_data_from_dict), а старые
-    # версии приложения неизвестный ключ просто игнорируют.
+    # v1.0RC4: Quick launch — a list of menu entries for the server. Each entry:
+    # {"type": "url"|"command", "name": str, "value": str}. URL opens in the
+    # default browser; command is sent as the first command to the SSH terminal.
+    # Stored in JSON as the "quick_launch" array (asdict). Backward-compat: old
+    # JSON without the key is read as an empty list (server_data_from_dict), and old
+    # application versions simply ignore the unknown key.
     quick_launch: "list | None" = None
 
     def __post_init__(self):
@@ -47,21 +47,21 @@ class ServerData:
 
 
 def sanitize_quick_launch(raw) -> list:
-    """v1.0RC4: привести сырое значение "quick_launch" к списку валидных пунктов.
+    """v1.0RC4: coerce a raw "quick_launch" value into a list of valid entries.
 
-    Пункт — dict {"type": "url"|"command", "name": str, "value": str}. Битые
-    записи (не-dict, пустые name/value, неизвестный type) отбрасываются без
-    падения загрузки — та же политика, что у tags/notes/groups.
+    An entry — a dict {"type": "url"|"command", "name": str, "value": str}. Corrupt
+    records (non-dict, empty name/value, unknown type) are dropped without
+    breaking the load — the same policy as for tags/notes/groups.
     """
     out = []
     if isinstance(raw, (list, tuple)):
         for e in raw:
             if not isinstance(e, dict):
                 continue
-            # v1.0-fix (audit #3): явный null в JSON — e.get(...) вернёт None
-            # (дефолт срабатывает только при ОТСУТСТВИИ ключа), и str(None) = "None"
-            # проходил бы как валидное имя/значение. None → пустая строка → запись
-            # отбрасывается, как и положено по политике «битые записи отбрасываются».
+            # v1.0-fix (audit #3): an explicit null in JSON — e.get(...) returns None
+            # (the default only kicks in when the key is ABSENT), and str(None) = "None"
+            # would pass as a valid name/value. None → empty string → the record
+            # is dropped, as the "corrupt records are dropped" policy dictates.
             etype = str(e.get("type") or "url").strip().lower()
             if etype not in ("url", "command"):
                 etype = "url"
@@ -76,27 +76,27 @@ def sanitize_quick_launch(raw) -> list:
 
 
 def server_data_from_dict(raw: dict) -> ServerData:
-    """Собрать ServerData из сырого JSON-словаря.
+    """Build a ServerData from a raw JSON dict.
 
-    Неизвестные/лишние ключи игнорируются, типы приводятся в порядок.
+    Unknown/extra keys are ignored, types are normalized.
     """
     import uuid
 
     fields = ServerData.__dataclass_fields__
     data = {k: v for k, v in raw.items() if k in fields}
-    if not data.get('id'):  # id обязателен — генерируем, если в JSON его нет
+    if not data.get('id'):  # id is required — generate one if missing from JSON
         data['id'] = str(uuid.uuid4())[:8]
     else:
-        # v1.2.10rc2 (AUDIT ручной #5e): явный "id": 123 (int) в JSON раньше проходил
-        # как есть — ниже id используется как строка/ключ везде (имя keyring-сервиса,
-        # undo-команды, реестры). Приводим к str после проверки на пустоту.
+        # v1.2.10rc2 (manual AUDIT #5e): an explicit "id": 123 (int) in JSON earlier passed
+        # through as-is — below, id is used as a string/key everywhere (keyring service name,
+        # undo commands, registries). We coerce to str after the emptiness check.
         data['id'] = str(data['id'])
-    # Дефолты как при ручной сборке ServerData в старых версиях _open_project().
-    # v1.0-fix (audit #4): setdefault заполнял только ОТСУТСТВУЮЩИЕ ключи — явный
-    # null в JSON ("host": null) проходил как None и крашил SSH-диалог на .strip()
-    # (_start_worker). Теперь отсутствующий ключ И явный null дают дефолт; остальные
-    # строковые поля — явный null → пустая строка (как отсутствующий ключ), чтобы
-    # «битые» записи не роняли UI-пути, работающие с ServerData.
+    # Defaults as when building ServerData manually in old versions of _open_project().
+    # v1.0-fix (audit #4): setdefault only filled MISSING keys — an explicit
+    # null in JSON ("host": null) passed through as None and crashed the SSH dialog on .strip()
+    # (_start_worker). Now a missing key AND an explicit null yield the default; the other
+    # string fields — an explicit null → empty string (like a missing key), so that
+    # "corrupt" records don't break the UI paths working with ServerData.
     for _field, _default in (('alias', 'Server'), ('host', 'localhost'),
                              ('user', 'ubuntu'), ('password', ''), ('key_path', ''),
                              ('cpu', ''), ('ram', ''), ('disk', ''), ('ip', ''),
@@ -112,21 +112,21 @@ def server_data_from_dict(raw: dict) -> ServerData:
             data[coord] = float(data.get(coord) or 0.0)
         except (TypeError, ValueError):
             data[coord] = 0.0
-    # v0.8.4 (бывш. DESIGN.md §D): отсутствующий ключ → развёрнутый узел; приведение к bool
-    # на случай повреждённого значения (0/1/строки из сторонних правок JSON).
+    # v0.8.4 (former DESIGN.md §D): missing key → expanded node; coercion to bool
+    # in case of a corrupted value (0/1/strings from external JSON edits).
     data['collapsed'] = bool(data.get('collapsed') or False)
-    # v0.9.4: теги — отсутствуют в старых JSON → пустой список; приводим к list[str]
+    # v0.9.4: tags — missing in old JSON → empty list; coerce to list[str]
     raw_tags = data.get('tags')
     if not isinstance(raw_tags, (list, tuple)):
         raw_tags = [] if raw_tags in (None, "") else [str(raw_tags)]
     data['tags'] = [str(t).strip() for t in raw_tags if str(t).strip()]
-    # v1.0RC4: Быстрый запуск — отсутствует в старых JSON → пустой список;
-    # битые записи отбрасываются (sanitize_quick_launch)
+    # v1.0RC4: Quick launch — missing in old JSON → empty list;
+    # corrupt records are dropped (sanitize_quick_launch)
     data['quick_launch'] = sanitize_quick_launch(data.get('quick_launch'))
     return ServerData(**data)
 
 
 def server_data_to_dict(data: ServerData) -> dict:
     serialized = asdict(data)
-    serialized.pop('password', None)  # пароль не храним в JSON
+    serialized.pop('password', None)  # the password is not stored in JSON
     return serialized

@@ -1,29 +1,29 @@
 # -*- coding: utf-8 -*-
-"""v1.1.2RC2 — Карта, импорт, сайдбар (тема релиза).
+"""v1.1.2RC2 — Map, import, sidebar (release theme).
 
-ROADMAP v1.1.2RC2 (пункты AUDIT §5, проверенные на v1.1.1):
-  N3    MapView: сброс drag-состояния при потере фокуса/активации (focusOutEvent
-         «blur» + changeEvent ActivationChange — отдельного blurEvent у QWidget
-         нет): если _move_drag_node задан или
-         dragMode()==NoDrag → ScrollHandDrag + очистка _move_drag_node/
-         _group_drag_olds. Раньше единственный сброс — mouseReleaseEvent; путь
-         залипания — потеря capture (Alt+Tab посреди драга).
-  N6    импорт из TXT: DNS-резолв вне GUI-потока — пакетный resolve_host() в
-         HostResolverThread (QThread, паттерн _ProbeThread) с прогрессом в
-         статус-баре; файл с десятками имён при недоступном резолвере не
-         замораживает интерфейс. IP-адреса резолва не требуют — синхронно.
-  N8/N9 мёртвый код сайдбара: item.setForeground(0, windowText()) (визуальный
-         no-op под комментарием «теги серым») и setItemData(QColor,
-         Qt.DecorationRole) (стандартный стиль читает DecorationRole как QIcon)
-         — убраны, комментарии поправлены.
-  N10   i18n-ключ msg.confirm_delete_profile × en/ru/zh: подтверждение удаления
-         ПРОФИЛЯ больше не серверский msg.confirm_delete («Delete server ...?»).
-         Паритет релиза 373 → 375 (с v1.1.2 final — 377): +N10 (msg.confirm_delete_profile) и +N6
-         (status.import_resolving — прогресс резолва в статус-баре).
-  U1    кнопки сайдбара выравниванием влево: отступ от левого края, иконка,
-         текст (замечание пользователей; раньше центральный alignment по умолчанию).
+ROADMAP v1.1.2RC2 (the AUDIT §5 items, verified on v1.1.1):
+  N3    MapView: the reset of the drag state on the loss of focus/activation (the focusOutEvent
+         "blur" + changeEvent ActivationChange — there is no separate blurEvent for a QWidget):
+         if _move_drag_node is set or
+         dragMode()==NoDrag → ScrollHandDrag + the cleanup of _move_drag_node/
+         _group_drag_olds. Before, the only reset — mouseReleaseEvent; the stickiness path — the loss
+         of the capture (Alt+Tab in the middle of a drag).
+  N6    the import from TXT: the DNS resolve outside the GUI thread — the batch resolve_host() in
+         HostResolverThread (QThread, the _ProbeThread pattern) with the progress in the
+         status bar; a file with dozens of names on an unreachable resolver does not
+         freeze the interface. IP addresses do not need the resolve — synchronously.
+  N8/N9 the dead code of the sidebar: item.setForeground(0, windowText()) (a visual
+         no-op under the "tags in gray" comment) and setItemData(QColor,
+         Qt.DecorationRole) (the standard style reads DecorationRole as a QIcon)
+         — removed, the comments corrected.
+  N10   the i18n key msg.confirm_delete_profile × en/ru/zh: the confirmation of the PROFILE deletion
+         is no longer the server's msg.confirm_delete ("Delete server ...?").
+         The release parity 373 → 375 (with v1.1.2 final — 377): +N10 (msg.confirm_delete_profile) and +N6
+         (status.import_resolving — the resolve progress in the status bar).
+  U1    the buttons of the sidebar are left-aligned: the offset from the left edge, the icon,
+         the text (the users' remark; before — the central alignment by default).
 
-Запуск: python tests/test_rc2_map_import_sidebar.py   (из корня проекта) или python tests/run_all.py
+Run: python tests/test_rc2_map_import_sidebar.py   (from the project root) or python tests/run_all.py
 """
 import os
 import sys
@@ -32,14 +32,14 @@ import time
 
 from _common import bootstrap, check, finish, wait_until, viewport_point as _vp, load_i18n_langs, check_i18n_parity, check_release_state
 
-ROOT, WORK = bootstrap()  # ДО импортов модулей приложения (HOME-изоляция и faulthandler внутри)
+ROOT, WORK = bootstrap()  # BEFORE the app module imports (the HOME isolation and faulthandler inside)
 
 from PySide6.QtWidgets import QApplication, QMessageBox
 app = QApplication(sys.argv)
 
 
 # ════════════════════════════════════════════════════════════
-# N3. MapView: сброс drag-состояния при blur/ActivationChange
+# N3. MapView: resetting the drag state on blur/ActivationChange
 # ════════════════════════════════════════════════════════════
 print("== N3: MapView drag-state reset on blur/activation ==")
 from PySide6.QtCore import QPointF, QEvent, Qt as _Qt, QPoint as _QPt
@@ -61,14 +61,14 @@ app.processEvents()
 
 
 def _stuck_drag():
-    """Имитировать «залипший» жест: NoDrag + живое состояние drag'а."""
+    """Simulate a "stuck" gesture: NoDrag + the live state of the drag."""
     view3.setDragMode(QGraphicsView.NoDrag)
     view3._move_drag_node = node3
     view3._move_drag_old = QPointF(node3.pos())
     view3._group_drag_olds = [(node3, QPointF(node3.pos()))]
 
 
-# (a) focusOutEvent («blur» в терминологии ROADMAP) — потеря фокуса посреди драга
+# (a) focusOutEvent ("blur" in ROADMAP terminology) — losing focus mid-drag
 _stuck_drag()
 check("N3: preconditions — NoDrag + _move_drag_node/_group_drag_olds",
       view3.dragMode() == QGraphicsView.NoDrag and view3._move_drag_node is node3
@@ -80,7 +80,7 @@ check("N3: focusOutEvent clears _move_drag_node/_move_drag_old",
       view3._move_drag_node is None and view3._move_drag_old is None)
 check("N3: focusOutEvent clears _group_drag_olds", view3._group_drag_olds == [])
 
-# (b) changeEvent(ActivationChange) — смена активации окна (Alt+Tab)
+# (b) changeEvent(ActivationChange) — the window activation change (Alt+Tab)
 _stuck_drag()
 view3.changeEvent(QEvent(QEvent.Type.ActivationChange))
 check("N3: changeEvent(ActivationChange) restores ScrollHandDrag",
@@ -88,22 +88,22 @@ check("N3: changeEvent(ActivationChange) restores ScrollHandDrag",
 check("N3: changeEvent clears drag state",
       view3._move_drag_node is None and view3._group_drag_olds == [])
 
-# (c) другие типы changeEvent drag-состояние НЕ трогают
+# (c) the other changeEvent types do NOT touch the drag state
 _stuck_drag()
 view3.changeEvent(QEvent(QEvent.Type.FontChange))
 check("N3: other changeEvent types do not reset drag state",
       view3.dragMode() == QGraphicsView.NoDrag and view3._move_drag_node is node3)
-view3.focusOutEvent(QFocusEvent(QEvent.Type.FocusOut))  # уборка
+view3.focusOutEvent(QFocusEvent(QEvent.Type.FocusOut))  # cleanup
 
-# (d) контроль: blur без активного drag — no-op, без падения
+# (d) control: blur without an active drag — a no-op, no crash
 check("N3: control — clean state before blur",
       view3.dragMode() == QGraphicsView.ScrollHandDrag and view3._move_drag_node is None)
 view3.focusOutEvent(QFocusEvent(QEvent.Type.FocusOut))
 check("N3: control — blur with clean state is a no-op",
       view3.dragMode() == QGraphicsView.ScrollHandDrag and view3._move_drag_node is None)
 
-# (e) реальный жест через QTest: press по узлу → NoDrag; blur сбрасывает;
-#     release после сброса НЕ создаёт undo-команду (жест прерван)
+# (e) the real gesture via QTest: press on a node → NoDrag; blur resets;
+#     release after the reset creates NO undo command (the gesture is interrupted)
 committed = []
 view3.node_drag_committed.connect(lambda *a: committed.append(a))
 view3.centerOn(_QPt(int(node3.pos().x()), int(node3.pos().y())))
@@ -114,7 +114,7 @@ app.processEvents()
 check("N3: real press over node starts move-drag (NoDrag + _move_drag_node)",
       view3.dragMode() == QGraphicsView.NoDrag and view3._move_drag_node is node3,
       f"mode={view3.dragMode()}")
-view3.focusOutEvent(QFocusEvent(QEvent.Type.FocusOut))  # Alt+Tab посреди драга
+view3.focusOutEvent(QFocusEvent(QEvent.Type.FocusOut))  # Alt+Tab mid-drag
 check("N3: blur mid-drag resets the stuck state",
       view3.dragMode() == QGraphicsView.ScrollHandDrag and view3._move_drag_node is None)
 _QTest.mouseRelease(view3.viewport(), _Qt.LeftButton, pos=_press_pt)
@@ -126,15 +126,15 @@ check("N3: drag mode stays ScrollHandDrag after the late release",
 
 
 # ════════════════════════════════════════════════════════════
-# N6. Импорт из TXT: DNS-резолв вне GUI-потока
+# N6. Import from TXT: DNS resolution outside the GUI thread
 # ════════════════════════════════════════════════════════════
 print("== N6: TXT import — DNS resolve off the GUI thread ==")
 import services.host_importer as HI
 
 _orig_resolve = HI.resolve_host
 
-# (a) unit: HostResolverThread — резолв в не-main потоке, progress + result map
-_fake_ips = {"alpha.example": "10.0.0.1", "beta.example": "10.0.0.2"}  # gamma — не резолвится
+# (a) unit: HostResolverThread — resolution in a non-main thread, progress + result map
+_fake_ips = {"alpha.example": "10.0.0.1", "beta.example": "10.0.0.2"}  # gamma — does not resolve
 
 
 def _fake_resolve(name):
@@ -177,7 +177,7 @@ check("N6: result map — resolved names → IP, unresolvable → None",
 check("N6: progress(done, total) signals in order",
       progress_events == [(1, 3), (2, 3), (3, 3)], str(progress_events))
 
-# (b) stop(): отмена между именами — не все резолвятся
+# (b) stop(): cancellation between names — not all of them get resolved
 slow_count = {"n": 0}
 
 
@@ -192,13 +192,13 @@ thr2 = HI.HostResolverThread([f"h{i}.example" for i in range(5)])
 res2 = {}
 thr2.resolved_map.connect(lambda m: res2.update(m))
 thr2.start()
-time.sleep(0.1)  # первая проба в работе (sleep 0.25 s) — просим отмену
+time.sleep(0.1)  # the first probe in work (sleep 0.25 s) — we ask for a cancellation
 thr2.stop()
 check("N6: stop() finished the thread", bool(thr2.wait(5000)))
 check("N6: stop() cancels the loop between names (not all 5 resolved)",
       slow_count["n"] < 5, f"resolved={slow_count['n']}")
 
-# (c) E2E MainWindow: файл с IP + именами; GUI не блокируется; прогресс в статус-баре
+# (c) E2E MainWindow: a file with IPs + names; the GUI is not blocked; progress in the status bar
 import ui.main_window as MW
 from PySide6.QtWidgets import QFileDialog
 from modules.undo_commands import CmdAddRemoveNodeBatch
@@ -211,7 +211,7 @@ txt_path = os.path.join(WORK, "rc2_hosts.txt")
 with open(txt_path, "w", encoding="utf-8") as f:
     f.write("# comment\n// another\n10.1.1.1\nalpha.example\nbeta.example\nALPHA.EXAMPLE\n\n")
 
-# фейковый «недоступный резолвер»: 150 мс на имя; beta — не резолвится вовсе
+# a fake "unreachable resolver": 150 ms for the name; beta — never resolves
 def _e2e_resolve(name):
     time.sleep(0.15)
     return {"alpha.example": "10.0.0.99"}.get(name)
@@ -261,11 +261,11 @@ try:
     top = win.undo_stack.command(win.undo_stack.count() - 1) if win.undo_stack.count() else None
     check("N6 E2E: one undo command for the whole batch",
           isinstance(top, CmdAddRemoveNodeBatch), f"cmd={type(top).__name__ if top else None}")
-    win._undo()  # Ctrl+Z — вся пачка откатывается одной командой
+    win._undo()  # Ctrl+Z — the whole batch is reverted by a single command
     check("N6 E2E: Ctrl+Z removes the whole batch at once", len(win.scene.nodes()) == 0,
           str(len(win.scene.nodes())))
 
-    # (d) только IP-адреса — синхронный путь без потока
+    # (d) IP addresses only — the synchronous path without a thread
     txt_ip = os.path.join(WORK, "rc2_ips.txt")
     with open(txt_ip, "w", encoding="utf-8") as f:
         f.write("10.2.2.2\n192.168.7.7\n")
@@ -282,12 +282,12 @@ finally:
     QMessageBox.information = _orig_info
 
 # ════════════════════════════════════════════════════════════
-# N8/N9. Мёртвый код сайдбара убран
+# N8/N9. The sidebar dead code is removed
 # ════════════════════════════════════════════════════════════
 print("== N8/N9: sidebar dead code removed ==")
 
-# (a) уровень исходников: вызовы больше не существуют в КОДЕ ui/sidebar.py
-# (комментарии с именем убранного кода допустимы — фильтруем через tokenize)
+# (a) source level: the calls no longer exist in the CODE of ui/sidebar.py
+# (comments naming removed code are allowed — we filter via tokenize)
 import io as _io
 import tokenize as _tokenize
 
@@ -298,7 +298,7 @@ _sb_code = "\n".join(tok.string for tok in _tokenize.generate_tokens(_io.StringI
 check("N8: no setForeground call in ui/sidebar.py code", "setForeground" not in _sb_code)
 check("N9: no DecorationRole in ui/sidebar.py code", "DecorationRole" not in _sb_code)
 
-# (b) поведение: строка с тегами — подпись в тексте, ForegroundRole не выставляется
+# (b) behaviour: a row with tags — a caption in the text, ForegroundRole is not set
 from ui.sidebar import SidebarPanel, CONTEXT_MENU_ITEMS, _BUTTONS
 
 
@@ -323,7 +323,7 @@ _fg = item_a.data(0, _Qt.ForegroundRole)
 check("N8: ForegroundRole NOT set on tagged rows (no windowText paint)",
       _fg is None, str(_fg))
 
-# (c) тег-фильтр: «● tag» в тексте, DecorationRole данных нет
+# (c) tag filter: "● tag" in the text, no DecorationRole data
 panel.sync_tag_filter_items(fake_nodes)
 combo = panel.tag_filter
 texts = [combo.itemText(i) for i in range(combo.count())]
@@ -333,7 +333,7 @@ check("N9: no DecorationRole data on tag items (QColor was never rendered)",
       all(d is None for d in _deco), str(_deco))
 
 # ════════════════════════════════════════════════════════════
-# U1. Кнопки сайдбара — выравнивание влево
+# U1. The sidebar buttons — left alignment
 # ════════════════════════════════════════════════════════════
 print("== U1: sidebar buttons left-aligned ==")
 _bad_align = []
@@ -345,14 +345,14 @@ for attr, _icon_name, _key, _ru in _BUTTONS:
         _bad_align.append(attr)
     if btn.icon().isNull():
         _no_icon.append(attr)
-check("U1: all 6 buttons — text-align: left + padding-left (отступ от левого края)",
+check("U1: all 6 buttons — text-align: left + padding-left (the offset from the left edge)",
       not _bad_align, str(_bad_align))
 check("U1: every button keeps its vector icon (icon, then text)", not _no_icon, str(_no_icon))
 check("U1: button height unchanged (34 px)", all(getattr(panel, a).minimumHeight() == 34
                                                  for a, *_r in _BUTTONS))
 
 # ════════════════════════════════════════════════════════════
-# N10. i18n-ключ msg.confirm_delete_profile
+# N10. The i18n key msg.confirm_delete_profile
 # ════════════════════════════════════════════════════════════
 print("== N10: msg.confirm_delete_profile ==")
 import i18n
@@ -366,7 +366,7 @@ i18n.set_language("en")
 
 check_i18n_parity(load_i18n_langs(ROOT))
 
-# (b) диалог: подтверждение удаления ПРОФИЛЯ — свой ключ, не серверский msg.confirm_delete
+# (b) dialog: confirming PROFILE deletion — its own key, not the server's msg.confirm_delete
 from models import profile as _prof
 from dialogs.profile_manager_dialog import ProfileManagerDialog
 
@@ -396,7 +396,7 @@ check("N10: profile deleted after Yes",
 dlg.close()
 
 # ════════════════════════════════════════════════════════════
-# Состояние релиза (пины — tests/_common.py: EXPECTED_APP_VERSION)
+# Release state (pins — tests/_common.py: EXPECTED_APP_VERSION)
 # ════════════════════════════════════════════════════════════
 print("== release state ==")
 check_release_state(ROOT)

@@ -1,20 +1,22 @@
 # -*- coding: utf-8 -*-
-"""v0.9.2: Палитра команд (Ctrl+K).
+"""v0.9.2: Command palette (Ctrl+K).
 
-Быстрые действия без мыши: fuzzy-поиск по всем действиям приложения
-(пункты меню) + по серверам проекта (выбор → центрирование карты на узле).
+Mouse-free quick actions: fuzzy search across all application actions
+(menu items) + project servers (select → center the map on the node).
 
-Дизайн:
-- CommandPalette(QDialog, Qt.Popup-подобное окно без заголовка): строка ввода
-  сверху + QListWidget результатов.
-- Команды собираются из QAction главного окна (меню уже несёт i18n и слоты)
-  плюс динамический блок серверов (пересобирается при каждом открытии).
-- Фильтрация — простая subsequence fuzzy (без внешних зависимостей):
-  "cns" матчит "Connect via SSH"; чем плотнее совпадение, тем выше ранг.
-- Enter — выполнить первую/выделенную команду; Esc — закрыть.
+Design:
+- CommandPalette(QDialog, Qt.Popup-style frameless window): input line
+  on top + a QListWidget with results.
+- Commands are collected from the main window's QActions (the menus
+  already carry i18n and slots) plus a dynamic servers block (rebuilt
+  on every open).
+- Filtering is simple subsequence fuzzy matching (no external deps):
+  "cns" matches "Connect via SSH"; the tighter the match, the higher
+  the rank.
+- Enter runs the first/selected command; Esc closes the palette.
 
-i18n: ключи palette.* × en/ru/zh; названия действий берутся из уже
-переведённых текстов QAction (дублирования переводов нет).
+i18n: keys palette.* × en/ru/zh; action names are taken from the
+already-translated QAction texts (no duplicate translations).
 """
 
 from PySide6.QtCore import Qt, QPoint
@@ -24,13 +26,14 @@ from PySide6.QtWidgets import (
 )
 
 try:
-    # Пакетный запуск (из корня проекта).
-    # v0.9.4-fix: i18n экспортирует t(), а не translate() — прежний импорт
-    # молча падал и палитра показывала сырые ключи вместо переводов.
+    # Package-style run (from the project root).
+    # v0.9.4-fix: i18n exports t(), not translate() — the old import
+    # silently failed and the palette showed raw keys instead of
+    # translations.
     from i18n import t as _translate
-except Exception:  # pragma: no cover - плоский запуск
+except Exception:  # pragma: no cover - flat run
     try:
-        from .i18n import t as _translate  # пакетный запуск как подпакета
+        from .i18n import t as _translate  # package-style run as a subpackage
     except Exception:
         _translate = None
 
@@ -45,10 +48,10 @@ def _t(key: str) -> str:
 
 
 def fuzzy_score(pattern: str, text: str):
-    """Subsequence-fuzzy: вернуть (score, matched) или None.
+    """Subsequence fuzzy: return (score, matched) or None.
 
-    score — чем меньше, тем лучше (плотные совпадения выгоднее).
-    Регистр не важен; разделители слов дают бонус.
+    score — lower is better (tighter matches win).
+    Case-insensitive; word boundaries give a bonus.
     """
     p, s = pattern.lower(), text.lower()
     if not p:
@@ -63,14 +66,14 @@ def fuzzy_score(pattern: str, text: str):
         gap_penalty = 0 if found == last + 1 else min(found - idx, 10)
         score += gap_penalty
         if found == 0 or s[found - 1] in " ._-\t":
-            score -= 3  # бонус за начало слова
+            score -= 3  # word-start bonus
         last = found
         idx = found + 1
     return (score - (len(s) - len(p)) // 20, True)
 
 
 class CommandPalette(QDialog):
-    """Палитра команд: поиск по действиям и серверам (Ctrl+K)."""
+    """Command palette: search across actions and servers (Ctrl+K)."""
 
     def __init__(self, main_window, parent=None):
         super().__init__(parent or main_window)
@@ -81,9 +84,10 @@ class CommandPalette(QDialog):
     # ── UI ───────────────────────────────────────────────────────
 
     def _build_ui(self):
-        # v0.9.3 fix: тексты обвязки (заголовок/плейсхолдер/hint) теперь
-        # переустанавливаются при каждом открытии — см. retranslate_ui();
-        # раньше они застывали на языке, активном в момент создания палитры.
+        # v0.9.3 fix: the chrome texts (title/placeholder/hint) are
+        # re-applied on every open — see retranslate_ui();
+        # previously they were frozen in the language active when the
+        # palette was created.
         self.setWindowTitle(_t("palette.title"))
         self.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint)
         self.setModal(True)
@@ -128,12 +132,12 @@ class CommandPalette(QDialog):
                 return True
         return super().eventFilter(obj, event)
 
-    # ── Сбор команд ─────────────────────────────────────────────
+    # ── Collecting commands ─────────────────────────────────────
 
     def _collect_commands(self):
         cmds = []
 
-        # 1) Действия меню главного окна (уже переведены через i18n).
+        # 1) Main window menu actions (already translated via i18n).
         seen = set()
 
         def walk(menu):
@@ -155,17 +159,19 @@ class CommandPalette(QDialog):
                 cmds.append((text, "action", lambda a=act: a.trigger()))
 
         bar = self.mw.menuBar()
-        # v0.9.8 bugfix (PySide6 6.11): держим обёртки верхних QAction в списке до конца
-        # обхода — когда Python-обёртка QAction с прикреплённым QMenu умирает, PySide6
-        # уничтожает за ней C++-меню (MainWindow._qaction_guard — тот же guard глобально;
-        # здесь локальная страховка на случай окна без него).
+        # v0.9.8 bugfix (PySide6 6.11): keep the top-level QAction wrappers
+        # in a list until the walk is finished — when a Python QAction
+        # wrapper with an attached QMenu dies, PySide6 destroys the
+        # underlying C++ menu (MainWindow._qaction_guard holds the same
+        # guard globally; this is a local safety net for windows
+        # without it).
         tops = list(bar.actions())
         for top in tops:
             child = top.menu()
             if child is not None:
                 walk(child)
 
-        # 2) Серверы проекта → «центрирование на узле».
+        # 2) Project servers → "center on node".
         try:
             servers = self.mw.scene.nodes()
         except Exception:
@@ -183,10 +189,10 @@ class CommandPalette(QDialog):
 
     @staticmethod
     def _reveal_node(node):
-        """Центрировать вид на узле + акцент выделения.
+        """Center the view on the node + highlight it.
 
-        v1.2.4.1 (задача 5): карта свёрнута — центрирование пропускается (выделение
-        работает; без исключений и без авто-показа карты).
+        v1.2.4.1 (task 5): map collapsed — centering is skipped (selection
+        still works; no exceptions and no auto-showing the map).
         """
         mw = node.scene().views()[0].window() if node.scene().views() else None
         scene = node.scene()
@@ -196,22 +202,22 @@ class CommandPalette(QDialog):
                 and not getattr(mw, "_map_collapsed", False):
             mw.view.centerOn(node)
 
-    # ── Показ / фильтрация / запуск ─────────────────────────────
+    # ── Show / filter / run ─────────────────────────────────────
 
     def retranslate_ui(self):
-        """v0.9.3 fix: перевести статичную обвязку заново (команды и так
-        пересобираются из QAction при каждом открытии — см. open_palette)."""
+        """v0.9.3 fix: re-translate the static chrome (commands are
+        rebuilt from QActions on every open anyway — see open_palette)."""
         self.setWindowTitle(_t("palette.title"))
         self.input.setPlaceholderText(_t("palette.placeholder"))
         self._hint_label.setText(_t("palette.hint"))
 
     def open_palette(self):
-        """Открыть палитру: собрать актуальные команды, сбросить фильтр."""
+        """Open the palette: collect current commands, reset the filter."""
         self.retranslate_ui()
         self._collect_commands()
         self.input.clear()
         self._refilter("")
-        # По центру родительского окна
+        # Center on the parent window
         parent = self.parent() or self.mw
         geo = parent.geometry()
         self.resize(520, 420)
@@ -232,14 +238,15 @@ class CommandPalette(QDialog):
         for _, kind, label, fn in scored[:50]:
             item = QListWidgetItem(label)
             item.setData(Qt.UserRole, fn)
-            # v0.9.3 fix: эмодзи «🖥/⚡» убраны — проект сознательно перешёл на
-            # векторные иконки (ui/icons.py, Segoe UI Emoji рендерится плохо).
+            # v0.9.3 fix: the "🖥/⚡" emojis were removed — the project
+            # deliberately moved to vector icons (ui/icons.py,
+            # Segoe UI Emoji renders poorly).
             try:
                 from ui.icons import get_icon
                 icon = get_icon("add_server" if kind == "server" else "connection")
                 if icon is not None and not icon.isNull():
                     item.setIcon(icon)
-            except Exception:  # noqa: BLE001 — иконка косметика, не роняем палитру
+            except Exception:  # noqa: BLE001 — icons are cosmetic, don't break the palette
                 pass
             self.listw.addItem(item)
         if self.listw.count():
@@ -257,10 +264,10 @@ class CommandPalette(QDialog):
 
 
 def _qaction_slot(act):
-    """Достать вызываемый слот QAction без приватных API PyQt.
+    """Get a callable slot for a QAction without PyQt private APIs.
 
-    PyQt6 не отдаёт слот напрямую; вместо этого оборачиваем trigger(),
-    а отключённые действия пропускаем по isEnabled при выполнении.
+    PyQt6 does not expose the slot directly; instead we wrap trigger(),
+    and disabled actions are skipped via isEnabled at run time.
     """
     if not act.isCheckable() and act.menu() is None:
         return act

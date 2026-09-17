@@ -12,7 +12,7 @@ try:
 except ImportError:
     from models.server import server_data_to_dict
 
-if TYPE_CHECKING:  # AUDIT v0.7.2 (низкая #16): аннотация без runtime-циркулярного импорта
+if TYPE_CHECKING:  # AUDIT v0.7.2 (low #16): annotation without a runtime circular import
     try:
         from ..graphics.server_node import ServerNode
     except ImportError:
@@ -20,7 +20,7 @@ if TYPE_CHECKING:  # AUDIT v0.7.2 (низкая #16): аннотация без 
 
 
 def _log():
-    """Lazy-imported logger — не роняет модуль, если логгер недоступен."""
+    """Lazy-imported logger — doesn't break the module if the logger is unavailable."""
     try:
         from modules.logger import get_logger
         return get_logger("storage.project")
@@ -29,7 +29,7 @@ def _log():
 
 
 def load_project(path: str) -> dict:
-    """Загрузить проект из JSON-файла."""
+    """Load a project from a JSON file."""
     log = _log()
     try:
         with open(path, 'r', encoding='utf-8') as f:
@@ -48,19 +48,19 @@ def load_project(path: str) -> dict:
 
 
 def serialize_scene(
-    nodes: "Dict[str, 'ServerNode']",  # кавычки + TYPE_CHECKING — без runtime-циркуляра (AUDIT v0.7.2 #16)
+    nodes: "Dict[str, 'ServerNode']",  # quotes + TYPE_CHECKING — no runtime circular import (AUDIT v0.7.2 #16)
     arrows: list,
     zoom: float,
     center_x: float,
     center_y: float,
-    notes=None,   # v0.7.2: список StickyNote (необязательный параметр)
-    groups=None,  # v0.8.1: список NodeGroup — кластеры/папки на карте (массив "groups")
-    background=None,  # v0.9.1: BackgroundImage — фон-изображение (ключ "background")
+    notes=None,   # v0.7.2: a list of StickyNote (optional parameter)
+    groups=None,  # v0.8.1: a list of NodeGroup — clusters/folders on the map ("groups" array)
+    background=None,  # v0.9.1: BackgroundImage — the background image ("background" key)
 ) -> dict:
-    """v0.9.7: сцена → dict проекта JSON (единый сериализатор).
+    """v0.9.7: scene → project JSON dict (single serializer).
 
-    Общий путь для save_project() и автосохранения (storage/autosave.py):
-    формат один, паролей в нём нет (server_data_to_dict их вырезает).
+    Common path for save_project() and autosave (storage/autosave.py):
+    one format, no passwords in it (server_data_to_dict strips them).
     """
     servers = [server_data_to_dict(n.data) for n in nodes.values()]
     connections = []
@@ -69,35 +69,35 @@ def serialize_scene(
             'source_id': a.source.data.id,
             'target_id': a.target.data.id,
             'label': a.label_text,
-            # v0.7: тип связи (SSH/VPN/HTTP/Database/NFS/Kubernetes)
+            # v0.7: connection type (SSH/VPN/HTTP/Database/NFS/Kubernetes)
             'type': getattr(a, "connection_type", "ssh"),
         }
-        # v1.2.6: двухсторонняя связь — опциональное поле (паттерн server_id заметок):
-        # пишется только когда true; отсутствует = односторонняя (старые файлы без
-        # ключа читаются как есть). VERSION_FORMAT "0.9" не меняется.
+        # v1.2.6: bidirectional connection — optional field (the notes' server_id pattern):
+        # written only when true; absent = unidirectional (old files without
+        # the key are read as-is). VERSION_FORMAT "0.9" is unchanged.
         if getattr(a, "bidirectional", False):
             conn['bidirectional'] = True
         connections.append(conn)
 
-    # v0.7.2: независимые заметки на карте (отдельный массив).
-    # Для старых версий приложения поле просто не читается — backward-compat.
+    # v0.7.2: independent notes on the map (a separate array).
+    # For old application versions the field is simply not read — backward-compat.
     notes_list = []
     for n in (notes or []):
         to_dict = getattr(n, "to_dict", None)
         if callable(to_dict):
             notes_list.append(to_dict())
 
-    # v0.8.1: группы узлов (кластеры/папки). Хранится только геометрия+имя —
-    # членство не сериализуется: геометрический инвариант «центр узла в верхней
-    # группе» пересчитывает его при загрузке (MapScene.resync_group_members).
+    # v0.8.1: node groups (clusters/folders). Only geometry+name is stored —
+    # membership is not serialized: the geometric invariant "node center in the top
+    # group" recomputes it on load (MapScene.resync_group_members).
     groups_list = []
     for g in (groups or []):
         to_dict = getattr(g, "to_dict", None)
         if callable(to_dict):
             groups_list.append(to_dict())
 
-    # v0.9.1: фоновое изображение ({path, x, y, width, height}) или null.
-    # Файл НЕ встраивается в JSON; при загрузке отсутствующий путь игнорируется.
+    # v0.9.1: background image ({path, x, y, width, height}) or null.
+    # The file is NOT embedded in the JSON; on load a missing path is ignored.
     background_dict = None
     if background is not None:
         to_dict = getattr(background, "to_dict", None)
@@ -105,10 +105,10 @@ def serialize_scene(
             background_dict = to_dict()
 
     return {
-        # AUDIT v0.8.3 (#1): версия формата — из централизованного version.py
-        # (VERSION_FORMAT меняется только при реальном изменении схемы).
-        # Поле не валидируется при загрузке: проекты 0.6/0.7/0.7.2/0.8.0
-        # читаются без проверки этой строки.
+        # AUDIT v0.8.3 (#1): format version — from the centralized version.py
+        # (VERSION_FORMAT changes only on a real schema change).
+        # The field is not validated on load: 0.6/0.7/0.7.2/0.8.0 projects
+        # are read without checking this string.
         'version': VERSION_FORMAT,
         'servers': servers,
         'connections': connections,
@@ -122,10 +122,10 @@ def serialize_scene(
 
 
 def write_project_json(path: str, data: dict) -> None:
-    """v0.9.7: атомарная запись уже сериализованного проекта (dict → файл).
+    """v0.9.7: atomic write of an already-serialized project (dict → file).
 
-    Атомарность — та же, что была в save_project до v0.9.7 (tmp + fsync +
-    os.replace, v0.9.3 fix): крах посреди записи не рвёт файл с картой.
+    Atomicity — the same as save_project had before v0.9.7 (tmp + fsync +
+    os.replace, v0.9.3 fix): a crash mid-write doesn't corrupt the map file.
     """
     tmp_path = path + '.tmp'
     with open(tmp_path, 'w', encoding='utf-8') as f:
@@ -137,16 +137,16 @@ def write_project_json(path: str, data: dict) -> None:
 
 def save_project(
     path: str,
-    nodes: "Dict[str, 'ServerNode']",  # кавычки + TYPE_CHECKING — без runtime-циркуляра (AUDIT v0.7.2 #16)
+    nodes: "Dict[str, 'ServerNode']",  # quotes + TYPE_CHECKING — no runtime circular import (AUDIT v0.7.2 #16)
     arrows: list,
     zoom: float,
     center_x: float,
     center_y: float,
-    notes=None,   # v0.7.2: список StickyNote (необязательный параметр)
-    groups=None,  # v0.8.1: список NodeGroup — кластеры/папки на карте (массив "groups")
-    background=None,  # v0.9.1: BackgroundImage — фон-изображение (ключ "background")
+    notes=None,   # v0.7.2: a list of StickyNote (optional parameter)
+    groups=None,  # v0.8.1: a list of NodeGroup — clusters/folders on the map ("groups" array)
+    background=None,  # v0.9.1: BackgroundImage — the background image ("background" key)
 ):
-    """Сохранить проект в JSON-файл (сцена → serialize_scene → атомарная запись)."""
+    """Save the project to a JSON file (scene → serialize_scene → atomic write)."""
     log = _log()
     try:
         data = serialize_scene(

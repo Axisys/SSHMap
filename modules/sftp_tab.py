@@ -1,36 +1,37 @@
 # -*- coding: utf-8 -*-
-"""SFTP-вкладка окна терминала (v1.1.3, ROADMAP задача 2).
+"""SFTP tab of the terminal window (v1.1.3, ROADMAP task 2).
 
-Классический SFTP-режим поверх worker'а из modules/sftp_worker.py (один
-поток с очередью — SFTPClient не thread-safe): дерево каталогов в виде
-текущего листинга (QTreeWidget) + навигация «..»:
+Classic SFTP mode on top of the worker from modules/sftp_worker.py (a single
+thread with a queue — SFTPClient is not thread-safe): the directory tree as
+a current listing (QTreeWidget) + "..." navigation:
 
-  * строка «..» (первая, если текущий ≠ "/") и кнопка «Вверх» — переход на
-    уровень вверх; двойной клик по каталогу — вход в него;
-  * upload: локальные файлы (QFileDialog) → ТЕКУЩИЙ показанный каталог
-    (несколько файлов = последовательные задачи очереди);
-  * D&D (v1.2.8): файлы из Проводника в любое место вкладки → тот же
-    worker-очередной upload в ТЕКУЩИЙ каталог; каталоги/не-файлы игнорируются
-    с подсказкой; без соединения — подсказка «ожидание» (как у кнопки Upload);
-  * download: выбранные файлы (мультивыделение) → выбранный локальный
-    каталог; существующий файл той же цели перезаписывается (обработка
-    конфликтов — v1.3 панель файлов);
-  * прогресс — в статус-баре ОКНА (SSHTerminalWindow сам подключается к
-    сигналам worker'а: progress bar + showMessage); вкладка ведёт только своё
-    состояние (кнопка «Отменить» активна, пока есть передачи) и локальные
-    подсказки через сигнал message();
-  * GUI не блокируется: все операции SFTP — в worker-потоке, вкладка лишь
-    ставит задачи в очередь и перерисовывает листинг по list_ready.
+  * the ".." row (first, if the current dir != "/") and the "Up" button — go
+    one level up; double-click on a directory — enter it;
+  * upload: local files (QFileDialog) → the CURRENT shown directory
+    (several files = sequential queue tasks);
+  * D&D (v1.2.8): files from Explorer into any spot of the tab → the same
+    worker-queue upload into the CURRENT directory; directories/non-files are
+    ignored with a hint; no connection — "waiting" hint (same as the Upload
+    button);
+  * download: selected files (multi-selection) → the chosen local directory;
+    an existing file at the same target is overwritten (conflict handling —
+    v1.3 file panel);
+  * progress — in the window's status bar (SSHTerminalWindow connects to
+    the worker's signals itself: progress bar + showMessage); the tab only
+    keeps its own state (the "Cancel" button is active while transfers are
+    running) and local hints via the message() signal;
+  * the GUI is not blocked: all SFTP operations run in the worker thread,
+    the tab merely queues tasks and redraws the listing on list_ready.
 
-Устаревшие ответы (переход/Refresh, пока летит старый листинг) отбрасываются
-по совпадению task_id → запрошенный путь: рисуется только ответ для ТЕКУЩЕГО
-каталога. Если SSH-соединение ещё не готово, вкладка показывает «Ожидание
-SSH-подключения…» и ждёт set_worker(worker) — окно вызывает его после
-connected_signal / при переключении на вкладку (open_sftp() на том же
-transport — ROADMAP задача 3).
+Stale responses (navigation/Refresh while an old listing is in flight) are
+dropped by matching task_id → requested path: only the response for the
+CURRENT directory is rendered. If the SSH connection is not ready yet, the
+tab shows "Waiting for SSH connection…" and waits for set_worker(worker) —
+the window calls it after connected_signal / when switching to the tab
+(open_sftp() on the same transport — ROADMAP task 3).
 
-Полное дерево с ленивым раскрытием, просмотрщик и drop «в конкретную строку»
-— цепочка v1.3 (фундамент — этот модуль + sftp_worker.py).
+A full tree with lazy expansion, a file viewer, and drop "into a specific row"
+— the v1.3 chain (foundation — this module + sftp_worker.py).
 """
 import os
 import posixpath
@@ -44,18 +45,18 @@ from PySide6.QtWidgets import (
 
 try:
     from i18n import t as _t
-except Exception:  # noqa: BLE001 — импорт вне дерева проекта (плоский запуск)
+except Exception:  # noqa: BLE001 — import outside the project tree (flat run)
     def _t(key, **kwargs):  # type: ignore
         return key
 
-try:  # v1.2.5: центральная тема (статус-лейблы — ui/theme.py)
+try:  # v1.2.5: central theme (status labels — ui/theme.py)
     from ..ui import theme
 except ImportError:
     from ui import theme
 
 
 def format_size(n) -> str:
-    """Человекочитаемый размер: 0 → "0 B", 1536 → "1.5 KB" (без локалей)."""
+    """Human-readable size: 0 → "0 B", 1536 → "1.5 KB" (no locales)."""
     try:
         n = int(n)
     except (TypeError, ValueError):
@@ -71,7 +72,7 @@ def format_size(n) -> str:
 
 
 def format_mtime(ts) -> str:
-    """Локальное время mtime "%Y-%m-%d %H:%M"; битое/нулевое → ""."""
+    """Local mtime time "%Y-%m-%d %H:%M"; broken/zero → ""."""
     try:
         ts = int(ts)
     except (TypeError, ValueError):
@@ -85,37 +86,37 @@ def format_mtime(ts) -> str:
 
 
 class SftpTab(QWidget):
-    """Вкладка «Файлы»: листинг текущего каталога + upload/download через очередь."""
+    """The "Files" tab: listing of the current directory + upload/download via the queue."""
 
-    PATH_ROLE = Qt.ItemDataRole.UserRole       # полный удалённый путь записи
-    ISDIR_ROLE = Qt.ItemDataRole.UserRole + 1  # bool — каталог?
-    SIZE_ROLE = Qt.ItemDataRole.UserRole + 2   # int — размер файла (0 для каталога)
+    PATH_ROLE = Qt.ItemDataRole.UserRole       # full remote path of the entry
+    ISDIR_ROLE = Qt.ItemDataRole.UserRole + 1  # bool — is it a directory?
+    SIZE_ROLE = Qt.ItemDataRole.UserRole + 2   # int — file size (0 for a directory)
     MTIME_ROLE = Qt.ItemDataRole.UserRole + 3  # int — unix mtime
 
-    # Локальные подсказки в статус-бар окна (ожидание соединения, нет выбора).
-    # Ошибки/прогресс worker'а окно показывает само по его сигналам.
+    # Local hints in the window's status bar (waiting for connection, no selection).
+    # Worker errors/progress are shown by the window itself via its signals.
     message = Signal(str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self._worker = None
         self._current_dir = "/"
-        self._pending_lists = {}     # task_id → запрошенный путь (сталинг-фильтр)
-        self._transfer_tasks = set()  # task id активных upload/download
-        self._up_item = None          # строка «..» (идентификация по объекту)
+        self._pending_lists = {}     # task_id → requested path (staleness filter)
+        self._transfer_tasks = set()  # task ids of active upload/download
+        self._up_item = None          # the ".." row (identified by object)
 
         t = _t
         outer = QVBoxLayout(self)
         outer.setContentsMargins(6, 6, 6, 6)
         outer.setSpacing(4)
 
-        # Строка пути — текущий каталог («адресная строка»).
+        # Path row — the current directory (the "address bar").
         self.path_label = QLabel(t("sftp.waiting_connection"))
-        # v1.2.5: цвет — из центральной темы (ui/theme.py); значение без изменений
+        # v1.2.5: color — from the central theme (ui/theme.py); value unchanged
         self.path_label.setStyleSheet(f"color: {theme.TEXT_MUTED}; padding: 2px 0;")
         outer.addWidget(self.path_label)
 
-        # Кнопки: навигация | операции.
+        # Buttons: navigation | operations.
         bar = QHBoxLayout()
         bar.setSpacing(6)
         self.btn_up = QPushButton(t("sftp.up"))
@@ -123,10 +124,10 @@ class SftpTab(QWidget):
         self.btn_upload = QPushButton(t("sftp.upload"))
         self.btn_download = QPushButton(t("sftp.download"))
         self.btn_cancel = QPushButton(t("sftp.cancel"))
-        self.btn_cancel.setEnabled(False)  # активна, пока есть передачи
+        self.btn_cancel.setEnabled(False)  # active while transfers are running
         for b in (self.btn_up, self.btn_refresh, self.btn_upload,
                   self.btn_download):
-            b.setEnabled(False)  # до set_worker()
+            b.setEnabled(False)  # until set_worker()
         bar.addWidget(self.btn_up)
         bar.addWidget(self.btn_refresh)
         bar.addStretch(1)
@@ -135,7 +136,7 @@ class SftpTab(QWidget):
         bar.addWidget(self.btn_cancel)
         outer.addLayout(bar)
 
-        # Листинг: Имя | Размер | Изменён.
+        # Listing: Name | Size | Modified.
         self.tree = QTreeWidget()
         self.tree.setColumnCount(3)
         self.tree.setHeaderLabels([t("sftp.column_name"), t("sftp.column_size"),
@@ -152,19 +153,19 @@ class SftpTab(QWidget):
         self.btn_download.clicked.connect(self._on_download)
         self.btn_cancel.clicked.connect(self._on_cancel)
 
-        # v1.2.8: D&D — файлы из Проводника в любое место вкладки. Qt доставляет
-        # drag-события виджету под курсором (дерево занимает почти всю вкладку),
-        # поэтому обработчики живут здесь, а eventFilter пересылает события с
-        # ДЕТЕЙ (tree/viewport/header/кнопки) в свои же обработчики.
+        # v1.2.8: D&D — files from Explorer into any spot of the tab. Qt delivers
+        # drag events to the widget under the cursor (the tree covers almost the
+        # whole tab), so the handlers live here, and eventFilter forwards events
+        # from the CHILDREN (tree/viewport/header/buttons) to the same handlers.
         self.setAcceptDrops(True)
         for w in self.findChildren(QWidget):
             w.installEventFilter(self)
         self.installEventFilter(self)
 
-    # ── Привязка worker'а (вызывает окно) ────────────────────────────────
+    # ── Worker binding (called by the window) ────────────────────────────
 
     def set_worker(self, worker):
-        """Привязать/отвязать SftpWorker. None — состояние «ожидание соединения»."""
+        """Bind/unbind the SftpWorker. None — the "waiting for connection" state."""
         if self._worker is not None:
             for sig in (self._worker.list_ready, self._worker.task_started,
                         self._worker.task_done, self._worker.task_error,
@@ -172,7 +173,7 @@ class SftpTab(QWidget):
                 try:
                     sig.disconnect(self)
                 except TypeError:
-                    pass  # не было подключения — делать нечего
+                    pass  # no connection existed — nothing to do
         self._worker = worker
         self._transfer_tasks.clear()
         self.btn_cancel.setEnabled(False)
@@ -204,24 +205,24 @@ class SftpTab(QWidget):
 
     @property
     def current_dir(self) -> str:
-        """Текущий показанный каталог (цель upload)."""
+        """The currently shown directory (upload target)."""
         return self._current_dir
 
-    # ── Навигация и листинг ──────────────────────────────────────────────
+    # ── Navigation and listing ───────────────────────────────────────────
 
     def go_up(self):
-        """«..» — на уровень вверх (от "/" — no-op)."""
+        """".." — one level up (no-op from "/")."""
         if self._current_dir == "/":
             return
         parent = posixpath.dirname(self._current_dir) or "/"
         self._relist(parent)
 
     def _navigate(self, path: str):
-        """Вход в каталог (двойной клик по строке каталога)."""
+        """Enter a directory (double-click on a directory row)."""
         self._relist(path)
 
     def _relist(self, path: str):
-        """Перерисовать листинг для нового текущего каталога."""
+        """Redraw the listing for the new current directory."""
         self._current_dir = path or "/"
         self.tree.clear()
         self._up_item = None
@@ -235,8 +236,8 @@ class SftpTab(QWidget):
 
     def _on_list_ready(self, task_id: int, remote_dir: str, entries: list):
         requested = self._pending_lists.pop(task_id, None)
-        # Сталкинг-фильтр: рисуем только ответ для ТЕКУЩЕГО каталога (переход
-        # или Refresh, пока старый листинг летел — игнор).
+        # Staleness filter: render only the response for the CURRENT directory
+        # (navigation or Refresh while an old listing was in flight — ignored).
         if requested is None or requested != self._current_dir \
                 or remote_dir != self._current_dir:
             return
@@ -273,17 +274,17 @@ class SftpTab(QWidget):
     def _file_icon(self):
         return self.style().standardIcon(QStyle.StandardPixmap.SP_FileIcon)
 
-    # ── События дерева ───────────────────────────────────────────────────
+    # ── Tree events ──────────────────────────────────────────────────────
 
     def _on_item_double_clicked(self, item: QTreeWidgetItem, _column: int):
         if not item.data(0, self.ISDIR_ROLE):
-            return  # файл — ничего (просмотрщик файлов — v1.3.1)
+            return  # file — nothing (file viewer — v1.3.1)
         if item is self._up_item:
             self.go_up()
         else:
             self._navigate(item.data(0, self.PATH_ROLE))
 
-    # ── Операции (кнопки) ────────────────────────────────────────────────
+    # ── Operations (buttons) ─────────────────────────────────────────────
 
     def _on_upload(self):
         if self._worker is None:
@@ -291,7 +292,7 @@ class SftpTab(QWidget):
             return
         files, _ = QFileDialog.getOpenFileNames(
             self, _t("sftp.upload_dialog_title"))
-        for f in files:  # несколько файлов = последовательные задачи очереди
+        for f in files:  # several files = sequential queue tasks
             self._worker.queue_upload(f, self._current_dir)
 
     def _on_download(self):
@@ -305,7 +306,7 @@ class SftpTab(QWidget):
             return
         local_dir = QFileDialog.getExistingDirectory(
             self, _t("sftp.download_dir_title"))
-        if not local_dir:  # отмена диалога — тихо ничего не делаем
+        if not local_dir:  # dialog cancelled — quietly do nothing
             return
         for it in items:
             self._worker.queue_download(
@@ -315,15 +316,15 @@ class SftpTab(QWidget):
         if self._worker is not None:
             self._worker.cancel()
 
-    # ── D&D: файлы из Проводника (v1.2.8) ───────────────────────────────
+    # ── D&D: files from Explorer (v1.2.8) ────────────────────────────────
 
     _DRAG_TYPES = (QEvent.Type.DragEnter, QEvent.Type.DragMove, QEvent.Type.Drop)
 
     def eventFilter(self, obj, event):
-        """Drag-события на детях вкладки пересылаются в обработчики САМОЙ
-        вкладки: цель drop'а — текущий каталог независимо от того, куда именно
-        (на строку дерева, на кнопки) упали файлы. Возврат True = событие
-        потреблено (QTreeWidget не обрабатывает его «по-своему»)."""
+        """Drag events on the tab's children are forwarded to the tab's OWN
+        handlers: the drop target is the current directory regardless of where
+        exactly (a tree row, a button) the files landed. Returning True = the
+        event is consumed (QTreeWidget does not process it "its own way")."""
         etype = event.type()
         if etype in self._DRAG_TYPES and (obj is self or self.isAncestorOf(obj)):
             if etype == QEvent.Type.DragEnter:
@@ -337,8 +338,8 @@ class SftpTab(QWidget):
 
     @staticmethod
     def _local_files(mime_data) -> list:
-        """Существующие локальные файлы из URL перетаскивания. Каталоги,
-        удалённые/несуществующие пути и не-file данные — пропускаются."""
+        """Existing local files from the dragged URLs. Directories, deleted/
+        nonexistent paths, and non-file data — are skipped."""
         out = []
         if mime_data is None or not mime_data.hasUrls():
             return out
@@ -355,7 +356,7 @@ class SftpTab(QWidget):
             event.acceptProposedAction()
 
     def dragMoveEvent(self, event):
-        # Тот же ответ, что и в dragEnter — иначе Qt сбросит действие до Drop.
+        # Same answer as dragEnter — otherwise Qt will reset the action before Drop.
         if self._local_files(event.mimeData()):
             event.acceptProposedAction()
 
@@ -366,20 +367,20 @@ class SftpTab(QWidget):
         self._on_drop(files)
 
     def _on_drop(self, files: list):
-        """Результат drop'а: upload в ТЕКУЩИЙ каталог (как кнопка Upload)."""
+        """Drop result: upload into the CURRENT directory (like the Upload button)."""
         if not files:
-            # В перетаскивании нет локальных файлов (каталоги/другие данные).
+            # No local files in the drag (directories/other data).
             self.message.emit(_t("sftp.drop_no_files"))
             return
         if self._worker is None:
             self.message.emit(_t("sftp.waiting_connection"))
             return
-        for f in files:  # несколько файлов = последовательные задачи очереди (v1.1.3)
+        for f in files:  # several files = sequential queue tasks (v1.1.3)
             self._worker.queue_upload(f, self._current_dir)
         self.message.emit(
             _t("sftp.drop_queued", count=len(files), dir=self._current_dir))
 
-    # ── Состояние передач (кнопка «Отменить») ────────────────────────────
+    # ── Transfer state (the "Cancel" button) ─────────────────────────────
 
     def _on_task_started(self, task_id: int, kind: str, _label: str):
         if kind in ("upload", "download"):

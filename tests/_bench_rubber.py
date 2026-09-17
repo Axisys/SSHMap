@@ -1,21 +1,21 @@
 # -*- coding: utf-8 -*-
-"""v1.2.10rc3 — замер rubber-band выделения (AUDIT авто #9). НЕ часть сьюта.
+"""v1.2.10rc3 — the measurement of the rubber-band selection (the AUDIT auto #9). NOT part of the suite.
 
-Паттерн standalone-замера (как tests/_bench_history.py для v1.2.12): запускается
-вручную, печатает мс в stdout — числа уходят в CHANGELOG.md («измерено на …,
-v1.2.10rc3»). run_all.py его НЕ собирает (файлы с префиксом _ пропускаются).
+The pattern of the standalone measurement (like tests/_bench_history.py for v1.2.12): it is run
+manually, prints the ms to stdout — the numbers go to CHANGELOG.md ("measured on …,
+v1.2.10rc3"). run_all.py does NOT collect it (files with the _ prefix are skipped).
 
-Сценарий: синтетическая карта 500 ServerNode (сетка 25×20) + связи и заметка
-(реалистичный состав элементов сцены); драг рамки выделения через всю карту —
-N шагов от левого верхнего угла к правому нижнему. Каждый шаг = одно движение
-мыши = один вызов MapView._update_rubber_select (до фикса v1.2.10rc3 — полный
-O(n) обход scene.items(); после — пространственный индекс scene().items(rect)
-+ фильтр isinstance).
+The scenario: a synthetic map of 500 ServerNode (the grid 25×20) + the connections and a note
+(a realistic composition of the scene elements); the drag of the selection frame across the map —
+N steps from the top-left corner to the bottom-right. Each step = one mouse movement
+= one call of MapView._update_rubber_select (before the fix of v1.2.10rc3 — the full
+O(n) sweep of scene.items(); after — the spatial index scene().items(rect)
++ the isinstance filter).
 
-Сравнение до/после: прогнать скрипт на кодовой базе v1.2.10rc2 (до фикса),
-затем после фикса graphics/map_view.py — обе пары чисел в CHANGELOG.
+The before/after comparison: run the script on the codebase of v1.2.10rc2 (before the fix),
+then after the fix of graphics/map_view.py — both pairs of numbers into the CHANGELOG.
 
-Запуск:  python tests/_bench_rubber.py   (из корня проекта)
+Run:  python tests/_bench_rubber.py   (from the project root)
 """
 import platform
 import sys
@@ -32,12 +32,12 @@ app = QApplication.instance() or QApplication([])
 
 
 def build_scene(n_cols=25, n_rows=20):
-    """Синтетическая карта: сетка узлов + связи и заметка (прочие элементы сцены)."""
+    """The synthetic map: the grid of the nodes + the connections and a note (the other elements of the scene)."""
     from models.server import ServerData
     from graphics.map_scene import MapScene
 
     scene = MapScene()
-    dx, dy = 280.0, 240.0   # шаг сетки > MIN_NODE_WIDTH/HEIGHT — узлы не перекрываются
+    dx, dy = 280.0, 240.0   # the grid step > MIN_NODE_WIDTH/HEIGHT — the nodes do not overlap
     ids = []
     for r in range(n_rows):
         for c in range(n_cols):
@@ -46,8 +46,8 @@ def build_scene(n_cols=25, n_rows=20):
                               x=100.0 + c * dx, y=100.0 + r * dy)
             scene.add_server(data)
             ids.append(data.id)
-    # Связи и заметка — другие элементы сцены (старый полный обход тоже их видел;
-    # items(rect) отдаёт их кандидатами — фильтр isinstance должен отсечь).
+    # The connections and the note — other scene elements (the old full walk saw them too;
+    # items(rect) returns them as candidates — the isinstance filter must cut them off).
     for i in range(0, len(ids) - 1, 37):
         scene.add_connection(ids[i], ids[i + 1])
     scene.add_note("bench note", x=40.0, y=40.0)
@@ -55,10 +55,10 @@ def build_scene(n_cols=25, n_rows=20):
 
 
 def drag_across(view, steps=25):
-    """Один полный драг рамки через карту: start → steps обновлений → finish.
+    """One full rubber-band drag across the map: start → the update steps → finish.
 
-    Возвращает (ms_обновлений, ширина/высота финальной рамки). Замеряется ТОЛЬКО
-    цикл _update_rubber_select — старт/финиш (addItem/removeItem) не в счёт."""
+    Returns (ms of the updates, the width/height of the final band). Measures ONLY
+    the _update_rubber_select loop — the start/finish (addItem/removeItem) do not count."""
     nodes = view.scene().nodes()
     xs = [n.pos().x() for n in nodes]
     ys = [n.pos().y() for n in nodes]
@@ -87,24 +87,24 @@ def main():
     view.resize(1200, 800)
 
     steps = 25
-    print(f"_bench_rubber (v1.2.10rc3, AUDIT авто #9): {n_nodes} узлов (сетка 25x20), "
-          f"элементов сцены={n_items}")
-    print(f"  среда: python {platform.python_version()}, Qt {qt_ver()}, "
+    print(f"_bench_rubber (v1.2.10rc3, AUDIT auto #9): {n_nodes} nodes (25x20 grid), "
+          f"scene items={n_items}")
+    print(f"  env: python {platform.python_version()}, Qt {qt_ver()}, "
           f"PySide6 {pyside_ver}, offscreen")
 
-    # Разогрев: первый прогон строит внутренние индексы/кэши Qt — не в зачёт.
+    # The warm-up: the first run builds the internal Qt indexes/caches — not counted.
     for _ in range(3):
         drag_across(view, steps)
     cycles = [drag_across(view, steps)[0] for _ in range(5)]
     w, h = drag_across(view, steps)[1], drag_across(view, steps)[2]
 
-    print(f"  драг рамки через карту: {steps} шагов (каждый = mouse move), "
-          f"финальная рамка {w:.0f}x{h:.0f}")
+    print(f"  rubber-band drag across the map: {steps} steps (each = mouse move), "
+          f"final rectangle {w:.0f}x{h:.0f}")
     for i, ms in enumerate(cycles, 1):
-        print(f"  цикл {i}: {ms:8.2f} мс   ({ms * 1000.0 / steps:7.1f} мкс/обновление)")
+        print(f"  cycle {i}: {ms:8.2f} ms   ({ms * 1000.0 / steps:7.1f} µs/update)")
     best = min(cycles)
-    print(f"  ЛУЧШИЙ из {len(cycles)} циклов: {best:.2f} мс "
-          f"({best * 1000.0 / steps:.1f} мкс/обновление, {n_nodes} узлов)")
+    print(f"  BEST of {len(cycles)} cycles: {best:.2f} ms "
+          f"({best * 1000.0 / steps:.1f} µs/update, {n_nodes} nodes)")
     return 0
 
 

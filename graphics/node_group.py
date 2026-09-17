@@ -1,25 +1,26 @@
-"""Группировка узлов (v0.8.1): кластер/папка на карте.
+"""Node grouping (v0.8.1): a cluster/folder on the map.
 
-Группа — подписанная прямоугольная область ПОД узлами и стрелками (z = Z_VALUE,
-ниже всех: «фон»-зона карты). Жесты — как у StickyNote (ручная обработка мыши,
-ItemIsMovable НЕ ставится — см. docstring sticky_note.py про ScrollHandDrag):
+A group — a labeled rectangular area UNDER the nodes and arrows (z = Z_VALUE,
+the lowest: the map's "background" zone). The gestures — as in StickyNote
+(manual mouse handling, ItemIsMovable is NOT set — see the sticky_note.py
+docstring about ScrollHandDrag):
 
-    drag  — за любое место рамки перемещает группу; ВСЕ члены сдвигаются на тот же
-            дельта-сдвиг (задача v0.8.1 #2: «серверы внутри группы автоматически
-            перемещаются при изменении границы группы»);
-    resize — за правый нижний угол (CORNER_HIT px): члены репозиционируются
-            пропорционально новому размеру и клампятся внутрь рамки;
-    double-click по верхней полосе (TITLE_ZONE_H) — сигнал renameRequested →
-            диалог переименования в MainWindow.
+    drag  — by any point of the frame it moves the group; ALL members are shifted
+            by the same delta (task v0.8.1 #2: "the servers inside a group move
+            automatically when the group boundary changes");
+    resize — by the bottom-right corner (CORNER_HIT px): the members are repositioned
+            proportionally to the new size and clamped inside the frame;
+    a double click on the top band (TITLE_ZONE_H) — the renameRequested signal →
+            the rename dialog in MainWindow.
 
-Членство геометрическое: центр сервера внутри ВЕРХНЕЙ группы → он её член
-(MapScene.resync_group_members() пересчитывает при любом движении/resize).
-Поэтому в JSON (массив "groups") хранится только {id, name, x, y, width, height} —
-членство не сериализуется и восстанавливается из геометрии при загрузке.
+Membership is geometric: a server center inside the TOPMOST group → it is its member
+(MapScene.resync_group_members() recomputes on any move/resize).
+That is why the JSON (the "groups" array) stores only {id, name, x, y, width, height} —
+membership is not serialized and is restored from the geometry on load.
 
-QGraphicsObject (а не QGraphicsItem) — по спецификации v0.8.1: нужны сигналы
-(moved/resized/titleChanged/membershipChanged/renameRequested), которые поднимает
-MainWindow на dirty-маркер проекта, как у заметок.
+QGraphicsObject (not QGraphicsItem) — per the v0.8.1 spec: the signals
+(moved/resized/titleChanged/membershipChanged/renameRequested) are needed, which
+MainWindow turns into the project dirty marker, as with the notes.
 """
 import uuid
 from typing import List, Optional
@@ -30,49 +31,49 @@ from PySide6.QtGui import (
 )
 from PySide6.QtWidgets import QGraphicsItem, QGraphicsObject
 
-try:  # v1.2.5: центральная тема (палитра/радиусы/шрифты — ui/theme.py)
+try:  # v1.2.5: central theme (palette/radii/fonts — ui/theme.py)
     from ..ui import theme
 except ImportError:
     from ui import theme
 
 
 def _tint(hex_color: str, alpha: int) -> "QColor":
-    """v1.2.5: цвет центральной темы с прозрачностью (заливки группы)."""
+    """v1.2.5: a central theme color with opacity (the group fills)."""
     c = QColor(hex_color)
     c.setAlpha(alpha)
     return c
 
 
 class NodeGroup(QGraphicsObject):
-    """Кластер/папка на карте: рамка + заголовок, drag/resize, членство серверов."""
+    """A cluster/folder on the map: a frame + a title, drag/resize, server membership."""
 
-    Z_VALUE = -5.0     # ниже узлов (z=0) и стрелок (z=-2) — «фон»-зона карты
+    Z_VALUE = -5.0     # below the nodes (z=0) and the arrows (z=-2) — the map's "background" zone
     MIN_W, MIN_H = 160.0, 100.0
     MAX_W, MAX_H = 2400.0, 1600.0
     DEFAULT_W, DEFAULT_H = 480.0, 320.0
 
-    CORNER_HIT = 18.0      # зона «за угол» для resize (px от правого нижнего, как у заметок)
-    TITLE_ZONE_H = 28.0    # верхняя полоса: двойной клик — переименование
-    MEMBER_MARGIN = 8.0    # мин. отступ членов от рамки при клампе на resize
+    CORNER_HIT = 18.0      # "grab the corner" zone for resize (px from the bottom-right, as with the notes)
+    TITLE_ZONE_H = 28.0    # the top band: a double click — rename
+    MEMBER_MARGIN = 8.0    # the minimum inset of the members from the frame when clamping on resize
 
-    CORNER_RADIUS = theme.RADIUS_GROUP   # скругление рамки (в едином стиле с карточкой узла)
+    CORNER_RADIUS = theme.RADIUS_GROUP   # rounding of the frame (in one style with the node card)
 
-    # v1.2.5: цвета — из центральной темы (ui/theme.py); значения без изменений.
-    COLOR_BORDER = QColor(theme.GROUP_BORDER)     # violet-600 — отличается от синего узлов
+    # v1.2.5: colors — from the central theme (ui/theme.py); values unchanged.
+    COLOR_BORDER = QColor(theme.GROUP_BORDER)     # violet-600 — distinct from the nodes' blue
     COLOR_HOVER = QColor(theme.GROUP_HOVER)       # violet-400
-    COLOR_SELECTED = QColor(theme.SELECTION_AMBER)  # тот же янтарь, что выделение узла (единая палитра)
-    COLOR_FILL = _tint(theme.GROUP_BORDER, 16)        # почти прозрачная заливка — сетка видна сквозь
+    COLOR_SELECTED = QColor(theme.SELECTION_AMBER)  # the same amber as the node selection (a single palette)
+    COLOR_FILL = _tint(theme.GROUP_BORDER, 16)        # a nearly transparent fill — the grid shows through
     COLOR_FILL_HOVER = _tint(theme.GROUP_BORDER, 28)
     COLOR_FILL_SELECTED = _tint(theme.SELECTION_AMBER, 20)
-    COLOR_TITLE = QColor(theme.GROUP_TITLE)       # violet-300 — читается на тёмной карте
+    COLOR_TITLE = QColor(theme.GROUP_TITLE)       # violet-300 — reads on the dark map
 
-    moved = Signal()               # группу переместили (dirty-причина для MainWindow)
-    resized = Signal()             # размер изменён (drag за угол или set_group_size)
-    titleChanged = Signal(str)     # заголовок переименован (новое имя — аргумент)
-    membershipChanged = Signal()   # состав членов изменился (человек перетащил узел в/из группы)
-    renameRequested = Signal()     # двойной клик по заголовку → MainWindow откроет диалог
-    # v0.8.3-audit (#6): завершённые жесты — для undo-команд (паттерн node_drag_committed)
-    moveCommitted = Signal(object, object)   # (QPointF старая поз., QPointF новая)
+    moved = Signal()               # the group was moved (a dirty reason for MainWindow)
+    resized = Signal()             # the size changed (a corner drag or set_group_size)
+    titleChanged = Signal(str)     # the title was renamed (the new name — the argument)
+    membershipChanged = Signal()   # the member composition changed (a user dragged a node into/out of the group)
+    renameRequested = Signal()     # a double click on the title → MainWindow opens the dialog
+    # v0.8.3-audit (#6): completed gestures — for the undo commands (the node_drag_committed pattern)
+    moveCommitted = Signal(object, object)   # (the old position as a QPointF, the new one)
     resizeCommitted = Signal(float, float, float, float)  # (w0, h0, w1, h1)
 
     def __init__(self, x: float = 0.0, y: float = 0.0, width: Optional[float] = None,
@@ -82,27 +83,27 @@ class NodeGroup(QGraphicsObject):
 
         self.group_id = (str(group_id)[:8] if group_id else "") or None
         if self.group_id is None:
-            self.group_id = str(uuid.uuid4())[:8]  # тот же паттерн, что у заметок/серверов
+            self.group_id = str(uuid.uuid4())[:8]  # the same pattern as with the notes/servers
 
         self._name = str(name or "").strip()
         w, h = self._clamp_size(
             width if width else self.DEFAULT_W, height if height else self.DEFAULT_H)
         self._width, self._height = float(w), float(h)
 
-        # Члены: ServerNode (НЕ дочерние QGraphicsItem — независимые объекты сцены;
-        # их data.x/data.y остаются координатами СЦЕНЫ и корректно сохраняются в JSON).
+        # Members: ServerNode (NOT child QGraphicsItems — independent scene objects;
+        # their data.x/data.y stay SCENE coordinates and are saved correctly in the JSON).
         self._members = set()
 
-        # Ручное перемещение/resize (паттерн StickyNote: ScrollHandDrag иначе забирает жест)
+        # Manual move/resize (the StickyNote pattern: otherwise ScrollHandDrag would steal the gesture)
         self._drag_mode = None        # None | "move" | "resize"
         self._drag_start_scene = None
         self._size_start = None
-        # v0.8.3-audit (#6): геометрия на начало жеста — для moveCommitted/resizeCommitted
-        self._gesture_start_pos = None    # QPointF позиции группы
+        # v0.8.3-audit (#6): the geometry at the start of the gesture — for moveCommitted/resizeCommitted
+        self._gesture_start_pos = None    # the QPointF of the group position
         self._hover = False
-        self._applying_move = False   # наш собственный setPos в _apply_move — не дублировать shift в itemChange
+        self._applying_move = False   # our own setPos in _apply_move — do not duplicate the shift in itemChange
 
-        # ItemIsMovable НЕ ставим (см. модульный docstring); только выделение.
+        # ItemIsMovable is NOT set (see the module docstring); selection only.
         self.setFlag(QGraphicsItem.ItemIsSelectable, True)
         self.setAcceptHoverEvents(True)
         self.setZValue(self.Z_VALUE)
@@ -111,7 +112,7 @@ class NodeGroup(QGraphicsObject):
         self._display_name = ""
         self._update_title_text()
 
-    # ── Geometry helpers (паттерн StickyNote/ServerNode: явная геометрия) ──
+    # ── Geometry helpers (the StickyNote/ServerNode pattern: explicit geometry) ──
 
     @classmethod
     def _clamp_size(cls, w: float, h: float):
@@ -121,11 +122,11 @@ class NodeGroup(QGraphicsObject):
 
     @property
     def name(self) -> str:
-        """Имя группы (заголовок над рамкой)."""
+        """The group name (the title above the frame)."""
         return self._name
 
     def set_title(self, text: str):
-        """Переименовать группу. Пустое имя допускается (заголовок не рисуется)."""
+        """Rename the group. An empty name is allowed (the title is not drawn)."""
         new = str(text or "").strip()
         if new == self._name:
             return
@@ -134,38 +135,38 @@ class NodeGroup(QGraphicsObject):
         self.titleChanged.emit(new)
 
     def size(self):
-        """Текущий размер (w, h) в координатах сцены."""
+        """Current size (w, h) in scene coordinates."""
         return float(self._width), float(self._height)
 
     def boundingRect(self) -> QRectF:
-        """Явная геометрия группы (единообразно с ServerNode/StickyNote)."""
+        """Explicit group geometry (uniform with ServerNode/StickyNote)."""
         return QRectF(0, 0, self._width, self._height)
 
     def shape(self) -> QPainterPath:
-        """Hit-область — вся рамка: клик в любом месте зоны попадает в группу."""
+        """The hit area — the whole frame: a click anywhere in the zone lands on the group."""
         path = QPainterPath()
         path.addRoundedRect(QRectF(0, 0, self._width, self._height),
                             self.CORNER_RADIUS, self.CORNER_RADIUS)
         return path
 
     def _in_corner(self, local: QPointF) -> bool:
-        """Правый нижний угол — зона resize (как у заметок)."""
+        """The bottom-right corner — the resize zone (as with the notes)."""
         return (self._width - self.CORNER_HIT <= local.x() <= self._width and
                 self._height - self.CORNER_HIT <= local.y() <= self._height)
 
     def _in_title_zone(self, local: QPointF) -> bool:
-        """Верхняя полоса — зона двойного клика для переименования."""
+        """The top band — the double-click zone for renaming."""
         return 0.0 <= local.x() <= self._width and 0.0 <= local.y() <= self.TITLE_ZONE_H
 
     def set_group_size(self, width: float, height: float) -> bool:
-        """Изменить размер группы (clamp MIN/MAX).
+        """Change the group size (clamped MIN/MAX).
 
-        Задача v0.8.1 #2: члены автоматически перемещаются при изменении границы —
-        их позиции масштабируются пропорционально новому размеру (sx/sy от левого
-        верхнего угла), затем клампятся внутрь рамки с MEMBER_MARGIN, чтобы не
-        «выпасть» из папки даже если группа стала меньше узла.
+        Task v0.8.1 #2: the members move automatically when the boundary changes —
+        their positions are scaled proportionally to the new size (sx/sy from the
+        top-left corner), then clamped inside the frame with MEMBER_MARGIN, so they
+        do not "fall out" of the folder even if the group became smaller than a node.
 
-        Возвращает True, если размер реально изменился.
+        Returns True if the size really changed.
         """
         w, h = self._clamp_size(width, height)
         if abs(w - self._width) < 0.5 and abs(h - self._height) < 0.5:
@@ -175,34 +176,34 @@ class NodeGroup(QGraphicsObject):
         sx, sy = w / old_w, h / old_h
         gpos = self.pos()
 
-        # Сначала СВОЯ геометрия: промежуточные resync-и (от setPos членов ниже) увидят
-        # уже новую рамку — состав членства не «мигает» при расширении группы.
+        # First OUR OWN geometry: the intermediate resyncs (from the members' setPos below)
+        # will see the new frame already — the membership does not "flicker" on a group expansion.
         m = self.MEMBER_MARGIN
         self.prepareGeometryChange()
         self._width, self._height = float(w), float(h)
 
         for node in list(self._members):
-            r = node.sceneBoundingRect()  # узел — независимый item сцены: координаты сцены
+            r = node.sceneBoundingRect()  # a node — an independent scene item: scene coordinates
             lx = (r.left() - gpos.x()) * sx
             ly = (r.top() - gpos.y()) * sy
             nw, nh = r.width(), r.height()
-            max_lx = max(m, w - nw - m)   # узел шире группы → якорь в левом верхнем углу
+            max_lx = max(m, w - nw - m)   # a node wider than the group → anchored at the top-left corner
             max_ly = max(m, h - nh - m)
             lx = min(max(lx, m), max_lx)
             ly = min(max(ly, m), max_ly)
             node.setPos(gpos.x() + lx, gpos.y() + ly)
 
-        self._update_title_text()  # elide заголовка зависит от ширины
+        self._update_title_text()  # the title eliding depends on the width
 
         sc = self.scene()
         if sc is not None and hasattr(sc, "resync_group_members"):
-            sc.resync_group_members()  # другие узлы могли оказаться под рамкой / выйти из неё
+            sc.resync_group_members()  # other nodes may have ended up under the frame / left it
         self.update()
         self.resized.emit()
         return True
 
     def _apply_move(self, delta: QPointF):
-        """Сдвинуть группу И всех членов на delta (задача v0.8.1 #2 — drag-часть)."""
+        """Shift the group AND all members by delta (task v0.8.1 #2 — the drag part)."""
         if abs(delta.x()) < 0.5 and abs(delta.y()) < 0.5:
             return
         self.prepareGeometryChange()
@@ -212,31 +213,31 @@ class NodeGroup(QGraphicsObject):
         finally:
             self._applying_move = False
         for node in list(self._members):
-            # ServerNode.itemChange синхронизирует data.x/data.y и стрелки связей сам
+            # ServerNode.itemChange syncs data.x/data.y and the connection arrows by itself
             node.setPos(node.pos() + delta)
         sc = self.scene()
         if sc is not None and hasattr(sc, "resync_group_members"):
-            sc.resync_group_members()  # под рамкой могли оказаться другие узлы
+            sc.resync_group_members()  # other nodes may have ended up under the frame
         self.moved.emit()
 
     def itemChange(self, change, value):
-        """Внешний (программный) setPos — члены следуют за группой так же.
+        """An external (programmatic) setPos — the members follow the group the same way.
 
-        Интерактивный drag идёт через _apply_move() с флагом _applying_move — там
-        сдвиг членов уже сделан вручную; без флага itemChange ловит только
-        программные перемещения (тесты/скрипты), и дублирования не происходит.
+        An interactive drag goes through _apply_move() with the _applying_move flag — there
+        the member shift is already done manually; without the flag itemChange catches only
+        programmatic moves (tests/scripts), and there is no duplication.
 
-        Как и у ServerNode, хук вызывается ДО применения позиции: рамку для resync
-        считаем от value явно (moving_group-override в MapScene).
+        As with ServerNode, the hook is called BEFORE the position is applied: the frame for
+        the resync is computed from value explicitly (the moving_group override in MapScene).
         """
         if change == QGraphicsItem.ItemPositionChange and not getattr(self, "_applying_move", False):
             try:
                 dx = float(value.x()) - float(self.pos().x())
                 dy = float(value.y()) - float(self.pos().y())
-            except Exception:  # noqa: BLE001 — неожиданный тип value — отдаём стандартному пути
+            except Exception:  # noqa: BLE001 — an unexpected value type — hand it to the standard path
                 return super().itemChange(change, value)
             if abs(dx) + abs(dy) > 0.5:
-                result = super().itemChange(change, value)  # принять → Qt применит позицию
+                result = super().itemChange(change, value)  # accept → Qt applies the position
                 for node in list(self._members):
                     node.setPos(node.pos() + QPointF(dx, dy))
                 sc = self.scene()
@@ -247,10 +248,10 @@ class NodeGroup(QGraphicsObject):
                 return result
         return super().itemChange(change, value)
 
-    # ── Членство (ServerNode-объекты; эксклюзивность — один узел в одной группе) ──
+    # ── Membership (ServerNode objects; exclusivity — one node in one group) ──
 
     def get_members(self) -> List:
-        """Список членов (порядок не гарантирован)."""
+        """The member list (no order guaranteed)."""
         return list(self._members)
 
     def member_count(self) -> int:
@@ -260,37 +261,37 @@ class NodeGroup(QGraphicsObject):
         return node in self._members
 
     def add_member(self, node):
-        """Добавить члена. Эксклюзивность: узел не может быть в двух группах —
-        при необходимости снимаем его с прежней (верхняя группа побеждает)."""
+        """Add a member. Exclusivity: a node cannot be in two groups —
+        if needed we remove it from its old one (the topmost group wins)."""
         if node is None or node in self._members:
             return
         sc = self.scene()
         if sc is not None and hasattr(sc, "_groups"):
             for other in list(sc._groups):
                 if other is not self and node in other._members:
-                    other.remove_member(node)  # снимает membershipChanged прежней группы
+                    other.remove_member(node)  # removes the old group's membershipChanged
         self._members.add(node)
         self.membershipChanged.emit()
 
     def remove_member(self, node):
-        """Убрать члена (no-op, если его не было)."""
+        """Remove a member (a no-op if it was not there)."""
         if node in self._members:
             self._members.discard(node)
             self.membershipChanged.emit()
 
     def clear_members(self):
-        """Очистить состав одним сигналом (удаление группы / пересборка сцены)."""
+        """Clear the composition with a single signal (deleting a group / rebuilding the scene)."""
         if self._members:
             self._members.clear()
             self.membershipChanged.emit()
 
-    # ── Заголовок ──────────────────────────────────────────────
+    # ── Title ──────────────────────────────────────────────
 
     def _title_font(self) -> QFont:
         return QFont(theme.FONT_UI, 9, QFont.Bold)
 
     def _update_title_text(self):
-        """Elide длинного имени под ширину рамки (полное имя — в tooltip; паттерн ServerNode)."""
+        """Elide a long name to the frame width (the full name — in the tooltip; the ServerNode pattern)."""
         fm = QFontMetrics(self._title_font())
         max_w = max(int(self._width - 28), 1)
         if self._name and fm.horizontalAdvance(self._name) > max_w:
@@ -300,11 +301,11 @@ class NodeGroup(QGraphicsObject):
             self._display_name = self._name
             self.setToolTip("")
 
-    # ── Отрисовка (вся графика в paint() — без дочерних items:
-    #      единый hit-объект, стандартный drag работает по всей площади рамки) ──
+    # ── Rendering (all the graphics in paint() — no child items:
+    #      a single hit object, the standard drag works over the whole frame area) ──
 
     def _state_colors(self):
-        """(pen_color, pen_width, fill, title_color) для текущего состояния."""
+        """(pen_color, pen_width, fill, title_color) for the current state."""
         if self.isSelected():
             return (self.COLOR_SELECTED, 2.5, self.COLOR_FILL_SELECTED,
                     QColor(theme.GROUP_TITLE_SELECTED))
@@ -321,7 +322,7 @@ class NodeGroup(QGraphicsObject):
         pen_color, pen_width, fill, title_color = self._state_colors()
 
         path = QPainterPath()
-        # Инсет 1 px — рамка целиком внутри boundingRect (Qt клипует по нему)
+        # A 1 px inset — the frame is entirely inside the boundingRect (Qt clips to it)
         path.addRoundedRect(1.0, 1.0, w - 2.0, h - 2.0, self.CORNER_RADIUS, self.CORNER_RADIUS)
 
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
@@ -331,7 +332,7 @@ class NodeGroup(QGraphicsObject):
         painter.setBrush(QBrush(fill))
         painter.drawPath(path)
 
-        # Заголовок в верхней полосе (elide см. _update_title_text)
+        # The title in the top band (see _update_title_text for the eliding)
         if self._display_name:
             painter.setFont(self._title_font())
             painter.setPen(QPen(title_color))
@@ -340,21 +341,21 @@ class NodeGroup(QGraphicsObject):
                 Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
                 self._display_name)
 
-        # Маркер resize-угла — виден при hover/выделении (подсказка «за этот угол тянуть»)
+        # The resize-corner marker — visible on hover/selection (a "drag by this corner" hint)
         if self._hover or self.isSelected():
             painter.setPen(Qt.PenStyle.NoPen)
             painter.setBrush(QBrush(pen_color))
             r = theme.RADIUS_RESIZE_MARK
             painter.drawRoundedRect(QRectF(w - 16.0, h - 16.0, 10.0, 10.0), r, r)
 
-    # ── Mouse (ручное перемещение/resize — паттерн StickyNote) ──
+    # ── Mouse (manual move/resize — the StickyNote pattern) ──
 
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
             scene_pos = event.scenePos()
             local = self.mapFromScene(scene_pos) if scene_pos is not None else None
             if local is None or not self.boundingRect().contains(local):
-                super().mousePressEvent(event)  # клик мимо группы — стандартный путь
+                super().mousePressEvent(event)  # a click outside the group — the standard path
                 return
             self.setSelected(True)
             if self._in_corner(local):
@@ -364,9 +365,9 @@ class NodeGroup(QGraphicsObject):
             else:
                 self._drag_mode = "move"
                 self._drag_start_scene = scene_pos
-            # v0.8.3-audit (#6): запомнить геометрию начала жеста (для undo)
+            # v0.8.3-audit (#6): remember the start-of-gesture geometry (for undo)
             self._gesture_start_pos = QPointF(self.pos())
-            event.accept()  # НЕ передаём в сцену — иначе ScrollHandDrag заберёт жест
+            event.accept()  # do NOT pass it to the scene — otherwise ScrollHandDrag would steal the gesture
             return
         super().mousePressEvent(event)
 
@@ -379,9 +380,9 @@ class NodeGroup(QGraphicsObject):
                 delta = scene_pos - self._drag_start_scene
                 if abs(delta.x()) + abs(delta.y()) > 0.5:
                     self._apply_move(delta)
-                # Пошаговый сдвиг (старт обновляется) — без накопительной ошибки (StickyNote)
+                # Incremental shift (the start is updated) — no cumulative drift (StickyNote)
                 self._drag_start_scene = scene_pos
-            else:  # resize за правый нижний угол
+            else:  # resize by the bottom-right corner
                 w0, h0 = self._size_start or (self._width, self._height)
                 start_local = self.mapFromScene(self._drag_start_scene or scene_pos)
                 cur_local = self.mapFromScene(scene_pos)
@@ -401,8 +402,8 @@ class NodeGroup(QGraphicsObject):
             self._drag_start_scene = None
             self._size_start = None
             self._gesture_start_pos = None
-            # v0.8.3-audit (#6): жест завершён → сигнал для undo-команды окна.
-            # Эмиссия только при реальном изменении геометрии (иначе пустой шаг стека).
+            # v0.8.3-audit (#6): the gesture is complete → a signal for the window's undo command.
+            # Emitted only on a real geometry change (otherwise an empty stack entry).
             try:
                 if mode == "move" and start_pos is not None:
                     end_pos = QPointF(self.pos())
@@ -412,12 +413,12 @@ class NodeGroup(QGraphicsObject):
                     cur = (self._width, self._height)
                     if abs(cur[0] - start_size[0]) + abs(cur[1] - start_size[1]) > 0.5:
                         self.resizeCommitted.emit(start_size[0], start_size[1], cur[0], cur[1])
-            except Exception:  # noqa: BLE001 — undo-сигнал не роняет release
+            except Exception:  # noqa: BLE001 — the undo signal must not kill the release
                 pass
         super().mouseReleaseEvent(event)
 
     def mouseDoubleClickEvent(self, event):
-        """Двойной клик по заголовку — запрос переименования (MainWindow покажет диалог)."""
+        """A double click on the title — a rename request (MainWindow shows the dialog)."""
         scene_pos = event.scenePos()
         local = self.mapFromScene(scene_pos) if scene_pos is not None else None
         if local is not None and self._in_title_zone(local):
@@ -426,7 +427,7 @@ class NodeGroup(QGraphicsObject):
             return
         super().mouseDoubleClickEvent(event)
 
-    # ── Hover: курсоры (drag / resize-угол), как у заметок ──────
+    # ── Hover: cursors (drag / resize corner), as with the notes ──────
 
     def hoverEnterEvent(self, event):
         self._hover = True
@@ -451,8 +452,8 @@ class NodeGroup(QGraphicsObject):
         self.update()
         super().hoverLeaveEvent(event)
 
-    # ── Serialization (v0.8.1: массив "groups" в JSON проекта) ───
-    # Членство НЕ хранится — геометрический инвариант пересчитывает его при загрузке.
+    # ── Serialization (v0.8.1: the "groups" array in the project JSON) ───
+    # Membership is NOT stored — the geometric invariant recomputes it on load.
 
     def to_dict(self) -> dict:
         return {
@@ -466,7 +467,7 @@ class NodeGroup(QGraphicsObject):
 
     @classmethod
     def from_dict(cls, raw: dict) -> "NodeGroup":
-        """Создать группу из записи JSON (битые значения — дефолты; паттерн StickyNote)."""
+        """Create a group from a JSON entry (corrupt values — defaults; the StickyNote pattern)."""
         try:
             x = float(raw.get("x") or 0.0)
             y = float(raw.get("y") or 0.0)

@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
-"""Регрессия v0.9.4: теги/цветные метки серверов.
+"""Regression v0.9.4: server tags/color labels.
 
-Запуск: python tests/test_tags.py или python tests/run_all.py
-Без pytest: общая обвязка tests/_common.py.
+Run: python tests/test_tags.py or python tests/run_all.py
+Without pytest: the common harness tests/_common.py.
 """
 import json
 import os
@@ -11,7 +11,7 @@ import tempfile
 
 from _common import bootstrap, check, finish
 
-ROOT, WORK = bootstrap()  # ДО импортов модулей приложения (HOME-изоляция и faulthandler внутри)
+ROOT, WORK = bootstrap()  # BEFORE the app module imports (the HOME isolation and faulthandler inside)
 
 from PySide6.QtWidgets import QApplication
 
@@ -27,7 +27,7 @@ def main():
 
     scene = MapScene()
 
-    # ── #1 Модель: поле tags, дефолты и нормализация при чтении JSON ──
+    # ── #1 The model: the tags field, the defaults, and normalization when reading JSON ──
     d = ServerData(id="t1", alias="web", host="10.0.0.1", user="root",
                    tags=["prod", " web ", "", "PROD"])
     check("model stores tags as given (normalize at parse/dialog layer)",
@@ -48,7 +48,7 @@ def main():
     check("to_dict serializes tags array", out["tags"] == ["prod", "dev", "42"])
     check("password not in dict", "password" not in out)
 
-    # ── #2 Цвета тегов: известные роли + стабильный хэш произвольных ──
+    # ── #2 The tag colors: the known roles + a stable hash of arbitrary ones ──
     check("known role color prod", ServerNode.tag_color("prod").name() == "#ef4444")
     check("role color case-insensitive",
           ServerNode.tag_color("Prod") == ServerNode.tag_color("prod"))
@@ -58,7 +58,7 @@ def main():
     palette = {Q.name() for Q in ServerNode.TAG_PALETTE}
     check("arbitrary tag from palette", ServerNode.tag_color("webfarm").name() in palette)
 
-    # ── #3 Полоска тегов на карточке (expanded) ──
+    # ── #3 The tag strip on the card (expanded) ──
     n = scene.add_server(ServerData(id="n1", alias="app", host="10.0.0.3", user="u",
                                     tags=["prod", "dmz"]))
     check("two visible segments for two tags",
@@ -75,7 +75,7 @@ def main():
     vis = [s.isVisible() for s in n._tag_segments]
     check("refresh_tags after edit", vis[0] and not any(vis[1:]))
 
-    # ── #4 Свёрнутый вид: полоска остаётся, следует за высотой ──
+    # ── #4 The collapsed view: the strip stays and follows the height ──
     n.toggle_collapsed()
     check("collapsed height applied", n._current_height == ServerNode.COLLAPSED_HEIGHT)
     r = n._tag_segments[0].rect()
@@ -84,21 +84,21 @@ def main():
           and r.width() == ServerNode.TAG_STRIP_WIDTH)
     n.toggle_collapsed()
 
-    # ── #5 Пустые теги — сегменты скрыты ──
+    # ── #5 Empty tags — the segments are hidden ──
     n.data.tags = []
     n.refresh_tags()
     check("no tags -> all segments hidden",
           not any(s.isVisible() for s in n._tag_segments))
 
-    # ── #6 set_dimmed: затемнение несовпадающих узлов ──
+    # ── #6 set_dimmed: dimming the non-matching nodes ──
     n.set_dimmed(True)
     check("dimmed opacity", abs(n.opacity() - ServerNode.DIM_OPACITY) < 1e-6)
-    n.set_dimmed(True)   # повторный вызов — no-op
+    n.set_dimmed(True)   # a repeated call — a no-op
     check("dim idempotent", abs(n.opacity() - ServerNode.DIM_OPACITY) < 1e-6)
     n.set_dimmed(False)
     check("undim restores opacity", abs(n.opacity() - 1.0) < 1e-6)
 
-    # ── #7 Backward-compat: проект со старым форматом (без tags) читается ──
+    # ── #7 Backward-compat: a project in the old format (no tags) is readable ──
     old_project = {
         "version": "0.9",
         "servers": [

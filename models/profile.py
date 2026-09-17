@@ -20,10 +20,10 @@ class Profile:
     password: str = ""  # SSH password (optional — only used locally during edit, never persisted to disk)
 
     def __post_init__(self):
-        # AUDIT v0.7.2 (средняя #13): id генерируем ТОЛЬКО для новых профилей.
-        # Раньше любой id длиной ≠ 8 молча заменялся при загрузке — связь профиля с
-        # записью в keyring ("profile:{id}") терялась и пароль «исчезал». Теперь
-        # существующий id (какой бы длины) сохраняется как есть.
+        # AUDIT v0.7.2 (medium #13): id is generated ONLY for new profiles.
+        # Earlier any id whose length ≠ 8 was silently replaced on load — the link between
+        # the profile and the keyring entry ("profile:{id}") was lost and the password
+        # "disappeared". Now an existing id (of any length) is kept as-is.
         if not self.id:
             import uuid
             self.id = str(uuid.uuid4())[:8]
@@ -56,8 +56,8 @@ def load_profiles() -> List[Profile]:
     try:
         with open(_profiles_path(), "r", encoding="utf-8") as f:
             raw = json.load(f)
-        # AUDIT v0.7.2 (средняя #13): id из файла сохраняем как есть — только пустой
-        # генерируем (__post_init__). Битые записи пропускаем, не роняя загрузку.
+        # AUDIT v0.7.2 (medium #13): the id from the file is kept as-is — only an empty one
+        # is generated (__post_init__). Corrupt entries are skipped, without breaking the load.
         profiles = []
         for p in raw or []:
             if not isinstance(p, dict):
@@ -88,10 +88,10 @@ def save_profiles(profiles: List[Profile]) -> None:
     data = []
     for p in profiles:
         d = asdict(p)
-        d.pop("password", None)  # пароль живёт только в keyring, а не в JSON
+        d.pop("password", None)  # the password lives only in the keyring, not in the JSON
         data.append(d)
-    # v0.9.4-fix: атомарная запись (tmp + fsync + os.replace) — как в storage/project.py;
-    # крах посреди прямого open/write рвал файл профилей целиком.
+    # v0.9.4-fix: atomic write (tmp + fsync + os.replace) — like in storage/project.py;
+    # a crash mid-way through a direct open/write corrupted the entire profiles file.
     tmp_path = _profiles_path() + ".tmp"
     with open(tmp_path, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
@@ -112,9 +112,9 @@ def add_profile(name: str, user: str, password: str = "") -> Profile:
     )
     profiles.append(p)
 
-    # AUDIT v0.7.2 (низкая #14): отдельной записи в keyring больше нет — save_profiles()
-    # ниже делает её в том же проходе для всех профилей с непустым паролем. Раньше пароль
-    # нового профиля записывался дважды (здесь и в save_profiles) — лишний I/O без пользы.
+    # AUDIT v0.7.2 (low #14): there is no separate keyring write anymore — save_profiles()
+    # below does it in the same pass for all profiles with a non-empty password. Earlier the
+    # new profile's password was written twice (here and in save_profiles) — useless extra I/O.
     save_profiles(profiles)
     return p
 
@@ -124,9 +124,9 @@ def update_profile(profile_id: str, name: str, user: str,
     """Update an existing profile by ID.
 
     password:
-        None — не менять сохранённый пароль (запись в keyring остаётся как есть);
-        ""   — стереть пароль;
-        str  — установить новый пароль.
+        None — do not change the stored password (the keyring entry is kept as-is);
+        ""   — clear the password;
+        str  — set a new password.
     """
     profiles = load_profiles()
     for i, p in enumerate(profiles):
@@ -135,7 +135,7 @@ def update_profile(profile_id: str, name: str, user: str,
             p.user = user.strip()
 
             if password is None:
-                # «Не менять»: сохраняем текущий пароль (из keyring) для использования в памяти
+                # "Do not change": keep the current password (from the keyring) for in-memory use
                 p.password = get_profile_password(profile_id) or ""
             elif password:
                 # Save password to keyring BEFORE potentially clearing it from memory

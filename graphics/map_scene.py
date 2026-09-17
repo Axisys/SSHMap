@@ -7,23 +7,23 @@ except ImportError:
 
 from .server_node import ServerNode
 from .connection_arrow import (ConnectionArrow, DEFAULT_CONNECTION_TYPE,
-                               edge_point)  # v1.2.4: линия-якорь «от края к краю»
+                               edge_point)  # v1.2.4: the anchor line "from edge to edge"
 try:
     from .sticky_note import StickyNote
-except ImportError:  # плоский импорт (запуск из корня)
+except ImportError:  # flat import (running from the root)
     from sticky_note import StickyNote
 
 try:
-    from .node_group import NodeGroup  # v0.8.1: группировка узлов (кластеры/папки)
+    from .node_group import NodeGroup  # v0.8.1: node grouping (clusters/folders)
 except ImportError:
     from node_group import NodeGroup
 
 try:
-    from .background_image import BackgroundImage  # v0.9.1: фон-изображение
+    from .background_image import BackgroundImage  # v0.9.1: the background image
 except ImportError:
     from background_image import BackgroundImage
 
-try:  # v1.2.5: центральная тема (палитра/радиусы/шрифты — ui/theme.py)
+try:  # v1.2.5: central theme (palette/radii/fonts — ui/theme.py)
     from ..ui import theme
 except ImportError:
     from ui import theme
@@ -34,10 +34,10 @@ from PySide6.QtWidgets import QGraphicsScene
 
 
 class MapScene(QGraphicsScene):
-    """Главная сцена карты."""
+    """The main map scene."""
 
-    # v1.2.4: якорное крепление заметки — левый верхний угол заметки = правый верхний
-    # угол узла + офсет (ROADMAP «правый верхний угол + 12px»)
+    # v1.2.4: anchor attachment of a note — the note's top-left corner = the node's
+    # top-right corner + an offset (ROADMAP "top-right corner + 12px")
     NOTE_ANCHOR_OFFSET_X = 12.0
     NOTE_ANCHOR_OFFSET_Y = 12.0
 
@@ -46,44 +46,45 @@ class MapScene(QGraphicsScene):
         self.setSceneRect(-5000, -5000, 10000, 10000)
         self._nodes: Dict[str, ServerNode] = {}
         self._arrows: List[ConnectionArrow] = []
-        # v0.7.2: независимые заметки (не связаны с серверами)
+        # v0.7.2: standalone notes (not linked to servers)
         self._notes: List[StickyNote] = []
-        # v1.2.4: линии-якоря закреплённых заметок (note_id → QGraphicsPathItem)
+        # v1.2.4: anchor lines of the attached notes (note_id → QGraphicsPathItem)
         self._note_anchor_lines: Dict[str, object] = {}
-        # v0.8.1: группы узлов (кластеры/папки на карте). Порядок в списке — порядок
-        # добавления; при одинаковом z верхняя группа = последняя добавленная.
+        # v0.8.1: node groups (clusters/folders on the map). The order in the list — the
+        # order of addition; at equal z the topmost group = the last one added.
         self._groups: List[NodeGroup] = []
-        # v0.9.1: фоновое изображение (схема здания / план дата-центра) — не более одного.
+        # v0.9.1: the background image (a building diagram / a data-center floor plan) — at most one.
         self._background: Optional[BackgroundImage] = None
-        # UI polish: адаптивная сетка — базовый шаг 20 px в координатах сцены; при зуме
-        # ВЫШЕ (scale < 1) шаг удваивается, пока интервал на экране не вернётся к базовому.
-        # Инвариант: интервал на экране всегда ∈ [16, 32) px — плотность постоянна, а при
-        # зуме >= 1 сетка как и раньше (ровно 20 px). Без адаптации при зуме 0.1 рисовалось
-        # в ~5 раз лишних линий по каждой оси (тормоз + визуальный шум).
+        # UI polish: an adaptive grid — the base step is 20 px in scene coordinates; when
+        # zoomed OUT (scale < 1) the step doubles until the on-screen interval returns to
+        # the base one. Invariant: the on-screen interval is always ∈ [16, 32) px — the
+        # density is constant, and at zoom >= 1 the grid is as before (exactly 20 px).
+        # Without the adaptation at zoom 0.1 about 5× more lines were drawn on each axis
+        # (a slowdown + visual noise).
         self._grid_size = 20
         self._grid_min_screen_px = float(self._grid_size) * 0.8   # 16 px
         self._grid_major_every = 5
-        # v1.2.5: цвета — из центральной темы (ui/theme.py); значения без изменений.
-        self._grid_color = QColor(theme.WINDOW_BG)      # minor-линии (тёмные)
-        self._grid_major_color = QColor(theme.BASE_BG)  # major-линии (чуть светлее)
+        # v1.2.5: colors — from the central theme (ui/theme.py); values unchanged.
+        self._grid_color = QColor(theme.WINDOW_BG)      # minor lines (dark)
+        self._grid_major_color = QColor(theme.BASE_BG)  # major lines (a bit lighter)
 
-    # ── AUDIT v0.8.3 (#5): публичные итераторы вместо обращений к _nodes/_arrows ──
+    # ── AUDIT v0.8.3 (#5): public iterators instead of accessing _nodes/_arrows ──
 
     def nodes(self) -> List[ServerNode]:
-        """Все узлы карты (копия списка — безопасно мутировать во время обхода)."""
+        """All map nodes (a list copy — safe to mutate during the iteration)."""
         return list(self._nodes.values())
 
     def arrows(self) -> List[ConnectionArrow]:
-        """Все стрелки-связи (копия списка)."""
+        """All connection arrows (a list copy)."""
         return list(self._arrows)
 
     def notes(self) -> List["StickyNote"]:
-        """Все sticky-заметки (копия списка) — AUDIT-фикс: публичный итератор
-        вместо обращений к _notes извне (как nodes()/arrows()/groups())."""
+        """All sticky notes (a list copy) — an AUDIT fix: a public iterator
+        instead of accessing _notes from outside (like nodes()/arrows()/groups())."""
         return list(self._notes)
 
     def get_node(self, node_id: str) -> Optional[ServerNode]:
-        """Узел по id или None."""
+        """A node by id, or None."""
         return self._nodes.get(node_id)
 
     def has_node(self, node_id: str) -> bool:
@@ -96,14 +97,15 @@ class MapScene(QGraphicsScene):
         return len(self._arrows)
 
     def groups(self) -> List[NodeGroup]:
-        """Все группы (v0.8.1; копия списка)."""
+        """All groups (v0.8.1; a list copy)."""
         return list(self._groups)
 
     def _current_grid_step(self, scale: float) -> int:
-        """Шаг сетки в координатах сцены для текущего масштаба вида.
+        """The grid step in scene coordinates for the current view scale.
 
-        При scale >= 1 — базовый шаг (сетка как раньше); при уменьшении зума шаг
-        удваивается до возврата интервала на экране к базовому (инвариант [0.8, 2)×base).
+        At scale >= 1 — the base step (the grid as before); as the zoom shrinks the step
+        doubles until the on-screen interval returns to the base one
+        (the [0.8, 2)×base invariant).
         """
         if scale <= 0:
             scale = 1.0
@@ -115,7 +117,7 @@ class MapScene(QGraphicsScene):
     def drawBackground(self, painter: QPainter, rect: QRectF):
         painter.fillRect(rect, QBrush(QColor(theme.CANVAS_BG)))
 
-        # Масштаб вида (m11) — из первого вью; без вью рисуем базовый шаг.
+        # The view scale (m11) — from the first view; without a view we draw the base step.
         scale = 1.0
         views = self.views()
         if views:
@@ -123,7 +125,7 @@ class MapScene(QGraphicsScene):
                 s = float(views[0].transform().m11())
                 if s > 0:
                     scale = s
-            except Exception:  # noqa: BLE001 — без трансформации рисуем как есть
+            except Exception:  # noqa: BLE001 — without a transform we draw as-is
                 pass
 
         step = self._current_grid_step(scale)
@@ -134,8 +136,9 @@ class MapScene(QGraphicsScene):
 
         left = int(rect.left()) // step * step
         top = int(rect.top()) // step * step
-        # Major-линии фиксируем по координатам сцены (кратные step*5), а не по счётчику
-        # от края видимого rect — иначе при панорамировании «светлые» линии бежали бы.
+        # The major lines are anchored to scene coordinates (multiples of step*5), not to
+        # a counter from the edge of the visible rect — otherwise the "light" lines would
+        # run away during panning.
         for x in range(left, int(rect.right()), step):
             painter.setPen(major_pen if (x // step) % self._grid_major_every == 0 else minor_pen)
             painter.drawLine(x, int(rect.top()), x, int(rect.bottom()))
@@ -144,8 +147,8 @@ class MapScene(QGraphicsScene):
             painter.drawLine(int(rect.left()), y, int(rect.right()), y)
 
     def add_server(self, data: ServerData) -> ServerNode:
-        # AUDIT v0.7.2 (низкая #17): коллизия uuid[:8] — перегенерируем id вместо тихого
-        # затирания существующей ноды (у заметок такая проверка уже была в add_note).
+        # AUDIT v0.7.2 (low #17): a uuid[:8] collision — we regenerate the id instead of
+        # silently clobbering an existing node (the notes already had such a check in add_note).
         if data.id in self._nodes:
             import uuid as _uuid
             while True:
@@ -156,8 +159,8 @@ class MapScene(QGraphicsScene):
         node = ServerNode(data)
         self.addItem(node)
         self._nodes[data.id] = node
-        # v0.8.1: новый узел оказался под рамкой группы → автоматически её член
-        # (геометрический инвариант см. resync_group_members). Дёшево: только если группы есть.
+        # v0.8.1: a new node ended up under a group frame → automatically its member
+        # (the geometric invariant — see resync_group_members). Cheap: only when groups exist.
         if self._groups:
             self.resync_group_members()
         return node
@@ -165,36 +168,37 @@ class MapScene(QGraphicsScene):
     def remove_server(self, node_id: str):
         if node_id in self._nodes:
             node = self._nodes[node_id]
-            # v0.8.1: узел уходит с карты — снимаем его из членства групп (члены
-            # остаются на своих местах; состав просто обновляется)
+            # v0.8.1: the node leaves the map — we remove it from the group membership
+            # (the members stay where they are; the composition is just updated)
             for g in list(self._groups):
                 if node in g.get_members():
                     g.remove_member(node)
-            # Удалить связанные стрелки
+            # Remove the connected arrows
             arrows_to_remove = [a for a in self._arrows
                                 if a.source == node or a.target == node]
             for a in arrows_to_remove:
                 self.removeItem(a)
-                getattr(a, 'deleteLater', lambda: None)()  # v0.9.3 fix: убираем C++-объект (иначе утечка до конца сессии)
+                getattr(a, 'deleteLater', lambda: None)()  # v0.9.3 fix: we drop the C++ object (otherwise a leak until the end of the session)
                 self._arrows.remove(a)
-            # v1.2.4 (D7): страховка — закреплённые заметки снимаются, линии убираются
-            # (no-op, если окно уже пушило detach-команды; защищает fallback-пути без окна)
+            # v1.2.4 (D7): a safety net — the attached notes are detached, the lines are removed
+            # (a no-op if the window already pushed the detach commands; protects the fallback
+            # paths without a window)
             for n in self.notes_attached_to(node_id):
                 n.server_id = None
                 self._remove_note_anchor_line(n.note_id)
             self.removeItem(node)
-            getattr(node, 'deleteLater', lambda: None)()  # v0.9.3 fix: карточка+тень+пульс+тексты — иначе живут вечно
+            getattr(node, 'deleteLater', lambda: None)()  # v0.9.3 fix: the card+shadow+pulse+text — otherwise they live forever
             del self._nodes[node_id]
 
     def add_connection(self, source_id: str, target_id: str, label: str = "",
                        ctype: str = DEFAULT_CONNECTION_TYPE,
                        bidirectional: bool = False) -> Optional[ConnectionArrow]:
-        # v1.2.6: bidirectional — наконечники на обоих концах (опционально; дефолт
-        # False — стандартная односторонняя стрелка, как до v1.2.6).
+        # v1.2.6: bidirectional — arrowheads on both ends (optional; the default
+        # False — a standard one-way arrow, as before v1.2.6).
         if source_id not in self._nodes or target_id not in self._nodes:
             return None
         if self.has_connection(source_id, target_id):
-            return None  # дубль связи не создаём
+            return None  # we do not create a duplicate connection
         src = self._nodes[source_id]
         tgt = self._nodes[target_id]
         arrow = ConnectionArrow(src, tgt, label, ctype, bidirectional=bidirectional)
@@ -203,22 +207,22 @@ class MapScene(QGraphicsScene):
         return arrow
 
     def has_connection(self, source_id: str, target_id: str) -> bool:
-        """Проверить, существует ли уже связь между узлами (в том же направлении)."""
+        """Check whether a connection between the nodes already exists (in the same direction)."""
         for a in self._arrows:
             if a.source.data.id == source_id and a.target.data.id == target_id:
                 return True
         return False
 
-    # ── v0.7.3: удаление связи ─────────────────────────────────
+    # ── v0.7.3: removing a connection ─────────────────────────────────
 
     def remove_connection(self, arrow: ConnectionArrow) -> bool:
-        """Удалить связь по ссылке на стрелку (контекстное меню, v0.7.3).
+        """Remove a connection by a reference to the arrow (the context menu, v0.7.3).
 
-        Возвращает True, если стрелка была найдена и удалена.
+        Returns True if the arrow was found and removed.
         """
         if arrow in self._arrows:
             self.removeItem(arrow)
-            getattr(arrow, 'deleteLater', lambda: None)()  # v0.9.3 fix: C++-объект не должен жить до смерти сцены (deleteLater доступен у QObject-наследников)
+            getattr(arrow, 'deleteLater', lambda: None)()  # v0.9.3 fix: the C++ object must not live until the scene's death (deleteLater is available on QObject subclasses)
             self._arrows.remove(arrow)
             return True
         return False
@@ -227,34 +231,34 @@ class MapScene(QGraphicsScene):
         for arrow in self._arrows:
             if arrow.source == node or arrow.target == node:
                 arrow.update_position()
-        # v1.2.4 (D4): закреплённые заметки следуют за узлом — единая точка покрытия,
-        # все пути изменения геометрии узла уже вызывают этот метод (itemChange при
-        # любом setPos, оба конца update_appearance). Во время live-drag якорь «догоняет»
-        # на один шаг ровно как стрелки — самоисцеление через повторный setPos в
-        # CmdMoveNode.redo() при отпускании.
+        # v1.2.4 (D4): the attached notes follow the node — a single point of coverage,
+        # all paths that change the node geometry already call this method (itemChange on
+        # any setPos, both ends of update_appearance). During a live drag the anchor
+        # "catches up" one step behind, exactly like the arrows — self-healing via the
+        # repeated setPos in CmdMoveNode.redo() on release.
         self.update_note_anchor_for_node(node)
 
     def get_selected_node(self):
-        """Возвращает выделенный ServerNode или None."""
+        """Returns the selected ServerNode, or None."""
         for item in self.selectedItems():
             if isinstance(item, ServerNode):
                 return item
         return None
 
-    # ── v0.7.2: заметки (Sticky Notes) ───────────────────────────
+    # ── v0.7.2: notes (Sticky Notes) ───────────────────────────
 
     def add_note(self, text: str = "", x: float = 0.0, y: float = 0.0,
                  width: float = 240.0, height: float = 160.0,
                  note_id: Optional[str] = None) -> StickyNote:
-        """Создать заметку на сцене (позиция — левый верхний угол)."""
+        """Create a note on the scene (the position — the top-left corner)."""
         if note_id is not None and any(n.note_id == note_id for n in self._notes):
-            # дубль id при загрузке битого файла — генерируем новый, не теряем заметку
+            # a duplicate id when loading a corrupt file — generate a new one, do not lose the note
             note_id = None
         note = StickyNote(text=text, x=x, y=y, width=width, height=height, note_id=note_id)
         self.addItem(note)
         self._notes.append(note)
-        # v1.2.4-fix: live-геометрия драга — линия-якорь закреплённой заметки следует
-        # за ней (свободной сигнал ни на что не влияет: on_note_drag_updated no-op)
+        # v1.2.4-fix: the live drag geometry — the anchor line of an attached note follows
+        # it (for a free one the signal does nothing: on_note_drag_updated is a no-op)
         try:
             note.dragUpdated.connect(self.on_note_drag_updated)
         except RuntimeError:  # Qt teardown
@@ -262,12 +266,12 @@ class MapScene(QGraphicsScene):
         return note
 
     def remove_note(self, note_id: str):
-        """Удалить заметку по id (no-op, если её нет)."""
+        """Remove a note by id (a no-op if there is none)."""
         for i, n in enumerate(self._notes):
             if n.note_id == note_id:
-                self._remove_note_anchor_line(note_id)  # v1.2.4: линия не должна остаться сиротой
+                self._remove_note_anchor_line(note_id)  # v1.2.4: the line must not be left orphaned
                 self.removeItem(n)
-                getattr(n, 'deleteLater', lambda: None)()  # v0.9.3 fix: QTextEdit внутри заметки — тяжёлый C++-объект
+                getattr(n, 'deleteLater', lambda: None)()  # v0.9.3 fix: the QTextEdit inside the note — a heavy C++ object
                 del self._notes[i]
                 return
 
@@ -277,21 +281,21 @@ class MapScene(QGraphicsScene):
                 return n
         return None
 
-    # ── v1.2.4: крепление заметок к серверам + линия-якорь ────────
+    # ── v1.2.4: attaching notes to servers + the anchor line ────────
 
     def notes_attached_to(self, node_id: str) -> List["StickyNote"]:
-        """Заметки, закреплённые к узлу (копия списка)."""
+        """The notes attached to the node (a list copy)."""
         return [n for n in self._notes if getattr(n, "server_id", None) == node_id]
 
     def attach_note_to_node(self, note, node, keep_position: bool = False) -> bool:
-        """v1.2.4: закрепить заметку к узлу (server_id + линия).
+        """v1.2.4: attach a note to a node (server_id + the line).
 
-        keep_position=False (меню/drag): заметка «встает» в якорь — правый верхний
-        угол узла + офсет 12 px, anchor_offset обнуляется.
-        keep_position=True (загрузка из файла / undo открепления): сохранённая позиция
-        доверяется — anchor_offset вычисляется от неё относительно якоря, заметка не
-        прыгает в угол (v1.2.4-fix: закреплённую заметку можно двигать).
-        Идемпотентно по совпадению id; False — если аргументы не на этой сцене.
+        keep_position=False (menu/drag): the note "snaps" to the anchor — the node's
+        top-right corner + a 12 px offset, anchor_offset is reset.
+        keep_position=True (loading from a file / undo of a detach): the stored position
+        is trusted — anchor_offset is computed from it relative to the anchor, the note
+        does not jump into the corner (v1.2.4-fix: an attached note can be moved).
+        Idempotent by id match; False — if the arguments are not on this scene.
         """
         if note is None or node is None or getattr(note, "scene", lambda: None)() is not self:
             return False
@@ -312,7 +316,7 @@ class MapScene(QGraphicsScene):
         return True
 
     def detach_note_from_node(self, note) -> bool:
-        """v1.2.4: открепить заметку (заметка остаётся на месте; линия убирается)."""
+        """v1.2.4: detach the note (the note stays where it is; the line is removed)."""
         if not getattr(note, "server_id", None):
             return False
         note.server_id = None
@@ -320,9 +324,9 @@ class MapScene(QGraphicsScene):
         return True
 
     def on_note_drag_updated(self, note=None):
-        """v1.2.4-fix: заметку двигают/масштабируют мышью (dragUpdated) — закреплённая
-        остаётся закреплённой: offset от якоря пересчитывается, линия-якорь следует
-        live. Свободная заметка / мёртвого узла нет — no-op."""
+        """v1.2.4-fix: the note is moved/resized with the mouse (dragUpdated) — an attached
+        one stays attached: the offset from the anchor is recomputed, the anchor line
+        follows live. A free note / no living node — a no-op."""
         if note is None or not getattr(note, "server_id", None):
             return
         node = self._nodes.get(note.server_id)
@@ -334,28 +338,28 @@ class MapScene(QGraphicsScene):
             note.anchor_offset = (p.x() - (r.right() + self.NOTE_ANCHOR_OFFSET_X),
                                   p.y() - (r.top() + self.NOTE_ANCHOR_OFFSET_Y))
             self._update_note_anchor_line(note, node)
-        except RuntimeError:  # Qt teardown — item уничтожен
+        except RuntimeError:  # Qt teardown — the item is destroyed
             pass
 
     def update_note_anchor_for_node(self, node):
-        """v1.2.4: пересчёт позиций заметок, закреплённых к узлу (паттерн
-        update_connections_for_node). Публичный — для прямых вызовов attach/detach/load.
-        v1.2.4-fix: заметка следует с сохранением своего anchor_offset (после ручного
-        сдвига она не «впрыгивает» обратно в угол узла)."""
+        """v1.2.4: recompute the positions of the notes attached to the node (the
+        update_connections_for_node pattern). Public — for direct attach/detach/load calls.
+        v1.2.4-fix: the note follows while keeping its anchor_offset (after a manual
+        shift it does not "jump back" into the node's corner)."""
         for note in self.notes_attached_to(node.data.id):
             try:
                 if note.scene() is not None:
                     self._place_note_at_anchor(note, node)
                     self._update_note_anchor_line(note, node)
-            except RuntimeError:  # Qt teardown — item уничтожен
+            except RuntimeError:  # Qt teardown — the item is destroyed
                 pass
 
     def _place_note_at_anchor(self, note, node):
-        """Позиция заметки = якорь узла (правый верхний угол + офсет 12 px, D2)
-        + anchor_offset заметки (v1.2.4-fix: её можно двигать — смещение сохраняется)."""
+        """The note position = the node anchor (the top-right corner + a 12 px offset, D2)
+        + the note's anchor_offset (v1.2.4-fix: it can be moved — the offset is kept)."""
         r = node.sceneBoundingRect()
         ox, oy = getattr(note, "anchor_offset", (0.0, 0.0))
-        note.prepareGeometryChange()  # QGraphicsProxyWidget — без этого артефакты
+        note.prepareGeometryChange()  # QGraphicsProxyWidget — without this there are artifacts
         note.setPos(r.right() + self.NOTE_ANCHOR_OFFSET_X + ox,
                     r.top() + self.NOTE_ANCHOR_OFFSET_Y + oy)
 
@@ -367,13 +371,13 @@ class MapScene(QGraphicsScene):
             pen = QPen(QColor(StickyNote.BG_COLOR), 1.2, Qt.PenStyle.DashLine)
             pen.setDashPattern([4.0, 3.0])
             line.setPen(pen)
-            line.setZValue(-1.0)  # выше стрелок (-2), ниже узлов/заметок (0)
+            line.setZValue(-1.0)  # above the arrows (-2), below the nodes/notes (0)
             self.addItem(line)
             self._note_anchor_lines[note.note_id] = line
         self._update_note_anchor_line(note, node)
 
     def _update_note_anchor_line(self, note, node):
-        """Прямой путь от края заметки до края узла через два edge_point (D3)."""
+        """A straight path from the note edge to the node edge via two edge_point calls (D3)."""
         line = self._note_anchor_lines.get(getattr(note, "note_id", None))
         if line is None:
             return
@@ -389,17 +393,17 @@ class MapScene(QGraphicsScene):
         line = self._note_anchor_lines.pop(note_id, None) if note_id else None
         if line is not None:
             self.removeItem(line)
-            getattr(line, "deleteLater", lambda: None)()  # v0.9.3-паттерн против утечки
+            getattr(line, "deleteLater", lambda: None)()  # the v0.9.3 anti-leak pattern
 
-    # ── v0.8.1: группы узлов (кластеры/папки на карте) ───────────
+    # ── v0.8.1: node groups (clusters/folders on the map) ───────────
 
     def add_group(self, name: str = "", x: float = 0.0, y: float = 0.0,
                   width: Optional[float] = None, height: Optional[float] = None,
                   group_id: Optional[str] = None) -> NodeGroup:
-        """Создать группу (рамка + заголовок) в точке сцены (левый верхний угол).
+        """Create a group (frame + title) at a scene point (the top-left corner).
 
-        Узлы, уже лежащие под рамкой, автоматически становятся членами (resync).
-        Коллизия id — перегенерируем (паттерн add_server/add_note), запись не теряем.
+        The nodes already lying under the frame automatically become members (resync).
+        An id collision — regenerate (the add_server/add_note pattern), the entry is not lost.
         """
         if group_id is not None and any(g.group_id == group_id for g in self._groups):
             import uuid as _uuid
@@ -415,19 +419,19 @@ class MapScene(QGraphicsScene):
             group_id=group_id)
         self.addItem(grp)
         self._groups.append(grp)
-        self.resync_group_members()  # авто-захват узлов под рамкой (задача v0.8.1 #2)
+        self.resync_group_members()  # auto-capture of the nodes under the frame (task v0.8.1 #2)
         return grp
 
     def remove_group(self, group: NodeGroup) -> bool:
-        """Удалить группу. Серверы-члены ОСТАЮТСЯ на карте в тех же позициях —
-        группы это контейнер-подпись, а не владелец узлов."""
+        """Remove a group. The member servers STAY on the map at the same positions —
+        a group is a labeled container, not an owner of the nodes."""
         if group in self._groups:
-            group.clear_members()  # один сигнал, без N пересигналов
+            group.clear_members()  # a single signal, no N re-signals
             self.removeItem(group)
-            getattr(group, 'deleteLater', lambda: None)()  # v0.9.3 fix: рамка+заголовок группы — тоже C++-объекты
+            getattr(group, 'deleteLater', lambda: None)()  # v0.9.3 fix: the group frame+title — C++ objects too
             self._groups.remove(group)
-            # Узел, чей центр был в этой группе, может оказаться под рамкой другой
-            # (нижележащей) группы — инвариант восстанавливаем.
+            # A node whose center was in this group may end up under the frame of another
+            # (lower) group — we restore the invariant.
             if self._nodes and self._groups:
                 self.resync_group_members()
             return True
@@ -446,46 +450,46 @@ class MapScene(QGraphicsScene):
         return None
 
     def find_group_at(self, scene_pos) -> Optional[NodeGroup]:
-        """Верхняя группа под точкой сцены (позднее добавленные — поверх)."""
-        try:  # contains(qreal x, qreal y) — не зависит от QPoint/QPointF-варианта биндинга
+        """The topmost group under a scene point (the later-added ones — on top)."""
+        try:  # contains(qreal x, qreal y) — independent of the QPoint/QPointF binding variant
             px = float(scene_pos.x())
             py = float(scene_pos.y())
-        except Exception:  # noqa: BLE001 — не точка (например, bool из QAction.triggered)
+        except Exception:  # noqa: BLE001 — not a point (e.g. a bool from QAction.triggered)
             return None
         for g in reversed(self._groups):
             try:
                 if QRectF(g.sceneBoundingRect()).contains(px, py):
                     return g
-            except RuntimeError:  # Qt teardown — item уже уничтожен
+            except RuntimeError:  # Qt teardown — the item is already destroyed
                 continue
         return None
 
     def get_selected_group(self) -> Optional[NodeGroup]:
-        """Возвращает выделенную группу или None (аналог get_selected_node)."""
+        """Returns the selected group, or None (the get_selected_node analog)."""
         for item in self.selectedItems():
             if isinstance(item, NodeGroup):
                 return item
         return None
 
     def resync_group_members(self, node_overrides=None, moving_group=None) -> bool:
-        """v0.8.1: пересчитать членство по геометрическому инварианту.
+        """v0.8.1: recompute the membership by the geometric invariant.
 
-        Узел — член ВЕРХНЕЙ группы, в которую попадает центр его карточки; вне всех
-        групп — не член ни одной (эксклюзивность). Вызывается при любом движении/
-        resize узлов и групп, поэтому в JSON членство хранить не нужно: оно
-        восстанавливается из геометрии. Возвращает True, если состав изменился.
+        A node — a member of the TOPMOST group whose frame contains its card center;
+        outside all groups — a member of none (exclusivity). Called on any move/resize
+        of the nodes and groups, so the membership does not need to be stored in the JSON:
+        it is restored from the geometry. Returns True if the composition changed.
 
-        node_overrides  — {node_id: QRectF}: целевые rect узлов, чьё перемещение ещё
-                          НЕ применено Qt (itemChange-хук вызывается до setPos).
-        moving_group    — (NodeGroup, QRectF): целевая рамка группы в процессе её
-                          перемещения (тот же pre-apply момент).
+        node_overrides  — {node_id: QRectF}: the target rects of nodes whose move is not
+                          yet applied by Qt (the itemChange hook is called before setPos).
+        moving_group    — (NodeGroup, QRectF): the target frame of a group while it is
+                          being moved (the same pre-apply moment).
         """
         if not self._groups:
-            return False  # без групп пересчитывать нечего (дешёвый выход на горячем пути)
+            return False  # without groups there is nothing to recompute (a cheap exit on the hot path)
 
         moving_grp, moving_rect = (moving_group or (None, None))
 
-        desired = {}  # node_id -> NodeGroup | None (по одному — верхней группе)
+        desired = {}  # node_id -> NodeGroup | None (one per node — the topmost group)
         for nid, node in list(self._nodes.items()):
             r = QRectF(node_overrides[nid]) if (node_overrides and nid in node_overrides) \
                 else node.sceneBoundingRect()
@@ -494,10 +498,10 @@ class MapScene(QGraphicsScene):
             center = r.center()
             cx, cy = float(center.x()), float(center.y())
             grp = None
-            for g in reversed(self._groups):  # верхняя (позднее добавленная) побеждает
+            for g in reversed(self._groups):  # the topmost (the later-added) one wins
                 try:
                     if g is moving_grp and moving_rect is not None:
-                        gr = QRectF(moving_rect)  # рамка ещё не применена Qt — цель из overrides
+                        gr = QRectF(moving_rect)  # the frame is not yet applied by Qt — the target from overrides
                     else:
                         gr = QRectF(g.sceneBoundingRect())
                     if gr.contains(cx, cy):
@@ -507,7 +511,7 @@ class MapScene(QGraphicsScene):
                     continue
             desired[nid] = grp
 
-        current = {}  # node_id -> группа из живых составов (инвариант эксклюзивности)
+        current = {}  # node_id -> the group from the live compositions (the exclusivity invariant)
         for g in self._groups:
             for n in list(g.get_members()):
                 if getattr(n, "data", None) is not None and hasattr(n.data, "id"):
@@ -515,43 +519,44 @@ class MapScene(QGraphicsScene):
 
         changed = False
         for nid, grp in desired.items():
-            cur = current.get(nid)  # None — узел не состоит ни в одной группе
+            cur = current.get(nid)  # None — the node is in no group
             if cur is grp:
                 continue
             node = self._nodes.get(nid)
             if node is None:
                 continue
             if cur is not None:
-                cur.remove_member(node)   # снимает membershipChanged (dirty-маркер окна)
+                cur.remove_member(node)   # emits membershipChanged (the window's dirty marker)
                 changed = True
             if grp is not None:
-                grp.add_member(node)      # add_member сам гарантирует эксклюзивность
+                grp.add_member(node)      # add_member guarantees the exclusivity itself
                 changed = True
         return changed
 
     def clear_all(self):
-        self.clear()  # убирает и узлы, и стрелки, и заметки, и группы, и фон (все QGraphicsItem)
+        self.clear()  # removes the nodes, the arrows, the notes, the groups, and the background (all the QGraphicsItems)
         self._nodes.clear()
         self._arrows.clear()
         self._notes.clear()
-        # v1.2.4: линии-якоря тоже scene items — clear() их уже уничтожил (C++-объекты
-        # мёртвы, removeItem на них падает RuntimeError'ом), достаточно сбросить ссылки
+        # v1.2.4: the anchor lines are scene items too — clear() already destroyed them
+        # (the C++ objects are dead, a removeItem on them raises a RuntimeError), just
+        # reset the references
         self._note_anchor_lines.clear()
-        self._groups.clear()  # v0.8.1: составы групп живут в самих items — они удалены
+        self._groups.clear()  # v0.8.1: the group compositions live in the items themselves — they are removed
         self._background = None  # v0.9.1
 
-    # ── v0.9.1: фоновое изображение + экспорт карты ──────────────
+    # ── v0.9.1: the background image + map export ──────────────
 
     def background(self) -> Optional[BackgroundImage]:
-        """Текущий фон (или None)."""
+        """The current background (or None)."""
         return self._background
 
     def set_background_image(self, path: str) -> BackgroundImage:
-        """Установить фоновое изображение (заменяет предыдущее).
+        """Set the background image (replaces the previous one).
 
-        Размер по умолчанию — нативный размер картинки, позиция (0, 0);
-        двигать/масштабировать можно мышью (drag / правый нижний угол).
-        Бросает ValueError, если файл не читается как изображение.
+        The default size — the native image size, the position (0, 0);
+        move/resize with the mouse (drag / the bottom-right corner).
+        Raises ValueError if the file cannot be read as an image.
         """
         self.remove_background()
         bg = BackgroundImage(path)
@@ -560,23 +565,23 @@ class MapScene(QGraphicsScene):
         return bg
 
     def remove_background(self):
-        """Убрать фоновое изображение (no-op, если его нет)."""
+        """Remove the background image (a no-op if there is none)."""
         if self._background is not None:
             sc_item = self._background.scene()
             if sc_item is not None:
                 self.removeItem(self._background)
-            getattr(self._background, 'deleteLater', lambda: None)()  # v0.9.3 fix: pixmap не должен висеть до смерти сцены
+            getattr(self._background, 'deleteLater', lambda: None)()  # v0.9.3 fix: the pixmap must not linger until the scene's death
             self._background = None
 
     def render_to_pixmap(self, scale: float = 2.0, padding: float = 60.0,
                          use_view_rect=None) -> "QPixmap":
-        """Отрендерить карту в QPixmap (v0.9.1 #1).
+        """Render the map into a QPixmap (v0.9.1 #1).
 
-        Область — itemsBoundingRect (+padding), т.е. вся карта целиком,
-        независимо от текущего зума/панорамирования окна. Фон-изображение
-        входит в результат (это часть карты); фон и сетка рисуются через
-        drawBackground (CANVAS_BG + линии) — QGraphicsScene.render вызывает её,
-        поэтому экспорт выглядит как интерактивный вид (поведение с v0.9.1).
+        The area — itemsBoundingRect (+padding), i.e. the whole map,
+        regardless of the window's current zoom/pan. The background image
+        is included in the result (it is part of the map); the background and the grid
+        are drawn via drawBackground (CANVAS_BG + the lines) — QGraphicsScene.render calls it,
+        so the export looks like the interactive view (behavior since v0.9.1).
         """
         from PySide6.QtGui import QPixmap, QColor
 
@@ -588,7 +593,7 @@ class MapScene(QGraphicsScene):
         w = max(int(src.width() * scale), 1)
         h = max(int(src.height() * scale), 1)
         pixmap = QPixmap(w, h)
-        pixmap.fill(QColor(theme.RENDER_BG))  # тот же тон тёмной темы (фон сцены)
+        pixmap.fill(QColor(theme.RENDER_BG))  # the same dark-theme tone (the scene background)
 
         painter = QPainter(pixmap)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
@@ -596,33 +601,33 @@ class MapScene(QGraphicsScene):
         painter.end()
         return pixmap
 
-    # ── v0.9.9.7: PDF-экспорт карты (поверх render_to_pixmap) ───────────────
+    # ── v0.9.9.7: PDF export of the map (on top of render_to_pixmap) ───────────────
 
     def render_to_pdf(self, path: str, scale: float = 2.0) -> int:
-        """Отрендерить карту целиком в PDF-файл (v0.9.9.7): одна страница на всю карту.
+        """Render the whole map into a PDF file (v0.9.9.7): one page for the entire map.
 
-        Поверх готового `render_to_pixmap`: отрендеренный pixmap растягивается на
-        страницу PDF с сохранением пропорций. Страница — кастомного размера под
-        пропорции карты (длинная сторона 1200 pt ≈ 42 см, нулевые поля), поэтому
-        карта занимает страницу целиком, без «полос» A4.
+        On top of the ready `render_to_pixmap`: the rendered pixmap is stretched to
+        the PDF page while preserving the proportions. The page — a custom size for
+        the map's proportions (the long side 1200 pt ≈ 42 cm, zero margins), so the
+        map fills the page entirely, without A4 "stripes".
 
-        PDF-устройство: `QPdfWriter` (QtGui; Qt 6.11+/PySide6 6.11 — замена
-        `QPdfPrinter`, упомянутого в CHANGELOG v0.9.1) с fallback'ом на
-        `QPdfPrinter` для старых Qt 6.x (тот же API, файл задаётся
-        setOutputFileName). Новых зависимостей нет.
+        The PDF device: `QPdfWriter` (QtGui; Qt 6.11+/PySide6 6.11 — the replacement
+        for `QPdfPrinter`, mentioned in CHANGELOG v0.9.1) with a fallback to
+        `QPdfPrinter` for older Qt 6.x (the same API, the file is set via
+        setOutputFileName). No new dependencies.
 
-        Возвращает размер файла в байтах. Бросает ValueError (null-pixmap) или
-        OSError (устройство не стартовало / файл не создан).
+        Returns the file size in bytes. Raises ValueError (a null pixmap) or
+        OSError (the device did not start / the file was not created).
         """
         import os
 
         from PySide6.QtCore import QMarginsF, QRectF, QSizeF
         from PySide6.QtGui import QPageLayout, QPageSize, QPainter
 
-        try:  # Qt 6.11+ (PySide6 6.11): QPdfPrinter заменён на QPdfWriter
+        try:  # Qt 6.11+ (PySide6 6.11): QPdfPrinter was replaced by QPdfWriter
             from PySide6.QtGui import QPdfWriter as _PdfDevice
             device = _PdfDevice(path)
-        except ImportError:  # старые Qt 6.x — исходный план ROADMAP v0.9.9.7
+        except ImportError:  # older Qt 6.x — the original ROADMAP v0.9.9.7 plan
             from PySide6.QtGui import QPdfPrinter as _PdfDevice
             device = _PdfDevice()
             device.setOutputFileName(path)
@@ -638,7 +643,7 @@ class MapScene(QGraphicsScene):
             QPageSize(page_size, QPageSize.Unit.Point),
             QPageLayout.Orientation.Landscape if pixmap.width() >= pixmap.height()
             else QPageLayout.Orientation.Portrait,
-            QMarginsF())  # нулевые поля: карта занимает всю страницу
+            QMarginsF())  # zero margins: the map fills the whole page
         device.setPageLayout(layout)
 
         painter = QPainter(device)

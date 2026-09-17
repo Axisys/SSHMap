@@ -1,13 +1,13 @@
 # -*- coding: utf-8 -*-
-"""v0.9.7: диалог бэкапов проекта (кольцевой буфер) + последнего автосохранения.
+"""v0.9.7: project backups dialog (ring buffer) + the last autosave.
 
-Data-driven: вызывающий (MainWindow) передаёт список items
-``[{label, path, mtime, size}, ...]`` (свежие первыми — см.
-storage/autosave.py) и получает сигнал ``restore_requested(path, label)``.
-Все решения (подтверждение dirty-правки, перезапись файла, перезагрузка сцены)
-остаются в MainWindow — единый путь восстановления (ROADMAP v0.9.7 #2).
+Data-driven: the caller (MainWindow) passes a list of items
+``[{label, path, mtime, size}, ...]`` (newest first — see
+storage/autosave.py) and receives the ``restore_requested(path, label)`` signal.
+All decisions (confirming a dirty change, overwriting the file, reloading the scene)
+stay in MainWindow — a single restore path (ROADMAP v0.9.7 #2).
 """
-import os  # noqa: F401 — сохранён для совместимости импорта вызывающим кодом
+import os  # noqa: F401 — kept for import compatibility with calling code
 from datetime import datetime
 
 try:
@@ -15,7 +15,7 @@ try:
 except ImportError:
     try:
         from i18n import t
-    except ImportError:  # flat-раскладка без i18n — ключи как есть (паттерн main_window)
+    except ImportError:  # flat layout without i18n — keys as-is (main_window pattern)
         def t(key, **kwargs):
             return key.format(**kwargs) if kwargs else key
 
@@ -27,7 +27,7 @@ from PySide6.QtWidgets import (
 
 
 def _fmt_time(mtime: float) -> str:
-    """Локальное время изменения; битый mtime — «-» (не роняем диалог)."""
+    """Local modification time; a broken mtime — "-" (we don't crash the dialog)."""
     try:
         return datetime.fromtimestamp(mtime).strftime("%Y-%m-%d %H:%M:%S")
     except (OSError, OverflowError, ValueError):
@@ -43,12 +43,12 @@ def _fmt_size(size: int) -> str:
 
 
 class BackupsDialog(QDialog):
-    """Список бэкапов (свежие первыми) + кнопка «Восстановить» для выбранной строки.
+    """Backup list (newest first) + a "Restore" button for the selected row.
 
-    Двойной клик по строке — то же, что кнопка. Закрыть без выбора — reject().
+    Double-clicking a row — same as the button. Close without a selection — reject().
     """
 
-    restore_requested = Signal(str, str)  # (path исходника, label для статуса/лога)
+    restore_requested = Signal(str, str)  # (source path, label for status/log)
 
     def __init__(self, items: list, parent=None):
         super().__init__(parent)
@@ -71,9 +71,9 @@ class BackupsDialog(QDialog):
                 _fmt_time(it.get("mtime", 0.0)),
                 _fmt_size(int(it.get("size", 0))),
             ])
-            # path+label — данные строки; сигнал несёт их дальше в MainWindow.
-            # v1.2.10 (AUDIT авто #4): паритет с .get() для label/mtime/size выше — элемент
-            # без "path" не роняет диалог KeyError'ом.
+            # path+label — the row's data; the signal carries them on to MainWindow.
+            # v1.2.10 (auto AUDIT #4): parity with .get() for label/mtime/size above — an item
+            # without "path" doesn't crash the dialog with a KeyError.
             row.setData(0, Qt.UserRole, (it.get("path", ""), it.get("label", "")))
             self.tree.addTopLevelItem(row)
 
@@ -98,10 +98,10 @@ class BackupsDialog(QDialog):
         if self.tree.topLevelItemCount():
             self.tree.setCurrentItem(self.tree.topLevelItem(0))
 
-    # ── Публичный доступ для тестов ─────────────────────────────
+    # ── Public access for tests ─────────────────────────────
 
     def selected_item(self) -> QTreeWidgetItem:
-        """Выбранная строка (или первая, если выбор пуст)."""
+        """The selected row (or the first one if the selection is empty)."""
         items = self.tree.selectedItems()
         if items:
             return items[0]
@@ -110,7 +110,7 @@ class BackupsDialog(QDialog):
     def item_count(self) -> int:
         return self.tree.topLevelItemCount()
 
-    # ── Слоты ───────────────────────────────────────────────────
+    # ── Slots ───────────────────────────────────────────────────
 
     def _emit_restore(self):
         item = self.selected_item()

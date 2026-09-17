@@ -1,28 +1,31 @@
 # -*- coding: utf-8 -*-
-"""v1.2.10rc1 — Аудит: потоки и teardown (AUDIT.md авто #2 + ручной #1 + находка верификации).
+"""v1.2.10rc1 — Audit: threads and teardown (AUDIT.md auto #2 + manual #1 + a verification finding).
 
-Тематический тест релиза (ROADMAP v1.2.10rc1; offscreen, фейковые потоки — без сети):
+The thematic test of the release (ROADMAP v1.2.10rc1; offscreen, the fake threads — without the network):
 
-§1 DNS-guard (авто #2): два быстрых «Copy Hostname» → ОДИН ReverseDnsThread,
-   повторный запрос игнорируется со статус-сообщением (без затирания работающего
-   потока); поток создаётся с parent=MainWindow; после finished() — cleanup
-   self._dns_thread + буфер обмена; guard снимается — следующий запрос стартует.
+§1 The DNS guard (auto #2): two quick "Copy Hostname" → ONE ReverseDnsThread,
+   the repeated request is ignored with the status message (without the clobbering of the running
+   thread); the thread is created with parent=MainWindow; after finished() — the cleanup
+   of self._dns_thread + the clipboard; the guard is released — the next request starts.
 
-§2 closeEvent с висящим фейковым DNS-потоком (находка верификации): окно закрывается
-   в wait-бюджете (~2 c, не зависает), переживший поток — в orphan-реестре
-   services/diagnostics._orphan_threads (не оставлен на GC: «QThread: Destroyed
-   while thread is still running»), реестр самочищается по finished().
+§2 closeEvent with a hanging fake DNS thread (the finding of the verification): the window is closed
+   within the wait budget (~2 s, does not hang), the surviving thread — in the orphan registry
+   services/diagnostics._orphan_threads (not left to the GC: "QThread: Destroyed
+   while thread is still running"), the registry self-cleans on finished().
 
-§3 Шатдаун с 2 активными терминальными сессиями при terminal_close_behavior="ask"
-   (ручной #1, реальный баг): НОЛЬ QMessageBox.question (шов ST.QMessageBox.question
-   подменён) — «ask»-гейт пропускается через _force_close (путь лимита v1.1.1),
-   главное окно закрыто; пережившие потоки — в ST._orphan_threads (N4-путь).
+§3 The shutdown with 2 active terminal sessions at terminal_close_behavior="ask"
+   (manual #1, the real bug): ZERO QMessageBox.question (the seam ST.QMessageBox.question
+   is patched) — the "ask" gate is passed via _force_close (the path of the limit v1.1.1),
+   the main window is closed; the surviving threads — in ST._orphan_threads (the N4 path).
 
-§4 Состояние релиза + i18n-паритет (427 — новых ключей НЕТ: guard-сообщение
-   переиспользует существующий status.import_resolving).
+§4 The release state + the i18n parity (427 — no NEW keys: the guard message
+   reuses the existing status.import_resolving).
 
-Запуск:  python tests/test_audit_rc1_threads.py   (из корня проекта) или python tests/run_all.py
+Run:  python tests/test_audit_rc1_threads.py   (from the project root) or python tests/run_all.py
 """
+# tags: slow
+# the reason: the ~2 s wait budgets in the teardown scenarios (§2, §3 — part of the specification)
+
 import json
 import os
 import sys
@@ -32,7 +35,7 @@ import time
 from _common import (bootstrap, check, finish, wait_until,
                      load_i18n_langs, check_i18n_parity, check_release_state)
 
-ROOT, WORK = bootstrap()  # ДО импортов модулей приложения
+ROOT, WORK = bootstrap()  # BEFORE the app module imports
 
 from PySide6.QtCore import QThread, Signal as QtSignal
 from PySide6.QtWidgets import QApplication, QMessageBox
@@ -46,13 +49,13 @@ from models.server import ServerData
 
 
 # ════════════════════════════════════════════════════════════
-# Обвязка: фейковые потоки (тот же API, что у реальных)
+# The harness: fake threads (the same API as the real ones)
 # ════════════════════════════════════════════════════════════
 
 class _HangingDnsThread(QThread):
-    """Фейковый ReverseDnsThread: run() висит до release() (недоступный резолвер —
-    getaddrinfo доживает свой таймаут), МЕТОДА stop() НЕТ — ровно как у реального
-    ReverseDnsThread/PingThread (находка верификации)."""
+    """The fake ReverseDnsThread: run() hangs until the release() (the unavailable resolver —
+    the getaddrinfo lives out its timeout), the stop() method is ABSENT — exactly as in the real
+    ReverseDnsThread/PingThread (the finding of the verification)."""
 
     resolved = QtSignal(str)
 
@@ -62,20 +65,20 @@ class _HangingDnsThread(QThread):
         self._release = threading.Event()
 
     def run(self):
-        self._release.wait(30)   # «getaddrinfo» — stop() не прерывает (его нет)
+        self._release.wait(30)   # "getaddrinfo" — stop() does not interrupt it (it has none)
         try:
             self.resolved.emit(self._host)
         except RuntimeError:
-            pass  # окно уже уничтожено — поздний emit без приёмников безопасен
+            pass  # the window is already destroyed — a late emit without receivers is safe
 
     def release(self):
         self._release.set()
 
 
 class _BlockingTermThread(QThread):
-    """Фейковый SSHTerminalThread: run() блокируется до release(); stop() лишь
-    выставляет running=False и НЕ прерывает run() — как paramiko-подключение
-    с timeout 15 c (сценарий N4 v1.1.2RC1)."""
+    """The fake SSHTerminalThread: run() blocks until the release(); stop() only
+    sets running=False and does NOT interrupt run() — as the paramiko connection
+    with the timeout of 15 s (the scenario N4 v1.1.2RC1)."""
 
     output_signal = QtSignal(bytes)
     error_signal = QtSignal(str)
@@ -94,16 +97,16 @@ class _BlockingTermThread(QThread):
         self._release = threading.Event()
 
     def run(self):
-        self._release.wait(30)   # «подключение» — stop() не прерывает
+        self._release.wait(30)   # "connection" — stop() does not interrupt it
         self.running = False
         try:
             self.closed_signal.emit()
         except RuntimeError:
-            pass  # страница уже уничтожена — поздний emit без приёмников безопасен
+            pass  # the page is already destroyed — a late emit without receivers is safe
 
     def stop(self):
         self.stop_calls += 1
-        self.running = False     # НЕ прерывает run() (recv-цикл выходит сам за ~30 мс)
+        self.running = False     # does NOT interrupt run() (the recv loop exits by itself in ~30 ms)
 
     def release(self):
         self._release.set()
@@ -128,7 +131,7 @@ def clear_config():
 
 
 # ════════════════════════════════════════════════════════════
-# 1. DNS-guard (AUDIT авто #2): повторный «Copy Hostname» не затирает поток
+# 1. DNS guard (AUDIT auto #2): a repeated "Copy Hostname" does not clobber the thread
 # ════════════════════════════════════════════════════════════
 print("== §1 DNS guard: second 'Copy Hostname' is ignored ==")
 
@@ -137,42 +140,42 @@ win = MW.MainWindow()
 node = win.scene.add_server(ServerData(id="rc1-dns", alias="rc1", host="192.0.2.55", user="root"))
 
 _orig_dns_cls = diag.ReverseDnsThread
-diag.ReverseDnsThread = _HangingDnsThread   # шов: импорт внутри _copy_node_info — по модулю
+diag.ReverseDnsThread = _HangingDnsThread   # the seam: the import inside _copy_node_info — by module
 th1 = th3 = None
 try:
-    # Первый «Copy Hostname» — поток стартует и висит (недоступный резолвер).
+    # The first "Copy Hostname" — the thread starts and hangs (an unreachable resolver).
     win._copy_node_info(node, "hostname")
     th1 = win._dns_thread
     wait_until(lambda: th1 is not None and th1.isRunning(), timeout_ms=3000)
-    check("первый Copy Hostname: ReverseDnsThread запущен",
+    check("the first Copy Hostname: ReverseDnsThread is running",
           th1 is not None and th1.isRunning())
-    check("поток создан с parent=MainWindow (v1.2.10rc1)", th1.parent() is win,
+    check("the thread is created with parent=MainWindow (v1.2.10rc1)", th1.parent() is win,
           repr(th1.parent()))
 
-    # Второй быстрый «Copy Hostname» — guard: без затирания + статус-сообщение.
+    # A second fast "Copy Hostname" — the guard: no clobbering + a status message.
     win._copy_node_info(node, "hostname")
-    check("guard: self._dns_thread НЕ затёрт (один поток)", win._dns_thread is th1,
+    check("guard: self._dns_thread is NOT clobbered (a single thread)", win._dns_thread is th1,
           repr(win._dns_thread))
     _expected_guard = win.t("status.import_resolving", done=0, total=1)
-    check("guard: статус-сообщение показано (существующий ключ — без новых i18n)",
+    check("guard: the status message is shown (an existing key — no new i18n)",
           win.statusBar().currentMessage() == _expected_guard,
           win.statusBar().currentMessage())
 
-    # Завершение: release → resolved → буфер обмена + cleanup self._dns_thread.
+    # Finishing: release → resolved → the clipboard + cleanup of self._dns_thread.
     th1.release()
     wait_until(lambda: win._dns_thread is None, timeout_ms=5000)
-    check("после finished(): self._dns_thread очищен", win._dns_thread is None)
-    check("резолвлённое имя скопировано в буфер", QApplication.clipboard().text() == "192.0.2.55",
+    check("after finished(): self._dns_thread is cleared", win._dns_thread is None)
+    check("the resolved name is copied to the clipboard", QApplication.clipboard().text() == "192.0.2.55",
           QApplication.clipboard().text())
 
-    # Guard снят: следующий запрос стартует НОВЫЙ поток.
+    # The guard is lifted: the next request starts a NEW thread.
     win._copy_node_info(node, "hostname")
     th3 = win._dns_thread
     wait_until(lambda: th3 is not None and th3.isRunning(), timeout_ms=3000)
-    check("после завершения: следующий Copy Hostname стартует новый поток",
+    check("after completion: the next Copy Hostname starts a new thread",
           th3 is not None and th3 is not th1 and th3.isRunning())
 finally:
-    for _th in (th1, th3):   # release() ВСЕГДА — незакрытый фейк не даёт warning на выходе
+    for _th in (th1, th3):   # release() ALWAYS — an unclosed fake gives no warning on exit
         if _th is not None:
             try:
                 _th.release()
@@ -182,15 +185,15 @@ finally:
 
 
 # ════════════════════════════════════════════════════════════
-# 2. closeEvent с висящим DNS-потоком (находка верификации):
-#    окно закрывается в бюджете, поток — в orphan-реестре до finished()
+# 2. closeEvent with a hanging DNS thread (a verification finding):
+#    the window closes within the budget, the thread stays in the orphan registry until finished()
 # ════════════════════════════════════════════════════════════
 print("== §2 closeEvent + hanging DNS thread → orphan registry ==")
 
 clear_config()
 win2 = MW.MainWindow()
 fake = _HangingDnsThread("192.0.2.77", parent=win2)
-win2._dns_thread = fake   # симуляция запроса, зависшего на недоступном резолвере
+win2._dns_thread = fake   # simulating a request stuck on an unreachable resolver
 fake.start()
 wait_until(lambda: fake.isRunning(), timeout_ms=3000)
 
@@ -199,39 +202,39 @@ try:
     win2.close()
     _elapsed = time.monotonic() - _t0
 
-    check("окно закрылось в wait-бюджете (~2 c): closeEvent не завис",
+    check("the window closed within the wait budget (~2 s): closeEvent did not hang",
           _elapsed < 4.0, f"{_elapsed:.2f}s")
-    check("closeEvent реально дождался бюджета (поток всё ещё жив)",
+    check("closeEvent really waited for the budget (the thread is still alive)",
           _elapsed >= 1.8, f"{_elapsed:.2f}s")
-    check("переживший поток в orphan-реестре services.diagnostics (не оставлен на GC)",
+    check("the surviving thread is in the orphan registry of services.diagnostics (not left to the GC)",
           fake in diag._orphan_threads and fake.isRunning(),
           f"registry={len(diag._orphan_threads)} running={fake.isRunning()}")
 
     fake.release()
     wait_until(lambda: fake not in diag._orphan_threads, timeout_ms=8000)
-    check("реестр самочищается по finished()",
+    check("the registry self-cleans on finished()",
           fake not in diag._orphan_threads and not fake.isRunning(),
           f"registry={len(diag._orphan_threads)} running={fake.isRunning()}")
 finally:
-    try:   # release() ВСЕГДА — незакрытый фейк не даёт warning на выходе из процесса
+    try:   # release() ALWAYS — an unclosed fake gives no warning on process exit
         fake.release()
     except RuntimeError:
         pass
 
 
 # ════════════════════════════════════════════════════════════
-# 3. Шатдаун: «ask»-гейт пропускается (AUDIT ручной #1, реальный баг)
+# 3. Shutdown: the "ask" gate is skipped (AUDIT manual #1, a real bug)
 # ════════════════════════════════════════════════════════════
 print("== §3 shutdown with terminal_close_behavior='ask': zero dialogs ==")
 
 write_config({"terminal_close_behavior": "ask"})
 
 _orig_term_cls = ST.SSHTerminalThread
-ST.SSHTerminalThread = _BlockingTermThread   # шов: класс потока — из модуля ssh_terminal
-# НОЛЬ диалогов при шатдауне: QMessageBox.question подменяем ОДИН РАЗ (шов
-# ST.QMessageBox — тот же класс, что MW.QMessageBox: атрибут ставится на сам класс,
-# все вызовы QMessageBox.question в процессе уходят сюда). До фикса здесь были ровно
-# 2 вызова — по одному «ask»-диалогу на активную сессию (AUDIT ручной #1).
+ST.SSHTerminalThread = _BlockingTermThread   # the seam: the thread class — from the ssh_terminal module
+# ZERO dialogs on the shutdown: QMessageBox.question is replaced ONCE (the seam
+# ST.QMessageBox — the same class as MW.QMessageBox: the attribute is set on the class itself,
+# every QMessageBox.question call in the process goes here). Before the fix there were exactly
+# 2 calls — one "ask" dialog per active session (AUDIT manual #1).
 _asked = []
 _orig_q = ST.QMessageBox.question
 ST.QMessageBox.question = staticmethod(
@@ -243,17 +246,17 @@ try:
         ServerData(id="rc1-ta", alias="ta", host="10.99.1.1", user="root"), None, password="pw")
     winB = ST.SSHTerminalWindow(
         ServerData(id="rc1-tb", alias="tb", host="10.99.1.2", user="root"), None, password="pw")
-    # compat-свойство window.page — live-ссылка на АКТИВНЫЙ таб: после закрытия
-    # последнего таба оно вернёт None — страницы храним явно ДО close().
+    # the compat property window.page — a live reference to the ACTIVE tab: after closing
+    # of the last tab it would return None — we store the pages explicitly BEFORE close().
     page_a, page_b = winA.page, winB.page
     th_a, th_b = page_a.terminal_thread, page_b.terminal_thread
     wait_until(lambda: th_a.isRunning() and th_b.isRunning(), timeout_ms=3000)
-    check("fixture: 2 активные терминальные сессии (потоки работают)",
+    check("fixture: 2 active terminal sessions (the threads are running)",
           th_a.isRunning() and th_b.isRunning())
-    check("fixture: gate 'ask' читан из конфига",
+    check("fixture: the 'ask' gate is read from the config",
           page_a._close_behavior == "ask" and page_b._close_behavior == "ask")
 
-    win3._terminal_windows.extend([page_a, page_b])   # реестр сессий MainWindow
+    win3._terminal_windows.extend([page_a, page_b])   # the MainWindow session registry
     win3.show()
     app.processEvents()
 
@@ -261,31 +264,31 @@ try:
     win3.close()
     _elapsed3 = time.monotonic() - _t0
 
-    check("НОЛЬ QMessageBox.question — «ask»-гейт пропущен при шатдауне (до фикса: 2)",
+    check("ZERO QMessageBox.question — the 'ask' gate is skipped on the shutdown (before the fix: 2)",
           len(_asked) == 0, f"asked={len(_asked)}")
-    check("главное окно закрыто", not win3.isVisible())
-    check("обе сессии shut down'ы (page.shutdown)",
+    check("the main window is closed", not win3.isVisible())
+    check("both sessions are shut down (page.shutdown)",
           page_a._shut_down is True and page_b._shut_down is True)
-    check("stop() вызван на потоках каждой сессии",
+    check("stop() is called on the threads of each session",
           th_a.stop_calls >= 1 and th_b.stop_calls >= 1,
           f"stops={th_a.stop_calls}/{th_b.stop_calls}")
-    check("пережившие потоки в ST._orphan_threads (N4-путь page.shutdown)",
+    check("the surviving threads are in ST._orphan_threads (the N4 path of page.shutdown)",
           th_a in ST._orphan_threads and th_b in ST._orphan_threads,
           f"registry={len(ST._orphan_threads)}")
-    check("шатдаун уложился в разумный бюджет", _elapsed3 < 15.0, f"{_elapsed3:.2f}s")
+    check("the shutdown fit into a reasonable budget", _elapsed3 < 15.0, f"{_elapsed3:.2f}s")
 
 finally:
-    # release() — ВСЕГДА (даже при FAIL): незакрытые фейки не должны давать
-    # «QThread: Destroyed while thread is still running» на выходе из процесса.
+    # release() — ALWAYS (even on FAIL): unclosed fakes must not give
+    # "QThread: Destroyed while thread is still running" on process exit.
     for _th in (th_a, th_b):
         if _th is not None:
             try:
                 _th.release()
             except RuntimeError:
-                pass  # C++-объект уже удалён — поток всё равно живёт до release/таймаута
+                pass  # The C++ object is already removed — the thread still lives until release/timeout
     if th_a is not None and th_b is not None:
         wait_until(lambda: (not th_a.isRunning()) and (not th_b.isRunning()), timeout_ms=8000)
-        check("ST orphan-реестр самочищается по finished()",
+        check("the ST orphan registry self-cleans on finished()",
               th_a not in ST._orphan_threads and th_b not in ST._orphan_threads,
               f"registry={len(ST._orphan_threads)}")
     ST.QMessageBox.question = _orig_q
@@ -294,7 +297,7 @@ finally:
 
 
 # ════════════════════════════════════════════════════════════
-# 4. Состояние релиза + i18n-паритет (новых ключей НЕТ — 427)
+# 4. Release state + i18n parity (NO new keys — 427)
 # ════════════════════════════════════════════════════════════
 print("== §4 release state + i18n parity ==")
 

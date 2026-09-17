@@ -1,23 +1,23 @@
 # -*- coding: utf-8 -*-
-"""v1.1.2RC1 — SSH-путь: undo, paramiko-дефолты, жизненный цикл потока (тема релиза).
+"""v1.1.2RC1 — the SSH path: undo, paramiko defaults, thread lifecycle (release theme).
 
-ROADMAP v1.1.2RC1 (пункты AUDIT §5, проверенные на v1.1.1):
-  N1    правки user/key/port при успешном SSH-подключении идут через undo-стек:
-        прямые записи в server_data из SSHConnectDialog._on_worker_success() убраны —
-        единственный путь MainWindow._apply_ssh_dialog_fields → CmdEditNodeData;
-        регрессия: смена user/port в диалоге → подключение → Ctrl+Z откатывает.
-  N2    пресет «conhost» внешнего терминала убран (conhost.exe не лаунчер, /c не
-        принимает): TERMINAL_CHOICES_WINDOWS/detect/build_command; старое значение
-        конфига "conhost" трактуется как "cmd" (backward-compat, файл не перезаписывается).
-  N5    password-ветка SSHWorker: look_for_keys=False, allow_agent=False (паритет с
-        ssh_terminal.py) — без опроса локальных ключей/agent до попытки пароля.
-  N4    жизненный цикл потока при закрытии окна во время подключения: guard
-        `if self.running` перед error_signal.emit() в except-ветках run() + реестр
-        орфано-потоков (поток, переживший closeEvent wait(1500), держится до finished()).
-  бонус-N11 CmdAddRemoveNode(mode="add"): стэш keyring-пароля при создании команды и
-        восстановление в redo — после Ctrl+Z→Ctrl+Y дублирования копия снова с паролем.
+ROADMAP v1.1.2RC1 (the AUDIT §5 items, verified on v1.1.1):
+  N1    the user/key/port changes on a successful SSH connection go through the undo stack:
+        the direct writes into server_data from SSHConnectDialog._on_worker_success() are removed —
+        the single path MainWindow._apply_ssh_dialog_fields → CmdEditNodeData;
+        regression: the user/port change in the dialog → the connection → Ctrl+Z reverts it.
+  N2    the "conhost" preset of the external terminal is removed (conhost.exe is not a launcher, /c does
+        not accept it): TERMINAL_CHOICES_WINDOWS/detect/build_command; the old config value
+        "conhost" is treated as "cmd" (backward-compat, the file is not overwritten).
+  N5    the password branch of SSHWorker: look_for_keys=False, allow_agent=False (the parity with
+        ssh_terminal.py) — no polling of the local keys/agent before the password attempt.
+  N4    the thread lifecycle on the window close during the connection: the guard
+        `if self.running` before error_signal.emit() in the except branches of run() + the registry
+        of the orphan threads (a thread that survived the closeEvent wait(1500) is kept until finished()).
+  bonus-N11 CmdAddRemoveNode(mode="add"): the stash of the keyring password on the command creation and
+        the restoration in redo — after the Ctrl+Z→Ctrl+Y the duplicate's copy is again with the password.
 
-Запуск: python tests/test_ssh_undo_lifecycle.py   (из корня проекта) или python tests/run_all.py
+Run: python tests/test_ssh_undo_lifecycle.py   (from the project root) or python tests/run_all.py
 """
 import json as _json
 import os
@@ -27,7 +27,7 @@ import time
 
 from _common import bootstrap, check, finish, wait_until, check_release_state
 
-ROOT, WORK = bootstrap()  # ДО импортов модулей приложения (HOME-изоляция и faulthandler внутри)
+ROOT, WORK = bootstrap()  # BEFORE the app module imports (the HOME isolation and faulthandler inside)
 
 from PySide6.QtWidgets import QApplication, QDialog
 from PySide6.QtGui import QUndoStack
@@ -36,7 +36,7 @@ app = QApplication(sys.argv)
 
 
 def _drain_events(ms=300):
-    """Прокрутить event loop ms миллисекунд — доставить queued-сигналы из потоков."""
+    """Spin the event loop for ms milliseconds — deliver the queued signals from the threads."""
     end = time.time() + ms / 1000.0
     while time.time() < end:
         app.processEvents()
@@ -46,8 +46,8 @@ def _drain_events(ms=300):
 from models.server import ServerData
 
 # ════════════════════════════════════════════════════════════
-# N1. SSH-диалог не пишет в node.data напрямую; правки user/key/port
-#     идут через undo-стек (CmdEditNodeData), Ctrl+Z откатывает
+# N1. The SSH dialog does not write to node.data directly; the user/key/port edits
+#     go through the undo stack (CmdEditNodeData), Ctrl+Z reverts them
 # ════════════════════════════════════════════════════════════
 print("== N1: ssh dialog fields via undo stack ==")
 from dialogs.ssh_connect_dialog import SSHConnectDialog
@@ -66,7 +66,7 @@ class _FakeWorkerN1:
 _n1_dlg._ssh_worker = _FakeWorkerN1()
 try:
     _n1_dlg._on_worker_success("connected ok")
-except Exception as e:  # noqa: BLE001 — ключевое: success-путь не падает без записей
+except Exception as e:  # noqa: BLE001 — key point: the success path does not fall without records
     check("N1: _on_worker_success runs without direct writes", False, repr(e))
 else:
     check("N1: _on_worker_success runs without direct writes", True)
@@ -77,22 +77,12 @@ check("N1: server_data NOT written by the dialog itself (port/key)",
       _n1_data.ssh_port == 22 and _n1_data.key_path == "",
       f"port={_n1_data.ssh_port} key={_n1_data.key_path!r}")
 
-# E2E: MainWindow._run_ssh_connect — единственный путь через _apply_ssh_dialog_fields
+# E2E: MainWindow._run_ssh_connect — the only path through _apply_ssh_dialog_fields
 import ui.main_window as MW
 from modules.undo_commands import CmdEditNodeData
 
 
-class _FL:
-    """Мини-заглушка QLineEdit для фейка диалога."""
-    def __init__(self, v): self._v = v
-    def text(self): return self._v
-    def setText(self, v): self._v = v
-
-
-class _FS:
-    """Мини-заглушка QSpinBox."""
-    def __init__(self, v): self._v = v
-    def value(self): return self._v
+from _fakes import FakeLineEdit as _FL, FakeSpinBox as _FS
 
 
 class _FakeSSHDialogN1:
@@ -146,7 +136,7 @@ check("N1 E2E: Ctrl+Y re-applies the dialog fields",
       f"user={_n1_node.data.user!r} port={_n1_node.data.ssh_port}")
 
 # ════════════════════════════════════════════════════════════
-# N2. Пресет «conhost» убран; старое значение конфига → "cmd"
+# N2. The "conhost" preset is removed; the old config value → "cmd"
 # ════════════════════════════════════════════════════════════
 print("== N2: conhost preset removed, backward-compat ==")
 from modules import external_terminal as ET
@@ -181,7 +171,7 @@ def _clear_cfg():
         pass
 
 
-# (a) старое значение в config.json → "cmd" (Windows), файл на диске НЕ перезаписывается
+# (a) the old value in config.json → "cmd" (Windows), the on-disk file is NOT rewritten
 _clear_cfg()
 _write_cfg({"external_terminal": "conhost"})
 _v = ET.load_external_terminal_setting()
@@ -193,7 +183,7 @@ else:
 check("N2: config file NOT rewritten on read (backward-compat is read-only)",
       (_read_cfg() or {}).get("external_terminal") == "conhost", str(_read_cfg()))
 
-# (b) миграция legacy-файла: "conhost" нормализуется в "cmd" ДО записи в config.json
+# (b) legacy file migration: "conhost" is normalized to "cmd" BEFORE writing config.json
 _clear_cfg()
 _legacy_path = ET._legacy_settings_path()
 with open(_legacy_path, "w", encoding="utf-8") as f:
@@ -206,7 +196,7 @@ if sys.platform == "win32":
     check("N2: migrated value loads as 'cmd'", _v == "cmd", f"got={_v!r}")
 check("N2: legacy file removed after migration", not os.path.exists(_legacy_path))
 
-# (c) detect_terminal с вынужденным старым значением — никогда не возвращает "conhost"
+# (c) detect_terminal with a forced old value — never returns "conhost"
 _write_cfg({"external_terminal": "conhost"})
 _dt = ET.detect_terminal()
 check("N2: detect_terminal never returns 'conhost'", _dt != "conhost", str(_dt))
@@ -214,7 +204,7 @@ if sys.platform == "win32":
     check("N2: forced 'conhost' resolves to 'cmd' (cmd.exe always present)",
           _dt == "cmd", f"got={_dt!r}")
 
-# (d) build_command: "conhost" — алиас "cmd"; команды с conhost.exe больше нет
+# (d) build_command: "conhost" — an alias for "cmd"; no more commands with conhost.exe
 _c_cmd = ET.build_command("cmd", "h1", "root")
 _c_con = ET.build_command("conhost", "h1", "root")
 check("N2: build_command('conhost') is an alias of build_command('cmd')",
@@ -222,7 +212,7 @@ check("N2: build_command('conhost') is an alias of build_command('cmd')",
 check("N2: no command starts with conhost.exe anymore",
       _c_con[0] == "cmd.exe", str(_c_con[:3]))
 
-# (e) комбобокс диалога не содержит «conhost»
+# (e) the dialog's combobox does not contain "conhost"
 _dlg_n2 = SSHConnectDialog(ServerData(id="n2srv00", alias="N2", host="10.0.0.2", user="u"), None)
 _ids = [_dlg_n2.ext_terminal_combo.itemData(i) for i in range(_dlg_n2.ext_terminal_combo.count())]
 check("N2: dialog combo has no 'conhost' item", "conhost" not in _ids, str(_ids))
@@ -235,7 +225,7 @@ except OSError:
     pass
 
 # ════════════════════════════════════════════════════════════
-# N5. SSHWorker password-ветка: look_for_keys=False, allow_agent=False
+# N5. The SSHWorker password branch: look_for_keys=False, allow_agent=False
 # ════════════════════════════════════════════════════════════
 print("== N5: paramiko password-branch flags ==")
 import paramiko as _paramiko
@@ -243,7 +233,7 @@ from modules.ssh_worker import SSHWorker
 
 
 class _RecClient:
-    """Фейковый SSHClient: записывает kwargs connect(), сеть не трогает."""
+    """The fake SSHClient: it records the kwargs of connect(), it does not touch the network."""
     instances = []
 
     def __init__(self):
@@ -266,7 +256,7 @@ class _RecClient:
 _orig_ssh_client = _paramiko.SSHClient
 _paramiko.SSHClient = _RecClient
 try:
-    # (a) password-ветка — целевая проверка N5
+    # (a) the password branch — the target check N5
     w_pw = SSHWorker(host="127.0.0.1", user="u", port=22, server_id="", password="pw")
     w_pw.start()
     check("N5: password worker finished", bool(w_pw.wait(5000)))
@@ -277,7 +267,7 @@ try:
     check("N5: password branch passes allow_agent=False (parity with ssh_terminal.py)",
           _kw.get("allow_agent") is False, str(_kw))
 
-    # (b) контрольные ветки не тронуты: key-ветка и «чистый» key/agent-fallback
+    # (b) the control branches are untouched: the key branch and the "clean" key/agent fallback
     _RecClient.instances.clear()
     w_key = SSHWorker(host="127.0.0.1", user="u", port=22, server_id="",
                       password="", key_path="/k/key.pem")
@@ -299,14 +289,14 @@ finally:
     _paramiko.SSHClient = _orig_ssh_client
 
 # ════════════════════════════════════════════════════════════
-# N4. Жизненный цикл потока при закрытии окна во время подключения
+# N4. The thread lifecycle when the window closes during a connection
 # ════════════════════════════════════════════════════════════
 print("== N4: thread lifecycle on window close ==")
 import modules.ssh_terminal as ST
 
 
 class _SlowClient:
-    """connect() блокируется на event (с клампом 10 c), потом бросает исключение."""
+    """connect() is blocked on the event (with a 10 s clamp), then it raises an exception."""
 
     def __init__(self, blocker):
         self._b = blocker
@@ -319,7 +309,7 @@ class _SlowClient:
 
     def connect(self, *a, **kw):
         self._b["entered"] = True
-        self._b["event"].wait(10)  # кламп: тест не зависнет при любом сбое
+        self._b["event"].wait(10)  # the clamp: the test will not hang on any failure
         raise Exception("connect boom (late)")
 
     def close(self):
@@ -327,7 +317,7 @@ class _SlowClient:
 
 
 class _FailClient:
-    """connect() падает сразу — контрольный живой поток."""
+    """connect() fails immediately — a control live thread."""
 
     def set_missing_host_key_policy(self, policy):
         pass
@@ -342,7 +332,7 @@ class _FailClient:
         pass
 
 
-# (a) guard: stop() ДО ошибки → error_signal не эмитится (running=False)
+# (a) guard: stop() BEFORE the error → error_signal is not emitted (running=False)
 _blocker = {"entered": False, "event": threading.Event()}
 _paramiko.SSHClient = lambda: _SlowClient(_blocker)
 try:
@@ -352,14 +342,14 @@ try:
     t_guard.start()
     wait_until(lambda: _blocker["entered"], timeout_ms=3000)
     check("N4 guard: thread entered (blocked) connect", _blocker["entered"])
-    t_guard.stop()  # окно закрылось во время подключения
-    _blocker["event"].set()  # поздняя ошибка — после stop()
+    t_guard.stop()  # the window closed during the connection
+    _blocker["event"].set()  # a late error — after stop()
     check("N4 guard: thread finished", bool(t_guard.wait(5000)))
     _drain_events()
     check("N4 guard: no error_signal after stop() (running=False)",
           _errors_guard == [], str(_errors_guard))
 
-    # (b) контроль: живой поток (без stop) ошибку доставляет
+    # (b) control: a live thread (without stop) delivers the error
     _paramiko.SSHClient = _FailClient
     t_live = ST.SSHTerminalThread("127.0.0.1", "u", 22, password="pw")
     _errors_live = []
@@ -370,7 +360,7 @@ try:
           bool(_errors_live) and "connect boom (live)" in _errors_live[0], str(_errors_live))
     t_live.wait(3000)
 
-    # (c) реестр орфано-потоков: окно закрыто во время подключения, поток жив
+    # (c) the orphan-thread registry: the window closed during the connection, the thread is alive
     _blocker2 = {"entered": False, "event": threading.Event()}
     _paramiko.SSHClient = lambda: _SlowClient(_blocker2)
     tw = ST.SSHTerminalWindow(
@@ -379,12 +369,12 @@ try:
     wait_until(lambda: _blocker2["entered"], timeout_ms=5000)
     thread_ref = tw.terminal_thread
     check("N4 orphan: thread running before close", thread_ref.isRunning())
-    tw.close()  # closeEvent: stop() + wait(1500) → поток всё ещё жив → в реестр
+    tw.close()  # closeEvent: stop() + wait(1500) → the thread is still alive → into the registry
     app.processEvents()
     check("N4 orphan: still-running thread registered after close (not destroyed)",
           thread_ref in ST._orphan_threads and thread_ref.isRunning(),
           f"registry={len(ST._orphan_threads)} running={thread_ref.isRunning()}")
-    _blocker2["event"].set()  # поздняя ошибка: guard молчит, поток завершается
+    _blocker2["event"].set()  # a late error: the guard is silent, the thread finishes
     wait_until(lambda: thread_ref not in ST._orphan_threads, timeout_ms=8000)
     check("N4 orphan: registry self-cleans on finished()",
           thread_ref not in ST._orphan_threads and thread_ref.isFinished(),
@@ -393,7 +383,7 @@ finally:
     _paramiko.SSHClient = _orig_ssh_client
 
 # ════════════════════════════════════════════════════════════
-# Бонус-N11. CmdAddRemoveNode(mode="add"): стэш keyring-пароля + redo
+# Bonus N11. CmdAddRemoveNode(mode="add"): the keyring password stash + the redo
 # ════════════════════════════════════════════════════════════
 print("== bonus-N11: keyring stash in CmdAddRemoveNode(add) ==")
 from graphics.map_scene import MapScene
@@ -402,7 +392,7 @@ import services.credential_manager as _cm_mod
 
 
 class _FakeCM:
-    """In-memory credential manager (машина без wincred не влияет на тест)."""
+    """An in-memory credential manager (a machine without wincred does not affect the test)."""
 
     def __init__(self):
         self.store = {}
@@ -431,26 +421,26 @@ try:
     scene = MapScene()
     stack = QUndoStack()
 
-    # (a) сценарий дублирования: пароль уже скопирован под новым id ДО push'а команды
+    # (a) the duplication scenario: the password was already copied under the new id BEFORE pushing the command
     scene.add_server(ServerData(id="orig1111", alias="Orig", host="10.0.0.1", user="u"))
-    _fake_cm.store["dup2222"] = "secret-pw"  # имитация _duplicate_node
+    _fake_cm.store["dup2222"] = "secret-pw"  # imitating _duplicate_node
     cmd_dup = CmdAddRemoveNode(_DummyWin(), scene,
                                ServerData(id="dup2222", alias="Orig-copy",
                                           host="10.0.0.1", user="u"), "add")
     check("N11: password stashed at command creation (mode=add)",
           cmd_dup._stashed_password == "secret-pw", repr(cmd_dup._stashed_password))
-    stack.push(cmd_dup)  # push сам выполняет redo
+    stack.push(cmd_dup)  # the push performs the redo itself
     check("N11: redo adds the node", scene.has_node("dup2222"))
-    stack.undo()  # undo("add"): remove_server + delete keyring-пароля
+    stack.undo()  # undo("add"): remove_server + delete the keyring password
     check("N11: undo removes node AND its keyring record",
           not scene.has_node("dup2222") and "dup2222" not in _fake_cm.store,
           str(_fake_cm.store))
-    stack.redo()  # redo: узел обратно + пароль ВОССТАНОВЛЕН (Ctrl+Z→Ctrl+Y)
+    stack.redo()  # redo: the node is back + the password is RESTORED (Ctrl+Z→Ctrl+Y)
     check("N11: redo restores the copy WITH its password",
           scene.has_node("dup2222") and _fake_cm.store.get("dup2222") == "secret-pw",
           str(_fake_cm.store))
 
-    # (b) свежее добавление: записи в keyring нет — стэш пустой, restore no-op
+    # (b) a fresh addition: no keyring record — the stash is empty, restore is a no-op
     cmd_new = CmdAddRemoveNode(_DummyWin(), scene,
                                ServerData(id="new3333", alias="New",
                                           host="10.0.0.2", user="u"), "add")
@@ -487,7 +477,7 @@ finally:
     _cm_mod.get_credential_manager = _orig_get_cm
 
 # ════════════════════════════════════════════════════════════
-# Состояние релиза (пины — tests/_common.py: EXPECTED_APP_VERSION)
+# Release state (pins — tests/_common.py: EXPECTED_APP_VERSION)
 # ════════════════════════════════════════════════════════════
 print("== release state ==")
 check_release_state(ROOT)

@@ -1,22 +1,22 @@
 # -*- coding: utf-8 -*-
-"""Двухсторонние стрелки (v1.2.6, ROADMAP задача 1).
+"""Bidirectional arrows (v1.2.6, ROADMAP task 1).
 
-Покрывает:
-  * геометрия: наконечники на ОБОИХ концах кривой — кончики ровно на границах узлов, каждый наконечник смотрит НА СВОЙ узел (←——→);
-    стандартный режим — путь исходного наконечника пуст (item невидим);
-  * set_bidirectional: переключение + идемпотентность без пересоздания item'а;
-  * ConnectionDialog / EditConnectionDialog: чекбокс, prefill из стрелки,
-    кортежи get_connection() 5/3 элементов (v1.2.6);
+It covers:
+  * the geometry: the arrowheads on BOTH the ends of the curve — the tips exactly on the borders of the nodes, each arrowhead looks AT ITS node (←——→);
+    the standard mode — the path of the original arrowhead is empty (the item is invisible);
+  * set_bidirectional: the toggle + the idempotence without the recreation of the item;
+  * ConnectionDialog / EditConnectionDialog: the checkbox, the prefill from the arrow,
+    the tuples of get_connection() 5/3 elements (v1.2.6);
   * MapScene.add_connection(bidirectional=...);
-  * JSON: поле "bidirectional" пишется только когда true (паттерн server_id),
-    round-trip save/load, backward-compat (нет поля → односторонняя);
-  * undo/redo: CmdAddRemoveConnection (флаг сохраняется через undo/redo),
-    CmdEditConnection (переключение флага одной командой), удаление узла —
-    стэш 5-кортежей E2E (_remove_node_guarded с patched QMessageBox.question);
-  * drawio-экспорт: startArrow=classic у двухстороннего ребра, без него у обычного;
-  * i18n-паритет + состояние релиза.
+  * the JSON: the "bidirectional" field is written only when true (the pattern of server_id),
+    the round-trip save/load, the backward-compat (no field → one-way);
+  * undo/redo: CmdAddRemoveConnection (the flag is preserved through undo/redo),
+    CmdEditConnection (the toggle of the flag by one command), the removal of a node —
+    the stash of the 5-tuples E2E (_remove_node_guarded with the patched QMessageBox.question);
+  * the drawio export: the startArrow=classic of the two-way edge, without it of the regular one;
+  * the i18n parity + the release state.
 
-Запуск: python tests/test_bidirectional_arrows.py   (из корня проекта) или python tests/run_all.py
+Run: python tests/test_bidirectional_arrows.py   (from the project root) or python tests/run_all.py
 """
 import json
 import os
@@ -25,7 +25,7 @@ import xml.etree.ElementTree as ET
 
 from _common import bootstrap, check, finish, load_i18n_langs, check_i18n_parity, check_release_state
 
-ROOT, WORK = bootstrap()  # ДО импортов модулей приложения
+ROOT, WORK = bootstrap()  # BEFORE the app module imports
 
 from PySide6.QtWidgets import QApplication, QMessageBox
 
@@ -48,7 +48,7 @@ def _find_arrow(scene, src_id, tgt_id):
 
 print("== v1.2.6: bidirectional arrows ==")
 
-# ── §1 Геометрия: два наконечника, кончики на границах узлов ────────────────
+# ── §1 The geometry: two arrowheads, the tips on the node borders ────────────────
 sc = MapScene()
 na = sc.add_server(ServerData(id="ba01", alias="A", host="10.9.9.1", user="u"))
 nb = sc.add_server(ServerData(id="bb02", alias="B", host="10.9.9.2", user="u"))
@@ -60,14 +60,14 @@ check("standard arrow: bidirectional defaults to False",
 check("standard arrow: source head path is empty (item invisible)",
       std._arrow_head_src.path().elementCount() == 0,
       str(std._arrow_head_src.path().elementCount()))
-# Замкнутый треугольник = moveTo + 2×lineTo + closeSubpath → 4 элемента пути.
+# A closed triangle = moveTo + 2×lineTo + closeSubpath → 4 path elements.
 check("standard arrow: target head present (moveTo + 2 lineTo + close)",
       std._arrow_head.path().elementCount() == 4,
       str(std._arrow_head.path().elementCount()))
 
 nc = sc.add_server(ServerData(id="bc03", alias="C", host="10.9.9.3", user="u"))
 nd = sc.add_server(ServerData(id="bd04", alias="D", host="10.9.9.4", user="u"))
-nd.setPos(400, 200)  # C (0, 200), D (400, 200) — горизонтальная пара
+nd.setPos(400, 200)  # C (0, 200), D (400, 200) — a horizontal pair
 
 bi = sc.add_connection("bc03", "bd04", "two-way", "vpn", bidirectional=True)
 check("scene.add_connection(bidirectional=True) sets the flag",
@@ -79,7 +79,7 @@ tgt_head = bi._arrow_head.path()
 check("bidirectional arrow: both heads present (4 elements each)",
       src_head.elementCount() == 4 and tgt_head.elementCount() == 4,
       f"{src_head.elementCount()}/{tgt_head.elementCount()}")
-# elementAt(0) — MoveToElement; в PySide6 у Element.x/.y свойства (не методы).
+# elementAt(0) — a MoveToElement; in PySide6 Element.x/.y are properties (not methods).
 tip_src = src_head.elementAt(0) if src_head.elementCount() else None
 tip_tgt = tgt_head.elementAt(0) if tgt_head.elementCount() else None
 check("source head tip lies on source boundary (right edge of C)",
@@ -91,17 +91,17 @@ check("target head tip lies on target boundary (left edge of D)",
       and rect_d.top() - 1 <= tip_tgt.y <= rect_d.bottom() + 1,
       f"tip=({tip_tgt.x:.1f},{tip_tgt.y:.1f}) left={rect_d.left()}" if tip_tgt else "no tip")
 
-# v1.2.6-fix: ОРИЕНТАЦИЯ — каждый наконечник смотрит НА СВОЙ узел (←——→), а не оба
-# в сторону движения (→——→). Центроид заполненного треугольника лежит по «крыльевую»
-# сторону от кончика: у исходного наконечника он обязан быть между p0 и p3 (на стороне
-# кривой, вне узла), у целевого — между p3 и p0. Раньше проверялись только
-# elementCount/позиция кончика, поэтому перевёрнутый исходный наконечник (тело под
-# узлом) проходил тесты, но визуально не отличался от односторонней стрелки.
+# v1.2.6-fix: THE ORIENTATION — each arrowhead looks AT ITS node (←——→), not both
+# in the direction of movement (→——→). The centroid of the filled triangle lies on the "wing" side
+# side from the tip: for the original arrowhead it must lie between p0 and p3 (on the
+# curve, outside the node), in the target one — between p3 and p0. Before, only
+# the elementCount/the tip position, so the flipped source arrowhead (the body under
+# node) passed the tests, but visually it was indistinguishable from a one-way arrow.
 p0_pts, _c1, _c2, p3_pts = bi._curve_pts
 
 
 def _head_centroid(path):
-    pts = [path.elementAt(i) for i in range(3)]  # MoveTo (кончик) + 2×lineTo (крылья)
+    pts = [path.elementAt(i) for i in range(3)]  # MoveTo (the tip) + 2×lineTo (the wings)
     return (sum(p.x for p in pts) / 3.0, sum(p.y for p in pts) / 3.0)
 
 
@@ -115,18 +115,18 @@ check("target head points AT the target node (wings on curve side of p3)",
       (ctx_ - p3_pts.x()) * (p0_pts.x() - p3_pts.x()) + (cty - p3_pts.y()) * (p0_pts.y() - p3_pts.y()) > 0,
       f"centroid=({ctx_:.1f},{cty:.1f}) p3=({p3_pts.x():.1f},{p3_pts.y():.1f})")
 
-# ── §2 set_bidirectional: переключение + идемпотентность ────────────────────
+# ── §2 set_bidirectional: the toggle + the idempotence ────────────────────
 std.set_bidirectional(True)
 check("set_bidirectional(True): source head appears",
       std.bidirectional is True and std._arrow_head_src.path().elementCount() == 4)
-std.set_bidirectional(True)  # повторный вызов с тем же значением — no-op без ошибок
+std.set_bidirectional(True)  # a repeated call with the same value — a no-op without errors
 check("set_bidirectional idempotent (second call is a no-op)",
       std.bidirectional is True and std._arrow_head_src.path().elementCount() == 4)
 std.set_bidirectional(False)
 check("set_bidirectional(False): source head removed again",
       std.bidirectional is False and std._arrow_head_src.path().elementCount() == 0)
 
-# ── §3 Диалоги: чекбокс, prefill, расширенные кортежи ────────────────────────
+# ── §3 The dialogs: the checkbox, the prefill, the extended tuples ────────────────────────
 cdlg = ConnectionDialog(list(sc.nodes()), None,
                         default_source_id="bc03", default_target_id="bd04")
 check("ConnectionDialog: bidirectional checkbox exists and is unchecked by default",
@@ -151,7 +151,7 @@ check("EditConnectionDialog: standard arrow → checkbox unchecked",
       ecd2.bidirectional_check.isChecked() is False
       and ecd2.get_connection()[2] is False)
 
-# ── §4 Сериализация JSON: опциональное поле + round-trip + backward-compat ───
+# ── §4 The JSON serialization: the optional field + the round-trip + the backward-compat ───
 win = MW.MainWindow()
 win.scene.add_server(ServerData(id="snode001", alias="web-1", host="10.0.0.5", user="root"))
 win.scene.add_server(ServerData(id="snode002", alias="db-1", host="10.0.0.6", user="root"))
@@ -191,7 +191,7 @@ la = _find_arrow(win3.scene, "oldaaa01", "oldbbb02")
 check("backward-compat: connection without 'bidirectional' loads as one-way",
       la is not None and la.bidirectional is False)
 
-# ── §5 undo/redo: флаг живёт через все команды ───────────────────────────────
+# ── §5 undo/redo: the flag survives all the commands ───────────────────────────────
 win4 = MW.MainWindow()
 win4.scene.add_server(ServerData(id="u1", alias="U1", host="10.2.2.1", user="root"))
 win4.scene.add_server(ServerData(id="u2", alias="U2", host="10.2.2.2", user="root"))
@@ -221,7 +221,7 @@ check("CmdEditConnection(bidir): undo restored the old state",
       f"{au.label_text}/{au.connection_type}/{au.bidirectional}")
 win4.undo_stack.redo()
 
-# E2E: удаление узла захватывает 5-кортежи; undo возвращает связь как была
+# E2E: removing a node captures the 5-tuples; undo restores the connection as it was
 win5 = MW.MainWindow()
 m1 = win5.scene.add_server(ServerData(id="m1", alias="M1", host="10.3.3.1", user="root"))
 m2 = win5.scene.add_server(ServerData(id="m2", alias="M2", host="10.3.3.2", user="root"))
@@ -247,7 +247,7 @@ restored = _find_arrow(win5.scene, "m1", "m2")
 check("undo of node deletion restored the bidirectional arrow (5-tuple stash)",
       win5.scene.has_node("m2") and restored is not None and restored.bidirectional is True)
 
-# ── §6 drawio-экспорт: startArrow у двухстороннего ребра ─────────────────────
+# ── §6 the drawio export: the startArrow of a two-way edge ─────────────────────
 dsc = MapScene()
 dsc.add_server(ServerData(id="da", alias="DA", host="10.4.4.1", user="u"))
 dsc.add_server(ServerData(id="db", alias="DB", host="10.4.4.2", user="u"))
@@ -265,7 +265,7 @@ check("drawio: bidirectional edge carries startArrow=classic",
 check("drawio: one-way edge has no startArrow",
       "startArrow" not in edge_styles.get("one-edge", ""), str(edge_styles))
 
-# ── §7 i18n-паритет + состояние релиза ───────────────────────────────────────
+# ── §7 the i18n parity + the release state ───────────────────────────────────────
 langs = load_i18n_langs(ROOT)
 check_i18n_parity(langs)
 check_release_state(ROOT)

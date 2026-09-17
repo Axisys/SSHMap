@@ -1,44 +1,50 @@
 # -*- coding: utf-8 -*-
-"""v1.1: Диалог настроек (хаб) — ROADMAP v1.1, задачи 1–6; v1.1.1 — опции вокруг хаба.
+"""v1.1: Settings dialog (hub) — ROADMAP v1.1, tasks 1–6; v1.1.1 — options around the hub.
 
-QTabWidget «Общие / Терминал / Статусы / Автосохранение / Карта / Язык»:
-централизованные настройки приложения + точки входа (меню «Настройки» и кнопка
-⚙ сайдбара — в ui/main_window.py / ui/sidebar.py). Каждая следующая идея из
-ROADMAP добавляется полем/чекбоксом в существующую вкладку, а не новой UI-версией.
+QTabWidget "General / Terminal / Statuses / Autosave / Map / Language":
+centralized application settings + entry points (the "Settings" menu and the
+⚙ sidebar button — in ui/main_window.py / ui/sidebar.py). Each next idea from
+the ROADMAP is added as a field/checkbox in an existing tab, not as a new
+UI version.
 
-Хранение — ЕДИНЫЙ ~/.sshmap/config.json (i18n.save_config, атомарная merge-запись);
-все ключи опциональны, дефолты = текущее поведение:
-  * Общие:          external_terminal (v1.1: перенесён из ~/.sshmap_settings.json,
-                     миграция при чтении — modules/external_terminal.py, задача 7)
-                     + v1.1.1: ui_font_family/ui_font_size (шрифт UI, на лету),
-                     ui_show_sidebar_buttons (блок кнопок сайдбара);
-  * Терминал:       terminal_palette / terminal_font_size / terminal_history_lines
-                     (ключи v1.0) + terminal_close_behavior (v1.1: "close"|"ask")
-                     + v1.1.1: terminal_font (семейство; читался с v1.0, UI впервые),
-                     terminal_max_open (лимит своих терминалов, дефолт 4)
-                      + v1.2.2: terminal_mode ("windows" дефолт | "tabs" — док на карте);
-  * Статусы:        status_interval_sec / status_probe_timeout_sec (v1.1; дефолты
-                     30 c / 3.0 c — поведение v1.0, services/status_checker.py);
-  * Автосохранение: autosave_enabled / autosave_interval_sec / backup_count (v0.9.7);
-  * Карта:          v1.1.1: ui_node_double_click ("properties"|"connect"),
-                     ui_show_connection_type (тип на плашке связи);
-  * Язык:           language — немедленное применение (signal language_changed →
-                     MainWindow._switch_language; пункт «Помощь → Язык» сохранён).
+Storage — a SINGLE ~/.sshmap/config.json (i18n.save_config, atomic
+merge-write); all keys are optional, defaults = current behavior:
+  * General:          external_terminal (v1.1: moved from ~/.sshmap_settings.json,
+                     migration on read — modules/external_terminal.py, task 7)
+                     + v1.1.1: ui_font_family/ui_font_size (UI font, live),
+                     ui_show_sidebar_buttons (the sidebar button block);
+  * Terminal:         terminal_palette / terminal_font_size / terminal_history_lines
+                     (v1.0 keys) + terminal_close_behavior (v1.1: "close"|"ask")
+                     + v1.1.1: terminal_font (family; read since v1.0, UI for
+                     the first time), terminal_max_open (own-terminals limit,
+                     default 4)
+                      + v1.2.2: terminal_mode ("windows" default | "tabs" — the dock on the map);
+  * Statuses:         status_interval_sec / status_probe_timeout_sec (v1.1; defaults
+                     30 s / 3.0 s — v1.0 behavior, services/status_checker.py);
+  * Autosave:         autosave_enabled / autosave_interval_sec / backup_count (v0.9.7);
+  * Map:              v1.1.1: ui_node_double_click ("properties"|"connect"),
+                     ui_show_connection_type (type on the connection plaque);
+  * Language:         language — applied immediately (signal language_changed →
+                     MainWindow._switch_language; the "Help → Language" item is kept).
 
-v1.1.1: load_ui_settings() — валидатор ui_* ключей (паттерн get_status_settings);
-применение на лету без перезапуска — MainWindow (_apply_settings_from_dialog):
-QApplication.setFont, шрифт открытых окон терминала, видимость кнопок сайдбара,
-режим двойного клика, перерисовка плашек связей.
+v1.1.1: load_ui_settings() — the ui_* key validator (the get_status_settings
+pattern); live application without a restart — MainWindow
+(_apply_settings_from_dialog): QApplication.setFont, the font of open
+terminal windows, sidebar button visibility, double-click mode, connection
+plaque redraw.
 
-Сигналы (паттерн модуля — как ui/sidebar.py: диалог не знает о MainWindow):
-    applied()            — конфиг сохранён по ОК; MainWindow применяет на лету
-                           автосохранение (QTimer), статусы (StatusChecker) и
-                           v1.1.1-опции (шрифты/кнопки/двойной клик/плашки);
-                           терминал читает конфиг при следующем создании окна;
-    language_changed(str)— выбор языка во вкладке «Язык» (немедленно, до ОК).
+Signals (the module pattern — like ui/sidebar.py: the dialog does not know
+about MainWindow):
+    applied()            — the config was saved on OK; MainWindow applies
+                           autosave (QTimer), statuses (StatusChecker) and
+                           the v1.1.1 options (fonts/buttons/double-click/
+                           plaques) live; the terminal reads the config on
+                           the next window creation;
+    language_changed(str)— the language choice in the "Language" tab
+                           (immediately, before OK).
 
-i18n: ключи settings.* × en/ru/zh; реестр строк — в retranslate() (смена языка
-внутри открытого диалога обновляет его собственные подписи).
+i18n: keys settings.* × en/ru/zh; the string registry — in retranslate()
+(a language change inside the open dialog updates its own labels).
 """
 
 import sys
@@ -50,15 +56,15 @@ from PySide6.QtWidgets import (
     QPushButton, QMessageBox,
 )
 
-try:  # i18n — top-level пакет (плоский запуск из корня проекта)
+try:  # i18n — top-level package (flat run from the project root)
     from i18n import t as _translate
-except Exception:  # pragma: no cover - запасной путь
+except Exception:  # pragma: no cover - fallback path
     try:
         from .i18n import t as _translate
     except Exception:
         _translate = None
 
-try:  # v1.1 (задача 7): единый источник — config.json; миграция внутри модуля
+try:  # v1.1 (task 7): a single source — config.json; the migration is inside the module
     from ..modules.external_terminal import (
         TERMINAL_CHOICES_WINDOWS, TERMINAL_CHOICES_LINUX,
         load_external_terminal_setting,
@@ -69,7 +75,7 @@ except ImportError:
             TERMINAL_CHOICES_WINDOWS, TERMINAL_CHOICES_LINUX,
             load_external_terminal_setting,
         )
-    except ImportError:  # flat-раскладка без модуля — вкладка «Общие» без комбо
+    except ImportError:  # flat layout without the module — the "General" tab without the combo
         TERMINAL_CHOICES_WINDOWS = ["auto"]
         TERMINAL_CHOICES_LINUX = ["auto"]
         def load_external_terminal_setting():  # noqa: N802
@@ -77,27 +83,27 @@ except ImportError:
 
 
 def _t(key: str, **kw) -> str:
-    """Безопасный перевод (как в ui/command_palette.py): без i18n — сам ключ."""
+    """Safe translation (like in ui/command_palette.py): without i18n — the key itself."""
     if _translate is not None:
         try:
             return _translate(key, **kw) if kw else _translate(key)
-        except Exception:  # noqa: BLE001 — сбой i18n не роняет диалог
+        except Exception:  # noqa: BLE001 — an i18n failure must not break the dialog
             pass
     return key
 
 
 def load_ui_settings():
-    """v1.1.1 (ROADMAP v1.1.1): читает и валидирует ui_* ключи из ~/.sshmap/config.json.
+    """v1.1.1 (ROADMAP v1.1.1): reads and validates the ui_* keys from ~/.sshmap/config.json.
 
-    Паттерн тех же get_status_settings()/get_autosave_settings() — каждый домен
-    читает собственные ключи; источник i18n.load_config() (никогда не падает).
-    Возвращает:
-      {"font_family": str,            # "" — не задан (системный шрифт)
-       "font_size": int | None,       # None — не задан (системный размер; 0 = то же)
-       "node_double_click": str,      # "properties" (дефолт) | "connect"
-       "show_sidebar_buttons": bool,  # дефолт True — блок кнопок сайдбара виден
-       "show_connection_type": bool}  # дефолт False — тип на плашке связи не рисуется
-    Невалидные значения (чужой тип, вне диапазона) → дефолт. Никогда не бросает.
+    The same pattern as get_status_settings()/get_autosave_settings() — each
+    domain reads its own keys; the source is i18n.load_config() (never
+    fails). Returns:
+      {"font_family": str,            # "" — not set (the system font)
+       "font_size": int | None,       # None — not set (the system size; 0 = the same)
+       "node_double_click": str,      # "properties" (default) | "connect"
+       "show_sidebar_buttons": bool,  # default True — the sidebar button block is visible
+       "show_connection_type": bool}  # default False — the type on the connection plaque is not drawn
+    Invalid values (foreign type, out of range) → default. Never raises.
     """
     defaults = {"font_family": "", "font_size": None,
                 "node_double_click": "properties",
@@ -114,11 +120,11 @@ def load_ui_settings():
 
     v = cfg.get("ui_font_size")
     if isinstance(v, int) and not isinstance(v, bool) and 6 <= v <= 72:
-        defaults["font_size"] = v     # битое/0/вне диапазона → системный размер (дефолт)
+        defaults["font_size"] = v     # broken/0/out of range → the system size (default)
 
     v = cfg.get("ui_node_double_click")
     if isinstance(v, str) and v.strip().lower() in ("properties", "connect"):
-        defaults["node_double_click"] = v.strip().lower()  # битое/чужое → "properties"
+        defaults["node_double_click"] = v.strip().lower()  # broken/foreign → "properties"
 
     v = cfg.get("ui_show_sidebar_buttons")
     if isinstance(v, bool):
@@ -132,10 +138,10 @@ def load_ui_settings():
 
 
 class SettingsDialog(QDialog):
-    """Диалог настроек (хаб): 6 вкладок, сохранение в ~/.sshmap/config.json по ОК."""
+    """Settings dialog (hub): 6 tabs, saved to ~/.sshmap/config.json on OK."""
 
-    applied = Signal()           # конфиг сохранён — применить на лету (MainWindow)
-    language_changed = Signal(str)  # выбор языка во вкладке «Язык» (немедленно)
+    applied = Signal()           # the config was saved — apply live (MainWindow)
+    language_changed = Signal(str)  # the language choice in the "Language" tab (immediately)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -153,7 +159,7 @@ class SettingsDialog(QDialog):
         self._build_map_tab()
         self._build_language_tab()
 
-        # ── Кнопки ОК/Отмена (ОК = сохранение config.json + signal applied) ─────
+        # ── OK/Cancel buttons (OK = saving config.json + the applied signal) ─────
         btn_layout = QHBoxLayout()
         btn_layout.addStretch(1)
         self.ok_btn = QPushButton(_t("settings.ok"))
@@ -164,7 +170,7 @@ class SettingsDialog(QDialog):
         btn_layout.addWidget(self.cancel_btn)
         layout.addLayout(btn_layout)
 
-    # ── Вкладка «Общие» (v1.1: external_terminal — единый config.json) ─────────
+    # ── "General" tab (v1.1: external_terminal — a single config.json) ─────────
 
     def _build_general_tab(self):
         tab = QWidget()
@@ -173,7 +179,7 @@ class SettingsDialog(QDialog):
         choices = (TERMINAL_CHOICES_WINDOWS if sys.platform == "win32"
                    else TERMINAL_CHOICES_LINUX)
         for tid in choices:
-            # i18n-метки пресетов — существующие ключи ssh_ext.preset.* (v0.9.9.2)
+            # i18n preset labels — the existing keys ssh_ext.preset.* (v0.9.9.2)
             self.ext_term_combo.addItem(_t(f"ssh_ext.preset.{tid}"), tid)
         cur = load_external_terminal_setting()
         idx = next((i for i in range(self.ext_term_combo.count())
@@ -182,13 +188,13 @@ class SettingsDialog(QDialog):
         self._lbl_ext_term = QLabel(_t("settings.general.external_terminal"))
         form.addRow(self._lbl_ext_term, self.ext_term_combo)
 
-        # v1.1.1 (пункт 1): шрифт интерфейса — семейство + размер (pt); применение
-        # на лету без перезапуска (MainWindow: QApplication.setFont по ОК и при старте).
+        # v1.1.1 (item 1): the interface font — family + size (pt); applied
+        # live without a restart (MainWindow: QApplication.setFont on OK and at startup).
         ui_cfg = load_ui_settings()
         self.ui_font_family_edit = QLineEdit(ui_cfg["font_family"])
         self._lbl_ui_font_family = QLabel(_t("settings.general.ui_font_family"))
         form.addRow(self._lbl_ui_font_family, self.ui_font_family_edit)
-        # 0 = системный размер (specialValueText); диапазон валидатора 6..72
+        # 0 = the system size (specialValueText); the validator range is 6..72
         self.ui_font_size_spin = QSpinBox()
         self.ui_font_size_spin.setRange(0, 72)
         self.ui_font_size_spin.setValue(ui_cfg["font_size"] or 0)
@@ -196,15 +202,16 @@ class SettingsDialog(QDialog):
         self._lbl_ui_font_size = QLabel(_t("settings.general.ui_font_size"))
         form.addRow(self._lbl_ui_font_size, self.ui_font_size_spin)
 
-        # v1.1.1 (пункт 5): блок кнопок сайдбара — show/hide (layout сам перестроится);
-        # весь сайдбар прячется отдельным пунктом меню «Вид» (MainWindow).
+        # v1.1.1 (item 5): the sidebar button block — show/hide (the layout
+        # reflows itself); the whole sidebar is hidden by a separate "View"
+        # menu item (MainWindow).
         self.sidebar_buttons_chk = QCheckBox(_t("settings.general.sidebar_buttons"))
         self.sidebar_buttons_chk.setChecked(ui_cfg["show_sidebar_buttons"])
         form.addRow("", self.sidebar_buttons_chk)
 
         self.tabs.addTab(tab, _t("settings.tab.general"))
 
-    # ── Вкладка «Терминал» (ключи v1.0 + новое поведение закрытия) ─────────────
+    # ── "Terminal" tab (v1.0 keys + the new close behavior) ─────────────
 
     def _build_terminal_tab(self):
         try:
@@ -216,10 +223,10 @@ class SettingsDialog(QDialog):
         tab = QWidget()
         form = QFormLayout(tab)
 
-        # v1.2.2 (задача 4): режим отображения терминалов — "windows" (дефолт,
-        # текущее поведение: отдельные окна) | "tabs" (док «Терминалы» на карте).
-        # Применение без перезапуска: новые сессии уходят в выбранный режим,
-        # открытые окна/док живут как есть до закрытия.
+        # v1.2.2 (task 4): the terminal display mode — "windows" (default,
+        # current behavior: separate windows) | "tabs" (the "Terminals" dock on the map).
+        # Applied without a restart: new sessions go to the chosen mode,
+        # open windows/the dock stay as-is until closed.
         self.mode_combo = QComboBox()
         self.mode_combo.addItem(_t("settings.terminal.mode.windows"), "windows")
         self.mode_combo.addItem(_t("settings.terminal.mode.tabs"), "tabs")
@@ -241,36 +248,38 @@ class SettingsDialog(QDialog):
         self._lbl_palette = QLabel(_t("settings.terminal.palette"))
         form.addRow(self._lbl_palette, self.palette_combo)
 
-        # v1.1.1 (пункт 1): семейство шрифта терминала (моноширинный); пустое —
-        # системный моноширинный. Ключ terminal_font читался с v1.0, UI появляется
-        # впервые; применение на лету — в открытые окна (MainWindow по ОК).
+        # v1.1.1 (item 1): the terminal font family (monospace); empty —
+        # the system monospace. The terminal_font key was read since v1.0,
+        # the UI appears for the first time; live application — to open
+        # windows (MainWindow on OK).
         self.term_font_family_edit = QLineEdit(cfg["font_family"])
         self._lbl_term_font_family = QLabel(_t("settings.terminal.font_family"))
         form.addRow(self._lbl_term_font_family, self.term_font_family_edit)
 
-        # Размер шрифта: тот же диапазон валидатора (6–72 pt), дефолт 10
+        # Font size: the same validator range (6–72 pt), default 10
         self.font_size_spin = QSpinBox()
         self.font_size_spin.setRange(6, 72)
         self.font_size_spin.setValue(cfg["font_size"] or 10)
         self._lbl_font_size = QLabel(_t("settings.terminal.font_size"))
         form.addRow(self._lbl_font_size, self.font_size_spin)
 
-        # v1.1.1 (пункт 3): лимит своих открытых терминалов — при достижении не
-        # отказ, а предложение закрыть старейшую сессию (MainWindow._spawn_terminal_window).
+        # v1.1.1 (item 3): the limit of own open terminals — when reached,
+        # not a refusal but an offer to close the oldest session
+        # (MainWindow._spawn_terminal_window).
         self.max_open_spin = QSpinBox()
         self.max_open_spin.setRange(1, 16)
         self.max_open_spin.setValue(cfg["max_open"])
         self._lbl_max_open = QLabel(_t("settings.terminal.max_open"))
         form.addRow(self._lbl_max_open, self.max_open_spin)
 
-        # Глубина истории: диапазон валидатора (0 = скроллбэк выключен)
+        # History depth: the validator range (0 = scrollback disabled)
         self.history_spin = QSpinBox()
         self.history_spin.setRange(0, 1_000_000)
         self.history_spin.setValue(cfg["history_lines"])
         self._lbl_history = QLabel(_t("settings.terminal.history_lines"))
         form.addRow(self._lbl_history, self.history_spin)
 
-        # v1.1 (задача 3): поведение закрытия сессии — новый ключ
+        # v1.1 (task 3): the session close behavior — a new key
         self.close_behavior_combo = QComboBox()
         self.close_behavior_combo.addItem(
             _t("settings.terminal.close_behavior.close"), "close")
@@ -284,7 +293,7 @@ class SettingsDialog(QDialog):
 
         self.tabs.addTab(tab, _t("settings.tab.terminal"))
 
-    # ── Вкладка «Статусы» (интервал + таймаут пробы StatusChecker) ─────────────
+    # ── "Statuses" tab (the StatusChecker probe interval + timeout) ─────────────
 
     def _build_statuses_tab(self):
         try:
@@ -311,8 +320,8 @@ class SettingsDialog(QDialog):
         self._lbl_probe_timeout = QLabel(_t("settings.statuses.timeout"))
         form.addRow(self._lbl_probe_timeout, self.probe_timeout_spin)
 
-        # v1.1.2 final (задача 2): потолок параллельных проб в раунде —
-        # status_max_parallel (дефолт 16; диапазон = кламп get_status_settings).
+        # v1.1.2 final (task 2): the cap on parallel probes per round —
+        # status_max_parallel (default 16; range = the clamp of get_status_settings).
         self.max_parallel_spin = QSpinBox()
         self.max_parallel_spin.setRange(1, _MPL)
         self.max_parallel_spin.setValue(st["max_parallel"])
@@ -321,7 +330,7 @@ class SettingsDialog(QDialog):
 
         self.tabs.addTab(tab, _t("settings.tab.statuses"))
 
-    # ── Вкладка «Автосохранение» (ключи v0.9.7) ────────────────────────────────
+    # ── "Autosave" tab (v0.9.7 keys) ────────────────────────────────
 
     def _build_autosave_tab(self):
         try:
@@ -351,7 +360,7 @@ class SettingsDialog(QDialog):
 
         self.tabs.addTab(tab, _t("settings.tab.autosave"))
 
-    # ── Вкладка «Карта» (v1.1.1: опции карты — двойной клик узла, плашка связи) ─
+    # ── "Map" tab (v1.1.1: map options — node double click, connection plaque) ─
 
     def _build_map_tab(self):
         ui_cfg = load_ui_settings()
@@ -359,9 +368,10 @@ class SettingsDialog(QDialog):
         tab = QWidget()
         form = QFormLayout(tab)
 
-        # v1.1.1 (пункт 4): двойной клик по узлу — свойства (дефолт, поведение v1.1)
-        # или сразу диалог входа SSH (_run_ssh_connect). Чекбокс «Подключиться по
-        # SSH» в свойствах не ломается — новый режим лишь дублирует его быстрее.
+        # v1.1.1 (item 4): double click on a node — properties (default,
+        # v1.1 behavior) or straight to the SSH login dialog (_run_ssh_connect).
+        # The "Connect via SSH" checkbox in properties is not broken — the
+        # new mode merely duplicates it faster.
         self.node_dblclick_combo = QComboBox()
         self.node_dblclick_combo.addItem(
             _t("settings.map.node_double_click.properties"), "properties")
@@ -373,15 +383,15 @@ class SettingsDialog(QDialog):
         self._lbl_node_dblclick = QLabel(_t("settings.map.node_double_click"))
         form.addRow(self._lbl_node_dblclick, self.node_dblclick_combo)
 
-        # v1.1.1 (пункт 6): тип связи на плашке («SSH · <метка>») — удобно для
-        # экспорта PNG/PDF, где цвет менее заметен; по умолчанию выключено.
+        # v1.1.1 (item 6): the connection type on the plaque ("SSH · <label>") —
+        # handy for PNG/PDF export, where color is less visible; off by default.
         self.show_conn_type_chk = QCheckBox(_t("settings.map.show_connection_type"))
         self.show_conn_type_chk.setChecked(ui_cfg["show_connection_type"])
         form.addRow("", self.show_conn_type_chk)
 
         self.tabs.addTab(tab, _t("settings.tab.map"))
 
-    # ── Вкладка «Язык» (немедленное применение — до ОК) ────────────────────────
+    # ── "Language" tab (immediate application — before OK) ────────────────────────
 
     def _build_language_tab(self):
         tab = QWidget()
@@ -392,44 +402,45 @@ class SettingsDialog(QDialog):
             for lg in get_available_languages():
                 self.language_combo.addItem(lg["name"], lg["code"])
             cur = get_current_language()
-        except Exception:  # noqa: BLE001 — без i18n вкладка не строится комбо
+        except Exception:  # noqa: BLE001 — without i18n the combo is not built
             cur = ""
         idx = next((i for i in range(self.language_combo.count())
                     if self.language_combo.itemData(i) == cur), 0)
         self.language_combo.setCurrentIndex(idx)
-        # Немедленное применение — ПОСЛЕ установки начального индекса (иначе эхо
-        # currentIndexChanged при конструировании переключило бы язык на свой же).
+        # Immediate application — AFTER setting the initial index (otherwise the
+        # currentIndexChanged echo at construction time would switch the
+        # language onto itself).
         self.language_combo.currentIndexChanged.connect(self._on_language_changed)
         self._lbl_language = QLabel(_t("settings.language.label"))
         form.addRow(self._lbl_language, self.language_combo)
         self.tabs.addTab(tab, _t("settings.tab.language"))
 
-    # ── Слоты ──────────────────────────────────────────────────────────────────
+    # ── Slots ──────────────────────────────────────────────────────────────────
 
     def _on_language_changed(self, index: int):
-        """Вкладка «Язык»: немедленное применение (set_language + retranslate UI)."""
+        """The "Language" tab: immediate application (set_language + UI retranslate)."""
         code = self.language_combo.itemData(index)
         if not code:
             return
         self.language_changed.emit(code)
-        # Подписи самого диалога обновляем сразу (t() уже на новом языке).
+        # The dialog's own labels are updated immediately (t() is already in the new language).
         try:
             self.retranslate()
         except RuntimeError:
             pass  # Qt teardown
 
     def _on_accept(self):
-        """ОК: сохранить собранные значения в config.json + signal applied."""
+        """OK: save the collected values to config.json + the applied signal."""
         try:
             from i18n import save_config
             if not save_config(self.collect()):
                 QMessageBox.warning(
                     self, _t("msg.error_title"),
                     _t("msg.save_failed", error="~/.sshmap/config.json"))
-                return  # не закрываем молча — пользователь видит ошибку
+                return  # do not close silently — the user sees the error
         except Exception as e:
-            # v1.2.10 (AUDIT авто #3): тихий `return` оставлял «замерзший» диалог без объяснений;
-            # теперь — лог + видимая ошибка, как в ветке save_config()==False выше (те же i18n-ключи).
+            # v1.2.10 (AUDIT auto #3): the quiet `return` left a "frozen" dialog without an explanation;
+            # now — a log + a visible error, as in the save_config()==False branch above (the same i18n keys).
             try:
                 from modules.logger import get_logger
                 get_logger("ui.settings_dialog").warning(f"save_config failed: {e}")
@@ -442,24 +453,28 @@ class SettingsDialog(QDialog):
         self.applied.emit()
         self.accept()
 
-    # ── Сбор значений (ключи config.json; language НЕ входит — он сразу) ───────
+    # ── Collecting values (config.json keys; language is NOT included — it is immediate) ───────
 
     def collect(self) -> dict:
-        """Значения вкладок → ключи ~/.sshmap/config.json (все валидны по построению:
-        комбо дают фиксированные id, спинбоксы — свой диапазон).
+        """The tab values → the ~/.sshmap/config.json keys (all valid by construction:
+        the combos give fixed ids, the spinboxes — their own range).
 
-        v1.1.1: +7 ключей — шрифты UI/терминала (ui_font_family/ui_font_size/
-        terminal_font), лимит терминалов (terminal_max_open), двойной клик узла
-        (ui_node_double_click), кнопки сайдбара (ui_show_sidebar_buttons) и тип
-        на плашке связи (ui_show_connection_type). ui_font_size = 0 — системный
-        размер (валидатор load_ui_settings() читает диапазон 6..72, иначе дефолт).
-        v1.1.2 final: +1 ключ — status_max_parallel (потолок параллельных проб;
-        диапазон спинбокса = кламп валидатора get_status_settings()).
-        v1.2.2: +1 ключ — terminal_mode ("windows"|"tabs"; комбо даёт фиксированные id).
+        v1.1.1: +7 keys — the UI/terminal fonts (ui_font_family/ui_font_size/
+        terminal_font), the terminal limit (terminal_max_open), the node
+        double click (ui_node_double_click), the sidebar buttons
+        (ui_show_sidebar_buttons) and the type on the connection plaque
+        (ui_show_connection_type). ui_font_size = 0 — the system size
+        (the load_ui_settings() validator reads the range 6..72, otherwise
+        the default).
+        v1.1.2 final: +1 key — status_max_parallel (the cap on parallel
+        probes; the spinbox range = the validator clamp of
+        get_status_settings()).
+        v1.2.2: +1 key — terminal_mode ("windows"|"tabs"; the combo gives
+        fixed ids).
         """
         return {
             "external_terminal": self.ext_term_combo.currentData() or "auto",
-            # v1.2.2 (задача 4): режим отображения терминалов
+            # v1.2.2 (task 4): the terminal display mode
             "terminal_mode": self.mode_combo.currentData() or "windows",
             "terminal_palette": self.palette_combo.currentData() or "default",
             "terminal_font_size": int(self.font_size_spin.value()),
@@ -467,26 +482,26 @@ class SettingsDialog(QDialog):
             "terminal_close_behavior": self.close_behavior_combo.currentData() or "close",
             "status_interval_sec": int(self.status_interval_spin.value()),
             "status_probe_timeout_sec": float(self.probe_timeout_spin.value()),
-            # v1.1.2 final (задача 2): потолок параллельных проб в раунде
+            # v1.1.2 final (task 2): the cap on parallel probes per round
             "status_max_parallel": int(self.max_parallel_spin.value()),
             "autosave_enabled": bool(self.autosave_enabled_chk.isChecked()),
             "autosave_interval_sec": int(self.autosave_interval_spin.value()),
             "backup_count": int(self.backup_count_spin.value()),
-            # v1.1.1: шрифты (UI + терминал) и лимит своих терминалов
+            # v1.1.1: fonts (UI + terminal) and the own-terminals limit
             "ui_font_family": self.ui_font_family_edit.text().strip(),
             "ui_font_size": int(self.ui_font_size_spin.value()),
             "terminal_font": self.term_font_family_edit.text().strip(),
             "terminal_max_open": int(self.max_open_spin.value()),
-            # v1.1.1: опции карты/сайдбара
+            # v1.1.1: map/sidebar options
             "ui_node_double_click": self.node_dblclick_combo.currentData() or "properties",
             "ui_show_sidebar_buttons": bool(self.sidebar_buttons_chk.isChecked()),
             "ui_show_connection_type": bool(self.show_conn_type_chk.isChecked()),
         }
 
-    # ── i18n: retranslate собственных строк (смена языка в открытом диалоге) ───
+    # ── i18n: retranslating the dialog's own strings (a language change in the open dialog) ───
 
     def retranslate(self):
-        """Повторно применить перевод к строкам диалога (реестр — здесь)."""
+        """Re-apply translations to the dialog's strings (the registry — here)."""
         self.setWindowTitle(_t("settings.title"))
         self.tabs.setTabText(0, _t("settings.tab.general"))
         self.tabs.setTabText(1, _t("settings.tab.terminal"))
@@ -501,13 +516,13 @@ class SettingsDialog(QDialog):
             if tid:
                 self.ext_term_combo.setItemText(i, _t(f"ssh_ext.preset.{tid}"))
 
-        # v1.1.1: шрифт UI + кнопки сайдбара (вкладка «Общие»)
+        # v1.1.1: UI font + sidebar buttons ("General" tab)
         self._lbl_ui_font_family.setText(_t("settings.general.ui_font_family"))
         self._lbl_ui_font_size.setText(_t("settings.general.ui_font_size"))
         self.ui_font_size_spin.setSpecialValueText(_t("settings.ui_font_system"))
         self.sidebar_buttons_chk.setText(_t("settings.general.sidebar_buttons"))
 
-        # v1.2.2: режим отображения (вкладка «Терминал»)
+        # v1.2.2: the display mode ("Terminal" tab)
         self._lbl_mode.setText(_t("settings.terminal.mode"))
         for i in range(self.mode_combo.count()):
             mid = self.mode_combo.itemData(i)
@@ -551,7 +566,7 @@ class SettingsDialog(QDialog):
         self._lbl_autosave_interval.setText(_t("settings.autosave.interval"))
         self._lbl_backup_count.setText(_t("settings.autosave.backups"))
 
-        # v1.1.1: опции карты (вкладка «Карта»)
+        # v1.1.1: map options ("Map" tab)
         self._lbl_node_dblclick.setText(_t("settings.map.node_double_click"))
         for i in range(self.node_dblclick_combo.count()):
             cid = self.node_dblclick_combo.itemData(i)

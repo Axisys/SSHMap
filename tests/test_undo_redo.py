@@ -1,19 +1,19 @@
-"""Регрессионные тесты v0.8.3 — Undo/Redo.
+"""Regression tests v0.8.3 — Undo/Redo.
 
-Проверяется настоящий путь MainWindow + QUndoStack:
-  round-trip undo/redo для каждой операции (добавление/удаление сервера,
-  связи, заметки; правка текста заметки, правка данных узла),
-  merge перемещений узла одним жестом,
-  dirty-маркер, привязанный к индексу undo-стека (save = новая точка отсчёта).
+The real path of MainWindow + QUndoStack is checked:
+  the round-trip undo/redo of every operation (the add/remove of a server,
+  a connection, a note; the edit of the note text, the edit of the node data),
+  the merge of the node moves by one gesture,
+  the dirty marker tied to the index of the undo stack (save = a new baseline).
 
-Запуск:  python tests/test_undo_redo.py   (из корня проекта) или python tests/run_all.py
+Run:  python tests/test_undo_redo.py   (from the project root) or python tests/run_all.py
 """
 import os
 import sys
 
 from _common import bootstrap, check, finish
 
-ROOT, WORK = bootstrap()  # ДО импортов модулей приложения (HOME-изоляция и faulthandler внутри)
+ROOT, WORK = bootstrap()  # BEFORE the app module imports (the HOME isolation and faulthandler inside)
 
 
 from PySide6.QtCore import QPointF
@@ -35,7 +35,7 @@ except ImportError:
 
 def make_win():
     win = MW.MainWindow()
-    # headless-тесты без event loop: StatusChecker не запускаем
+    # the headless tests without an event loop: we do not start the StatusChecker
     return win
 
 
@@ -53,7 +53,7 @@ check("window has QUndoStack", hasattr(win, "undo_stack"))
 check("undo disabled initially", not win.undo_stack.canUndo())
 check("not dirty on clean project", not win._has_unsaved_changes)
 win.act_undo.setEnabled(True)
-win.act_undo.setEnabled(False)  # подключение canUndoChanged живое (не упало)
+win.act_undo.setEnabled(False)  # the canUndoChanged connection is alive (did not fall)
 check("undo/redo actions wired to stack", True)
 
 print("== add/remove server round-trip ==")
@@ -87,8 +87,8 @@ check("redo removes them again",
       and not win.scene.has_connection(a.data.id, b.data.id))
 
 print("== connection add/remove round-trip ==")
-# Стрелка, созданная ПОСЛЕ удаления узла, при undo удаления не восстанавливается
-# (не была захвачена) — это корректно. Честный round-trip связи делаем на живых узлах:
+# An arrow created AFTER the node removal, on the undo of the removal, is not restored
+# (was not caught) — that is correct. We do an honest connection round-trip on live nodes:
 c = node_at(win, 800, 0)
 win._push_command(CmdAddRemoveConnection(win, win.scene, a.data.id, c.data.id, "", "vpn", "add"))
 check("add-connection command creates arrow",
@@ -163,7 +163,7 @@ ok_saved = win2._save_project()
 MW.MainWindow._save_project = orig_save
 check("save resets dirty even though stack had history",
       ok_saved and not win2._dirty)
-# после save стек чист: undo недоступно до нового изменения
+# after the save the stack is clean: undo is unavailable until a new change
 check("undo unavailable right after save (baseline)", not win2.undo_stack.canUndo())
 
 print("== status changes are NOT undoable (spec boundary) ==")
@@ -177,11 +177,11 @@ print("== LIFO order: delete-node after add-arrow ==")
 w3 = make_win()
 na = node_at(w3, 0, 0)
 nb = node_at(w3, 300, 0)
-w3._push_command(CmdAddRemoveNode(w3, w3.scene, nb.data, "remove", []))       # удалить b
-w3._push_command(CmdAddRemoveConnection(w3, w3.scene, na.data.id, nb.data.id, "", "ssh", "add"))  # no-op (узла нет)
-w3.undo_stack.undo()  # сначала отменяется связь
-w3.undo_stack.undo()  # затем возвращается узел
+w3._push_command(CmdAddRemoveNode(w3, w3.scene, nb.data, "remove", []))       # remove b
+w3._push_command(CmdAddRemoveConnection(w3, w3.scene, na.data.id, nb.data.id, "", "ssh", "add"))  # a no-op (no node)
+w3.undo_stack.undo()  # first the connection is undone
+w3.undo_stack.undo()  # then the node is returned
 check("LIFO undo returns both objects", nb.data.id in w3.scene._nodes)
 
-# ── итог ──
+# ── the summary ──
 finish()

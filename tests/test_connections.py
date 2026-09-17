@@ -1,14 +1,14 @@
-"""Связи: Безье-стрелки, типы, edge-to-edge, drag-режим (бывш. smoke_test.py §6b «v0.7»).
+"""Connections: Bézier arrows, types, edge-to-edge, drag mode (former smoke_test.py §6b "v0.7").
 
-Часть сьюта, разбитого из smoke_test.py v0.6–v0.9.2 (см. INDEX.md).
-  * геометрия cubic Bezier (moveTo + curve), край-к-краю на границах узлов;
-  * A→B и B→A прогибаются на противоположные стороны; неизвестный тип → дефолт ssh;
-  * set_type меняет цвет/тип; поле type сериализуется в JSON, version = 0.9;
-  * backward-compat: проект v0.6 без поля type загружается как ssh;
-  * ConnectionDialog: 6 типов + prefill source/target (drag-режим);
-  * drag-режим Shift+ЛКМ: полный путь MapView→MainWindow через QTest-ввод.
+A part of the suite split out of smoke_test.py v0.6–v0.9.2 (see INDEX.md).
+  * the geometry of the cubic Bezier (moveTo + curve), the edge-to-edge on the borders of the nodes;
+  * the A→B and the B→A bend to the opposite sides; the unknown type → the default ssh;
+  * set_type changes the color/the type; the field type is serialized in the JSON, version = 0.9;
+  * the backward-compat: the project v0.6 without the field type loads as ssh;
+  * ConnectionDialog: the 6 types + the prefill of the source/target (the drag mode);
+  * the drag mode Shift+LMB: the full path MapView→MainWindow through the QTest input.
 
-Запуск: python tests/test_connections.py   (из корня проекта) или python tests/run_all.py
+Run: python tests/test_connections.py   (from the project root) or python tests/run_all.py
 """
 import json
 import os
@@ -16,7 +16,7 @@ import sys
 
 from _common import bootstrap, check, finish, viewport_point as _vp
 
-ROOT, WORK = bootstrap()  # ДО импортов модулей приложения
+ROOT, WORK = bootstrap()  # BEFORE the app module imports
 
 from PySide6.QtWidgets import QApplication
 app = QApplication(sys.argv)
@@ -31,13 +31,13 @@ from graphics.connection_arrow import (
     ConnectionArrow as _CA, CONNECTION_TYPES, DEFAULT_CONNECTION_TYPE, type_color,
 )
 
-# Geometрия: два узла горизонтально друг против друга (A слева, B справа на 310 px)
+# Geometry: two nodes facing each other horizontally (A on the left, B 310 px to the right)
 vsc = _MapScene()
 ndA = ServerData(id="va01", alias="A", host="10.9.9.1", user="u")
 ndB = ServerData(id="vb02", alias="B", host="10.9.9.2", user="u")
-node_a = vsc.add_server(ndA)          # rect (0, 0, 180, 130), центр (90, 65)
+node_a = vsc.add_server(ndA)          # the rect (0, 0, 180, 130), the center (90, 65)
 node_b = vsc.add_server(ndB)
-node_b.setPos(400, 0)                 # rect (400, 0, 180, 130), центр (490, 65)
+node_b.setPos(400, 0)                 # the rect (400, 0, 180, 130), the center (490, 65)
 
 arrow_ab = vsc.add_connection("va01", "vb02", "lan-1", "vpn")
 check("typed connection: type stored on arrow",
@@ -46,15 +46,15 @@ check("type colors are distinct and vpn=#60a5fa",
       len({c.name().lower() for c in map(type_color, CONNECTION_TYPES)}) == 6
       and type_color("vpn").name().lower() == "#60a5fa")
 
-# Геометрия: (path, p0, p3, c1, c2); структура пути — через elementAt (Qt6 PySide6)
+# Geometry: (path, p0, p3, c1, c2); the path structure — via elementAt (Qt6 PySide6)
 from PySide6.QtCore import QPointF as _QPointF
 geom = arrow_ab._compute_geometry()
 check("arrow geometry computed (nodes apart)", geom is not None)
 if geom is not None:
     _gpath, p0, p3, _c1, _c2 = geom
-else:  # фолбэк, чтобы следующие проверки не упали с AttributeError
+else:  # a fallback, so the checks below do not fail with AttributeError
     _gpath = arrow_ab.path(); p0 = _QPointF(0, 0); p3 = _QPointF(0, 0)
-# cubic Bezier в Qt6: [MoveTo(p0), CurveTo(p3), data(c1), data(c2)] → elementCount == 4
+# A cubic Bezier in Qt6: [MoveTo(p0), CurveTo(p3), data(c1), data(c2)] → elementCount == 4
 check("arrow path is a single cubic Bezier (moveTo + curve)",
       _gpath.elementCount() == 4 and _gpath.elementAt(0).isMoveTo()
       and _gpath.elementAt(1).isCurveTo(), str(_gpath.elementCount()))
@@ -68,8 +68,8 @@ check("edge-to-edge: ends on target boundary (left edge of B)",
 check("arrow is a curve (bbox taller than the chord)",
       arrow_ab.path().boundingRect().height() > 2, str(arrow_ab.path().boundingRect()))
 
-# A->B и B->A прогибаются на противоположные стороны — не перекрываются
-arrow_ba = vsc.add_connection("vb02", "va01", "", "carrier-pigeon")  # неизвестный тип → дефолт
+# A->B and B->A bend to the opposite sides — they do not overlap
+arrow_ba = vsc.add_connection("vb02", "va01", "", "carrier-pigeon")  # an unknown type → the default
 check("unknown connection type falls back to default (ssh)",
       arrow_ba is not None and arrow_ba.connection_type == DEFAULT_CONNECTION_TYPE)
 check("A->B and B->A bow on opposite sides of the chord",
@@ -77,17 +77,17 @@ check("A->B and B->A bow on opposite sides of the chord",
       and arrow_ba.path().boundingRect().center().y() < 65.0,
       f"{arrow_ab.path().boundingRect().center().y():.1f} / {arrow_ba.path().boundingRect().center().y():.1f}")
 
-# set_type меняет цвет и тип (для будущего контекстного меню v0.7.3)
+# set_type changes the color and the type (for the future context menu, v0.7.3)
 old_color = arrow_ba._base_color.name()
 arrow_ba.set_type("database")
 check("set_type changes color",
       arrow_ba.connection_type == "database" and arrow_ba._base_color.name() != old_color
       and arrow_ba._base_color.name().lower() == "#a78bfa")
-arrow_ba.set_type("not-a-type")  # неизвестный — игнорируется без ошибок
+arrow_ba.set_type("not-a-type")  # an unknown one — ignored without errors
 
-# Сериализация: version синхронизирована с релизом приложения (ревью-фикс v0.8.0 #2)
-# + поле type в связях. Поле не валидируется при загрузке — старые
-# файлы (0.6/0.7/0.7.2) читаются без изменений, см. backward-compat ниже.
+# Serialization: the version is synchronized with the app release (review fix v0.8.0 #2)
+# + the type field in connections. The field is not validated on load — old
+# the files (0.6/0.7/0.7.2) are read unchanged, see the backward-compat below.
 win = MW.MainWindow()
 win.scene.add_server(ServerData(id="snode001", alias="web-1", host="10.0.0.5", user="root"))
 win.scene.add_server(ServerData(id="snode002", alias="db-1", host="10.0.0.6", user="root"))
@@ -98,13 +98,13 @@ p7 = os.path.join(WORK, "save_v07.json")
 ok7 = win._do_save(p7)
 with open(p7, encoding="utf-8") as f:
     j7 = json.load(f)
-# v0.8.1: версия формата — новая (ключ "groups"); старые версии читаются без изменений ниже
+# v0.8.1: the format version — new (the "groups" key); the old versions read unchanged below
 check("saved version synced to format 0.9", ok7 and j7.get("version") == "0.9", str(j7.get("version")))
 conn_db = [c for c in j7["connections"] if c.get("label") == "vpn-link"]
 check("connection type serialized in JSON",
       conn_db and conn_db[0].get("type") == "database", str(conn_db))
 
-# Backward-compat: проект v0.6 без поля type загружается как SSH
+# Backward-compat: a v0.6 project without the type field loads as SSH
 raw_old = {
     "version": "0.6",
     "servers": [
@@ -119,7 +119,7 @@ la = win3.scene._arrows[0] if win3.scene._arrows else None
 check("v0.6 project (no type field): connection loads with default ssh",
       la is not None and la.connection_type == DEFAULT_CONNECTION_TYPE, str(getattr(la, "connection_type", None)))
 
-# ConnectionDialog: 6 типов + prefill source/target для drag-режима
+# ConnectionDialog: 6 types + a source/target prefill for the drag mode
 from dialogs.connection_dialog import ConnectionDialog as _CDlg
 cdlg = _CDlg(list(win3.scene._nodes.values()), None,
              default_source_id="oldaaa01", default_target_id="oldbbb02")
@@ -127,22 +127,22 @@ check("ConnectionDialog exposes type combo with 6 types", cdlg.type_combo.count(
 check("ConnectionDialog prefills source/target (drag mode)",
       cdlg.source.currentData() == "oldaaa01" and cdlg.target.currentData() == "oldbbb02")
 res = cdlg.get_connection()
-# v1.2.6: кортеж расширен до 5 элементов (5-й — bidirectional, дефолт False)
+# v1.2.6: the tuple is extended to 5 elements (the 5th — bidirectional, the default False)
 check("get_connection returns 5-tuple with valid type + bidir flag",
       len(res) == 5 and res[3] in CONNECTION_TYPES and res[4] is False, str(res))
 
-# Drag-режим: Shift+ЛКМ на узле → движение → отпускание над другим узлом.
-# Модальный диалог заменяем фейком (offscreen), проверяется весь путь MapView→MainWindow.
-# Направление B→A: связь A→B ("legacy") уже существует, дубль в ту же сторону будет отклонён.
-# ВАЖНО (Qt 6.11): ручные QMouseEvent НЕ запускают внутреннюю обработку QGraphicsView
-# (проверено эмпирически на PySide6 и PyQt6) — ввод шлём через QTest.mousePress/move/release,
-# который генерирует события штатным для Qt способом (маршрутизация viewport→view).
+# The drag mode: Shift+LMB on a node → movement → release over another node.
+# The modal dialog is replaced with a fake (offscreen), the whole MapView→MainWindow path is checked.
+# The B→A direction: the A→B connection ("legacy") already exists, a duplicate in the same direction will be rejected.
+# IMPORTANT (Qt 6.11): manual QMouseEvents do NOT trigger the QGraphicsView internal processing
+# (verified empirically on PySide6 and PyQt6) — we send input via QTest.mousePress/move/release,
+# which generates events the standard Qt way (the viewport→view routing).
 from PySide6.QtCore import Qt as _Qt, QPoint as _QPt
 from PySide6.QtTest import QTest as _QTest
 
 na3 = win3.scene._nodes["oldaaa01"]
 nb3 = win3.scene._nodes["oldbbb02"]
-na3.setPos(-300, -300)   # разъединяем узлы (из v0.6-файла оба были в (0,0))
+na3.setPos(-300, -300)   # we disconnect the nodes (from the v0.6 file both were at (0,0))
 nb3.setPos(500, 100)
 
 drag_calls = []
@@ -153,9 +153,9 @@ class _FakeConnDialog:
     def exec(self): return 1  # QDialog.Accepted
     def get_connection(self):
         src, tgt = drag_calls[-1]
-        # v1.2.6: 5-кортеж (src, tgt, label, ctype, bidirectional) — как у настоящего диалога;
-        # старый 4-кортеж роняет _add_connection ValueError'ом → модалка QMessageBox.critical
-        # зависает offscreen на faulthandler-таймаут (180 c).
+        # v1.2.6: a 5-tuple (src, tgt, label, ctype, bidirectional) — as in the real dialog;
+        # the old 4-tuple crashes _add_connection with a ValueError → the QMessageBox.critical modal
+        # hangs offscreen on the faulthandler timeout (180 s).
         return (src, tgt, "drag-label", "http", False)
 
 _orig_cd = MW.ConnectionDialog

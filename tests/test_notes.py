@@ -1,21 +1,21 @@
-"""Sticky notes: drag/resize/edit/delete + JSON round-trip (бывш. smoke_test.py §6e «v0.7.2»).
+"""Sticky notes: drag/resize/edit/delete + JSON round-trip (former smoke_test.py §6e "v0.7.2").
 
-Часть сьюта, разбитого из smoke_test.py v0.6–v0.9.2 (см. INDEX.md).
-  * создание + сериализация (to_dict/from_dict, битые значения → дефолты);
-  * clamp размера MIN/MAX;
-  * drag мышью через ПОЛНЫЙ pipeline view→scene→item (QTest-ввод): MapView сам
-    переключает NoDrag при нажатии над заметкой; moved-сигнал на release;
-  * resize за правый нижний угол; edit mode по двойному клику (focus policy);
-  * textChanged → note.textEdited; Delete-клавиша через MainWindow._remove_note;
-  * JSON round-trip + backward-compat старого проекта без ключа "notes".
+A part of the suite split out of smoke_test.py v0.6–v0.9.2 (see INDEX.md).
+  * creation + serialization (to_dict/from_dict, broken values → the defaults);
+  * the size clamp MIN/MAX;
+  * the mouse drag through the FULL pipeline view→scene→item (QTest input): MapView itself
+    switches to NoDrag on the press over a note; the moved signal on the release;
+  * the resize by the bottom-right corner; the edit mode on the double click (the focus policy);
+  * textChanged → note.textEdited; the Delete key via MainWindow._remove_note;
+  * the JSON round-trip + the backward-compat of an old project without the "notes" key.
 
-Запуск: python tests/test_notes.py   (из корня проекта) или python tests/run_all.py
+Run: python tests/test_notes.py   (from the project root) or python tests/run_all.py
 """
 import sys
 
 from _common import bootstrap, check, finish, viewport_point as _vp
 
-ROOT, WORK = bootstrap()  # ДО импортов модулей приложения
+ROOT, WORK = bootstrap()  # BEFORE the app module imports
 
 from PySide6.QtWidgets import QApplication
 app = QApplication(sys.argv)
@@ -34,7 +34,7 @@ from PySide6.QtTest import QTest as _QTest
 
 win4 = MW.MainWindow()
 
-# Создание + сериализация
+# Creation + serialization
 note1 = win4.scene.add_note(text="hello", x=50.0, y=60.0)
 check("scene.add_note creates StickyNote in _notes", len(win4.scene._notes) == 1 and note1 is win4.scene._notes[0])
 d1 = note1.to_dict()
@@ -42,28 +42,28 @@ check("note to_dict has id/text/x/y/width/height",
       set(d1.keys()) == {"id", "text", "x", "y", "width", "height"} and d1["text"] == "hello"
       and len(d1["id"]) == 8, str(d1))
 
-# from_dict: битые значения — дефолты, лишние ключи игнорируются
+# from_dict: corrupt values — the defaults, extra keys are ignored
 n_bad = _SN2.from_dict({"x": "garbage", "width": None, "extra_key": 1})
 check("note from_dict survives bad values (defaults)", n_bad.pos().x() == 0.0 and n_bad.rect().width() >= _SN2.MIN_W)
 
-# Размер: clamp MIN/MAX
+# The size: the clamp MIN/MAX
 n_cl = win4.scene.add_note(x=800, y=400)
 n_cl.set_note_size(10, 5)
 check("note size clamped to MIN", n_cl.rect().width() == _SN2.MIN_W and n_cl.rect().height() == _SN2.MIN_H)
 n_cl.set_note_size(9999, 9999)
 check("note size clamped to MAX", n_cl.rect().width() == _SN2.MAX_W and n_cl.rect().height() == _SN2.MAX_H)
 
-# Drag заметки мышью через ПОЛНЫЙ pipeline view->scene->item (QTest-ввод, см. v0.7 секцию):
-# MapView сам переключает NoDrag при нажатии над заметкой (динамический режим).
+# A mouse drag of a note through the FULL pipeline view->scene->item (QTest input, see the v0.7 section):
+# MapView switches NoDrag itself on a press over a note (the dynamic mode).
 view4 = win4.view
 check("drag mode is ScrollHandDrag before press over note", view4.dragMode() == _QGV2.DragMode.ScrollHandDrag)
 
-vp4 = view4.viewport()   # QTest шлёт события в viewport — штатный путь маршрутизации Qt
+vp4 = view4.viewport()   # QTest sends events to the viewport — the standard Qt routing path
 
 moved_signals = []
 note1.moved.connect(lambda: moved_signals.append(1))
-p0 = _QP2(note1.pos().x() + 80, note1.pos().y() + 50)   # тело заметки (не угол!)
-pos_before = (note1.pos().x(), note1.pos().y())          # отсчёт: заметка сдвигается на DELTA
+p0 = _QP2(note1.pos().x() + 80, note1.pos().y() + 50)   # the body of the note (not the corner!)
+pos_before = (note1.pos().x(), note1.pos().y())          # the offset: the note is shifted by DELTA
 _QTest.mousePress(vp4, _Qt.LeftButton, pos=_vp(view4, p0))
 app.processEvents()
 check("press over note switches view to NoDrag", view4.dragMode() == _QGV2.DragMode.NoDrag)
@@ -80,7 +80,7 @@ app.processEvents()
 check("note moved signal fired on release", len(moved_signals) == 1, str(moved_signals))
 check("drag mode restored to ScrollHandDrag after release", view4.dragMode() == _QGV2.DragMode.ScrollHandDrag)
 
-# Resize за правый нижний угол: press в углу -> move наружу -> размер растёт
+# A resize by the bottom-right corner: press in the corner -> move outward -> the size grows
 w0, h0 = note1.rect().width(), note1.rect().height()
 corner = _QP2(note1.pos().x() + w0 - 6, note1.pos().y() + h0 - 6)
 _QTest.mousePress(vp4, _Qt.LeftButton, pos=_vp(view4, corner))
@@ -94,8 +94,8 @@ check("note resize grows from the corner",
 _QTest.mouseRelease(vp4, _Qt.LeftButton, pos=_vp(view4, corner))
 app.processEvents()
 
-# Edit mode: двойной клик через QTest — РЕАЛЬНЫЙ QGraphicsSceneMouseEvent (handler может
-# переслать его в QTextEdit через super(); фейковый duck-typed event падал на C++-методе).
+# Edit mode: a double click via QTest — a REAL QGraphicsSceneMouseEvent (the handler may
+# forward it to QTextEdit via super(); the fake duck-typed event fell on the C++ method).
 check("note not in edit mode initially", note1.editing is False)
 _QTest.mouseDClick(vp4, _Qt.LeftButton, pos=_vp(view4, _QP2(note1.pos().x() + 60, note1.pos().y() + 40)))
 app.processEvents()
@@ -106,24 +106,24 @@ check("edit mode: editor focus policy becomes StrongFocus", ed.focusPolicy() == 
 note1.exit_edit_mode()
 check("exit_edit_mode restores NoFocus", note1.editing is False and ed.focusPolicy() == _Qt2.FocusPolicy.NoFocus)
 
-# Text change -> signal (только после добавления в сцену)
+# A text change -> a signal (only after adding to the scene)
 dirty_hits = []
 note1.textEdited.connect(lambda *_a: dirty_hits.append(1))
 ed.setPlainText("changed")
 check("editor textChanged emits note.textEdited", len(dirty_hits) == 1, str(dirty_hits))
 
-# Delete-клавиша удаляет выделенную заметку через MainWindow._remove_note
+# The Delete key removes the selected note via MainWindow._remove_note
 note1.setSelected(True)
 from PySide6.QtGui import QKeyEvent as _QKE
-view4.keyPressEvent(_QKE(_QEv2.Type.KeyPress, _Qt.Key_Delete, _Qt.NoModifier))  # Qt.Key_Delete (0x0100007 в Qt 6.11 — не хардкод!)
+view4.keyPressEvent(_QKE(_QEv2.Type.KeyPress, _Qt.Key_Delete, _Qt.NoModifier))  # Qt.Key_Delete (0x0100007 in Qt 6.11 — no hardcoding!)
 check("Delete key removes selected note via window", len(win4.scene._notes) == 1 and win4.scene.get_note_by_id(note1.note_id) is None)
 
-# JSON round-trip: save с заметками -> load -> backward-compat без ключа notes
-win4._add_note_at(_QP2(300, 300))  # через MainWindow (сигналы подключены)
+# A JSON round-trip: a save with notes -> load -> backward-compat without the notes key
+win4._add_note_at(_QP2(300, 300))  # via MainWindow (the signals are connected)
 check("_add_note_at creates note via window", len(win4.scene._notes) == 2)
 added = win4.scene._notes[-1]
-win4._mark_dirty()  # заметка добавлена — проект dirty (как в реальном потоке)
-# текст для round-trip: правим через редактор (сигнал textEdited сработает сам)
+win4._mark_dirty()  # the note is added — the project is dirty (as in the real flow)
+# the text for the round-trip: we edit it via the editor (the textEdited signal fires on its own)
 added.widget().setPlainText("roundtrip")
 p_notes = os.path.join(WORK, "save_v072.json")
 okn = win4._do_save(p_notes)
@@ -131,7 +131,7 @@ with open(p_notes, encoding="utf-8") as f:
     jn = json.load(f)
 check("saved JSON contains notes array with 2 entries", okn and len(jn.get("notes", [])) == 2, str(jn.get("notes")))
 ids_saved = {n["id"] for n in jn["notes"]}
-# Загрузка в новое окно через _import_project_raw (backward-compat: старый файл без "notes")
+# Loading into a new window via _import_project_raw (backward-compat: an old file without "notes")
 win5 = MW.MainWindow()
 win5._import_project_raw(json.load(open(p_notes, encoding="utf-8")))
 check("reload restores both notes (same ids)",
@@ -139,7 +139,7 @@ check("reload restores both notes (same ids)",
       str([(n.note_id, n.text()) for n in win5.scene._notes]))
 check("note text round-trips through JSON", any(n.text() == "roundtrip" for n in win5.scene._notes))
 win6 = MW.MainWindow()
-old_raw = {"version": "0.7", "servers": [], "connections": []}  # без ключа notes
+old_raw = {"version": "0.7", "servers": [], "connections": []}  # without the notes key
 win6._import_project_raw(old_raw)
 check("v0.7 project without 'notes' key loads fine (backward-compat)", len(win6.scene._notes) == 0)
 

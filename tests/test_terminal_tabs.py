@@ -1,51 +1,50 @@
 # -*- coding: utf-8 -*-
-"""v1.2.1 — Несколько SSH-сессий табами в одном окне терминала (ROADMAP v1.2.1).
+"""v1.2.1 — Multiple SSH sessions as tabs in one terminal window (ROADMAP v1.2.1).
 
-Тематический тест релиза v1.2.1 (конвенция «новый тематический файл»): offscreen,
-ВСЕ без сети — фейковые потоки с тем же API, что у SSHTerminalThread (тестовый шов
+The thematic test of the release v1.2.1 (the "new thematic file" convention): offscreen,
+ALL without the network — the fake threads with the same API as SSHTerminalThread (the test seam
 ST.SSHTerminalThread).
 
-§1 Структура окна: SSHTerminalWindow получает QTabWidget из страниц (центральный
-   виджет session_tabs), табы закрываемые; заголовок таба — alias узла, tooltip —
-   terminal.tab_close_tooltip; WA_DeleteOnClose/заголовок сохранены; compat-атрибуты —
-   live-ссылки на АКТИВНЫЙ таб (win.page = текущий таб).
+§1 The window structure: SSHTerminalWindow receives the QTabWidget of the pages (the central
+   widget session_tabs), the closable tabs; the title of the tab — the alias of the node, the tooltip —
+   terminal.tab_close_tooltip; the WA_DeleteOnClose/the title are kept; the compat attributes —
+   the live references to the ACTIVE tab (win.page = the current tab).
 
-§2 Новая сессия = новый таб (существующий путь «подключиться к узлу»):
-   MainWindow._spawn_terminal_window для уже открытого узла → то же окно + второй таб
-   (статус-сообщение terminal.session_new_tab); другой узел — новое окно.
+§2 A new session = a new tab (the existing "connect to the node" path):
+   MainWindow._spawn_terminal_window for the already open node → the same window + the second tab
+   (the status message terminal.session_new_tab); another node — a new window.
 
-§3 Закрытие таба = существующая cleanup-логика на странице: gate «ask» confirm_close
-   → единый teardown shutdown (поток стопнут, _shut_down); закрытие одного таба НЕ
-   затрагивает соседний (сессия жива и печатает); закрытие ПОСЛЕДНЕГО таба закрывает
-   окно (WA_DeleteOnClose E2E); крестик на табе (tabCloseRequested) — тот же путь.
+§3 The tab close = the existing cleanup logic on the page: the "ask" gate confirm_close
+   → the single teardown shutdown (the thread is stopped, _shut_down); the close of one tab does NOT
+   affect the neighbor (the session lives and types); the close of the LAST tab closes
+   the window (the WA_DeleteOnClose E2E); the cross on the tab (tabCloseRequested) — the same path.
 
-§4 Error-путь в табовом окне: error_signal на одном табе → QMessageBox.critical +
-   закрывается ТОЛЬКО этот таб; соседняя сессия жива и печатает.
+§4 The error path in the tabbed window: the error_signal on one tab → QMessageBox.critical +
+   only THIS tab is closed; the neighboring session lives and types.
 
-§5 Лимит «4 своих терминала» (terminal_max_open) считается по СЕССИЯМ во всех окнах:
-   2 таба (одно окно) + 1 сессия (другое окно) = лимит; Cancel → None, Close →
-   старейшая сессия (_force_close) — закрывается ЕЁ таб, а окно с соседней сессией живёт.
+§5 The limit "4 own terminals" (terminal_max_open) is counted by SESSIONS in all the windows:
+   2 tabs (one window) + 1 session (another window) = the limit; Cancel → None, Close →
+   the oldest session (_force_close) — its tab is closed, and the window with the neighboring session lives.
 
-§6 Мост «статус-бар» — только активный таб: сообщения неактивных табов в статус-бар
-   не доходят; при переключении табов мост переподключается; SFTP-прогресс-бар следует
-   за состоянием активного таба.
+§6 The "status bar" bridge — only the active tab: the messages of the inactive tabs do not reach
+   the status bar; on the tab switch the bridge reconnects; the SFTP progress bar follows
+   the state of the active tab.
 
-§7 i18n-паритет (400 = 398 + 2 terminal.*) + состояние релиза (пин _common.py).
+§7 The i18n parity (400 = 398 + 2 terminal.*) + the release state (the pin _common.py).
 
-Запуск:  python tests/test_terminal_tabs.py   (из корня проекта) или python tests/run_all.py
+Run:  python tests/test_terminal_tabs.py   (from the project root) or python tests/run_all.py
 """
 import json
 import os
 import sys
-import threading
 
 from _common import (bootstrap, check, finish, wait_until,
                      load_i18n_langs, check_i18n_parity, check_release_state)
 
-ROOT, WORK = bootstrap()  # ДО импортов модулей приложения (HOME-изоляция и faulthandler внутри)
+ROOT, WORK = bootstrap()  # BEFORE the app module imports (the HOME isolation and faulthandler inside)
 
-from PySide6.QtCore import Qt, QThread, Signal as QtSignal
-from PySide6.QtWidgets import QApplication, QMessageBox, QTabWidget
+from PySide6.QtCore import Qt
+from PySide6.QtWidgets import QApplication, QMessageBox, QTabWidget, QSplitter
 
 app = QApplication(sys.argv)
 
@@ -57,69 +56,10 @@ import ui.main_window as MW
 
 
 # ════════════════════════════════════════════════════════════
-# Обвязка: фейковые потоки (тот же API, что у SSHTerminalThread)
+# The harness: fake threads (the same API as SSHTerminalThread) — _fakes.py
 # ════════════════════════════════════════════════════════════
 
-class _FakeChannel:
-    closed = False
-
-    def __init__(self):
-        self.sent = []
-
-    def send(self, data):
-        self.sent.append(data)
-
-
-class _FakeThread(QThread):
-    """Idle-поток: run() — pass (реальный SSH не нужен)."""
-    output_signal = QtSignal(bytes)
-    error_signal = QtSignal(str)
-    status_signal = QtSignal(str)
-    closed_signal = QtSignal()
-    connected_signal = QtSignal()
-
-    def __init__(self, host, user, port, password="", key_path=""):
-        super().__init__()
-        self.host, self.user, self.port = host, user, port
-        self.password, self.key_path = password, key_path
-        self.client = None
-        self.channel = _FakeChannel()
-        self.running = True
-        self.stop_calls = 0
-
-    def run(self):
-        pass
-
-    def stop(self):
-        self.stop_calls += 1
-        self.running = False
-
-    def send_data(self, data_bytes):
-        if not data_bytes:
-            return
-        if self.channel and not self.channel.closed:
-            self.channel.send(data_bytes)
-
-
-class _BlockingThread(_FakeThread):
-    """Имитация paramiko-подключения: run() блокируется до release() — «живая» сессия
-    для gate «ask» (stop() не прерывает, как реальный connect)."""
-
-    def __init__(self, host, user, port, password="", key_path=""):
-        super().__init__(host, user, port, password, key_path)
-        self.channel = None
-        self._release = threading.Event()
-
-    def run(self):
-        self._release.wait(30)   # «подключение» — stop() не прерывает (как paramiko)
-        self.running = False
-        try:
-            self.closed_signal.emit()
-        except RuntimeError:
-            pass  # страница уже уничтожена — поздний emit без приёмников безопасен
-
-    def release(self):
-        self._release.set()
+from _fakes import FakeSSHThread as _FakeThread, BlockingFakeSSHThread as _BlockingThread
 
 
 def _cfg_path():
@@ -141,7 +81,7 @@ def clear_config():
 
 
 def alive(w):
-    """Жив ли C++-объект (WA_DeleteOnClose: после accept — уже уничтожен)."""
+    """Is the C++ object alive (WA_DeleteOnClose: after the accept — already destroyed)."""
     try:
         w.windowTitle()
         return True
@@ -150,13 +90,13 @@ def alive(w):
 
 
 _orig_thread_cls = ST.SSHTerminalThread
-ST.SSHTerminalThread = _FakeThread   # все страницы/окна в этом файле — на фейке
+ST.SSHTerminalThread = _FakeThread   # all the pages/windows in this file — on the fake
 
 _windows = []
 
 
 def make_window(alias, host="10.98.2.1", password="pw"):
-    """Окно терминала с фейковым потоком (один таб)."""
+    """The terminal window with the fake thread (one tab)."""
     w = ST.SSHTerminalWindow(
         ServerData(id=f"tt-{alias}", alias=alias, host=host, user="root"),
         None, password=password)
@@ -170,61 +110,64 @@ def dot_color(node):
 
 
 # ════════════════════════════════════════════════════════════
-# 1. Структура окна: QTabWidget из страниц сессий
+# 1. Window structure: a QTabWidget of session pages
 # ════════════════════════════════════════════════════════════
 print("== 1. window structure: QTabWidget of sessions ==")
 
 clear_config()
 w1 = make_window("struct")
-check("окно: WA_DeleteOnClose сохранён",
+check("the window: WA_DeleteOnClose is kept",
       bool(w1.testAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)) is True)
-check("окно: заголовок terminal.window_title (alias+host)",
+check("the window: the title is terminal.window_title (alias+host)",
       "struct" in w1.windowTitle() and "10.98.2.1" in w1.windowTitle(), w1.windowTitle())
-check("окно: центральный виджет — QTabWidget из сессий (session_tabs)",
-      isinstance(w1.centralWidget(), QTabWidget) and w1.session_tabs is w1.centralWidget())
-check("окно: табы закрываемые (крестик на табе)",
+# v1.3: the central widget — QSplitter [cmdlib_panel | session_tabs] (the "Terminal macros" panel)
+check("the window: the central widget is a QSplitter [cmdlib_panel | session_tabs] (v1.3)",
+      isinstance(w1.centralWidget(), QSplitter)
+      and w1.cmdlib_panel is w1.centralWidget().widget(0)
+      and w1.session_tabs is w1.centralWidget().widget(1))
+check("the window: the tabs are closable (the cross on the tab)",
       w1.session_tabs.tabsClosable() is True)
-check("окно: первый таб — TerminalSessionPage (v1.2 compat: win.page)",
+check("the window: the first tab is a TerminalSessionPage (the v1.2 compat: win.page)",
       isinstance(w1.session_tabs.widget(0), TerminalSessionPage)
       and w1.session_tabs.widget(0) is w1.page)
-check("заголовок таба — alias узла", w1.session_tabs.tabText(0) == "struct",
+check("the tab title is the node alias", w1.session_tabs.tabText(0) == "struct",
       repr(w1.session_tabs.tabText(0)))
-check("tooltip таба — terminal.tab_close_tooltip",
+check("the tab tooltip is terminal.tab_close_tooltip",
       w1.session_tabs.tabToolTip(0) == i18n.t("terminal.tab_close_tooltip"),
       repr(w1.session_tabs.tabToolTip(0)))
 p1 = w1.page
-check("страница привязана к хосту (set_host_window)", p1._host_window is w1)
-check("compat: win.widget/tscreen/terminal_thread — live-ссылки на активный таб",
+check("the page is bound to the host (set_host_window)", p1._host_window is w1)
+check("compat: win.widget/tscreen/terminal_thread — live references to the active tab",
       w1.widget is w1.page.widget and w1.tscreen is w1.page.tscreen
       and w1.terminal_thread is w1.page.terminal_thread)
-check("compat: win.tabs/sftp_tab/status_label — live-ссылки (внутренние табы сессии)",
+check("compat: win.tabs/sftp_tab/status_label — live references (the session's inner tabs)",
       w1.tabs is w1.page.tabs and w1.sftp_tab is w1.page.sftp_tab
       and w1.status_label is w1.page.status_label)
 
-# add_session: второй таб того же узла — активный, мост переключился
+# add_session: a second tab of the same node — active, the bridge switched
 p2 = w1.add_session(
     ServerData(id="tt-struct-b", alias="struct", host="10.98.2.1", user="root"), password="pw")
 app.processEvents()
-check("add_session: второй таб добавлен и стал активным (Qt: addTab не активирует)",
+check("add_session: the second tab is added and became active (Qt: addTab does not activate)",
       w1.session_tabs.count() == 2 and w1.session_tabs.currentWidget() is p2)
-check("add_session: заголовок второго таба — alias узла",
+check("add_session: the second tab's title is the node alias",
       w1.session_tabs.tabText(1) == "struct")
-check("compat: win.page — теперь АКТИВНЫЙ таб", w1.page is p2)
+check("compat: win.page — now the ACTIVE tab", w1.page is p2)
 
-# ── закрытие НЕпоследнего таба не закрывает окно; последний таб → WA_DeleteOnClose ──
-w1.close_page(w1.session_tabs.widget(0))   # struct (таб 0) — сосед p2 жив
+# ── closing the non-LAST tab does not close the window; the last tab → WA_DeleteOnClose ──
+w1.close_page(w1.session_tabs.widget(0))   # struct (tab 0) — the neighbour p2 is alive
 app.processEvents()
-check("close_page: закрытие НЕпоследнего таба оставляет окно с соседним табом",
+check("close_page: closing a NON-last tab leaves the window with the neighbour tab",
       alive(w1) and w1.session_tabs.count() == 1 and w1.session_tabs.widget(0) is p2,
       f"tabs={w1.session_tabs.count() if alive(w1) else '?'}")
-w1.close_page(p2)   # последний таб → окно закрывается целиком
+w1.close_page(p2)   # the last tab → the window closes entirely
 wait_until(lambda: not alive(w1), timeout_ms=4000)
-check("close_page: закрытие ПОСЛЕДНЕГО таба уничтожило окно (WA_DeleteOnClose)",
+check("close_page: closing the LAST tab destroyed the window (WA_DeleteOnClose)",
       not alive(w1))
 
 
 # ════════════════════════════════════════════════════════════
-# 2. Новая сессия = новый таб (существующий путь «подключиться к узлу»)
+# 2. A new session = a new tab (the existing "connect to node" path)
 # ════════════════════════════════════════════════════════════
 print("== 2. new session = new tab (existing connect path) ==")
 
@@ -235,27 +178,27 @@ app.processEvents()
 node_a = mw.scene.add_server(
     ServerData(id="tt-a", alias="alpha", host="10.98.3.1", user="root"))
 win_a1 = mw._spawn_terminal_window(node_a)
-check("первое подключение: новое окно с одним табом (поведение v1.2)",
+check("the first connection: a new window with one tab (the v1.2 behavior)",
       win_a1 is not None and win_a1.session_tabs.count() == 1
       and len(mw._terminal_windows) == 1,
       f"registry={len(mw._terminal_windows)}")
 
 win_a2 = mw._spawn_terminal_window(node_a)
 app.processEvents()
-check("второе подключение к тому же узлу — новый таб в ТОМ ЖЕ окне (v1.2.1)",
+check("the second connection to the same node — a new tab in the SAME window (v1.2.1)",
       win_a2 is win_a1 and win_a1.session_tabs.count() == 2,
       f"tabs={win_a1.session_tabs.count() if alive(win_a1) else '?'}")
-check("реестр хранит СЕССИИ (TerminalSessionPage), а не окна",
+check("the registry stores SESSIONS (TerminalSessionPage), not windows",
       len(mw._terminal_windows) == 2
       and all(isinstance(s, TerminalSessionPage) for s in mw._terminal_windows)
       and all(s is not win_a1 and s is not win_a2 for s in mw._terminal_windows),
       f"registry={[type(s).__name__ for s in mw._terminal_windows]}")
-check("заголовки табов — alias узла (оба таба)",
+check("the tab titles are the node alias (both tabs)",
       win_a1.session_tabs.tabText(0) == "alpha" and win_a1.session_tabs.tabText(1) == "alpha",
       f"{win_a1.session_tabs.tabText(0)!r}/{win_a1.session_tabs.tabText(1)!r}")
-check("зелёная точка узла горит (2 активные сессии)", dot_color(node_a) == "#22c55e",
+check("the node's green dot is lit (2 active sessions)", dot_color(node_a) == "#22c55e",
       dot_color(node_a))
-check("статус-сообщение: terminal.session_new_tab (alias в тексте)",
+check("the status message: terminal.session_new_tab (the alias in the text)",
       mw.statusBar().currentMessage() == i18n.t("terminal.session_new_tab", alias="alpha"),
       repr(mw.statusBar().currentMessage()))
 
@@ -263,67 +206,67 @@ node_b = mw.scene.add_server(
     ServerData(id="tt-b", alias="beta", host="10.98.3.2", user="root"))
 win_b = mw._spawn_terminal_window(node_b)
 app.processEvents()
-check("другой узел — НОВОЕ окно (не таб в чужом окне)",
+check("another node — a NEW window (not a tab in a foreign window)",
       win_b is not None and win_b is not win_a1 and win_b.session_tabs.count() == 1
       and len(mw._terminal_windows) == 3,
       f"registry={len(mw._terminal_windows)}")
 
 
 # ════════════════════════════════════════════════════════════
-# 3. Закрытие таба = существующая cleanup-логика на странице
+# 3. Closing a tab = the existing cleanup logic on the page
 # ════════════════════════════════════════════════════════════
 print("== 3. closing a tab = existing page cleanup ==")
 
 page_a1 = win_a1.session_tabs.widget(0)
 page_a2 = win_a1.session_tabs.widget(1)
 
-# ── закрытие одного таба не затрагивает соседний ─────────────────────────────
+# ── closing one tab does not affect the neighbor ─────────────────────────────
 win_a1.close_page(page_a1)
 wait_until(lambda: len(mw._terminal_windows) == 2, timeout_ms=4000)
 app.processEvents()
-check("закрыт один таб → реестр 2 (destroyed-сигнал страницы)",
+check("one tab is closed → the registry has 2 (the page's destroyed signal)",
       len(mw._terminal_windows) == 2 and not alive(page_a1),
       f"registry={len(mw._terminal_windows)}")
-check("окно живо с соседним табом (не уничтожено)",
+check("the window is alive with the neighbour tab (not destroyed)",
       alive(win_a1) and win_a1.session_tabs.count() == 1
       and win_a1.session_tabs.widget(0) is page_a2)
-check("закрытая сессия: поток стопнут + единый shutdown",
+check("the closed session: the thread is stopped + the single shutdown",
       page_a1.terminal_thread.stop_calls >= 1 and page_a1._shut_down is True,
       f"stop={page_a1.terminal_thread.stop_calls} shut_down={page_a1._shut_down}")
-check("зелёная точка горит, пока жива вторая сессия узла", dot_color(node_a) == "#22c55e",
+check("the green dot is lit while the node's second session is alive", dot_color(node_a) == "#22c55e",
       dot_color(node_a))
-check("соседний таб не затронут: сессия не shut down", page_a2._shut_down is False)
+check("the neighbour tab is untouched: the session is not shut down", page_a2._shut_down is False)
 page_a2.terminal_thread.output_signal.emit(b"still alive\r\n")
 app.processEvents()
-check("соседний таб не затронут: вывод всё ещё рендерится на холсте",
+check("the neighbour tab is untouched: the output still renders on the canvas",
       "still alive" in page_a2.widget.visible_text(),
       repr(page_a2.widget.visible_text())[:80])
 
-# ── последний таб закрывает окно (WA_DeleteOnClose E2E) ──────────────────────
+# ── the last tab closes the window (the WA_DeleteOnClose E2E) ──────────────────────
 win_a1.close_page(win_a1.session_tabs.widget(0))
 wait_until(lambda: len(mw._terminal_windows) == 1, timeout_ms=4000)
 app.processEvents()
-check("последний таб → окно уничтожено (WA_DeleteOnClose)", not alive(win_a1))
-check("зелёная точка погасла (все сессии узла закрыты)", dot_color(node_a) == "#64748b",
+check("the last tab → the window is destroyed (WA_DeleteOnClose)", not alive(win_a1))
+check("the green dot went out (all the node's sessions are closed)", dot_color(node_a) == "#64748b",
       dot_color(node_a))
-check("_ssh_connected_nodes: id узла сброшен после всех сессий",
+check("_ssh_connected_nodes: the node id is reset after all the sessions",
       node_a.data.id not in mw._ssh_connected_nodes)
 
-# ── крестик на табе: tabCloseRequested → тот же путь ─────────────────────────
+# ── the cross on the tab: tabCloseRequested → the same path ─────────────────────────
 win_b.session_tabs.tabCloseRequested.emit(0)
 wait_until(lambda: not alive(win_b), timeout_ms=4000)
 app.processEvents()
-check("крестик на табе (tabCloseRequested): последний таб закрыт → окно уничтожено",
+check("the cross on the tab (tabCloseRequested): the last tab is closed → the window is destroyed",
       not alive(win_b) and len(mw._terminal_windows) == 0,
       f"registry={len(mw._terminal_windows)}")
 
-# ── gate «ask» при закрытии таба: Cancel держит / Close закрывает ────────────
+# ── the "ask" gate on tab close: Cancel holds / Close closes ────────────
 write_config({"terminal_close_behavior": "ask"})
 ST.SSHTerminalThread = _BlockingThread
 node_c = mw.scene.add_server(
     ServerData(id="tt-c", alias="gamma", host="10.98.3.3", user="root"))
 win_c1 = mw._spawn_terminal_window(node_c)
-mw._spawn_terminal_window(node_c)   # два таба в одном окне (v1.2.1)
+mw._spawn_terminal_window(node_c)   # two tabs in one window (v1.2.1)
 app.processEvents()
 page_c1 = win_c1.session_tabs.widget(0)
 page_c2 = win_c1.session_tabs.widget(1)
@@ -342,24 +285,24 @@ def _fake_question(*a, **k):
 ST.QMessageBox.question = staticmethod(_fake_question)
 try:
     asked.clear()
-    win_c1.close_page(page_c1)   # «ask» + активная сессия → подтверждение
+    win_c1.close_page(page_c1)   # "ask" + an active session → a confirmation
     app.processEvents()
-    check("«ask» + Cancel при закрытии таба: таб остаётся открытым",
+    check("'ask' + Cancel on a tab close: the tab stays open",
           len(asked) == 1 and alive(win_c1) and win_c1.session_tabs.count() == 2
           and page_c1._shut_down is False, f"asked={asked}")
 
     _q_result[0] = QMessageBox.StandardButton.Close
     asked.clear()
-    win_c1.close_page(page_c1)   # «ask» + Close → teardown ТОЛЬКО этого таба
+    win_c1.close_page(page_c1)   # "ask" + Close → teardown of THIS tab ONLY
     wait_until(lambda: len(mw._terminal_windows) == 1, timeout_ms=4000)
     app.processEvents()
-    check("«ask» + Close при закрытии таба: закрыт только этот таб (сосед жив)",
+    check("'ask' + Close on a tab close: only this tab is closed (the neighbour is alive)",
           len(asked) == 1 and alive(win_c1) and win_c1.session_tabs.count() == 1
           and not alive(page_c1), f"asked={asked}")
 finally:
     ST.QMessageBox.question = _orig_question
 
-# cleanup «ask»-секции: отпустить блокирующиеся потоки, закрыть остаток
+# the "ask" section cleanup: release the blocked threads, close the remainder
 page_c1.terminal_thread.release()
 page_c2.terminal_thread.release()
 wait_until(lambda: (not page_c1.terminal_thread.isRunning()
@@ -367,15 +310,15 @@ wait_until(lambda: (not page_c1.terminal_thread.isRunning()
 ST.SSHTerminalThread = _FakeThread
 clear_config()
 if alive(win_c1):
-    win_c1.close()   # сессии завершены — без диалога; последний таб → окно
+    win_c1.close()   # the sessions are finished — no dialog; the last tab → the window
 wait_until(lambda: len(mw._terminal_windows) == 0, timeout_ms=4000)
 app.processEvents()
-check("cleanup ask-секции: все сессии закрыты, реестр пуст",
+check("the ask-section cleanup: all the sessions are closed, the registry is empty",
       len(mw._terminal_windows) == 0, f"registry={len(mw._terminal_windows)}")
 
 
 # ════════════════════════════════════════════════════════════
-# 4. Error-путь в табовом окне: закрывается только таб с ошибкой
+# 4. The error path in a tabbed window: only the tab with the error is closed
 # ════════════════════════════════════════════════════════════
 print("== 4. error path in a tabbed window ==")
 
@@ -383,7 +326,7 @@ clear_config()
 node_d = mw.scene.add_server(
     ServerData(id="tt-d", alias="delta", host="10.98.3.4", user="root"))
 win_d1 = mw._spawn_terminal_window(node_d)
-mw._spawn_terminal_window(node_d)   # два таба в одном окне
+mw._spawn_terminal_window(node_d)   # two tabs in one window
 app.processEvents()
 page_d1 = win_d1.session_tabs.widget(0)
 page_d2 = win_d1.session_tabs.widget(1)
@@ -394,47 +337,47 @@ ST.QMessageBox.critical = staticmethod(lambda *a, **k: crit_calls.append(a))
 try:
     page_d1.terminal_thread.error_signal.emit("boom-d")
     app.processEvents()
-    check("error → QMessageBox.critical (parent — хост-окно)",
+    check("error → QMessageBox.critical (the parent — the host window)",
           len(crit_calls) == 1 and crit_calls[0][0] is win_d1, str(crit_calls)[:120])
 finally:
     ST.QMessageBox.critical = _orig_critical
 
 wait_until(lambda: len(mw._terminal_windows) == 1, timeout_ms=4000)
 app.processEvents()
-check("error: закрыт ТОЛЬКО таб с ошибкой (реестр 1)",
+check("error: ONLY the tab with the error is closed (the registry has 1)",
       len(mw._terminal_windows) == 1 and not alive(page_d1),
       f"registry={len(mw._terminal_windows)}")
-check("error: окно живо с соседней сессией",
+check("error: the window is alive with the neighbour session",
       alive(win_d1) and win_d1.session_tabs.count() == 1
       and win_d1.session_tabs.widget(0) is page_d2)
-check("error: соседняя сессия не shut down", page_d2._shut_down is False)
+check("error: the neighbour session is not shut down", page_d2._shut_down is False)
 page_d2.terminal_thread.output_signal.emit(b"delta alive\r\n")
 app.processEvents()
-check("error: соседний таб всё ещё печатает",
+check("error: the neighbour tab still prints",
       "delta alive" in page_d2.widget.visible_text(),
       repr(page_d2.widget.visible_text())[:80])
 
-win_d1.close_page(page_d2)   # последний таб → окно
+win_d1.close_page(page_d2)   # the last tab → the window
 wait_until(lambda: not alive(win_d1), timeout_ms=4000)
 app.processEvents()
-check("error-путь: закрытие последнего таба → окно уничтожено", not alive(win_d1))
+check("the error path: closing the last tab → the window is destroyed", not alive(win_d1))
 
 
 # ════════════════════════════════════════════════════════════
-# 5. Лимит «своих терминалов» — по СЕССИЯМ во всех окнах
+# 5. The "own terminals" limit — by SESSIONS across all windows
 # ════════════════════════════════════════════════════════════
 print("== 5. limit counts sessions across all windows ==")
 
 write_config({"terminal_max_open": 3})
 node_e = mw.scene.add_server(
     ServerData(id="tt-e", alias="eps", host="10.98.3.5", user="root"))
-win_e1 = mw._spawn_terminal_window(node_e)   # таб 1
-mw._spawn_terminal_window(node_e)            # таб 2 (то же окно)
+win_e1 = mw._spawn_terminal_window(node_e)   # tab 1
+mw._spawn_terminal_window(node_e)            # tab 2 (the same window)
 node_f = mw.scene.add_server(
     ServerData(id="tt-f", alias="fio", host="10.98.3.6", user="root"))
-win_f = mw._spawn_terminal_window(node_f)    # новое окно, сессия 3
+win_f = mw._spawn_terminal_window(node_f)    # a new window, session 3
 app.processEvents()
-check("лимит: 3 сессии (2 таба в одном окне + 1 в другом)",
+check("the limit: 3 sessions (2 tabs in one window + 1 in another)",
       len(mw._terminal_windows) == 3 and win_e1 is not None
       and win_e1.session_tabs.count() == 2 and win_f is not win_e1,
       f"registry={len(mw._terminal_windows)}")
@@ -455,26 +398,26 @@ try:
         ServerData(id="tt-g", alias="gma", host="10.98.3.7", user="root"))
     asked5.clear()
     w_cancel = mw._spawn_terminal_window(node_g)
-    check("лимит (сессии во всех окнах): Cancel → None, реестр не изменился (3)",
+    check("the limit (sessions across all the windows): Cancel → None, the registry is unchanged (3)",
           w_cancel is None and len(asked5) == 1 and len(mw._terminal_windows) == 3,
           f"asked={asked5} registry={len(mw._terminal_windows)}")
 
     _limit_result[0] = QMessageBox.StandardButton.Close
     asked5.clear()
-    oldest_sess = mw._terminal_windows[0]   # первый таб окна eps
+    oldest_sess = mw._terminal_windows[0]   # the first tab of the eps window
     node_h = mw.scene.add_server(
         ServerData(id="tt-h", alias="eta", host="10.98.3.8", user="root"))
     w_new = mw._spawn_terminal_window(node_h)
-    check("лимит: Close → диалог про старейшую сессию", len(asked5) == 1, str(asked5))
-    check("лимит: _force_close поставлен на старейшую сессию (против повторного 'ask')",
+    check("the limit: Close → the dialog about the oldest session", len(asked5) == 1, str(asked5))
+    check("the limit: _force_close is set on the oldest session (against a repeated 'ask')",
           getattr(oldest_sess, "_force_close", False) is True)
     wait_until(lambda: oldest_sess not in mw._terminal_windows, timeout_ms=4000)
     app.processEvents()
-    check("лимит: закрыт таб старейшей сессии — её окно живо с соседней (v1.2.1)",
+    check("the limit: the oldest session's tab is closed — its window stays alive with the neighbour (v1.2.1)",
           alive(win_e1) and win_e1.session_tabs.count() == 1
           and oldest_sess not in mw._terminal_windows,
           f"tabs={win_e1.session_tabs.count() if alive(win_e1) else '?'}")
-    check("лимит: реестр снова 3 — старейшая убрана, новая сессия в новом окне",
+    check("the limit: the registry is 3 again — the oldest is removed, the new session is in a new window",
           w_new is not None and len(mw._terminal_windows) == 3
           and mw._terminal_windows[-1] is w_new.page and w_new is not win_e1,
           f"registry={[type(s).__name__ for s in mw._terminal_windows]}")
@@ -482,18 +425,18 @@ finally:
     MW.QMessageBox.question = _orig_mw_question
 clear_config()
 
-# cleanup: закрыть все оставшиеся окна (сессии)
+# cleanup: close all the remaining windows (sessions)
 for ww in (win_e1, win_f, w_new):
     if alive(ww):
         ww.close()
 wait_until(lambda: len(mw._terminal_windows) == 0, timeout_ms=4000)
 app.processEvents()
-check("cleanup лимит-секции: все сессии закрыты, реестр пуст",
+check("the limit-section cleanup: all the sessions are closed, the registry is empty",
       len(mw._terminal_windows) == 0, f"registry={len(mw._terminal_windows)}")
 
 
 # ════════════════════════════════════════════════════════════
-# 6. Мост «статус-бар» — только активный таб
+# 6. The "status bar" bridge — only the active tab
 # ════════════════════════════════════════════════════════════
 print("== 6. status bridge: active tab only ==")
 
@@ -501,59 +444,59 @@ clear_config()
 node_i = mw.scene.add_server(
     ServerData(id="tt-i", alias="iota", host="10.98.3.9", user="root"))
 win_i1 = mw._spawn_terminal_window(node_i)
-mw._spawn_terminal_window(node_i)   # два таба; активный — второй (add_session)
+mw._spawn_terminal_window(node_i)   # two tabs; the active one — the second (add_session)
 app.processEvents()
 page_i1 = win_i1.session_tabs.widget(0)
 page_i2 = win_i1.session_tabs.widget(1)
-check("мост: после add_session активен НОВЫЙ таб",
+check("the bridge: after add_session the NEW tab is active",
       win_i1.session_tabs.currentWidget() is page_i2)
 
 page_i2.status_message.emit("iota-2", 0)
 app.processEvents()
-check("мост: сообщение АКТИВНОГО таба → статус-бар окна",
+check("the bridge: the ACTIVE tab's message → the window's status bar",
       win_i1.statusBar().currentMessage() == "iota-2",
       repr(win_i1.statusBar().currentMessage()))
 
-win_i1.session_tabs.setCurrentIndex(0)   # переключение на первый таб
+win_i1.session_tabs.setCurrentIndex(0)   # switching to the first tab
 app.processEvents()
-page_i2.status_message.emit("iota-2-late", 0)   # неактивный таб — не мостится
+page_i2.status_message.emit("iota-2-late", 0)   # an inactive tab — not bridged
 app.processEvents()
-check("мост: сообщение НЕАКТИВНОГО таба в статус-бар не доходит",
+check("the bridge: an INACTIVE tab's message does not reach the status bar",
       win_i1.statusBar().currentMessage() == "iota-2",
       repr(win_i1.statusBar().currentMessage()))
 page_i1.status_message.emit("iota-1", 0)
 app.processEvents()
-check("мост: после переключения — сообщение активного таба в статус-баре",
+check("the bridge: after the switch — the active tab's message is in the status bar",
       win_i1.statusBar().currentMessage() == "iota-1",
       repr(win_i1.statusBar().currentMessage()))
 
-# SFTP-прогресс-бар следует за состоянием активного таба
+# The SFTP progress bar follows the state of the active tab
 page_i1.progress_busy.emit()
 app.processEvents()
-check("мост: progress_busy на активном табе → бар виден (индетерминированный)",
+check("the bridge: progress_busy on the active tab → the bar is visible (indeterminate)",
       not win_i1._sftp_progress.isHidden() and win_i1._sftp_progress.maximum() == 0)
-win_i1.session_tabs.setCurrentIndex(1)   # таб без передач
+win_i1.session_tabs.setCurrentIndex(1)   # a tab with no transfers
 app.processEvents()
-check("мост: переключение на таб без передач → бар скрыт",
+check("the bridge: switching to a tab with no transfers → the bar is hidden",
       win_i1._sftp_progress.isHidden())
 
-win_i1.close()   # оба таба (дефолт 'close' — без диалога)
+win_i1.close()   # both tabs (the default 'close' — no dialog)
 wait_until(lambda: len(mw._terminal_windows) == 0, timeout_ms=4000)
 app.processEvents()
-check("окно с двумя табами закрылось целиком, реестр пуст",
+check("the window with two tabs closed entirely, the registry is empty",
       len(mw._terminal_windows) == 0 and not alive(win_i1),
       f"registry={len(mw._terminal_windows)}")
 
 
 # ════════════════════════════════════════════════════════════
-# 7. i18n-паритет + состояние релиза
+# 7. i18n parity + release state
 # ════════════════════════════════════════════════════════════
 print("== 7. i18n parity + release state ==")
 
 langs = load_i18n_langs(ROOT)
-check_i18n_parity(langs)   # v1.2.1: +2 terminal.* ключа (398 → 400)
+check_i18n_parity(langs)   # v1.2.1: +2 terminal.* keys (398 → 400)
 for code in ("en", "ru", "zh"):
-    check(f"i18n {code}: новые ключи tab_close_tooltip/session_new_tab не пусты",
+    check(f"i18n {code}: the new keys tab_close_tooltip/session_new_tab are not empty",
           bool(langs[code].get("terminal.tab_close_tooltip"))
           and bool(langs[code].get("terminal.session_new_tab")))
 check_release_state(ROOT)

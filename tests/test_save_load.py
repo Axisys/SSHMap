@@ -1,12 +1,12 @@
-"""Save/load проекта headless + keyring-пароли (бывш. smoke_test.py §6 «main window»).
+"""Headless project save/load + keyring passwords (former smoke_test.py §6 "main window").
 
-Часть сьюта, разбитого из smoke_test.py v0.6–v0.9.2 (см. INDEX.md).
-Критические пункты бывш. AUDIT.md (расшифровка — в CHANGELOG.md): round-trip сохранения/загрузки проекта в offscreen-MainWindow,
-[*]-маркер dirty, password → keyring при save (audit #1), key_path в JSON (audit #5),
-сброс [*] после save (audit #7), восстановление key_path при загрузке (audit #5),
-защита от дублирующихся связей A→B (audit #43).
+A part of the suite split out of smoke_test.py v0.6–v0.9.2 (see INDEX.md).
+The critical items of the former AUDIT.md (the decoding — in CHANGELOG.md): the save/load round-trip of the project in an offscreen MainWindow,
+the [*] dirty marker, the password → keyring on save (audit #1), the key_path in the JSON (audit #5),
+the [*] reset after the save (audit #7), the key_path restoration on load (audit #5),
+the protection against the duplicated A→B connection (audit #43).
 
-Запуск: python tests/test_save_load.py   (из корня проекта) или python tests/run_all.py
+Run: python tests/test_save_load.py   (from the project root) or python tests/run_all.py
 """
 import json
 import os
@@ -14,7 +14,7 @@ import sys
 
 from _common import bootstrap, check, finish
 
-ROOT, WORK = bootstrap()  # ДО импортов модулей приложения
+ROOT, WORK = bootstrap()  # BEFORE the app module imports
 
 from PySide6.QtWidgets import QApplication, QMessageBox
 app = QApplication(sys.argv)
@@ -72,8 +72,8 @@ else:
     check("no-keyring: password kept in memory (audit #12)", nd.password == "NodePass999", f"pw={nd.password!r}")
     check("no-keyring warning shown to user", len(w) >= 1, str(boxes))
 
-# cleanup: при is_available=True выше тест записал тестовые пароли в РЕАЛЬНОЕ
-# системное хранилище — удаляем, чтобы прогоны не копили записи «sshmap:snode00N».
+# cleanup: at is_available=True above the test wrote test passwords into the REAL
+# the system store — we remove it so runs do not accumulate "sshmap:snode00N" entries.
 if cm.is_available:
     try:
         cm.delete_password("snode001")

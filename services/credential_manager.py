@@ -23,31 +23,31 @@ class CredentialManager:
         self._backend_available = False
         self._try_init()
 
-    # AUDIT v0.9.5.5 (безопасность #1): безопасные бэкенды Windows (allowlist).
+    # AUDIT v0.9.5.5 (security #1): secure Windows backends (allowlist).
     # keyring 24.x: keyrings.win.keyring.WindowsCredKeyring
-    # keyring 25.x: keyring.backends.Windows.WinVaultKeyring — тот же wincred,
-    # новый layout пакета (проверка только по старому префиксу «keyrings.win»
-    # отбрасывала даже это хранилище → is_available=False на машинах с pywin32).
+    # keyring 25.x: keyring.backends.Windows.WinVaultKeyring — the same wincred,
+    # new package layout (checking only the old "keyrings.win" prefix
+    # discarded even this store → is_available=False on machines with pywin32).
     _WINDOWS_SECURE_CLASSES = ("windowscredkeyring", "winvaultkeyring")
 
     def _try_init(self):
         """Try to initialize a working keyring backend. Falls back gracefully.
 
-        AUDIT v0.9.5.5 (безопасность #1): на Windows — строгий allowlist,
-        только Windows Credential Manager (wincred): класс WindowsCredKeyring
-        (keyring 24.x, модуль keyrings.win.*) или WinVaultKeyring (keyring 25.x,
-        модуль keyring.backends.Windows). Без pywin32 keyring может молча выбрать
-        keyrings.alt.file — plaintext-файл; такие бэкенды отвергаются,
-        is_available=False. На других ОС — отвергаем заведомо небезопасные
-        (keyrings.alt.*) и неработающие (keyring.backends.fail) бэкенды.
-        Запись/чтение идут ТОЛЬКО через принятый бэкенд (см. save/load/delete) —
-        глобальный keyring API обходить запрещено.
+        AUDIT v0.9.5.5 (security #1): on Windows — a strict allowlist,
+        Windows Credential Manager (wincred) only: the WindowsCredKeyring class
+        (keyring 24.x, keyrings.win.* module) or WinVaultKeyring (keyring 25.x,
+        keyring.backends.Windows module). Without pywin32 keyring may silently pick
+        keyrings.alt.file — a plaintext file; such backends are rejected,
+        is_available=False. On other OSes — we reject the known-insecure
+        (keyrings.alt.*) and the non-functional (keyring.backends.fail) backends.
+        Read/write go ONLY through the accepted backend (see save/load/delete) —
+        bypassing the global keyring API is forbidden.
         """
         try:
-            # v1.2.10rc2 (AUDIT авто #7): явный import keyring — раньше имя привязывалось
-            # побочным эффектом `import keyring.errors` ниже; работало, но хрупко по
-            # читаемости. keyring.errors нужен отдельно: исключения перехватываются в
-            # save/load/delete.
+            # v1.2.10rc2 (AUDIT auto #7): explicit import keyring — previously the name was bound
+            # as a side effect of the `import keyring.errors` below; it worked, but was
+            # fragile in terms of readability. keyring.errors is needed separately: its
+            # exceptions are caught in save/load/delete.
             import keyring
             import keyring.errors  # noqa: F401
 
@@ -60,15 +60,15 @@ class CredentialManager:
             backend_name = getattr(kr, "name", "") or ""
             backend_module = (cls.__module__ or "").lower()
             if _platform_mod.system() == "Windows":
-                # Строгий allowlist: только wincred (Windows Credential Manager)
+                # Strict allowlist: wincred (Windows Credential Manager) only
                 ok = (
                     class_name in self._WINDOWS_SECURE_CLASSES
                     or backend_module.startswith("keyrings.win")
                     or backend_module.startswith("keyring.backends.windows")
                 )
             else:
-                # Чёрный список: plaintext-файловые бэкенды и fail-бэкенд
-                # (у которого get/set/delete бросают NoKeyringError — хранить негде)
+                # Blacklist: plaintext file backends and the fail backend
+                # (whose get/set/delete raise NoKeyringError — nowhere to store)
                 ok = (
                     not backend_module.startswith("keyrings.alt")
                     and not backend_module.startswith("keyring.backends.fail")
@@ -79,10 +79,10 @@ class CredentialManager:
                 self._keyring_backend = kr
                 self._backend_available = True
             else:
-                # v1.2.10 (AUDIT ручной #2): get_logger() без аргумента бросал TypeError
-                # (name — обязательный позиционный аргумент, modules/logger.py), который
-                # глотался окружающим except — задокументированное в DOCUMENTATION.md
-                # предупреждение «Rejected keyring backend» никогда не доходило до лога.
+                # v1.2.10 (AUDIT manual #2): get_logger() with no argument raised TypeError
+                # (name — a required positional argument, modules/logger.py), which was swallowed
+                # by the surrounding except — the warning "Rejected keyring backend" documented
+                # in DOCUMENTATION.md never made it to the log.
                 log = None
                 try:
                     from modules.logger import get_logger
@@ -119,15 +119,15 @@ class CredentialManager:
         Returns:
             True if saved successfully, False if keyring unavailable
 
-        AUDIT v0.9.5.5 (безопасность #1): запись идёт ТОЛЬКО через принятый
-        проверенный бэкенд (self._keyring_backend), а не через глобальный
-        keyring API — иначе отклонённый plaintext-бэкенд всё равно мог бы
-        получить пароль при вызове из кода, не проверяющего is_available.
+        AUDIT v0.9.5.5 (security #1): the write goes ONLY through the accepted
+        verified backend (self._keyring_backend), not through the global
+        keyring API — otherwise a rejected plaintext backend could still
+        receive the password when called from code that does not check is_available.
         """
         if not self._backend_available or self._keyring_backend is None:
-            # Бэкенд отклонён (или недоступен): отказ от записи — пароль не
-            # уходит в plaintext-файл. Вызывающий обязан отреагировать (UI-
-            # предупреждение), см. is_available.
+            # Backend rejected (or unavailable): refuse the write — the password
+            # must not end up in a plaintext file. The caller must react (a UI
+            # warning), see is_available.
             return False
         try:
             import keyring.errors
@@ -156,8 +156,8 @@ class CredentialManager:
         Returns:
             Stored password string, or None if not found/unavailable
 
-        AUDIT v0.9.5.5 (безопасность #1): чтение только через принятый
-        проверенный бэкенд, без глобального keyring API.
+        AUDIT v0.9.5.5 (security #1): read only through the accepted
+        verified backend, without the global keyring API.
         """
         if not self._backend_available or self._keyring_backend is None:
             return None
@@ -186,9 +186,9 @@ class CredentialManager:
         Returns:
             True if deleted successfully or not found, False on error
 
-        AUDIT v0.9.5.5 (безопасность #1): удаление только через принятый
-        проверенный бэкенд. Если бэкенд отклонён — True: ничего не хранилось
-        в отклонённом бэкенде, удалять нечего (соответствует v094b-тесту).
+        AUDIT v0.9.5.5 (security #1): deletion only through the accepted
+        verified backend. If the backend was rejected — True: nothing was stored
+        in the rejected backend, so there is nothing to delete (matches the v094b test).
         """
         if not self._backend_available or self._keyring_backend is None:
             return True  # Nothing to delete — no store available
@@ -200,11 +200,12 @@ class CredentialManager:
         except keyring.errors.NoKeyringError:
             return True  # Nothing to delete — no store available
         except Exception as e:
-            # v1.2.10rc2 (AUDIT ручной #6): явная проверка PasswordDeleteError вместо
-            # обманчивого `except getattr(keyring.errors, "PasswordDeleteError", ())` —
-            # при отсутствии атрибута except () никогда не срабатывал и исключение
-            # молча уходило в общий обработчик. Теперь та же деградация (общий
-            # обработчик), но без обмана: класс через getattr(..., None) + isinstance.
+            # v1.2.10rc2 (AUDIT manual #6): an explicit PasswordDeleteError check instead of
+            # the misleading `except getattr(keyring.errors, "PasswordDeleteError", ())` —
+            # when the attribute is missing, except () never fired and the exception
+            # silently fell through to the generic handler. Now the same degradation (the
+            # generic handler), but without the misdirection: the class via getattr(..., None)
+            # + isinstance.
             _pde = getattr(keyring.errors, "PasswordDeleteError", None)  # keyring 25.x
             if _pde is not None and isinstance(e, _pde):
                 return True  # Nothing to delete — entry was already absent
@@ -216,9 +217,9 @@ class CredentialManager:
                 pass
             return False
 
-    # AUDIT v0.7.2 (средняя #12): мёртвый legacy-API удалён — _get_username(),
-    # save_credentials()/load_credentials() не вызывались нигде, а их формат имени
-    # ключа username ("{server_id}.user") расходился с _get_username("sshmap:{id}.user").
+    # AUDIT v0.7.2 (medium #12): the dead legacy API removed — _get_username(),
+    # save_credentials()/load_credentials() were never called anywhere, and their
+    # username key format ("{server_id}.user") disagreed with _get_username("sshmap:{id}.user").
 
 # Module-level singleton (initialized lazily)
 _cm_instance = None

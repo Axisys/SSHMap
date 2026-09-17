@@ -1,26 +1,26 @@
-"""Проверка полноты i18n: каждый t('key') из кода должен существовать в en/ru/zh.
+"""The i18n completeness check: every t('key') in the code must exist in en/ru/zh.
 
-Запуск:  python tests/check_i18n_keys.py   (exit code 0 = все ключи на месте)
-Ловит класс багов бывш. AUDIT.md #9 («в UI показываются сырые ключи»; расшифровка пунктов — в CHANGELOG.md).
+Run:  python tests/check_i18n_keys.py   (exit code 0 = all the keys are in place)
+Catches the class of the bugs of the former AUDIT.md #9 ("the raw keys in the UI"; the decoding of the items — in CHANGELOG.md).
 """
 import json, os, re, sys
 
-# v0.9.4-fix: UTF-8 stdout на cp1251-консолях
+# v0.9.4-fix: UTF-8 stdout on cp1251 consoles
 try:
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 except Exception:
     pass
 
-ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # корень проекта (родитель tests/)
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # the project root (the parent of tests/)
 langs = {}
 for code in ("en", "ru", "zh"):
     with open(os.path.join(ROOT, "i18n", f"{code}.json"), encoding="utf-8") as f:
         langs[code] = set(json.load(f).keys())
 
 # t('key') / .t("key") — \b matches before 't' in both forms; plus __t('key')
-# и _t('key') (v0.9.8: безопасный i18n-хук graphics/* и ui/map_search_bar.py —
-# без него ключи этих модулей были невидимы проверке).
+# and _t('key') (v0.9.8: the safe i18n hook of graphics/* and ui/map_search_bar.py —
+# without it the keys of these modules were invisible to the check).
 pats = [
     re.compile(r"""\bt\(\s*['"]([a-zA-Z][a-zA-Z0-9_.]*)['"]"""),
     re.compile(r"""(?<![\w])__t\(\s*['"]([a-zA-Z][a-zA-Z0-9_.]*)['"]"""),
@@ -32,7 +32,7 @@ for dirpath, _, files in os.walk(ROOT):
     if "__pycache__" in dirpath or "_tmp_testdata" in dirpath:
         continue
     if os.path.relpath(dirpath, ROOT) == "tests":
-        continue  # мета-скрипты тестов не являются UI-кодом
+        continue  # the test meta-scripts are not UI code
     for f in files:
         if not f.endswith(".py") or f.startswith("_"):
             continue  # skip helper scripts like _smoke_test.py

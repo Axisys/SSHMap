@@ -1,9 +1,9 @@
 # -*- coding: utf-8 -*-
-"""Регрессия v0.9.4b: keyring fail-бэкенд + замечания ревью.
+"""Regression v0.9.4b: the keyring fail backend + review notes.
 
-Запуск: python tests/test_keyring_fail_backend.py или python tests/run_all.py
-Проверяет поведение CredentialManager на fail-бэкенде (keyring 25.x бросает
-NoKeyringError из set/get на машинах без хранилища) и атомарную запись профилей.
+Run: python tests/test_keyring_fail_backend.py or python tests/run_all.py
+Checks the behavior of the CredentialManager on the fail-backend (keyring 25.x raises
+NoKeyringError from set/get on the machines without the store) and the atomic write of the profiles.
 """
 import json
 import os
@@ -12,14 +12,14 @@ import tempfile
 
 from _common import bootstrap, check, finish
 
-ROOT, WORK = bootstrap()  # ДО импортов модулей приложения (HOME-изоляция и faulthandler внутри)
+ROOT, WORK = bootstrap()  # BEFORE the app module imports (the HOME isolation and faulthandler inside)
 
 import keyring
 
 
 class _FailBackend(keyring.backend.KeyringBackend):
-    """Имитация keyring fail-бэкенда (как chainer None в keyring 25.x):
-    любой set/get/delete бросает NoKeyringError."""
+    """Simulation of the keyring fail-backend (like the chainer None in keyring 25.x):
+    any set/get/delete raises NoKeyringError."""
 
     name = "fail"
 
@@ -39,7 +39,7 @@ class _FailBackend(keyring.backend.KeyringBackend):
 def main():
     print("== v0.9.4b: keyring fail-backend + review fixes ==")
 
-    # ── #1 CredentialManager на fail-бэкенде: без исключений, False/None ──
+    # ── #1 CredentialManager on the fail backend: no exceptions, False/None ──
     import keyring
     from services.credential_manager import CredentialManager
 
@@ -47,7 +47,7 @@ def main():
     orig = keyring.get_keyring()
     keyring.set_keyring(_FailBackend())
     try:
-        # Форсируем переинициализацию под fail-бэкенд
+        # We force a re-initialization under the fail backend
         cm._try_init()
         check("save returns False on fail backend",
               cm.save_password("deadbeef", "pw") is False)
@@ -55,13 +55,13 @@ def main():
               cm.load_password("deadbeef") is None)
         check("delete returns True on fail backend (nothing to delete — by design)",
               cm.delete_password("deadbeef") is True)
-        # Главное: никакое исключение не вырвалось наружу (тест дошёл сюда)
+        # The main point: no exception escaped outward (the test got this far)
         check("no exception escaped to caller", True)
     finally:
         keyring.set_keyring(orig)
         cm._try_init()
 
-    # ── #2 save_profiles: атомарная запись, .tmp не остаётся ──
+    # ── #2 save_profiles: an atomic write, no .tmp left behind ──
     import models.profile as prof_mod
     tmpdir = tempfile.mkdtemp()
     profiles_path = os.path.join(tmpdir, "sshmap_profiles.json")
@@ -78,7 +78,7 @@ def main():
     finally:
         prof_mod._profiles_path = orig_path_fn
 
-    # ── #3 MapScene.notes(): публичный итератор заметок ──
+    # ── #3 MapScene.notes(): a public iterator over the notes ──
     try:
         os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
         from PySide6.QtWidgets import QApplication
@@ -89,7 +89,7 @@ def main():
     except Exception as e:
         check(f"notes() iterator ({e})", False)
 
-    # ── #4 Модель ServerData: tags аннотация и дефолт ──
+    # ── #4 The ServerData model: the tags annotation and the default ──
     from models.server import ServerData
     check("tags default [] via __post_init__", ServerData(id="x", alias="a", host="h", user="u").tags == [])
 

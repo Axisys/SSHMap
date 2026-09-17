@@ -1,35 +1,37 @@
 # -*- coding: utf-8 -*-
-"""v0.9.8 — строка поиска по карте (Ctrl+F): плавающая панель поверх canvas.
+"""v0.9.8 — map search bar (Ctrl+F): floating panel over the canvas.
 
 ROADMAP v0.9.8:
-  #1 Ctrl+F → строка поиска поверх canvas: подсветка совпадающих узлов
+  #1 Ctrl+F → search bar over the canvas: highlight matching nodes
      (alias/host/ip/comment).
-  #2 Enter/Shift+Enter — переход между результатами с центрированием и
-     кратковременной рамкой-акцентом (reveal_flash, паттерн пульса set_status).
-  #3 Несовпавшие ноды затемняются (focus/dim), чтобы совпадения читались мгновенно.
+  #2 Enter/Shift+Enter — move between results with centering and a
+     brief accent frame (reveal_flash, the set_status pulse pattern).
+  #3 Non-matching nodes are dimmed (focus/dim) so matches are read
+     instantly.
 
-Виджет НЕ содержит логику поиска: он только принимает ввод и эмитит сигналы —
-какие узлы совпадают, что затемнять и куда центрировать решает MainWindow
-(единый источник истины — ui/main_window.py). Тёмная тема в палитре приложения
-(theme.WINDOW_BG фон карточки, theme.ACCENT акцент, theme.TEXT_PRIMARY текст —
-те же цвета, что у узлов; v1.2.5: константы центральной темы ui/theme.py).
+The widget holds NO search logic: it only accepts input and emits
+signals — which nodes match, what to dim and where to center is decided
+by MainWindow (single source of truth — ui/main_window.py). The dark
+theme follows the app palette (theme.WINDOW_BG card background,
+theme.ACCENT accent, theme.TEXT_PRIMARY text — the same colors the
+nodes use; v1.2.5: central theme constants in ui/theme.py).
 """
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QKeyEvent
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QLineEdit, QPushButton, QWidget
 
-try:  # v1.2.5: центральная тема (палитра/радиусы/шрифты — ui/theme.py)
+try:  # v1.2.5: central theme (palette/radii/fonts — ui/theme.py)
     from . import theme
 except ImportError:
     try:
         from ui import theme
-    except ImportError:  # flat-раскладка: каталог ui/ сам на sys.path
+    except ImportError:  # flat layout: the ui/ directory itself is on sys.path
         import theme
 
 
 def _t(key: str) -> str:
-    """Безопасный i18n-хук (единообразно с map_view/server_node)."""
+    """Safe i18n hook (consistent with map_view/server_node)."""
     try:
         from i18n import t as _translate
         return _translate(key)
@@ -37,9 +39,9 @@ def _t(key: str) -> str:
         return key
 
 
-# Тёмная тема панели (палитра приложения): карточка WINDOW_BG на фоне canvas CANVAS_BG,
-# акцентная рамка ACCENT — тот же, что у совпадений/выделения MapView.
-# v1.2.5: f-string со ссылками на константы центральной темы (значения без изменений).
+# Dark panel theme (app palette): a WINDOW_BG card on the CANVAS_BG canvas,
+# ACCENT border — the same one used for MapView matches/selection.
+# v1.2.5: f-string referencing central theme constants (values unchanged).
 _BAR_STYLE = f"""
 QWidget#MapSearchBar {{
     background-color: {theme.WINDOW_BG};
@@ -69,11 +71,11 @@ QPushButton:hover {{ color: {theme.TEXT_PRIMARY}; }}
 
 
 class _SearchLineEdit(QLineEdit):
-    """Поле ввода с навигационными клавишами.
+    """Input field with navigation keys.
 
-    Enter — следующий результат, Shift+Enter — предыдущий, Esc — закрыть панель.
-    QLineEdit.returnPressed срабатывает и на Enter, и на Shift+Enter (и модификаторы
-    не передаёт), поэтому keyPressEvent перехватываем сами.
+    Enter — next result, Shift+Enter — previous, Esc — close the panel.
+    QLineEdit.returnPressed fires on both Enter and Shift+Enter (and does
+    not pass modifiers), so we intercept keyPressEvent ourselves.
     """
 
     next_pressed = Signal()
@@ -90,17 +92,17 @@ class _SearchLineEdit(QLineEdit):
             return
         if event.key() == Qt.Key_Escape:
             self.close_pressed.emit()
-            event.accept()  # без «бипа» — Esc осмысленное действие, а не ошибка
+            event.accept()  # no "beep" — Esc is a meaningful action, not an error
             return
         super().keyPressEvent(event)
 
 
 class MapSearchBar(QWidget):
-    """v0.9.8: плавающая строка поиска по карте (родитель — MapView).
+    """v0.9.8: floating map search bar (parent — MapView).
 
-    Состав: [поле ввода] [счётчик «k / N» | «Нет совпадений»] [×].
-    Сигналы: query_changed(str) при каждом изменении текста; next_requested /
-    prev_requested — Enter/Shift+Enter; close_requested — Esc или кнопка «×».
+    Layout: [input field] ["k / N" counter | "No matches"] [×].
+    Signals: query_changed(str) on every text change; next_requested /
+    prev_requested — Enter/Shift+Enter; close_requested — Esc or the "×" button.
     """
 
     query_changed = Signal(str)
@@ -108,8 +110,8 @@ class MapSearchBar(QWidget):
     prev_requested = Signal()
     close_requested = Signal()
 
-    PREFERRED_WIDTH = 420   # ширина панели, пока viewport не уже
-    MIN_WIDTH = 280         # ниже — панель теряет читаемость
+    PREFERRED_WIDTH = 420   # panel width while the viewport is wider
+    MIN_WIDTH = 280         # below this the panel loses readability
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -128,8 +130,8 @@ class MapSearchBar(QWidget):
         self._line.prev_pressed.connect(self.prev_requested)
         self._line.close_pressed.connect(self.close_requested)
 
-        # Счётчик: «k / N» при совпадениях, иначе текст «Нет совпадений».
-        # _count_state — последнее состояние (current, total) для retranslate().
+        # Counter: "k / N" when there are matches, otherwise the "No matches" text.
+        # _count_state — the last state (current, total) for retranslate().
         self._count_state = None
         self._count = QLabel("", self)
         self._update_count_label()
@@ -144,34 +146,34 @@ class MapSearchBar(QWidget):
         layout.addWidget(self._close_btn)
         self.hide()
 
-    # ── Публичный API (MainWindow управляет состоянием) ────────────────
+    # ── Public API (MainWindow controls the state) ────────────────
 
     @property
     def query(self) -> str:
-        """Текущий текст запроса (без изменений)."""
+        """Current query text (as-is)."""
         return self._line.text()
 
     def set_query(self, text: str):
-        """Программно установить текст (эмитит query_changed при смене)."""
+        """Set the text programmatically (emits query_changed on change)."""
         if self._line.text() != text:
             self._line.setText(text)
 
     def set_count(self, current: int, total: int):
-        """Счётчик «k / N» или «Нет совпадений» (i18n — актуальный на момент вызова)."""
+        """The "k / N" counter or "No matches" (i18n — current at call time)."""
         self._count_state = (int(current), int(total))
         self._update_count_label()
 
     def retranslate(self):
-        """Повторно применить переводы (смена языка в MainWindow._switch_language)."""
+        """Re-apply translations (language switch in MainWindow._switch_language)."""
         self._line.setPlaceholderText(_t("search.map_placeholder"))
-        self._update_count_label()  # перерисовать счётчик на новом языке
+        self._update_count_label()  # redraw the counter in the new language
 
     def focus_input(self):
-        """Фокус на поле ввода + выделение всего текста (быстрая замена запроса)."""
+        """Focus the input field + select all text (quick query replacement)."""
         self._line.setFocus()
         self._line.selectAll()
 
-    # ── Внутреннее ────────────────────────────────────────────────
+    # ── Internal ────────────────────────────────────────────────
 
     def _update_count_label(self):
         state = self._count_state
@@ -184,5 +186,5 @@ class MapSearchBar(QWidget):
             return
         try:
             self._count.setText(_t("search.count").format(cur=current, total=total))
-        except Exception:  # noqa: BLE001 — форматирование упало — показываем числа как есть
+        except Exception:  # noqa: BLE001 — formatting failed — show the numbers as-is
             self._count.setText(f"{current} / {total}")

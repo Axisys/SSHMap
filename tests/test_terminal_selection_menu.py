@@ -1,32 +1,32 @@
 # -*- coding: utf-8 -*-
-"""v1.2.7 — Терминал: выделение двойным/тройным кликом + контекстное меню (ROADMAP v1.2.7).
+"""v1.2.7 — Terminal: double/triple-click selection + context menu (ROADMAP v1.2.7).
 
-  * word_units() (чистая функция, без GUI): слово = максимальный прогон небелых
-    ячеек; пунктуация принадлежит слову ("foo,bar" — одно); заглушка широкого
-    CJK-глифа (data=='') принадлежит слову ("a中b" — одно слово на 4 ячейках);
-    пробелы/пустая строка → [];
-  * двойной клик — выделение СЛОВА (offscreen, синтетические QMouseEvent;
-    click-count считает сам виджет: QMouseEvent в PySide6 его не несёт):
-    границы слова + selected_text(); клик по пробелу — бездействия; интервал
-    больше DOUBLE_CLICK_MS → счётчик сбросился, простой клик сбрасывает выделение;
-  * тройной клик — вся СТРОКА (0..columns-1);
-  * drag после двойного клика — расширение от ДАЛЬНОГО конца слова (фиксатор
-    _click_sel_end), отпускание при count>=2 НЕ затирает выделение;
-  * контекстное меню ПКМ (_build_context_menu — тестовый шов, без menu.exec()):
-    состав/порядок [Копировать | Вставить | Выделить всё], Копировать enabled
-    только при выделении → буфер обмена, Вставить → bracketed-paste-блок в PTY
-    (тот же путь, что Ctrl+V; пустой буфер → ничего; thread=None → disabled),
-    Выделить всё → вся сетка; ПКМ не сбрасывает выделение; НАСТОЯЩИЙ путь ПКМ
-    (contextMenuEvent с реальным QContextMenuEvent → menu.exec в глобальных
-    координатах — регрессия v1.2.7-fix: globalPos() уже QPoint, .toPoint() ронял);
-    подписи en/ru/zh;
-  * i18n: +3 ключа terminal.menu.* × en/ru/zh, паритет 422 → 425, состояние релиза.
+  * word_units() (a pure function, no GUI): a word = the maximal run of the non-blank
+    cells; the punctuation belongs to the word ("foo,bar" — one); the stub of the wide
+    CJK glyph (data=='') belongs to the word ("a中b" — one word on 4 cells);
+    the blanks/an empty string → [];
+  * the double click — the selection of the WORD (offscreen, the synthetic QMouseEvents;
+    the click-count is counted by the widget itself: the QMouseEvent in PySide6 does not carry it):
+    the boundaries of the word + selected_text(); the click on a blank — does nothing; the interval
+    beyond DOUBLE_CLICK_MS → the counter is reset, a plain click resets the selection;
+  * the triple click — the whole LINE (0..columns-1);
+  * the drag after the double click — the extension from the FAR end of the word (the
+    _click_sel_end anchor), the release at count>=2 does NOT clobber the selection;
+  * the context menu of the right click (_build_context_menu — the test seam, without menu.exec()):
+    the composition/the order [Copy | Paste | Select all], the Copy is enabled
+    only with the selection → the clipboard, the Paste → the bracketed-paste block into the PTY
+    (the same path as Ctrl+V; an empty clipboard → nothing; thread=None → disabled),
+    the Select all → the whole grid; the right click does not reset the selection; the REAL path of the right click
+    (the contextMenuEvent with the real QContextMenuEvent → menu.exec in the global
+    coordinates — the regression v1.2.7-fix: globalPos() is already a QPoint, .toPoint() crashed);
+    the captions en/ru/zh;
+  * i18n: +3 keys terminal.menu.* × en/ru/zh, the parity 422 → 425, the release state.
 
-Acceptance ROADMAP v1.2.7: двойной клик выделяет слово, тройной — строку,
-действия меню работают (копирование с выделением → буфер обмена, вставка → байты
-в PTY); полный прогон сьюта exit 0.
+The Acceptance of the ROADMAP v1.2.7: the double click selects the word, the triple — the line,
+the actions of the menu work (the copy with the selection → the clipboard, the paste → the bytes
+into the PTY); the full run of the suite exit 0.
 
-Запуск:  python tests/test_terminal_selection_menu.py   (из корня проекта) или python tests/run_all.py
+Run:  python tests/test_terminal_selection_menu.py   (from the project root) or python tests/run_all.py
 """
 import sys
 import time
@@ -34,7 +34,7 @@ import time
 from _common import (bootstrap, check, finish, load_i18n_langs,
                      check_i18n_parity, check_release_state)
 
-ROOT, WORK = bootstrap()  # ДО импортов модулей приложения (HOME-изоляция и faulthandler внутри)
+ROOT, WORK = bootstrap()  # BEFORE the app module imports (the HOME isolation and faulthandler inside)
 
 from PySide6.QtCore import Qt, QEvent, QPointF, QPoint
 from PySide6.QtGui import QMouseEvent, QContextMenuEvent
@@ -47,18 +47,12 @@ import modules.terminal_widget as _tw
 from modules.terminal_widget import TerminalWidget, selection_cells, word_units
 
 
-sent = []
+from _fakes import FakeWidgetThread as FakeThread
+FakeThread.sent = []
+sent = FakeThread.sent   # the same list — for the checks below
 
 
-class FakeThread:
-    def send_data(self, b):
-        sent.append(b)
-
-    def stop(self):
-        pass
-
-
-_NO_THREAD = object()   # сентинел: явный thread=None ≠ «не передан» (FakeThread по умолчанию)
+_NO_THREAD = object()   # sentinel: an explicit thread=None ≠ "not passed" (the default FakeThread)
 
 
 def make_widget(cols=20, lines=5, thread=_NO_THREAD):
@@ -68,7 +62,7 @@ def make_widget(cols=20, lines=5, thread=_NO_THREAD):
     return scr, TerminalWidget(scr, thread)
 
 
-# ── мышь: синтетические QMouseEvent (паттерн test_terminal_input.py) ──────────
+# ── the mouse: the synthetic QMouseEvents (the test_terminal_input.py pattern) ──────────
 
 def lmb_press(w, r, c):
     cw_, ch_ = w.cell_size
@@ -111,7 +105,7 @@ def rmb_release(w, r, c):
 
 
 def double_click(w, r, c):
-    """press/release + press/release в одной ячейке (внутри DOUBLE_CLICK_MS)."""
+    """press/release + press/release in one cell (within DOUBLE_CLICK_MS)."""
     lmb_press(w, r, c)
     lmb_release(w, r, c)
     lmb_press(w, r, c)
@@ -125,13 +119,13 @@ def triple_click(w, r, c):
 
 
 # ════════════════════════════════════════════════════════════
-# 1. word_units — чистая функция (без GUI)
+# 1. word_units — a pure function (no GUI)
 # ════════════════════════════════════════════════════════════
 print("== word_units (pure) ==")
 
 
 def row_of(text, cols=20):
-    """Строка pyte Char из текста (через реальный TerminalScreen — E2E-путь)."""
+    """The row of pyte Chars from the text (through the real TerminalScreen — the E2E path)."""
     scr = TerminalScreen(columns=cols, lines=2)
     scr.feed(text.encode("utf-8") + b"\r\n")
     rows, _cx, _cy, _hidden = scr.snapshot()
@@ -140,24 +134,24 @@ def row_of(text, cols=20):
 
 check("«hello world» → [(0,4),(6,10)]", word_units(row_of("hello world")) == [(0, 4), (6, 10)],
       repr(word_units(row_of("hello world"))))
-check("пробелы по краям/подряд: «  ab  cd  » → [(2,3),(6,7)]",
+check("the blanks at the edges / in a row: '  ab  cd  ' → [(2,3),(6,7)]",
       word_units(row_of("  ab  cd  ")) == [(2, 3), (6, 7)],
       repr(word_units(row_of("  ab  cd  "))))
-check("пунктуация в слове: «foo,bar» → одно слово [(0,6)]",
+check("the punctuation is inside the word: 'foo,bar' → one word [(0,6)]",
       word_units(row_of("foo,bar")) == [(0, 6)], repr(word_units(row_of("foo,bar"))))
-check("пустая строка → []", word_units(row_of("")) == [])
-check("только пробелы → []", word_units(row_of("   ")) == [])
-# CJK: широкий глиф = ячейка + заглушка (data=='') — заглушка ПРИНАДЛЕЖИТ слову
+check("an empty string → []", word_units(row_of("")) == [])
+check("blanks only → []", word_units(row_of("   ")) == [])
+# CJK: a wide glyph = a cell + a stub (data=='') — the stub BELONGS to the word
 cjk_row = row_of("a中b")
-check("CJK «a中b»: 4 ячейки (глиф+заглушка), одно слово [(0,3)]",
+check("CJK 'a中b': 4 cells (the glyph + the stub), one word [(0,3)]",
       [ch.data for ch in cjk_row[:4]] == ["a", "中", "", "b"] and word_units(cjk_row) == [(0, 3)],
       f"row={[ch.data for ch in cjk_row[:6]]} units={word_units(cjk_row)}")
-check("CJK между словами: «x a中b y» → [(0,0),(2,5),(7,7)]",
+check("CJK between words: 'x a中b y' → [(0,0),(2,5),(7,7)]",
       word_units(row_of("x a中b y")) == [(0, 0), (2, 5), (7, 7)],
       repr(word_units(row_of("x a中b y"))))
 
 # ════════════════════════════════════════════════════════════
-# 2. Двойной клик — выделение слова (offscreen)
+# 2. Double click — word selection (offscreen)
 # ════════════════════════════════════════════════════════════
 print("== double-click → word ==")
 
@@ -166,40 +160,40 @@ scr.feed(b"hello world\r\nsecond line\r\nthird row")
 cw, chh = w.cell_size
 w.resize(cw * 20, chh * 5)
 
-# Первый (простой) клик — выделения нет; второй в интервале — слово
+# The first (simple) click — no selection; the second within the interval — the word
 lmb_press(w, 0, 7)      # count=1
-lmb_release(w, 0, 7)    # простой клик (press/release в одной ячейке) → сброс
-check("простой клик → выделения нет", not w.has_selection())
-lmb_press(w, 0, 7)      # count=2 (та же ячейка, внутри DOUBLE_CLICK_MS) → _select_word
-check("двойной клик (press): выделение активно", w.has_selection())
-check("клик-счётчик == 2", w._click_count == 2, f"count={w._click_count}")
-check("границы слова «world» = (0,6)-(0,10)",
+lmb_release(w, 0, 7)    # a simple click (a press/release in one cell) → a reset
+check("a plain click → no selection", not w.has_selection())
+lmb_press(w, 0, 7)      # count=2 (the same cell, within DOUBLE_CLICK_MS) → _select_word
+check("a double click (press): the selection is active", w.has_selection())
+check("the click counter == 2", w._click_count == 2, f"count={w._click_count}")
+check("the word 'world' bounds = (0,6)-(0,10)",
       (w._sel_anchor, w._sel_active) == ((0, 6), (0, 10)),
       f"got=({w._sel_anchor}, {w._sel_active})")
 check("selected_text() == «world»", w.selected_text() == "world", repr(w.selected_text()))
-lmb_release(w, 0, 7)    # отпускание при count>=2 НЕ затирает выделение
-check("отпускание после двойного клика → выделение живёт",
+lmb_release(w, 0, 7)    # a release at count>=2 does NOT clobber the selection
+check("the release after a double click → the selection survives",
       (w._sel_anchor, w._sel_active) == ((0, 6), (0, 10)) and w.has_selection(),
       f"got=({w._sel_anchor}, {w._sel_active})")
 
-# Двойной клик по пробелу — бездействия (выделение не меняется/не создаётся)
+# A double click on a space — does nothing (the selection is not changed/created)
 w.clear_selection()
 double_click(w, 0, 15)
-check("двойной клик по пробелу → бездействия", not w.has_selection())
+check("a double click on a blank → nothing happens", not w.has_selection())
 
-# Интервал больше DOUBLE_CLICK_MS → счётчик сбросился: «двойной» = два простых клика
+# An interval larger than DOUBLE_CLICK_MS → the counter was reset: "double" = two simple clicks
 w.clear_selection()
 lmb_press(w, 0, 7)
 lmb_release(w, 0, 7)
-w._last_click_ms = time.monotonic() * 1000.0 - 2000.0   # симуляция паузы (мс; тест-хук)
+w._last_click_ms = time.monotonic() * 1000.0 - 2000.0   # simulating a pause (ms; a test hook)
 lmb_press(w, 0, 7)
-check("пауза > DOUBLE_CLICK_MS → count сбросился на 1", w._click_count == 1,
+check("a pause > DOUBLE_CLICK_MS → the count was reset to 1", w._click_count == 1,
       f"count={w._click_count}")
 lmb_release(w, 0, 7)
-check("простой клик после паузы → сброс выделения", not w.has_selection())
+check("a plain click after the pause → the selection is reset", not w.has_selection())
 
 # ════════════════════════════════════════════════════════════
-# 3. Тройной клик — выделение строки (offscreen)
+# 3. Triple click — line selection (offscreen)
 # ════════════════════════════════════════════════════════════
 print("== triple-click → line ==")
 
@@ -208,21 +202,21 @@ scr.feed(b"hello world\r\nsecond line\r\nthird row")
 w.resize(cw * 20, chh * 5)
 
 triple_click(w, 1, 2)
-check("тройной клик: выделение активно", w.has_selection())
-check("границы строки = (1,0)-(1,19)",
+check("a triple click: the selection is active", w.has_selection())
+check("the line bounds = (1,0)-(1,19)",
       (w._sel_anchor, w._sel_active) == ((1, 0), (1, 19)),
       f"got=({w._sel_anchor}, {w._sel_active})")
-check("selected_text() == «second line» (хвостовые пробелы обрезаны)",
+check("selected_text() == 'second line' (the trailing blanks are trimmed)",
       w.selected_text() == "second line", repr(w.selected_text()))
 
-# Тройной клик на последней строке — clamp строк не нужен, но границы сетки точные
+# A triple click on the last line — no row clamp is needed, but the grid bounds are exact
 triple_click(w, 4, 19)
-check("тройной клик на пустой строке 4 → (4,0)-(4,19), текст «»",
+check("a triple click on the empty line 4 → (4,0)-(4,19), the text is empty",
       (w._sel_anchor, w._sel_active) == ((4, 0), (4, 19)) and w.selected_text() == "",
       f"got=({w._sel_anchor}, {w._sel_active}) text={w.selected_text()!r}")
 
 # ════════════════════════════════════════════════════════════
-# 4. Drag после двойного клика — от дальнего конца слова (offscreen)
+# 4. Drag after a double click — from the far end of the word (offscreen)
 # ════════════════════════════════════════════════════════════
 print("== drag after double-click ==")
 
@@ -232,27 +226,27 @@ w.resize(cw * 20, chh * 5)
 
 lmb_press(w, 0, 7)
 lmb_release(w, 0, 7)
-lmb_press(w, 0, 7)      # count=2: слово (0,6)-(0,10); клик у левого края → фиксатор правый конец
-check("фиксатор drag'а = дальний (правый) конец слова", w._click_sel_end == (0, 10),
+lmb_press(w, 0, 7)      # count=2: the word (0,6)-(0,10); a click near the left edge → the right end is the anchor
+check("the drag anchor = the far (right) end of the word", w._click_sel_end == (0, 10),
       f"got={w._click_sel_end}")
-lmb_move(w, 2, 3)        # drag вниз-влево: якорь = фиксатор, конец = (2,3)
-check("drag: якорь переехал в фиксатор", w._sel_anchor == (0, 10), f"got={w._sel_anchor}")
+lmb_move(w, 2, 3)        # a drag down-left: the anchor = the fixed end, the end = (2,3)
+check("drag: the anchor moved to the fixed end", w._sel_anchor == (0, 10), f"got={w._sel_anchor}")
 lmb_release(w, 2, 3)
 exp = selection_cells((0, 10), (2, 3), 20)
-check("drag после двойного клика → ячейки selection_cells((0,10),(2,3))",
+check("a drag after the double click → the cells selection_cells((0,10),(2,3))",
       w._selected_cells() == exp and w.has_selection(), f"got={w._selected_cells()}")
 
-# Клик у правого края слова → фиксатор левый конец
+# A click near the right edge of the word → the left end is the anchor
 w.clear_selection()
 lmb_press(w, 0, 9)
 lmb_release(w, 0, 9)
-lmb_press(w, 0, 9)      # «world»: col=9, start=6, end=10 → 9-6=3 > 10-9=1 → фиксатор (0,6)
-check("клик у правого края → фиксатор левый конец слова", w._click_sel_end == (0, 6),
+lmb_press(w, 0, 9)      # "world": col=9, start=6, end=10 → 9-6=3 > 10-9=1 → the anchor (0,6)
+check("a click near the right edge → the anchor is the left end of the word", w._click_sel_end == (0, 6),
       f"got={w._click_sel_end}")
 lmb_release(w, 0, 9)
 
 # ════════════════════════════════════════════════════════════
-# 5. Контекстное меню ПКМ (тестовый шов _build_context_menu)
+# 5. The right-click context menu (the _build_context_menu test seam)
 # ════════════════════════════════════════════════════════════
 print("== context menu (RMB) ==")
 
@@ -261,46 +255,46 @@ scr.feed(b"hello world\r\nsecond line\r\nthird row")
 w.resize(cw * 20, chh * 5)
 cb = app.clipboard()
 
-# Состав и порядок: [Копировать | Вставить | Выделить всё] (en — дефолт)
+# The composition and the order: [Copy | Paste | Select all] (en — the default)
 menu = w._build_context_menu()
-check("меню — QMenu с 3 пунктами", isinstance(menu, QMenu) and len(menu.actions()) == 3,
+check("the menu is a QMenu with 3 items", isinstance(menu, QMenu) and len(menu.actions()) == 3,
       f"actions={len(menu.actions())}")
 texts = [a.text() for a in menu.actions()]
-check("порядок/подписи en: Copy | Paste | Select All",
+check("the order/labels en: Copy | Paste | Select All",
       texts == ["Copy", "Paste", "Select All"], repr(texts))
 
-# Копировать — disabled БЕЗ выделения
+# Copy — disabled WITHOUT a selection
 act_copy, act_paste, act_all = menu.actions()
-check("Копировать без выделения → disabled", not act_copy.isEnabled())
+check("Copy without a selection → disabled", not act_copy.isEnabled())
 
-# Выделение словом → enabled; триггер → буфер обмена (Acceptance)
+# A word selection → enabled; the trigger → the clipboard (Acceptance)
 double_click(w, 0, 7)
 menu = w._build_context_menu()
 act_copy = menu.actions()[0]
-check("Копировать при выделении → enabled", act_copy.isEnabled())
+check("Copy with a selection → enabled", act_copy.isEnabled())
 cb.setText("")
 sent.clear()
 act_copy.trigger()
-check("триггер Копировать → буфер == «world»", cb.text() == "world", repr(cb.text()))
-check("триггер Копировать → в PTY ничего не ушло", sent == [], f"sent={sent!r}")
+check("the Copy trigger → the clipboard == 'world'", cb.text() == "world", repr(cb.text()))
+check("the Copy trigger → nothing went to the PTY", sent == [], f"sent={sent!r}")
 
-# ПКМ не сбрасывает выделение (press/release RightButton — мимо логики ЛКМ)
+# A right-click does not reset the selection (a press/release RightButton — past the LMB logic)
 rmb_press(w, 0, 7)
 rmb_release(w, 0, 7)
-check("ПКМ → выделение не сброшено", w.has_selection() and w.selected_text() == "world")
+check("the RMB → the selection is not reset", w.has_selection() and w.selected_text() == "world")
 
-# v1.2.7-fix (регрессия ручного тестирования): НАСТОЯЩИЙ путь ПКМ — contextMenuEvent
-# с реальным QContextMenuEvent обязан вызвать menu.exec() в глобальных координатах.
-# Раньше .toPoint() на QPoint (globalPos() у QContextMenuEvent уже возвращает QPoint,
-# а не QPointF) бросал AttributeError, который except глотал молча → «ПКМ ничего не
-# делает». Spy через модульный глобал _tw.QMenu: присваивание класс-атрибута
-# QMenu.exec = f в PySide6 6.11 — тихий no-op (проверено), а _build_context_menu
-# берёт QMenu из глобала своего модуля.
+# v1.2.7-fix (a manual-testing regression): the REAL right-click path — contextMenuEvent
+# with a real QContextMenuEvent it must call menu.exec() in the global coordinates.
+# Before, .toPoint() on a QPoint (QContextMenuEvent's globalPos() already returns a QPoint,
+# and not a QPointF) raised an AttributeError, which the except swallowed silently → "a right-click does nothing
+# does". A spy via the module global _tw.QMenu: the class-attribute assignment
+# QMenu.exec = f in PySide6 6.11 — a silent no-op (verified), and _build_context_menu
+# takes the QMenu from its own module global.
 _ctx_exec_calls = []
 
 
 class _SpyCtxMenu(QMenu):
-    def exec(self, pos=None):  # noqa: A003 — сигнатура QMenu.exec
+    def exec(self, pos=None):  # noqa: A003 — the QMenu.exec signature
         _ctx_exec_calls.append(pos)
         return 0
 
@@ -312,67 +306,67 @@ try:
                                          QPoint(12, 34), QPoint(567, 89)))
 finally:
     _tw.QMenu = _saved_qmenu
-check("настоящий путь ПКМ: contextMenuEvent → menu.exec вызван (регрессия v1.2.7-fix)",
+check("the real RMB path: contextMenuEvent → menu.exec is called (the v1.2.7-fix regression)",
       len(_ctx_exec_calls) == 1, f"calls={_ctx_exec_calls!r}")
-check("настоящий путь ПКМ: exec получил глобальные координаты события",
+check("the real RMB path: exec got the global coordinates of the event",
       bool(_ctx_exec_calls) and _ctx_exec_calls[0] == QPoint(567, 89),
       f"got={_ctx_exec_calls!r}")
 
-# Вставить в PTY — bracketed-paste-блок (тот же путь, что Ctrl+V; Acceptance: байты в PTY)
+# Paste into the PTY — a bracketed-paste block (the same path as Ctrl+V; Acceptance: the bytes in the PTY)
 cb.setText("ls -la\r\npwd")
 sent.clear()
 menu = w._build_context_menu()
 act_paste = menu.actions()[1]
-check("Вставить при живом потоке → enabled", act_paste.isEnabled())
+check("Paste with a live thread → enabled", act_paste.isEnabled())
 act_paste.trigger()
-check("триггер Вставить → ровно \\x1b[200~ls -la\\npwd\\x1b[201~ в PTY",
+check("the Paste trigger → exactly \\x1b[200~ls -la\\npwd\\x1b[201~ into the PTY",
       sent == [b"\x1b[200~ls -la\npwd\x1b[201~"], f"sent={sent!r}")
 
 cb.setText("")
 sent.clear()
 w._build_context_menu().actions()[1].trigger()
-check("Вставить с пустым буфером → ничего не шлётся", sent == [], f"sent={sent!r}")
+check("Paste with an empty clipboard → nothing is sent", sent == [], f"sent={sent!r}")
 
-# Выделить всё — вся видимая сетка (Acceptance)
+# Select all — the whole visible grid (Acceptance)
 w.clear_selection()
 menu = w._build_context_menu()
 act_all = menu.actions()[2]
-check("Выделить всё всегда enabled", act_all.isEnabled())
+check("Select All is always enabled", act_all.isEnabled())
 act_all.trigger()
-check("select_all: границы (0,0)-(4,19)",
+check("select_all: the bounds (0,0)-(4,19)",
       (w._sel_anchor, w._sel_active) == ((0, 0), (4, 19)),
       f"got=({w._sel_anchor}, {w._sel_active})")
-# Пустые строки 3–4 входят в прямоугольник → две пустые строки хвостом (semantics drag'а)
-check("selected_text() = все строки, \\n, хвосты обрезаны",
+# The empty lines 3–4 enter the rectangle → two empty lines as a tail (the drag semantics)
+check("selected_text() = all the lines, \\n, the tails trimmed",
       w.selected_text() == "hello world\nsecond line\nthird row\n\n", repr(w.selected_text()))
 
-# thread=None: Вставить disabled (ввод отключён), Копировать/Выделить всё работают
+# thread=None: Paste is disabled (the input is off), Copy/Select all work
 scr0, w0 = make_widget(thread=None)
 menu0 = w0._build_context_menu()
-check("thread=None: Вставить → disabled", not menu0.actions()[1].isEnabled())
-check("thread=None: Выделить всё → enabled", menu0.actions()[2].isEnabled())
+check("thread=None: Paste → disabled", not menu0.actions()[1].isEnabled())
+check("thread=None: Select All → enabled", menu0.actions()[2].isEnabled())
 menu0.actions()[2].trigger()
-check("thread=None: select_all работает локально",
+check("thread=None: select_all works locally",
       (w0._sel_anchor, w0._sel_active) == ((0, 0), (4, 19)),
       f"got=({w0._sel_anchor}, {w0._sel_active})")
 
-# Подписи меню на ru/zh (i18n terminal.menu.*)
+# The menu labels in ru/zh (the i18n terminal.menu.*)
 import i18n as _i18n
 saved_lang = _i18n.get_current_language()
 try:
     _i18n.set_language("ru")
     texts_ru = [a.text() for a in w._build_context_menu().actions()]
-    check("подписи ru: Копировать | Вставить | Выделить всё",
+    check("the ru labels",
           texts_ru == ["Копировать", "Вставить", "Выделить всё"], repr(texts_ru))
     _i18n.set_language("zh")
     texts_zh = [a.text() for a in w._build_context_menu().actions()]
-    check("подписи zh: 复制 | 粘贴 | 全选",
+    check("the zh labels",
           texts_zh == ["复制", "粘贴", "全选"], repr(texts_zh))
 finally:
     _i18n.set_language(saved_lang)
 
 # ════════════════════════════════════════════════════════════
-# 6. i18n-паритет + состояние релиза
+# 6. i18n parity + release state
 # ════════════════════════════════════════════════════════════
 print("== i18n parity + release state ==")
 
@@ -380,7 +374,7 @@ langs = load_i18n_langs(ROOT)
 check_i18n_parity(langs)
 for code in ("en", "ru", "zh"):
     for key in ("terminal.menu.copy", "terminal.menu.paste", "terminal.menu.select_all"):
-        check(f"i18n {code}: {key} не пуст", bool(langs[code].get(key)),
+        check(f"i18n {code}: {key} is not empty", bool(langs[code].get(key)),
               repr(langs[code].get(key)))
 check_release_state(ROOT)
 

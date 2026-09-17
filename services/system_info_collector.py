@@ -1,19 +1,20 @@
 # -*- coding: utf-8 -*-
-"""v0.9: Автосбор данных о Linux-сервере по SSH (CPU/RAM/DISK/OS).
+"""v0.9: Automatic collection of Linux server info over SSH (CPU/RAM/DISK/OS).
 
-Один батч команд через один exec_command() существующего paramiko-стека —
-вывод размечен маркерами секций (--MARKER--) и парсится по секциям.
+One batch of commands through a single exec_command() of the existing paramiko
+stack — the output is marked with section markers (--MARKER--) and parsed
+section by section.
 
-НЕ привязан к StatusChecker'у: тот делает лёгкие TCP-пробы без аутентификации,
-авторизационные данные туда тащить нельзя (roadmap v0.9, задача 5).
+NOT tied to the StatusChecker: that one does lightweight TCP probes without
+authentication; credential data must not be passed to it (roadmap v0.9, task 5).
 
-Использование:
+Usage:
     collector = SystemInfoCollector(server_data, password="...")
     collector.info_ready.connect(on_ready)    # (server_id, info_dict)
     collector.info_failed.connect(on_fail)    # (server_id, error_text)
     collector.start()
 
-info_dict содержит только успешно разобранные ключи:
+info_dict contains only the successfully parsed keys:
     os_name, cpu_model, cpu_cores, ram_gb, disk_gb
 """
 
@@ -27,7 +28,7 @@ except ImportError:
     from models.server import ServerData
 
 
-# ── Батч сбора: один exec_command, вывод размечен маркерами ──────────
+# ── Collection batch: one exec_command, output marked with markers ──────────
 INFO_BATCH = r"""
 echo ---OS---
 uname -srmo 2>/dev/null
@@ -43,7 +44,7 @@ df -B1 --output=size / 2>/dev/null | tail -1
 echo ---END---
 """
 
-_TIMEOUT_S = 10          # общий таймаут на канал (roadmap: 5 c на команду; батч лёгкий)
+_TIMEOUT_S = 10          # overall timeout for the channel (roadmap: 5 s per command; the batch is light)
 _SECTION_OS = "---OS---"
 _SECTION_CPU = "---CPU---"
 _SECTION_RAM = "---RAM---"
@@ -52,10 +53,10 @@ _SECTION_END = "---END---"
 
 
 def bytes_to_gb(nbytes: float) -> str:
-    """Формат байтов → строка GB в стиле модели («8 gb», «100.5 gb»).
+    """Format bytes → a GB string in the model's style ("8 gb", "100.5 gb").
 
-    Делим на 1024^3 (GiB — как показывает free -b), округляем до одного знака,
-    хвостовой «.0» убираем.
+    Divide by 1024^3 (GiB — as shown by free -b), round to one decimal place,
+    and strip the trailing ".0".
     """
     try:
         gb = float(nbytes) / (1024.0 ** 3)
@@ -69,14 +70,14 @@ def bytes_to_gb(nbytes: float) -> str:
 
 
 def _clean_text(line: str) -> str:
-    """Убрать ANSI-последовательности, управляющие символы и пробелы по краям."""
+    """Strip ANSI sequences, control characters, and whitespace at the ends."""
     import re
     line = re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "", line)  # CSI … m/A/…
     return re.sub(r"[\x00-\x1f\x7f]", "", line).strip()
 
 
 def parse_os_release(text: str) -> str:
-    """PRETTY_NAME из /etc/os-release (с учётом кавычек) или строка lsb_release."""
+    """PRETTY_NAME from /etc/os-release (quotes accounted for) or the lsb_release line."""
     for line in text.splitlines():
         line = _clean_text(line)
         if line.startswith("PRETTY_NAME"):
@@ -84,7 +85,7 @@ def parse_os_release(text: str) -> str:
             value = value.strip().strip('"').strip("'").strip()
             if value:
                 return value
-    # fallback: вывод lsb_release -ds (единственная строка без "=")
+    # fallback: the lsb_release -ds output (the only line without "=")
     for line in text.splitlines():
         line = _clean_text(line)
         if line and "=" not in line and not line.startswith("---"):
@@ -93,7 +94,7 @@ def parse_os_release(text: str) -> str:
 
 
 def parse_cpu(text: str):
-    """(cores:int|None, model:str) из nproc + 'model name : ...'."""
+    """(cores:int|None, model:str) from nproc + 'model name : ...'."""
     cores = None
     model = ""
     for line in text.splitlines():
@@ -106,17 +107,17 @@ def parse_cpu(text: str):
 
 
 def parse_ram_bytes(text: str):
-    """Байты RAM из free -b (первая цифра) или MemTotal из /proc/meminfo (кБ)."""
+    """RAM bytes from free -b (the first number) or MemTotal from /proc/meminfo (kB)."""
     for line in text.splitlines():
         token = line.strip()
         if not token or not token[0].isdigit():
             continue
         first = token.split()[0]
         if first.isdigit():
-            # meminfo даёт килобайты («MemTotal:  16094 kB»), но grep-строка
-            # начинается с 'M', сюда попадает только число из free -b и чистое
-            # число-килобайт из второй колонки meminfo; кБ-случай обрабатывает
-            # fallback ниже (MemTotal → *1024).
+            # meminfo gives kilobytes ("MemTotal:  16094 kB"), but the grep line
+            # starts with 'M', so here we only get the number from free -b and the
+            # pure kilobyte number from meminfo's second column; the kB case is
+            # handled by the fallback below (MemTotal → *1024).
             return int(first)
     # fallback: "MemTotal:  16394256 kB"
     import re
@@ -127,10 +128,10 @@ def parse_ram_bytes(text: str):
 
 
 def parse_disk_bytes(text: str) -> int | None:
-    """Размер корневого тома из df -B1 --output=size / (первая числовая строка)."""
+    """Root volume size from df -B1 --output=size / (the first numeric line)."""
     for line in text.splitlines():
         s = line.strip()
-        if s.startswith("---"):  # следующая секция — числа диска не будет
+        if s.startswith("---"):  # the next section — no disk number will come
             break
         if s.isdigit():
             return int(s)
@@ -138,10 +139,10 @@ def parse_disk_bytes(text: str) -> int | None:
 
 
 def parse_info_output(output: str) -> Dict[str, str]:
-    """Разобрать весь батч-вывод по маркерам → словарь готовых значений.
+    """Parse the whole batch output by markers → a dict of finished values.
 
-    В словарь попадают только непустые значения; формат полей совпадает
-    с моделью (cpu_cores — строкой, ram/disk — «N gb»).
+    Only non-empty values go into the dict; the field format matches the model
+    (cpu_cores — as a string, ram/disk — "N gb").
     """
     sections = {}
     current = None
@@ -182,10 +183,10 @@ def parse_info_output(output: str) -> Dict[str, str]:
 
 
 class SystemInfoCollector(QThread):
-    """Одноразовый поток: SSH-подключение + один батч команд + парсинг.
+    """One-shot thread: an SSH connection + one command batch + parsing.
 
-    Сигналы доставляются в GUI-поток; приёмники обязаны перепроверить,
-    что узел ещё существует на карте.
+    The signals are delivered to the GUI thread; receivers must re-check that
+    the node still exists on the map.
     """
 
     info_ready = Signal(str, dict)   # server_id, info_dict
@@ -197,13 +198,13 @@ class SystemInfoCollector(QThread):
         self.data = data
         self.password = password or ""
 
-    # v0.9.3 fix: коллектор одноразовый (без cancel-флага внутри run), поэтому
-    # «остановка» — это просто ограниченное ожидание естественного завершения
-    # (_TIMEOUT_S на канал + парсинг; см. _shutdown_background_threads в MainWindow).
+    # v0.9.3 fix: the collector is one-shot (no cancel flag inside run), so
+    # "stopping" is just a bounded wait for its natural completion
+    # (_TIMEOUT_S on the channel + parsing; see _shutdown_background_threads in MainWindow).
     def stop(self):
         self.wait(int((_TIMEOUT_S + 2) * 1000))
 
-    def run(self):  # noqa: C901 — плоская цепочка шагов с ранними выходами
+    def run(self):  # noqa: C901 — a flat chain of steps with early exits
         sid = self.data.id
         try:
             import paramiko
@@ -253,7 +254,7 @@ class SystemInfoCollector(QThread):
                 client.close()
 
             if _SECTION_END not in output:
-                # Windows-сервер или не-Linux shell: маркеров нет — пропускать
+                # a Windows server or a non-Linux shell: no markers — skip
                 raise RuntimeError(
                     err.strip()[:200] or "no info batch markers in output "
                     "(non-Linux host?)")
@@ -262,5 +263,5 @@ class SystemInfoCollector(QThread):
             if not info:
                 raise RuntimeError("empty system info parsed")
             self.info_ready.emit(sid, info)
-        except Exception as e:  # noqa: BLE001 — любая ошибка → сигнал, не падение
+        except Exception as e:  # noqa: BLE001 — any error → a signal, not a crash
             self.info_failed.emit(sid, str(e))

@@ -1,18 +1,18 @@
-"""UI polish: ноды, сетка, fit/zoom, статус-бар, иконки, hit-зона стрелок (бывш. smoke_test).
+"""UI polish: nodes, grid, fit/zoom, status bar, icons, arrow hit zones (former smoke_test).
 
-Часть сьюта, разбитого из smoke_test.py v0.6–v0.9.2 (см. INDEX.md).
-  * boundingRect узла включает полоску тени; декоративная кнопка 🔒 удалена;
-  * точка статуса + затемнение контента offline-узла до 0.55;
-  * адаптивная сетка: шаг 20px при зуме >= 1, удвоение при мелком зуме;
-  * fit_to_content (с контентом → True, пустая сцена → False без падения);
-  * set_zoom_and_center: валидные значения применяются, битые игнорируются;
-  * _center_view центрирует по содержимому карты;
-  * статус-бар: % зума + счётчики серверов/связей (ru);
-  * векторные иконки 20x20, неизвестное имя → пустой QIcon;
-  * hit-область стрелки ловит середину кривой (shape шире видимого штриха);
-  * i18n: ключи v0.7.3 + UI polish + v0.8.1 во всех трёх языках.
+A part of the suite split out of smoke_test.py v0.6–v0.9.2 (see INDEX.md).
+  * the node's boundingRect includes the shadow strip; the decorative 🔒 button removed;
+  * the status dot + the dimming of the offline node's content down to 0.55;
+  * the adaptive grid: a 20px step at zoom >= 1, the doubling at a small zoom;
+  * fit_to_content (with the content → True, an empty scene → False without a crash);
+  * set_zoom_and_center: the valid values are applied, the broken ones are ignored;
+  * _center_view centers by the map's content;
+  * the status bar: the % of the zoom + the counters of servers/connections (ru);
+  * the vector icons 20x20, an unknown name → an empty QIcon;
+  * the arrow's hit area catches the middle of the curve (the shape is wider than the visible stroke);
+  * i18n: the v0.7.3 keys + UI polish + v0.8.1 in all three languages.
 
-Запуск: python tests/test_ui_polish.py   (из корня проекта) или python tests/run_all.py
+Run: python tests/test_ui_polish.py   (from the project root) or python tests/run_all.py
 """
 import json
 import os
@@ -20,7 +20,7 @@ import sys
 
 from _common import bootstrap, check, finish, snapshot_i18n_config, restore_i18n_config
 
-ROOT, WORK = bootstrap()  # ДО импортов модулей приложения
+ROOT, WORK = bootstrap()  # BEFORE the app module imports
 
 from PySide6.QtWidgets import QApplication
 app = QApplication(sys.argv)
@@ -30,24 +30,24 @@ from models.server import server_data_from_dict
 from graphics.server_node import ServerNode as _SN
 from i18n import set_language
 
-# ══ UI polish (quick wins): ноды, сетка, fit/zoom, статус-бар, иконки ═══
+# ══ The UI polish (quick wins): the nodes, the grid, the fit/zoom, the status bar, the icons ═══
 print("== UI polish ==")
 
-# Фикстура: окно с двумя узлами и БЕЗ связей — состояние win73 в smoke_test после
-# секции v0.7.3 (стрелка удалена _remove_connection): счётчик «Связи: 0» ниже зависит от этого.
+# The fixture: a window with two nodes and WITHOUT connections — the win73 state in smoke_test after
+# v0.7.3 section (the arrow was removed by _remove_connection): the "Connections: 0" counter below depends on this.
 win = MW.MainWindow()
 d_a = server_data_from_dict({"alias": "ctx-a", "host": "192.168.3.52", "user": "u", "ip": "192.0.2.10", "x": 100, "y": 100})
 d_b = server_data_from_dict({"alias": "ctx-b", "host": "192.168.3.53", "user": "u", "x": 450, "y": 160})
 n_a = win.scene.add_server(d_a)
 n_b = win.scene.add_server(d_b)
 
-# Узел: полоска тени входит в boundingRect; декоративная кнопка 🔒 удалена
+# The node: the shadow strip is in the boundingRect; the decorative 🔒 button is removed
 check("node boundingRect includes shadow strip",
       abs(n_a.boundingRect().height() - (_SN.MIN_NODE_HEIGHT + _SN.SHADOW_BOTTOM)) < 0.5,
       str(n_a.boundingRect()))
 check("decorative SSH lock button removed from node", not hasattr(n_a, "_ssh_btn"))
 
-# Точка статуса + затемнение контента offline-узла (рамка и точки остаются яркими)
+# The status dot + dimming the offline node's content (the frame and the dots stay bright)
 n_a.set_status("offline")
 check("status dot turns red on offline",
       n_a._status_dot.brush().color().name() == _SN.STATUS_COLORS["offline"].name())
@@ -56,12 +56,12 @@ check("offline node content dimmed to 0.55",
 n_a.set_status("online")
 check("content opacity restored on online", n_a._alias.opacity() == 1.0)
 
-# Адаптивная сетка: базовый шаг при зуме >= 1; удвоение шага при мелком зуме
+# The adaptive grid: the base step at zoom >= 1; a doubled step at a small zoom
 check("grid step stays 20px at scale >= 1", win.scene._current_grid_step(1.0) == 20)
 check("grid step adapts to low zoom (screen interval stays in [16, 32) px)",
       16.0 <= win.scene._current_grid_step(0.1) * 0.1 < 32.0)
 
-# «Вписать карту»: есть контент -> True и зум в диапазоне; пустая сцена -> False без падения
+# "Fit map": there is content -> True and the zoom is in range; an empty scene -> False without a crash
 fit_ok = win.view.fit_to_content()
 check("fit_to_content fits existing nodes", fit_ok and 0.1 <= win.view.zoom <= 5.0,
       f"zoom={win.view.zoom}")
@@ -69,16 +69,16 @@ _empty_win = MW.MainWindow()
 check("fit on empty map returns False (no crash)", _empty_win.view.fit_to_content() is False)
 _empty_win.close(); _empty_win.destroy()
 
-# Восстановление сохранённого вида: валидные значения применяются, битые игнорируются
+# Restoring the saved view: valid values are applied, corrupt ones are ignored
 win.view.set_zoom_and_center(2.0, -100, -50)
 check("set_zoom_and_center applies zoom", abs(win.view.zoom - 2.0) < 1e-6)
 try:
-    win.view.set_zoom_and_center("garbage", None, "x")  # битые значения — вид не меняется
+    win.view.set_zoom_and_center("garbage", None, "x")  # the corrupt values — the view does not change
 except Exception as _bad_view_exc:
     check("set_zoom_and_center ignores bad values (no exception)", False, str(_bad_view_exc))
 check("set_zoom_and_center ignores bad values", abs(win.view.zoom - 2.0) < 1e-6)
 
-# Центрирование по содержимому карты (а не по началу координат сцены)
+# Centering by the map content (not by the start of the scene coordinates)
 _crect = win.view.content_bounding_rect()
 win._center_view()
 _mapped = win.view.mapFromScene(_crect.center())
@@ -88,7 +88,7 @@ check("_center_view centers on map content",
       and abs(float(_mapped.y()) - float(_vp_center.y())) < 2.0,
       f"mapped=({_mapped.x():.1f},{_mapped.y():.1f}) vp=({_vp_center.x():.1f},{_vp_center.y():.1f})")
 
-# Статус-бар: % зума и счётчики (язык фиксируем на ru для стабильного ассерта)
+# The status bar: the % zoom and the counters (we pin the language to ru for a stable assert)
 _lang_snap = snapshot_i18n_config()
 set_language("ru")
 win._on_zoom_changed(1.5)
@@ -98,16 +98,16 @@ check("counts label has servers and connections (ru)",
       "Серверы: 2" in win.counts_label.text() and "Связи: 0" in win.counts_label.text(),
       win.counts_label.text())
 
-# Векторные иконки: известные рендерятся 20x20, неизвестное имя -> пустой QIcon
+# Vector icons: the known ones render at 20x20, an unknown name -> an empty QIcon
 from ui.icons import get_icon as _gi_up
 _ic_fit = _gi_up("fit")
 check("icons module renders vector icons (20x20)",
       not _ic_fit.isNull() and _ic_fit.pixmap(20).width() == 20)
 check("unknown icon name -> empty QIcon", _gi_up("no_such_icon").isNull())
 
-# Hit-область стрелки: середина кривой теперь ловится (contains() шире видимого штриха —
-# в этом PySide6 strokeToFill/strokedPath не пробиндены, и fill-only contains точку ровно
-# на линии НЕ ловил; тонкая линия 1.8 px физически была некликабельна)
+# The arrow hit area: the middle of the curve is now caught (contains() is wider than the visible stroke —
+# in this PySide6 strokeToFill/strokedPath are not bound, and the fill-only contains is the point exactly
+# on the line it did NOT catch; the thin 1.8 px line was physically unclickable)
 from graphics.connection_arrow import build_curve as _bc73, curve_midpoint as _cm73, edge_point as _ep73
 _arrow_hit = win.scene.add_connection(d_a.id, d_b.id, "up-hit", "ssh")
 if _arrow_hit is not None:
@@ -121,7 +121,7 @@ if _arrow_hit is not None:
 else:
     check("arrow recreated for hit test", False)
 
-# i18n: новые ключи v0.7.3 + UI polish присутствуют во всех 3 языках
+# i18n: the new v0.7.3 + UI polish keys are present in all 3 languages
 _langs73 = {}
 for _l in ("en", "ru", "zh"):
     with open(os.path.join(ROOT, "i18n", f"{_l}.json"), encoding="utf-8") as _f:
@@ -137,13 +137,13 @@ _grp_keys = ["edit.add_group", "ctx.add_group", "ctx.rename_group", "ctx.delete_
              "status.group_added", "status.group_renamed", "status.group_deleted"]  # v0.8.1
 check("v0.7.3 + UI polish + v0.8.1 i18n keys present in en/ru/zh (>=213 keys each)",
       all(_k in _langs73[_l] for _k in (_v73_keys + _up_keys + _grp_keys) for _l in _langs73)
-      and all(len(_langs73[_l]) >= 213 for _l in _langs73),  # v0.8.2: +6 ключей = 219
+      and all(len(_langs73[_l]) >= 213 for _l in _langs73),  # v0.8.2: +6 keys = 219
       str({l: len(d) for l, d in _langs73.items()}))
 
-# Headless-герметичность закрытия: win сейчас dirty, а глобальная заглушка question()
-# отвечает Save → closeEvent ушёл бы в _save_project_as() → модальный QFileDialog в
-# offscreen зависает навсегда. Поток сохранения уже покрыт test_save_load.py —
-# здесь проверяем только чистое close/destroy.
+# The headless hermeticity of closing: win is now dirty, and the global question() stub
+# answers Save → closeEvent would have gone to _save_project_as() → a modal QFileDialog in
+# offscreen hangs forever. The save thread is already covered by test_save_load.py —
+# here we check only a clean close/destroy.
 win._dirty = False
 win.close()
 win.destroy()

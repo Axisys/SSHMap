@@ -1,22 +1,22 @@
-"""Регрессия v0.9.9.2 — UI внешнего терминала (пресеты + сброс к умолчанию).
+"""Regression v0.9.9.2 — the external terminal UI (presets + reset to defaults).
 
 ROADMAP v0.9.9.2:
-  #1 Секция в SSHConnectDialog: выбор пресета (auto / windows_terminal / cmd /
-     conhost на Windows; Linux-список) + кнопка «Сбросить к умолчанию»
-     (= готовый откат на auto). Хранение — существующий ~/.sshmap_settings.json
-     (load/save_external_terminal_setting из modules/external_terminal.py).
-  #2 Пресет сохраняется из UI, применяется к запуску (detect_terminal читает
-     конфиг) — и из диалога, и из ctx-меню MainWindow.
-  #3 i18n × en/ru/zh: +13 ключей (ssh_ext.section/preset_label/reset/preset.*).
-  Произвольная команда-шаблон с плейсхолдерами — осознанно в v1.1 (диалог настроек).
+  #1 the section in SSHConnectDialog: the preset choice (auto / windows_terminal / cmd /
+     conhost on Windows; the Linux list) + the "Reset to default" button
+     (= the ready rollback to auto). The storage — the existing ~/.sshmap_settings.json
+     (load/save_external_terminal_setting from modules/external_terminal.py).
+  #2 the preset is saved from the UI and applied to the launch (detect_terminal reads
+     the config) — both from the dialog and from the ctx menu of MainWindow.
+  #3 i18n × en/ru/zh: +13 keys (ssh_ext.section/preset_label/reset/preset.*).
+  The arbitrary command template with the placeholders — deliberately in v1.1 (the settings dialog).
 
-Запуск:  python tests/test_ext_terminal_dialog.py   (из корня проекта) или python tests/run_all.py
+Run:  python tests/test_ext_terminal_dialog.py   (from the project root) or python tests/run_all.py
 """
 import os, sys, shutil, tempfile, traceback
 
 from _common import bootstrap, check, finish, load_i18n_langs, check_i18n_parity
 
-ROOT, WORK = bootstrap()  # ДО импортов модулей приложения (HOME-изоляция и faulthandler внутри)
+ROOT, WORK = bootstrap()  # BEFORE the app module imports (the HOME isolation and faulthandler inside)
 
 from PySide6.QtWidgets import QApplication
 
@@ -30,10 +30,10 @@ from modules.external_terminal import (
 )
 from dialogs.ssh_connect_dialog import SSHConnectDialog
 
-# Тот же путь, что и модуль (~ — песочница: bootstrap() изолировал HOME/USERPROFILE).
+# The same path as the module (~ — the sandbox: bootstrap() isolated HOME/USERPROFILE).
 SETTINGS_PATH = _settings_path()
 
-# ══ i18n: 13 новых ключей × en/ru/zh (паритет — _common.check_i18n_parity) ══
+# ══ i18n: 13 new keys × en/ru/zh (the parity — _common.check_i18n_parity) ══
 print("== i18n ==")
 langs = load_i18n_langs(ROOT)
 new_keys = ["ssh_ext.section", "ssh_ext.preset_label", "ssh_ext.reset",
@@ -43,10 +43,10 @@ new_keys = ["ssh_ext.section", "ssh_ext.preset_label", "ssh_ext.reset",
             "ssh_ext.preset.konsole", "ssh_ext.preset.xfce4-terminal",
             "ssh_ext.preset.alacritty", "ssh_ext.preset.kitty"]
 missing = [k for k in new_keys if any(not langs[c].get(k, "").strip() for c in ("en", "ru", "zh"))]
-check("13 новых ключей v0.9.9.2 есть и не пусты в en/ru/zh", not missing, str(missing))
+check("the 13 new v0.9.9.2 keys are present and non-empty in en/ru/zh", not missing, str(missing))
 check_i18n_parity(langs)
 
-# ══ Секция в SSHConnectDialog: состав пресетов под платформу ══
+# ══ The section in the SSHConnectDialog: the preset composition for the platform ══
 print("== dialog section ==")
 sd = ServerData(id="ss92a", alias="ext-1", host="10.1.1.5", user="ops", ip="10.1.1.5")
 dlg = SSHConnectDialog(sd)
@@ -64,14 +64,14 @@ check(f"combo lists exactly the platform presets ({len(expected_choices)} on {sy
 check("all combo items have non-empty display labels",
       all(str(combo.itemText(i)).strip() for i in range(combo.count())))
 
-# Чистый HOME: файла настроек нет — диалог открыт, файл НЕ создан (нет записи на open).
+# A clean HOME: no settings file — the dialog is open, the file is NOT created (no open record).
 check("no settings file written on dialog open (fresh HOME)",
       not os.path.exists(SETTINGS_PATH), f"path={SETTINGS_PATH}")
 check("initial preset is 'auto' (default in fresh HOME)",
       combo.itemData(combo.currentIndex()) == "auto"
       and load_external_terminal_setting() == "auto")
 
-# ══ Выбор пресета из UI сохраняется сразу ══
+# ══ The preset choice from the UI is saved immediately ══
 print("== preset save from UI ==")
 cmd_idx = got_ids.index("cmd") if "cmd" in got_ids else None
 if cmd_idx is not None:
@@ -81,7 +81,7 @@ if cmd_idx is not None:
           load_external_terminal_setting() == "cmd",
           f"got={load_external_terminal_setting()!r}")
 else:
-    # Linux: cmd в списке нет — берём второй пресет (x-terminal-emulator и т.п.)
+    # Linux: cmd is not in the list — we take the second preset (x-terminal-emulator, etc.)
     alt_idx = 1
     combo.setCurrentIndex(alt_idx)
     app.processEvents()
@@ -89,7 +89,7 @@ else:
           load_external_terminal_setting() == got_ids[alt_idx],
           f"got={load_external_terminal_setting()!r} expected={got_ids[alt_idx]}")
 
-# ══ «Сбросить к умолчанию» — откат на auto ══
+# ══ "Reset to default" — the rollback to auto ══
 print("== reset to default ==")
 reset_btn.click()
 app.processEvents()
@@ -99,17 +99,17 @@ check("reset button returns combo to 'auto'",
 check("reset persists 'auto' to settings",
       load_external_terminal_setting() == "auto",
       f"got={load_external_terminal_setting()!r}")
-# Идемпотентность: повторный сброс в состоянии auto — безопасно.
+# Idempotency: a repeated reset in the auto state — safe.
 reset_btn.click()
 app.processEvents()
 check("second reset while already 'auto' is a safe no-op",
       load_external_terminal_setting() == "auto"
       and combo.itemData(combo.currentIndex()) == "auto")
 
-# ══ Пресет применяется к запуску: detect_terminal читает сохранённый id ══
+# ══ The preset is applied to the launch: detect_terminal reads the saved id ══
 print("== applied at launch ==")
 if sys.platform == "win32":
-    save_external_terminal_setting("cmd")  # cmd.exe есть на любой Windows
+    save_external_terminal_setting("cmd")  # cmd.exe exists on any Windows
     got = detect_terminal()
     check("preset 'cmd' is honored by detect_terminal (launch path)", got == "cmd", f"got={got}")
     cmd = build_command("cmd", "10.1.1.5", "ops")
@@ -125,12 +125,12 @@ else:
     else:
         check("no forced preset available on this system — launch-path check skipped", True)
 
-# Битый/чужой id в файле → авто-откат к auto (защита load_external_terminal_setting).
+# A corrupt/foreign id in the file → an auto-rollback to auto (the load_external_terminal_setting protection).
 save_external_terminal_setting("definitely-not-a-terminal")
 check("corrupted setting value falls back to 'auto'",
       load_external_terminal_setting() == "auto",
       f"got={load_external_terminal_setting()!r}")
-save_external_terminal_setting("auto")  # вернуть чистое состояние
+save_external_terminal_setting("auto")  # return a clean state
 
 dlg.close()
 app.processEvents()

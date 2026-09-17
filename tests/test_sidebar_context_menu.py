@@ -1,25 +1,25 @@
-"""Регрессия v0.9.6 — контекстное меню в сайдбаре (списке серверов).
+"""Regression v0.9.6 — the context menu in the sidebar (server list).
 
 ROADMAP v0.9.6:
-  #1 ПКМ по серверу в дереве: Подключиться SSH, Внешний терминал, Редактировать,
-     Скопировать IP, Copy Hostname, Ping, Собрать информацию,
-     Показать на карте (центрирование + акцент), Удалить (guarded-путь).
-  #2 НЕ дублировать «карточные» действия (drag-связь, свернуть плашку) — в списке
-     их нет.
-  #3 Группы/заметки — Н/Д: дерево показывает только серверы (refresh_sidebar
-     итерирует scene.nodes()), условие задачи не выполнено — меню для них не нужны.
-  #4 i18n: все ключи переиспользованы из ctx.*; новый только ctx.reveal_on_map × en/ru/zh.
+  #1 the RMB on the server in the tree: Connect via SSH, the external terminal, Edit,
+     Copy IP, Copy Hostname, Ping, Gather the information,
+     Show on the map (the centering + the accent), Delete (the guarded path).
+  #2 do NOT duplicate the "card" actions (the drag-connection, the plaque collapse) — they
+     are not in the list.
+  #3 the groups/notes — N/A: the tree shows only the servers (refresh_sidebar
+     iterates scene.nodes()), the condition of the task is not met — no menu is needed for them.
+  #4 i18n: all the keys are reused from ctx.*; the new one is only ctx.reveal_on_map × en/ru/zh.
 
-Запуск:  python tests/test_sidebar_context_menu.py   (из корня проекта) или python tests/run_all.py
+Run:  python tests/test_sidebar_context_menu.py   (from the project root) or python tests/run_all.py
 """
 import os, sys, tempfile, traceback
 
 from _common import bootstrap, check, finish, wait_until, load_i18n_langs, check_i18n_parity
 
-ROOT, WORK = bootstrap()  # ДО импортов модулей приложения (HOME-изоляция и faulthandler внутри)
+ROOT, WORK = bootstrap()  # BEFORE the app module imports (the HOME isolation and faulthandler inside)
 
 from PySide6.QtCore import Qt, QPoint, QTimer, QEventLoop
-from PySide6.QtWidgets import QApplication, QDialog, QMessageBox, QMenu
+from PySide6.QtWidgets import QApplication, QDialog, QMessageBox
 
 app = QApplication(sys.argv)
 
@@ -33,7 +33,7 @@ win.show(); app.processEvents()
 view = win.view
 view.resize(900, 700); app.processEvents()
 
-# Два сервера — строки дерева. У первого явный IP (для Copy IP), у второго — нет.
+# Two servers — the tree rows. The first has an explicit IP (for Copy IP), the second — none.
 n1 = win.scene.add_server(ServerData(id="sb6a", alias="web-1", host="10.20.0.11",
                                      user="ops", ip="10.20.0.11", x=500, y=300))
 n2 = win.scene.add_server(ServerData(id="sb6b", alias="db-1", host="db.internal",
@@ -55,20 +55,15 @@ def _row_center(item):
     return QPoint(int(r.center().x()), int(r.center().y()))
 
 
-# ── Перехват QMenu (паттерн regression_v081): exec не блокирует offscreen ──
-captured = []
+# ── The QMenu interception (the regression_v081 pattern): exec does not block offscreen ──
+from _fakes import CaptureMenu as _CaptureMenu
 
-class _CaptureMenu(QMenu):
-    def exec(self, *a, **k):
-        captured.append(self)
-        return 0
-    def exec_(self, *a, **k):
-        captured.append(self)
-        return 0
+captured = []
+_CaptureMenu.captured = captured
 
 
 def _ctx_row(item):
-    """Настоящий путь: сигнал customContextMenuRequested → слот MainWindow."""
+    """The real path: the signal customContextMenuRequested → the slot of MainWindow."""
     captured.clear()
     win.tree.customContextMenuRequested.emit(_row_center(item))
     app.processEvents()
@@ -82,20 +77,20 @@ try:
     check("tree has a row for the first server", item1 is not None,
           f"rows={win.tree.topLevelItemCount()}")
 
-    # ══ #4. i18n: новый ключ ctx.reveal_on_map × en/ru/zh, наборы идентичны ══
+    # ══ #4. i18n: the new key ctx.reveal_on_map × en/ru/zh, the sets are identical ══
     print("== i18n ==")
     langs = load_i18n_langs(ROOT)
     check("ctx.reveal_on_map present and non-empty in en/ru/zh",
           all(langs[c].get("ctx.reveal_on_map", "").strip() for c in ("en", "ru", "zh")),
           str({c: langs[c].get("ctx.reveal_on_map") for c in ("en", "ru", "zh")}))
-    # v0.9.7: +18 ключей автосохранения/бэкапов (file.restore_autosave … msg.open_project_first)
-    # v0.9.8: +6 ключей поиска по карте (view.find_on_map … status.no_matches)
-    # v0.9.9.2: +13 ключей UI внешнего терминала (ssh_ext.section … ssh_ext.preset.kitty)
-    # v0.9.9.7: +2 ключа PDF-экспорта (file.export_pdf, status.export_pdf_ok)
-    # v1.0RC4: +22 ключа Быстрого запуска (ctx.quick_launch … msg.ql_open_failed)
-    # v1.1: +33 ключа диалога настроек (settings.* / menu.settings / btn.settings / status.settings_saved)
-    # v1.1.2RC2: +2 ключа (msg.confirm_delete_profile, status.import_resolving)
-    # v1.1.2 final: +2 ключа (settings.statuses.max_parallel, status.auto_interval_hint)
+    # v0.9.7: +18 autosave/backups keys (file.restore_autosave … msg.open_project_first)
+    # v0.9.8: +6 map search keys (view.find_on_map … status.no_matches)
+    # v0.9.9.2: +13 external terminal UI keys (ssh_ext.section … ssh_ext.preset.kitty)
+    # v0.9.9.7: +2 PDF export keys (file.export_pdf, status.export_pdf_ok)
+    # v1.0RC4: +22 Quick launch keys (ctx.quick_launch … msg.ql_open_failed)
+    # v1.1: +33 settings dialog keys (settings.* / menu.settings / btn.settings / status.settings_saved)
+    # v1.1.2RC2: +2 keys (msg.confirm_delete_profile, status.import_resolving)
+    # v1.1.2 final: +2 keys (settings.statuses.max_parallel, status.auto_interval_hint)
     check_i18n_parity(langs)
     _sidebar_keys = ["ctx.ssh_connect", "ctx.ssh_external", "ctx.edit_server",
                      "ctx.copy_ip", "ctx.copy_hostname", "ctx.ping",
@@ -103,7 +98,7 @@ try:
     check("all sidebar menu keys exist in every language",
           all(k in langs[c] for k in _sidebar_keys for c in ("en", "ru", "zh")))
 
-    # ══ #1. Состав и порядок меню (ROADMAP v0.9.6, пункт 1; v1.0RC4: +Быстрый запуск) ══
+    # ══ #1. The menu composition and order (ROADMAP v0.9.6, item 1; v1.0RC4: +Quick launch) ══
     print("== menu composition ==")
     menu = _ctx_row(item1)
     check("context menu captured on right-click of a tree row", menu is not None)
@@ -111,8 +106,8 @@ try:
         actions = [a for a in menu.actions()]
         non_sep = [a.text() for a in actions if a.isSeparator() is False]
         n_sep = sum(1 for a in actions if a.isSeparator())
-        # v1.0RC4: первым пунктом — подменю «Быстрый запуск» (у sb6a пунктов нет →
-        # в нём только «Настроить…»), затем разделитель и 9 ROADMAP-действий.
+        # v1.0RC4: the first item — the "Quick launch" submenu (sb6a has no items →
+        # in it only "Configure…"), then a separator and 9 ROADMAP actions.
         expected_order = [it("ctx.quick_launch")] + [it(k) for k in _sidebar_keys]
         check("menu has the Quick Launch submenu + the 9 ROADMAP actions",
               len(non_sep) == 10, f"got {len(non_sep)}: {non_sep}")
@@ -120,7 +115,7 @@ try:
               non_sep == expected_order, f"got={non_sep} want={expected_order}")
         check("menu grouped by 5 separators (4 ROADMAP + 1 after Quick Launch)",
               n_sep == 5, f"separators={n_sep}")
-        # Подменю: у узла без пунктов — только «Настроить…»
+        # The submenu: a node without items — only "Configure…"
         ql_sub = next((a.menu() for a in actions if a.text() == it("ctx.quick_launch")), None)
         check("Quick Launch submenu exists as the first item", ql_sub is not None, str(non_sep[:2]))
         if ql_sub:
@@ -128,14 +123,14 @@ try:
             check("empty quick launch → submenu holds only 'Configure…'",
                   ql_items == [it("ql.configure")], str(ql_items))
 
-        # ══ #2. «Карточные» действия НЕ дублируются в списке ══
+        # ══ #2. The "card" actions are NOT duplicated in the list ══
         forbidden = {it("ctx.collapse_server"), it("ctx.expand_server"),
                      it("edit.connect_selected"), it("btn.add_connection")}
         leaked = [x for x in non_sep if x in forbidden]
-        check("no card-only actions (drag-связь / свернуть плашку) in sidebar menu",
+        check("no card-only actions (the drag-connection / the plaque collapse) in the sidebar menu",
               not leaked, f"leaked={leaked}")
 
-        # ══ #1. «Скопировать IP» — буфер обмена получает IP узла ══
+        # ══ #1. "Copy IP" — the clipboard receives the node's IP ══
         clip_before = app.clipboard().text()
         for act in menu.actions():
             if act.text() == it("ctx.copy_ip"):
@@ -146,7 +141,7 @@ try:
               app.clipboard().text() == "10.20.0.11",
               f"clipboard={app.clipboard().text()!r} (before {clip_before!r})")
 
-        # ══ #1. «Показать на карте» — выбор + центрирование + акцент-вспышка ══
+        # ══ #1. "Show on the map" — the selection + the centering + the accent flash ══
         status_before = n1.status
         for act in menu.actions():
             if act.text() == it("ctx.reveal_on_map"):
@@ -169,7 +164,7 @@ try:
         check("accent flash fades out and hides (900 ms animation completes)",
               not n1._pulse.isVisible())
 
-        # ══ #1. «Подключиться SSH» — узел выделяется, диалог получает его данные ══
+        # ══ #1. "Connect SSH" — the node is selected, the dialog receives its data ══
         ssh_calls = []
 
         class _FakeSSHDialog:
@@ -195,7 +190,7 @@ try:
         finally:
             MW.SSHConnectDialog = _orig_ssh_dlg
 
-        # ══ #1. «Внешний терминал» — connect_external получает host/user/port ══
+        # ══ #1. "External terminal" — connect_external receives the host/user/port ══
         ext_calls = []
 
         class _FakeExtTerm:
@@ -220,7 +215,7 @@ try:
         finally:
             MW._ext_term = _orig_ext
 
-        # ══ #1. «Собрать информацию» — коллектор создан и запущен (фейк, без SSH) ══
+        # ══ #1. "Gather information" — the collector is created and started (a fake, no SSH) ══
         import threading as _threading
         import services.system_info_collector as SIC
         from PySide6.QtCore import QThread, Signal as QtSignal
@@ -235,10 +230,10 @@ try:
                 super().__init__(parent)
                 self._data = data
                 collectors.append(self)
-                self._stop_evt = _threading.Event()  # держим «running» до release
+                self._stop_evt = _threading.Event()  # we hold "running" until the release
 
             def run(self):
-                self._stop_evt.wait(timeout=5)  # без сети; отмена — флаг (паттерн реального класса)
+                self._stop_evt.wait(timeout=5)  # without network; the cancellation — a flag (the pattern of the real class)
 
         _orig_coll_cls = SIC.SystemInfoCollector
         SIC.SystemInfoCollector = _FakeCollector
@@ -253,9 +248,9 @@ try:
             check("collect-info action starts a collector with the node data",
                   len(collectors) == 1 and collectors[0]._data is n1.data,
                   f"collectors={len(collectors)}")
-            check("running collector registered in _info_collectors (guard против параллельных)",
+            check("the running collector is registered in _info_collectors (the guard against the parallel runs)",
                   "sb6a" in win._info_collectors, str(list(win._info_collectors)))
-            # Отпускаем поток и проверяем cleanup по finished-сигналу
+            # We release the thread and check the cleanup by the finished signal
             for c in collectors:
                 c._stop_evt.set()
             wait_until(lambda: not any(c.isRunning() for c in collectors), timeout_ms=2000)
@@ -265,7 +260,7 @@ try:
         finally:
             SIC.SystemInfoCollector = _orig_coll_cls
 
-        # ══ #1. «Удалить» — guarded-путь (подтверждение → worker-guard → remove) ══
+        # ══ #1. "Delete" — the guarded path (the confirmation → the worker guard → remove) ══
         rows_before = win.tree.topLevelItemCount()
         _orig_question = QMessageBox.question
         QMessageBox.question = staticmethod(lambda *a, **k: QMessageBox.Yes)
@@ -287,7 +282,7 @@ try:
         finally:
             QMessageBox.question = _orig_question
 
-    # ══ Пустая область дерева — меню не показывается, падения нет ══
+    # ══ The empty area of the tree — the menu is not shown, no crashes ══
     print("== empty area ==")
     covered = [win.tree.visualItemRect(win.tree.topLevelItem(i))
                for i in range(win.tree.topLevelItemCount())]
@@ -309,14 +304,14 @@ try:
     except Exception as e:
         check("right-click on empty tree area shows no menu (no crash)", False, repr(e))
 
-    # ══ Robustness: _reveal_node_on_map(None) — узел удалён, пока меню было открыто ══
+    # ══ Robustness: _reveal_node_on_map(None) — the node was removed while the menu was open ══
     try:
         win._reveal_node_on_map(None)
         check("_reveal_node_on_map(None) is a safe no-op", True)
     except Exception as e:
         check("_reveal_node_on_map(None) is a safe no-op", False, repr(e))
 
-    # ══ Второй узел (host без IP): Copy IP копирует host — существующая семантика ══
+    # ══ The second node (a host without an IP): Copy IP copies the host — the existing semantics ══
     item2 = _item_for("sb6b")
     if item2 is not None:
         menu6 = _ctx_row(item2)
@@ -332,7 +327,7 @@ try:
 finally:
     MW.QMenu = _orig_menu_cls
 
-# Cleanup: сначала сбрасываем dirty — иначе closeEvent уйдёт в диалог сохранения.
+# Cleanup: first reset dirty — otherwise closeEvent would go to the save dialog.
 try:
     win._dirty = False
     win.close(); win.destroy()

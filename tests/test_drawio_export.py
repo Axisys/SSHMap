@@ -1,19 +1,19 @@
 # -*- coding: utf-8 -*-
-"""Экспорт карты в drawio (.drawio) v0.9.5 (бывш. tests/smoke_v095_drawio.py).
+"""Map export to drawio (.drawio) v0.9.5 (former tests/smoke_v095_drawio.py).
 
-Проверяет (DOCUMENTATION.md v0.9.5 #6):
-  1. Round-trip структуры XML: узлы / связи / группы / заметки / фон.
-  2. Файл открывается валидатором XML (ET.parse).
-  3. Координаты членов групп пересчитаны относительно parent.
+Checks (DOCUMENTATION.md v0.9.5 #6):
+  1. The round-trip of the structure of the XML: the nodes / the connections / the groups / the notes / the background.
+  2. The file opens by the XML validator (ET.parse).
+  3. The coordinates of the members of the groups are recalculated relative to the parent.
 
-Запуск: python tests/test_drawio_export.py   (из корня проекта) или python tests/run_all.py
+Run: python tests/test_drawio_export.py   (from the project root) or python tests/run_all.py
 """
 import os
 import xml.etree.ElementTree as ET
 
 from _common import bootstrap, check, finish
 
-ROOT, WORK = bootstrap()  # ДО импортов модулей приложения (HOME-изоляция и faulthandler внутри)
+ROOT, WORK = bootstrap()  # BEFORE the app module imports (the HOME isolation and faulthandler inside)
 
 from PySide6.QtWidgets import QApplication
 
@@ -33,7 +33,7 @@ def find_cells(root):
 
 scene = MapScene()
 
-# Узлы: два свободных + один внутри группы
+# The nodes: two free + one inside a group
 n1 = scene.add_server(ServerData(
     id="srv1", alias="web-01", host="10.0.0.11", user="ubuntu",
     x=700, y=80, cpu="2", ram="4GB", ip="10.0.0.11", os_name="Ubuntu 24.04"))
@@ -44,51 +44,51 @@ n3 = scene.add_server(ServerData(
     id="srv3", alias="cache-01", host="10.0.0.13", user="ubuntu",
     x=120, y=160))
 scene.add_connection("srv1", "srv2", label="replication", ctype="database")
-note = scene.add_note("Проверить бэкапы", x=600, y=50)
-check("стикер добавлен в сцену", note is not None and bool(scene.notes()))
+note = scene.add_note("Check the backups", x=600, y=50)
+check("the note is added to the scene", note is not None and bool(scene.notes()))
 group = scene.add_group("prod", x=50, y=50, width=400, height=300)
 group.add_member(n3)
 
 path = os.path.join(WORK, "test_drawio_export.drawio")
 cells_n = export_scene_to_drawio(scene, path)
-check("экспорт вернул число ячеек", isinstance(cells_n, int) and cells_n > 0, f"got {cells_n!r}")
+check("the export returns the cell count", isinstance(cells_n, int) and cells_n > 0, f"got {cells_n!r}")
 
-# ── 1. Валидный XML ───────────────────────────────────────────────────────────
+# ── 1. A valid XML ───────────────────────────────────────────────────────────
 try:
-    tree = ET.parse(path)  # бросит ParseError при битой структуре
+    tree = ET.parse(path)  # will throw a ParseError on a corrupt structure
     root = tree.getroot()
 except ET.ParseError as e:
-    check("XML валиден (ET.parse)", False, str(e))
+    check("the XML is valid (ET.parse)", False, str(e))
     finish()
-check("корневой тег == mxfile", root.tag == "mxfile", f"got {root.tag!r}")
+check("the root tag == mxfile", root.tag == "mxfile", f"got {root.tag!r}")
 
 cells = find_cells(root)
 stats = load_drawio_structure(path)
 
-# ── 2. Структура: 3 вершины узлов + 1 стикер; 1 контейнер; 1 ребро ───────────
-check("vertices == 3 (n1, n2, член группы)", stats.get("vertices") == 3, str(stats))
+# ── 2. The structure: 3 node corners + 1 sticker; 1 container; 1 edge ───────────
+check("vertices == 3 (n1, n2, the group member)", stats.get("vertices") == 3, str(stats))
 check("notes == 1", stats.get("notes") == 1, str(stats))
 check("containers == 1", stats.get("containers") == 1, str(stats))
 check("edges == 1", stats.get("edges") == 1, str(stats))
 
 edge = next((c for c in cells.values() if c.get("edge") == "1"), None)
-check("ячейка ребра существует", edge is not None)
+check("the edge cell exists", edge is not None)
 if edge is not None:
     src_cell = cells.get(edge.get("source"))
     dst_cell = cells.get(edge.get("target"))
-    check("концы ребра существуют", src_cell is not None and dst_cell is not None)
-    check("цвет типа связи применён (a78bfa)", "a78bfa" in (edge.get("style") or ""))
+    check("the edge ends exist", src_cell is not None and dst_cell is not None)
+    check("the connection type color is applied (a78bfa)", "a78bfa" in (edge.get("style") or ""))
 
-# ── 3. Координаты члена группы относительно parent + parent = контейнер ──────
+# ── 3. The member coordinates relative to the parent + the parent = the container ──────
 member_id = next((k for k in cells if k.endswith("-member-0")), None)
 group_id = next((k for k in cells
                  if k.startswith("group-") and not k.endswith("-member-0")), None)
-check("ячейка группы существует", group_id is not None, str(sorted(cells)))
-check("ячейка члена группы существует", member_id is not None)
+check("the group cell exists", group_id is not None, str(sorted(cells)))
+check("the group member cell exists", member_id is not None)
 if member_id is not None and group_id is not None:
     geom = cells[member_id].find("mxGeometry")
-    # Член группы обязан быть дочерней ячейкой контейнера (xml-reference §Containers)
-    check("parent члена == контейнер", cells[member_id].get("parent") == group_id,
+    # A group member must be a child cell of the container (xml-reference §Containers)
+    check("the member's parent == the container", cells[member_id].get("parent") == group_id,
           f"got {cells[member_id].get('parent')!r}")
     gx = float(cells[group_id].find("mxGeometry").get("x"))
     gy = float(cells[group_id].find("mxGeometry").get("y"))
@@ -96,34 +96,34 @@ if member_id is not None and group_id is not None:
     my = float(geom.get("y"))
     expected_x = round(float(n3.pos().x()) - gx, 2)
     expected_y = round(float(n3.pos().y()) - gy, 2)
-    check("координаты члена относительно parent",
+    check("the member's coordinates are relative to the parent",
           abs(mx - expected_x) < 0.51 and abs(my - expected_y) < 0.51,
           f"({mx},{my}) vs ({expected_x},{expected_y})")
 
-# ── 4. Текст узла содержит alias и host; перенос строки — &#xa; ───────────────
+# ── 4. The node text contains the alias and the host; the line break — &#xa; ───────────────
 node_cell = next((c for c in cells.values()
                   if (c.get("value") or "").startswith("web-01")), None)
-check("ячейка узла web-01 существует", node_cell is not None)
+check("the node cell web-01 exists", node_cell is not None)
 if node_cell is not None:
-    check("метка содержит @host", "@10.0.0.11" in (node_cell.get("value") or ""))
-    check("метка содержит строку OS", "Ubuntu 24.04" in (node_cell.get("value") or ""))
-    check("style содержит html=1", "html=1" in (node_cell.get("style") or ""))
+    check("the label contains the @host", "@10.0.0.11" in (node_cell.get("value") or ""))
+    check("the label contains the OS line", "Ubuntu 24.04" in (node_cell.get("value") or ""))
+    check("the style contains html=1", "html=1" in (node_cell.get("style") or ""))
 raw = open(path, encoding="utf-8").read()
-check("перенос строки закодирован как &#xa; в файле", "&#xa;" in raw)
+check("the line break is encoded as &#xa; in the file", "&#xa;" in raw)
 
-# ── 5. Слои в правильном порядке и висят на root (parent="0") ────────────────
+# ── 5. The layers in the right order, hanging on the root (parent="0") ────────────────
 layer_ids = [c.get("id") for c in cells.values()
              if str(c.get("id", "")).startswith("layer-")]
-check("слои в порядке background→groups→map",
+check("the layers are in the order background→groups→map",
       layer_ids == ["layer-background", "layer-groups", "layer-map"], str(layer_ids))
 for lid in layer_ids:
-    check(f"слой {lid}: parent==0 и не vertex/edge",
+    check(f"layer {lid}: parent==0 and not vertex/edge",
           cells[lid].get("parent") == "0"
           and cells[lid].get("vertex") is None and cells[lid].get("edge") is None)
 
 try:
     os.remove(path)
 except OSError:
-    pass  # WORK всё равно сносится bootstrap'ом на следующем прогоне
+    pass  # WORK is still wiped by the bootstrap on the next run
 
 finish()

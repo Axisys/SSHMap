@@ -1,35 +1,36 @@
-"""Фоновая диагностика узлов карты: ping + обратный DNS (v0.9.9.3).
+"""Background diagnostics of map nodes: ping + reverse DNS (v0.9.9.3).
 
-Классы перенесены в v0.9.9.3 ИЗ ui/main_window.py, где они были вложены прямо
-в методы `_ping_node` / `_copy_node_info` (фаза 0 серии «Гигиена main_window.py»).
-НУЛЕВОЕ изменение поведения: те же сигналы, те же командные строки ping'а,
-те же i18n-ключи, тот же fallback на host при неудаче DNS.
+The classes were moved in v0.9.9.3 FROM ui/main_window.py, where they were
+nested directly in the `_ping_node` / `_copy_node_info` methods (phase 0 of the
+"main_window.py hygiene" series). ZERO behavior change: the same signals, the
+same ping command lines, the same i18n keys, the same fallback to host on a
+DNS failure.
 
-Паттерн «модуль + колбэки»: MainWindow держит ссылки на потоки
-(`self._ping_thread` / `self._dns_thread` — guard AUDIT v0.7.2 #8 против
-затирания работающего ping'а и orphan-потоков), подключает сигналы
-локальными замыканиями-колбэками и стартует поток; остановка при закрытии
-окна — общий `_shutdown_background_threads()` (stop()/wait(), как у StatusChecker).
+The "module + callbacks" pattern: MainWindow holds references to the threads
+(`self._ping_thread` / `self._dns_thread` — guard AUDIT v0.7.2 #8 against
+clobbering a running ping and orphan threads), connects the signals
+with local closures as callbacks and starts the thread; the stop on window
+close — the shared `_shutdown_background_threads()` (stop()/wait(), like StatusChecker).
 
-Использование (MainWindow):
+Usage (MainWindow):
     from services.diagnostics import PingThread, ReverseDnsThread
 
     ping = PingThread(host)
     ping.finished_ping.connect(on_done)      # (ok: bool, text: str)
-    self._ping_thread = ping                 # держать ссылку — не orphan
+    self._ping_thread = ping                 # keep the reference — not an orphan
     ping.start()
 
-    dns = ReverseDnsThread(host, parent=self)  # v1.2.10rc1: parent — владелец C++-объекта
+    dns = ReverseDnsThread(host, parent=self)  # v1.2.10rc1: parent — owner of the C++ object
     dns.resolved.connect(on_resolved)        # (name: str)
     self._dns_thread = dns
     dns.start()
 
-v1.2.10rc1 (AUDIT авто #2 + находка верификации): реестр орфано-потоков
-`_orphan_threads` + `register_orphan_thread()` — ping/DNS не имеют stop(), и при
-недоступном резолвере getaddrinfo/ping доживают дольше wait-бюджета шатдауна
-(~2 c); переживший поток нельзя оставлять на GC («QThread: Destroyed while thread
-is still running») — реестр держит его до finished() (паттерн N4, _orphan_threads
-из modules/ssh_terminal.py).
+v1.2.10rc1 (AUDIT auto #2 + a verification finding): the orphan-thread registry
+`_orphan_threads` + `register_orphan_thread()` — ping/DNS have no stop(), and with
+an unreachable resolver getaddrinfo/ping outlive the shutdown wait budget
+(~2 s); a surviving thread must not be left to GC ("QThread: Destroyed while thread
+is still running") — the registry holds it until finished() (pattern N4, _orphan_threads
+from modules/ssh_terminal.py).
 """
 import platform
 import subprocess
@@ -38,23 +39,23 @@ from typing import List
 from PySide6.QtCore import QThread, Signal
 
 
-# ── v1.2.10rc1: реестр орфано-потоков ping/DNS (паттерн N4) ───────────────────
-# PingThread/ReverseDnsThread НЕ имеют stop(): при закрытии окна их можно только
-# ждать с бюджетом (~2 c, MainWindow._shutdown_background_threads). Если
-# getaddrinfo/ping переживут бюджет (недоступный резолвер — ровно тот сценарий,
-# ради которого DNS выносился в поток), живой QThread без сильного ссылающегося
-# объекта нельзя оставлять на GC: «QThread: Destroyed while thread is still
-# running» + риск RuntimeError на поздних emit. Реестр держит такие потоки до
-# finished() — как _orphan_threads (modules/ssh_terminal.py, v1.1.2RC1 N4); все
-# слоты окна к этому моменту уже отвязаны/окно закрыто, поэтому поздние emit без
-# приёмников — безопасный no-op.
+# ── v1.2.10rc1: orphan-thread registry for ping/DNS (pattern N4) ───────────────────
+# PingThread/ReverseDnsThread have NO stop(): on window close we can only
+# wait for them with a budget (~2 s, MainWindow._shutdown_background_threads).
+# If getaddrinfo/ping outlive the budget (an unreachable resolver — exactly the
+# scenario for which DNS was moved to a thread), a live QThread with no strong
+# referencing object must not be left to GC: "QThread: Destroyed while thread
+# is still running" + the risk of a RuntimeError on late emits. The registry holds
+# such threads until finished() — like _orphan_threads (modules/ssh_terminal.py,
+# v1.1.2RC1 N4); all window slots are already disconnected / the window is closed
+# by then, so late emits without receivers — a safe no-op.
 _orphan_threads: List["QThread"] = []
 
 
 def register_orphan_thread(thread: "QThread"):
-    """Держать ещё работающий ping/DNS-поток до finished() (v1.2.10rc1).
+    """Hold a still-running ping/DNS thread until finished() (v1.2.10rc1).
 
-    Идемпотентно; самовычищается по сигналу finished().
+    Idempotent; self-cleans on the finished() signal.
     """
     if thread not in _orphan_threads:
         _orphan_threads.append(thread)
@@ -63,15 +64,15 @@ def register_orphan_thread(thread: "QThread"):
             try:
                 _orphan_threads.remove(t)
             except ValueError:
-                pass  # уже удалён (двойной finished — на практике не бывает)
+                pass  # already removed (a double finished — does not happen in practice)
         thread.finished.connect(_drop)
 
 
 class PingThread(QThread):
-    """Ping узла в отдельном потоке без блокировки GUI (v0.7.3).
+    """Ping a node in a separate thread without blocking the GUI (v0.7.3).
 
-    Windows: `ping -n 3`, POSIX: `ping -c 3`. Результат — сигнал finished_ping;
-    интерпретация (статус-бар / диалог) остаётся за вызывающим колбэком.
+    Windows: `ping -n 3`, POSIX: `ping -c 3`. The result — the finished_ping
+    signal; interpretation (status bar / dialog) is left to the calling callback.
     """
 
     finished_ping = Signal(bool, str)
@@ -86,17 +87,17 @@ class PingThread(QThread):
         except Exception:
             def _t(key, **kw):
                 return key.format(**kw) if kw else key
-        # v1.2.10rc2 (AUDIT ручной #5d): guard ДО subprocess — Windows ping НЕ
-        # поддерживает «--» (асимметрия веток: POSIX-команда ниже имеет его), поэтому
-        # хост, начинающийся с «-», мог бы быть съеден как флаг. Такой хост невалиден
-        # как DNS-имя и так — отказываемся БЕЗ запуска процесса (на обеих ОС).
+        # v1.2.10rc2 (AUDIT manual #5d): guard BEFORE the subprocess — the Windows ping
+        # does NOT support "--" (asymmetry of the branches: the POSIX command below has
+        # it), so a host starting with "-" could be eaten as a flag. Such a host is
+        # invalid as a DNS name anyway — we refuse WITHOUT launching the process (on both OSes).
         if isinstance(self._host, str) and self._host.startswith("-"):
             self.finished_ping.emit(False, _t("status.ping_failed", host=self._host))
             return
         count_flag = "-n" if platform.system() == "Windows" else "-c"
-        # AUDIT v0.9.5.5 (безопасность #4): -w/-W — миллисекунды на Windows,
-        # секунды на Linux; таймаут 3 с в обоих случаях. На Linux "--" перед
-        # хостом, чтобы хост вида "-x" не съелся как флаг.
+        # AUDIT v0.9.5.5 (security #4): -w/-W — milliseconds on Windows,
+        # seconds on Linux; a 3 s timeout in both cases. On Linux the "--" before
+        # the host, so a host of the form "-x" is not eaten as a flag.
         if platform.system() == "Windows":
             cmd = ["ping", count_flag, "3", "-w", "3000", self._host]
         else:
@@ -117,20 +118,20 @@ class PingThread(QThread):
 
 
 class ReverseDnsThread(QThread):
-    """Обратный DNS вне GUI-потока (AUDIT v0.7.2, средняя #6).
+    """Reverse DNS outside the GUI thread (AUDIT v0.7.2, medium #6).
 
-    gethostbyaddr при недоступном резолвере раньше замерзал на таймауте DNS
-    в GUI-потоке; теперь — отдельный поток, сигнал resolved(name).
-    DNS не отдал имя → name = сам host (колбэк копирует его как есть).
+    With an unreachable resolver gethostbyaddr used to freeze on the DNS timeout
+    in the GUI thread; now — a separate thread, the resolved(name) signal.
+    DNS did not return a name → name = the host itself (the callback copies it as-is).
     """
 
     resolved = Signal(str)
 
     def __init__(self, host_, parent=None):
-        # v1.2.10rc1 (AUDIT авто #2): parent — QObject-владелец C++-объекта потока
-        # (MainWindow передаёт self): пока окно живо, поток не может быть уничтожен
-        # GC независимо от Python-ссылок; переживший wait-бюджет шатдауна поток
-        # регистрируется в _orphan_threads выше (register_orphan_thread).
+        # v1.2.10rc1 (AUDIT auto #2): parent — the QObject owner of the thread's C++ object
+        # (MainWindow passes self): while the window is alive, the thread cannot be destroyed
+        # by GC regardless of the Python references; a thread that outlives the shutdown
+        # wait budget is registered in _orphan_threads above (register_orphan_thread).
         super().__init__(parent)
         self._host = host_
 
@@ -139,5 +140,5 @@ class ReverseDnsThread(QThread):
         try:
             name = _socket.gethostbyaddr(self._host)[0]
         except Exception:
-            name = self._host  # DNS не отдал имя — копируем сам host
+            name = self._host  # DNS did not return a name — copy the host itself
         self.resolved.emit(name)

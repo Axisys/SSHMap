@@ -11,7 +11,7 @@ try:
 except ImportError:
     from models.profile import load_profiles, get_profile_by_id
 
-try:  # v1.2.5: центральная тема (палитра/радиусы/шрифты — ui/theme.py)
+try:  # v1.2.5: central theme (palette/radii/fonts — ui/theme.py)
     from ..ui import theme
 except ImportError:
     from ui import theme
@@ -48,12 +48,12 @@ class AddServerDialog(QDialog):
 
         self.setMinimumWidth(420)
         self._data = edit_data
-        # v0.9.5.6: True после клика «Подключиться по SSH» — данные сохраняются
-        # (как по ОК), а MainWindow затем открывает SSH-диалог.
+        # v0.9.5.6: True after the "Connect via SSH" click — the data is saved
+        # (as with OK) and MainWindow then opens the SSH dialog.
         self._connect_after_accept = False
-        # v1.0RC4: Быстрый запуск — текущий список пунктов (источник правды для
-        # get_data()); инициализируется из edit_data, иначе правка ДРУГИХ полей
-        # сервера обнуляла бы настроенные пункты (ServerData.quick_launch).
+        # v1.0RC4: Quick launch — the current list of entries (source of truth for
+        # get_data()); initialized from edit_data, otherwise editing OTHER fields
+        # of the server would reset the configured entries (ServerData.quick_launch).
         self._quick_launch_entries = [dict(e) for e in sanitize_quick_launch(
             getattr(edit_data, "quick_launch", None))] if edit_data is not None else []
         
@@ -96,7 +96,7 @@ class AddServerDialog(QDialog):
         # Create the profile combo once — always visible, regardless of i18n.
         self.profile_combo = QComboBox()
         manual_label = (self.t("profile.manual_input") if self._i18n_available
-                        else "(ручной ввод)")
+                        else "(manual input)")
         self.profile_combo.addItem(manual_label)
         for p in self._profiles:
             self.profile_combo.addItem(p["name"])
@@ -104,7 +104,7 @@ class AddServerDialog(QDialog):
 
         btn_manage_profiles = QPushButton(
             (self.t("profile.manage_button") if self._i18n_available
-             else "Управление профилями…"))  # UI polish: без эмодзи
+             else "Manage Profiles…"))  # UI polish: no emojis
         btn_manage_profiles.clicked.connect(self._open_profile_manager)
 
         combo_hbox = QHBoxLayout()
@@ -113,7 +113,7 @@ class AddServerDialog(QDialog):
         combo_hbox.addWidget(btn_manage_profiles)
 
         label_text = (self.t("profile.select_profile_hint") if self._i18n_available
-                      else "Выберите профиль для автозаполнения логина и пароля:")
+                      else "Select profile for auto-fill login and password:")
         profile_section.addRow("", QLabel(label_text))
         if self._i18n_available:
             try:
@@ -124,18 +124,18 @@ class AddServerDialog(QDialog):
                 pass
         profile_section.addRow("", combo_hbox)
 
-        # v1.0RC4: Быстрый запуск — под кнопкой «Управление профилями…» (решение
-        # по названию: кнопка повторяет имя пункта контекстного меню, а не
-        # абстрактное «Настройка» — 1:1 с подменю «Быстрый запуск»).
+        # v1.0RC4: Quick launch — under the "Manage profiles…" button (naming
+        # decision: the button repeats the context-menu item name instead of the
+        # abstract "Settings" — 1:1 with the "Quick launch" submenu).
         btn_quick_launch = QPushButton(
             (self.t("ql.configure_button") if self._i18n_available
-             else "Быстрый запуск…"))  # UI polish: без эмодзи
+             else "Quick Launch…"))  # UI polish: no emojis
         btn_quick_launch.clicked.connect(self._open_quick_launch)
         profile_section.addRow("", btn_quick_launch)
 
         main_layout.addLayout(profile_section)
 
-        # Separator (v1.2.5: цвет — из центральной темы ui/theme.py)
+        # Separator (v1.2.5: color — from the central theme ui/theme.py)
         sep = QLabel("─" * 50)
         sep.setStyleSheet(f"color: {theme.SURFACE_ALT};")
         main_layout.addWidget(sep)
@@ -160,7 +160,7 @@ class AddServerDialog(QDialog):
         layout.addRow(self.t("server.password"), self.password)
         layout.addRow(self.t("server.port"), self.port)
 
-        # Key path button (UI polish: эмодзи из значения i18n server.key убраны)
+        # Key path button (UI polish: emojis removed from the i18n server.key value)
         key_btn = QPushButton(self.t("server.key"))
         key_btn.clicked.connect(self._select_key_file)
         key_hbox = QHBoxLayout()
@@ -168,13 +168,13 @@ class AddServerDialog(QDialog):
         key_hbox.addWidget(key_btn)
         layout.addRow("", key_hbox)
 
-        self.os_name = QLineEdit()  # v0.9: ОС (вручную или из автосбора)
+        self.os_name = QLineEdit()  # v0.9: OS (manual or auto-collected)
         self.cpu = QLineEdit()
         self.ram = QLineEdit()
         self.disk = QLineEdit()
         self.ip = QLineEdit()
         self.comment = QLineEdit()
-        # v0.9.4: теги — ввод через запятую («prod, web»); парсинг в get_data()
+        # v0.9.4: tags — comma-separated input ("prod, web"); parsed in get_data()
         self.tags_edit = QLineEdit()
         self.tags_edit.setPlaceholderText(
             self.t("server.tags_hint") if self._i18n_available else "prod, staging, dev")
@@ -189,11 +189,11 @@ class AddServerDialog(QDialog):
 
         main_layout.addLayout(layout)
 
-        # v0.9.5.6: кнопка «Подключиться по SSH» — слева; ОК/Отмена — справа
-        # (QDialogButtonBox сохраняет стандартный порядок).
+        # v0.9.5.6: "Connect via SSH" button — on the left; OK/Cancel — on the right
+        # (QDialogButtonBox keeps the standard order).
         btn_row = QHBoxLayout()
         self.ssh_connect_btn = QPushButton(
-            self.t("ssh.connect") if self._i18n_available else "Подключиться по SSH")
+            self.t("ssh.connect") if self._i18n_available else "Connect via SSH")
         self.ssh_connect_btn.clicked.connect(self._on_connect_ssh)
 
         btns = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
@@ -206,7 +206,7 @@ class AddServerDialog(QDialog):
         main_layout.addLayout(btn_row)
 
     def _on_ok(self):
-        """Валидация перед закрытием: host обязателен."""
+        """Validate before closing: host is required."""
         if not self.host.text().strip():
             from PySide6.QtWidgets import QMessageBox
             QMessageBox.warning(self, self.t("msg.error_title"), self.t("validation.empty_host"))
@@ -214,10 +214,10 @@ class AddServerDialog(QDialog):
         self.accept()
 
     def _on_connect_ssh(self):
-        """v0.9.5.6: «Подключиться по SSH» — сохранить данные и открыть SSH-диалог.
+        """v0.9.5.6: "Connect via SSH" — save the data and open the SSH dialog.
 
-        Валидация та же, что у ОК (host обязателен); флаг _connect_after_accept
-        читает MainWindow после accept() — он и запускает подключение.
+        Same validation as OK (host is required); the _connect_after_accept flag
+        is read by MainWindow after accept() — it triggers the connection.
         """
         if not self.host.text().strip():
             from PySide6.QtWidgets import QMessageBox
@@ -229,8 +229,8 @@ class AddServerDialog(QDialog):
     def _on_profile_changed(self, index: int):
         """When user selects a profile from the combo → auto-fill user + password."""
         if index <= 0 or not self._profiles:
-            return  # "(ручной ввод)" selected, keep current values
-        profile = self._profiles[index - 1]  # offset by 1 because of "(ручной ввод)" item
+            return  # manual-input item selected, keep current values
+        profile = self._profiles[index - 1]  # offset by 1 because of the manual-input item
         self.user.setText(profile["user"])
         # Fetch password from keyring (not stored in plain dict)
         pw = self._get_profile_password(profile["id"])
@@ -265,10 +265,10 @@ class AddServerDialog(QDialog):
                 self.profile_combo.setCurrentIndex(old_current)
 
     def _open_quick_launch(self):
-        """v1.0RC4: открыть диалог настройки Быстрого запуска для этого сервера.
+        """v1.0RC4: open the Quick launch configuration dialog for this server.
 
-        Работает и при добавлении нового сервера (edit_data=None — пустой список);
-        результат хранится в self._quick_launch_entries и уходит в get_data().
+        Works when adding a new server too (edit_data=None — empty list);
+        the result is stored in self._quick_launch_entries and flows into get_data().
         """
         try:
             from ..dialogs.quick_launch_dialog import QuickLaunchDialog
@@ -292,7 +292,7 @@ class AddServerDialog(QDialog):
         self.alias.setText(d.alias)
         self.host.setText(d.host)
         self.user.setText(d.user)
-        self.password.setText(d.password)  # пароль загружается через CredentialManager (keyring), в JSON не хранится
+        self.password.setText(d.password)  # password loaded via CredentialManager (keyring); never stored in JSON
         self.port.setValue(d.ssh_port or 22)
         self.key_path.setText(d.key_path or "")
         self.os_name.setText(d.os_name)  # v0.9
@@ -307,16 +307,16 @@ class AddServerDialog(QDialog):
         self._ensure_profiles_loaded()
         for i, p in enumerate(self._profiles):
             if p["user"] == d.user:
-                self.profile_combo.setCurrentIndex(i + 1)  # +1 because "(ручной ввод)" is index 0
+                self.profile_combo.setCurrentIndex(i + 1)  # +1 because the manual-input item is index 0
                 break
 
     def get_data(self) -> ServerData:
         sid = self._data.id if self._data else str(uuid.uuid4())[:8]
         return ServerData(
             id=sid,
-            # v1.2.10 (AUDIT ручной #3): валидация проверяет непустоту ПОСЛЕ strip, а значение
-            # сохранялось с пробелами — терминальное подключение к « 192.168.1.5» падало на DNS
-            # (terminal_page.py передаёт host как есть); тем же фиксом закрыт путь SystemInfoCollector.
+            # v1.2.10 (manual AUDIT #3): validation checks non-emptiness AFTER strip, while the value
+            # was saved with spaces — a terminal connection to " 192.168.1.5" failed on DNS
+            # (terminal_page.py passes host as-is); the same fix also closes the SystemInfoCollector path.
             alias=self.alias.text().strip() or "Server",
             host=self.host.text().strip(),
             user=self.user.text().strip(),
@@ -325,9 +325,9 @@ class AddServerDialog(QDialog):
             ssh_port=self.port.value(),
             x=self._data.x if self._data else 0,
             y=self._data.y if self._data else 0,
-            # v1.0-fix (audit #1): collapsed раньше не передавался — в новом ServerData
-            # он всегда был False, и любая правка через «Свойства» (даже без изменения
-            # ни одного поля) молча разворачивала свёрнутый узел.
+            # v1.0-fix (audit #1): collapsed was not passed earlier — in a new ServerData
+            # it was always False, and any edit via "Properties" (even without changing
+            # a single field) silently expanded a collapsed node.
             collapsed=self._data.collapsed if self._data else False,
             os_name=self.os_name.text(),  # v0.9
             cpu_model=getattr(self._data, "cpu_model", "") if self._data else "",
@@ -341,7 +341,7 @@ class AddServerDialog(QDialog):
         )
 
     def _parse_tags(self) -> list:
-        """v0.9.4: строку «prod, web» → ['prod', 'web'] (дубликаты/пустые долой)."""
+        """v0.9.4: "prod, web" string → ['prod', 'web'] (duplicates/empties removed)."""
         seen, out = set(), []
         for part in self.tags_edit.text().split(","):
             tag = part.strip()

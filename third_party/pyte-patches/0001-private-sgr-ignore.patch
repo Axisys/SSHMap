@@ -1,0 +1,33 @@
+Subject: [sshmap fork 0001] private SGR ignore (select_graphic_rendition)
+
+Provenance: upstream pyte PR #203 (issue #202 "TypeError from SGR sequence ESC[?4m",
+            sent by Vim 9+), author Mustitz, merged into selectel/pyte master on
+            2025-09-02. The hunk is byte-for-byte the PR's screens.py change (commit
+            edd650fd); the PR's second commit (upstream tests/test_screen.py) is NOT
+            part of the fork — upstream test suite is not vendored.
+Base:       pyte 0.8.2 (PyPI sdist, sha256 in MANIFEST.md), pyte/screens.py.
+Policy:     drop when the change ships in an upstream release (0.8.3+); until then
+            this patch is the only source of private SGR handling.
+Applied:    2026-09-10, sshmap v1.3rc1.
+
+diff --git a/pyte/screens.py b/pyte/screens.py
+--- a/pyte/screens.py
++++ b/pyte/screens.py
+@@ -967,11 +967,15 @@
+             for x in range(self.columns):
+                 self.buffer[y][x] = self.buffer[y][x]._replace(data="E")
+ 
+-    def select_graphic_rendition(self, *attrs: int) -> None:
++    def select_graphic_rendition(self, *attrs: int, private: bool = False) -> None:
+         """Set display attributes.
+ 
+         :param list attrs: a list of display attributes to set.
+-        """
++        :param bool private: if True, ignore the SGR sequence (private sequences are not supported).
++        """
++        if private:
++            return
++
+         replace = {}
+ 
+         # Fast path for resetting all attributes.

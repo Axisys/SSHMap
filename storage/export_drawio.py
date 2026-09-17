@@ -1,30 +1,30 @@
 # -*- coding: utf-8 -*-
-"""Экспорт карты в формат draw.io (.drawio) — v0.9.5.
+"""Export the map to the draw.io format (.drawio) — v0.9.5.
 
-Сериализатор mxGraph XML через xml.etree.ElementTree, без новых зависимостей.
+An mxGraph XML serializer via xml.etree.ElementTree, no new dependencies.
 
-Что экспортируется:
-  - ServerNode      → mxCell vertex (геометрия + текст alias/host/ОС/CPU/RAM);
-  - ConnectionArrow → mxCell edge source→target с label и цветом типа связи;
-  - StickyNote      → вершина со стилем shape=note;
-  - NodeGroup       → контейнер (container=1), члены — дочерние ячейки
-    с пересчётом координат относительно parent (членство геометрическое:
-    вычитаем позицию группы);
-  - фон-изображение → отдельный нижний слой (shape=image).
+What is exported:
+  - ServerNode      → an mxCell vertex (geometry + alias/host/OS/CPU/RAM text);
+  - ConnectionArrow → an mxCell edge source→target with a label and the connection type color;
+  - StickyNote      → a vertex with the shape=note style;
+  - NodeGroup       → a container (container=1), members — child cells
+    with coordinates recomputed relative to the parent (membership is geometric:
+    we subtract the group's position);
+  - background image → a separate bottom layer (shape=image).
 
-Слои drawio (порядок в XML = z-порядок, нижние первыми):
+drawio layers (order in the XML = z-order, bottom ones first):
   layer-background → layer-groups → layer-map.
 
-КРИТИЧНОЕ ТРЕБОВАНИЕ ФОРМАТА (подтверждено кодом mxModelCodec.draw.io,
-decodeRoot: итерация идёт по прямым детям <root>):
-  ВСЕ mxCell — прямые дети элемента <root>, плоская последовательность.
-  Иерархия (слои, контейнеры групп) выражается ТОЛЬКО атрибутом parent.
-  Ячейки, вложенные в XML внутри другого mxCell (например, внутри
-  «layer-map»), при импорте draw.io МОЛЧА ОТБРАСЫВАЮТСЯ — диаграмма
-  открывается пустой. (Это была причина битых экспортов mynet_01..03.)
+CRITICAL FORMAT REQUIREMENT (confirmed by the mxModelCodec.draw.io code,
+decodeRoot: the iteration goes over the direct children of <root>):
+  ALL mxCell — direct children of the <root> element, a flat sequence.
+  Hierarchy (layers, group containers) is expressed ONLY via the parent attribute.
+  Cells nested in the XML inside another mxCell (e.g. inside
+  "layer-map") are SILENTLY DROPPED by the draw.io import — the diagram
+  opens empty. (This was the cause of the broken mynet_01..03 exports.)
 
-Файл открывается в draw.io / diagrams.net / VS Code-плагине как обычная
-диаграмма и остаётся редактируемой схемой инфраструктуры.
+The file opens in draw.io / diagrams.net / the VS Code plugin as an ordinary
+diagram and remains an editable infrastructure scheme.
 """
 
 from __future__ import annotations
@@ -34,11 +34,11 @@ import xml.etree.ElementTree as ET
 from typing import Optional
 from urllib.parse import quote
 
-# Тёмная палитра приложения (приближение к canvas карты)
-NODE_FILL = "#0f172a"       # тёмно-синий фон узла
-NODE_STROKE = "#38bdf8"     # голубая рамка
-NODE_TEXT = "#e2e8f0"       # светлый текст
-NOTE_FILL = "#facc15"       # стикеры остаются «жёлтыми»
+# The application's dark palette (an approximation of the map canvas)
+NODE_FILL = "#0f172a"       # dark blue node background
+NODE_STROKE = "#38bdf8"     # light blue frame
+NODE_TEXT = "#e2e8f0"       # light text
+NOTE_FILL = "#facc15"       # notes stay "yellow"
 NOTE_TEXT = "#1e293b"
 GROUP_FILL = "none"
 GROUP_STROKE = "#64748b"
@@ -49,12 +49,12 @@ LAYER_MAP = "layer-map"
 
 
 def _uri_for_style(path: str) -> str:
-    """URI для атрибута style=...image=... (drawio требует URL-кодирование)."""
+    """URI for the style=...image=... attribute (drawio requires URL-encoding)."""
     return "file:///" + quote(path.replace("\\", "/").lstrip("/"))
 
 
 def _node_geometry(node) -> tuple:
-    """(x, y, width, height) узла ServerNode из его текущей геометрии."""
+    """(x, y, width, height) of a ServerNode from its current geometry."""
     try:
         x = float(node.pos().x())
         y = float(node.pos().y())
@@ -66,7 +66,7 @@ def _node_geometry(node) -> tuple:
 
 
 def _node_label(node) -> str:
-    """Текстовая плашка узла: alias, host, ОС/CPU/RAM."""
+    """The node's text card: alias, host, OS/CPU/RAM."""
     data = getattr(node, "data", None)
     if data is None:
         return ""
@@ -81,21 +81,21 @@ def _node_label(node) -> str:
     if getattr(data, "ip", "") and data.ip != data.host:
         details.append(data.ip)
     lines.extend(details)
-    # Переносы строк в value: drawio требует сущность &#xa;. Литеральный "\n"
-    # в атрибуте XML парсер нормализует в пробел, поэтому в to_xml_bytes()
-    # плейсхолдер заменяется на "&#xa;" ПОСЛЕ сериализации (ET сам не умеет).
+    # Newlines in value: drawio requires the &#xa; entity. A literal "\n"
+    # in an XML attribute is normalized to a space by the parser, so in to_xml_bytes()
+    # the placeholder is replaced with "&#xa;" AFTER serialization (ET can't do it itself).
     return "\x01".join(lines)
 
 
 def _vertex(root_el, cell_id, value, x, y, w, h, style, parent_id="1"):
-    """Создать mxCell vertex.
+    """Create an mxCell vertex.
 
-    root_el — элемент <root>, которому ячейка добавляется как ПРЯМОЙ
-    ребёнок (draw.io декодирует только прямые дети <root>; вложенные в
-    XML mxCell при импорте отбрасываются).
+    root_el — the <root> element to which the cell is added as a DIRECT
+    child (draw.io decodes only direct children of <root>; mxCells nested
+    in the XML are dropped on import).
 
-    parent_id — ЛОГИЧЕСКИЙ родитель: id слоя или контейнера группы.
-    Члены группы — parent="<containerId>" с относительными координатами.
+    parent_id — the LOGICAL parent: the layer id or a group container.
+    Group members — parent="<containerId>" with relative coordinates.
     """
     el = ET.SubElement(root_el, "mxCell", {
         "id": cell_id,
@@ -115,20 +115,20 @@ def _vertex(root_el, cell_id, value, x, y, w, h, style, parent_id="1"):
 
 
 class DrawioExporter:
-    """Сборка mxGraph-модели из MapScene и сериализация в .drawio XML."""
+    """Assembling an mxGraph model from a MapScene and serializing it into .drawio XML."""
 
     def __init__(self, scene, dark: bool = True):
         self.scene = scene
         self.dark = dark
         self._cell_seq = 0
-        self._member_cell_ids: dict = {}  # ServerNode(в группе) → cell id
+        self._member_cell_ids: dict = {}  # ServerNode (in a group) → cell id
 
-    # ── id-генерация ─────────────────────────────────────────────────
+    # ── id generation ─────────────────────────────────────────────────
     def _next_id(self, prefix: str) -> str:
         self._cell_seq += 1
         return f"{prefix}-{self._cell_seq}"
 
-    # ── сборка ───────────────────────────────────────────────────────
+    # ── assembly ───────────────────────────────────────────────────────
     def build(self) -> ET.Element:
         root = ET.Element("mxfile", {"host": "SSHMap"})
         diagram = ET.SubElement(root, "diagram", {
@@ -143,21 +143,21 @@ class DrawioExporter:
         ET.SubElement(root_cells, "mxCell", {
             "id": "1", "parent": "0"})
 
-        # Слой drawio — mxCell с parent="0" без vertex/edge
-        # (xml-reference §Layers); порядок в XML = z-порядок: нижние первыми.
+        # A drawio layer — an mxCell with parent="0" and no vertex/edge
+        # (xml-reference §Layers); order in the XML = z-order: bottom ones first.
         for name in (LAYER_BACKGROUND, LAYER_GROUPS, LAYER_MAP):
             ET.SubElement(root_cells, "mxCell", {
                 "id": name, "value": name.removeprefix("layer-"),
                 "parent": "0"})
 
-        # ВАЖНО: все ячейки добавляются ПЛОСКО как прямые дети <root>.
-        # Логическая принадлежность к слою/контейнеру — через parent_id.
+        # IMPORTANT: all cells are added FLAT as direct children of <root>.
+        # Logical belonging to a layer/container — via parent_id.
         self._export_background(root_cells)
         groups = self._export_groups(root_cells)
         self._export_map(root_cells, groups)
         return root
 
-    # ── фон ──────────────────────────────────────────────────────────
+    # ── background ──────────────────────────────────────────────────────────
     def _export_background(self, root_el) -> None:
         bg = self.scene.background()
         if bg is None:
@@ -176,9 +176,9 @@ class DrawioExporter:
             "verticalLabelPosition=bottom;verticalAlign=top;opacity=60;",
             parent_id=LAYER_BACKGROUND)
 
-    # ── группы ───────────────────────────────────────────────────────
+    # ── groups ───────────────────────────────────────────────────────
     def _export_groups(self, root_el) -> dict:
-        """Группы → container-вершины. Возвращает {group_obj: cell_id}."""
+        """Groups → container vertices. Returns {group_obj: cell_id}."""
         ids = {}
         for gi, group in enumerate(self.scene.groups()):
             try:
@@ -193,19 +193,19 @@ class DrawioExporter:
                 "verticalAlign=top;align=left;spacingLeft=8;"
                 "html=1;whiteSpace=wrap;pointerEvents=0;")
             cell_id = self._next_id("group")
-            # Контейнер группы — плоский mxCell на слое layer-groups
+            # A group container — a flat mxCell on the layer-groups layer
             _vertex(root_el, cell_id, getattr(group, "_name", "") or "",
                     gx, gy, gw, gh, style, parent_id=LAYER_GROUPS)
             ids[group] = cell_id
-            # Члены группы — плоские mxCell с parent=контейнер,
-            # координаты относительно parent (xml-reference §Containers)
+            # Group members — flat mxCells with parent=container,
+            # coordinates relative to the parent (xml-reference §Containers)
             for mi, member in enumerate(group.get_members()):
                 mx, my, mw, mh = _node_geometry(member)
                 _vertex(
                     root_el, f"{cell_id}-member-{mi}", _node_label(member),
                     round(mx - gx, 2), round(my - gy, 2), mw, mh,
                     self._node_style(), parent_id=cell_id)
-                # маппинг для стрелок: id члена внутри группы
+                # mapping for the arrows: the id of a member inside a group
                 self._member_cell_ids[member] = f"{cell_id}-member-{mi}"
         return ids
 
@@ -218,10 +218,10 @@ class DrawioExporter:
             f"strokeColor={stroke};fontColor={text};align=left;"
             "spacingLeft=8;verticalAlign=middle;fontFamily=Consolas;")
 
-    # ── карта ────────────────────────────────────────────────────────
+    # ── map ────────────────────────────────────────────────────────
     def _export_map(self, root_el, group_ids: dict) -> None:
         node_ids = {}   # ServerNode → cell id
-        # Узлы вне групп — плоские mxCell на слое layer-map
+        # Nodes outside groups — flat mxCells on the layer-map layer
         for node in self.scene.nodes():
             if any(node in g.get_members() for g in self.scene.groups()):
                 continue
@@ -234,8 +234,8 @@ class DrawioExporter:
             node_ids[node] = cell_id
         node_ids.update(self._member_cell_ids)
 
-        # Стрелки — плоские mxCell; parent = слой (не контейнер),
-        # иначе рёбра между членами разных групп будут обрезаться
+        # Arrows — flat mxCells; parent = the layer (not the container),
+        # otherwise edges between members of different groups would be cut off
         for ai, arrow in enumerate(self.scene.arrows()):
             src = node_ids.get(getattr(arrow, "source", None))
             dst = node_ids.get(getattr(arrow, "target", None))
@@ -244,7 +244,7 @@ class DrawioExporter:
             ctype = getattr(arrow, "connection_type", "ssh")
             color = type_color_safe(ctype)
             label = getattr(arrow, "label_text", "") or ""
-            # v1.2.6: двухсторонняя связь — наконечник и на стартовом конце (startArrow)
+            # v1.2.6: bidirectional connection — an arrowhead at the start end too (startArrow)
             bidir = bool(getattr(arrow, "bidirectional", False))
             edge = ET.SubElement(root_el, "mxCell", {
                 "id": f"edge-{ai}",
@@ -263,7 +263,7 @@ class DrawioExporter:
             ET.SubElement(edge, "mxGeometry",
                           {"relative": "1", "as": "geometry"})
 
-        # Стикеры — плоские mxCell на слое layer-map
+        # Notes — flat mxCells on the layer-map layer
         for ni, note in enumerate(self.scene.notes()):
             try:
                 nx, ny = float(note.pos().x()), float(note.pos().y())
@@ -277,23 +277,23 @@ class DrawioExporter:
                 f"fontColor={NOTE_TEXT};align=left;spacingLeft=4;",
                 parent_id=LAYER_MAP)
 
-    # ── вывод ────────────────────────────────────────────────────────
+    # ── output ────────────────────────────────────────────────────────
     def to_xml_bytes(self, root_el: Optional[ET.Element] = None) -> bytes:
-        """Сериализовать модель в байты XML. root_el — готовое дерево build()
-        (v1.0-fix audit #7: экспорт считает ячейки по тому же дереву, не строя дважды);
-        без аргумента — строит сам."""
+        """Serialize the model to XML bytes. root_el — the ready tree from build()
+        (v1.0-fix audit #7: the export counts cells on the same tree, without building twice);
+        without the argument — it builds it itself."""
         if root_el is None:
             root_el = self.build()
         tree = root_el
         ET.indent(tree, space="  ")
         xml = ET.tostring(tree, encoding="unicode")
-        # Плейсхолдер переноса строки → drawio-сущность &#xa;
+        # Newline placeholder → the drawio &#xa; entity
         xml = xml.replace("\x01", "&#xa;")
         return b'<?xml version="1.0" encoding="UTF-8"?>\n' + xml.encode("utf-8")
 
 
 def type_color_safe(ctype: str) -> str:
-    """HEX цвета типа связи без зависимости от Qt (дублирует палитру v0.7)."""
+    """HEX color of a connection type without a Qt dependency (duplicates the v0.7 palette)."""
     return {
         "ssh": "#34d399",
         "vpn": "#60a5fa",
@@ -305,11 +305,11 @@ def type_color_safe(ctype: str) -> str:
 
 
 def export_scene_to_drawio(scene, path: str, dark: bool = True) -> int:
-    """Экспортировать сцену в .drawio файл. Возвращает число ячеек (диагностика).
+    """Export the scene to a .drawio file. Returns the number of cells (diagnostics).
 
-    v1.0-fix (audit #7): раньше возвращался _cell_seq — он инкрементировался только
-    для групп и узлов без data.id, т.е. лог «cells» считал на деле группы. Теперь —
-    реальное число mxCell в файле (включая структурные: корневые "0"/"1" и 3 слоя).
+    v1.0-fix (audit #7): earlier _cell_seq was returned — it was incremented only
+    for groups and nodes without data.id, i.e. the "cells" log actually counted groups. Now —
+    the real number of mxCell in the file (including structural ones: the root "0"/"1" and the 3 layers).
     """
     exporter = DrawioExporter(scene, dark=dark)
     root = exporter.build()
@@ -321,9 +321,9 @@ def export_scene_to_drawio(scene, path: str, dark: bool = True) -> int:
 
 
 def load_drawio_structure(path: str) -> Optional[dict]:
-    """Лёгкий парсер «своих» файлов (импорт — опциональная задача v0.9.5 #5).
+    """A lightweight parser of "our own" files (import — the optional task v0.9.5 #5).
 
-    Возвращает словарь со счётчиками вершин/рёбер или None при битом XML.
+    Returns a dict with vertex/edge counters, or None on corrupt XML.
     """
     try:
         tree = ET.parse(path)

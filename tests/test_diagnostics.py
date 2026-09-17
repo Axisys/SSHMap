@@ -1,21 +1,32 @@
 """services/diagnostics.py: PingThread + ReverseDnsThread (v0.9.9.3).
 
-ROADMAP v0.9.9.3 — фаза 0 серии «Гигиена main_window.py»: _PingThread/_ReverseDnsThread
-перенесены из ui/main_window.py (были вложены прямо в методы _ping_node/_copy_node_info)
-в services/diagnostics.py. НУЛЕВОЕ изменение поведения: те же сигналы
-(finished_ping(bool, str), resolved(str)), те же командные строки ping'а (AUDIT v0.9.5.5 #4),
-те же i18n-ключи; паттерн «модуль + колбэки» — MainWindow держит ссылки на потоки
-(self._ping_thread/self._dns_thread) и подключает локальные замыкания.
+ROADMAP v0.9.9.3 — phase 0 of the "Hygiene of main_window.py" series: _PingThread/_ReverseDnsThread
+were moved from ui/main_window.py (they were nested straight inside the _ping_node/_copy_node_info methods)
+into services/diagnostics.py. ZERO behavior change: the same signals
+(finished_ping(bool, str), resolved(str)), the same ping command lines (AUDIT v0.9.5.5 #4),
+the same i18n keys; the "module + callbacks" pattern — MainWindow keeps the references to the threads
+(self._ping_thread/self._dns_thread) and connects local closures.
 
-  * перенесённые классы: подклассы QThread, сигналы с той же сигнатурой (emit из Python);
-  * гигиена: вложенные Thread-классы из main_window.py исчезли, импорты — services.diagnostics;
-  * ReverseDnsThread: успех (monkeypatch gethostbyaddr) + fallback на host при herror;
-  * PingThread: ok/fail/exception-пути через фейковый subprocess.run + командная строка по ОС;
-  * регрессия MainWindow (offscreen): _ping_node (старт/финиш, self-cleanup, guard AUDIT v0.7.2 #8),
-    _copy_node_info(hostname) — буфер обмена + статус-бар + cleanup _dns_thread.
+  * the moved classes: the QThread subclasses, the signals with the same signature (the emit from Python);
+  * the hygiene: the nested Thread classes are gone from main_window.py, the imports — services.diagnostics;
+  * ReverseDnsThread: success (the monkeypatched gethostbyaddr) + the fallback to the host on herror;
+  * PingThread: the ok/fail/exception paths via the fake subprocess.run + the command line per OS;
+  * the MainWindow regression (offscreen): _ping_node (the start/finish, the self-cleanup, the guard AUDIT v0.7.2 #8),
+    _copy_node_info(hostname) — the clipboard + the status bar + the cleanup of _dns_thread.
 
-Запуск: python tests/test_diagnostics.py   (из корня проекта) или python tests/run_all.py
+§5a in two modes (the suite optimization, phase 3): by default hermetic — subprocess.run
+is intercepted, the ping "fails" instantly (returncode 1), the whole path MainWindow._ping_node →
+PingThread → finished_ping → the dialog + the cleanup is run WITHOUT the network; the real ping
+TEST-NET-1 (up to ~10 s) runs only with an explicit `run_all.py --tag network`
+(the runner passes the tag to the env SSHMAP_TEST_TAGS).
+
+Run: python tests/test_diagnostics.py   (from the project root, hermetic) or python tests/run_all.py
 """
+# tags: network
+# §5a: a real ping of TEST-NET-1 only with run_all.py --tag network (env SSHMAP_TEST_TAGS);
+#      normal runs are hermetic and fast
+
+import os
 import platform as _platform
 import socket as _socket
 import subprocess as _subprocess
@@ -23,7 +34,7 @@ import sys
 
 from _common import bootstrap, check, finish, wait_until
 
-ROOT, WORK = bootstrap()  # ДО импортов модулей приложения
+ROOT, WORK = bootstrap()  # BEFORE the app module imports
 
 from PySide6.QtCore import QThread
 from PySide6.QtWidgets import QApplication, QMessageBox
@@ -35,14 +46,14 @@ import services.diagnostics as diag
 from i18n import t as _t
 
 
-# ══ 1. Перенесённые классы: API и сигнатуры сигналов ═══════════════
+# ══ 1. The moved classes: the API and the signal signatures ═══════════════
 print("== v0.9.9.3 diagnostics: moved classes ==")
 
 check("PingThread is a QThread subclass", issubclass(diag.PingThread, QThread))
 check("ReverseDnsThread is a QThread subclass", issubclass(diag.ReverseDnsThread, QThread))
 
-# Сигналы с той же сигнатурой, что у бывших вложенных классов: emit из Python
-# (прямое подключение — синхронно) с неверным числом аргументов дал бы TypeError.
+# The signals with the same signature as in the former nested classes: an emit from Python
+# (a direct connection — synchronously) with the wrong number of arguments would have raised TypeError.
 _ping_probe = diag.PingThread("probe-host")
 _got_ping = []
 _ping_probe.finished_ping.connect(lambda ok, text: _got_ping.append((ok, text)))
@@ -57,9 +68,9 @@ _dns_probe.resolved.emit("resolved-name")
 check("ReverseDnsThread.resolved(str) keeps its signature", _got_dns == ["resolved-name"],
       str(_got_dns))
 
-# ══ 2. Гигиена main_window.py: вложенные Thread-классы исчезли ═════
-# v1.1.4: _ping_node/_copy_node_info переехали в NodeOpsMixin — импорты потоков
-# проверяем там (фасад main_window.py их больше не содержит).
+# ══ 2. The main_window.py hygiene: the nested Thread classes are gone ═════
+# v1.1.4: _ping_node/_copy_node_info moved to NodeOpsMixin — the thread imports
+# we check it there (the main_window.py facade does not contain them anymore).
 _mw_src_path = sys.modules[MW.__name__].__file__
 with open(_mw_src_path, encoding="utf-8") as f:
     _mw_src = f.read()
@@ -75,12 +86,12 @@ check("node_ops mixin imports ReverseDnsThread from services.diagnostics",
       "from services.diagnostics import ReverseDnsThread" in _mwo_src)
 
 
-# ══ 3. ReverseDnsThread: поведение (hermetic, без реального DNS) ════
+# ══ 3. ReverseDnsThread: the behavior (hermetic, no real DNS) ════
 print("== v0.9.9.3 diagnostics: ReverseDnsThread ==")
 
 _real_gethostbyaddr = _socket.gethostbyaddr
 
-# успех: резолв отдал имя
+# success: the resolve returned a name
 _socket.gethostbyaddr = lambda ip: ("diag-host.example", [], ["10.9.8.7"])
 try:
     dns_ok = diag.ReverseDnsThread("10.9.8.7")
@@ -93,7 +104,7 @@ try:
 finally:
     dns_ok.wait(3000)
 
-# сбой: DNS не отдал имя → fallback на сам host (как раньше, AUDIT v0.7.2 #6)
+# a failure: DNS did not give a name → a fallback to the host itself (as before, AUDIT v0.7.2 #6)
 def _no_ptr(ip):
     raise _socket.herror("simulated: no PTR record")
 
@@ -111,7 +122,7 @@ finally:
     _socket.gethostbyaddr = _real_gethostbyaddr
 
 
-# ══ 4. PingThread: поведение (hermetic, фейковый subprocess.run) ════
+# ══ 4. PingThread: the behavior (hermetic, a fake subprocess.run) ════
 print("== v0.9.9.3 diagnostics: PingThread ==")
 
 class _FakeProc:
@@ -121,11 +132,11 @@ class _FakeProc:
 
 
 _real_run = _subprocess.run
-HOST = "192.0.2.66"  # TEST-NET-1: в реальных прогонах недостижим (см. интеграцию ниже)
+HOST = "192.0.2.66"  # TEST-NET-1: unreachable in real runs (see the integration below)
 
-# ВАЖНО: фейк перехватывает только ping — остальные вызовы subprocess.run (например,
-# platform._syscmd_ver → `cmd /c ver` внутри platform.system()) проходят на реальный run,
-# иначе глобальный патч ломает платформенный кэш и тест падает не по своей вине.
+# IMPORTANT: the fake intercepts only ping — the other subprocess.run calls (for example,
+# platform._syscmd_ver → `cmd /c ver` inside platform.system()) go to the real run,
+# otherwise the global patch breaks the platform cache and the test fails not by its own fault.
 
 def _pass_through(cmd, **kw):
     if not (isinstance(cmd, (list, tuple)) and cmd and str(cmd[0]).lower() == "ping"):
@@ -133,7 +144,7 @@ def _pass_through(cmd, **kw):
     return None
 
 
-# ok-путь: returncode 0 → finished_ping(True, i18n status.ping_ok) + командная строка по ОС
+# the ok path: returncode 0 → finished_ping(True, the i18n status.ping_ok) + the per-OS command line
 _captured = {}
 
 def _fake_run_ok(cmd, **kw):
@@ -170,8 +181,8 @@ try:
 finally:
     ping_ok.wait(3000)
 
-# fail-путь: returncode != 0 → finished_ping(False, i18n status.ping_failed + хвост вывода)
-_LONG_OUT = ("Request to " + HOST + " timed out. \n") * 40  # > 400 байт — проверим обрезку
+# the fail path: returncode != 0 → finished_ping(False, the i18n status.ping_failed + the output tail)
+_LONG_OUT = ("Request to " + HOST + " timed out. \n") * 40  # > 400 bytes — we check the truncation
 
 def _fake_run_fail(cmd, **kw):
     passthrough = _pass_through(cmd, **kw)
@@ -194,7 +205,7 @@ try:
 finally:
     ping_fail.wait(3000)
 
-# exception-путь: subprocess.run выбросил → finished_ping(False, … (exc))
+# the exception path: subprocess.run raised → finished_ping(False, … (exc))
 def _fake_run_exc(cmd, **kw):
     if not (isinstance(cmd, (list, tuple)) and cmd and str(cmd[0]).lower() == "ping"):
         return _real_run(cmd, **kw)
@@ -207,7 +218,7 @@ try:
     ping_exc.finished_ping.connect(lambda ok, text: _res_ping3.update(ok=ok, text=text))
     ping_exc.start()
     wait_until(lambda: "text" in _res_ping3, timeout_ms=5000)
-    # str(TimeoutExpired(cmd, 15)) — «Command […] timed out after 15 seconds» (все платформы)
+    # str(TimeoutExpired(cmd, 15)) — "Command […] timed out after 15 seconds" (all platforms)
     check("PingThread emits finished_ping(False, …) when subprocess.run raises",
           _res_ping3.get("ok") is False
           and _res_ping3.get("text", "").startswith(_t("status.ping_failed", host=HOST))
@@ -218,7 +229,7 @@ finally:
     _subprocess.run = _real_run
 
 
-# ══ 5. Регрессия MainWindow (offscreen): связка «модуль + колбэки» ══
+# ══ 5. The MainWindow regression (offscreen): the wiring "module + callbacks" ══
 print("== v0.9.9.3 diagnostics: MainWindow regression ==")
 
 win = MW.MainWindow()
@@ -226,12 +237,22 @@ _node = win.scene.add_server(ServerData(id="diagnode", alias="diag", host=HOST, 
 check("fixture: node on scene + window has _ping_thread/_dns_thread slots",
       _node is not None and hasattr(win, "_ping_thread") and hasattr(win, "_dns_thread"))
 
-# 5a. _ping_node — реальный (быстрый) ping TEST-NET-хоста: поток стартует и завершается.
-# Headless-герметичность: при неудаче слот показывает МОДАЛЬНЫЙ QMessageBox.information()
-# — в offscreen его никто не закроет (паттерн test_context_menus.py).
+# 5a. _ping_node — pinging a TEST-NET host: the thread starts and finishes.
+# Two modes (suite optimization phase 3):
+#   * by default (hermetic): subprocess.run is intercepted — ping "fails" instantly
+#     (returncode 1, the fake from §4), full path _ping_node → PingThread → finished_ping
+#     → the dialog + cleanup runs WITHOUT network;
+#   * run_all.py --tag network (env SSHMAP_TEST_TAGS contains "network"): REAL
+#     ping TEST-NET-1 (up to ~10 s) — an integration check on a live machine.
+# The headless hermeticity: on failure the slot shows a MODAL QMessageBox.information()
+# — in offscreen no one will close it (the test_context_menus.py pattern).
+_REAL_NET = "network" in os.environ.get("SSHMAP_TEST_TAGS", "").split()
 _real_qmb_info = QMessageBox.information
 _ping_dialog_calls = []
 QMessageBox.information = staticmethod(lambda *a, **kw: (_ping_dialog_calls.append(a), 0)[1])
+if not _REAL_NET:
+    _subprocess.run = _fake_run_fail   # ping → returncode 1 instantly (hermetic)
+_ping_wait_ms = 25000 if _REAL_NET else 3000
 try:
     win._ping_node(_node)
     check("_ping_node starts a services.diagnostics.PingThread",
@@ -240,15 +261,17 @@ try:
     check("_ping_node shows ping_running in status bar on start",
           HOST in (win.statusBar().currentMessage() or ""),
           win.statusBar().currentMessage())
-    wait_until(lambda: win._ping_thread is None, timeout_ms=25000)
+    wait_until(lambda: win._ping_thread is None, timeout_ms=_ping_wait_ms)
     check("_ping_node thread finishes and clears self._ping_thread", win._ping_thread is None)
     check("failed ping → modal info dialog with host in text (stubbed offscreen)",
           len(_ping_dialog_calls) == 1 and HOST in _ping_dialog_calls[0][2],
           str(_ping_dialog_calls)[:160])
 finally:
     QMessageBox.information = _real_qmb_info
+    if not _REAL_NET:
+        _subprocess.run = _real_run
 
-# 5b. Guard AUDIT v0.7.2 #8: повторный ping во время работающего игнорируется.
+# 5b. The AUDIT v0.7.2 #8 guard: a repeated ping while one is running is ignored.
 class _FakeRunningThread:
     def isRunning(self):
         return True
@@ -265,7 +288,7 @@ try:
 finally:
     win._ping_thread = None
 
-# 5c. _copy_node_info(hostname) — обратный DNS через ReverseDnsThread: буфер + статус-бар.
+# 5c. _copy_node_info(hostname) — reverse DNS via ReverseDnsThread: the clipboard + the status bar.
 _socket.gethostbyaddr = lambda ip: ("diag-win-host", [], [HOST])
 try:
     win._copy_node_info(_node, "hostname")
@@ -283,7 +306,7 @@ try:
 finally:
     _socket.gethostbyaddr = _real_gethostbyaddr
 
-# 5d. _copy_node_info(ip) — синхронный путь без сети (fallback на host при пустом ip).
+# 5d. _copy_node_info(ip) — the synchronous path without network (falling back to host when ip is empty).
 win._copy_node_info(_node, "ip")
 check("_copy_node_info(ip) copies host fallback synchronously (no thread)",
       QApplication.clipboard().text() == HOST and win._dns_thread is None,

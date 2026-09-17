@@ -7,7 +7,7 @@ try:
     from ..graphics.map_scene import MapScene
     from ..graphics.map_view import MapView
     from ..graphics.server_node import ServerNode
-    from ..graphics.node_group import NodeGroup  # v0.8.1: группировка узлов (кластеры/папки)
+    from ..graphics.node_group import NodeGroup  # v0.8.1: node grouping (clusters/folders)
 except ImportError:
     from graphics.map_scene import MapScene
     from graphics.map_view import MapView
@@ -24,18 +24,18 @@ except ImportError:
     from dialogs.ssh_connect_dialog import SSHConnectDialog
 
 # v1.1.4: AddServerDialog/ConnectionDialog/SSHConnectDialog/SSHTerminalWindow/_ext_term —
-# ТОЧКИ ПОДМЕНЫ В ТЕСТАХ (MW.<имя> = Fake): методы, перенесённые в миксины
+# TEST SUBSTITUTION POINTS (MW.<name> = Fake): methods moved to mixins
 # (NodeOpsMixin._add_server/_add_connection, SshMixin._run_ssh_connect/
-# _spawn_terminal_window/_connect_ssh_external), берут их из ЭТОГО модуля в момент
-# вызова (host_attr, см. ui/mixin_support.py) — поэтому импорты остаются здесь,
-# даже если ядро их больше не использует напрямую (ConnectionDialog/SSHConnectDialog).
+# _spawn_terminal_window/_connect_ssh_external) resolve them from THIS module at
+# call time (host_attr, see ui/mixin_support.py) — so the imports stay here,
+# even if the core no longer uses them directly (ConnectionDialog/SSHConnectDialog).
 
 try:
     from ..modules.ssh_terminal import SSHTerminalWindow
 except ImportError:
     from modules.ssh_terminal import SSHTerminalWindow
 
-try:  # v0.8.2: внешний (системный) терминал (v1.1.4: использует SshMixin через host_attr)
+try:  # v0.8.2: external (system) terminal (v1.1.4: used by SshMixin via host_attr)
     from ..modules import external_terminal as _ext_term
 except ImportError:
     try:
@@ -43,21 +43,21 @@ except ImportError:
     except ImportError:
         _ext_term = None
 
-try:  # UI polish: векторные иконки (замена эмодзи)
+try:  # UI polish: vector icons (replacing emoji)
     from .icons import get_icon
 except ImportError:
     try:
         from icons import get_icon
-    except ImportError:  # flat-раскладка без ui/icons — кнопки текстовые, как раньше
-        def get_icon(name):  # noqa: N802 — заглушка с той же сигнатурой
+    except ImportError:  # flat layout without ui/icons — text buttons, as before
+        def get_icon(name):  # noqa: N802 — stub with the same signature
             return None
 
-try:  # v0.9.9.4: сайдбар-кластер (дерево, тег-фильтр, статус-маркеры, контекстное меню)
+try:  # v0.9.9.4: sidebar cluster (tree, tag filter, status markers, context menu)
     from .sidebar import SidebarPanel
 except ImportError:
     from sidebar import SidebarPanel
 
-try:  # v1.1.2RC3 (AUDIT U2): размеры окон — saveGeometry()/saveState() в config.json
+try:  # v1.1.2RC3 (AUDIT U2): window sizes — saveGeometry()/saveState() into config.json
     from ..modules.window_geometry import (
         save_window_geometry, restore_window_geometry,
     )
@@ -66,65 +66,65 @@ except ImportError:
         save_window_geometry, restore_window_geometry,
     )
 
-try:  # v1.2.3 (ROADMAP v1.2.3): мультинабор — хаб broadcast'а ввода во все сессии
+try:  # v1.2.3 (ROADMAP v1.2.3): multi-input — hub broadcasting input to all sessions
     from ..modules import multi_input as _multi_input_mod
 except ImportError:
     from modules import multi_input as _multi_input_mod
 
-try:  # v1.2.5: центральная тема (палитра/радиусы/шрифты — ui/theme.py)
+try:  # v1.2.5: central theme (palette/radii/fonts — ui/theme.py)
     from . import theme
 except ImportError:
     try:
         from ui import theme
-    except ImportError:  # flat-раскладка: каталог ui/ сам на sys.path
+    except ImportError:  # flat layout: the ui/ directory itself is on sys.path
         import theme
 
 
 from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtGui import (
-    QFont,      # v1.1.1: шрифт UI из конфига (QApplication.setFont)
+    QFont,      # v1.1.1: UI font from config (QApplication.setFont)
     QMouseEvent,
     QUndoStack,  # v0.8.3: undo/redo
-    QColor, QIcon, QPainter, QPainterPath, QPen, QPixmap,  # v1.2.4.1: полоски/ромбы сворачивания
+    QColor, QIcon, QPainter, QPainterPath, QPen, QPixmap,  # v1.2.4.1: collapse strips/diamonds
 )
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QHBoxLayout, QSplitter,
-    QLabel, QTreeWidgetItem,  # QTreeWidgetItem — аннотации слотов дерева (v0.9.9.4: дерево в ui/sidebar.py)
+    QLabel, QTreeWidgetItem,  # QTreeWidgetItem — tree slot annotations (v0.9.9.4: tree in ui/sidebar.py)
     QToolBar, QMessageBox, QDialog, QFileDialog, QMenu,
-    QApplication, QToolButton,  # QToolButton — кнопка выхода на плашке мультинабора (v1.2.3)
+    QApplication, QToolButton,  # QToolButton — exit button on the multi-input plaque (v1.2.3)
 )
 
-# v1.1.4 (ROADMAP): разрез на миксины — кластеры «проект I/O», «операции над
-# узлами/связями» и «SSH/терминалы» вынесены в ui/main_window_*.py. MainWindow
-# остаётся фасадом: публичный API, имена методов и точки вызова не изменились;
-# миксины НЕ импортируют main_window (цикл) — только duck-typing по инстансу.
+# v1.1.4 (ROADMAP): split into mixins — the "project I/O", "node/connection
+# operations", and "SSH/terminals" clusters live in ui/main_window_*.py. MainWindow
+# remains a facade: public API, method names, and call sites are unchanged;
+# the mixins do NOT import main_window (circular) — duck-typing on the instance only.
 try:
     from .main_window_project_io import ProjectIOMixin
     from .main_window_node_ops import NodeOpsMixin, _is_scene_point
     from .main_window_ssh import SshMixin
-except ImportError:  # flat-раскладка без пакета (паттерн остальных импортов выше)
+except ImportError:  # flat layout without the package (same pattern as the imports above)
     from main_window_project_io import ProjectIOMixin
     from main_window_node_ops import NodeOpsMixin, _is_scene_point
     from main_window_ssh import SshMixin
 
 
-# ── v1.2.4.1: сворачивание сайдбара/карты в тонкую линию (ROADMAP v1.2.4.1) ──
+# ── v1.2.4.1: collapsing the sidebar/map into a thin strip (ROADMAP v1.2.4.1) ──
 
 def _diamond_icon():
-    """Векторный ромб «◇» на канвасе 20×20 (угловые кнопки сворачивания).
+    """Vector "◇" diamond on a 20×20 canvas (corner collapse buttons).
 
-    v1.2.4.1-fix (запрос тестировщика): вместо шевронов «›»/«‹» — единый ромб у обеих
-    панелей (сайдбар и карта — оба внизу справа; верх карты зарезервирован под
-    миникарту). Та же техника, что ui/icons.py (QPainterPath на прозрачном QPixmap),
-    но иконки живут локально: в _DRAWERS по спецификации добавляется только пара
-    sidebar_panel/map_panel (пункты меню «Вид»), а ромбы кнопок/полосок — служебная
-    графика окна.
+    v1.2.4.1-fix (QA request): instead of "›"/"‹" chevrons — a single diamond on both
+    panels (sidebar and map — both at the bottom right; the top of the map is reserved
+    for the minimap). Same technique as ui/icons.py (QPainterPath on a transparent QPixmap),
+    but the icon lives locally: per the spec only the sidebar_panel/map_panel
+    pair goes into _DRAWERS (the "View" menu items), while the button/strip diamonds
+    are window-internal graphics.
     """
     pm = QPixmap(20, 20)
     pm.fill(QColor(0, 0, 0, 0))
     p = QPainter(pm)
     p.setRenderHint(QPainter.Antialiasing, True)
-    pen = QPen(QColor(theme.ICON_COLOR), 1.8)  # v1.2.5: центральная тема
+    pen = QPen(QColor(theme.ICON_COLOR), 1.8)  # v1.2.5: central theme
     pen.setCapStyle(Qt.PenCapStyle.RoundCap)
     pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
     p.setPen(pen)
@@ -142,14 +142,14 @@ def _diamond_icon():
 
 
 class _CollapseStrip(QWidget):
-    """Тонкая кликабельная полоска свёрнутой панели (~18 px; ROADMAP v1.2.4.1, задача 1).
+    """Thin clickable strip of a collapsed panel (~18 px; ROADMAP v1.2.4.1, task 1).
 
-    Клик в ЛЮБОМ месте = развернуть панель (expand_requested); внутри — ромб «◇»
-    внизу справа (v1.2.4.1-fix: вместо шеврона, запрос тестировщика) + tooltip
-    (выставляет MainWindow).
-    Реальный виджет панели при этом hide()н: скрытый член контейнера занимает 0px —
-    нативный Qt, кастомного лейаута нет. Цвета — тёмная палитра Fusion приложения
-    (theme.WINDOW_BG / theme.BASE_BG, v1.2.5): полоска читается и на фоне сайдбара, и карты.
+    A click ANYWHERE expands the panel (expand_requested); inside — the "◇" diamond
+    at the bottom right (v1.2.4.1-fix: instead of the chevron, QA request) + a tooltip
+    (set by MainWindow).
+    The real panel widget is hidden at the same time: a hidden child takes 0px —
+    native Qt, no custom layout. Colors — the app's dark Fusion palette
+    (theme.WINDOW_BG / theme.BASE_BG, v1.2.5): the strip reads well on both the sidebar and the map background.
     """
 
     expand_requested = Signal()
@@ -182,11 +182,11 @@ class _CollapseStrip(QWidget):
     def paintEvent(self, event):
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing, True)
-        # v1.2.5: цвета — из центральной темы (ui/theme.py); значения без изменений.
+        # v1.2.5: colors — from the central theme (ui/theme.py); values unchanged.
         p.fillRect(self.rect(), QColor(theme.SURFACE_ALT if self._hover else theme.BASE_BG))
-        # Ромб «◇» внизу справа (v1.2.4.1-fix: запрос тестировщика — вместо шеврона;
-        # та же точка, что и у угловой кнопки развёрнутой панели — ромб «внизу» и до,
-        # и после сворачивания).
+        # "◇" diamond at the bottom right (v1.2.4.1-fix: QA request — instead of the chevron;
+        # the same spot as the expanded panel's corner button — the diamond is "at the bottom"
+        # both before and after collapsing).
         pen = QPen(QColor(theme.ICON_COLOR), 1.8)
         pen.setCapStyle(Qt.PenCapStyle.RoundCap)
         pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
@@ -230,65 +230,65 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         
         self.resize(1200, 850)
 
-        # v1.1.2RC3 (AUDIT U2): восстановление размера/состояния главного окна из
-        # config.json (сохраняется в closeEvent). Ключа нет / битое значение →
-        # дефолтный 1200×850 выше; геометрия не должна ронять старт.
+        # v1.1.2RC3 (AUDIT U2): restore the main window size/state from
+        # config.json (saved in closeEvent). No key / a corrupt value ->
+        # the default 1200×850 above; the geometry must not break startup.
         try:
             restore_window_geometry("ui_window_geometry_main", self)
         except Exception:  # noqa: BLE001
             pass
 
         self._project_file: Optional[str] = None
-        self._dirty = False  # Флаг несохранённых изменений (маркер " [*]" в заголовке)
-        # v1.2 (ROADMAP задача 4): реестр открытых СЕССИЙ терминала
-        # (modules/terminal_page.TerminalSessionPage), а не окон — зелёная точка
-        # узла гаснет только когда закрыты ВСЕ сессии узла, лимит «4 своих
-        # терминала» (v1.1.1) считается по сессиям. Имя сохранено (v1.1.x API).
+        self._dirty = False  # Unsaved-changes flag (the " [*]" marker in the title)
+        # v1.2 (ROADMAP task 4): registry of open terminal SESSIONS
+        # (modules/terminal_page.TerminalSessionPage), not windows — the node's green dot
+        # goes out only when ALL of the node's sessions are closed; the "4 own
+        # terminals" limit (v1.1.1) is counted per session. Name kept (v1.1.x API).
         self._terminal_windows: List = []
-        # v1.2.3 (ROADMAP v1.2.3): мультинабор — состояние режима живёт в хубе
-        # (modules/multi_input.py, singleton процесса), который окно держит как
-        # self._multi_hub; TerminalWidget берёт тот же хаб по умолчанию. Provider —
-        # реестр сессий (тот же, что у зелёной точки/лимита); UI-реакция — слушатель
-        # _on_multi_changed (SshMixin). Шатдаун — _multi_shutdown в closeEvent-пути.
+        # v1.2.3 (ROADMAP v1.2.3): multi-input — the mode state lives in the hub
+        # (modules/multi_input.py, a process singleton), held by the window as
+        # self._multi_hub; TerminalWidget picks up the same hub by default. The provider —
+        # the session registry (the same one as the green dot/limit); UI reaction — the
+        # _on_multi_changed listener (SshMixin). Shutdown — _multi_shutdown in the closeEvent path.
         self._multi_hub = _multi_input_mod.get_hub()
         self._multi_provider = lambda: list(getattr(self, "_terminal_windows", []))
         self._multi_hub.set_session_provider(self._multi_provider)
         self._multi_hub.add_listener(self._on_multi_changed)
-        # v1.2.2: док «Терминалы» (terminal.mode = "tabs") — ленивое создание в
-        # SshMixin._ensure_terminals_dock на первую сессию в режиме "tabs".
+        # v1.2.2: "Terminals" dock (terminal.mode = "tabs") — lazily created in
+        # SshMixin._ensure_terminals_dock on the first session in "tabs" mode.
         self._terminals_dock = None
-        # v0.9.4-fix: id узлов с активной SSH-сессией (для сброса индикатора)
+        # v0.9.4-fix: IDs of nodes with an active SSH session (for indicator reset)
         self._ssh_connected_nodes: set = set()
-        self._ping_thread = None   # v0.7.3: ping-поток (AUDIT v0.7.2 #8: guard против затирания)
-        self._dns_thread = None    # AUDIT v0.7.2 (#6): поток обратного DNS для copy-hostname
-        # v1.1.2RC2 (N6): пакетный DNS-резолв импорта из TXT вне GUI-потока —
-        # поток + контекст пачки (pending/path/skipped), дожидающийся resolved_map
+        self._ping_thread = None   # v0.7.3: ping thread (AUDIT v0.7.2 #8: guard against clobbering)
+        self._dns_thread = None    # AUDIT v0.7.2 (#6): reverse-DNS thread for copy-hostname
+        # v1.1.2RC2 (N6): batch DNS resolution for TXT imports off the GUI thread —
+        # thread + batch context (pending/path/skipped) awaiting resolved_map
         self._import_resolve_thread = None
-        self._import_pending = None   # [entry, ...] строки файла, ожидающие добавления
-        self._import_path = None      # путь исходного TXT-файла (лог/статус)
-        self._import_skipped = 0      # счётчик пропущенных дубликатов
-        self._menu_i18n: List[tuple] = []  # (widget: QMenu|QAction, key) — для повторного перевода
+        self._import_pending = None   # [entry, ...] file lines awaiting addition
+        self._import_path = None      # path of the source TXT file (log/status)
+        self._import_skipped = 0      # count of skipped duplicates
+        self._menu_i18n: List[tuple] = []  # (widget: QMenu|QAction, key) — for re-translation
         self._sidebar_title: Optional[QLabel] = None
 
         # ── v0.8.3: Undo/Redo ─────────────────────────────────────
-        # Dirty-маркер привязан к cleanState/индексу стека: save/load ставит
-        # новую точку отсчёта, undo/redo сами обновляют заголовок окна.
+        # The dirty marker is bound to cleanState/stack index: save/load sets a
+        # new baseline; undo/redo update the window title themselves.
         self.undo_stack = QUndoStack(self)
-        self._undo_baseline_dirty = False  # dirty-причины ВНЕ undo (статусы, группы)
-        self._note_committed = {}          # note_id -> последний закоммиченный текст (дебаунс)
+        self._undo_baseline_dirty = False  # dirty reasons OUTSIDE undo (statuses, groups)
+        self._note_committed = {}          # note_id -> last committed text (debounce)
         self._note_edit_timer = QTimer(self)
         self._note_edit_timer.setSingleShot(True)
-        self._note_edit_timer.setInterval(600)  # мс тишины → команда EditTextNote
+        self._note_edit_timer.setInterval(600)  # ms of silence -> the EditTextNote command
         self._note_edit_timer.timeout.connect(self._commit_note_text)
-        self._note_edit_pending = None     # (note, old_text) активной правки
+        self._note_edit_pending = None     # (note, old_text) of the active edit
 
         # ── Logger (lazy import to avoid circular deps at module level) ──
         self._log: Optional[object] = None
 
-        # v1.2.4.1: состояние сворачивания панелей (checked пункта меню = развёрнут).
-        # Инициализация ДО _setup_ui: методы окна (_select_node и др.) гвардируются
-        # по этим флагам; сохранённое из config.json значение применяется в
-        # _apply_ui_options_from_config (ПОСЛЕ restore_window_geometry/restoreState).
+        # v1.2.4.1: panel collapse state (menu item checked = expanded).
+        # Initialized BEFORE _setup_ui: window methods (_select_node etc.) guard on
+        # these flags; the value saved in config.json is applied in
+        # _apply_ui_options_from_config (AFTER restore_window_geometry/restoreState).
         self._sidebar_collapsed = False
         self._map_collapsed = False
 
@@ -305,25 +305,25 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
                 if self.log:
                     self.log.warning(f"i18n UI update error: {e}")
 
-        # ── v1.1.1: сохранённые UI-опции при старте (шрифты, кнопки сайдбара,
-        #    режим двойного клика) — те же методы, что применение по ОК в диалоге ──
-        self._node_double_click_mode = "properties"  # дефолт до чтения конфига
+        # ── v1.1.1: saved UI options at startup (fonts, sidebar buttons,
+        #    double-click mode) — the same methods as applying them via the dialog's OK ──
+        self._node_double_click_mode = "properties"  # default until the config is read
         try:
             self._apply_ui_options_from_config()
         except Exception as e:
             if self.log:
                 self.log.warning(f"Apply UI options at startup failed: {e}")
 
-        # ── v0.7.1: фоновая проверка статусов узлов (online/warn/offline) ──
-        # Пробы идут в отдельном потоке — GUI не блокируется.
-        # v1.1 (ROADMAP задача 4): интервал/таймаут — из ~/.sshmap/config.json
-        # (status_interval_sec / status_probe_timeout_sec; дефолты 30 c / 3.0 c =
-        # поведение v1.0); на лету меняются из диалога настроек (_apply_settings_from_dialog).
-        # v1.1.2 final: пробы внутри раунда параллельные (ThreadPoolExecutor),
-        # потолок — status_max_parallel (дефолт 16); для больших карт (N > 50)
-        # интервал удваивается (effective_interval_ms + подсказка в статус-баре).
+        # ── v0.7.1: background node status checks (online/warn/offline) ──
+        # Probes run in a separate thread — the GUI is not blocked.
+        # v1.1 (ROADMAP task 4): interval/timeout — from ~/.sshmap/config.json
+        # (status_interval_sec / status_probe_timeout_sec; defaults 30 s / 3.0 s =
+        # v1.0 behavior); changed live from the settings dialog (_apply_settings_from_dialog).
+        # v1.1.2 final: probes within a round run in parallel (ThreadPoolExecutor),
+        # cap — status_max_parallel (default 16); for large maps (N > 50) the
+        # interval doubles (effective_interval_ms + a status-bar hint).
         self._status_checker = None
-        self._auto_interval_hinted = False  # v1.1.2 final: подсказка о большом интервале — один раз
+        self._auto_interval_hinted = False  # v1.1.2 final: the large-interval hint — shown once
         try:
             from services.status_checker import StatusChecker as _StatusChecker, \
                 get_status_settings as _get_status_cfg
@@ -333,28 +333,28 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
                 probe_timeout=float(_st_cfg["probe_timeout_sec"]),
                 max_parallel=int(_st_cfg["max_parallel"]), parent=self)
             self._status_checker.status_changed.connect(self._on_node_status_changed)
-            # При уничтожении окна — остановить таймер и дождаться текущего раунда,
-            # чтобы поток-проба не был убит на ходу вместе с родителем.
+            # On window destruction — stop the timer and wait for the current round
+            # so a probe thread is not killed in flight with its parent.
             self.destroyed.connect(lambda *_a: self._status_checker.shutdown())
-            # Цели синхронизируем сразу; сам запуск периодических проверок — один раз,
-            # из main.py после window.show() (см. start_status_checks()). В headless-
-            # тестах без event loop это гарантирует отсутствие фоновых потоков.
+            # Targets are synced immediately; starting the periodic checks happens once,
+            # from main.py after window.show() (see start_status_checks()). In headless
+            # tests without an event loop this guarantees no background threads.
             self._sync_status_targets()
         except Exception as e:
             if self.log:
                 self.log.warning(f"StatusChecker unavailable: {e}")
 
-        # ── v0.9.7: автосохранение (ROADMAP #1) ────────────────────────
-        # QTimer по интервалу из ~/.sshmap/config.json (autosave_interval_sec,
-        # дефолт 60 c; autosave_enabled — вкл/выкл). Тик пишет автосохранение
-        # ТОЛЬКО при dirty и при установленном файле проекта (новый несохранённый
-        # проект восстанавливать некому — см. _autosave_tick). Интервал живёт до
-        # перезапуска; диалог настроек появится в v1.1 (ROADMAP).
+        # ── v0.9.7: autosave (ROADMAP #1) ────────────────────────
+        # QTimer at the interval from ~/.sshmap/config.json (autosave_interval_sec,
+        # default 60 s; autosave_enabled — on/off). A tick writes an autosave
+        # ONLY when dirty and a project file is set (a new unsaved project has
+        # nothing to restore — see _autosave_tick). The interval lives until restart;
+        # the settings dialog arrives in v1.1 (ROADMAP).
         self._autosave_timer = QTimer(self)
         try:
             from storage.autosave import get_autosave_settings as _get_as
             _as_cfg = _get_as()
-        except Exception:  # noqa: BLE001 — дефолты важнее, модуль опционален
+        except Exception:  # noqa: BLE001 — defaults matter more; the module is optional
             _as_cfg = {"enabled": True, "interval_sec": 60}
         self._autosave_enabled = bool(_as_cfg.get("enabled", True))
         self._autosave_timer.setInterval(int(_as_cfg.get("interval_sec", 60)) * 1000)
@@ -363,7 +363,7 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
             self._autosave_timer.start()
 
     def start_status_checks(self):
-        """v0.7.1: запустить периодические проверки статусов (вызывается один раз)."""
+        """v0.7.1: start periodic status checks (called once)."""
         checker = getattr(self, "_status_checker", None)
         if checker is not None and not checker.is_busy:
             try:
@@ -373,10 +373,10 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
                 if self.log:
                     self.log.warning(f"StatusChecker start failed: {e}")
 
-    # ── v0.7.1: статусы узлов ────────────────────────────────
+    # ── v0.7.1: node statuses ────────────────────────────────
 
     def _sync_status_targets(self):
-        """Обновить список целей StatusChecker под текущие узлы сцены."""
+        """Update the StatusChecker target list to match the current scene nodes."""
         checker = getattr(self, "_status_checker", None)
         if checker is None:
             return
@@ -389,9 +389,9 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
             if self.log:
                 self.log.warning(f"StatusChecker set_servers failed: {e}")
             return
-        # v1.1.2 final (задача 3): большая карта (N > LARGE_MAP_THRESHOLD) —
-        # интервал проверок удваивается (StatusChecker.effective_interval_ms);
-        # одноразовая подсказка в статус-баре при пересечении порога вверх.
+        # v1.1.2 final (task 3): large map (N > LARGE_MAP_THRESHOLD) —
+        # the check interval doubles (StatusChecker.effective_interval_ms);
+        # a one-time status-bar hint when the threshold is crossed upward.
         try:
             if checker.is_large_map():
                 if not getattr(self, "_auto_interval_hinted", False):
@@ -399,30 +399,30 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
                     self.statusBar().showMessage(
                         self.t("status.auto_interval_hint", servers=checker.target_count), 8000)
             else:
-                self._auto_interval_hinted = False  # порог снова ниже — можно подсказать заново
+                self._auto_interval_hinted = False  # below the threshold again — the hint may fire once more
         except (AttributeError, RuntimeError):
-            pass  # Qt teardown — статус-бар уже уничтожен
+            pass  # Qt teardown — the status bar is already destroyed
 
     def _on_node_status_changed(self, server_id: str, status: str):
-        """Обработать результат пробы одного узла."""
+        """Handle the probe result for a single node."""
         node = self.scene.get_node(server_id)
         if node is None:
-            return  # узел уже удалён — статус ему не нужен
+            return  # node already removed — it needs no status
         try:
             node.set_status(status)
         except Exception as e:
             if self.log:
                 self.log.warning(f"set_status failed for {server_id}: {e}")
         else:
-            self._update_counts_label()  # UI polish: online/warn/offline в статус-баре
-            # Ревью-фикс v0.8.0 (#3): маркер строки дерева обновляется на месте
-            # (node.status — фактический статус после set_status; неизвестные игнорируются)
+            self._update_counts_label()  # UI polish: online/warn/offline in the status bar
+            # Review fix v0.8.0 (#3): the tree row marker is updated in place
+            # (node.status — the actual status after set_status; unknowns are ignored)
             self._update_sidebar_status_marker(server_id)
 
     def _update_window_title(self):
-        """Пересобрать заголовок окна: базовый заголовок + файл проекта + маркер [*]."""
-        # AUDIT v0.8.3 (#1): база — APP_NAME/APP_VERSION из version.py (единая
-        # точка истины); i18n-ключ title.main_window больше не источник версии.
+        """Rebuild the window title: base title + project file + [*] marker."""
+        # AUDIT v0.8.3 (#1): base — APP_NAME/APP_VERSION from version.py (the single
+        # source of truth); the i18n key title.main_window is no longer a version source.
         try:
             from version import APP_NAME, APP_VERSION
         except ImportError:
@@ -435,19 +435,19 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         if self._dirty:
             title += " [*]"
         self.setWindowTitle(title)
-        # v0.9.7: восстановление из автосохранения/бэкапов имеет смысл только для
-        # открытого файла проекта (методы сами гвардятся — это UX-подсказка).
+        # v0.9.7: restoring from autosave/backups makes sense only for an
+        # opened project file (the methods guard themselves — this is a UX hint).
         for act in (getattr(self, "act_restore_autosave", None),
                     getattr(self, "act_backups", None)):
             if act is not None:
                 act.setEnabled(bool(self._project_file))
 
     def _register_i18n(self, widget, key: str):
-        """Запомнить виджет (QMenu/QAction) и ключ перевода для повторного применения."""
+        """Remember a widget (QMenu/QAction) and its translation key for re-application."""
         self._menu_i18n.append((widget, key))
 
     def _apply_ui_translations(self):
-        """Перевести меню, тулбар и служебные подписи на текущий язык."""
+        """Translate the menus, toolbar, and service labels to the current language."""
         for widget, key in self._menu_i18n:
             if widget is None:
                 continue
@@ -455,36 +455,36 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
                 widget.setTitle(self.t(key))
             else:
                 widget.setText(self.t(key))
-        # v0.9.9.4: строки сайдбара (кнопки, заголовок, плейсхолдер, «Все теги») —
-        # реестр панели; retranslate через i18n-колбэк (регрессия на баг v0.9.2:
-        # раньше эти строки не обновлялись при смене языка).
+        # v0.9.9.4: sidebar strings (buttons, title, placeholder, "All tags") —
+        # the panel registry; retranslate via the i18n callback (regression on the v0.9.2 bug:
+        # these strings were not updated on language switch before).
         panel = getattr(self, "sidebar", None)
         if panel is not None:
             try:
                 panel.retranslate()
             except RuntimeError:
-                pass  # Qt teardown — панель уже уничтожена
-        # v1.2.2: док «Терминалы» мог быть создан до смены языка — перевести заголовок
+                pass  # Qt teardown — the panel is already destroyed
+        # v1.2.2: the "Terminals" dock may have been created before the language switch — translate its title
         dock = getattr(self, "_terminals_dock", None)
         if dock is not None:
             try:
                 dock.setWindowTitle(self.t("terminal.dock_title"))
             except RuntimeError:
-                pass  # Qt teardown — док уже уничтожен
-        # v1.2.3: плашка мультинабора — tooltip кнопки выхода на новом языке
+                pass  # Qt teardown — the dock is already destroyed
+        # v1.2.3: multi-input plaque — the exit button tooltip in the new language
         _multi_btn = getattr(self, "_multi_exit_btn", None)
         if _multi_btn is not None:
             try:
                 _multi_btn.setToolTip(self.t("terminal.multi_exit_button"))
             except RuntimeError:
-                pass  # Qt teardown — плашка уже уничтожена
-        # v1.2.4.1: tooltip'ы угловых кнопок сворачивания и полосок свёрнутых панелей
+                pass  # Qt teardown — the plaque is already destroyed
+        # v1.2.4.1: tooltips of the corner collapse buttons and the collapsed-panel strips
         _sb_panel = getattr(self, "sidebar", None)
         if _sb_panel is not None:
             try:
                 _sb_panel.collapse_btn.setToolTip(self.t("view.toggle_sidebar"))
             except RuntimeError:
-                pass  # Qt teardown — панель уже уничтожена
+                pass  # Qt teardown — the panel is already destroyed
         for _widget, _key in ((getattr(self, "_map_collapse_btn", None), "view.toggle_map"),
                               (getattr(self, "_sidebar_strip", None), "view.strip_sidebar_tooltip"),
                               (getattr(self, "_map_strip", None), "view.strip_map_tooltip")):
@@ -492,7 +492,7 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
                 try:
                     _widget.setToolTip(self.t(_key))
                 except RuntimeError:
-                    pass  # Qt teardown — виджет уже уничтожен
+                    pass  # Qt teardown — the widget is already destroyed
         self.statusBar().showMessage(self.t("status.ready"))
 
     @property
@@ -512,26 +512,26 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         layout = QHBoxLayout(central)
         layout.setContentsMargins(0, 0, 0, 0)
 
-        # v1.2.4.1: self._splitter — фасадная ссылка (механика сворачивания панелей).
-        # Члены сплиттера — КОНТЕЙНЕРЫ [панель | полоска], а не сами виджеты: в
-        # свёрнутом состоянии реальный виджет hide()н (0px, нативный Qt), на его
-        # месте — кликабельная полоска ~18px (_CollapseStrip). Ручку нельзя дотянуть
-        # до нуля (setCollapsible(False) + minimumWidth контейнера) — панель нельзя
-        # «потерять»; состояние управляется кнопками/меню (ROADMAP v1.2.4.1, задача 6).
+        # v1.2.4.1: self._splitter — a facade reference (panel collapse mechanics).
+        # Splitter children are CONTAINERS [panel | strip], not the widgets themselves: in
+        # the collapsed state the real widget is hidden (0px, native Qt), and in its
+        # place — a clickable ~18px strip (_CollapseStrip). The handle cannot be dragged
+        # to zero (setCollapsible(False) + the container's minimumWidth) — a panel cannot
+        # be "lost"; state is driven by buttons/menus (ROADMAP v1.2.4.1, task 6).
         splitter = QSplitter(Qt.Horizontal)
         self._splitter = splitter
         layout.addWidget(splitter)
 
-        # Side panel — v0.9.9.4: сайдбар-кластер (кнопки, заголовок, поиск,
-        # тег-фильтр, дерево с маркерами статусов, контекстное меню) вынесен в
-        # ui/sidebar.py (SidebarPanel). MainWindow остаётся фасадом: self.tree /
-        # self.tag_filter / self.search_edit / self.btn_* — ссылки на виджеты
-        # панели; публичный API и все слоты окна не изменились.
+        # Side panel — v0.9.9.4: the sidebar cluster (buttons, title, search,
+        # tag filter, tree with status markers, context menu) is moved to
+        # ui/sidebar.py (SidebarPanel). MainWindow remains a facade: self.tree /
+        # self.tag_filter / self.search_edit / self.btn_* — references to the
+        # panel's widgets; the public API and all window slots are unchanged.
         self.sidebar = SidebarPanel(
             translate_fn=self.t if self._i18n_available else None,
             actions={
-                # Контекстное меню строки (ROADMAP v0.9.6): «сначала выделить,
-                # потом действие» — как в исходных замыканиях _on_sidebar_context_menu.
+                # Row context menu (ROADMAP v0.9.6): "select first,
+                # then act" — as in the original _on_sidebar_context_menu closures.
                 "ssh": lambda n: (self._select_node(n), self._connect_ssh_to_selected()),
                 "external": lambda n: (self._select_node(n), self._connect_ssh_external(n)),
                 "edit": lambda n: self._edit_node(n),
@@ -541,15 +541,15 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
                 "collect_info": lambda n: self._collect_node_info(n),
                 "reveal": lambda n: self._reveal_node_on_map(n),
                 "delete": lambda n: self._remove_node_guarded(n),
-                # v1.0RC4: Быстрый запуск — подменю первым пунктом (выше SSH);
-                # ключи опциональные (вне CONTEXT_MENU_ITEMS) — см. SidebarPanel.
+                # v1.0RC4: Quick launch — a submenu as the first item (above SSH);
+                # keys are optional (outside CONTEXT_MENU_ITEMS) — see SidebarPanel.
                 "ql_entry": lambda n, e: self._run_quick_launch_entry(n, e),
                 "ql_configure": lambda n: self._open_quick_launch_dialog(n),
             },
-            show_title=self._i18n_available,  # раньше метка создавалась только при i18n
+            show_title=self._i18n_available,  # before, the label was created only with i18n
         )
 
-        # Фасадные ссылки на виджеты панели (публичный API MainWindow — тесты)
+        # Facade references to the panel widgets (MainWindow public API — tests)
         self.tree = self.sidebar.tree
         self.tag_filter = self.sidebar.tag_filter
         self.search_edit = self.sidebar.search_edit
@@ -558,29 +558,29 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         self.btn_connect_ssh = self.sidebar.btn_connect_ssh
         self.btn_props = self.sidebar.btn_props
         self.btn_delete = self.sidebar.btn_delete
-        self.btn_settings = self.sidebar.btn_settings  # v1.1: кнопка ⚙ «Настройки» (6-я)
-        self._sidebar_title = self.sidebar.title_label  # None без i18n (как раньше)
+        self.btn_settings = self.sidebar.btn_settings  # v1.1: the ⚙ "Settings" button (the 6th)
+        self._sidebar_title = self.sidebar.title_label  # None without i18n (as before)
 
-        # События панели — слоты окна (те же, что до v0.9.9.4)
+        # Panel events — window slots (the same as before v0.9.9.4)
         self.search_edit.textChanged.connect(self.refresh_sidebar)
         self.tag_filter.currentIndexChanged.connect(self._on_tag_filter_changed)
         self.tree.itemClicked.connect(self._on_tree_item_clicked)
         self.tree.itemDoubleClicked.connect(self._on_tree_item_double_click)
-        # v0.9.6: контекстное меню дерева серверов (ПКМ по строке сайдбара);
-        # политику CustomContextMenu выставляет сама панель при конструировании.
+        # v0.9.6: server tree context menu (right-click on a sidebar row);
+        # the panel itself sets the CustomContextMenu policy at construction.
         self.tree.customContextMenuRequested.connect(self._on_sidebar_context_menu)
 
-        # Кнопки панели → слоты окна
+        # Panel buttons -> window slots
         self.sidebar.add_server_clicked.connect(self._add_server)
         self.sidebar.add_connection_clicked.connect(self._add_connection)
         self.sidebar.connect_ssh_clicked.connect(self._connect_ssh_to_selected)
         self.sidebar.show_properties_clicked.connect(self._show_properties)
         self.sidebar.delete_selected_clicked.connect(self._delete_selected)
-        # v1.1: кнопка ⚙ «Настройки» внизу сайдбара → диалог настроек (хаб)
+        # v1.1: the ⚙ "Settings" button at the bottom of the sidebar -> the settings dialog (hub)
         self.sidebar.settings_clicked.connect(self._open_settings_dialog)
 
-        # v1.2.4.1 (задача 1): контейнер сайдбара [sidebar | полоска]. Полоска — у
-        # правого края (со стороны ручки сплиттера); в развёрнутом состоянии скрыта.
+        # v1.2.4.1 (task 1): the sidebar container [sidebar | strip]. The strip — at
+        # the right edge (splitter-handle side); hidden in the expanded state.
         self._sidebar_container = QWidget()
         _sb_lay = QHBoxLayout(self._sidebar_container)
         _sb_lay.setContentsMargins(0, 0, 0, 0)
@@ -593,34 +593,34 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
 
         # Map canvas
         self.scene = MapScene()
-        # v0.9.9.1: reentry-guard синхронизации выделения (вместо blockSignals — см. _select_node)
+        # v0.9.9.1: reentry guard for selection sync (instead of blockSignals — see _select_node)
         self._selection_syncing = False
         self.scene.selectionChanged.connect(self._sync_selection_state)
         self.view = MapView(self.scene, self)
 
-        # v0.8.3: undo-стек — dirty по индексу, refresh после undo/redo
+        # v0.8.3: undo stack — dirty by index, refresh after undo/redo
         self.undo_stack.indexChanged.connect(lambda *_a: self._on_stack_changed())
         self.undo_stack.cleanChanged.connect(lambda *_a: self._on_stack_changed())
-        # Перемещение узла: MapView сообщает о завершении жеста → команда MoveNode
+        # Node movement: MapView reports the finished gesture -> a MoveNode command
         try:
             self.view.node_drag_committed.connect(self._commit_node_move)
             self.view.nodes_drag_committed.connect(self._commit_nodes_move)  # v0.9.3
-        except Exception:  # noqa: BLE001 — без сигнала перемещение просто не попадёт в undo
+        except Exception:  # noqa: BLE001 — without the signal the move simply won't reach undo
             pass
 
         # Mouse event filter for double-click on nodes
         self.view.viewport().installEventFilter(self)
 
-        # v0.7: drag-режим создания связи (Shift+перетаскивание узла) — подсказка в статус-баре
+        # v0.7: drag mode for creating a connection (Shift+drag a node) — a status-bar hint
         self.view.connect_drag_started.connect(
             lambda: self.statusBar().showMessage(self.t("hint.connect_drag")))
         self.view.connect_drag_finished.connect(
             lambda: self.statusBar().showMessage(self.t("status.ready")))
 
-        # v1.2.4.1 (задача 1): контейнер карты [полоска | view]. Полоска — у левого
-        # края (со стороны ручки сплиттера: целевое состояние [сайдбар | полоска-карта]);
-        # в развёрнутом состоянии скрыта. Док «Терминалы» — QDockWidget окна, к
-        # механике сплиттера не относится (собирается нативно).
+        # v1.2.4.1 (task 1): the map container [strip | view]. The strip — at the left
+        # edge (splitter-handle side: target state [sidebar | map-strip]);
+        # hidden in the expanded state. The "Terminals" dock — the window's QDockWidget,
+        # unrelated to the splitter mechanics (assembled natively).
         self._map_container = QWidget()
         _mp_lay = QHBoxLayout(self._map_container)
         _mp_lay.setContentsMargins(0, 0, 0, 0)
@@ -632,9 +632,9 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         splitter.addWidget(self._map_container)
         splitter.setSizes([250, 950])
 
-        # v1.2.4.1 (задача 6): ручку нельзя дотянуть до нуля вручную — состояние
-        # свёрнутости управляется кнопками/меню; minimumWidth контейнеров — нижняя
-        # граница ручной растяжки (свёрнутый контейнер сжимается до 18px в _set_panel_collapsed).
+        # v1.2.4.1 (task 6): the handle cannot be dragged to zero manually — the
+        # collapsed state is driven by buttons/menus; the containers' minimumWidth is
+        # the lower bound of manual dragging (a collapsed container shrinks to 18px in _set_panel_collapsed).
         splitter.setCollapsible(0, False)
         splitter.setCollapsible(1, False)
         self.SIDEBAR_MIN_WIDTH = 160
@@ -642,18 +642,18 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         self._sidebar_container.setMinimumWidth(self.SIDEBAR_MIN_WIDTH)
         self._map_container.setMinimumWidth(self.MAP_MIN_WIDTH)
 
-        # v1.2.4.1 (задача 2): угловая кнопка сворачивания карты — overlay-QToolButton
-        # на MapView (паттерн map_search: child of view, вне layout), перепозиция по
-        # resizeEvent через сигнал MapView.resized. Кнопка сворачивания САЙДБАРА живёт
-        # в нижнем ряду SidebarPanel (self.sidebar.collapse_btn); иконки/tooltip/подключение
-        # — в _setup_menubar (после создания QAction).
+        # v1.2.4.1 (task 2): the map collapse corner button — an overlay QToolButton
+        # on the MapView (the map_search pattern: a child of view, outside the layout),
+        # repositioned on resizeEvent via the MapView.resized signal. The SIDEBAR
+        # collapse button lives in the SidebarPanel's bottom row (self.sidebar.collapse_btn);
+        # icon/tooltip/wiring — in _setup_menubar (after the QAction is created).
         self._map_collapse_btn = QToolButton(self.view)
         self._map_collapse_btn.setAutoRaise(True)
-        self._map_collapse_btn.setToolTip("Свернуть карту")  # fallback без i18n
+        self._map_collapse_btn.setToolTip("Map")  # fallback without i18n
         self.view.resized.connect(self._position_map_collapse_btn)
         self._position_map_collapse_btn()
 
-        # v0.9.8: поиск по карте (Ctrl+F) — плавающая строка поверх canvas
+        # v0.9.8: map search (Ctrl+F) — a floating bar over the canvas
         self._setup_map_search()
 
         # Status bar
@@ -664,12 +664,12 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
             except Exception:
                 pass
         else:
-            self.statusBar().showMessage("Готово. Двойной клик — свойства узла.")
+            self.statusBar().showMessage("Ready. Double-click for node properties.")
 
-        # UI polish: постоянные индикаторы справа в статус-баре — счётчики узлов/
-        # связей/статусов и процент зума (обновляются из MapView.zoomChanged).
+        # UI polish: permanent indicators on the right of the status bar — node/
+        # connection/status counters and the zoom percentage (updated from MapView.zoomChanged).
         self.counts_label = QLabel("")
-        # v1.2.5: QSS — f-string со ссылкой на константу темы (значение без изменений)
+        # v1.2.5: QSS — an f-string referencing the theme constant (value unchanged)
         self.counts_label.setStyleSheet(f"color: {theme.TEXT_MUTED}; padding-right: 10px;")
         self.statusBar().addPermanentWidget(self.counts_label)
 
@@ -679,9 +679,9 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         self.zoom_label.setStyleSheet(f"color: {theme.TEXT_PRIMARY}; padding-right: 6px;")
         self.statusBar().addPermanentWidget(self.zoom_label)
 
-        # v1.2.3 (ROADMAP задача 3): плашка режима мультинабора «МУЛЬТИ: N сессий» +
-        # кнопка выхода — permanent-виджет справа в статус-баре; скрыта, пока режим
-        # выключен (_on_multi_changed/_multi_refresh_ui управляют видимостью).
+        # v1.2.3 (ROADMAP task 3): the multi-input mode plaque "MULTI: N sessions" +
+        # an exit button — a permanent widget on the right of the status bar; hidden
+        # while the mode is off (_on_multi_changed/_multi_refresh_ui control visibility).
         self._multi_plaque = QWidget()
         _multi_row = QHBoxLayout(self._multi_plaque)
         _multi_row.setContentsMargins(8, 0, 4, 0)
@@ -692,7 +692,7 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         self._multi_exit_btn = QToolButton()
         self._multi_exit_btn.setText("✕")
         self._multi_exit_btn.setToolTip(self.t("terminal.multi_exit_button"))
-        # Кнопка выхода — НЕ Esc (Esc уходит в shell как \x1b!): явный False.
+        # Exit button — NOT Esc (Esc goes to the shell as \x1b!): an explicit False.
         self._multi_exit_btn.clicked.connect(lambda: self._toggle_multi_input(False))
         _multi_row.addWidget(self._multi_label)
         _multi_row.addWidget(self._multi_exit_btn)
@@ -701,7 +701,7 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
 
         try:
             self.view.zoomChanged.connect(self._on_zoom_changed)
-        except Exception:  # noqa: BLE001 — без сигнала статус-бар просто не обновится
+        except Exception:  # noqa: BLE001 — without the signal the status bar simply won't update
             pass
         self._update_counts_label()
 
@@ -718,7 +718,7 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
     # ── v0.8.3: Undo/Redo ─────────────────────────────────────────
 
     def _push_command(self, command):
-        """Единая точка входа: push команды в стек (redo выполняется сам)."""
+        """Single entry point: push a command onto the stack (redo runs itself)."""
         try:
             self.undo_stack.push(command)
         except Exception as e:
@@ -726,13 +726,13 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
                 self.log.warning(f"undo push failed: {e}")
 
     def _commit_node_move(self, node, old_pos, new_pos):
-        """v0.8.3: завершён жест перетаскивания узла → команда CmdMoveNode."""
+        """v0.8.3: a node drag gesture finished -> a CmdMoveNode command."""
         from modules.undo_commands import CmdMoveNode
         self._push_command(CmdMoveNode(self, node, old_pos, new_pos))
         self._mark_dirty()
 
     def _commit_nodes_move(self, moves):
-        """v0.9.3: завершён групповой drag → ОДНА команда CmdMoveNodes."""
+        """v0.9.3: a group drag finished -> ONE CmdMoveNodes command."""
         from modules.undo_commands import CmdMoveNodes
         if not moves:
             return
@@ -740,17 +740,17 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         self._mark_dirty()
 
     def _on_stack_changed(self):
-        """QUndoStack.indexChanged/canUndoChanged → пересчитать dirty-маркер."""
+        """QUndoStack.indexChanged/canUndoChanged -> recompute the dirty marker."""
         try:
             self._dirty = self.undo_stack.canUndo() or self._undo_baseline_dirty
         except RuntimeError:
-            # Qt teardown: C++-объект стека уничтожен вместе с окном (паттерн
-            # _sync_selection_state) — обновлять заголовок некому и незачем.
+            # Qt teardown: the stack's C++ object is destroyed with the window (the
+            # _sync_selection_state pattern) — no one left to update the title, and no need.
             return
         self._update_window_title()
 
     def _post_undo_refresh(self):
-        """Синхронизировать UI с фактическим состоянием сцены (после undo/redo)."""
+        """Sync the UI with the scene's actual state (after undo/redo)."""
         try:
             self.refresh_sidebar()
         except Exception:
@@ -784,7 +784,7 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
                 self.log.warning(f"redo failed: {e}")
 
     def _reset_undo_stack(self):
-        """Сброс стека и baseline (new/open/save/load)."""
+        """Reset the stack and the baseline (new/open/save/load)."""
         self.undo_stack.clear()
         self._note_committed.clear()
         for note in self.scene.notes():
@@ -792,12 +792,12 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         self._undo_baseline_dirty = False
 
     def _attach_note(self, note):
-        """Подключить сигналы заметки (undo-текст + dirty) — путь создания и undo/redo."""
+        """Wire the note's signals (undo text + dirty) — the creation and undo/redo paths."""
         self._connect_note_signals(note)
         self._note_committed[note.note_id] = note.text()
 
     def _commit_note_text(self):
-        """Дебаунс правки текста заметки → команда CmdEditTextNote."""
+        """Debounce a note text edit -> a CmdEditTextNote command."""
         pending = self._note_edit_pending
         self._note_edit_pending = None
         if not pending:
@@ -809,49 +809,49 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
             return
         committed = self._note_committed.get(note.note_id)
         if new_text == old_text or (committed is not None and new_text == committed):
-            return  # ничего не поменялось / уже закоммичено предыдущей командой
+            return  # nothing changed / already committed by a previous command
         from modules.undo_commands import CmdEditTextNote
         self._note_committed[note.note_id] = new_text
         self._push_command(CmdEditTextNote(self, note, committed if committed is not None else old_text, new_text))
 
     def closeEvent(self, event):
         """Ask to save on exit if there are unsaved changes."""
-        # v1.1.2RC3 (AUDIT U2): сохранить размер/состояние окна ДО всего — даже при
-        # отмене закрытия (event.ignore) записанные значения равны текущим, а при
-        # нормальном выходе их прочитает следующий старт (ui_window_geometry_main).
+        # v1.1.2RC3 (AUDIT U2): save the window size/state BEFORE everything — even on
+        # a cancelled close (event.ignore) the written values equal the current ones, and on
+        # a normal exit the next start reads them (ui_window_geometry_main).
         try:
             save_window_geometry("ui_window_geometry_main", self)
-        except Exception:  # noqa: BLE001 — геометрия не блокирует закрытие
+        except Exception:  # noqa: BLE001 — geometry must not block closing
             pass
 
-        # v0.9.7: автосохранение останавливается ДО диалога — во время решения
-        # пользователя (Save/Discard/Cancel) запись в ~/.sshmap/autosave не нужна.
+        # v0.9.7: autosave stops BEFORE the dialog — while the user decides
+        # (Save/Discard/Cancel) no writes to ~/.sshmap/autosave are needed.
         try:
             self._autosave_timer.stop()
-        except Exception:  # noqa: BLE001 — teardown-устойчивость (RuntimeError C++ объекта)
+        except Exception:  # noqa: BLE001 — teardown robustness (C++ object RuntimeError)
             pass
 
-        # v0.9.4-fix: остановка фоновых QThread выполняется при ЛЮБОМ выходе.
-        # Раньше вызов стоял только в конце «чистого» выхода: все три ветки
-        # диалога делали ранний return до шатдауна, и при несохранённых
-        # изменениях (самый частый случай) работающие SystemInfoCollector /
-        # ping / DNS-потоки уничтожались вместе с QObject →
-        # «QThread: Destroyed while thread is still running».
-        # Потоки останавливаем ДО диалога — он может держать окно открытым
-        # сколько угодно, а фоновая работа к моменту закрытия уже не нужна.
+        # v0.9.4-fix: stopping background QThreads happens on ANY exit.
+        # The call used to stand only at the end of a "clean" exit: all three dialog
+        # branches returned early before shutdown, so with unsaved
+        # changes (the most common case) the running SystemInfoCollector /
+        # ping / DNS threads were destroyed with the QObject ->
+        # "QThread: Destroyed while thread is still running".
+        # Threads are stopped BEFORE the dialog — it may keep the window open
+        # indefinitely, and background work is no longer needed at close time.
         self._shutdown_background_threads()
 
         if self._has_unsaved_changes:
             reply = QMessageBox.question(
                 self, 
-                self.t("dialog.save_changes") if self._i18n_available else "Сохранить изменения?",
-                self.t("msg.save_on_exit") if self._i18n_available else "Есть несохранённые изменения. Сохранить перед выходом?",
+                self.t("dialog.save_changes") if self._i18n_available else "Save changes?",
+                self.t("msg.save_on_exit") if self._i18n_available else "There are unsaved changes. Save before exiting?",
                 QMessageBox.Save | QMessageBox.Discard | QMessageBox.Cancel,
                 QMessageBox.Save
             )
             if reply == QMessageBox.Save:
-                # Закрываемся только если сохранение реально удалось —
-                # иначе данные терялись бы молча (бывш. AUDIT.md, критичная #1 — см. CHANGELOG.md).
+                # Close only if the save really succeeded —
+                # otherwise the data would be lost silently (former AUDIT.md, critical #1 — see CHANGELOG.md).
                 saved = self._save_project()
                 event.accept() if saved else event.ignore()
                 return
@@ -865,22 +865,22 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         event.accept()
 
     def _shutdown_background_threads(self):
-        """Остановить коллекторы, ping/DNS-потоки и терминальные сессии.
+        """Stop collectors, ping/DNS threads, and terminal sessions.
 
-        Паттерн взят у StatusChecker: stop() + ограниченный wait() — никогда
-        не блокируем GUI-поток дольше пары секунд на поток.
+        The pattern is borrowed from StatusChecker: stop() + a bounded wait() — the GUI
+        thread is never blocked more than a couple of seconds per thread.
         """
-        # v1.2.3 (ROADMAP v1.2.3): мультинабор — режим выключается и provider
-        # отвязывается ДО teardown сессий (подсветка/плашка сбрасываются, пока
-        # контейнеры живы; висящий callable не держит мёртвое окно).
+        # v1.2.3 (ROADMAP v1.2.3): multi-input — the mode is turned off and the provider
+        # unhooked BEFORE the sessions' teardown (highlight/plaque reset while
+        # the containers are alive; a dangling callable does not hold a dead window).
         try:
             self._multi_shutdown()
-        except Exception:  # noqa: BLE001 — мультинабор не блокирует выход
+        except Exception:  # noqa: BLE001 — multi-input must not block exit
             pass
 
         threads = []
 
-        # Автосбор системной информации (SystemInfoCollector)
+        # Automatic system-info collection (SystemInfoCollector)
         for coll in getattr(self, "_info_collectors", {}).values():
             stop = getattr(coll, "stop", None) or getattr(coll, "request_stop", None)
             if callable(stop):
@@ -891,12 +891,12 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
             if hasattr(coll, "isRunning"):
                 threads.append(coll)
 
-        # Ping, обратный DNS и DNS-резолв импорта. v1.2.10rc1 (находка верификации):
-        # stop() с cancel-флагом есть ТОЛЬКО у _import_resolve_thread
-        # (HostResolverThread.stop, services/host_importer.py — выставляет Event, цикл
-        # выходит между именами); у PingThread/ReverseDnsThread stop() НЕТ — текущий
-        # getaddrinfo/ping доживает свой таймаут. Пережившие wait-бюджет ниже потоки
-        # регистрируются в orphan-реестре (services/diagnostics.register_orphan_thread).
+        # Ping, reverse DNS, and import DNS resolution. v1.2.10rc1 (verification finding):
+        # a stop() with a cancel flag exists ONLY on _import_resolve_thread
+        # (HostResolverThread.stop, services/host_importer.py — sets an Event, the loop
+        # exits between names); PingThread/ReverseDnsThread have NO stop() — the current
+        # getaddrinfo/ping runs out its timeout. Threads that outlive the wait budget below
+        # are registered in the orphan registry (services/diagnostics.register_orphan_thread).
         for attr in ("_ping_thread", "_dns_thread", "_import_resolve_thread"):
             th = getattr(self, attr, None)
             if th is not None and hasattr(th, "isRunning") and th.isRunning():
@@ -908,21 +908,20 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
                         pass
                 threads.append(th)
 
-        # Терминальные СЕССИИ (v1.2: реестр хранит страницы, не окна): их teardown
-        # сам делает thread.stop()+wait() через page.shutdown(); здесь только ждём
-        # остаток, если окно ещё не закрыто пользователем. v1.2.1: закрываем ВСЕ
-        # сессии, а не только видимые — в табовом окне неактивные табы «невидимы»
-        # (QStackedWidget прячет их), но их потоки обязаны остановиться.
+        # Terminal SESSIONS (v1.2: the registry stores pages, not windows): their teardown
+        # does thread.stop()+wait() itself via page.shutdown(); here we only wait for
+        # the remainder if the window has not been closed by the user yet. v1.2.1: close ALL
+        # sessions, not just visible ones — in the tabbed window inactive tabs are "invisible"
+        # (QStackedWidget hides them), but their threads must stop.
         terminal_waits = []
         for s in list(getattr(self, "_terminal_windows", [])):
             try:
-                # v1.2.10rc1 (AUDIT ручной #1): при шатдауне «ask»-гейт пропускается —
-                # поток уже остановлен (stop_thread() внутри close_terminal()), решения
-                # принимать не о чем. Раньше при terminal_close_behavior="ask" на каждую
-                # активную сессию при выходе показывался QMessageBox.question, а «Отмена»
-                # не работала (окно закрывалось независимо от ответа). Тот же путь, что
-                # у лимита v1.1.1: _force_close — подтверждённое решение, без повторного
-                # вопроса.
+                # v1.2.10rc1 (manual AUDIT #1): on shutdown the "ask" gate is skipped —
+                # the thread is already stopped (stop_thread() inside close_terminal()); there is
+                # nothing to decide. Before, with terminal_close_behavior="ask", a QMessageBox.question
+                # was shown for each active session on exit, and "Cancel"
+                # did not work (the window closed regardless of the answer). The same path as the
+                # v1.1.1 limit: _force_close — a confirmed decision, no re-asking.
                 s._force_close = True
                 s.close_terminal()
                 th = getattr(s, "terminal_thread", None)
@@ -941,18 +940,18 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
             except Exception:
                 pass
 
-        # v1.2.10rc1 (находка верификации): ping/DNS/import-resolve потоки, пережившие
-        # wait-бюджет (getaddrinfo/ping при недоступном резолвере), регистрируются в
-        # orphan-реестре — живой QThread без сильного ссылающегося объекта нельзя
-        # оставлять на GC («QThread: Destroyed while thread is still running» на всех
-        # путях выхода). Терминальные потоки имеют собственный N4-путь (page.shutdown()
-        # → modules/ssh_terminal._orphan_threads) — сюда не дублируем.
+        # v1.2.10rc1 (verification finding): ping/DNS/import-resolve threads that outlive
+        # the wait budget (getaddrinfo/ping with an unreachable resolver) are registered in
+        # the orphan registry — a live QThread without a strong referrer must not
+        # be left to GC ("QThread: Destroyed while thread is still running" on all
+        # exit paths). Terminal threads have their own N4 path (page.shutdown()
+        # -> modules/ssh_terminal._orphan_threads) — not duplicated here.
         for th in threads:
             try:
                 if hasattr(th, "isRunning") and th.isRunning():
                     from services.diagnostics import register_orphan_thread as _register_orphan
                     _register_orphan(th)
-            except Exception:  # noqa: BLE001 — реестр не блокирует выход
+            except Exception:  # noqa: BLE001 — the registry must not block exit
                 pass
 
     @property
@@ -970,8 +969,8 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
     def eventFilter(self, source, event):
         """Handle double-click on any child element of a node."""
         if source == self.view.viewport() and event.type() == QMouseEvent.MouseButtonDblClick:
-            # AUDIT v0.7.2 (средняя #9): position() — современный Qt6 API;
-            # pos() оставлен fallback'ом для legacy-биндингов.
+            # AUDIT v0.7.2 (medium #9): position() — the modern Qt6 API;
+            # pos() is kept as a fallback for legacy bindings.
             try:
                 local_pos = event.position().toPoint()
             except AttributeError:
@@ -986,13 +985,13 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
 
     def _setup_toolbar(self):
         toolbar = QToolBar()
-        # v1.1.2RC3 (AUDIT U2): objectName нужен saveState()/restoreState() —
-        # без него Qt шлёт в stderr «'objectName' not set for QToolBar».
+        # v1.1.2RC3 (AUDIT U2): objectName is needed by saveState()/restoreState() —
+        # without it Qt writes "'objectName' not set for QToolBar" to stderr.
         toolbar.setObjectName("main_toolbar")
         self.addToolBar(toolbar)
 
-        # UI polish: у всех действий — векторные иконки (ui/icons.py, замена эмодзи);
-        # текстовые-только действия в тулбаре выглядели бы чужеродно.
+        # UI polish: all actions get vector icons (ui/icons.py, replacing emoji);
+        # text-only actions in the toolbar would look out of place.
         groups = (
             ((("file.new_project"), self._new_project, "new"),
              ("file.open", self._open_project, "open"),
@@ -1003,12 +1002,12 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
              ("view.center_map", self._center_view, "center"),
              ("view.fit_map", self._fit_to_content, "fit")),
         )
-        # Тексты без i18n (как в старом else-ветвлении) — UI polish: иконки теперь есть
+        # Text without i18n (as in the old else branch) — UI polish: icons now exist
         _fallback = {
-            "file.new_project": "Новый", "file.open": "Открыть", "file.save": "Сохранить",
-            "file.save_as": "Сохранить как", "btn.add_server": "Добавить сервер",
-            "btn.add_connection": "Добавить связь", "view.center_map": "Центрировать",
-            "view.fit_map": "Вписать карту",
+            "file.new_project": "New Project", "file.open": "Open...", "file.save": "Save",
+            "file.save_as": "Save as...", "btn.add_server": "Add Server",
+            "btn.add_connection": "Add Connection", "view.center_map": "Center map",
+            "view.fit_map": "Fit Map to Content",
         }
 
         for gi, group in enumerate(groups):
@@ -1021,14 +1020,14 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
                 try:
                     icon = get_icon(icon_name)
                     if icon is not None and not icon.isNull():
-                        action.setIcon(icon)  # tooltip подхватит текст действия сам
-                except Exception:  # noqa: BLE001 — иконка косметика, не роняем тулбар
+                        action.setIcon(icon)  # the tooltip will pick up the action text itself
+                except Exception:  # noqa: BLE001 — the icon is cosmetic; do not break the toolbar
                     pass
 
-        # v0.8.3: undo/redo в тулбаре (иконки + текст, включённость ведёт QUndoStack)
+        # v0.8.3: undo/redo in the toolbar (icons + text; enabled state driven by QUndoStack)
         toolbar.addSeparator()
         self.act_undo = toolbar.addAction(
-            self.t("edit.undo") if self._i18n_available else "Отменить",
+            self.t("edit.undo") if self._i18n_available else "Undo",
             self._undo)
         self.act_undo.setShortcut("Ctrl+Z")
         self.act_undo.setEnabled(False)
@@ -1041,7 +1040,7 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         self.undo_stack.canUndoChanged.connect(self.act_undo.setEnabled)
 
         self.act_redo = toolbar.addAction(
-            self.t("edit.redo") if self._i18n_available else "Вернуть",
+            self.t("edit.redo") if self._i18n_available else "Redo",
             self._redo)
         self.act_redo.setShortcuts(["Ctrl+Y", "Ctrl+Shift+Z"])
         self.act_redo.setEnabled(False)
@@ -1054,7 +1053,7 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         self.undo_stack.canRedoChanged.connect(self.act_redo.setEnabled)
 
     def _add_menu_action(self, menu, key: str, slot, shortcut: str = ""):
-        """Добавить пункт меню с переводом и зарегистрировать его для повторного перевода."""
+        """Add a translated menu item and register it for re-translation."""
         action = menu.addAction(self.t(key), slot, shortcut) if shortcut \
             else menu.addAction(self.t(key), slot)
         self._register_i18n(action, key)
@@ -1064,95 +1063,95 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         menubar = self.menuBar()
 
         # File menu
-        file_menu = menubar.addMenu(self.t("menu.file") if self._i18n_available else "Файл")
+        file_menu = menubar.addMenu(self.t("menu.file") if self._i18n_available else "File")
         self._register_i18n(file_menu, "menu.file")
         self._add_menu_action(file_menu, "file.new_project", self._new_project, "Ctrl+N")
         self._add_menu_action(file_menu, "file.open", self._open_project, "Ctrl+O")
         self._add_menu_action(file_menu, "file.save", self._save_project, "Ctrl+S")
         self._add_menu_action(file_menu, "file.save_as", self._save_project_as)
-        # v0.9.7: автосохранение + кольцевой буфер бэкапов (ROADMAP v0.9.7 #2/#3) —
-        # включённость ведёт _update_window_title (нужен открытый файл проекта).
+        # v0.9.7: autosave + a ring buffer of backups (ROADMAP v0.9.7 #2/#3) —
+        # enabled state driven by _update_window_title (an open project file is required).
         self.act_restore_autosave = self._add_menu_action(
             file_menu, "file.restore_autosave", self._restore_from_autosave)
         self.act_backups = self._add_menu_action(
             file_menu, "file.backups", self._show_backups_dialog)
-        # v0.9.5.5: массовый импорт серверов из текстового файла
+        # v0.9.5.5: bulk import of servers from a text file
         self._add_menu_action(file_menu, "file.import_servers", self._import_servers_from_txt)
-        # v0.9.1: экспорт карты в изображение (PNG/JPEG)
+        # v0.9.1: export the map to an image (PNG/JPEG)
         file_menu.addSeparator()
         self._add_menu_action(file_menu, "file.export_png", self._export_map_image)
-        # v0.9.5: экспорт карты в drawio (.drawio)
+        # v0.9.5: export the map to drawio (.drawio)
         self._add_menu_action(file_menu, "file.export_drawio", self._export_map_drawio)
-        # v0.9.9.7: экспорт карты в PDF (QPdfWriter поверх render_to_pixmap)
+        # v0.9.9.7: export the map to PDF (QPdfWriter on top of render_to_pixmap)
         self._add_menu_action(file_menu, "file.export_pdf", self._export_map_pdf)
         file_menu.addSeparator()
         self._add_menu_action(file_menu, "file.exit", self.close)
 
         # Edit menu
-        edit_menu = menubar.addMenu(self.t("menu.edit") if self._i18n_available else "Правка")
+        edit_menu = menubar.addMenu(self.t("menu.edit") if self._i18n_available else "Edit")
         self._register_i18n(edit_menu, "menu.edit")
-        # v0.8.3: Undo/Redo — первые пункты меню «Правка»
+        # v0.8.3: Undo/Redo — the first items of the "Edit" menu
         self._add_menu_action(edit_menu, "edit.undo", self._undo, "Ctrl+Z")
         self._add_menu_action(edit_menu, "edit.redo", self._redo, "Ctrl+Y")
         edit_menu.addSeparator()
         self._add_menu_action(edit_menu, "edit.add_server", self._add_server, "Ctrl+Shift+A")
-        self._add_menu_action(edit_menu, "edit.add_group", self._add_group_at, "Ctrl+Shift+G")  # v0.8.1: группы узлов
+        self._add_menu_action(edit_menu, "edit.add_group", self._add_group_at, "Ctrl+Shift+G")  # v0.8.1: node groups
         self._add_menu_action(edit_menu, "edit.add_connection", self._add_connection, "Ctrl+Shift+C")
         self._add_menu_action(edit_menu, "edit.properties", self._show_properties, "Ctrl+I")
-        # v0.9.2: горячие клавиши частых действий над выделенным узлом
+        # v0.9.2: hotkeys for frequent actions on the selected node
         self._add_menu_action(edit_menu, "ctx.ssh_connect", self._connect_ssh_to_selected, "Ctrl+Return")
         self._add_menu_action(edit_menu, "ctx.edit_server", self._edit_selected_node, "Ctrl+E")
         self._add_menu_action(edit_menu, "ctx.add_note", self._add_note_at_view_center, "Ctrl+Shift+N")
         self._add_menu_action(edit_menu, "edit.delete", self._delete_selected, "Delete")
-        # v0.9.3: дублирование + групповые операции мультивыделения
+        # v0.9.3: duplication + multi-selection group operations
         self._add_menu_action(edit_menu, "edit.duplicate", self._duplicate_selected_node, "Ctrl+D")
         edit_menu.addSeparator()
         self._add_menu_action(edit_menu, "edit.connect_selected", self._connect_selected_nodes)
         self._add_menu_action(edit_menu, "edit.delete_selected", self._delete_selected_nodes)
 
         # Profile menu
-        profile_menu = menubar.addMenu(self.t("menu.profile") if self._i18n_available else "Профиль")
+        profile_menu = menubar.addMenu(self.t("menu.profile") if self._i18n_available else "Profile")
         self._register_i18n(profile_menu, "menu.profile")
         self._add_menu_action(profile_menu, "profile.manage", self._open_profile_manager)
 
         # View menu
-        view_menu = menubar.addMenu(self.t("menu.view") if self._i18n_available else "Вид")
+        view_menu = menubar.addMenu(self.t("menu.view") if self._i18n_available else "View")
         self._register_i18n(view_menu, "menu.view")
         self._add_menu_action(view_menu, "view.center_map", self._center_view)
         self._add_menu_action(view_menu, "view.reset_zoom", self._reset_zoom)
-        # UI polish: «Вписать карту» — fitInView по содержимому (Ctrl+Shift+F: F одной
-        # клавишей конфликтовал бы с вводом в поле поиска сайдбара)
+        # UI polish: "Fit map" — fitInView by content (Ctrl+Shift+F: a bare F key
+        # would conflict with typing into the sidebar search field)
         self._add_menu_action(view_menu, "view.fit_map", self._fit_to_content, "Ctrl+Shift+F")
-        # v0.9.8: поиск по карте (Ctrl+F) — строка поиска поверх canvas; тот же аргумент
-        # про Ctrl, что у fit_map (голая F занята вводом в поля поиска)
+        # v0.9.8: map search (Ctrl+F) — a search bar over the canvas; the same
+        # Ctrl argument as fit_map (bare F is taken by search-field typing)
         self._add_menu_action(view_menu, "view.find_on_map", self._toggle_map_search, "Ctrl+F")
-        # v1.1.1 (пункт 5): показать/скрыть ВЕСЬ сайдбар; v1.2.4.1 (задача 3): пункт
-        # становится переключателем expanded↔collapsed (checked = развёрнут) — ОДИН
-        # механизм «свернуть в тонкую линию» для обеих панелей: клик по пункту, угловая
-        # кнопка и полоска свёрнутой панели идут через один QAction (toggle() → toggled).
-        # Подключение к toggled(bool), а не triggered — паттерн фикса v1.2.4-fix у
-        # act_multi_input (PySide6 6.11: авто-подключение addAction(text, slot) эмитит
-        # triggered БЕЗ состояния; явный connect передаёт новое состояние и срабатывает
-        # на программный setChecked — галочка и механика не расходятся).
+        # v1.1.1 (item 5): show/hide the WHOLE sidebar; v1.2.4.1 (task 3): the item
+        # becomes an expanded<->collapsed toggle (checked = expanded) — ONE
+        # "collapse into a thin strip" mechanism for both panels: clicking the item, the corner
+        # button, and the collapsed panel's strip all go through one QAction (toggle() -> toggled).
+        # Connecting to toggled(bool), not triggered — the v1.2.4-fix pattern on
+        # act_multi_input (PySide6 6.11: the auto-connection addAction(text, slot) emits
+        # triggered WITHOUT state; an explicit connect passes the new state and fires
+        # on a programmatic setChecked — the checkbox and the mechanism stay in sync).
         self.act_show_sidebar = view_menu.addAction(
-            self.t("view.toggle_sidebar") if self._i18n_available else "Сайдбар")
+            self.t("view.toggle_sidebar") if self._i18n_available else "Sidebar")
         self.act_show_sidebar.setCheckable(True)
         self.act_show_sidebar.setChecked(True)
-        self.act_show_sidebar.setIcon(get_icon("sidebar_panel"))  # v1.2.4.1: иконка пары
+        self.act_show_sidebar.setIcon(get_icon("sidebar_panel"))  # v1.2.4.1: the pair's icon
         self.act_show_sidebar.toggled.connect(self._on_sidebar_toggled)
         self._register_i18n(self.act_show_sidebar, "view.toggle_sidebar")
-        # v1.2.4.1 (задача 3): карта — по тому же паттерну (создание вручную, иконка пары).
+        # v1.2.4.1 (task 3): the map — the same pattern (created manually, the pair's icon).
         self.act_show_map = view_menu.addAction(
-            self.t("view.toggle_map") if self._i18n_available else "Карта")
+            self.t("view.toggle_map") if self._i18n_available else "Map")
         self.act_show_map.setCheckable(True)
         self.act_show_map.setChecked(True)
         self.act_show_map.setIcon(get_icon("map_panel"))
         self.act_show_map.toggled.connect(self._on_map_toggled)
         self._register_i18n(self.act_show_map, "view.toggle_map")
-        # v1.2.4.1 (задача 2): угловые кнопки сворачивания — тот же QAction (toggle()).
-        # v1.2.4.1-fix (запрос тестировщика): иконка — ромб «◇» у обеих панелей, обе
-        # внизу справа (нижний ряд сайдбара / правый НИЖНИЙ угол карты — верх зарезервирован
-        # под миникарту по новым обсуждениям).
+        # v1.2.4.1 (task 2): corner collapse buttons — the same QAction (toggle()).
+        # v1.2.4.1-fix (QA request): the icon — a "◇" diamond on both panels, both
+        # at the bottom right (the sidebar's bottom row / the map's right BOTTOM corner — the top is
+        # reserved for the minimap per the new discussions).
         self.sidebar.collapse_btn.setIcon(_diamond_icon())
         if self._i18n_available:
             self.sidebar.collapse_btn.setToolTip(self.t("view.toggle_sidebar"))
@@ -1161,59 +1160,59 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         if self._i18n_available:
             self._map_collapse_btn.setToolTip(self.t("view.toggle_map"))
         self._map_collapse_btn.clicked.connect(lambda: self.act_show_map.toggle())
-        # v1.2.4.1 (задача 1): tooltip'ы полосок свёрнутых панелей.
+        # v1.2.4.1 (task 1): tooltips of the collapsed-panel strips.
         if self._i18n_available:
             self._sidebar_strip.setToolTip(self.t("view.strip_sidebar_tooltip"))
             self._map_strip.setToolTip(self.t("view.strip_map_tooltip"))
         self._sidebar_strip.expand_requested.connect(lambda: self.act_show_sidebar.toggle())
         self._map_strip.expand_requested.connect(lambda: self.act_show_map.toggle())
-        # v0.8.4 (бывш. DESIGN.md §D): массовое сворачивание — половина ценности фичи
-        # для больших карт.
+        # v0.8.4 (former DESIGN.md §D): bulk collapse — half of the feature's value
+        # for large maps.
         view_menu.addSeparator()
         self._add_menu_action(view_menu, "view.collapse_all", self._collapse_all_servers)
         self._add_menu_action(view_menu, "view.expand_all", self._expand_all_servers)
-        # v0.9.1: фоновое изображение карты (схема здания / план дата-центра)
+        # v0.9.1: a map background image (a building diagram / a data-center layout)
         view_menu.addSeparator()
         self._add_menu_action(view_menu, "view.set_background", self._set_background_image)
         self._add_menu_action(view_menu, "view.remove_background", self._remove_background_image)
-        # v1.2.3 (ROADMAP задачи 2/3): мультинабор — checkable-пункт; F12 = ВЫХОД из
-        # режима (не Esc — он уходит в shell как \x1b!). ApplicationShortcut: клавиша
-        # ловится независимо от того, где фокус (карта / окно терминала / док). Пока
-        # режим выключен шортката на QAction НЕТ (QKeySequence() пустой; QAction не
-        # имеет setShortcutEnabled) — F12 уходит в shell как \x1b[24~ (RC2-маппинг
-        # TerminalWidget); в режиме _on_multi_changed вешает F12, маппинг приостанавливается.
+        # v1.2.3 (ROADMAP tasks 2/3): multi-input — a checkable item; F12 = EXIT from
+        # the mode (not Esc — that goes to the shell as \x1b!). ApplicationShortcut: the key
+        # is caught regardless of where the focus is (map / terminal window / dock). While
+        # the mode is off, the QAction has NO shortcut (QKeySequence() is empty; QAction
+        # does not have setShortcutEnabled) — F12 goes to the shell as \x1b[24~ (the RC2
+        # mapping of TerminalWidget); in the mode, _on_multi_changed attaches F12 and the mapping is paused.
         view_menu.addSeparator()
-        # v1.2.4-fix (корень инцидента «пункт меню не работает»): пункт НЕ создаётся
-        # через _add_menu_action — его авто-подключение QMenu.addAction(text, slot) в
-        # PySide6 6.11 эмитит QAction.triggered в Python-слот БЕЗ аргументов (эмпирика:
-        # явный .triggered.connect передаёт новое состояние, авто-подключение — нет),
-        # причём отключить такое подключение disconnect() НЕ удаётся (RuntimeWarning,
-        # внутренний адаптер) — слот оставался бы висящим. checked=None падал в no-op-
-        # ветку: режим из меню не включался и не выключался вообще (двигалась только
-        # галочка; F12 тоже молчал — шорткат вешается только в активном режиме).
-        # Поэтому QAction создаётся вручную и подключается к toggled(bool) — он несёт
-        # новое состояние (и срабатывает на программный setChecked: галочка и хаб не
-        # расходятся). Регрессия: tests/test_menu_actions_regression.py.
+        # v1.2.4-fix (root cause of the "menu item does not work" incident): the item is
+        # NOT created via _add_menu_action — its auto-connection QMenu.addAction(text, slot) in
+        # PySide6 6.11 emits QAction.triggered into the Python slot WITHOUT arguments (empirically:
+        # an explicit .triggered.connect passes the new state, the auto-connection does not),
+        # and disconnect() CANNOT remove such a connection (RuntimeWarning,
+        # the internal adapter) — the slot would remain dangling. checked=None fell into the
+        # no-op branch: the mode could not be turned on or off from the menu at all (only the
+        # checkbox moved; F12 was silent too — the shortcut is attached only in the active mode).
+        # Therefore the QAction is created manually and connected to toggled(bool) — it carries
+        # the new state (and fires on a programmatic setChecked: the checkbox and the hub stay
+        # in sync). Regression: tests/test_menu_actions_regression.py.
         self.act_multi_input = view_menu.addAction(self.t("view.multi_input"))
         self._register_i18n(self.act_multi_input, "view.multi_input")
         self.act_multi_input.setCheckable(True)
         self.act_multi_input.setChecked(False)
         self.act_multi_input.toggled.connect(self._toggle_multi_input)
-        from PySide6.QtGui import QKeySequence as _QKeySequence  # локально (как QShortcut в палитре)
-        self.act_multi_input.setShortcut(_QKeySequence())  # F12 вешает _on_multi_changed (в режиме)
+        from PySide6.QtGui import QKeySequence as _QKeySequence  # locally (like QShortcut in the palette)
+        self.act_multi_input.setShortcut(_QKeySequence())  # F12 is attached by _on_multi_changed (in the mode)
         self.act_multi_input.setShortcutContext(Qt.ShortcutContext.ApplicationShortcut)
 
-        # v1.1 (ROADMAP задача 2): диалог настроек (хаб) — пункт «Настройки» МЕЖДУ
-        # «Вид» и «Помощь». Пункт — QAction ВНУТРИ меню (не голое действие на menubar):
-        # палитра команд (Ctrl+K) обходит все QAction меню и подхватит его автоматически.
+        # v1.1 (ROADMAP task 2): the settings dialog (hub) — the "Settings" item BETWEEN
+        # "View" and "Help". The item — a QAction INSIDE the menu (not a bare menubar action):
+        # the command palette (Ctrl+K) walks all menu QActions and will pick it up automatically.
         settings_menu = menubar.addMenu(
-            self.t("menu.settings") if self._i18n_available else "Настройки")
+            self.t("menu.settings") if self._i18n_available else "Settings")
         self._register_i18n(settings_menu, "menu.settings")
         self.act_settings = self._add_menu_action(
             settings_menu, "settings.open", self._open_settings_dialog)
 
         # Help menu
-        help_menu = menubar.addMenu(self.t("menu.help") if self._i18n_available else "Помощь")
+        help_menu = menubar.addMenu(self.t("menu.help") if self._i18n_available else "Help")
         self._register_i18n(help_menu, "menu.help")
         self._add_menu_action(help_menu, "help.open_logs", self._open_log_file)
 
@@ -1228,39 +1227,39 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
                     action = lang_menu.addAction(lg["name"])
                     action.setCheckable(True)
                     action.setChecked(lg["code"] == self.current_language)
-                    action.setData(lg["code"])  # код языка — для отметки при переключении
+                    action.setData(lg["code"])  # the language code — for the checkmark on switch
                     code = lg["code"]
                     action.triggered.connect(lambda checked, c=code: self._switch_language(c))
             except Exception as e:
                 if self.log:
                     self.log.warning(f"i18n lang menu error: {e}")
 
-        # v0.9.2: палитра команд (Ctrl+K) — fuzzy-поиск по действиям и серверам.
+        # v0.9.2: the command palette (Ctrl+K) — a fuzzy search over actions and servers.
         self._setup_command_palette()
 
-        # ── v0.9.8 bugfix (PySide6 6.11, shiboken): guard на QActions с меню ──
-        # Эмпирически проверено (пробы regression_v098, offscreen И native Windows):
-        # когда Python-обёртка QAction, у которого ПРИКРЕПЛЕНО QMenu, умирает
-        # (GC временного объекта из menubar.actions()/act.menu()), PySide6 уничтожает
-        # за ней C++-объект QMenu со всем содержимым. Без guard'а открытие палитры
-        # команд (Ctrl+K) или смена языка убивали ВСЕ меню, кроме последнего
-        # (палитра ходит по menubar.actions() временными обёртками). PySide6 кэширует
-        # обёртки (повторный доступ — тот же объект), поэтому постоянное хранение
-        # всех таких QAction в self._qaction_guard делает их бессмертными, а значит
-        # и прикреплённые QMenu живут. Это латает и _switch_language, и палитру,
-        # и любой будущий код, обходящий меню через action.menu().
+        # ── v0.9.8 bugfix (PySide6 6.11, shiboken): a guard for QActions with menus ──
+        # Verified empirically (regression_v098 probes, offscreen AND native Windows):
+        # when the Python wrapper of a QAction with an ATTACHED QMenu dies
+        # (GC of a temporary object from menubar.actions()/act.menu()), PySide6 destroys
+        # the C++ QMenu object behind it together with its entire contents. Without the
+        # guard, opening the palette (Ctrl+K) or a language switch killed ALL menus
+        # except the last one (the palette walks menubar.actions() with temporary wrappers).
+        # PySide6 caches the wrappers (a repeat access — the same object), so keeping
+        # all such QActions in self._qaction_guard makes them immortal, and therefore
+        # the attached QMenus live on. This fixes both _switch_language and the palette,
+        # and any future code that walks menus via action.menu().
         guard = []
         for w, _key in self._menu_i18n:
             if isinstance(w, QMenu):
                 guard.extend(list(w.actions()))
-        guard.extend(list(menubar.actions()))  # заголовки верхнего уровня (File/Edit/…)
+        guard.extend(list(menubar.actions()))  # top-level titles (File/Edit/…)
         self._qaction_guard = guard
 
     def _setup_command_palette(self):
-        """v0.9.2: создать палитру команд и хоткей Ctrl+K."""
+        """v0.9.2: create the command palette and the Ctrl+K hotkey."""
         try:
             from ui.command_palette import CommandPalette
-        except ImportError:  # плоский запуск из корня проекта
+        except ImportError:  # flat launch from the project root
             from command_palette import CommandPalette
         self._command_palette = CommandPalette(self, self)
 
@@ -1273,7 +1272,7 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
             self._command_palette.open_palette()
 
     def _iter_server_nodes(self):
-        """Все ServerNode сцены (для collapse/expand all)."""
+        """All ServerNodes in the scene (for collapse/expand all)."""
         scene = getattr(self, "scene", None)
         if scene is None:
             return []
@@ -1284,7 +1283,7 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
             return []
 
     def _set_all_collapsed(self, collapsed: bool):
-        """v0.8.4: свернуть/развернуть все плашки; состояние сохраняется в проект."""
+        """v0.8.4: collapse/expand all plaques; the state is saved into the project."""
         changed = False
         for node in self._iter_server_nodes():
             if bool(getattr(node.data, "collapsed", False)) != collapsed:
@@ -1299,71 +1298,71 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
     def _expand_all_servers(self):
         self._set_all_collapsed(False)
 
-    # ── v1.2.4.1 (ROADMAP v1.2.4.1): ОДИН механизм «свернуть в тонкую линию» ──
-    # Три точки управления каждой панелью (угловая кнопка, клик по полоске, пункт
-    # меню «Вид») идут через один checkable QAction: Qt-клик инвертирует checked сам,
-    # кнопки/полоска зовут action.toggle() — все пути эмитят toggled(bool) в слоты ниже.
+    # ── v1.2.4.1 (ROADMAP v1.2.4.1): ONE "collapse into a thin strip" mechanism ──
+    # The three control points of each panel (corner button, strip click,
+    # "View" menu item) all go through one checkable QAction: a Qt click inverts checked itself,
+    # buttons/strips call action.toggle() — all paths emit toggled(bool) into the slots below.
 
     def _toggle_sidebar(self, checked: bool = True):
-        """v1.1.1 (пункт 5) → v1.2.4.1: совместимость — checked = развёрнут.
+        """v1.1.1 (item 5) -> v1.2.4.1: compatibility — checked = expanded.
 
-        Раньше: setVisible по всему сайдбару (один виджет в QSplitter). Теперь:
-        переключатель expanded↔collapsed — свёрнутый сайдбар не теряет данные
-        (поиск/тег-фильтр/дерево живут, refresh_sidebar работает), на его месте
-        полоска ~18px.
+        Before: setVisible on the whole sidebar (a single widget in the QSplitter). Now:
+        an expanded<->collapsed toggle — a collapsed sidebar does not lose its data
+        (search/tag filter/tree survive, refresh_sidebar works); in its place
+        is a ~18px strip.
         """
         if self._set_panel_collapsed("sidebar", not checked) == "forbidden":
             self._reject_collapse_both("sidebar")
 
     def _on_sidebar_toggled(self, checked: bool):
-        """v1.2.4.1: пункт меню «Вид → Сайдбар» (toggled; checked = развёрнут)."""
+        """v1.2.4.1: menu item "View -> Sidebar" (toggled; checked = expanded)."""
         if self._set_panel_collapsed("sidebar", not checked) == "forbidden":
             self._reject_collapse_both("sidebar")
 
     def _on_map_toggled(self, checked: bool):
-        """v1.2.4.1: пункт меню «Вид → Карта» (toggled; checked = развёрнут)."""
+        """v1.2.4.1: menu item "View -> Map" (toggled; checked = expanded)."""
         if self._set_panel_collapsed("map", not checked) == "forbidden":
             self._reject_collapse_both("map")
 
     def _reject_collapse_both(self, which: str):
-        """v1.2.4.1-fix (запрос тестировщика): отказ свернуть ВТОРУЮ панель.
+        """v1.2.4.1-fix (QA request): refuse to collapse the SECOND panel.
 
-        Все три пути управления сходятся в checkable QAction, и при запрете Qt уже
-        инвертировал checked (или его инвертировал программный setChecked) — галочку
-        возвращаем в фактическое состояние с заблокированными сигналами (паттерн
-        v1.2.4-fix: галочка и механика не расходятся) + подсказка в статус-баре.
+        All three control paths converge on a checkable QAction, and on refusal Qt has
+        already inverted checked (or a programmatic setChecked did) — the checkbox is
+        restored to the actual state with signals blocked (the
+        v1.2.4-fix pattern: the checkbox and the mechanism stay in sync) + a status-bar hint.
         """
         act = getattr(self, "act_show_sidebar" if which == "sidebar" else "act_show_map", None)
         if act is not None:
             try:
                 act.blockSignals(True)
-                act.setChecked(True)  # панель остаётся развёрнутой
+                act.setChecked(True)  # the panel stays expanded
             finally:
                 act.blockSignals(False)
         try:
             self.statusBar().showMessage(self.t("status.collapse_both_forbidden"))
-        except Exception:  # noqa: BLE001 — подсказка не роняет отказ
+        except Exception:  # noqa: BLE001 — the hint must not break the refusal
             pass
 
     def _set_panel_collapsed(self, which: str, collapsed: bool) -> str:
-        """v1.2.4.1 (задача 1): свернуть/развернуть сайдбар или карту в полоску.
+        """v1.2.4.1 (task 1): collapse/expand the sidebar or the map into a strip.
 
-        `which` — "sidebar" | "map"; `collapsed` — целевое состояние (True = полоска).
-        Идемпотентно: no-op, если панель уже в целевом состоянии (toggled/trigger могут
-        прийти повторно). В свёрнутом состоянии реальный виджет hide()н (скрытый член
-        контейнера занимает 0px — нативный Qt), показана кликабельная полоска; ширина
-        контейнера фиксируется setSizes + minimumWidth=18. При развёртывании
-        восстанавливается СОБСТВЕННАЯ ширина панели ДО сворачивания (сохраняется при
-        первом сворачивании в текущем цикле); если вторая панель тоже свёрнута — она
-        остаётся полоской (18px), остальное место берёт развёрнутая. Состояние
-        персистентно: ui_sidebar_collapsed / ui_map_collapsed в config.json
-        (merge-write i18n.save_config) — переживает перезапуск.
+        `which` — "sidebar" | "map"; `collapsed` — the target state (True = strip).
+        Idempotent: a no-op if the panel is already in the target state (toggled/trigger
+        may arrive again). In the collapsed state the real widget is hidden (a hidden
+        container child takes 0px — native Qt); a clickable strip is shown; the container
+        width is fixed by setSizes + minimumWidth=18. On expand
+        the panel's OWN width from BEFORE the collapse is restored (saved on the
+        first collapse of the current cycle); if the other panel is also collapsed — it
+        stays a strip (18px) and the expanded one takes the rest of the space. The state
+        is persistent: ui_sidebar_collapsed / ui_map_collapsed in config.json
+        (a merge-write via i18n.save_config) — it survives a restart.
 
-        v1.2.4.1-fix (запрос тестировщика): обе панели ОДНОВРЕМЕННО свёрнутыми быть
-        НЕ МОГУТ — хотя бы одна (сайдбар или карта) всегда развёрнута, иначе окно —
-        «пустышка» из двух полосок (даже при открытом доке «Терминалы»). Сворачивание
-        второй панели запрещено для ВСЕХ путей управления (кнопка/полоска/меню/программный
-        setChecked — все сходятся в toggled). Возвращает "changed" / "noop" / "forbidden".
+        v1.2.4.1-fix (QA request): both panels SIMULTANEOUSLY collapsed are
+        NOT ALLOWED — at least one (the sidebar or the map) is always expanded, otherwise
+        the window is a "shell" of two strips (even with the "Terminals" dock open).
+        Collapsing the second panel is forbidden for ALL control paths (button/strip/menu/
+        programmatic setChecked — they all converge on toggled). Returns "changed" / "noop" / "forbidden".
         """
         if which == "sidebar":
             panel, strip = self.sidebar, self._sidebar_strip
@@ -1380,9 +1379,9 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         else:
             return "noop"
         if getattr(self, flag_attr) == bool(collapsed):
-            return "noop"  # уже в целевом состоянии — no-op
+            return "noop"  # already in the target state — a no-op
         if collapsed and getattr(self, other_flag, False):
-            return "forbidden"  # вторая панель уже полоска — обе свёрнутыми нельзя
+            return "forbidden"  # the other panel is already a strip — both cannot be collapsed
 
         try:
             w_strip = _CollapseStrip.STRIP_WIDTH
@@ -1390,13 +1389,13 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
             own_w = sizes[0] if which == "sidebar" else sizes[1]
             if collapsed:
                 saved_attr = f"_saved_panel_width_{which}"
-                # Сохраняем ширину только если вторая панель развёрнута: иначе «своя»
-                # ширина завышена (вторая — полоска 18px) и восстановление её при
-                # втором развёртывании сжимало бы первую до minimum. Без сохранения —
-                # дефолт 250/950 при развёртывании (разумный возврат).
+                # Save the width only if the other panel is expanded: otherwise the "own"
+                # width is overstated (the other is a 18px strip) and restoring it on the
+                # second expand would squeeze the first to its minimum. Without the save —
+                # the 250/950 default on expand (a sensible fallback).
                 if getattr(self, saved_attr, None) is None \
                         and not getattr(self, other_flag, False):
-                    setattr(self, saved_attr, int(own_w))  # ширина ДО сворачивания
+                    setattr(self, saved_attr, int(own_w))  # the width BEFORE collapsing
                 panel.hide()
                 strip.show()
                 container.setMinimumWidth(w_strip)
@@ -1414,7 +1413,7 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
                 total = max(self._splitter.width(), 2 * w_strip + 10)
                 x_w = int(saved) if saved else (250 if which == "sidebar" else 950)
                 if getattr(self, other_flag, False):
-                    # вторая панель свёрнута — остаётся полоской (инвариант 18px)
+                    # the other panel is collapsed — it stays a strip (the 18px invariant)
                     if which == "sidebar":
                         self._splitter.setSizes([x_w, w_strip])
                     else:
@@ -1425,23 +1424,24 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
                     else:
                         self._splitter.setSizes([total - x_w, x_w])
         except RuntimeError:
-            return "noop"  # Qt teardown — C++-объект уже уничтожен
+            return "noop"  # Qt teardown — the C++ object is already destroyed
 
         setattr(self, flag_attr, bool(collapsed))
         try:
             from i18n import save_config as _save_cfg
             _save_cfg({key: bool(collapsed)})
-        except Exception:  # noqa: BLE001 — персистентность не роняет переключение
+        except Exception:  # noqa: BLE001 — persistence must not break the toggle
             pass
         return "changed"
 
     def _position_map_collapse_btn(self):
-        """v1.2.4.1 (задача 2): кнопка сворачивания карты — правый НИЖНИЙ угол MapView.
+        """v1.2.4.1 (task 2): the map collapse button — the right BOTTOM corner of the MapView.
 
-        v1.2.4.1-fix (запрос тестировщика): была в правом ВЕРХНЕМ углу — теперь внизу
-        (ромб «внизу» и до, и после сворачивания); верх зарезервирован под миникарту
-        по новым обсуждениям. Перепозиция по resizeEvent (сигнал MapView.resized:
-        ресайз окна, драг ручки сплиттера, смена размеров дока «Терминалы»).
+        v1.2.4.1-fix (QA request): it used to be in the right TOP corner — now at the bottom
+        (the diamond is "at the bottom" both before and after collapsing); the top is
+        reserved for the minimap per the new discussions. Repositioned on resizeEvent
+        (the MapView.resized signal: a window resize, a splitter-handle drag,
+        a "Terminals" dock size change).
         """
         btn = getattr(self, "_map_collapse_btn", None)
         view = getattr(self, "view", None)
@@ -1455,7 +1455,7 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
             bh = max(btn.sizeHint().height(), 24)
             btn.move(max(4, w - bw - 8), max(4, h - bh - 8))
         except RuntimeError:
-            pass  # Qt teardown — виджет уже уничтожен
+            pass  # Qt teardown — the widget is already destroyed
 
     def _switch_language(self, language_code: str):
         """Switch application language and re-apply to all UI elements."""
@@ -1468,24 +1468,24 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
             if success:
                 self.current_language = language_code
 
-                # Переводим меню/тулбар/подписи по зарегистрированным ключам
+                # Translate the menus/toolbar/labels by the registered keys
                 self._apply_ui_translations()
 
-                # v0.9.8: панель поиска по карте — плейсхолдер и счётчик на новом языке
+                # v0.9.8: the map search panel — the placeholder and counter in the new language
                 _map_bar = getattr(self, "map_search", None)
                 if _map_bar is not None:
                     try:
                         _map_bar.retranslate()
-                    except Exception:  # noqa: BLE001 — панель косметика при teardown
+                    except Exception:  # noqa: BLE001 — the panel is cosmetic on teardown
                         pass
 
-                # Заголовок окна (с учётом файла проекта и маркера [*])
+                # The window title (accounting for the project file and the [*] marker)
                 self._update_window_title()
 
-                # Отмечаем активный язык в подменю Язык.
-                # v0.9.8 bugfix: НЕ обходим через action.menu() — см. _qaction_guard выше:
-                # временные Python-обёртки QAction с прикреплённым QMenu роняли C++-меню
-                # (PySide6 6.11). Подменю берём напрямую из i18n-реестра — безопасно.
+                # Mark the active language in the Language submenu.
+                # v0.9.8 bugfix: do NOT walk via action.menu() — see _qaction_guard above:
+                # temporary Python wrappers of QActions with an attached QMenu dropped the C++ menu
+                # (PySide6 6.11). The submenu is taken straight from the i18n registry — safe.
                 lang_menu = None
                 for w, k in self._menu_i18n:
                     if k == "lang.menu":
@@ -1497,7 +1497,7 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
                             if sub.data() is not None:
                                 sub.setChecked(sub.data() == language_code)
                     except RuntimeError:
-                        pass  # Qt teardown — подменю уже уничтожено, отмечать нечего
+                        pass  # Qt teardown — the submenu is already destroyed; nothing to mark
 
                 if self.log:
                     self.log.info(f"Language switched to {language_code}")
@@ -1508,23 +1508,23 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
             if self.log:
                 self.log.exception(f"Error switching language to {language_code}")
 
-    # ── v1.1: диалог настроек (хаб) — ROADMAP v1.1, задачи 1–7 ────────────────
-    # ── v1.1.1: опции вокруг хаба — применение на лету без перезапуска ────────
+    # ── v1.1: the settings dialog (hub) — ROADMAP v1.1, tasks 1–7 ────────────────
+    # ── v1.1.1: options around the hub — applied live without a restart ────────
 
     def _apply_ui_options_from_config(self):
-        """v1.1.1: применить ui_* опции из config.json (старт и после ОК в диалоге).
+        """v1.1.1: apply the ui_* options from config.json (at startup and after the dialog's OK).
 
-        * Шрифт UI — QApplication.setFont (семейство/размер; пусто/0 = системный);
-          применяется к виджетам без перезапуска (Qt пересчитывает шрифты, не
-          установленные явно на каждом виджете).
-        * Блок кнопок сайдбара — SidebarPanel.set_buttons_visible (layout сам
-          перестроится); весь сайдбар прячется отдельно — пункт меню «Вид».
-        * Режим двойного клика по узлу — кэш self._node_double_click_mode
-          ("properties" дефолт | "connect" → _run_ssh_connect).
+        * UI font — QApplication.setFont (family/size; empty/0 = system);
+          applied to the widgets without a restart (Qt recomputes fonts not
+          set explicitly on each widget).
+        * The sidebar button block — SidebarPanel.set_buttons_visible (the layout
+          reflows itself); the whole sidebar is hidden separately — the "View" menu item.
+        * The node double-click mode — the self._node_double_click_mode cache
+          ("properties" the default | "connect" -> _run_ssh_connect).
         """
         try:
             from ui.settings_dialog import load_ui_settings as _load_ui
-        except ImportError:  # плоский запуск из корня проекта
+        except ImportError:  # flat launch from the project root
             from settings_dialog import load_ui_settings as _load_ui
         ui_cfg = _load_ui()
 
@@ -1540,7 +1540,7 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
                     if size is not None:
                         f.setPointSize(int(size))
                     app.setFont(f)
-            except Exception as e:  # noqa: BLE001 — шрифт не роняет старт/применение
+            except Exception as e:  # noqa: BLE001 — the font must not break startup/apply
                 if self.log:
                     self.log.warning(f"Apply UI font failed: {e}")
 
@@ -1549,15 +1549,15 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
             try:
                 panel.set_buttons_visible(ui_cfg["show_sidebar_buttons"])
             except RuntimeError:
-                pass  # Qt teardown — панель уже уничтожена
+                pass  # Qt teardown — the panel is already destroyed
 
         self._node_double_click_mode = ui_cfg["node_double_click"]
 
-        # v1.2.4.1 (задача 4): состояние сворачивания панелей из config.json —
-        # ui_sidebar_collapsed / ui_map_collapsed. Применяется при старте ПОСЛЕ
-        # restoreState() (метод вызывается в __init__ после restore_window_geometry)
-        # и после ОК в диалоге настроек (идемпотентно: _set_panel_collapsed — no-op,
-        # если состояние совпадает). setChecked(False) эмитит toggled → механизм.
+        # v1.2.4.1 (task 4): the panel collapse state from config.json —
+        # ui_sidebar_collapsed / ui_map_collapsed. Applied at startup AFTER
+        # restoreState() (the method is called in __init__ after restore_window_geometry)
+        # and after the settings dialog's OK (idempotent: _set_panel_collapsed is a no-op
+        # if the state matches). setChecked(False) emits toggled -> the mechanism.
         try:
             from i18n import load_config as _load_cfg
             _cfg = _load_cfg()
@@ -1565,39 +1565,39 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
                               ("act_show_map", "ui_map_collapsed")):
                 act = getattr(self, attr, None)
                 if act is not None and bool(_cfg.get(key, False)):
-                    act.setChecked(False)  # checked = развёрнут → сворачиваем
-        except Exception as e:  # noqa: BLE001 — состояние не роняет старт/применение
+                    act.setChecked(False)  # checked = expanded -> collapse
+        except Exception as e:  # noqa: BLE001 — the state must not break startup/apply
             if self.log:
                 self.log.warning(f"Apply panel collapsed states failed: {e}")
 
     def _open_settings_dialog(self):
-        """v1.1: открыть диалог настроек (QTabWidget-хаб) — меню «Настройки» и кнопка ⚙."""
+        """v1.1: open the settings dialog (the QTabWidget hub) — the "Settings" menu and the ⚙ button."""
         try:
             from ui.settings_dialog import SettingsDialog
-        except ImportError:  # плоский запуск из корня проекта
+        except ImportError:  # flat launch from the project root
             from settings_dialog import SettingsDialog
         dlg = SettingsDialog(self)
-        # Сигналы диалога → слоты окна (диалог не знает о MainWindow — паттерн sidebar.py):
-        # applied — применить автосохранение/статусы на лету; language_changed — тот же
-        # путь, что у пункта «Помощь → Язык» (set_language + полный retranslate UI).
+        # Dialog signals -> window slots (the dialog knows nothing about MainWindow — the sidebar.py pattern):
+        # applied — apply autosave/statuses live; language_changed — the same
+        # path as the "Help -> Language" item (set_language + a full UI retranslate).
         dlg.applied.connect(self._apply_settings_from_dialog)
         dlg.language_changed.connect(self._switch_language)
         dlg.exec()
 
     def _apply_settings_from_dialog(self):
-        """v1.1: применить сохранённые настройки на лету (после ОК в диалоге).
+        """v1.1: apply the saved settings live (after the dialog's OK).
 
-        * Автосохранение — QTimer прямо сейчас (интервал + старт/стоп по enabled);
-        * Статусы — StatusChecker.set_interval/set_probe_timeout/set_max_parallel
-          (следующий раунд; v1.1.2 final: параллельные пробы, потолок 1..64);
-        * v1.1.1: шрифт UI (QApplication.setFont), шрифт открытых окон терминала
-          (widget.set_font — без перезапуска), кнопки сайдбара, режим двойного
-          клика, перерисовка плашек связей (опция «тип на плашке»);
-        * Терминал (палитра/история/поведение закрытия) и внешний терминал
-          читают конфиг при следующем создании окна/запуске — действия не нужно;
-        * v1.2.2: terminal_mode ("windows"|"tabs") — применение БЕЗ перезапуска
-          «на новые сессии»: _spawn_terminal_window читает ключ на каждом вызове,
-          открытые окна/док живут как есть до закрытия (задача 4) — действия нет.
+        * Autosave — the QTimer right now (interval + start/stop per enabled);
+        * Statuses — StatusChecker.set_interval/set_probe_timeout/set_max_parallel
+          (the next round; v1.1.2 final: parallel probes, cap 1..64);
+        * v1.1.1: the UI font (QApplication.setFont), the open terminal windows' font
+          (widget.set_font — without a restart), the sidebar buttons, the double-click
+          mode, redrawing the connection plaques (the "type on plaque" option);
+        * The terminal (palette/history/close behavior) and the external terminal
+          read the config at the next window creation/launch — no action needed;
+        * v1.2.2: terminal_mode ("windows"|"tabs") — applied WITHOUT a restart
+          "to new sessions": _spawn_terminal_window reads the key on every call;
+          open windows/the dock live on as-is until closed (task 4) — no action.
         """
         try:
             from storage.autosave import get_autosave_settings as _get_as
@@ -1608,7 +1608,7 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
                 self._autosave_timer.start()
             else:
                 self._autosave_timer.stop()
-        except Exception as e:  # noqa: BLE001 — таймер не должен ронять применение
+        except Exception as e:  # noqa: BLE001 — the timer must not break applying
             if self.log:
                 self.log.warning(f"Apply autosave settings failed: {e}")
         checker = getattr(self, "_status_checker", None)
@@ -1618,21 +1618,21 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
                 _st_cfg = _get_st()
                 checker.set_interval(int(_st_cfg["interval_sec"]) * 1000)
                 checker.set_probe_timeout(float(_st_cfg["probe_timeout_sec"]))
-                # v1.1.2 final (задача 2): потолок параллельных проб — со следующего раунда
+                # v1.1.2 final (task 2): the parallel-probe cap — from the next round
                 checker.set_max_parallel(int(_st_cfg["max_parallel"]))
-            except Exception as e:  # noqa: BLE001 — статусы не должны ронять применение
+            except Exception as e:  # noqa: BLE001 — the statuses must not break applying
                 if self.log:
                     self.log.warning(f"Apply status settings failed: {e}")
 
-        # v1.1.1 (пункт 1): шрифт UI + кнопки сайдбара + режим двойного клика
+        # v1.1.1 (item 1): the UI font + the sidebar buttons + the double-click mode
         try:
             self._apply_ui_options_from_config()
-        except Exception as e:  # noqa: BLE001 — опции не должны ронять применение
+        except Exception as e:  # noqa: BLE001 — the options must not break applying
             if self.log:
                 self.log.warning(f"Apply UI options failed: {e}")
 
-        # v1.1.1 (пункт 1): шрифт терминала — в УЖЕ ОТКРЫТЫЕ сессии без перезапуска
-        # (v1.2: реестр хранит страницы — page.widget)
+        # v1.1.1 (item 1): the terminal font — into the ALREADY OPEN sessions without a restart
+        # (v1.2: the registry stores pages — page.widget)
         try:
             from modules.ssh_terminal import load_terminal_settings as _load_ts
         except ImportError:
@@ -1645,27 +1645,27 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
                         family=term_cfg["font_family"],
                         size=term_cfg["font_size"] if term_cfg["font_size"] is not None else 10)
                 except (RuntimeError, AttributeError):
-                    pass  # Qt teardown / сессия без widget — пропускаем
+                    pass  # Qt teardown / a session without a widget — skip it
 
-        # v1.1.1 (пункт 6): опция «тип на плашке» — перерисовать метки связей сцены
+        # v1.1.1 (item 6): the "type on plaque" option — redraw the scene's connection labels
         try:
             for arrow in list(getattr(self.scene, "_arrows", [])):
                 arrow.refresh_label()
-        except Exception:  # noqa: BLE001 — плашки косметика при teardown
+        except Exception:  # noqa: BLE001 — the plaques are cosmetic on teardown
             pass
 
         try:
             self.statusBar().showMessage(self.t("status.settings_saved"))
-        except Exception:  # noqa: BLE001 — teardown-устойчивость
+        except Exception:  # noqa: BLE001 — teardown robustness
             pass
 
     # ─────────────────────────────────────────────
 
     def _on_node_double_click_direct(self, node: ServerNode):
         """Handle double-click on a node."""
-        # v1.1.1 (пункт 4): режим из ключа ui_node_double_click — "connect" сразу
-        # открывает диалог входа SSH (быстрее дублирует чекбокс «Подключиться по
-        # SSH» в свойствах, тот не ломается); дефолт "properties" — поведение v1.1.
+        # v1.1.1 (item 4): the mode from the ui_node_double_click key — "connect" opens
+        # the SSH login dialog right away (a faster duplicate of the "Connect via
+        # SSH" checkbox in the properties, which is not broken); the default "properties" — the v1.1 behavior.
         if getattr(self, "_node_double_click_mode", "properties") == "connect":
             self._run_ssh_connect(node)
             return
@@ -1673,23 +1673,23 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
             dlg = AddServerDialog(self, edit_data=node.data)
             if dlg.exec() == QDialog.Accepted:
                 new_data = dlg.get_data()
-                # v0.8.3: правка данных сервера — undo-команда (id сохраняем!)
+                # v0.8.3: editing the server data — an undo command (the id is preserved!)
                 new_data.id = node.data.id
                 old_data = copy.deepcopy(node.data)
                 from modules.undo_commands import CmdEditNodeData
                 self._push_command(CmdEditNodeData(self, node, old_data, new_data))
                 self.refresh_sidebar()
-                # v0.7.1: host/порт могли измениться — обновляем план проверок и
-                # сбрасываем статус (старый больше неактуален)
+                # v0.7.1: host/port may have changed — update the check plan and
+                # reset the status (the old one is no longer relevant)
                 node.reset_status()
                 self._sync_status_targets()
                 if self.log:
                     self.log.info("Server updated", extra={"alias": new_data.alias})
                 self.statusBar().showMessage(self.t("status.server_updated", alias=new_data.alias))
                 self._mark_dirty()  # ← unsaved changes
-                # v0.9.5.6: «Подключиться по SSH» из свойств — данные уже
-                # применены к узлу (CmdEditNodeData), открываем SSH-диалог
-                # с предзаполненным паролем из полей свойств.
+                # v0.9.5.6: "Connect via SSH" from the properties — the data is already
+                # applied to the node (CmdEditNodeData); open the SSH dialog
+                # with the password prefilled from the property fields.
                 if getattr(dlg, "_connect_after_accept", False):
                     self._run_ssh_connect(node, prefill_password=dlg.password.text())
         except Exception as e:
@@ -1698,10 +1698,10 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
             QMessageBox.critical(self, self.t("msg.error_title"), self.t("msg.update_failed", error=str(e)))
 
     def _select_node(self, node: ServerNode, center: bool = False):
-        # v0.9.9.1: reentry-guard вместо scene.blockSignals — остальные слоты
-        # selectionChanged продолжают работать во время программной смены; эхо-
-        # обработчик сразу возвращается по флагу, а явная синхронизация ниже
-        # идемпотентна (полный пересчёт состояния, «дерево = выделению сцены»).
+        # v0.9.9.1: a reentry guard instead of scene.blockSignals — the other
+        # selectionChanged slots keep working during the programmatic change; the echo
+        # handler returns immediately on the flag, and the explicit sync below
+        # is idempotent (a full state recompute, "tree = scene selection").
         self._selection_syncing = True
         try:
             self.scene.clearSelection()
@@ -1709,33 +1709,33 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         finally:
             self._selection_syncing = False
         self._sync_selection_state()
-        # v1.2.4.1 (задача 5): карта свёрнута — центрирование пропускается (выделение
-        # и акцент работают; без исключений и без авто-показа карты). Покрыты все пути:
-        # «Показать на карте» (_reveal_node_on_map) и навигация поиска Enter/Shift+Enter.
+        # v1.2.4.1 (task 5): the map is collapsed — centering is skipped (selection
+        # and the accent still work; no exceptions and no auto-show of the map). All paths
+        # are covered: "Show on map" (_reveal_node_on_map) and the search navigation Enter/Shift+Enter.
         if center and not getattr(self, "_map_collapsed", False):
             self.view.centerOn(node)
 
     def _sync_selection_state(self):
-        # v0.9.9.1: reentry-guard — пока идёт программная смена выделения, эхо
-        # собственных сигналов возвращается сразу (без рекурсии); явный вызов
-        # после смены делает полный идемпотентный пересчёт, поэтому внешнее
-        # изменение в окне синхронизации не теряется — следующее выравнивание сходится.
+        # v0.9.9.1: reentry guard — while the programmatic selection change is in flight,
+        # the echo of our own signals returns immediately (no recursion); the explicit call
+        # after the change does a full idempotent recompute, so an external
+        # change inside the sync window is not lost — the next alignment converges.
         if getattr(self, "_selection_syncing", False):
             return
         try:
             selected_node = self.scene.get_selected_node()
-            # v0.9.3: мультивыделение — подсветка рамки у КАЖДОГО выделенного
-            # узла, а не только первого из selectedItems().
+            # v0.9.3: multi-selection — a selection frame on EVERY selected
+            # node, not just the first of selectedItems().
             for node in self.scene.nodes():
                 try:
                     node.set_selected(node.isSelected())
                 except RuntimeError:
-                    pass  # Qt teardown — отдельный item уничтожен
+                    pass  # Qt teardown — one item is destroyed
 
             selected_id = selected_node.data.id if selected_node else None
-            # v0.9.9.1: без tree.blockSignals — синхронизация идемпотентна по
-            # состоянию (полный пересчёт, а не «применить дельту»), поэтому эхо
-            # во время выравнивания безвредно, а чужие слоты дерева не подавляются.
+            # v0.9.9.1: no tree.blockSignals — the sync is idempotent by
+            # state (a full recompute, not "apply a delta"), so the echo
+            # during the alignment is harmless and the tree's own slots are not suppressed.
             self.tree.setCurrentItem(None)
             for i in range(self.tree.topLevelItemCount()):
                 item = self.tree.topLevelItem(i)
@@ -1743,9 +1743,9 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
                     self.tree.setCurrentItem(item)
                     break
         except RuntimeError:
-            # PySide6/Qt teardown при выходе из процесса: C++-объект сцены уже
-            # уничтожен, а сигнал selectionChanged доехал до живого Python-слота.
-            # Нормальное состояние — молча игнорируем (иначе traceback в консоль).
+            # PySide6/Qt teardown on process exit: the scene's C++ object is already
+            # destroyed, yet the selectionChanged signal reached a live Python slot.
+            # A normal state — silently ignore it (otherwise a traceback in the console).
             pass
 
     def _show_properties(self):
@@ -1756,17 +1756,17 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
             QMessageBox.information(self, self.t("msg.info_title"), 
                                   self.t("msg.properties_select"))
 
-    # ── v0.7.3: контекстное меню узла и стрелки ────────────────
+    # ── v0.7.3: the node and arrow context menus ────────────────
 
     def _edit_node(self, node: "ServerNode"):
-        """Редактирование узла (контекстное меню / двойной клик)."""
+        """Edit a node (context menu / double click)."""
         if node is not None:
             self._on_node_double_click_direct(node)
 
-    # ── v0.9.2: хоткеи частых действий над выделенным узлом ─────
+    # ── v0.9.2: hotkeys for frequent actions on the selected node ─────
 
     def _edit_selected_node(self):
-        """Ctrl+E: редактировать выделенный на карте сервер."""
+        """Ctrl+E: edit the server selected on the map."""
         node = self.scene.get_selected_node()
         if not node:
             QMessageBox.information(self, self.t("msg.info_title"),
@@ -1775,7 +1775,7 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         self._edit_node(node)
 
     def _add_note_at_view_center(self):
-        """Ctrl+Shift+N: заметка в центре видимой области карты."""
+        """Ctrl+Shift+N: a note at the center of the map's visible area."""
         self._add_note_at()
 
     def _delete_selected(self):
@@ -1783,38 +1783,38 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         if node:
             self._remove_node_guarded(node)
             return
-        # v0.8.1: выделенная группа — серверы остаются на карте, удаляется только рамка
+        # v0.8.1: a selected group — the servers stay on the map; only the frame is removed
         group = self.scene.get_selected_group()
         if group is not None:
             self._remove_group(group)
 
-    # ── v0.7.2: Sticky Notes (заметки на карте) ───────────────
+    # ── v0.7.2: Sticky Notes (notes on the map) ───────────────
 
     def _connect_note_signals(self, note):
-        """Подключить сигналы заметки к dirty-маркеру и undo (v0.8.3: правка текста)."""
+        """Wire the note's signals to the dirty marker and undo (v0.8.3: text editing)."""
         try:
             note.textEdited.connect(lambda *_a: self._on_note_text_edited(note))
             note.moved.connect(lambda *_a: self._mark_dirty())
-            # v1.2.4: крепление к серверу (drag на узел / drag закреплённой)
+            # v1.2.4: attachment to a server (drag onto a node / drag of an attached one)
             note.attachRequested.connect(
                 lambda node, n=note: self._attach_note_to_node(n, node))
             note.detachRequested.connect(
                 lambda *_a, n=note: self._detach_note(n))
         except Exception:
-            pass  # повторное подключение для той же заметки — не критично
+            pass  # re-wiring the same note — not critical
 
     def _on_note_text_edited(self, note):
-        """v0.8.3: правка текста — перезапуск дебаунса; по тишине → команда undo."""
+        """v0.8.3: a text edit — restart the debounce; on silence -> an undo command."""
         self._mark_dirty()
         try:
             committed = self._note_committed.get(note.note_id)
             if committed is not None and note.text() == committed:
                 self._note_edit_pending = None
-                return  # текст совпадает с уже закоммиченным (undo/redo вернул) — команды не надо
+                return  # the text matches the committed one (undo/redo restored it) — no command needed
         except RuntimeError:
             return
         if not self._note_edit_pending or self._note_edit_pending[0] is not note:
-            # новая сессия правки этой заметки — фиксируем стартовый текст
+            # a new edit session of this note — capture the starting text
             try:
                 start = self._note_committed.get(note.note_id, note.text())
             except RuntimeError:
@@ -1823,16 +1823,16 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         self._note_edit_timer.start()
 
     def _add_note_at(self, scene_pos=None) -> None:
-        """Создать заметку в точке сцены (центр — под курсором)."""
+        """Create a note at a scene point (center — under the cursor)."""
         if scene_pos is not None:
-            x = float(scene_pos.x()) - 120.0   # ~половина ширины по умолчанию
-            y = float(scene_pos.y()) - 80.0    # ~половина высоты по умолчанию
+            x = float(scene_pos.x()) - 120.0   # ~half of the default width
+            y = float(scene_pos.y()) - 80.0    # ~half of the default height
         else:
             center = self.view.mapToScene(self.view.viewport().rect().center())
             x, y = float(center.x()) - 120.0, float(center.y()) - 80.0
         note = self.scene.add_note(x=x, y=y)
-        # v0.8.3: создание заметки — undo-команда; сама заметка уже добавлена выше
-        # (add_note вернул объект), но для undo её нужно удалить/восстановить командой.
+        # v0.8.3: creating a note — an undo command; the note itself is already added above
+        # (add_note returned the object), but for undo it must be removed/restored by a command.
         from modules.undo_commands import CmdAddRemoveNote, CmdEditTextNote
         raw = {"id": note.note_id, "text": "", "x": float(note.pos().x()),
                "y": float(note.pos().y()),
@@ -1846,7 +1846,7 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         self._mark_dirty()
 
     def _remove_note(self, note) -> bool:
-        """Удалить заметку (лёгкий объект — без диалога подтверждения)."""
+        """Remove a note (a light object — no confirmation dialog)."""
         note_id = getattr(note, "note_id", None)
         if not note_id or self.scene.get_note_by_id(note_id) is None:
             return False
@@ -1855,7 +1855,7 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
             raw = note.to_dict()
         except RuntimeError:
             return False
-        self._note_edit_pending = None  # незакоммиченная правка уходит вместе с командой удаления
+        self._note_edit_pending = None  # the uncommitted edit goes away with the removal command
         self._push_command(CmdAddRemoveNote(self, self.scene, raw, "remove"))
         if self.log:
             self.log.info("Note deleted", extra={"id": note_id})
@@ -1864,12 +1864,12 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         return True
 
     def _attach_note_to_node(self, note, node) -> bool:
-        """v1.2.4: прикрепить заметку к узлу (меню / drag). Undo-команда."""
+        """v1.2.4: attach a note to a node (menu / drag). An undo command."""
         if note is None or node is None:
             return False
         try:
             if note.scene() is None or getattr(note, "server_id", None) == node.data.id:
-                return False  # уже закреплена к этому же узлу — no-op
+                return False  # already attached to this same node — a no-op
         except RuntimeError:
             return False
         from modules.undo_commands import CmdAttachNote
@@ -1881,7 +1881,7 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         return True
 
     def _detach_note(self, note) -> bool:
-        """v1.2.4: открепить заметку (меню / drag / удаление сервера). Undo-команда."""
+        """v1.2.4: detach a note (menu / drag / server removal). An undo command."""
         sid = getattr(note, "server_id", None) if note is not None else None
         if not sid:
             return False
@@ -1893,45 +1893,45 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         self._mark_dirty()
         return True
 
-    # ── v0.8.1: Группировка узлов (кластеры/папки на карте) ─────
+    # ── v0.8.1: node grouping (clusters/folders on the map) ─────
 
     def _commit_group_move(self, group, old_pos, new_pos):
-        """v0.8.3-audit (#6): завершён жест перемещения группы → CmdMoveGroup."""
+        """v0.8.3-audit (#6): a group-move gesture finished -> CmdMoveGroup."""
         from modules.undo_commands import CmdMoveGroup
         self._push_command(CmdMoveGroup(self, group, old_pos, new_pos))
         self._mark_dirty()
 
     def _commit_group_resize(self, group, w0, h0, w1, h1):
-        """v0.8.3-audit (#6): завершён resize группы → CmdResizeGroup."""
+        """v0.8.3-audit (#6): a group resize finished -> CmdResizeGroup."""
         from modules.undo_commands import CmdResizeGroup
         self._push_command(CmdResizeGroup(self, group, (w0, h0), (w1, h1)))
         self._mark_dirty()
 
     def _connect_group_signals(self, group):
-        """Подключить сигналы группы: dirty-маркер + undo-команды
-        (v0.8.3-audit #6: перемещение/resize/переименование входят в стек);
-        renameRequested — к диалогу переименования."""
+        """Wire the group's signals: the dirty marker + undo commands
+        (v0.8.3-audit #6: move/resize/rename enter the stack);
+        renameRequested — to the rename dialog."""
         try:
             for sig in (group.moved, group.resized, group.titleChanged,
                         group.membershipChanged):
                 sig.connect(lambda *_a: self._mark_dirty())
-            # Undo-коммиты завершённых жестов (паттерн node_drag_committed)
+            # Undo commits of finished gestures (the node_drag_committed pattern)
             group.moveCommitted.connect(
                 lambda op, np, g=group: self._commit_group_move(g, op, np))
             group.resizeCommitted.connect(
                 lambda w0, h0, w1, h1, g=group: self._commit_group_resize(
                     g, w0, h0, w1, h1))
-            # Двойной клик по заголовку → QInputDialog (замыкание g — группа-источник)
+            # Double click on the title -> QInputDialog (the g closure — the source group)
             group.renameRequested.connect(
                 lambda *_a, g=group: self._rename_group(g))
-        except Exception:  # noqa: BLE001 — повторное подключение не критично
+        except Exception:  # noqa: BLE001 — re-wiring is not critical
             pass
 
-    # ── v0.9.1: экспорт карты в изображение + фон-изображение ────
+    # ── v0.9.1: export the map to an image + a background image ────
 
     def _connect_background_signals(self, bg):
-        """Подключить сигналы фона к dirty-маркеру (undo — НЕ нужен:
-        геометрия фона хранится в JSON, но в стек undo не входит)."""
+        """Wire the background's signals to the dirty marker (undo — NOT needed:
+        the background geometry is stored in JSON but does not enter the undo stack)."""
         try:
             bg.moved.connect(lambda *_a: self._mark_dirty())
             bg.resized.connect(lambda *_a: self._mark_dirty())
@@ -1939,13 +1939,13 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
             pass
 
     def _export_map_image(self):
-        """Экспорт карты в PNG/JPEG (v0.9.1 #1): рендер всей сцены в файл."""
+        """Export the map to PNG/JPEG (v0.9.1 #1): render the whole scene to a file."""
         path, selected_filter = QFileDialog.getSaveFileName(
             self, self.t("file.export_png"), "",
             "PNG Images (*.png);;JPEG Images (*.jpg)")
         if not path:
             return
-        # Расширение по выбранному фильтру, если пользователь его не дописал
+        # The extension from the chosen filter, if the user did not type it
         if not path.lower().endswith((".png", ".jpg", ".jpeg")):
             ext = ".jpg" if "JPEG" in (selected_filter or "") else ".png"
             path += ext
@@ -1962,7 +1962,7 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
                 self.t("msg.export_failed", error=str(e)))
 
     def _export_map_drawio(self):
-        """Экспорт карты в draw.io (.drawio) — v0.9.5 #1–#4."""
+        """Export the map to draw.io (.drawio) — v0.9.5 #1–#4."""
         from storage.export_drawio import export_scene_to_drawio
         path, _ = QFileDialog.getSaveFileName(
             self, self.t("file.export_drawio"), "",
@@ -1983,7 +1983,7 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
                 self.t("msg.export_failed", error=str(e)))
 
     def _export_map_pdf(self):
-        """Экспорт карты в PDF (v0.9.9.7): открытая сцена → файл одним действием."""
+        """Export the map to PDF (v0.9.9.7): the open scene -> a file in one action."""
         path, _ = QFileDialog.getSaveFileName(
             self, self.t("file.export_pdf"), "", "PDF Documents (*.pdf)")
         if not path:
@@ -2002,7 +2002,7 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
                 self.t("msg.export_failed", error=str(e)))
 
     def _set_background_image(self):
-        """Выбрать и установить фоновое изображение карты (v0.9.1 #2/#3)."""
+        """Choose and set the map background image (v0.9.1 #2/#3)."""
         path, _ = QFileDialog.getOpenFileName(
             self, self.t("view.set_background"), "",
             "Images (*.png *.jpg *.jpeg *.bmp *.webp)")
@@ -2010,17 +2010,17 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
             return
         try:
             bg = self.scene.set_background_image(path)
-        except Exception as e:  # noqa: BLE001 — битое/нечитаемое изображение
+        except Exception as e:  # noqa: BLE001 — a corrupt/unreadable image
             QMessageBox.critical(
                 self, self.t("msg.error_title"),
                 self.t("msg.background_failed", error=str(e)))
             return
-        # Фон по умолчанию ставим в видимую область карты
+        # By default the background is placed in the map's visible area
         try:
             center = self.view.mapToScene(self.view.viewport().rect().center())
             w, h = bg.size()
             bg.setPos(center.x() - w / 2, center.y() - h / 2)
-        except Exception:  # noqa: BLE001 — вид недоступен (headless) — оставляем (0,0)
+        except Exception:  # noqa: BLE001 — the view is unavailable (headless) — keep (0,0)
             pass
         self._connect_background_signals(bg)
         self._mark_dirty()
@@ -2029,7 +2029,7 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
             self.log.info("Background image set", extra={"file": path})
 
     def _remove_background_image(self):
-        """Убрать фоновое изображение карты (v0.9.1)."""
+        """Remove the map background image (v0.9.1)."""
         if self.scene.background() is None:
             return
         self.scene.remove_background()
@@ -2037,12 +2037,12 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         self.statusBar().showMessage(self.t("status.background_removed"))
 
     def _add_group_at(self, at_scene_pos=None) -> None:
-        """Создать группу (рамка + заголовок), центрируя её под точкой клика.
+        """Create a group (frame + title), centering it under the click point.
 
-        `at_scene_pos` опционален: QAction.triggered шлёт первым аргументом bool
-        `checked` — позицию принимаем только если это действительно точка сцены
-        (тот же фикс, что у _add_server; regression_v081 #1). Узлы, уже лежащие под
-        рамкой, становятся членами автоматически (MapScene.resync_group_members).
+        `at_scene_pos` is optional: QAction.triggered sends a bool
+        `checked` as the first argument — the position is accepted only if it really is
+        a scene point (the same fix as on _add_server; regression_v081 #1). Nodes already
+        under the frame become members automatically (MapScene.resync_group_members).
         """
         try:
             if _is_scene_point(at_scene_pos):
@@ -2053,7 +2053,7 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
             base_name = self.t("group.default_name")
             used = {g.name for g in self.scene.groups()}
             name, n = base_name, 2
-            while name in used:  # не повторяем имена существующих групп
+            while name in used:  # do not repeat existing group names
                 name = f"{base_name} {n}"
                 n += 1
 
@@ -2073,7 +2073,7 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
                                  self.t("msg.add_failed", error=str(e)))
 
     def _rename_group(self, group) -> None:
-        """Переименовать группу (двойной клик по заголовку / контекстное меню)."""
+        """Rename a group (a double click on the title / the context menu)."""
         if group is None:
             return
         try:
@@ -2087,7 +2087,7 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
             if ok and str(text).strip():
                 new_name = str(text).strip()
                 if new_name != group.name:
-                    # v0.8.3-audit (#6): переименование — через undo-команду
+                    # v0.8.3-audit (#6): renaming — via an undo command
                     from modules.undo_commands import CmdEditGroupName
                     self._push_command(
                         CmdEditGroupName(self, group, group.name, new_name))
@@ -2098,8 +2098,8 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
                 self.log.exception(f"Error renaming group {group.name}")
 
     def _remove_group(self, group) -> bool:
-        """Удалить группу. Серверы-члены остаются на карте в тех же позициях —
-        группа это контейнер-подпись (лёгкий объект, без диалога подтверждения)."""
+        """Remove a group. Member servers stay on the map at the same positions —
+        a group is a labeled container (a light object, no confirmation dialog)."""
         gid = getattr(group, "group_id", None)
         if not gid or self.scene.get_group_by_id(gid) is None:
             return False
@@ -2121,71 +2121,71 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         if node_id and self.scene.has_node(node_id):
             self._select_node(self.scene.get_node(node_id), center=True)
 
-    # ── v0.9.6: контекстное меню дерева серверов (сайдбар) ───────────────
-    # v0.9.9.4: состав пунктов, разделители и i18n-подписи — в панели
-    # (SidebarPanel.fill_context_menu); объект QMenu создаётся здесь (модульная
-    # глобальная main_window — тестовый шов подмены), exec тоже на окне.
+    # ── v0.9.6: the server tree context menu (sidebar) ───────────────
+    # v0.9.9.4: the item set, separators, and i18n labels — in the panel
+    # (SidebarPanel.fill_context_menu); the QMenu object is created here (the module-global
+    # main_window — a test seam for substitution), and the exec is on the window too.
 
     def _on_sidebar_context_menu(self, pos):
-        """v0.9.6 (ROADMAP #1–#2): ПКМ по серверу в дереве — действия узла.
+        """v0.9.6 (ROADMAP #1–#2): right-click a server in the tree — node actions.
 
-        Состав и порядок — по ROADMAP v0.9.6 (SidebarPanel.CONTEXT_MENU_ITEMS):
-        Подключиться SSH, Внешний терминал, Редактировать, Скопировать IP,
-        Copy Hostname, Ping, Собрать информацию, Показать на карте
-        (центрирование + акцент), Удалить (guarded-путь). i18n — переиспользование
-        ключей ctx.* карты; новый только ctx.reveal_on_map. «Карточные» действия
-        сознательно НЕ дублируются (ROADMAP #2): drag-связь и свернуть/развернуть
-        плашку живут только в контексте карты, где они имеют смысл.
+        The set and order — per ROADMAP v0.9.6 (SidebarPanel.CONTEXT_MENU_ITEMS):
+        Connect SSH, External terminal, Edit, Copy IP,
+        Copy Hostname, Ping, Collect info, Show on map
+        (centering + accent), Delete (the guarded path). i18n — reusing
+        the map's ctx.* keys; the only new one is ctx.reveal_on_map. "Map-canvas"
+        actions are deliberately NOT duplicated (ROADMAP #2): the drag connection
+        and the collapse/expand plaque live only in the map context, where they make sense.
         """
         item = self.tree.itemAt(pos)
         if item is None:
-            return  # клик мимо строк — меню не показываем (пустая область дерева)
+            return  # a click off the rows — do not show the menu (an empty tree area)
         node_id = item.data(0, Qt.UserRole)
         if not node_id or not self.scene.has_node(node_id):
-            return  # строка без узла (или узел исчез) — действий нет
+            return  # a row without a node (or the node is gone) — no actions
         node = self.scene.get_node(node_id)
 
-        menu = QMenu(self)  # v0.9.9.4: панель наполняет, окно создаёт и показывает
+        menu = QMenu(self)  # v0.9.9.4: the panel fills it; the window creates and shows it
         self.sidebar.fill_context_menu(menu, node)
 
         try:
             menu.exec(self.tree.mapToGlobal(pos))
-        except Exception as e:  # noqa: BLE001 — GUI-компонент не должен ронять приложение
+        except Exception as e:  # noqa: BLE001 — a GUI component must not crash the app
             if self.log:
                 self.log.warning(f"sidebar context menu exec failed: {e}")
 
     def _reveal_node_on_map(self, node: "ServerNode"):
-        """v0.9.6 (ROADMAP #1): «Показать на карте» — центрирование + акцент.
+        """v0.9.6 (ROADMAP #1): "Show on map" — centering + an accent.
 
-        Выбор узла (строка дерева и рамка карты синхронизируются через
-        _sync_selection_state), centerOn — готовый путь _select_node(center=True);
-        акцент — рамка-вспышка ServerNode.reveal_flash (паттерн пульса set_status).
+        Selecting the node (the tree row and the map frame are synced via
+        _sync_selection_state); centerOn — the ready-made _select_node(center=True) path;
+        the accent — the ServerNode.reveal_flash flash frame (the set_status pulse pattern).
         """
         if node is None or node.scene() is None:
-            return  # узел удалён, пока меню было открыто
+            return  # the node was removed while the menu was open
         self._select_node(node, center=True)
         flash = getattr(node, "reveal_flash", None)
         if callable(flash):
             try:
                 flash()
-            except Exception:  # noqa: BLE001 — акцент косметика; навигация уже сработала
+            except Exception:  # noqa: BLE001 — the accent is cosmetic; the navigation already worked
                 pass
 
     def refresh_sidebar(self):
-        """v0.9.9.4-фасад: строки дерева (поиск + тег-фильтр + маркеры статусов)
-        и список тегов — SidebarPanel; затемнение/выделение/счётчики — окно."""
+        """v0.9.9.4 facade: the tree rows (search + tag filter + status markers)
+        and the tag list — SidebarPanel; dimming/selection/counters — the window."""
         query = self.search_edit.text().strip().lower() if hasattr(self, 'search_edit') else ""
         nodes = self.scene.nodes()
         self.sidebar.refresh_rows(nodes, query)
         self.sidebar.sync_tag_filter_items(nodes)
-        self._apply_map_dimming()  # v0.9.8: затемнение = тег-фильтр И поиск по карте
+        self._apply_map_dimming()  # v0.9.8: dimming = the tag filter AND the map search
         self._sync_selection_state()
-        self._update_counts_label()  # UI polish: счётчики в статус-баре следят за составом
+        self._update_counts_label()  # UI polish: the status-bar counters track the composition
 
-    # ── v0.9.4: фильтр по тегам (сайдбар + затемнение на карте) ──
+    # ── v0.9.4: the tag filter (sidebar + dimming on the map) ──
 
     def _active_tag_filter(self) -> str:
-        """Выбранный в комбобоксе тег или \"\" («Все теги»)."""
+        """The tag selected in the combo box, or \"\" ("All tags")."""
         combo = getattr(self, "tag_filter", None)
         if combo is None or not hasattr(combo, "currentData"):
             return ""
@@ -2193,19 +2193,19 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         return str(data) if data else ""
 
     def _on_tag_filter_changed(self, *_a):
-        """Смена тега в фильтре → перерисовать дерево и пересчитать затемнение."""
+        """A tag change in the filter -> redraw the tree and recompute the dimming."""
         if hasattr(self, "tree"):
             self.refresh_sidebar()
 
     def _apply_map_dimming(self):
-        """v0.9.4/v0.9.8: затемнение + подсветка активных фильтров на карте.
+        """v0.9.4/v0.9.8: dimming + highlighting of the active filters on the map.
 
-        Узел «горит» только если проходит ВСЕ активные фильтры (та же семантика,
-        что в сайдбаре — refresh_sidebar применяет query и тег одновременно):
-        - v0.9.4 тег-фильтр: узлы без выбранного тега затемнены;
-        - v0.9.8 поиск по карте (Ctrl+F): несовпавшие с запросом затемнены,
-          совпавшие — акцентная рамка (ServerNode.set_search_match).
-        Стрелки не трогаем: связи между затемнёнными узлами читаются по контексту.
+        A node "glows" only if it passes ALL active filters (the same semantics as in
+        the sidebar — refresh_sidebar applies the query and the tag at once):
+        - the v0.9.4 tag filter: nodes without the selected tag are dimmed;
+        - the v0.9.8 map search (Ctrl+F): non-matches are dimmed,
+          matches get the accent frame (ServerNode.set_search_match).
+        The arrows are not touched: connections between dimmed nodes are read from context.
         """
         active = self._active_tag_filter()
         query = (getattr(self, "_map_search_query", "") or "").strip().lower()
@@ -2229,25 +2229,25 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
             except (AttributeError, RuntimeError):
                 pass
 
-    # Backward-compat: имя v0.9.4 (внешний код/тесты могли обращаться к нему)
+    # Backward-compat: the v0.9.4 name (external code/tests may reference it)
     _apply_map_tag_dimming = _apply_map_dimming
 
-    # ── v0.9.8: поиск по карте (Ctrl+F) — ROADMAP v0.9.8 ────────────────
+    # ── v0.9.8: map search (Ctrl+F) — ROADMAP v0.9.8 ────────────────
 
     def _setup_map_search(self):
-        """v0.9.8: создать плавающую строку поиска поверх canvas + состояние.
+        """v0.9.8: create a floating search bar over the canvas + the state.
 
-        Панель — дочерний виджет MapView (плавает над viewport, не мешает сцене).
-        Хоткей Ctrl+F даёт пункт меню «Вид → Поиск по карте…» (QAction-шорткат) —
-        отдельный QShortcut с той же последовательностью создал бы ambiguous shortcut.
-        Логика поиска живёт здесь: совпадение/затемнение/центрирование — единый путь.
+        The panel — a child widget of the MapView (floats over the viewport, out of the scene's way).
+        The Ctrl+F hotkey provides the "View -> Search map..." item (a QAction shortcut) —
+        a separate QShortcut with the same sequence would create an ambiguous shortcut.
+        The search logic lives here: match/dim/center — a single path.
         """
         try:
             from ui.map_search_bar import MapSearchBar
-        except ImportError:  # плоский запуск из корня проекта
+        except ImportError:  # flat launch from the project root
             from map_search_bar import MapSearchBar
 
-        # Состояние (пусто до первого запроса)
+        # The state (empty until the first query)
         self._map_search_query = ""
         self._map_search_matches = []
         self._map_search_index = -1
@@ -2257,25 +2257,25 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         self.map_search.next_requested.connect(lambda: self._map_search_step(+1))
         self.map_search.prev_requested.connect(lambda: self._map_search_step(-1))
         self.map_search.close_requested.connect(self._close_map_search)
-        # Переставить панель при resize окна (она вне layout, child of view).
-        # v0.9.9.1: сигнал MapView.resized добавлен — раньше connect падал в
-        # AttributeError и молча глотался try/except (панель оставалась на старом x).
+        # Reposition the panel on a window resize (it is outside the layout, a child of the view).
+        # v0.9.9.1: the MapView.resized signal was added — before, the connect fell into
+        # an AttributeError and was silently swallowed by try/except (the panel kept its old x).
         self.view.resized.connect(self._position_map_search_bar)
 
     def _toggle_map_search(self):
-        """v0.9.8: Ctrl+F / «Вид → Поиск по карте…» — открыть или закрыть панель."""
+        """v0.9.8: Ctrl+F / "View -> Search map..." — open or close the panel."""
         if self.map_search.isVisible():
             self._close_map_search()
         else:
             self._open_map_search()
 
     def _open_map_search(self):
-        """v0.9.8: показать панель, поставить в верхний центр viewport, фокус на ввод.
+        """v0.9.8: show the panel, place it at the top center of the viewport, focus the input.
 
-        Если в поле остался запрос (закрыли Esc, текст сохранился — как в браузере),
-        оживляем его заново: пересчёт совпадений/счётчика по актуальной сцене.
-        Иначе Enter ссылался бы на очищенный self._map_search_query, а панель
-        показывала старый текст и счётчик — рассинхрон.
+        If the field still holds a query (closed with Esc, the text is kept — as in a browser),
+        re-activate it: recompute the matches/counter against the current scene.
+        Otherwise Enter would point at the cleared self._map_search_query while the panel
+        showed the old text and counter — a desync.
         """
         self.map_search.show()
         self.map_search.raise_()
@@ -2286,10 +2286,10 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         self.statusBar().showMessage(self.t("hint.map_search"))
 
     def _close_map_search(self):
-        """v0.9.8: закрыть панель и снять состояние поиска (затемнение + рамки).
+        """v0.9.8: close the panel and clear the search state (dimming + frames).
 
-        Тег-фильтр при этом остаётся активным — _apply_map_dimming пересчитает
-        затемнение по нему (query уже очищен выше).
+        The tag filter stays active — _apply_map_dimming will recompute
+        the dimming by it (the query is already cleared above).
         """
         if getattr(self, "map_search", None) is not None:
             self.map_search.hide()
@@ -2299,11 +2299,11 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         self._apply_map_dimming()
         try:
             self.statusBar().showMessage(self.t("status.ready"))
-        except Exception:  # noqa: BLE001 — статус-бар косметика при teardown
+        except Exception:  # noqa: BLE001 — the status bar is cosmetic on teardown
             pass
 
     def _position_map_search_bar(self):
-        """v0.9.8: панель в верхнем центре viewport (child of view, вне layout)."""
+        """v0.9.8: the panel at the top center of the viewport (a child of the view, outside the layout)."""
         bar = getattr(self, "map_search", None)
         if bar is None or not bar.isVisible():
             return
@@ -2314,7 +2314,7 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         bar.setGeometry(int(x), 10, int(w), int(h))
 
     def _map_search_nodes(self, query: str):
-        """v0.9.8: узлы, совпадающие с запросом (alias/host/ip/comment — как в сайдбаре)."""
+        """v0.9.8: nodes matching the query (alias/host/ip/comment — as in the sidebar)."""
         q = (query or "").strip().lower()
         if not q:
             return []
@@ -2331,10 +2331,10 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         return out
 
     def _on_map_search_query(self, query: str):
-        """v0.9.8: текст запроса изменился — пересчитать совпадения и затемнение.
+        """v0.9.8: the query text changed — recompute the matches and the dimming.
 
-        Счётчик указывает на ПЕРВЫЙ результат (паттерн браузерного поиска);
-        центрирование/выделение — только по Enter (ROADMAP #2).
+        The counter points at the FIRST result (the browser-search pattern);
+        centering/selection — only on Enter (ROADMAP #2).
         """
         self._map_search_query = query or ""
         matches = self._map_search_nodes(query)
@@ -2344,19 +2344,19 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         self.map_search.set_count(self._map_search_index + 1, len(matches))
 
     def _map_search_step(self, direction: int):
-        """v0.9.8: Enter/Shift+Enter — переход между результатами (с зацикливанием).
+        """v0.9.8: Enter/Shift+Enter — stepping through the results (with wrapping).
 
-        Выбор узла (строка сайдбара следует за выделением через _sync_selection_state),
-        центрирование view.centerOn и рамка-вспышка reveal_flash — тот же готовый путь,
-        что «Показать на карте» v0.9.6 (паттерн пульса set_status). Совпадения
-        пересчитываются свежими: узлы могли добавиться/удалиться с момента запроса.
+        Selecting the node (the sidebar row follows the selection via _sync_selection_state),
+        the view.centerOn centering and the reveal_flash flash frame — the same ready path
+        as the v0.9.6 "Show on map" (the set_status pulse pattern). The matches
+        are recomputed fresh: nodes may have been added/removed since the query.
         """
         matches = self._map_search_nodes(self._map_search_query)
         if not matches:
             q = (self._map_search_query or "").strip()
             try:
                 self.statusBar().showMessage(self.t("status.no_matches", query=q))
-            except Exception:  # noqa: BLE001 — сбой форматирования не критичен
+            except Exception:  # noqa: BLE001 — a formatting failure is not critical
                 self.statusBar().showMessage(f"No matches: {q}")
             return
         n = len(matches)
@@ -2370,33 +2370,33 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         if callable(flash):
             try:
                 flash()
-            except Exception:  # noqa: BLE001 — акцент косметика; навигация уже сработала
+            except Exception:  # noqa: BLE001 — the accent is cosmetic; the navigation already worked
                 pass
         self.map_search.set_count(idx + 1, n)
 
     def _close_map_search_if_open(self):
-        """v0.9.8: закрыть поиск при смене проекта (старый запрос к новым узлам неактуален)."""
+        """v0.9.8: close the search on a project switch (an old query about new nodes is stale)."""
         bar = getattr(self, "map_search", None)
         if bar is not None and bar.isVisible():
             self._close_map_search()
 
-    # ── Ревью-фикс v0.8.0 (#3): маркеры статусов узлов в дереве сайдбара ──
-    # v0.9.9.4: иконки точек и маркеры строк — SidebarPanel (apply_status_marker /
-    # update_status_marker); окно передаёт панели актуальный статус узла.
+    # ── Review fix v0.8.0 (#3): node status markers in the sidebar tree ──
+    # v0.9.9.4: the dot icons and row markers — SidebarPanel (apply_status_marker /
+    # update_status_marker); the window passes the panel the node's current status.
 
     def _update_sidebar_status_marker(self, server_id: str) -> None:
-        """Обновить маркер строки на месте (без полного пересбора дерева)."""
+        """Update the row marker in place (without a full tree rebuild)."""
         node = self.scene.get_node(server_id)
         if node is None:
-            return  # узла уже нет — статус никому не нужен
+            return  # the node is gone — nobody needs its status
         self.sidebar.update_status_marker(server_id, node.status, node.data.host or "")
 
     def _center_view(self):
-        """UI polish: центрировать по содержимому карты, а не по началу координат.
+        """UI polish: center on the map content, not on the origin.
 
-        Раньше centerOn(0, 0) — при узлах в отрицательных координатах взгляд уходил
-        в пустой угол сцены (баг из ревью v0.8).
-        v1.2.4.1 (задача 5): карта свёрнута — no-op (без исключений, без авто-показа).
+        Before, centerOn(0, 0) — with nodes at negative coordinates the view went to
+        an empty corner of the scene (a v0.8 review bug).
+        v1.2.4.1 (task 5): the map is collapsed — a no-op (no exceptions, no auto-show).
         """
         if self._map_collapsed:
             return
@@ -2407,9 +2407,9 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         self.view.centerOn(rect.center())
 
     def _fit_to_content(self):
-        """UI polish: «Вписать карту» — все узлы и заметки в видимой области.
+        """UI polish: "Fit map" — all nodes and notes inside the visible area.
 
-        v1.2.4.1 (задача 5): карта свёрнута — no-op (без исключений, без авто-показа).
+        v1.2.4.1 (task 5): the map is collapsed — a no-op (no exceptions, no auto-show).
         """
         if self._map_collapsed:
             return
@@ -2417,19 +2417,19 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
             self.statusBar().showMessage(self.t("status.fit_nothing"))
 
     def _on_zoom_changed(self, zoom: float):
-        """UI polish: процент зума в статус-баре (сигнал MapView.zoomChanged)."""
+        """UI polish: the zoom percentage in the status bar (the MapView.zoomChanged signal)."""
         try:
             self.zoom_label.setText(f"{int(round(zoom * 100))}%")
         except RuntimeError:
-            pass  # Qt teardown — виджет статус-бара уже уничтожен
+            pass  # Qt teardown — the status bar widget has already been destroyed
 
     def _update_counts_label(self):
-        """UI polish: постоянные счётчики «серверы · связи · online/warn/offline»."""
+        """UI polish: the permanent "servers · connections · online/warn/offline" counters."""
         try:
             nodes = list(self.scene.nodes())
             conns = self.scene.arrow_count()
         except (AttributeError, RuntimeError):
-            return  # сцена ещё не создана / уже уничтожена
+            return  # the scene is not created yet / already destroyed
         statuses = [getattr(n, "status", "") for n in nodes]
         self.counts_label.setText(
             self.t("status.counts",
@@ -2439,7 +2439,7 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
                    offline=statuses.count("offline")))
 
     def _reset_zoom(self):
-        # AUDIT v0.7.2 (низкая #19): публичный метод MapView вместо лезть в view._zoom
+        # AUDIT v0.7.2 (low #19): the public MapView method instead of poking view._zoom
         self.view.reset_zoom()
 
     def _open_profile_manager(self):

@@ -5,7 +5,7 @@ try:
 except ImportError:
     from ui.main_window import MainWindow
 
-try:  # v1.2.5: центральная тема (палитра/радиусы/шрифты — ui/theme.py)
+try:  # v1.2.5: central theme (palette/radii/fonts — ui/theme.py)
     from .ui import theme
 except ImportError:
     from ui import theme
@@ -13,21 +13,21 @@ except ImportError:
 
 def main():
     # ── Setup logging (before anything else) ──────────────────
-    log = None  # чтобы при сбое логгера код ниже не падал с NameError
+    log = None  # so that if logging fails, the code below does not crash with a NameError
     try:
         from modules.logger import setup_logging, get_log_file_path
         log = setup_logging()
 
         log.info("=" * 60)
-        # AUDIT v0.8.3 (#1): версия централизована в version.py — лог берёт её
-        # оттуда, рассинхронизация с релизом больше невозможна.
+        # AUDIT v0.8.3 (#1): the version is centralized in version.py — the log
+        # reads it from there, so drift from the release is no longer possible.
         try:
             from version import APP_NAME, APP_VERSION
         except ImportError:
             from .version import APP_NAME, APP_VERSION
-        # v1.0-fix (audit #10): фичевая строка релиза больше не хардкодится здесь —
-        # она устаревала на каждом следующем релизе; версия берётся из version.py,
-        # описание релиза — в CHANGELOG.md/DOCUMENTATION.md.
+        # v1.0-fix (audit #10): the release feature line is no longer hardcoded here —
+        # it went stale with every next release; the version comes from version.py,
+        # the release description lives in CHANGELOG.md/DOCUMENTATION.md.
         log.info(f"{APP_NAME} v{APP_VERSION} starting up")
         log.info(f"Log file: {get_log_file_path()}")
     except Exception as e:
@@ -41,8 +41,8 @@ def main():
         app = QApplication(sys.argv)
         app.setStyle('Fusion')
 
-        # Тёмная палитра (v1.2.5: значения — из центральной темы ui/theme.py;
-        # светлая тема/акцентный цвет в будущем — переназначение констант темы)
+        # Dark palette (v1.2.5: values come from the central theme ui/theme.py;
+        # light theme/accent color in the future — reassigning the theme constants)
         pal = app.palette()
         pal.setColor(QPalette.ColorRole.Window, QColor(theme.WINDOW_BG))
         pal.setColor(QPalette.ColorRole.WindowText, QColor(theme.TEXT_PRIMARY))
@@ -56,8 +56,8 @@ def main():
         win = MainWindow()
         win.show()
 
-        # v0.7.1: периодические проверки статусов узлов (online/warn/offline) —
-        # запускаем один раз после show(): первый раунд через ~2 c, далее по QTimer.
+        # v0.7.1: periodic node status checks (online/warn/offline) —
+        # started once after show(): the first round in ~2 s, then driven by QTimer.
         try:
             win.start_status_checks()
         except Exception as e:
@@ -73,9 +73,9 @@ def main():
         else:
             import traceback
             traceback.print_exc()
-        # v1.0-fix (audit #10): фатальная ошибка после создания QApplication раньше
-        # глоталась и процесс завершался с кодом 0 — теперь ненулевой exit code,
-        # чтобы лаунчер/CI могли обнаружить сбой запуска.
+        # v1.0-fix (audit #10): a fatal error after QApplication creation used to be
+        # swallowed and the process exited with code 0 — now a non-zero exit code,
+        # so a launcher/CI can detect a failed startup.
         sys.exit(1)
 
 

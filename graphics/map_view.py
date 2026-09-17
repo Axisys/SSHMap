@@ -25,14 +25,14 @@ except ImportError:
         StickyNote = None
 
 try:
-    from .node_group import NodeGroup  # v0.8.1: группы узлов (кластеры/папки)
+    from .node_group import NodeGroup  # v0.8.1: node groups (clusters/folders)
 except ImportError:
     try:
         from node_group import NodeGroup
     except ImportError:
         NodeGroup = None
 
-try:  # v1.2.5: центральная тема (палитра/радиусы/шрифты — ui/theme.py)
+try:  # v1.2.5: central theme (palette/radii/fonts — ui/theme.py)
     from ..ui import theme
 except ImportError:
     from ui import theme
@@ -49,7 +49,7 @@ from PySide6.QtWidgets import QGraphicsView, QGraphicsPathItem, QMenu
 
 
 def _t(key: str) -> str:
-    """Безопасный i18n-хук (единообразно с server_node/connection_arrow)."""
+    """Safe i18n hook (consistent with server_node/connection_arrow)."""
     try:
         from i18n import t as _translate
         return _translate(key)
@@ -58,18 +58,18 @@ def _t(key: str) -> str:
 
 
 class MapView(QGraphicsView):
-    """Вид карты: зум, панорамирование и (v0.7) создание связей перетаскиванием."""
+    """Map view: zoom, panning, and (v0.7) connection creation by dragging."""
 
-    connect_drag_started = Signal()   # началось Shift-перетаскивание связи от узла
-    connect_drag_finished = Signal()  # завершено (создана связь или отменено)
-    zoomChanged = Signal(float)       # UI polish: текущий зум — для % в статус-баре
-    # v0.8.3: завершён жест перетаскивания узла (node, old_scene_pos, new_scene_pos)
+    connect_drag_started = Signal()   # Shift-drag of a connection from a node has started
+    connect_drag_finished = Signal()  # finished (connection created or cancelled)
+    zoomChanged = Signal(float)       # UI polish: current zoom — for the % in the status bar
+    # v0.8.3: node drag gesture finished (node, old_scene_pos, new_scene_pos)
     node_drag_committed = Signal(object, object, object)
-    # v0.9.3: завершён жест ГРУППОВОГО перетаскивания — список
-    # [(node, old_pos: QPointF, new_pos: QPointF)] для одной undo-команды
+    # v0.9.3: GROUP drag gesture finished — a list
+    # [(node, old_pos: QPointF, new_pos: QPointF)] for a single undo command
     nodes_drag_committed = Signal(list)
-    # v0.9.9.1: изменился размер вида (плавающие панели поверх viewport —
-    # строка поиска — переставляются при ресайзе окна / драге сплиттера)
+    # v0.9.9.1: view resized (floating panels over the viewport —
+    # search bar — are repositioned on window resize / splitter drag)
     resized = Signal()
 
     def __init__(self, scene: "MapScene", parent=None):
@@ -78,50 +78,50 @@ class MapView(QGraphicsView):
         self.setTransformationAnchor(QGraphicsView.AnchorUnderMouse)
         self.setResizeAnchor(QGraphicsView.AnchorViewCenter)
         self.setDragMode(QGraphicsView.ScrollHandDrag)
-        self.setBackgroundBrush(QBrush(QColor(theme.CANVAS_BG)))  # v1.2.5: центральная тема
+        self.setBackgroundBrush(QBrush(QColor(theme.CANVAS_BG)))  # v1.2.5: central theme
         self._zoom = 1.0
 
-        # ── Drag-режим создания связи (v0.7) ─────────────
+        # ── Drag mode for connection creation (v0.7) ─────────────
         self._connect_source: Optional[ServerNode] = None
         self._rubber_band: Optional[QGraphicsPathItem] = None
 
-        # v0.8.3: активный жест перемещения узла (для undo-команды CmdMoveNode)
+        # v0.8.3: active node-move gesture (for the CmdMoveNode undo command)
         self._move_drag_node: Optional[ServerNode] = None
-        self._move_drag_old = None  # QPointF — позиция до начала жеста
+        self._move_drag_old = None  # QPointF — position before the gesture started
 
-        # ── v0.9.3: мультивыделение + групповой drag ──────────────
-        # Рамка выделения (Ctrl+ЛКМ по пустому месту): QGraphicsRectItem в сцене.
-        self._rubber_select_item = None          # QGraphicsRectItem рамки
-        self._rubber_select_origin = None        # QPointF стартовой точки сцены
-        self._rubber_saved_selection = []        # выделение на старте Ctrl+драга
-        # Групповой drag: позиции всех выделенных узлов до жеста
+        # ── v0.9.3: multi-selection + group drag ──────────────
+        # Selection rectangle (Ctrl+LMB on empty space): a QGraphicsRectItem in the scene.
+        self._rubber_select_item = None          # the selection-rectangle item
+        self._rubber_select_origin = None        # starting point in scene coords (QPointF)
+        self._rubber_saved_selection = []        # selection at the start of the Ctrl-drag
+        # Group drag: positions of all selected nodes before the gesture
         self._group_drag_olds = []               # [(node, QPointF), ...]
 
-    # UI polish: допустимый диапазон зума (общий для колеса, fit и восстановления).
+    # UI polish: allowed zoom range (shared by wheel, fit, and restore).
     ZOOM_MIN = 0.1
     ZOOM_MAX = 5.0
 
     @property
     def zoom(self) -> float:
-        """Текущий коэффициент зума (публичный доступ; AUDIT v0.7.2, низкая #19)."""
+        """Current zoom factor (public access; AUDIT v0.7.2, low #19)."""
         return self._zoom
 
     def _notify_zoom(self):
-        """UI polish: сообщить о текущем зуме (статус-бар показывает %)."""
+        """UI polish: report the current zoom (status bar shows %)."""
         try:
             self.zoomChanged.emit(float(self._zoom))
         except RuntimeError:
-            pass  # Qt teardown — слоты уже уничтожены (паттерн из _sync_selection_state)
+            pass  # Qt teardown — slots are already destroyed (pattern from _sync_selection_state)
 
     def reset_zoom(self):
-        """Сбросить зум к 100% и очистить трансформацию (AUDIT v0.7.2, низкая #19)."""
+        """Reset zoom to 100% and clear the transform (AUDIT v0.7.2, low #19)."""
         self.resetTransform()
         self._zoom = 1.0
         self._notify_zoom()
 
     def resizeEvent(self, event):
-        """v0.9.9.1: уведомить о смене размера — плавающие панели поверх viewport
-        (строка поиска) переставляются при ресайзе окна и драге сплиттера."""
+        """v0.9.9.1: notify about a size change — floating panels over the viewport
+        (the search bar) are repositioned on window resize and splitter drag."""
         super().resizeEvent(event)
         self.resized.emit()
 
@@ -134,10 +134,10 @@ class MapView(QGraphicsView):
             self.scale(zoom_factor, zoom_factor)
             self._notify_zoom()
 
-    # ── UI polish: «вписать карту» и восстановление сохранённого вида ──
+    # ── UI polish: "fit to content" and restoring the saved view ──
 
     def content_bounding_rect(self):
-        """Общий boundingRect узлов и заметок (None, если карта пуста)."""
+        """Combined boundingRect of nodes and notes (None if the map is empty)."""
         scene = self.scene()
         if scene is None:
             return None
@@ -152,17 +152,17 @@ class MapView(QGraphicsView):
         return rect
 
     def fit_to_content(self, margin: float = 80.0) -> bool:
-        """Вписать содержимое карты в область вида (KeepAspectRatio).
+        """Fit the map content into the view area (KeepAspectRatio).
 
-        Возвращает False, если контента нет. Зум приводится в диапазон
-        [ZOOM_MIN, ZOOM_MAX], как у колеса; _zoom синхронизируется с трансформацией.
+        Returns False if there is no content. Zoom is clamped to the
+        [ZOOM_MIN, ZOOM_MAX] range like the wheel; _zoom is kept in sync with the transform.
         """
         rect = self.content_bounding_rect()
         if rect is None or rect.isEmpty():
             return False
         self.fitInView(rect.adjusted(-margin, -margin, margin, margin),
                        Qt.AspectRatioMode.KeepAspectRatio)
-        # fitInView меняет трансформацию мимо _zoom — пересчитываем и клэмпаем
+        # fitInView changes the transform behind _zoom — recompute and clamp
         target = float(self.transform().m11())
         if target < self.ZOOM_MIN or target > self.ZOOM_MAX:
             clamped = max(self.ZOOM_MIN, min(self.ZOOM_MAX, target))
@@ -177,13 +177,13 @@ class MapView(QGraphicsView):
         return True
 
     def set_zoom_and_center(self, zoom: float, center_x: float, center_y: float):
-        """Применить сохранённый в проекте зум и центр (UI polish: раньше игнорировались)."""
+        """Apply the zoom and center saved in the project (UI polish: previously ignored)."""
         try:
             z = float(zoom)
             cx = float(center_x)
             cy = float(center_y)
         except (TypeError, ValueError):
-            return  # битые значения из чужого файла — оставляем текущий вид
+            return  # corrupt values from another file — keep the current view
         if not (self.ZOOM_MIN <= z <= self.ZOOM_MAX):
             z = max(self.ZOOM_MIN, min(self.ZOOM_MAX, z))
         self.resetTransform()
@@ -192,11 +192,11 @@ class MapView(QGraphicsView):
         self.centerOn(cx, cy)
         self._notify_zoom()
 
-    # ── v0.7.2: динамический drag-режим (перетаскивание нод/заметок) ──
-    # При ScrollHandDrag левый драг ВСЕГДА панорамирует canvas — Items с
-    # ItemIsMovable мышью не двигаются (проверено эмпирически). Поэтому на
-    # нажатии над перемещаемым объектом временно переключаемся в NoDrag, а
-    # после отпускания возвращаем ScrollHandDrag.
+    # ── v0.7.2: dynamic drag mode (dragging nodes/notes) ──
+    # Under ScrollHandDrag a left drag ALWAYS pans the canvas — items with
+    # ItemIsMovable do not move with the mouse (verified empirically). So on
+    # press over a movable object we temporarily switch to NoDrag, and
+    # after release we restore ScrollHandDrag.
 
     def _item_at_scene(self, scene_pos):
         if self.scene() is None:
@@ -205,19 +205,19 @@ class MapView(QGraphicsView):
 
     @staticmethod
     def _is_movable_item(item) -> bool:
-        """Является ли item (или его родительская группа) перемещаемым объектом."""
+        """Whether item (or its parent group) is a movable object."""
         while item is not None:
             if isinstance(item, ServerNode):
-                return True  # ItemIsMovable — штатный Qt-drag в режиме NoDrag
+                return True  # ItemIsMovable — standard Qt drag in NoDrag mode
             if StickyNote is not None and isinstance(item, StickyNote):
-                return True  # ручное перемещение в mousePressEvent самой заметки
-            if NodeGroup is not None and isinstance(item, NodeGroup):  # v0.8.1: группы
-                return True  # ручное перемещение в mousePressEvent самой группы (паттерн заметок)
+                return True  # manual move in the note's own mousePressEvent
+            if NodeGroup is not None and isinstance(item, NodeGroup):  # v0.8.1: groups
+                return True  # manual move in the group's own mousePressEvent (note pattern)
             item = item.parentItem()
         return False
 
     def _find_node_at(self, scene_pos) -> Optional[ServerNode]:
-        """ServerNode под точкой сцены (с учётом дочерних элементов группы)."""
+        """ServerNode under the scene point (accounting for group child elements)."""
         if self.scene() is None:
             return None
         item = self.scene().itemAt(scene_pos, self.transform())
@@ -228,12 +228,12 @@ class MapView(QGraphicsView):
         return None
 
     def _classify_at(self, scene_pos):
-        """Вернуть (node, arrow, note) — верхний объект каждого вида под точкой."""
+        """Return (node, arrow, note) — the topmost object of each kind under the point."""
         node = arrow = note = None
         if self.scene() is None:
             return node, arrow, note
         for item in self.scene().items(scene_pos):
-            # стрелка — напрямую (у неё нет групп-родителей)
+            # arrow — directly (it has no parent groups)
             if arrow is None and isinstance(item, ConnectionArrow):
                 arrow = item
             n = item
@@ -248,7 +248,7 @@ class MapView(QGraphicsView):
         return node, arrow, note
 
     def _cancel_connect_drag(self):
-        """Убрать резиновую нить и сбросить состояние drag-режима."""
+        """Remove the rubber band and reset the drag-mode state."""
         if self._rubber_band is not None and self._rubber_band.scene() is not None:
             self._rubber_band.scene().removeItem(self._rubber_band)
         self._rubber_band = None
@@ -256,12 +256,12 @@ class MapView(QGraphicsView):
         self.unsetCursor()
 
     def mousePressEvent(self, event: QMouseEvent):
-        # Shift+ЛКМ по узлу → создаём связь перетаскиванием (v0.7).
-        # Не передаём событие дальше: узел не двигается и панорама не стартует.
+        # Shift+LMB on a node → create a connection by dragging (v0.7).
+        # Don't pass the event on: the node doesn't move and panning doesn't start.
         if (event.button() == Qt.LeftButton
                 and bool(event.modifiers() & Qt.ShiftModifier)
                 and self._connect_source is None):
-            # PySide6/Qt6 mapToScene не биндит QPointF-версию — используем QPoint
+            # PySide6/Qt6 mapToScene doesn't bind the QPointF version — use QPoint
             scene_pos = self.mapToScene(event.position().toPoint())
             node = self._find_node_at(scene_pos)
             if node is not None:
@@ -275,20 +275,20 @@ class MapView(QGraphicsView):
                 self.setCursor(Qt.CrossCursor)
                 self.connect_drag_started.emit()
                 return
-        # v0.7.2: нажатие над перемещаемым объектом (узел/заметка) — временно NoDrag,
-        # иначе ScrollHandDrag забрал бы жест под панорамирование и ничего не двигалось.
+        # v0.7.2: press over a movable object (node/note) — temporary NoDrag,
+        # otherwise ScrollHandDrag would swallow the gesture into panning and nothing would move.
         if event.button() == Qt.LeftButton and self._connect_source is None:
             scene_pos = self.mapToScene(event.position().toPoint())
             if self._is_movable_item(self._item_at_scene(scene_pos)):
                 self.setDragMode(QGraphicsView.NoDrag)
-            # v0.8.3: старт жеста перемещения узла — запоминаем исходную позицию
+            # v0.8.3: node-move gesture starts — remember the initial position
             node = self._find_node_at(scene_pos)
             if node is not None:
                 self._move_drag_node = node
                 from PySide6.QtCore import QPointF
                 self._move_drag_old = QPointF(node.pos())
-                # v0.9.3: если узел уже входит в мультивыделение — это ГРУППОВОЙ
-                # drag (двигаются все выделенные). Позиции до жеста — для undo.
+                # v0.9.3: if the node is already part of a multi-selection — this is a GROUP
+                # drag (all selected move). Pre-gesture positions — for undo.
                 if node.isSelected() and len([i for i in self.scene().selectedItems()
                                               if isinstance(i, ServerNode)]) > 1:
                     self._group_drag_olds = [
@@ -298,12 +298,12 @@ class MapView(QGraphicsView):
                     ]
                 else:
                     self._group_drag_olds = []
-            # v0.9.3: Ctrl+ЛКМ по пустому месту → рамка выделения (rubber band).
+            # v0.9.3: Ctrl+LMB on empty space → selection rectangle (rubber band).
             elif bool(event.modifiers() & Qt.ControlModifier):
                 from PySide6.QtWidgets import QGraphicsRectItem
                 self._start_rubber_select(scene_pos,
                                           event.modifiers() & Qt.ShiftModifier)
-                return  # панораму не стартуем
+                return  # don't start panning
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event: QMouseEvent):
@@ -313,17 +313,17 @@ class MapView(QGraphicsView):
             p0 = edge_point(src_rect, src_rect.center(), scene_pos)
             path, _, _ = build_curve(p0, scene_pos)
             self._rubber_band.setPath(path)
-        # v0.9.3: обновление рамки выделения
+        # v0.9.3: update the selection rectangle
         elif self._rubber_select_item is not None:
             scene_pos = self.mapToScene(event.position().toPoint())
             self._update_rubber_select(scene_pos)
         super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event: QMouseEvent):
-        # v0.9.3: рамка выделения завершена — фиксируем выделение
+        # v0.9.3: selection rectangle finished — commit the selection
         if self._rubber_select_item is not None and event.button() == Qt.LeftButton:
             self._finish_rubber_select()
-            return  # нажатие не передавалось в Qt — отпускание тоже забираем
+            return  # the press wasn't passed to Qt — we consume the release too
         if (self._connect_source is not None and event.button() == Qt.LeftButton):
             source = self._connect_source
             scene_pos = self.mapToScene(event.position().toPoint())
@@ -331,17 +331,17 @@ class MapView(QGraphicsView):
             self._cancel_connect_drag()
             self.connect_drag_finished.emit()
             if target is not None and target is not source:
-                # MainWindow создаёт связь через предзаполненный диалог (тип + метка).
+                # MainWindow creates the connection via a pre-filled dialog (type + label).
                 win = self.window()
                 if hasattr(win, "_add_connection"):
                     win._add_connection(
                         default_source_id=source.data.id,
                         default_target_id=target.data.id,
                     )
-            return  # нажатие не передавалось в Qt — и отпускание забираем сами
-        # v0.7.2: жест над перемещаемым объектом завершён — возвращаем панорамирование
+            return  # the press wasn't passed to Qt — so we take the release too
+        # v0.7.2: gesture over a movable object finished — restore panning
         if self.dragMode() == QGraphicsView.NoDrag:
-            # v0.8.3: узел реально сдвинулся — сообщаем окну (команда CmdMoveNode)
+            # v0.8.3: the node actually moved — notify the window (CmdMoveNode command)
             node = getattr(self, "_move_drag_node", None)
             if node is not None:
                 old = getattr(self, "_move_drag_old", None)
@@ -351,8 +351,8 @@ class MapView(QGraphicsView):
                     new = node.pos()
                     if old is not None and (abs(new.x() - old.x()) > 0.5
                                             or abs(new.y() - old.y()) > 0.5):
-                        # v0.9.3: групповой drag → ОДНА команда на все выделенные;
-                        # одиночный drag → прежний сигнал с одним узлом.
+                        # v0.9.3: group drag → ONE command for all selected;
+                        # single drag → the previous signal with one node.
                         olds = getattr(self, "_group_drag_olds", [])
                         self._group_drag_olds = []
                         moved = [(n, o, QPointF(n.pos())) for n, o in olds
@@ -364,24 +364,25 @@ class MapView(QGraphicsView):
                         elif abs(new.x() - old.x()) > 0.5 or abs(new.y() - old.y()) > 0.5:
                             self.node_drag_committed.emit(node, old, QPointF(new))
                 except RuntimeError:
-                    pass  # Qt teardown — жест не завершён штатно, команды не будет
+                    pass  # Qt teardown — the gesture didn't finish normally, no command will be issued
             else:
                 self._group_drag_olds = []
             self.setDragMode(QGraphicsView.ScrollHandDrag)
         super().mouseReleaseEvent(event)
 
-    # ── v1.1.2RC2 (N3): сброс «залипшего» drag-состояния при потере фокуса ──
-    # Единственный штатный сброс — mouseReleaseEvent; но если capture ушёл без
-    # отпускания (Alt+Tab / смена активации окна посреди драга), release не
-    # приходит и вид остаётся в NoDrag с живым _move_drag_node: следующий левый
-    # драг ведёт себя непредсказуемо. Потеря фокуса/активации — тот же симптом,
-    # поэтому возвращаем ScrollHandDrag и чистим состояние жеста (идемпотентно:
-    # без активного drag оба условия ложны — ничего не меняется). В Qt «blur» —
-    # это QFocusEvent(FocusOut) → focusOutEvent (отдельного blurEvent у QWidget
-    # нет, проверено на PySide6 6.11); смена активации окна — changeEvent.
+    # ── v1.1.2RC2 (N3): resetting "stuck" drag state on focus loss ──
+    # The only regular reset is mouseReleaseEvent; but if the capture is lost
+    # without a release (Alt+Tab / window activation change mid-drag), the release
+    # never arrives and the view stays in NoDrag with a live _move_drag_node:
+    # the next left drag behaves unpredictably. Focus/activation loss is the
+    # same symptom, so we restore ScrollHandDrag and clean up the gesture state
+    # (idempotent: with no active drag both conditions are false — nothing
+    # changes). In Qt "blur" is QFocusEvent(FocusOut) → focusOutEvent (QWidget
+    # has no separate blurEvent, verified on PySide6 6.11); window activation
+    # change — changeEvent.
 
     def _reset_stuck_drag_state(self):
-        """Сбросить незавершённый drag-жест: ScrollHandDrag + очистка состояния."""
+        """Reset an unfinished drag gesture: ScrollHandDrag + state cleanup."""
         if self._move_drag_node is not None or self.dragMode() == QGraphicsView.NoDrag:
             self._move_drag_node = None
             self._move_drag_old = None
@@ -389,62 +390,62 @@ class MapView(QGraphicsView):
             self.setDragMode(QGraphicsView.ScrollHandDrag)
 
     def focusOutEvent(self, event: QFocusEvent):
-        """v1.1.2RC2 (N3): потеря фокуса («blur») — capture мог уйти, release не придёт."""
+        """v1.1.2RC2 (N3): focus loss ("blur") — the capture may have been lost, the release won't come."""
         self._reset_stuck_drag_state()
         super().focusOutEvent(event)
 
     def changeEvent(self, event: QEvent):
-        """v1.1.2RC2 (N3): смена активации окна — тот же путь залипания, что blur."""
+        """v1.1.2RC2 (N3): window activation change — the same stuck path as blur."""
         if event.type() == QEvent.Type.ActivationChange:
             self._reset_stuck_drag_state()
         super().changeEvent(event)
 
     def keyPressEvent(self, event: QKeyEvent):
         if self._rubber_select_item is not None:
-            # Esc во время рамки выделения — отмена без изменения выделения
+            # Esc during the selection rectangle — cancel without changing the selection
             self._finish_rubber_select()
             return
         if self._connect_source is not None:
-            # Любая клавиша во время drag-режима (в т.ч. Esc/Delete) — отмена drag'а;
-            # удаление узлов здесь намеренно НЕ выполняем.
+            # Any key during drag mode (incl. Esc/Delete) — cancels the drag;
+            # we intentionally do NOT delete nodes here.
             self._cancel_connect_drag()
             self.connect_drag_finished.emit()
             return
         if event.key() == Qt.Key_Delete:
-            # Удалить выделенный узел (патч v0.6.x / v0.7.3: единый guarded-путь —
-            # подтверждение + ожидание завершения SSHWorker до remove_server)
+            # Delete the selected node (patch v0.6.x / v0.7.3: single guarded path —
+            # confirmation + waiting for SSHWorker to finish before remove_server)
             scene = self.scene()
             node = None
             note = None
-            group = None  # v0.8.1: выделенная группа (кластер/папка)
+            group = None  # v0.8.1: selected group (cluster/folder)
             for item in scene.selectedItems() if scene else []:
                 if isinstance(item, ServerNode):
                     node = item
                 elif StickyNote is not None and isinstance(item, StickyNote):
-                    note = item  # может быть несколько — берём первый
+                    note = item  # there may be several — take the first
                 elif NodeGroup is not None and isinstance(item, NodeGroup):
-                    group = item  # v0.8.1: берём первую выделенную группу
+                    group = item  # v0.8.1: take the first selected group
             if node:
                 win = self.window()
                 if hasattr(win, "_remove_node_guarded"):
                     win._remove_node_guarded(node)
-                else:  # фолбэк для сцен без MainWindow (тесты/внешние хостеры)
+                else:  # fallback for scenes without MainWindow (tests/external hosts)
                     scene.remove_server(node.data.id)
                     parent_widget = self.parent()
                     if hasattr(parent_widget, 'refresh_sidebar'):
                         parent_widget.refresh_sidebar()
             elif note is not None:
-                # v0.7.2: выделенная заметка — лёгкий объект, удаляется без
-                # подтверждения. (Если фокус внутри её QTextEdit, клавиши до
-                # view не доходят — Delete стирает символы, заметку не трогает.)
+                # v0.7.2: selected note — a lightweight object, deleted without
+                # confirmation. (If focus is inside its QTextEdit, keys don't reach
+                # the view — Delete erases characters, not the note.)
                 win = self.window()
                 if hasattr(win, "_remove_note"):
                     win._remove_note(note)
                 elif scene is not None:
                     scene.remove_note(note.note_id)
             elif group is not None and NodeGroup is not None:
-                # v0.8.1: выделенная группа — лёгкий объект (серверы остаются на карте),
-                # удаляется без подтверждения, как заметка.
+                # v0.8.1: selected group — lightweight (servers stay on the map),
+                # deleted without confirmation, like a note.
                 win = self.window()
                 if hasattr(win, "_remove_group"):
                     win._remove_group(group)
@@ -452,47 +453,47 @@ class MapView(QGraphicsView):
                     scene.remove_group(group)
         super().keyPressEvent(event)
 
-    # ── v0.7.2/v0.7.3: контекстное меню на карте (ПКМ) ─────────────
+    # ── v0.7.2/v0.7.3: context menu on the map (RMB) ─────────────
 
     @staticmethod
     def _event_point(event):
-        """QPoint позиции события в версии-agnostic форме.
+        """Event position as a QPoint, in a version-agnostic form.
 
-        Qt6/PySide6: у событий есть position() (QPointF) и legacy pos(); в разных
-        версиях биндингов доступен то один, то другой вариант — пробуем оба.
+        Qt6/PySide6: events have position() (QPointF) and legacy pos(); across
+        binding versions either one or the other may be available — try both.
         """
         position = getattr(event, "position", None)
         if callable(position):
             try:
                 return position().toPoint()
             except Exception:
-                pass  # legacy-биндинг без position() — ниже event.pos()
+                pass  # legacy binding without position() — event.pos() below
         return event.pos()
 
     @classmethod
     def _event_global_point(cls, event):
-        """QPoint глобальной позиции события (для QMenu.exec)."""
+        """Event global position as a QPoint (for QMenu.exec)."""
         global_position = getattr(event, "globalPosition", None)
         if callable(global_position):
             try:
                 return global_position().toPoint()
             except Exception:
-                pass  # legacy-биндинг без globalPosition() — ниже event.globalPos()
+                pass  # legacy binding without globalPosition() — event.globalPos() below
         return event.globalPos()
 
-    # ── v0.9.3: рамка выделения (Ctrl+ЛКМ по пустому месту) ─────────
+    # ── v0.9.3: selection rectangle (Ctrl+LMB on empty space) ─────────
 
     def _start_rubber_select(self, scene_pos, additive: bool = False):
-        """Начать рисование рамки выделения. Shift добавляет к текущему
-        выделению, без Shift — заменяет его."""
+        """Start drawing the selection rectangle. Shift adds to the current
+        selection; without Shift it replaces the selection."""
         from PySide6.QtWidgets import QGraphicsRectItem
         self._rubber_select_origin = scene_pos
         self._rubber_saved_selection = list(self.scene().selectedItems()) \
             if additive else []
-        pen = QPen(QColor(theme.ACCENT), 0)  # v1.2.5: акцент темы; cosmetic pen — толщина не зависит от зума
+        pen = QPen(QColor(theme.ACCENT), 0)  # v1.2.5: theme accent; cosmetic pen — thickness is zoom-independent
         self._rubber_select_item = QGraphicsRectItem()
         self._rubber_select_item.setPen(pen)
-        _rubber_fill = QColor(theme.ACCENT)        # v1.2.5: ACCENT + alpha (заливка рамки выделения)
+        _rubber_fill = QColor(theme.ACCENT)        # v1.2.5: ACCENT + alpha (selection-rectangle fill)
         _rubber_fill.setAlpha(30)
         self._rubber_select_item.setBrush(QBrush(_rubber_fill))
         self._rubber_select_item.setZValue(200)
@@ -500,27 +501,27 @@ class MapView(QGraphicsView):
         self.setCursor(Qt.CrossCursor)
 
     def _update_rubber_select(self, scene_pos):
-        """Обновить геометрию рамки + live-выделение пересекаемых узлов.
+        """Update the rectangle geometry + live selection of intersecting nodes.
 
-        v1.2.10rc3 (AUDIT авто #9): полный O(n) обход ВСЕХ элементов сцены на каждое
-        движение мыши — scene.items() возвращает и детей QGraphicsItemGroup, поэтому у
-        500 узлов это ~6,5 тыс. элементов, по каждому isinstance + (у узлов)
-        sceneBoundingRect/intersects → прямой обход scene.nodes(): ТОТ ЖЕ набор
-        ServerNode (старый фильтр isinstance отбирал ровно их), но без ~6 тыс.
-        дочерних элементов групп. Замеренно быстрее полного обхода в ~3 раза
+        v1.2.10rc3 (AUDIT auto #9): a full O(n) walk of ALL scene elements on every
+        mouse move — scene.items() also returns QGraphicsItemGroup children, so with
+        500 nodes that's ~6.5k elements, each with isinstance + (for nodes)
+        sceneBoundingRect/intersects → direct walk of scene.nodes(): the SAME set
+        of ServerNodes (the old isinstance filter picked exactly them), but without
+        the ~6k group child elements. Measured ~3x faster than the full walk
         (tests/_bench_rubber.py, CHANGELOG v1.2.10rc3).
 
-        Замеченный в ROADMAP вариант `scene().items(rect)` (пространственный индекс Qt)
-        ИЗМЕРЕН и отвергнут: на Qt 6.11.1/PySide6 6.11.1 накладные расходы на
-        кандидата ~2,6 мкс, поэтому рамка, покрывающая всю карту, стоила 15,6 мс против
-        0,9 мс у простого обхода ВСЕХ элементов — медленнее СТАРОГО кода (выигрыш
-        только у малых рамок). want-критерий не изменился: пересекается ИЛИ в базовом
-        выделении (аддитивный режим Shift, _rubber_saved_selection) — результат
-        идентичен v1.2.10rc2."""
+        The ROADMAP-suggested `scene().items(rect)` (Qt spatial index)
+        was MEASURED and REJECTED: on Qt 6.11.1/PySide6 6.11.1 the per-candidate
+        overhead is ~2.6 us, so a rectangle covering the whole map cost 15.6 ms versus
+        0.9 ms for a plain walk of ALL elements — slower than the OLD code (the win
+        only for small rectangles). The want-criterion is unchanged: intersecting OR
+        in the base selection (Shift additive mode, _rubber_saved_selection) — the
+        result is identical to v1.2.10rc2."""
         origin = self._rubber_select_origin
         rect = QRectF(origin, scene_pos).normalized()
         self._rubber_select_item.setRect(rect)
-        # live: подсвечиваем узлы под рамкой прямо во время драга
+        # live: highlight the nodes under the rectangle right during the drag
         base_ids = {id(n) for n in getattr(self, "_rubber_saved_selection", [])}
         scene = self.scene()
         nodes = scene.nodes() if hasattr(scene, "nodes") \
@@ -532,7 +533,7 @@ class MapView(QGraphicsView):
                 node.setSelected(want)
 
     def _finish_rubber_select(self):
-        """Убрать рамку; итоговое выделение уже установлено в _update_rubber_select."""
+        """Remove the rectangle; the final selection was already set in _update_rubber_select."""
         if self._rubber_select_item is not None:
             sc = self._rubber_select_item.scene()
             if sc is not None:
@@ -543,7 +544,7 @@ class MapView(QGraphicsView):
         self.unsetCursor()
 
     def contextMenuEvent(self, event):
-        """ПКМ: пустое место — добавить заметку/сервер; объект — действия над ним."""
+        """RMB: empty space — add note/server; object — actions on it."""
         scene = self.scene()
         if scene is None:
             super().contextMenuEvent(event)
@@ -555,18 +556,18 @@ class MapView(QGraphicsView):
         menu = QMenu(self)
 
         if note is not None and StickyNote is not None:
-            # v1.2.4: крепление к серверу (drag на узел — основной путь, меню — запасной).
-            # Порядок пунктов: [Прикрепить… / Открепить] → [Удалить заметку].
+            # v1.2.4: attachment to a server (drag onto a node — primary path, menu — fallback).
+            # Item order: [Attach… / Detach] → [Delete note].
             if hasattr(win, "_attach_note_to_node") or hasattr(win, "_detach_note"):
                 if getattr(note, "server_id", None):
                     act_det = menu.addAction(_t("ctx.note_detach"))
-                    def _det(checked=False, n=note):  # checked — bool из triggered (питфол v0.8.1)
+                    def _det(checked=False, n=note):  # checked — a bool from triggered (v0.8.1 pitfall)
                         w = self.window()
                         if hasattr(w, "_detach_note"):
                             w._detach_note(n)
                     act_det.triggered.connect(_det)
                 else:
-                    target = node  # узел под курсором (из _classify_at выше)
+                    target = node  # the node under the cursor (from _classify_at above)
                     if target is None and hasattr(scene, "get_selected_node"):
                         target = scene.get_selected_node()
                     if target is not None:
@@ -587,10 +588,10 @@ class MapView(QGraphicsView):
                                 if hasattr(w, "_attach_note_to_node"):
                                     w._attach_note_to_node(n, tnode)
                             act_s.triggered.connect(_atts)
-            # Заметка (v0.7.2): редактирование — двойным кликом, здесь только удаление
+            # Note (v0.7.2): editing is via double-click; here only deletion
             act_del = menu.addAction(_t("ctx.delete_note"))
-            # v0.8.1: QAction.triggered передаёт bool `checked` первым аргументом —
-            # без явного параметра он бы затёр замыкание n (crash в _remove_note).
+            # v0.8.1: QAction.triggered passes a bool `checked` as the first argument —
+            # without an explicit parameter it would clobber the closure n (crash in _remove_note).
             def _del_note(checked=False, n=note):
                 w = self.window()
                 if hasattr(w, "_remove_note"):
@@ -599,13 +600,13 @@ class MapView(QGraphicsView):
                     scene.remove_note(n.note_id)
             act_del.triggered.connect(_del_note)
 
-        # ── v0.7.3: контекстное меню узла ──────────────────────────
+        # ── v0.7.3: node context menu ──────────────────────────
         if node is not None:
-            win_node = node  # локальная ссылка для замыканий
-            # v1.0RC4: Быстрый запуск — ПЕРВЫЙ пункт (выше «Подключиться по SSH»).
-            # Подменю: пункты node.data.quick_launch + разделитель + «Настроить…».
-            # Без пунктов — только «Настроить…» (discoverability). Паттерн hasattr —
-            # как у остальных действий: MapView не знает о MainWindow.
+            win_node = node  # local reference for closures
+            # v1.0RC4: Quick launch — the FIRST item (above "Connect via SSH").
+            # Submenu: node.data.quick_launch items + separator + "Configure…".
+            # No items — only "Configure…" (discoverability). The hasattr pattern is
+            # the same as for the other actions: MapView doesn't know about MainWindow.
             if hasattr(win, "_run_quick_launch_entry") or \
                     hasattr(win, "_open_quick_launch_dialog"):
                 ql_entries = list(getattr(win_node.data, "quick_launch", None) or [])
@@ -614,7 +615,7 @@ class MapView(QGraphicsView):
                     if not hasattr(win, "_run_quick_launch_entry"):
                         break
                     act_ql = ql_sub.addAction(str(e.get("name") or e.get("value") or "?"))
-                    def _ql(checked=False, n=win_node, en=e):  # checked — bool из triggered
+                    def _ql(checked=False, n=win_node, en=e):  # checked — a bool from triggered
                         w = self.window()
                         if hasattr(w, "_run_quick_launch_entry"):
                             w._run_quick_launch_entry(n, en)
@@ -623,26 +624,26 @@ class MapView(QGraphicsView):
                     ql_sub.addSeparator()
                 if hasattr(win, "_open_quick_launch_dialog"):
                     act_qc = ql_sub.addAction(_t("ql.configure"))
-                    def _ql_cfg(checked=False, n=win_node):  # checked — bool из triggered
+                    def _ql_cfg(checked=False, n=win_node):  # checked — a bool from triggered
                         w = self.window()
                         if hasattr(w, "_open_quick_launch_dialog"):
                             w._open_quick_launch_dialog(n)
                     act_qc.triggered.connect(_ql_cfg)
-                menu.addSeparator()  # Быстрый запуск отделён от «боевого» меню узла
+                menu.addSeparator()  # Quick launch is separated from the node's "main" menu
             if hasattr(win, "_connect_ssh_to_selected"):
                 act_ssh = menu.addAction(_t("ctx.ssh_connect"))
-                # v0.8.1: первый параметр — bool `checked` из QAction.triggered; без него
-                # PySide вызывает _ssh(True) и затёрло бы замыкание win_node (crash в
-                # MainWindow._select_node: 'bool' object has no attribute 'setSelected').
+                # v0.8.1: the first parameter is a bool `checked` from QAction.triggered;
+                # without it PySide calls _ssh(True), clobbering the win_node closure
+                # (crash in MainWindow._select_node: 'bool' object has no attribute 'setSelected').
                 def _ssh(checked=False, n=win_node):
                     w = self.window()
-                    w._select_node(n)          # SSH-диалог берёт выделенный узел
+                    w._select_node(n)          # the SSH dialog takes the selected node
                     w._connect_ssh_to_selected()
                 act_ssh.triggered.connect(_ssh)
-            # v0.8.2: подключение в системном терминале ОС
+            # v0.8.2: connection in the OS system terminal
             if hasattr(win, "_connect_ssh_external"):
                 act_ext = menu.addAction(_t("ctx.ssh_external"))
-                def _ssh_ext(checked=False, n=win_node):  # checked — bool из triggered
+                def _ssh_ext(checked=False, n=win_node):  # checked — a bool from triggered
                     w = self.window()
                     w._select_node(n)
                     w._connect_ssh_external(n)
@@ -650,12 +651,12 @@ class MapView(QGraphicsView):
             if hasattr(win, "_edit_node"):
                 act_edit = menu.addAction(_t("ctx.edit_server"))
                 act_edit.triggered.connect(lambda _=False, n=win_node: self.window()._edit_node(n))
-            # v0.9: автосбор данных о сервере (Linux) по SSH
+            # v0.9: automatic server-info collection (Linux) over SSH
             if hasattr(win, "_collect_node_info"):
                 act_info = menu.addAction(_t("ctx.collect_info"))
                 act_info.triggered.connect(
                     lambda _=False, n=win_node: self.window()._collect_node_info(n))
-            # v0.8.4 (бывш. DESIGN.md §D): свернуть/развернуть плашку
+            # v0.8.4 (former DESIGN.md §D): collapse/expand the badge
             if hasattr(win_node, "toggle_collapsed"):
                 act_col = menu.addAction(
                     _t("ctx.expand_server") if getattr(win_node.data, "collapsed", False)
@@ -671,7 +672,7 @@ class MapView(QGraphicsView):
                 act_ping.triggered.connect(lambda _=False, n=win_node: self.window()._ping_node(n))
             menu.addSeparator()
             if hasattr(win, "_duplicate_node"):
-                # v0.9.3: дублирование узла (копия полей + keyring-пароль под новым id)
+                # v0.9.3: node duplication (copy of fields + keyring password under a new id)
                 act_dup = menu.addAction(_t("ctx.duplicate_server"))
                 act_dup.triggered.connect(
                     lambda _=False, n=win_node: self.window()._duplicate_node(n))
@@ -680,7 +681,7 @@ class MapView(QGraphicsView):
                 act_delnode.triggered.connect(
                     lambda _=False, n=win_node: self.window()._remove_node_guarded(n))
 
-        # ── v0.9.3: групповые операции над мультивыделением ─────────
+        # ── v0.9.3: group operations on multi-selection ─────────
         if node is not None and hasattr(win, "selected_nodes"):
             try:
                 multi = len([i for i in scene.selectedItems()
@@ -691,7 +692,7 @@ class MapView(QGraphicsView):
                 menu.addSeparator()
                 if hasattr(win, "_connect_selected_nodes"):
                     act_conn = menu.addAction(_t("edit.connect_selected"))
-                    def _conn_sel(checked=False):  # checked — bool из triggered
+                    def _conn_sel(checked=False):  # checked — a bool from triggered
                         w = self.window()
                         if hasattr(w, "_connect_selected_nodes"):
                             w._connect_selected_nodes()
@@ -704,7 +705,7 @@ class MapView(QGraphicsView):
                             w._delete_selected_nodes()
                     act_delmulti.triggered.connect(_del_sel)
 
-        # ── v0.7.3: контекстное меню стрелки (связи) ───────────────
+        # ── v0.7.3: arrow (connection) context menu ───────────────
         if arrow is not None and node is None:
             win_arrow = arrow
             if hasattr(win, "_edit_connection"):
@@ -717,35 +718,35 @@ class MapView(QGraphicsView):
                     lambda _=False, a=win_arrow: self.window()._remove_connection(a))
 
         if node is None and arrow is None:
-            # Пустое место (v0.7.2 — заметка; в точке клика). Группа под точкой (v0.8.1):
-            # действия над ней дописываются ниже — клик по «фону» папки тоже её выбор.
+            # Empty space (v0.7.2 — note; at the click point). A group under the point (v0.8.1):
+            # actions on it are appended below — a click on a folder's "background" selects it too.
             if hasattr(win, "_add_server"):
                 p = scene_pos
                 act_srv = menu.addAction(_t("btn.add_server"))
-                # v0.8.1: `checked` — bool из QAction.triggered; раньше он затирал
-                # замыкание p, и MainWindow._add_server получал True вместо точки клика.
+                # v0.8.1: `checked` — a bool from QAction.triggered; it used to clobber
+                # the closure p, and MainWindow._add_server received True instead of the click point.
                 def _add_server(checked=False, p=p):
                     w = self.window()
                     fn = getattr(w, "_add_server", None)
                     if callable(fn):
                         try:
-                            fn(p)  # позиция точки клика (сигнатура принимает опционально)
+                            fn(p)  # the click-point position (the signature accepts it optionally)
                         except TypeError:
                             fn()
                 act_srv.triggered.connect(_add_server)
             if hasattr(win, "_add_note_at"):
                 p = scene_pos
                 act_note = menu.addAction(_t("ctx.add_note"))
-                def _add_note(checked=False, p=p):  # v0.8.1: см. _add_server выше
+                def _add_note(checked=False, p=p):  # v0.8.1: see _add_server above
                     w = self.window()
                     if hasattr(w, "_add_note_at"):
                         w._add_note_at(p)
                 act_note.triggered.connect(_add_note)
             if NodeGroup is not None and hasattr(win, "_add_group_at"):
-                # v0.8.1: новая группа в точке клика (узлы под рамкой захватятся сами)
+                # v0.8.1: new group at the click point (nodes under the rectangle will be captured automatically)
                 p = scene_pos
                 act_grp = menu.addAction(_t("ctx.add_group"))
-                def _add_group(checked=False, p=p):  # v0.8.1: checked — см. выше
+                def _add_group(checked=False, p=p):  # v0.8.1: checked — see above
                     w = self.window()
                     fn = getattr(w, "_add_group_at", None)
                     if callable(fn):
@@ -755,23 +756,23 @@ class MapView(QGraphicsView):
                             fn()
                 act_grp.triggered.connect(_add_group)
 
-            # ── v0.8.1: контекстное меню группы (клик по её фону/заголовку) ──
+            # ── v0.8.1: group context menu (click on its background/title) ──
             grp = None
             scene_obj = self.scene()
             if NodeGroup is not None and scene_obj is not None \
                     and hasattr(scene_obj, "find_group_at"):
                 grp = scene_obj.find_group_at(scene_pos)
             if grp is not None:
-                win_grp = grp  # локальная ссылка для замыканий (паттерн node/arrow выше)
+                win_grp = grp  # local reference for closures (node/arrow pattern above)
                 menu.addSeparator()
                 act_rg = menu.addAction(_t("ctx.rename_group"))
-                def _rename(checked=False, g=win_grp):  # v0.8.1: checked — bool из triggered
+                def _rename(checked=False, g=win_grp):  # v0.8.1: checked — a bool from triggered
                     w = self.window()
                     if hasattr(w, "_rename_group"):
                         w._rename_group(g)
                 act_rg.triggered.connect(_rename)
                 act_dg = menu.addAction(_t("ctx.delete_group"))
-                def _del_grp(checked=False, g=win_grp):  # v0.8.1: checked — bool из triggered
+                def _del_grp(checked=False, g=win_grp):  # v0.8.1: checked — a bool from triggered
                     w = self.window()
                     if hasattr(w, "_remove_group"):
                         w._remove_group(g)
@@ -780,24 +781,24 @@ class MapView(QGraphicsView):
                 act_dg.triggered.connect(_del_grp)
 
         if not menu.isEmpty():
-            # AUDIT v0.7.2 (средняя #9): не глотаем исключения целиком — «pass» молча
-            # превращал любую ошибку в «меню просто не открылось». Координаты уже
-            # приведены к QPoint явным хелпером выше; если что-то всё же пойдёт не так,
-            # пусть это будет видно (лог + traceback), а не незаметно.
+            # AUDIT v0.7.2 (medium #9): we don't swallow exceptions wholesale — a bare "pass"
+            # silently turned any error into "the menu simply didn't open". Coordinates are
+            # already converted to QPoint by the explicit helper above; if something still
+            # goes wrong, let it be visible (log + traceback), not invisible.
             try:
                 menu.exec(self._event_global_point(event))
-            except Exception as e:  # noqa: BLE001 — GUI-компонент не должен ронять приложение
-                # v1.0-fix (audit #11): логгер вместо print в stderr, как во всём остальном коде.
+            except Exception as e:  # noqa: BLE001 — a GUI component must not crash the app
+                # v1.0-fix (audit #11): logger instead of print to stderr, like the rest of the code.
                 try:
                     from modules.logger import get_logger
                     get_logger(__name__).error(f"contextMenuEvent: menu.exec failed: {e}")
-                except Exception:  # noqa: BLE001 — сбой логгера не должен ломать контекстное меню
+                except Exception:  # noqa: BLE001 — a logger failure must not break the context menu
                     pass
         else:
             super().contextMenuEvent(event)
 
     def _toggle_and_mark(self, node):
-        """v0.8.4 (бывш. DESIGN.md §D): toggle_collapsed + пометить проект изменённым."""
+        """v0.8.4 (former DESIGN.md §D): toggle_collapsed + mark the project as modified."""
         node.toggle_collapsed()
         w = self.window()
         if hasattr(w, "_mark_dirty"):

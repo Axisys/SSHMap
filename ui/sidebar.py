@@ -1,26 +1,30 @@
-"""Панель сайдбара (список серверов) — v0.9.9.4.
+"""Sidebar panel (server list) — v0.9.9.4.
 
-Сайдбар-кластер перенесён из ui/main_window.py (фаза 1 серии «Гигиена
-main_window.py»): кнопки действий, заголовок, поле поиска, тег-фильтр, дерево
-серверов с маркерами статусов и состав контекстного меню по строке.
+The sidebar cluster was moved out of ui/main_window.py (phase 1 of the
+"main_window.py hygiene" series): action buttons, title, search field,
+tag filter, the server tree with status markers, and the per-row context
+menu composition.
 
-Паттерн «модуль + колбэки» (как services/diagnostics.py в v0.9.9.3): панель не
-знает ни о MainWindow, ни о MapScene — всё приходит извне:
-  * translate_fn(key, **kw) — i18n-колбэк; реестр собственных строк панели
-    повторно применяется в retranslate() при смене языка (регрессия на баг
-    v0.9.2 — строки сайдбара не теряются/не остаются на старом языке);
-  * actions — словарь колбэков контекстного меню {ключ действия: callable(node)};
-  * клики кнопок — сигналы панели, MainWindow подключает свои слоты.
+"Module + callbacks" pattern (like services/diagnostics.py in v0.9.9.3):
+the panel knows neither MainWindow nor MapScene — everything comes from
+outside:
+  * translate_fn(key, **kw) — i18n callback; the panel's own string
+    registry is re-applied in retranslate() on language switch (regression
+    for the v0.9.2 bug — sidebar strings are not lost/left in the old
+    language);
+  * actions — a dict of context menu callbacks {action key: callable(node)};
+  * button clicks — panel signals; MainWindow wires up its own slots.
 
-MainWindow остаётся фасадом (публичный API не меняется): self.tree /
-self.tag_filter / self.search_edit / self.btn_* — ссылки на виджеты панели,
-refresh_sidebar()/_sync_selection_state()/_on_tree_item_clicked() и др. — методы
-окна. Объект контекстного меню СОЗДАЁТ MainWindow (QMenu — модульная глобальная,
-тестовый шов подмены), панель лишь наполняет его пунктами (fill_context_menu).
+MainWindow remains the facade (public API unchanged): self.tree /
+self.tag_filter / self.search_edit / self.btn_* — references to the
+panel's widgets, refresh_sidebar()/_sync_selection_state()/_on_tree_item_clicked()
+etc. — window methods. The context menu object is CREATED by MainWindow
+(QMenu — module-level global, the test seam for monkeypatching); the panel
+only fills it with items (fill_context_menu).
 """
 from PySide6.QtCore import Qt, QSize, Signal
-# v1.1.2RC2 (N9): QColor убран из импортов — с удалением мёртвого setItemData(...,
-# Qt.DecorationRole) в панели не осталось ни одного использования
+# v1.1.2RC2 (N9): QColor removed from imports — after deleting the dead
+# setItemData(..., Qt.DecorationRole) the panel has no remaining uses
 from PySide6.QtGui import QIcon, QPixmap, QPainter, QBrush
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QComboBox,
@@ -32,23 +36,24 @@ try:
 except ImportError:
     from graphics.server_node import ServerNode
 
-try:  # UI polish: векторные иконки (ui/icons.py) — замена эмодзи, единый стиль с тулбаром
+try:  # UI polish: vector icons (ui/icons.py) — emoji replacement, consistent with the toolbar
     from .icons import get_icon
 except ImportError:
     try:
         from icons import get_icon
-    except ImportError:  # flat-раскладка без ui/icons — кнопки текстовые, как раньше
-        def get_icon(name):  # noqa: N802 — заглушка с той же сигнатурой
+    except ImportError:  # flat layout without ui/icons — text-only buttons, as before
+        def get_icon(name):  # noqa: N802 — stub with the same signature
             return None
 
 
-# Ключи действий контекстного меню (порядок и разделители — ROADMAP v0.9.6, пункт 1).
-# «Карточные» действия сознательно НЕ дублируются (ROADMAP #2): drag-связь и
-# свернуть/развернуть плашку живут только в контексте карты, где они имеют смысл.
+# Context menu action keys (order and separators — ROADMAP v0.9.6, item 1).
+# "Card" actions are deliberately NOT duplicated (ROADMAP #2): the drag
+# connection and panel collapse/expand live only in the map context, where
+# they make sense.
 CONTEXT_MENU_ITEMS = (
     ("ssh", "ctx.ssh_connect"),
     ("external", "ctx.ssh_external"),
-    None,  # разделитель
+    None,  # separator
     ("edit", "ctx.edit_server"),
     None,
     ("copy_ip", "ctx.copy_ip"),
@@ -61,28 +66,30 @@ CONTEXT_MENU_ITEMS = (
     ("delete", "ctx.delete_server"),
 )
 
-# Кнопки панели: (атрибут, иконка, i18n-ключ) — порядок как в исходном _setup_ui.
-# v1.1: 6-я кнопка «Настройки» (хаб, ROADMAP v1.1 задача 2) — векторная шестерёнка
-# из ui/icons.py; retranslate() ниже обходит _BUTTONS — новый кортеж подхватывается.
+# Panel buttons: (attribute, icon, i18n key, fallback) — order as in the
+# original _setup_ui.
+# v1.1: 6th button "Settings" (hub, ROADMAP v1.1 task 2) — a vector gear
+# from ui/icons.py; retranslate() below iterates _BUTTONS — the new tuple
+# is picked up.
 _BUTTONS = (
-    ("btn_add", "add_server", "btn.add_server", "Добавить сервер"),
-    ("btn_connect", "connection", "btn.add_connection", "Добавить связь"),
-    ("btn_connect_ssh", "ssh", "btn.connect_ssh", "SSH Подключение"),
-    ("btn_props", "properties", "btn.properties", "Свойства"),
-    ("btn_delete", "delete", "btn.delete", "Удалить"),
-    ("btn_settings", "settings", "btn.settings", "Настройки"),
+    ("btn_add", "add_server", "btn.add_server", "Add Server"),
+    ("btn_connect", "connection", "btn.add_connection", "Add Connection"),
+    ("btn_connect_ssh", "ssh", "btn.connect_ssh", "Connect via SSH"),
+    ("btn_props", "properties", "btn.properties", "Properties"),
+    ("btn_delete", "delete", "btn.delete", "Delete"),
+    ("btn_settings", "settings", "btn.settings", "Settings"),
 )
 
 
 class SidebarPanel(QWidget):
-    """Сайдбар: кнопки, заголовок, поиск, тег-фильтр, дерево серверов (v0.9.9.4).
+    """Sidebar: buttons, title, search, tag filter, server tree (v0.9.9.4).
 
-    Сигналы (MainWindow подключает свои слоты):
+    Signals (MainWindow wires up its own slots):
         add_server_clicked / add_connection_clicked / connect_ssh_clicked /
-        show_properties_clicked / delete_selected_clicked — клики кнопок;
-        settings_clicked — клик кнопки «Настройки» (v1.1, хаб настроек);
-    события дерева (itemClicked/itemDoubleClicked/customContextMenuRequested)
-    доступны напрямую на self.tree.
+        show_properties_clicked / delete_selected_clicked — button clicks;
+        settings_clicked — "Settings" button click (v1.1, settings hub);
+    tree events (itemClicked/itemDoubleClicked/customContextMenuRequested)
+    are available directly on self.tree.
     """
 
     add_server_clicked = Signal()
@@ -90,18 +97,19 @@ class SidebarPanel(QWidget):
     connect_ssh_clicked = Signal()
     show_properties_clicked = Signal()
     delete_selected_clicked = Signal()
-    settings_clicked = Signal()  # v1.1: кнопка ⚙ «Настройки» (6-я в _BUTTONS)
-    collapse_clicked = Signal()  # v1.2.4.1: угловая кнопка (ромб «◇») — свернуть сайдбар в полоску
+    settings_clicked = Signal()  # v1.1: ⚙ "Settings" button (6th in _BUTTONS)
+    collapse_clicked = Signal()  # v1.2.4.1: corner button (the "◇" rhombus) — collapse the sidebar into a strip
 
     def __init__(self, translate_fn=None, actions=None, show_title: bool = True,
                  parent=None):
         """
-        :param translate_fn: i18n-колбэк (key, **kw) -> str; None — i18n недоступен
-            (строки остаются русскими литералами, как при конструировании).
-        :param actions: {ключ действия: callable(node)} для контекстного меню;
-            обязательны все ключи из CONTEXT_MENU_ITEMS.
-        :param show_title: создавать ли заголовок «Серверы» (MainWindow передаёт
-            _i18n_available — раньше метка создавалась только при доступном i18n).
+        :param translate_fn: i18n callback (key, **kw) -> str; None — i18n
+            unavailable (strings stay the English fallback literals from construction).
+        :param actions: {action key: callable(node)} for the context menu;
+            all keys from CONTEXT_MENU_ITEMS are required.
+        :param show_title: whether to create the "Servers" title (MainWindow
+            passes _i18n_available — earlier the label was created only when
+            i18n was available).
         """
         super().__init__(parent)
         self._translate = translate_fn
@@ -109,12 +117,12 @@ class SidebarPanel(QWidget):
         missing = [entry[0] for entry in CONTEXT_MENU_ITEMS
                    if entry is not None and entry[0] not in self._actions]
         if missing:
-            raise ValueError(f"SidebarPanel: нет колбэков для действий {missing}")
+            raise ValueError(f"SidebarPanel: no callbacks for actions {missing}")
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(8, 8, 8, 8)
 
-        # ── Server title label (только при доступном i18n — как раньше) ────────
+        # ── Server title label (only when i18n is available — as before) ────────
         self.title_label = None
         if show_title:
             self.title_label = QLabel(self._tr("server.title"))
@@ -125,52 +133,54 @@ class SidebarPanel(QWidget):
         if translate_fn is not None:
             try:
                 self.search_edit.setPlaceholderText(self._translate("search.placeholder"))
-            except Exception:  # noqa: BLE001 — плейсхолдер косметика
+            except Exception:  # noqa: BLE001 — placeholder is cosmetic
                 pass
         else:
-            self.search_edit.setPlaceholderText("Поиск по alias / host / IP...")
+            self.search_edit.setPlaceholderText("Search by alias / host / IP...")
         layout.addWidget(self.search_edit)
 
-        # ── v0.9.4: фильтр по тегам ────────────────────────────────────────────
-        # Элементы: [0] = «Все теги» (фильтр выключен), далее — уникальные теги
-        # всех серверов карты; перестраивается в sync_tag_filter_items (без сброса выбора).
+        # ── v0.9.4: tag filter ────────────────────────────────────────────
+        # Items: [0] = "All tags" (filter off), then the unique tags of all
+        # map servers; rebuilt in sync_tag_filter_items (without resetting the selection).
         self.tag_filter = QComboBox()
         layout.addWidget(self.tag_filter)
 
         # ── Server tree ────────────────────────────────────────────────────────
         self.tree = QTreeWidget()
         self.tree.setHeaderHidden(True)
-        # Ревью-фикс v0.8.0 (#3): цветные маркеры статусов в дереве (16×16 — ровно
-        # под pixmap точки; единый размер не зависит от стиля/платформы).
+        # Review fix v0.8.0 (#3): colored status markers in the tree (16×16 —
+        # exactly fits the dot pixmap; a single size independent of style/platform).
         self.tree.setIconSize(QSize(16, 16))
         layout.addWidget(self.tree)
-        # Кэш иконок точек по статусу ("", "online", "warn", "offline")
+        # Icon cache for the status dots ("", "online", "warn", "offline")
         self._status_dot_icons = {}
 
-        # v0.9.6: контекстное меню дерева серверов (ПКМ по строке сайдбара).
-        # Политика CustomContextMenu + сигнал customContextMenuRequested — штатный
-        # путь Qt для QTreeWidget (у виджета нет переопределяемого contextMenuEvent
-        # без перехвата событий viewport'а; сигнал несёт позицию в координатах
-        # дерева, itemAt(pos) даёт строку). Слот-обработчик — у MainWindow.
+        # v0.9.6: server tree context menu (right-click on a sidebar row).
+        # CustomContextMenu policy + customContextMenuRequested signal — Qt's
+        # standard path for QTreeWidget (the widget has no overridable
+        # contextMenuEvent without intercepting viewport events; the signal
+        # carries the position in tree coordinates, itemAt(pos) gives the row).
+        # The slot handler lives in MainWindow.
         self.tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
 
-        # ── Buttons (всегда создаются, i18n применяется при наличии колбэка) ──
+        # ── Buttons (always created, i18n applied when a callback is present) ──
         for attr, icon_name, i18n_key, ru_fallback in _BUTTONS:
             btn = QPushButton(ru_fallback)
             self._set_btn_icon(btn, icon_name)
-            btn.setMinimumHeight(34)  # UI polish: ровные кнопки сайдбара
-            # v1.1.2RC2 (U1, замечание пользователей): выравнивание влево — отступ
-            # от левого края, иконка, текст. QPushButton по умолчанию центрирует
-            # содержимое; QStyle не даёт настроить alignment без stylesheet,
-            # поэтому — минимальный CSS (рамка/фон нативные, стилизация только
-            # позиционированием контента).
+            btn.setMinimumHeight(34)  # UI polish: uniform sidebar buttons
+            # v1.1.2RC2 (U1, user feedback): left alignment — indent from the
+            # left edge, icon, text. QPushButton centers its content by
+            # default; QStyle does not allow setting alignment without a
+            # stylesheet, so — minimal CSS (frame/background stay native,
+            # styling is only content positioning).
             btn.setStyleSheet("QPushButton { text-align: left; padding-left: 12px; }")
             if translate_fn is not None:
                 try:
-                    # Эмодзи/префиксы уже содержатся в самих значениях перевода,
-                    # добавлять их здесь повторно нельзя (было «- - 添加连接» и т.п.)
+                    # Emojis/prefixes are already contained in the translation
+                    # values themselves; re-adding them here would duplicate
+                    # (there was " - - 添加连接" etc.)
                     btn.setText(self._translate(i18n_key))
-                except Exception:  # noqa: BLE001 — keep Russian fallback labels
+                except Exception:  # noqa: BLE001 — keep the English fallback labels
                     pass
             setattr(self, attr, btn)
             layout.addWidget(btn)
@@ -180,67 +190,69 @@ class SidebarPanel(QWidget):
         self.btn_connect_ssh.clicked.connect(self.connect_ssh_clicked)
         self.btn_props.clicked.connect(self.show_properties_clicked)
         self.btn_delete.clicked.connect(self.delete_selected_clicked)
-        self.btn_settings.clicked.connect(self.settings_clicked)  # v1.1: хаб настроек
+        self.btn_settings.clicked.connect(self.settings_clicked)  # v1.1: settings hub
 
-        # ── v1.2.4.1 (ROADMAP задача 2): кнопка сворачивания — нижний ряд, правый угол ──
-        # Иконка (векторный ромб «◇», v1.2.4.1-fix) и tooltip выставляет MainWindow (i18n + ui/icons);
-        # здесь — только виджет и сигнал collapse_clicked (паттерн «модуль + колбэки»).
+        # ── v1.2.4.1 (ROADMAP task 2): collapse button — bottom row, right corner ──
+        # The icon (vector rhombus "◇", v1.2.4.1-fix) and tooltip are set by MainWindow (i18n + ui/icons);
+        # here — only the widget and the collapse_clicked signal ("module + callbacks" pattern).
         self.collapse_btn = QToolButton()
         self.collapse_btn.setAutoRaise(True)
-        self.collapse_btn.setToolTip("Свернуть сайдбар")  # fallback без i18n (как кнопки выше)
+        self.collapse_btn.setToolTip("Sidebar")  # fallback without i18n (like the buttons above)
         _row = QHBoxLayout()
         _row.addStretch(1)
         _row.addWidget(self.collapse_btn)
         layout.addLayout(_row)
         self.collapse_btn.clicked.connect(self.collapse_clicked)
 
-    # ── i18n (колбэк + retranslate — регрессия на баг v0.9.2) ─────────────────
+    # ── i18n (callback + retranslate — regression for the v0.9.2 bug) ─────────────────
 
     def _tr(self, key: str, **kw) -> str:
-        """Перевод через переданный колбэк; без колбэка — сам ключ."""
+        """Translate via the passed callback; without one — the key itself."""
         if self._translate is not None:
             try:
                 return self._translate(key, **kw)
-            except Exception:  # noqa: BLE001 — сбой i18n не роняет панель
+            except Exception:  # noqa: BLE001 — an i18n failure must not break the panel
                 pass
         return key
 
     def retranslate(self):
-        """Повторно применить перевод к собственным строкам панели (смена языка).
+        """Re-apply translations to the panel's own strings (language switch).
 
-        Регрессия на баг v0.9.2: до v0.9.9.4 строки сайдбара (кнопки, заголовок,
-        плейсхолдер поиска, «Все теги» в тег-фильтре) выставлялись только при
-        конструировании и оставались на старом языке после переключения. Реестр
-        строк — здесь; i18n-модуль панель не импортирует (колбэк translate_fn).
-        Вызывается из MainWindow._apply_ui_translations().
+        Regression for the v0.9.2 bug: before v0.9.9.4 the sidebar strings
+        (buttons, title, search placeholder, "All tags" in the tag filter)
+        were set only at construction time and stayed in the old language
+        after switching. The string registry — here; the panel does not
+        import the i18n module (the translate_fn callback).
+        Called from MainWindow._apply_ui_translations().
         """
         if self._translate is None:
-            return  # i18n недоступен — русские литералы с момента конструирования
+            return  # i18n unavailable — the English fallback literals from construction
         try:
             if self.title_label is not None:
                 self.title_label.setText(self._tr("server.title"))
             self.search_edit.setPlaceholderText(self._tr("search.placeholder"))
             for attr, _icon, key, _ru in _BUTTONS:
                 getattr(self, attr).setText(self._tr(key))
-            # Тег-фильтр: подпись элемента 0 («Все теги») — без сброса выбора.
-            # setCurrentIndex на тот же индекс сигнал не эмитит (Qt), повторный
-            # refresh_sidebar в любом случае идемпотентен.
+            # Tag filter: item 0's label ("All tags") — without resetting the selection.
+            # setCurrentIndex to the same index does not emit a signal (Qt); a
+            # repeated refresh_sidebar is idempotent anyway.
             idx = self.tag_filter.currentIndex()
             self.tag_filter.setItemText(0, self._tr("filter.all_tags"))
             if idx > 0:
                 self.tag_filter.setCurrentIndex(idx)
         except RuntimeError:
-            pass  # Qt teardown — виджеты уже уничтожены
+            pass  # Qt teardown — the widgets are already destroyed
 
-    # ── Кнопки ─────────────────────────────────────────────────────────────────
+    # ── Buttons ─────────────────────────────────────────────────────────────────
 
     def set_buttons_visible(self, visible: bool) -> None:
-        """v1.1.1 (ROADMAP пункт 5): show/hide блока кнопок сайдбара.
+        """v1.1.1 (ROADMAP item 5): show/hide the sidebar button block.
 
-        Ключ ui_show_sidebar_buttons (дефолт True — поведение v1.1). Layout сам
-        перестраивается: скрытые кнопки занимают ноль места, дерево/поиск растут.
-        Весь сайдбар прячется отдельно (MainWindow: пункт меню «Вид → Сайдбар»);
-        этот метод трогает только кнопочный блок.
+        The ui_show_sidebar_buttons key (default True — v1.1 behavior). The
+        layout reflows itself: hidden buttons take no space, the tree/search
+        grow. The whole sidebar is hidden separately (MainWindow: the
+        "View → Sidebar" menu item); this method only touches the button
+        block.
         """
         for attr, _icon, _key, _ru in _BUTTONS:
             btn = getattr(self, attr, None)
@@ -248,30 +260,30 @@ class SidebarPanel(QWidget):
                 try:
                     btn.setVisible(bool(visible))
                 except RuntimeError:
-                    pass  # Qt teardown — виджет уже уничтожен
+                    pass  # Qt teardown — the widget is already destroyed
 
     def _set_btn_icon(self, btn, name):
-        """UI polish: векторная иконка на кнопке (no-op без ui/icons)."""
+        """UI polish: a vector icon on the button (no-op without ui/icons)."""
         try:
             icon = get_icon(name)
             if icon is not None and not icon.isNull():
                 btn.setIcon(icon)
                 btn.setIconSize(QSize(18, 18))
-        except Exception:  # noqa: BLE001 — иконка косметика, не роняем сайдбар
+        except Exception:  # noqa: BLE001 — the icon is cosmetic, don't break the sidebar
             pass
 
-    # ── Дерево: построение строк (refresh из MainWindow) ──────────────────────
+    # ── Tree: row construction (refresh from MainWindow) ──────────────────────
 
     def active_tag_filter(self) -> str:
-        """Выбранный в комбобоксе тег или "" («Все теги»)."""
+        """The tag selected in the combobox, or "" ("All tags")."""
         data = self.tag_filter.currentData()
         return str(data) if data else ""
 
     def refresh_rows(self, nodes, query: str = ""):
-        """Пересобрать строки дерева: поиск (query) + активный тег-фильтр.
+        """Rebuild the tree rows: search (query) + the active tag filter.
 
-        `nodes` — итерируемое ServerNode (MainWindow передаёт scene.nodes());
-        панель не зависит от сцены — только от данных узлов.
+        `nodes` — an iterable of ServerNode (MainWindow passes scene.nodes());
+        the panel does not depend on the scene — only on the node data.
         """
         self.tree.clear()
         active_tag = self.active_tag_filter()
@@ -281,7 +293,7 @@ class SidebarPanel(QWidget):
                 node.data.host,
                 node.data.ip,
                 node.data.comment,
-                # v0.9.4: поиск ищет и по тегам
+                # v0.9.4: search matches tags too
                 " ".join(getattr(node.data, "tags", None) or []),
             ]).lower()
             if query and query not in haystack:
@@ -292,22 +304,22 @@ class SidebarPanel(QWidget):
             item = QTreeWidgetItem()
             item.setText(0, f"{node.data.alias}  ({node.data.host})")
             item.setData(0, Qt.UserRole, node.data.id)
-            # Ревью-фикс v0.8.0 (#3): цветной маркер статуса узла (online/warn/offline/не проверен)
+            # Review fix v0.8.0 (#3): colored status marker for the node (online/warn/offline/not checked)
             self.apply_status_marker(item, node.status, node.data.host or "")
-            # v0.9.4: подпись тегов в конце строки («[tag1, tag2]», до 3 тегов).
-            # v1.1.2RC2 (N8): setForeground(0, palette().windowText()) УБРАН — под
-            # комментарием «серым» он красил ВСЮ строку стандартным цветом текста
-            # (визуальный no-op: цвет не отличался от дефолтного).
+            # v0.9.4: the tag caption at the end of the row ("[tag1, tag2]", up to 3 tags).
+            # v1.1.2RC2 (N8): setForeground(0, palette().windowText()) REMOVED — under
+            # the "gray" comment it painted the WHOLE row with the standard text
+            # color (visual no-op: the color was indistinguishable from the default).
             tags = getattr(node.data, "tags", None) or []
             if tags:
                 item.setText(0, item.text(0) + f"  [{', '.join(tags[:3])}]")
             self.tree.addTopLevelItem(item)
 
     def sync_tag_filter_items(self, nodes):
-        """Перестроить список уникальных тегов в комбобоксе, сохраняя выбор.
+        """Rebuild the unique tag list in the combobox, preserving the selection.
 
-        Вызывается из refresh_sidebar (MainWindow) — сигнал currentIndexChanged
-        при этом не должен зациклить пересборку (блокируем сигналы на время заполнения).
+        Called from refresh_sidebar (MainWindow) — the currentIndexChanged
+        signal must not loop the rebuild (signals are blocked while filling).
         """
         all_tags = sorted({
             t.strip()
@@ -318,7 +330,7 @@ class SidebarPanel(QWidget):
         current = self.active_tag_filter()
         try:
             all_label = self._translate("filter.all_tags") if self._translate else "All tags"
-        except Exception:  # noqa: BLE001 — как раньше: fallback на английский литерал
+        except Exception:  # noqa: BLE001 — as before: fallback to the English literal
             all_label = "All tags"
         if not all_label:
             all_label = "All tags"
@@ -327,9 +339,10 @@ class SidebarPanel(QWidget):
         try:
             combo.clear()
             combo.addItem(all_label, "")
-            # v1.1.2RC2 (N9): setItemData(QColor, Qt.DecorationRole) УБРАН — стандартный
-            # стиль читает DecorationRole как QIcon, QColor не рендерился (мёртвый код);
-            # «● tag» в тексте — обычный символ цветом текста, цвет тегов несёт карточка.
+            # v1.1.2RC2 (N9): setItemData(QColor, Qt.DecorationRole) REMOVED — the
+            # standard style reads DecorationRole as QIcon, QColor never rendered
+            # (dead code); the "● tag" in the text is a plain text-color glyph, the
+            # tag color is carried by the card.
             for tag in all_tags:
                 combo.addItem(f"● {tag}", tag)
             idx = combo.findData(current) if current else 0
@@ -339,10 +352,10 @@ class SidebarPanel(QWidget):
         finally:
             combo.blockSignals(False)
 
-    # ── Маркеры статусов (ревью-фикс v0.8.0, #3) ──────────────────────────────
+    # ── Status markers (review fix v0.8.0, #3) ──────────────────────────────
 
     def _status_dot_icon(self, status: str) -> QIcon:
-        """Цветная точка для строки дерева — та же палитра, что у точек на карточках."""
+        """Colored dot for a tree row — the same palette as the dots on the cards."""
         icon = self._status_dot_icons.get(status)
         if icon is not None:
             return icon
@@ -360,37 +373,38 @@ class SidebarPanel(QWidget):
         return icon
 
     def apply_status_marker(self, item: QTreeWidgetItem, status: str, host: str = "") -> None:
-        """Поставить на строку дерева точку статуса + tooltip (i18n node.status.*)."""
+        """Put the status dot + tooltip (i18n node.status.*) on a tree row."""
         item.setIcon(0, self._status_dot_icon(status))
         if status and status in ServerNode.STATUS_COLORS:
             tip = self._tr(f"node.status.{status}", host=host or "")
-            # i18n вернул «ключ» (нет перевода) — показываем статус без ключа
+            # i18n returned the "key" (no translation) — show the status without the key
             item.setToolTip(0, tip if not tip.startswith("[") else f"{status}: {host}")
         else:
-            item.setToolTip(0, "")  # не проверялся — подсказки нет
+            item.setToolTip(0, "")  # not checked — no tooltip
 
     def update_status_marker(self, server_id: str, status: str, host: str = "") -> None:
-        """Обновить маркер строки на месте (без полного пересбора дерева)."""
+        """Update the row's marker in place (without a full tree rebuild)."""
         for i in range(self.tree.topLevelItemCount()):
             item = self.tree.topLevelItem(i)
             if item.data(0, Qt.UserRole) == server_id:
                 self.apply_status_marker(item, status, host)
                 return
-        # Строки нет (например, отфильтрована поиском) — следующий refresh_sidebar
-        # построит её с актуальным маркером.
+        # No row (e.g. filtered out by the search) — the next refresh_sidebar
+        # will build it with the current marker.
 
-    # ── Контекстное меню (состав v0.9.6; объект QMenu создаёт MainWindow) ─────
+    # ── Context menu (composition v0.9.6; the QMenu object is created by MainWindow) ─────
 
     def fill_context_menu(self, menu, node) -> None:
-        """Наполнить QMenu пунктами действий узла (порядок — ROADMAP v0.9.6).
+        """Fill the QMenu with the node's action items (order — ROADMAP v0.9.6).
 
-        `menu` создаёт MainWindow (QMenu — модульная глобальная main_window; так
-        сохраняется тестовый шов подмены класса меню), parent/показ тоже на окне.
-        Каждый пункт подключён к колбэку из self._actions: callable(node).
+        `menu` is created by MainWindow (QMenu — module-level global in
+        main_window; this keeps the test seam for monkeypatching the menu
+        class), parent/ownership too. Each item is connected to a callback
+        from self._actions: callable(node).
 
-        v1.0RC4: первым пунктом — подменю «Быстрый запуск» (если потребитель
-        передал колбэки ql_entry/ql_configure; без них меню — как в v0.9.6,
-        backward-compat для старых вызывающих кодов).
+        v1.0RC4: first item — the "Quick Launch" submenu (if the consumer
+        passed the ql_entry/ql_configure callbacks; without them the menu is
+        as in v0.9.6 — backward-compat for old calling code).
         """
         self._fill_quick_launch(menu, node)
         for entry in CONTEXT_MENU_ITEMS:
@@ -400,32 +414,34 @@ class SidebarPanel(QWidget):
             action_key, i18n_key = entry
             act = menu.addAction(self._tr(i18n_key))
             callback = self._actions[action_key]
-            # checked — bool из QAction.triggered; колбэку передаём только узел.
+            # checked — the bool from QAction.triggered; we pass only the node to the callback.
             act.triggered.connect(lambda checked=False, n=node, cb=callback: cb(n))
 
     def _fill_quick_launch(self, menu, node) -> None:
-        """v1.0RC4: подменю «Быстрый запуск» — ПЕРВЫЙ пункт меню (выше SSH).
+        """v1.0RC4: the "Quick Launch" submenu — the FIRST menu item (above SSH).
 
-        Состав: пункты server.data.quick_launch (ссылки/команды), затем разделитель
-        и «Настроить…». Без пунктов — только «Настроить…» (фича остаётся
-        discoverable). Колбэки из self._actions (опциональные, вне CONTEXT_MENU_ITEMS):
-          * "ql_entry"     — callable(node, entry): открыть ссылку/отправить команду;
-          * "ql_configure" — callable(node): диалог настройки.
-        Если ни одного нет — подменю не строится (старые потребители без изменений).
+        Composition: the server.data.quick_launch entries (links/commands),
+        then a separator and "Configure…". Without entries — only
+        "Configure…" (the feature stays discoverable). Callbacks from
+        self._actions (optional, outside CONTEXT_MENU_ITEMS):
+          * "ql_entry"     — callable(node, entry): open the link/send the command;
+          * "ql_configure" — callable(node): the configuration dialog.
+        If neither is present — the submenu is not built (old consumers unchanged).
         """
         cb_entry = self._actions.get("ql_entry")
         cb_config = self._actions.get("ql_configure")
         if cb_entry is None and cb_config is None:
-            return  # потребитель не знает о Быстром запуске — меню как в v0.9.6
+            return  # the consumer does not know about Quick Launch — the menu is as in v0.9.6
         entries = list(getattr(node.data, "quick_launch", None) or [])
         sub = menu.addMenu(self._tr("ctx.quick_launch"))
-        # v1.0RC4-fix (PySide6 6.11/shiboken — тот же баг, что _qaction_guard в
-        # main_window.py v0.9.8): локальная обёртка sub умирает при возврате из
-        # метода, а MainWindow показывает меню лишь ПОСЛЕ возврата (menu.exec).
-        # Когда Python-обёртка QAction с прикреплённым QMenu умирает (GC), PySide6
-        # уничтожает за ней C++-подменю — пункт «Быстрый запуск» исчезал из меню
-        # или падал RuntimeError'ом. Держим ссылки (QAction + QMenu) на обёртке
-        # родительского меню: живут ровно столько, сколько само эфемерное меню.
+        # v1.0RC4-fix (PySide6 6.11/shiboken — the same bug as _qaction_guard in
+        # main_window.py v0.9.8): the local `sub` wrapper dies when the method
+        # returns, but MainWindow shows the menu only AFTER the return
+        # (menu.exec). When a Python QAction wrapper with an attached QMenu
+        # dies (GC), PySide6 destroys the C++ submenu behind it — the "Quick
+        # Launch" item disappeared from the menu or fell over with
+        # RuntimeError. We keep the references (QAction + QMenu) on the parent
+        # menu's wrapper: they live exactly as long as the ephemeral menu.
         _guard = getattr(menu, "_sshmap_ql_guard", None)
         if _guard is None:
             _guard = menu._sshmap_ql_guard = []
@@ -435,10 +451,10 @@ class SidebarPanel(QWidget):
         _guard.append(sub)
         for e in entries:
             if cb_entry is None:
-                break  # только настройка доступна — пункты не показываем
+                break  # only configuration is available — entries are not shown
             name = str(e.get("name") or e.get("value") or "?")
             act = sub.addAction(name)
-            # checked — bool из QAction.triggered; замыкаем и узел, и пункт.
+            # checked — the bool from QAction.triggered; we close over both the node and the entry.
             act.triggered.connect(
                 lambda checked=False, n=node, en=e, cb=cb_entry: cb(n, en))
         if entries:
@@ -447,4 +463,4 @@ class SidebarPanel(QWidget):
             act_cfg = sub.addAction(self._tr("ql.configure"))
             act_cfg.triggered.connect(
                 lambda checked=False, n=node, cb=cb_config: cb(n))
-        menu.addSeparator()  # Быстрый запуск отделён от «боевого» меню (как на карте)
+        menu.addSeparator()  # Quick Launch is separated from the "production" menu (like on the map)

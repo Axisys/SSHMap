@@ -1,38 +1,41 @@
 # -*- coding: utf-8 -*-
-"""v1.2.3 (ROADMAP v1.2.3): Мультинабор — broadcast ввода активной сессии во все остальные открытые сессии.
+"""v1.2.3 (ROADMAP v1.2.3): Multi-input — broadcast of the active session's input to all other open sessions.
 
-Единственная точка ввода (архитектура без переделки): **весь** пользовательский ввод
-проходит через `TerminalWidget.keyPressEvent()` → `_send(bytes)` →
-`terminal_thread.send_data()`. Хаб вешается ровно на эту точку: при включённом режиме
-`_send` слает те же байты в `send_data()` всех остальных живых сессий реестра
-(v1.2 — `MainWindow._terminal_windows` хранит TerminalSessionPage). Ctrl+V (bracketed
-paste) проходит через тот же `_send` — дублируется тоже (иначе «набралось» не везде).
+Single input point (architecture with no refactoring): **all** user input
+goes through `TerminalWidget.keyPressEvent()` → `_send(bytes)` →
+`terminal_thread.send_data()`. The hub is attached exactly to this point: when
+the mode is enabled, `_send` sends the same bytes to `send_data()` of all other
+live sessions in the registry (v1.2 — `MainWindow._terminal_windows` holds
+TerminalSessionPage). Ctrl+V (bracketed paste) goes through the same `_send` —
+it is duplicated too (otherwise the "typed" text would not appear everywhere).
 
-Источник — только окно/вкладка с фокусом: байты идут от клавиатуры фокусированного
-виджета, а не из вывода — эха по определению нет (broadcast не ре-транслирует чужой
-вывод и не шлёт в источник повторно). Сессия, умершая во время набора (error → close),
-убирается из реестра штатным путём (`_forget_terminal_window` по `destroyed`), а
-broadcast дополнительно фильтрует потоки по живости — мёртвый канал байты не получит.
+The source — only the focused window/tab: the bytes come from the keyboard of
+the focused widget, not from output — there is no echo by definition (broadcast
+does not re-transmit foreign output and does not send back to the source). A
+session that died during typing (error → close) is removed from the registry
+the standard way (`_forget_terminal_window` on `destroyed`), and broadcast
+additionally filters threads by liveness — a dead channel receives no bytes.
 
-UI (MainWindow/SshMixin): checkable QAction в меню «Вид» + F12 — ВЫХОД из режима
-(не Esc: Esc уходит в shell как \\x1b!) — при включённом режиме RC2-маппинг
-F12→\\x1b[24~ приостанавливается (клавиша не доходит до shell), при выключенном F12
-работает как раньше; плашка «МУЛЬТИ: N сессий» в статус-баре со кнопкой выхода;
-подсветка — бейджи вкладок «MULTI · <alias>» + рамка контейнера
-(apply_container_highlight, окна и док).
+UI (MainWindow/SshMixin): a checkable QAction in the "View" menu + F12 — EXIT
+the mode (not Esc: Esc goes to the shell as \\x1b!) — when the mode is enabled
+the RC2 mapping F12→\\x1b[24~ is suspended (the key does not reach the shell),
+when disabled F12 works as before; a "MULTI: N sessions" badge in the status bar
+with an exit button; highlight — tab badges "MULTI · <alias>" + a container
+frame (apply_container_highlight, windows and dock).
 
-Тестовые швы: явный `multi_hub` в конструкторе TerminalWidget (изоляция от
-модульного хабa); `hub.reset()` — сброс состояния между секциями тестового файла.
+Test seams: an explicit `multi_hub` in the TerminalWidget constructor (isolation
+from the module hub); `hub.reset()` — state reset between sections of a test file.
 
-Диагностика (v1.2.4-fix, инцидент «ручной тест не подтвердил broadcast»):
-смена состояния режима → INFO в лог приложения; каждый broadcast → DEBUG-строка
-(в TerminalWidget._send); режим включён, но байты никуда не ушли (реестр пуст /
-все потоки мёртвы) → rate-limited WARNING с деталями — виден и в консоли.
+Diagnostics (v1.2.4-fix, the "manual test did not confirm broadcast" incident):
+a mode state change → INFO in the application log; each broadcast → a DEBUG line
+(in TerminalWidget._send); the mode is enabled but the bytes went nowhere
+(empty registry / all threads dead) → a rate-limited WARNING with details —
+visible in the console too.
 """
 
 import time
 
-try:  # v1.2.5: центральная тема (ui/theme.py — чистые данные, без PySide6)
+try:  # v1.2.5: central theme (ui/theme.py — pure data, no PySide6)
     from ..ui import theme
 except ImportError:
     from ui import theme
@@ -41,7 +44,7 @@ _t_cache = None
 
 
 def get_translator():
-    """Safe i18n helper — returns cached translator or fallback (как в ssh_terminal)."""
+    """Safe i18n helper — returns the cached translator or a fallback (as in ssh_terminal)."""
     global _t_cache
     if _t_cache is None:
         try:
@@ -54,20 +57,20 @@ def get_translator():
     return _t_cache
 
 
-# ── Подсветка: цвет рамки/бейджа «MULTI» + objectName рамки (QSS-селектор) ─────
-# v1.2.5: янтарный акцент — из центральной темы (тот же, что выделение узла/группы);
-# имя MULTI_ACCENT сохранено (используется в QSS плашки статус-бара MainWindow).
-MULTI_ACCENT = theme.SELECTION_AMBER              # amber — рамка/бейдж режима
-MULTI_FRAME_OBJECT_NAME = "sshmap_multi_frame"    # селектор QSS только для контейнера
+# ── Highlight: the "MULTI" frame/badge color + the frame objectName (QSS selector) ─────
+# v1.2.5: the amber accent — from the central theme (the same one as node/group selection);
+# the MULTI_ACCENT name is kept (used in the MainWindow status-bar badge QSS).
+MULTI_ACCENT = theme.SELECTION_AMBER              # amber — the mode frame/badge
+MULTI_FRAME_OBJECT_NAME = "sshmap_multi_frame"    # QSS selector for the container only
 
 
 def _thread_alive(thread) -> bool:
-    """Жив ли терминальный поток для broadcast'а (ROADMAP v1.2.3, задача 4).
+    """Is the terminal thread alive for broadcasting (ROADMAP v1.2.3, task 4).
 
-    Живой — канал открыт (реальный SSHTerminalThread во время сессии) ИЛИ поток ещё
-    работает (QThread.isRunning()). Мёртвый: закрытый канал (error → close, stop()) —
-    в него байты не шлются. Тест-дубль без channel/isRunning считается живым (его
-    send_data() безопасен). Никогда не бросает."""
+    Alive — the channel is open (a real SSHTerminalThread during a session) OR the
+    thread is still running (QThread.isRunning()). Dead: a closed channel
+    (error → close, stop()) — no bytes are sent to it. A test double without
+    channel/isRunning counts as alive (its send_data() is safe). Never raises."""
     try:
         ch = getattr(thread, "channel", None)
         if ch is not None and not bool(getattr(ch, "closed", False)):
@@ -81,23 +84,24 @@ def _thread_alive(thread) -> bool:
 
 
 class MultiInputHub:
-    """Состояние режима мультинабора + broadcast ввода во все открытые сессии.
+    """The multi-input mode state + broadcast of input to all open sessions.
 
-    `provider` — callable() → список открытых сессий (реестр v1.2: объекты
-    TerminalSessionPage с `.terminal_thread` и `.widget`); None — broadcast выключен.
-    `listeners` — колбэки UI (active: bool) на смену состояния (MainWindow: QAction,
-    плашка статус-бара, подсветка контейнеров, статус-сообщение). Один процесс — один
-    хаб (get_hub()); TerminalWidget берёт его по умолчанию.
+    `provider` — callable() → list of open sessions (the v1.2 registry:
+    TerminalSessionPage objects with `.terminal_thread` and `.widget`); None —
+    broadcast disabled.
+    `listeners` — UI callbacks (active: bool) on a state change (MainWindow:
+    QAction, the status-bar badge, container highlight, status message). One
+    process — one hub (get_hub()); TerminalWidget takes it by default.
     """
 
     def __init__(self):
         self._active = False
         self._provider = None
         self._listeners = []
-        # v1.2.4-fix: rate-limit WARNING «0 получателей» (не спамить на каждую клавишу)
+        # v1.2.4-fix: rate-limited WARNING "0 receivers" (do not spam on every key)
         self._last_zero_warn = 0.0
 
-    # ── состояние режима ────────────────────────────────────────────────────
+    # ── mode state ────────────────────────────────────────────────────────
     @property
     def active(self) -> bool:
         return self._active
@@ -107,11 +111,11 @@ class MultiInputHub:
         return self._provider
 
     def set_session_provider(self, provider):
-        """Реестр открытых сессий (callable() → list[page]); None — broadcast выключен."""
+        """The open-sessions registry (callable() → list[page]); None — broadcast disabled."""
         self._provider = provider
 
     def add_listener(self, callback):
-        """UI-колбэк (active: bool) на смену состояния; идемпотентно."""
+        """A UI callback (active: bool) on a state change; idempotent."""
         if callback not in self._listeners:
             self._listeners.append(callback)
 
@@ -119,14 +123,14 @@ class MultiInputHub:
         try:
             self._listeners.remove(callback)
         except ValueError:
-            pass  # не был подключён — делать нечего
+            pass  # was not connected — nothing to do
 
     def set_active(self, on: bool):
-        """Вкл/выкл режима; слушатели уведомляются ТОЛЬКО при реальной смене.
+        """Toggle the mode on/off; listeners are notified ONLY on a real change.
 
-        Диагностика (v1.2.4-fix): смена состояния логируется INFO — в файле лога
-        (~/.sshmap/logs/sshmap.log) видно, ВКЛЮЧАЛСЯ ли режим и когда выключился
-        (F12 / меню / кнопка ✕ плашки). Никогда не бросает."""
+        Diagnostics (v1.2.4-fix): a state change is logged at INFO — in the log
+        file (~/.sshmap/logs/sshmap.log) you can see whether the mode was ENABLED
+        and when it was disabled (F12 / menu / the badge ✕ button). Never raises."""
         on = bool(on)
         if on == self._active:
             return
@@ -136,27 +140,28 @@ class MultiInputHub:
             _get_log("modules.multi_input").info(
                 f"Multi-input mode {'enabled' if on else 'disabled'}")
         except Exception:
-            pass  # логгер недоступен — смена состояния важнее записи о ней
+            pass  # the logger is unavailable — the state change matters more than logging it
         for cb in list(self._listeners):
             try:
                 cb(on)
             except Exception:
-                pass  # UI-колбэк под teardown не должен ломать смену состояния
+                pass  # a UI callback under teardown must not break the state change
 
     def toggle(self) -> bool:
-        """Переключить режим; возвращает новое состояние."""
+        """Toggle the mode; returns the new state."""
         self.set_active(not self._active)
         return self._active
 
-    # ── broadcast (единственная точка ввода) ────────────────────────────────
+    # ── broadcast (the single input point) ────────────────────────────────
     def broadcast(self, data: bytes, source_widget=None) -> int:
-        """Те же байты — в send_data() всех остальных живых сессий реестра.
+        """The same bytes — to send_data() of all other live sessions in the registry.
 
-        source_widget — TerminalWidget, от которого пришли байты (окно/вкладка с
-        фокусом): её сессия пропускается (уже получила их через _send). Возвращает
-        число получателей. Никогда не бросает: мёртвый C++-объект/поток в реестре
-        молча пропускается (сам реестр обновляет штатный teardown — destroyed →
-        _forget_terminal_window), остальные сессии продолжают получать ввод."""
+        source_widget — the TerminalWidget the bytes came from (the focused
+        window/tab): its session is skipped (it already received them via
+        _send). Returns the number of receivers. Never raises: a dead
+        C++ object/thread in the registry is silently skipped (the registry
+        itself is updated by the standard teardown — destroyed →
+        _forget_terminal_window), the other sessions keep receiving input."""
         if not data or self._provider is None:
             return 0
         try:
@@ -164,33 +169,34 @@ class MultiInputHub:
         except Exception:
             return 0
         sent = 0
-        others = 0   # сессий, кроме источника (для диагностики «0 получателей»)
-        dead = 0     # из них — мёртвые потоки/каналы
+        others = 0   # sessions besides the source (for the "0 receivers" diagnostic)
+        dead = 0     # of those — dead threads/channels
         for page in pages:
             try:
                 widget = getattr(page, "widget", None)
                 if widget is not None and widget is source_widget:
-                    continue  # источник — окно/вкладка с фокусом (уже получила)
+                    continue  # the source — the focused window/tab (already received it)
                 others += 1
                 thread = getattr(page, "terminal_thread", None)
                 if thread is None or not _thread_alive(thread):
                     dead += 1
-                    continue  # мёртвая сессия (error → close) — в мёртвый канал не шлём
+                    continue  # a dead session (error → close) — do not send into a dead channel
                 thread.send_data(data)
                 sent += 1
             except Exception:
-                continue  # C++-объект под teardown — пропускаем, остальные получают
+                continue  # a C++ object under teardown — skip it, the others receive it
         if sent == 0 and others > 0:
             self._warn_zero_receivers(others, dead)
         return sent
 
     def _warn_zero_receivers(self, others: int, dead: int):
-        """v1.2.4-fix (диагностика): режим включён, но байты никуда не ушли.
+        """v1.2.4-fix (diagnostics): the mode is enabled but the bytes went nowhere.
 
-        Это тихий сбой-сценарий ручного теста «набираю — во втором терминале
-        ничего»: WARNING (виден и в консоли) с деталями — сколько сессий в
-        реестре кроме источника и сколько из них мёртвых. Rate-limit 5 c, чтобы
-        быстрый набор не заспамил лог; никогда не бросает."""
+        This is the silent-failure scenario of the "I type — nothing in the second
+        terminal" manual test: a WARNING (visible in the console too) with details —
+        how many sessions are in the registry besides the source and how many of them
+        are dead. Rate-limited to 5 s so fast typing does not spam the log; never
+        raises."""
         now = time.monotonic()
         if now - self._last_zero_warn < 5.0:
             return
@@ -202,39 +208,40 @@ class MultiInputHub:
                 f"(other sessions={others}, dead threads={dead}) — "
                 f"input is NOT being duplicated")
         except Exception:
-            pass  # логгер недоступен — broadcast важнее записи о нём
+            pass  # the logger is unavailable — the broadcast matters more than logging it
 
     def reset(self):
-        """Тестовый шов: полный сброс состояния (режим выключен, реестра нет)."""
+        """Test seam: a full state reset (mode disabled, no registry)."""
         self._active = False
         self._provider = None
         self._listeners = []
         self._last_zero_warn = 0.0
 
 
-# ── Singleton приложения ───────────────────────────────────────────────────────
-# MainWindow и TerminalWidget используют ОДИН хаб: виджет берёт его по умолчанию,
-# когда в конструкторе не передан явный multi_hub. Один процесс — один хаб.
+# ── Application singleton ───────────────────────────────────────────────────────
+# MainWindow and TerminalWidget use ONE hub: the widget takes it by default when
+# no explicit multi_hub was passed in the constructor. One process — one hub.
 _default_hub = MultiInputHub()
 
 
 def get_hub() -> MultiInputHub:
-    """Хаб мультинабора по умолчанию (singleton процесса)."""
+    """The default multi-input hub (a process singleton)."""
     return _default_hub
 
 
-# ── Подсветка контейнеров сессий (рамка + бейджи вкладок «MULTI») ─────────────
+# ── Container highlight for sessions (frame + tab badges "MULTI") ─────────────
 
 def apply_container_highlight(host, on: bool) -> bool:
-    """Подсветить/сбросить контейнер сессий (SSHTerminalWindow / TerminalDockContent).
+    """Highlight/reset the sessions container (SSHTerminalWindow / TerminalDockContent).
 
-    Оба контейнера имеют `session_tabs` (QTabWidget из страниц с `.server_data.alias`)
-    — duck-typing без импорта ssh_terminal/terminal_dock (нет цикла). При входе:
-    бейджи вкладок «MULTI · <alias>» + рамка QTabWidget (objectName-селектор, чтобы
-    не затронуть Внутренние табы страницы [Терминал|Файлы]); у окна — префикс
-    заголовка `terminal.multi_title_prefix` (база хранится в `_multi_base_title`).
-    При выходе — всё сбрасывается. Идемпотентно; RuntimeError мёртвого C++-объекта
-    не распространяется (teardown-устойчивость). True — применено."""
+    Both containers have `session_tabs` (a QTabWidget of pages with
+    `.server_data.alias`) — duck-typing without importing ssh_terminal/
+    terminal_dock (no cycle). On entry: tab badges "MULTI · <alias>" + a QTabWidget
+    frame (objectName selector, so the page's INNER tabs [Terminal|Files] are not
+    touched); for the window — the title prefix `terminal.multi_title_prefix`
+    (the base is stored in `_multi_base_title`). On exit — everything is reset.
+    Idempotent; a RuntimeError of a dead C++ object does not propagate
+    (teardown robustness). True — applied."""
     try:
         tabs = getattr(host, "session_tabs", None)
         if tabs is None:
@@ -245,12 +252,12 @@ def apply_container_highlight(host, on: bool) -> bool:
                 page = tabs.widget(i)
                 alias = getattr(getattr(page, "server_data", None), "alias", "?")
             except RuntimeError:
-                continue  # C++-объект уже удалён (гонка закрытия) — таб пропускаем
+                continue  # C++ object already deleted (close race) — skip the tab
             try:
                 text = t("terminal.multi_tab_badge", alias=alias) if on else str(alias)
                 tabs.setTabText(i, text)
             except RuntimeError:
-                pass  # C++-объект уже удалён (гонка закрытия) — бейдж не критичен
+                pass  # C++ object already deleted (close race) — the badge is not critical
         try:
             if on:
                 tabs.setObjectName(MULTI_FRAME_OBJECT_NAME)
@@ -258,17 +265,17 @@ def apply_container_highlight(host, on: bool) -> bool:
                     f"QTabWidget#{MULTI_FRAME_OBJECT_NAME} "
                     f"{{ border: 2px solid {MULTI_ACCENT}; }}")
             else:
-                tabs.setObjectName("")   # симметричный сброс: селектор рамки уходит полностью
+                tabs.setObjectName("")   # symmetric reset: the frame selector is fully removed
                 tabs.setStyleSheet("")
         except RuntimeError:
-            pass  # C++-объект уже удалён (гонка закрытия) — рамка не критична
+            pass  # C++ object already deleted (close race) — the frame is not critical
         base_title = getattr(host, "_multi_base_title", None)
         if base_title is not None:
             try:
                 title = (t("terminal.multi_title_prefix") + base_title) if on else base_title
                 host.setWindowTitle(title)
             except RuntimeError:
-                pass  # C++-объект уже удалён (гонка закрытия) — заголовок не критичен
+                pass  # C++ object already deleted (close race) — the title is not critical
         return True
     except Exception:
         return False

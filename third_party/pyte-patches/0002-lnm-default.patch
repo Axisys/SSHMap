@@ -1,0 +1,25 @@
+Subject: [sshmap fork 0002] LNM (mode 20) enabled by default
+
+Provenance: sshmap — PYTE82_AUDIT.md patch A2 (implemented in v1.2.11 as the
+            SshmapHistoryScreen __init__/reset overrides, moved to the fork in
+            v1.3rc1). One line: _DEFAULT_MODE gains mo.LNM — bare LF = CR+LF
+            (xterm behavior; real terminals keep LNM on). Screen.reset() restores
+            mode = _DEFAULT_MODE.copy(), so this one line covers BOTH the
+            constructor and the RIS (ESC c) path. Explicit SM/RM 20 from a remote
+            program still works as before.
+Base:       pyte 0.8.2, pyte/screens.py (_DEFAULT_MODE).
+Policy:     keep until upstream ships LNM-by-default; then drop.
+Applied:    2026-09-10, sshmap v1.3rc1.
+
+diff --git a/pyte/screens.py b/pyte/screens.py
+--- a/pyte/screens.py
++++ b/pyte/screens.py
+@@ -134,7 +134,7 @@
+         return self.default
+ 
+ 
+-_DEFAULT_MODE = set([mo.DECAWM, mo.DECTCEM])
++_DEFAULT_MODE = set([mo.DECAWM, mo.DECTCEM, mo.LNM])
+ 
+ 
+ class Screen:

@@ -1,27 +1,27 @@
-"""Группы узлов на карте v0.8.1 (бывш. smoke_test.py «v0.8.1 groups»).
+"""Node groups on the map v0.8.1 (former smoke_test.py "v0.8.1 groups").
 
-Часть сьюта, разбитого из smoke_test.py v0.6–v0.9.2 (см. INDEX.md).
-Задачи релиза: (1) graphics/node_group.py — QGraphicsObject с рамкой и заголовком;
-(2) серверы внутри группы автоматически перемещаются при изменении границы;
-(3) группы сохраняются/загружаются из JSON (массив "groups").
-  * создание/id/to_dict+from_dict, z ниже узлов;
-  * геометрическое членство: центр карточки в верхней группе; find_group_at;
-  * drag группы (QTest): члены сдвигаются на тот же дельта-сдвиг, sync data.x/y, moved-сигнал;
-  * resize: пропорциональная репозиция ×3 включая кламп внутрь рамки меньше узла;
-  * выход/вход узла из рамки — членство пересчитывается на лету;
-  * перекрывающиеся группы: узел только в верхней (позднее добавленной);
-  * JSON round-trip 4 групп + восстановление членства из геометрии, backward-compat;
-  * путь через MainWindow: _add_group_at (QPoint и bool-guard), Delete-клавиша, Edit-menu;
-  * ctx-меню группы add/rename/delete + double-click по заголовку → renameRequested.
+A part of the suite split out of smoke_test.py v0.6–v0.9.2 (see INDEX.md).
+The tasks of the release: (1) graphics/node_group.py — a QGraphicsObject with the frame and the title;
+(2) the servers inside the group are moved automatically on the boundary change;
+(3) the groups are saved/loaded from the JSON (the "groups" array).
+  * the creation/the id/to_dict+from_dict, the z below the nodes;
+  * the geometric membership: the center of the card in the upper group; find_group_at;
+  * the drag of the group (QTest): the members shift by the same delta, the sync of data.x/y, the moved signal;
+  * the resize: the proportional reposition ×3 including the clamp into the frame smaller than the node;
+  * the exit/enter of the node from the frame — the membership is recomputed on the fly;
+  * the overlapping groups: the node only in the upper (the later added);
+  * the JSON round-trip of 4 groups + the restoration of the membership from the geometry, the backward-compat;
+  * the path via MainWindow: _add_group_at (the QPoint and the bool guard), the Delete key, the Edit menu;
+  * the ctx menu of the group add/rename/delete + the double click on the title → renameRequested.
 
-Запуск: python tests/test_groups.py   (из корня проекта) или python tests/run_all.py
+Run: python tests/test_groups.py   (from the project root) or python tests/run_all.py
 """
 import os
 import sys
 
 from _common import bootstrap, check, finish, viewport_point as _vp
 
-ROOT, WORK = bootstrap()  # ДО импортов модулей приложения
+ROOT, WORK = bootstrap()  # BEFORE the app module imports
 
 from PySide6.QtWidgets import QApplication
 app = QApplication(sys.argv)
@@ -30,7 +30,7 @@ import ui.main_window as MW
 from models.server import server_data_from_dict
 from i18n import t
 
-# ══ v0.8.1: группировка узлов (кластеры/папки на карте) ═══════════
+# ══ v0.8.1: the node grouping (the clusters/folders on the map) ═══════════
 print("== v0.8.1 groups ==")
 
 from graphics.node_group import NodeGroup as _NG
@@ -42,7 +42,7 @@ vp_g = view_g.viewport()
 from PySide6.QtCore import QPoint as _QPt, Qt as _Qt
 from PySide6.QtTest import QTest as _QTest
 
-# ── 1. Создание, id, сериализация ───────────────────────────────
+# ── 1. Creation, id, serialization ───────────────────────────────
 g1 = win_g.scene.add_group(name="prod", x=100, y=100, width=500, height=360)
 check("scene.add_group creates NodeGroup in _groups (QGraphicsObject with frame+title)",
       len(win_g.scene._groups) == 1 and g1 is win_g.scene._groups[0]
@@ -59,7 +59,7 @@ check("group from_dict survives bad values (defaults)",
       g_bad.pos().x() == 0.0 and abs(g_bad.boundingRect().width() - _NG.DEFAULT_W) < 0.5
       and len(g_bad.group_id) == 8, str(g_bad.to_dict()))
 
-# ── 2. Геометрическое членство: центр карточки в верхней группе ──
+# ── 2. Geometric membership: the center of the card in the upper group ──
 n_in = win_g.scene.add_server(server_data_from_dict({"alias": "g-in", "host": "10.9.9.1", "user": "u", "x": 140, "y": 140}))
 n_out = win_g.scene.add_server(server_data_from_dict({"alias": "g-out", "host": "10.9.9.2", "user": "u", "x": 700, "y": -600}))
 check("node with center inside group auto-joins on add", n_in in set(g1.get_members()),
@@ -68,11 +68,11 @@ check("node outside the frame stays ungrouped", n_out not in set(g1.get_members(
 check("find_group_at returns topmost group under point / None otherwise",
       win_g.scene.find_group_at(_QPt(300, 250)) is g1 and win_g.scene.find_group_at(_QPt(900, 900)) is None)
 
-# ── 3. Drag группы: члены сдвигаются на тот же дельта-сдвиг (задача #2) ──
+# ── 3. The group drag: the members shift by the same delta (task #2) ──
 view_g.centerOn(_QPt(380, 280)); app.processEvents()
 moved_hits = []
 g1.moved.connect(lambda *_a: moved_hits.append(1))
-p0g = _QPt(150, 420)   # тело рамки g1 (100..600 × 100..460): НЕ угол resize, не узел
+p0g = _QPt(150, 420)   # the body of the g1 frame (100..600 × 100..460): NOT a resize corner, not a node
 node_before = (n_in.data.x, n_in.data.y)          # (140, 140)
 _QTest.mousePress(vp_g, _Qt.LeftButton, pos=_vp(view_g, p0g))
 app.processEvents()
@@ -89,48 +89,48 @@ check("member node shifted with the group; data.x/data.y synced",
       f"({n_in.data.x:.1f},{n_in.data.y:.1f}) want ({node_before[0]+60},{node_before[1]+40})")
 check("group moved signal fired during drag", len(moved_hits) >= 1, str(moved_hits))
 
-# ── 4. Resize: пропорциональная репозиция + кламп внутрь рамки (задача #2) ──
+# ── 4. The resize: a proportional reposition + a clamp inside the frame (task #2) ──
 g2 = win_g.scene.add_group(name="resize-me", x=-900, y=-900, width=400, height=400)
 n_r = win_g.scene.add_server(server_data_from_dict({"alias": "g-r", "host": "10.9.9.3", "user": "u", "x": -850, "y": -850}))
 check("new group captured the node under its frame on add", n_r in set(g2.get_members()))
-g2.set_group_size(800, 400)   # sx=2, sy=1: локальный (50,50) → (100,50) → сцена (-800,-850)
+g2.set_group_size(800, 400)   # sx=2, sy=1: local (50,50) → (100,50) → the scene (-800,-850)
 check("resize scales member position proportionally",
       abs(n_r.pos().x() - (-800)) < 1 and abs(n_r.pos().y() - (-850)) < 1,
       f"({n_r.pos().x():.1f},{n_r.pos().y():.1f})")
-g2.set_group_size(600, 400)   # sx=0.75: локальный x 100→75 → сцена (-825,-850)
+g2.set_group_size(600, 400)   # sx=0.75: local x 100→75 → the scene (-825,-850)
 check("second resize rescales from current local coords",
       abs(n_r.pos().x() - (-825)) < 1 and abs(n_r.pos().y() - (-850)) < 1,
       f"({n_r.pos().x():.1f},{n_r.pos().y():.1f})")
-# Кламп-ожидаемое считаем от фактического размера узла (шрифто-независимо):
-# локальный (75, 25) → clamp [MARGIN, max(MARGIN, W - nsize - MARGIN)]
+# The expected clamp is computed from the actual node size (font-independent):
+# the local (75, 25) → clamp [MARGIN, max(MARGIN, W - nsize - MARGIN)]
 _nr_rect = n_r.sceneBoundingRect()
 _exp_lx = min(max(25.0, _NG.MEMBER_MARGIN), max(_NG.MEMBER_MARGIN, 200.0 - _nr_rect.width() - _NG.MEMBER_MARGIN))
 _exp_ly = min(max(25.0, _NG.MEMBER_MARGIN), max(_NG.MEMBER_MARGIN, 200.0 - _nr_rect.height() - _NG.MEMBER_MARGIN))
-g2.set_group_size(200, 200)   # группа меньше узла: x клампится в [MARGIN, W-nw-M]
+g2.set_group_size(200, 200)   # a group smaller than the node: x is clamped to [MARGIN, W-nw-M]
 check("resize clamps member inside a group smaller than the node",
       abs(n_r.pos().x() - (-900 + _exp_lx)) < 1 and abs(n_r.pos().y() - (-900 + _exp_ly)) < 1,
       f"({n_r.pos().x():.1f},{n_r.pos().y():.1f}) want ({-900+_exp_lx:.1f},{-900+_exp_ly:.1f})")
 check("member keeps membership after resize (center still inside)", n_r in set(g2.get_members()))
 
-# ── 5. Выход/вход узла из рамки: членство пересчитывается на лету ──
+# ── 5. A node entering/leaving the frame: the membership is recomputed on the fly ──
 g3 = win_g.scene.add_group(name="leave-me", x=1400, y=1400, width=400, height=400)
 n_m = win_g.scene.add_server(server_data_from_dict({"alias": "g-m", "host": "10.9.9.4", "user": "u", "x": 1500, "y": 1500}))
 check("node joined its group on creation", n_m in set(g3.get_members()))
-n_m.setPos(2100, 2100)   # центр (2190,2165) — полностью вне всех рамок
+n_m.setPos(2100, 2100)   # the center (2190,2165) — fully outside every frame
 app.processEvents()
 check("moving node fully out of the frame drops membership", len(g3.get_members()) == 0,
       str([n.data.alias for n in g3.get_members()]))
-n_m.setPos(1500, 1500)   # обратно внутрь
+n_m.setPos(1500, 1500)   # back inside
 check("moving node back inside re-joins membership", n_m in set(g3.get_members()))
 
-# ── 6. Перекрывающиеся группы: узел — только в ВЕРХНЕЙ (позднее добавленной) ──
-g_top = win_g.scene.add_group(name="top-g", x=-900, y=-900, width=300, height=300)  # поверх g2
+# ── 6. Overlapping groups: a node — only in the UPPER (later added) one ──
+g_top = win_g.scene.add_group(name="top-g", x=-900, y=-900, width=300, height=300)  # over g2
 check("overlapping groups: node belongs to the topmost one only",
       n_r in set(g_top.get_members()) and n_r not in set(g2.get_members()),
       f"top={[n.data.alias for n in g_top.get_members()]} g2={[n.data.alias for n in g2.get_members()]}")
 check("find_group_at prefers the later-added (top) group", win_g.scene.find_group_at(_QPt(-800, -810)) is g_top)
 
-# ── 7. JSON: массив "groups", версия 0.8.1, round-trip + backward-compat ──
+# ── 7. The JSON: the "groups" array, the version 0.8.1, the round-trip + the backward-compat ──
 import json
 win_g._dirty = False
 p_groups = os.path.join(WORK, "save_v081g.json")
@@ -170,12 +170,12 @@ check("topmost-overlap membership also reconstructed on load",
 
 win_bc = MW.MainWindow()
 old_raw = {"version": "0.8", "servers": [{"id": "old1", "alias": "a", "host": "h", "user": "u"}],
-           "connections": []}  # без ключа "groups" — проекты до v0.8.1
+           "connections": []}  # without the "groups" key — projects before v0.8.1
 win_bc._import_project_raw(old_raw)
 check("project without 'groups' key loads fine (backward-compat)",
       len(win_bc.scene._groups) == 0 and len(win_bc.scene._nodes) == 1)
 
-# ── 8. Путь через MainWindow: создание/имена/bool-guard/Delete-клавиша/меню ──
+# ── 8. The path via MainWindow: creation/names/bool guard/the Delete key/the menu ──
 win_g3 = MW.MainWindow()
 win_g3.show(); app.processEvents()
 view_g3 = win_g3.view
@@ -183,7 +183,7 @@ vp3 = view_g3.viewport()
 n_w = win_g3.scene.add_server(server_data_from_dict({"alias": "w-node", "host": "10.9.9.5", "user": "u"}))
 
 win_g3._dirty = False
-win_g3._add_group_at(_QPt(500, 400))   # центр → левый верхний (260,240) при DEFAULT_W/H 480×320
+win_g3._add_group_at(_QPt(500, 400))   # the center → the top-left (260,240) with DEFAULT_W/H 480×320
 check("_add_group_at creates group centered under the point",
       len(win_g3.scene._groups) == 1 and win_g3._dirty
       and abs(win_g3.scene._groups[0].pos().x() - 260) < 0.5
@@ -191,7 +191,7 @@ check("_add_group_at creates group centered under the point",
       str([g.to_dict() for g in win_g3.scene._groups]))
 gA = win_g3.scene._groups[0]
 
-# bool из QAction.triggered (паттерн test_ssh_terminal #1): не падает, группа создаётся в центре вида
+# A bool from QAction.triggered (the test_ssh_terminal #1 pattern): no crash, the group is created in the center of the view
 win_g3._dirty = False
 try:
     win_g3._add_group_at(True)
@@ -202,7 +202,7 @@ check("second group gets a non-duplicate default name",
       len(win_g3.scene._groups) == 2 and win_g3.scene._groups[1].name != gA.name,
       str([g.name for g in win_g3.scene._groups]))
 
-# Delete-клавиша: выделенная группа удаляется (серверы остаются на карте; паттерн заметок)
+# The Delete key: the selected group is removed (the servers stay on the map; the note pattern)
 win_g3._dirty = False
 gA.setSelected(True)
 from PySide6.QtGui import QKeyEvent as _QKE_g
@@ -213,8 +213,8 @@ check("Delete key removes selected group; servers stay on the map",
       and n_w.data.id in win_g3.scene._nodes and win_g3._dirty,
       str([g.name for g in win_g3.scene._groups]))
 
-# Меню «Правка» → Delete selected (get_selected_group-ветка _delete_selected)
-gB = win_g3.scene._groups[0]   # осталась вторая группа («Группа 2»)
+# The "Edit" menu → Delete selected (the get_selected_group branch of _delete_selected)
+gB = win_g3.scene._groups[0]   # the second group ("Group 2") remains
 check("only the second group remains after key-delete", len(win_g3.scene._groups) == 1,
       str([g.name for g in win_g3.scene._groups]))
 gB.setSelected(True)
@@ -222,20 +222,14 @@ win_g3._delete_selected()
 check("Edit-menu delete path removes the selected group", len(win_g3.scene._groups) == 0,
       str([g.name for g in win_g3.scene._groups]))
 
-# ── 9. Контекстное меню группы: add/rename/delete + диалог переименования ──
+# ── 9. The group context menu: add/rename/delete + the rename dialog ──
 import graphics.map_view as _MVm_g
-from PySide6.QtWidgets import QMenu as _QMenuBase, QInputDialog as _QDlg_g
+from PySide6.QtWidgets import QInputDialog as _QDlg_g
+from _fakes import CaptureMenu as _CaptureMenuG
 captured_g = []
+_CaptureMenuG.captured = captured_g   # the exec/exec_ interception offscreen (_fakes)
 
-class _CaptureMenuG(_QMenuBase):
-    def exec(self, *a, **k):      # Qt6: перехватываем — не блокируемся в offscreen
-        captured_g.append(self)
-        return 0
-    def exec_(self, *a, **k):     # legacy-имя
-        captured_g.append(self)
-        return 0
-
-def _ctx_g(view, sp):             # синтетический QContextMenuEvent (паттерн test_ssh_terminal)
+def _ctx_g(view, sp):             # a synthetic QContextMenuEvent (the test_ssh_terminal pattern)
     from PySide6.QtGui import QContextMenuEvent as _QCME_g
     vp_ = view.mapFromScene(sp)
     x, y = int(vp_.x()), int(vp_.y())
@@ -256,7 +250,7 @@ try:
               t("ctx.add_group") in texts and t("ctx.rename_group") in texts
               and t("ctx.delete_group") in texts and t("btn.add_server") in texts, str(texts))
 
-    # rename через действие меню + подменённый QInputDialog (headless-герметичность)
+    # rename via the menu action + a stubbed QInputDialog (headless hermeticity)
     _real_gettext = _QDlg_g.getText
     _QDlg_g.getText = staticmethod(lambda *a, **k: ("renamed-cluster", True))
     try:
@@ -269,7 +263,7 @@ try:
     check("rename action renames the group and marks dirty", gC.name == "renamed-cluster" and win_g3._dirty,
           str(gC.name))
 
-    # delete через действие меню (без подтверждения — серверы не удаляются)
+    # delete via the menu action (no confirmation — the servers are not deleted)
     captured_g.clear()
     _ctx_g(view_g3, gC.sceneBoundingRect().center())
     if captured_g:
@@ -283,27 +277,27 @@ try:
 finally:
     _MVm_g.QMenu = _orig_menu_cls
 
-# ── 10. Двойной клик по заголовку → renameRequested → диалог (E2E) + dirty-маркер ──
+# ── 10. A double click on the header → renameRequested → the dialog (E2E) + the dirty marker ──
 gD = win_g3.scene.add_group(name="dblclick", x=10, y=900, width=300, height=200)
 win_g3._connect_group_signals(gD)
-view_g3.centerOn(_QPt(60, 950)); app.processEvents()   # верхняя полоса gD в видимой области
+view_g3.centerOn(_QPt(60, 950)); app.processEvents()   # the top strip of gD in the visible area
 _real_gettext2 = _QDlg_g.getText
 _QDlg_g.getText = staticmethod(lambda *a, **k: ("renamed-dc", True))
 try:
-    _QTest.mouseDClick(vp3, _Qt.LeftButton, pos=_vp(view_g3, _QPt(40, 912)))  # верхняя полоса gD
+    _QTest.mouseDClick(vp3, _Qt.LeftButton, pos=_vp(view_g3, _QPt(40, 912)))  # the top strip of gD
 finally:
     _QDlg_g.getText = _real_gettext2
 app.processEvents()
 check("double-click on group title renames it (renameRequested -> dialog)",
       gD.name == "renamed-dc", str(gD.name))
 win_g3._dirty = False
-gD.set_title("via-api")   # titleChanged → _mark_dirty (сигналы подключены)
+gD.set_title("via-api")   # titleChanged → _mark_dirty (the signals are connected)
 check("group signals drive the window dirty marker", win_g3._dirty)
 
-# cleanup: окна секции закрываем (паттерн win73/win_rev выше). ВАЖНО: сначала
-# _dirty=False — иначе closeEvent увидит «несохранённые изменения», патченый
-# question() ответит Save, и _save_project упрётся в МОДАЛЬНЫЙ QFileDialog
-# (offscreen-зависание; файлов не открыто → путь Save-as).
+# cleanup: we close the section's windows (the win73/win_rev pattern above). IMPORTANT: first
+# _dirty=False — otherwise closeEvent would see "unsaved changes", the patched
+# question() answers Save, and _save_project hits a MODAL QFileDialog
+# (an offscreen hang; no files open → the Save-as path).
 for _w in (win_g, win_g2, win_bc, win_g3):
     try:
         _w._dirty = False
