@@ -57,7 +57,8 @@ dialogs/                     # AddServer, SSHConnect (+ external terminal), Conn
 ui/                          # main_window.py — façade over ProjectIOMixin / NodeOpsMixin / SshMixin; sidebar.py; map_search_bar.py (Ctrl+F);
                              # command_palette.py (Ctrl+K); hotkey_registry.py (configurable hotkeys); icons.py; mixin_support.py;
                              # theme.py (central UI palette, radii, fonts)
-i18n/                        # t(key, **kwargs); en/ru/zh JSON with identical key sets (parity pinned in tests); en is the default for new users
+i18n/                        # t(key, **kwargs); every *.json is a language (file name = code, root "name" = display name);
+                             # en/ru/zh/de with identical translation key sets (parity pinned in tests); en is the default for new users
 tests/                       # test_*.py without pytest + _common.py harness + run_all.py (parallel runner) + check_i18n_keys.py — map: tests/INDEX.md
 third_party/                 # pyte 0.8.2 managed fork (vendored): PyPI sdist + patches 0001–0003; provenance/sha256 — third_party/pyte-patches/MANIFEST.md
 ```
@@ -175,7 +176,7 @@ Passwords: keyring only (profiles `"profile:{id}"`, servers by server_id). If th
 from i18n import t, set_language, get_available_languages
 t("btn.add_server", alias="web-1")   # {alias} formatting
 ```
-en (default) / ru / zh. Rule: a new key is added to all 3 files at once; check — `python tests/check_i18n_keys.py`. Modules on the hot path (ssh_worker, ssh_terminal) use a cached `get_translator()`.
+en (default) / ru / zh / de — plus any language you drop in: every `i18n/*.json` is a language (the file name is the code, the root key `"name"` is the name shown in the menus), so adding one takes no code changes. Rule: a new key goes into all the files at once and a built-in language must cover 100% of en; check — `python tests/check_i18n_keys.py`. Modules on the hot path (ssh_worker, ssh_terminal) use a cached `get_translator()`.
 
 ---
 
@@ -201,7 +202,7 @@ en (default) / ru / zh. Rule: a new key is added to all 3 files at once; check �
 - profiles and passwords in the OS keyring — never written to JSON
 - autosave + ring buffer of backups with rollback ("File → Backups…")
 - export to PNG/JPEG/PDF and draw.io `.drawio`; bulk server import from TXT
-- i18n: en (default) / ru / zh
+- i18n: en (default) / ru / zh / de — and any language as one dropped-in JSON file, no code changes
 - settings hub — single `~/.sshmap/config.json`, live application without restart
 - hotkeys + command palette (Ctrl+K) — every shortcut editable in "Settings → Hotkeys", duplicates flagged, applied without restart
 
@@ -211,7 +212,7 @@ en (default) / ru / zh. Rule: a new key is added to all 3 files at once; check �
 - TOFU on first connect and keyring backend restrictions (§4 "Security").
 
 **Roadmap** (tasks, order, acceptance — in ROADMAP.md):
-- **v1.3.x series**: languages without writing code; lightweight plugins.
+- **v1.3.x series**: lightweight plugins (entry points + a local scripts folder); import from `~/.ssh/config`.
 - **v1.4**: syntax highlighting in the SFTP viewer (numbers, JSON/XML/YAML) — opens the 1.4 line.
 
 ---

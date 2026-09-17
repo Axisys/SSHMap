@@ -59,9 +59,13 @@ Helper utilities: `wait_until(cond)` — a real Qt event loop until the conditio
 (needed only with SSHMAP_TEST_NO_HOME_ISOLATION=1).
 
 Release pins and shared checks (at the bottom of the file): the constants
-`EXPECTED_APP_VERSION` / `EXPECTED_I18N_KEYS` — update at every release ONLY here;
-`load_i18n_langs(root)` — loads i18n/{en,ru,zh}.json; `check_i18n_parity(langs)` —
-parity of the key sets + the count; `check_release_state(root)` — APP_VERSION
+`EXPECTED_APP_VERSION` / `EXPECTED_I18N_KEYS` + the i18n policy constants
+`I18N_META_KEYS` (the language-file meta keys, "name") / `I18N_REFERENCE` ("en") —
+update at every release ONLY here; `i18n_lang_codes(root)` / `translation_keys(data)` /
+`load_i18n_langs(root)` — the auto-discovery of ALL i18n/*.json (v1.3.3: the file name is
+the code) and the loading of their TRANSLATION keys; `i18n_parity_problems(langs)` —
+the pure defect list (strict parity vs en + the pinned count); `check_i18n_parity(langs)` —
+the same as one check; `check_release_state(root)` — APP_VERSION
 (sentinel + format X.Y.Z[.W][RCn]) + the pyproject cross-check + the requirements.txt header.
 
 ## Suite files
@@ -97,6 +101,7 @@ of the file itself.
 | `test_groups.py` | — | Node groups on the map v0.8.1 (former smoke_test.py "v0.8.1 groups"). |
 | `test_hotkeys_config.py` | — | v1.3.2 — Configurable hotkeys (QKeySequenceEdit, action registry): the release's test. |
 | `test_hotkeys_palette.py` | — | Hotkeys + command palette v0.9.2 (former smoke_test "v0.9.2 hotkeys + command palette"). |
+| `test_i18n_languages.py` | — | v1.3.3 — Languages without writing code ("name" in JSON + parity policy + documentation): the release's themed test. |
 | `test_keyring_fail_backend.py` | — | Regression v0.9.4b: the keyring fail backend + review notes. |
 | `test_keyring_validation.py` | — | Regression v0.9.5.5 (security #1): the keyring backend — validation and guard. |
 | `test_main_window_split.py` | — | v1.1.4: main_window.py hygiene — split into mixins (ROADMAP v1.1.4 acceptance). |
@@ -171,11 +176,14 @@ of the file itself.
 2. **Mouse input** — only via `PySide6.QtTest.QTest` (widget) or a synthetic
    `QGraphicsSceneMouseEvent` for a QGraphicsItem (the v0.7.3 conclusion, see test_collapse.py).
 3. **Release pins:** at each release update only `tests/_common.py` —
-   `EXPECTED_APP_VERSION` (the version) and `EXPECTED_I18N_KEYS` (en/ru/zh parity);
+   `EXPECTED_APP_VERSION` (the version) and `EXPECTED_I18N_KEYS` (the parity of the
+   TRANSLATION keys over all the discovered languages — en/ru/zh today; the meta key
+   `"name"` is not counted, v1.3.3);
    the release-state sections of themed files call the shared
-   `check_release_state()`, parity — `check_i18n_parity()` (earlier: the
-   "N keys" count in 12 files + version pins in 7 sections). Missing
-   i18n keys against the code are caught by `check_i18n_keys.py`.
+   `check_release_state()`, parity — `i18n_parity_problems()` / `check_i18n_parity()`
+   (earlier: the "N keys" count in 12 files + version pins in 7 sections). Missing
+   i18n keys against the code are caught by `check_i18n_keys.py` (which also enforces
+   the parity over every `i18n/*.json`).
 4. **HOME isolation is mandatory** for all tests writing to `~/.sshmap*`
    (bootstrap does it itself); do not touch the user's real home.
 5. **Do not touch:** the MainWindow public API, the undo stack, the keyring password path,

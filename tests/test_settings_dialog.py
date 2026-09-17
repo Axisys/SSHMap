@@ -360,9 +360,13 @@ check("'Status Checks': the interval (≥5 s) + the probe timeout (≤60 s)",
 check("'Autosave': the on/off checkbox + the interval + the number of backups",
       hasattr(dlg, "autosave_enabled_chk") and hasattr(dlg, "autosave_interval_spin")
       and hasattr(dlg, "backup_count_spin"))
-check("'Language': the en/ru/zh combo",
-      sorted(dlg.language_combo.itemData(i) for i in range(dlg.language_combo.count()))
-      == ["en", "ru", "zh"])
+# v1.3.3: the combo is built from the DISCOVERED i18n/*.json — the test must not carry a
+# hardcoded language list either (dropping in a new language file is not a code change).
+_lang_codes = sorted(lg["code"] for lg in i18n.get_available_languages())
+check("'Language': the combo lists every discovered language (en/ru/zh + dropped-in files)",
+      sorted(dlg.language_combo.itemData(i) for i in range(dlg.language_combo.count())) == _lang_codes
+      and {"en", "ru", "zh"} <= set(_lang_codes),
+      str(_lang_codes))
 
 # Prefill from the config (all keys are optional — the values below are valid by construction)
 write_cfg({"terminal_palette": "dracula", "terminal_font_size": 14,

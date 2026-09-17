@@ -171,28 +171,84 @@ def restore_i18n_config(snap):
 # in 12 i18n files + the APP_VERSION/requirements pins in 7 release-state sections).
 # The misses of the keys themselves against the code are caught by check_i18n_keys.py.
 # ─────────────────────────────────────────────────────────────────────────────
-EXPECTED_APP_VERSION = "1.3.2"  # the current release (a sentinel: it catches "a bump to the wrong version")
-EXPECTED_I18N_KEYS = 458        # the en/ru/zh parity (v1.3.2: +5 settings.hotkeys.* / settings.tab.hotkeys
-                                # → 458; before, 453 since v1.3.1 — v1.3.1.1 reused those keys, no new ones)
+EXPECTED_APP_VERSION = "1.3.3"  # the current release (a sentinel: it catches "a bump to the wrong version")
+EXPECTED_I18N_KEYS = 458        # the parity of the TRANSLATION keys (v1.3.3 has no new keys — the
+                                # "name" meta key of the language files is NOT a translation and is
+                                # excluded here and in check_i18n_keys.py). v1.3.2: +5 settings.hotkeys.*
+                                # / settings.tab.hotkeys → 458; before, 453 since v1.3.1
 VERSION_FORMAT_RE = re.compile(r"^\d+(\.\d+){1,3}([Rr][Cc]\d+)?$")  # "1.1.3", "1.0RC4", "0.9.9.7", "1.2.10rc1" (v1.2.10: + lowercase rc)
 
+# v1.3.3: the meta keys of a language file — file metadata, not UI strings.
+# A language file: {"name": "Русский", "menu.file": "Файл", …}. "name" is the
+# language name in its own language; it is excluded from the key parity (a missing
+# one only degrades the display to the code, it does not break the language).
+I18N_META_KEYS = frozenset({"name"})
+I18N_REFERENCE = "en"   # the source language: every other file must cover 100% of its keys
 
-def load_i18n_langs(root):
-    """i18n/{en,ru,zh}.json → {code: dict} (the shared loading for the parity checks)."""
+
+def i18n_lang_codes(root):
+    """Auto-discovery of the languages: every i18n/*.json is a language, the file name is its code."""
+    i18n_dir = os.path.join(root, "i18n")
+    if not os.path.isdir(i18n_dir):
+        return []
+    return sorted(f[:-len(".json")] for f in os.listdir(i18n_dir) if f.endswith(".json"))
+
+
+def translation_keys(data):
+    """The TRANSLATION keys of a loaded language file (the meta keys are dropped)."""
+    return {k for k in data if k not in I18N_META_KEYS}
+
+
+def load_i18n_langs(root, codes=None):
+    """i18n/*.json → {code: dict} (the shared loading for the parity checks).
+
+    v1.3.3: auto-discovery (the file name is the code) — a dropped-in language file is
+    picked up by the checks without touching them. codes=… narrows the set.
+    """
     langs = {}
-    for code in ("en", "ru", "zh"):
+    for code in (i18n_lang_codes(root) if codes is None else codes):
         with open(os.path.join(root, "i18n", f"{code}.json"), encoding="utf-8") as f:
             langs[code] = json.load(f)
     return langs
 
 
+def i18n_parity_problems(langs, expected_keys=None, reference=I18N_REFERENCE):
+    """The parity defects among the discovered languages: [] = clean.
+
+    The policy (v1.3.3): a built-in language must cover 100% of the reference (en)
+    keys — STRICT parity, so an extra key is a defect as well (it would be dead
+    weight in one file only) — and the count is pinned by EXPECTED_I18N_KEYS.
+    Meta keys are not translations and are ignored here.
+    """
+    expected = EXPECTED_I18N_KEYS if expected_keys is None else expected_keys
+    if reference not in langs:
+        return [f"the reference language {reference!r} is not among the discovered files"]
+    ref_keys = translation_keys(langs[reference])
+    problems = []
+    for code in sorted(langs):
+        keys = translation_keys(langs[code])
+        missing = sorted(ref_keys - keys)
+        extra = sorted(keys - ref_keys)
+        if missing:
+            problems.append(f"{code}: {len(missing)} key(s) missing vs {reference}: "
+                            + ", ".join(missing[:5]) + ("…" if len(missing) > 5 else ""))
+        if extra:
+            problems.append(f"{code}: {len(extra)} key(s) not in {reference}: "
+                            + ", ".join(extra[:5]) + ("…" if len(extra) > 5 else ""))
+        if expected is not None and len(keys) != expected:
+            problems.append(f"{code}: {len(keys)} translation keys (the pin EXPECTED_I18N_KEYS = {expected})")
+    return problems
+
+
 def check_i18n_parity(langs):
-    """The en/ru/zh parity: the sets of the keys are equal and the count == EXPECTED_I18N_KEYS."""
+    """The parity over the DISCOVERED languages: identical translation key sets vs en + the pinned count."""
+    problems = i18n_parity_problems(langs)
     check(
-        f"i18n parity en/ru/zh ({EXPECTED_I18N_KEYS} keys each)",
-        set(langs["en"]) == set(langs["ru"]) == set(langs["zh"])
-        and all(len(d) == EXPECTED_I18N_KEYS for d in langs.values()),
-        str({c: len(d) for c, d in langs.items()}))
+        f"i18n parity: {len(langs)} language(s) × {EXPECTED_I18N_KEYS} keys "
+        f"({', '.join(sorted(langs))})",
+        not problems,
+        "; ".join(problems) + " | "
+        + str({c: len(translation_keys(d)) for c, d in sorted(langs.items())}))
 
 
 def check_release_state(root):
