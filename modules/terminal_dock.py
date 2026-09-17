@@ -138,6 +138,39 @@ class TerminalDockContent(QWidget):
         self._status_tokens = itertools.count()   # token-guard for label auto-clear
         self._status_token = None
 
+    # ── v1.3.3.1 (ROADMAP task 1): live i18n — re-text on a language switch ──
+
+    def retranslate(self):
+        """v1.3.3.1: re-text the content and its sessions in the current language.
+
+        The close tooltip of every tab, everything each page owns (the
+        `Terminal | Files` titles, the SFTP buttons/headers) and the container's own
+        "Terminal macros" panel. Every string already has an i18n key (ZERO new
+        keys); the module translator is looked up at call time — no cache to
+        invalidate. The dock's own title belongs to `TerminalsDock.retranslate()`.
+        Never raises — the dead-C++-object discipline of every container method.
+        """
+        t = get_translator()
+        try:
+            for i in range(self.session_tabs.count()):
+                self.session_tabs.setTabToolTip(i, t("terminal.tab_close_tooltip"))
+            pages = [self.session_tabs.widget(i) for i in range(self.session_tabs.count())]
+        except RuntimeError:
+            return  # the C++ object was already destroyed (a close race)
+        for page in pages:
+            try:
+                page.retranslate()
+            except RuntimeError:
+                pass  # Qt teardown — the page is already destroyed
+        # v1.3.3.1: the "Terminal macros" panel belongs to the CONTAINER (the dock
+        # owns one, the window owns another), so it is re-texted here.
+        cmdlib = getattr(self, "cmdlib_panel", None)
+        if cmdlib is not None:
+            try:
+                cmdlib.retranslate()
+            except RuntimeError:
+                pass  # Qt teardown — the panel is already destroyed
+
     # ── v1.2.2: tabs = sessions (SSHTerminalWindow contract, v1.2.1) ─────────
 
     def add_session(self, server_data, password: str = None,
@@ -305,3 +338,14 @@ class TerminalsDock(QDockWidget):
         # cleaned up page by page, the container is empty: hide the dock (do not
         # destroy it — see the docstring).
         self.content.last_tab_closed.connect(self.hide)
+
+    def retranslate(self):
+        """v1.3.3.1: re-text the dock title (`terminal.dock_title`) and its content."""
+        try:
+            self.setWindowTitle(get_translator()("terminal.dock_title"))
+        except RuntimeError:
+            return  # the C++ object was already destroyed (a close race)
+        try:
+            self.content.retranslate()
+        except RuntimeError:
+            pass  # Qt teardown — the content is already destroyed

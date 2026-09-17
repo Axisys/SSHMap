@@ -20,16 +20,27 @@ Adding a language (v1.3.3 — no code changes):
        a built-in language covers 100% of en's keys);
     4. python tests/check_i18n_keys.py   # green = the language is complete.
 
-The meta key "name" is NOT a translation — it is pinned here and relied upon by the
+The meta keys are NOT translations — they are pinned here and relied upon by the
 code:
-    * get_available_languages() reads it from the file (missing / broken / empty →
-      the language code is shown instead — a language file still works);
-    * it is stripped when a language is loaded, so t("name") never resolves to it
-      (it returns the key itself, exactly like any other unknown key);
+    * "name" — the display name: get_available_languages() reads it from the file
+      (missing / broken / empty → the language code is shown instead — a language
+      file still works);
+    * "partial" (v1.3.3.1) — `true` marks a DELIBERATELY incomplete language: the
+      file loads and works exactly as any other (the runtime en-fallback is what
+      makes it usable), but the parity check reports its missing keys / count
+      mismatch as a WARNING instead of a defect. A file WITHOUT the key stays
+      STRICT (a missing key AND an extra key are defects);
+    * both are STRIPPED when a language is loaded, so t("name") / t("partial")
+      never resolve to them (they return the key itself, exactly like any other
+      unknown key);
     * the parity checks (tests/check_i18n_keys.py, tests/_common.py) compare the
       TRANSLATION keys only — meta keys are outside the en-parity policy.
 The name is displayed in the "Help → Language" submenu and in the "Language" tab of
 the settings hub.
+
+Encoding (v1.3.3.1): every language file is read as "utf-8-sig" — a file saved by
+Notepad as "UTF-8 with BOM" (the first thing a Windows contributor produces) loads
+exactly like a plain UTF-8 one. The BOM is a file-level artifact, never a key.
 """
 
 import json
@@ -56,8 +67,14 @@ _CONFIG_FILE = os.path.join(_CONFIG_DIR, "config.json")
 
 # v1.3.3 (ROADMAP): the root meta keys of a language file. They describe the FILE,
 # they are not UI strings — excluded from the parity checks and from t() (see the
-# module docstring). "name" = the language name in its own language ("Русский").
-_META_KEYS = ("name",)
+# module docstring). "name" = the language name in its own language ("Русский");
+# "partial" (v1.3.3.1) = `true` marks a deliberately incomplete translation file.
+_META_KEYS = ("name", "partial")
+
+# v1.3.3.1 (ROADMAP task 2): a Notepad "UTF-8 with BOM" file must load. Every read
+# path of a language file goes through this encoding — the BOM is stripped by the
+# codec, so a BOM-prefixed file is byte-for-byte equivalent to a plain UTF-8 one.
+_LANG_ENCODING = "utf-8-sig"
 
 
 def _log_debug(message: str) -> None:
@@ -89,7 +106,7 @@ def _read_language_name(code: str) -> str:
     path = os.path.join(_i18n_dir, f"{code}.json")
     name = None
     try:
-        with open(path, "r", encoding="utf-8") as f:
+        with open(path, "r", encoding=_LANG_ENCODING) as f:
             data = json.load(f)
         if isinstance(data, dict):
             name = data.get(_META_KEYS[0])
@@ -99,6 +116,24 @@ def _read_language_name(code: str) -> str:
         return name.strip()
     _log_debug(f"language {code!r}: no usable \"name\" meta key — showing the code")
     return code
+
+
+def is_partial(language: str) -> bool:
+    """Is this language file marked `"partial": true` (v1.3.3.1, ROADMAP task 2)?
+
+    A partial file is a deliberately INCOMPLETE translation: it loads and works
+    exactly like a complete one (the runtime en-fallback is unchanged — a missing
+    key falls back to English), but the parity check reports its missing keys and
+    its key count as a WARNING rather than a defect. Only a real JSON `true` counts
+    (a string "true" / 1 / a missing key → False: the strict policy). Never raises.
+    """
+    path = os.path.join(_i18n_dir, f"{language}.json")
+    try:
+        with open(path, "r", encoding=_LANG_ENCODING) as f:
+            data = json.load(f)
+    except (json.JSONDecodeError, IOError, OSError):
+        return False
+    return isinstance(data, dict) and data.get("partial") is True
 
 
 def _ensure_config_dir() -> bool:
@@ -192,7 +227,7 @@ def load_language(language: str) -> bool:
         return False
 
     try:
-        with open(filepath, "r", encoding="utf-8") as f:
+        with open(filepath, "r", encoding=_LANG_ENCODING) as f:
             data = json.load(f)
         if not isinstance(data, dict):
             return False
@@ -202,6 +237,18 @@ def load_language(language: str) -> bool:
         return True
     except (json.JSONDecodeError, IOError):
         return False
+
+
+def reload_current_language() -> bool:
+    """Re-read the ACTIVE language file from disk (v1.3.3.1, ROADMAP task 3).
+
+    The "Help → Language → Rescan the language files" action uses this: the language
+    list itself is re-read by the menu rebuild, while an EDITED translation of the
+    active language needs an explicit re-load. The current language keeps working
+    from memory when its file disappeared or broke (returns False — the caller only
+    reports it). Never raises.
+    """
+    return load_language(_current_language)
 
 
 def get_current_language() -> str:
@@ -223,7 +270,7 @@ def _get_en_fallback() -> Dict[str, str]:
     if _en_fallback is None:
         path = os.path.join(_i18n_dir, "en.json")
         try:
-            with open(path, "r", encoding="utf-8") as f:
+            with open(path, "r", encoding=_LANG_ENCODING) as f:
                 _en_fallback = _strip_meta(json.load(f))
         except (json.JSONDecodeError, IOError, OSError):
             _en_fallback = {}

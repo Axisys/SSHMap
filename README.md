@@ -18,7 +18,7 @@ pipx install .                    # or pip install . → sshmap command (install
 Tests — plain Python scripts without pytest: topical `test_*.py` files + a single parallel runner; each file is an isolated process (sandbox HOME, offscreen Qt, UTF-8 stdout — nothing extra needed on cp1251 consoles or in CI):
 
 ```bash
-python tests/run_all.py               # everything (70 test files + i18n check); auto workers = cores (cap 8, --workers N); exit 0 ⇔ all green
+python tests/run_all.py               # everything (72 test files + i18n check); auto workers = cores (cap 8, --workers N); exit 0 ⇔ all green
 python tests/run_all.py --fast        # daily profile: skips files tagged slow/network
 python tests/run_all.py --tag network # only network-tagged files — real-network sections run ONLY on explicit opt-in (env SSHMAP_TEST_TAGS)
 python tests/run_all.py --failed-only # re-run only files that failed in the last run (cache test-results/last_run.json)
@@ -103,6 +103,7 @@ Format invariants:
 
 ### Terminal
 - **Architecture** — session = `TerminalSessionPage` (modules/terminal_page.py): thread + pyte screen + canvas + status line + SFTP tab; ALL cleanup logic lives on the page side — every teardown path (tab/window close, session error, MainWindow shutdown, limit reached) goes through the single idempotent `page.shutdown()`, and the "ask" gate is `page.confirm_close()`.
+- **Language** — the containers follow a language switch live: the window/dock titles, the tab titles and tooltips, the SFTP buttons and column headers, the command-library panel and its row tooltips are re-texted by a `retranslate()` on every container (MainWindow walks the session registry, exactly like it already did for the terminal font) — no restart.
 - **Containers** — `SSHTerminalWindow` (WA_DeleteOnClose) holds a QTabWidget of pages: re-connecting to the same node reuses its live window — new session = new tab (`window.add_session()`), a different node opens a new window; closing a tab cleans up only that page, the last tab closes the window. The status-bar bridge and `win.page` follow the ACTIVE tab (re-bridged on switch). The window itself closes with the standard X button — there is no separate "Close terminal" button.
 - **Display mode** — `terminal_mode`: `"windows"` (default) | `"tabs"` — sessions as tabs in a detachable QDockWidget "Terminals" on the map (`modules/terminal_dock.py`; the map remains the central widget): the dock detaches into a window and returns; cleanup is per-page (the last tab hides the dock, does not destroy it); applied without restart — new sessions go to the selected mode, open windows/dock stay as they are. The external terminal is unchanged (always a separate OS process).
 - **Pipeline** — raw SSH bytes → `TerminalScreen.feed()` (pyte.HistoryScreen, under lock) → cell-based canvas `TerminalWidget` (QWidget+QPainter: runs, color engine `resolve_color`, blinking block cursor); dirty rendering without a timer (`_on_output` → `widget.update()`, already on the GUI thread).
@@ -176,7 +177,7 @@ Passwords: keyring only (profiles `"profile:{id}"`, servers by server_id). If th
 from i18n import t, set_language, get_available_languages
 t("btn.add_server", alias="web-1")   # {alias} formatting
 ```
-en (default) / ru / zh / de — plus any language you drop in: every `i18n/*.json` is a language (the file name is the code, the root key `"name"` is the name shown in the menus), so adding one takes no code changes. Rule: a new key goes into all the files at once and a built-in language must cover 100% of en; check — `python tests/check_i18n_keys.py`. Modules on the hot path (ssh_worker, ssh_terminal) use a cached `get_translator()`.
+en (default) / ru / zh / de — plus any language you drop in: every `i18n/*.json` is a language (the file name is the code, the root key `"name"` is the name shown in the menus, a file saved with a BOM loads fine), so adding one takes no code changes and needs no restart — `Help → Language` rescans the folder (and re-reads your file) on every open. Rule: a new key goes into all the files at once and a built-in language must cover 100% of en — in keys, in `{placeholders}` and in line breaks; a deliberately incomplete translation may declare itself with the root key `"partial": true`, which turns its missing keys into a warning instead of a defect. Check — `python tests/check_i18n_keys.py`. Modules on the hot path (ssh_worker, ssh_terminal) use a cached `get_translator()`.
 
 ---
 
@@ -202,7 +203,7 @@ en (default) / ru / zh / de — plus any language you drop in: every `i18n/*.jso
 - profiles and passwords in the OS keyring — never written to JSON
 - autosave + ring buffer of backups with rollback ("File → Backups…")
 - export to PNG/JPEG/PDF and draw.io `.drawio`; bulk server import from TXT
-- i18n: en (default) / ru / zh / de — and any language as one dropped-in JSON file, no code changes
+- i18n: en (default) / ru / zh / de — and any language as one dropped-in JSON file, no code changes; the interface follows a language switch everywhere, terminals and SFTP tabs included; `Help → Language` rescans the folder without a restart
 - settings hub — single `~/.sshmap/config.json`, live application without restart
 - hotkeys + command palette (Ctrl+K) — every shortcut editable in "Settings → Hotkeys", duplicates flagged, applied without restart
 

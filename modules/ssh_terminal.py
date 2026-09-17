@@ -443,6 +443,69 @@ class SSHTerminalWindow(QMainWindow):
         # The first session — via the same path as a new tab (v1.2.1 task 1).
         self.add_session(server_data, password=password, initial_command=initial_command)
 
+    # ── v1.3.3.1 (ROADMAP task 1): live i18n — re-text on a language switch ──
+
+    def retranslate(self):
+        """v1.3.3.1: re-text the window and its sessions in the current language.
+
+        The window title (`terminal.window_title`), the close tooltip of every tab
+        (`terminal.tab_close_tooltip`) and — through each page — the `Terminal | Files`
+        titles, the SFTP buttons/headers and the command-library panel. Every string
+        already has an i18n key (ZERO new keys); the module translator is looked up at
+        call time, so its cache needs no invalidation.
+
+        The multi-input title prefix is PRESERVED: while the mode is on the title is
+        `terminal.multi_title_prefix + base` (the base is rebuilt here and re-prefixed),
+        otherwise the plain base title is restored. Never raises — the dead-C++-object
+        discipline of every container method.
+        """
+        t = get_translator()
+        data = getattr(self, "server_data", None)
+        base = t("terminal.window_title",
+                 alias=getattr(data, "alias", "?"), host=getattr(data, "host", ""))
+        # v1.2.3: the multi-input prefix lives on the window title (multi_input.py);
+        # the base is recomputed here, so the prefix is re-added instead of lost.
+        prefixed = False
+        try:
+            from .multi_input import get_hub as _get_hub
+        except ImportError:  # flat launch from the project root
+            try:
+                from multi_input import get_hub as _get_hub
+            except ImportError:
+                _get_hub = None
+        if _get_hub is not None:
+            try:
+                prefixed = bool(_get_hub().active)
+            except Exception:  # noqa: BLE001 — the hub must not break the re-text
+                prefixed = False
+        self._multi_base_title = base
+        try:
+            self.setWindowTitle((t("terminal.multi_title_prefix") + base) if prefixed else base)
+        except RuntimeError:
+            return  # the C++ object was already destroyed (a close race)
+        try:
+            for i in range(self.session_tabs.count()):
+                self.session_tabs.setTabToolTip(i, t("terminal.tab_close_tooltip"))
+        except RuntimeError:
+            pass  # the C++ object was already destroyed (a close race)
+        try:
+            pages = [self.session_tabs.widget(i) for i in range(self.session_tabs.count())]
+        except RuntimeError:
+            pages = []  # the C++ object was already destroyed (a close race)
+        for page in pages:
+            try:
+                page.retranslate()
+            except RuntimeError:
+                pass  # Qt teardown — the page is already destroyed
+        # v1.3.3.1: the "Terminal macros" panel belongs to the CONTAINER (both the
+        # window and the dock own one), so it is re-texted here — not by the page.
+        cmdlib = getattr(self, "cmdlib_panel", None)
+        if cmdlib is not None:
+            try:
+                cmdlib.retranslate()
+            except RuntimeError:
+                pass  # Qt teardown — the panel is already destroyed
+
     # ── v1.2.1: tabs = sessions ──────────────────────────────────────────────
 
     def add_session(self, server_data: ServerData, password: str = None,

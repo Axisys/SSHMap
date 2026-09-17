@@ -323,6 +323,20 @@ class ProjectIOMixin:
 
     def _do_save(self, path: str) -> bool:
         """Save the project to a file. Passwords go to the keyring (the JSON has only the rest)."""
+        # v1.3.3.1 (ROADMAP task 6): FLUSH the pending note-text debounce FIRST.
+        # The bug found by the v1.3.3 audit: typing in a note and pressing Ctrl+S
+        # inside the 600 ms debounce wrote the new text to the JSON (to_dict() reads
+        # the LIVE text) and THEN the pending CmdEditTextNote landed on the FRESH
+        # undo stack — the title showed unsaved changes right after a save, and
+        # Ctrl+Z reverted text that was already on disk. Committing here pushes the
+        # command BEFORE the stack is reset (a new baseline), so the state is clean.
+        commit = getattr(self, "_commit_note_text", None)
+        if callable(commit):
+            try:
+                commit()
+            except Exception as e:  # noqa: BLE001 — a failed flush must not block the save
+                if self.log:
+                    self.log.warning(f"Commit pending note text failed: {e}")
         try:
             server_count = self.scene.node_count()
             arrow_count = self.scene.arrow_count()

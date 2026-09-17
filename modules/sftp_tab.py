@@ -295,6 +295,44 @@ class SftpTab(QWidget):
             w.installEventFilter(self)
         self.installEventFilter(self)
 
+    # ── v1.3.3.1 (ROADMAP task 1): live i18n — re-text on a language switch ──
+
+    def retranslate(self):
+        """v1.3.3.1: re-text the tab's own strings in the current language.
+
+        Every string already has an i18n key (ZERO new keys): the five buttons,
+        the three column headers, the viewer's close tooltip and the "no preview"
+        row tooltips. The module translator (`i18n.t`) is looked up at call time,
+        so no cache has to be invalidated.
+
+        Deliberately NOT touched: the path label and the viewer header — they carry
+        the CURRENT directory / file (data, not UI text); the "waiting connection"
+        state is re-texted by `set_worker(None)` on the next call. Never raises —
+        the dead-C++-object discipline of every container method.
+        """
+        try:
+            self.btn_up.setText(_t("sftp.up"))
+            self.btn_refresh.setText(_t("sftp.refresh"))
+            self.btn_upload.setText(_t("sftp.upload"))
+            self.btn_download.setText(_t("sftp.download"))
+            self.btn_cancel.setText(_t("sftp.cancel"))
+            self.tree.setHeaderLabels([_t("sftp.column_name"), _t("sftp.column_size"),
+                                       _t("sftp.column_modified")])
+            self.btn_viewer_close.setToolTip(_t("sftp.viewer.close_tooltip"))
+            # The row markers carry the refusal text in the tooltip — re-text the
+            # rows of the CURRENT listing that are really marked (the facts of this
+            # session; the marker itself is re-applied by the next listing).
+            for path, reason in list(getattr(self, "_blocked", {}).items()):
+                if not reason:
+                    continue
+                for i in range(self.tree.topLevelItemCount()):
+                    item = self.tree.topLevelItem(i)
+                    if item.data(0, self.PATH_ROLE) == path:
+                        item.setToolTip(0, self._blocked_tooltip(reason))
+                        break
+        except RuntimeError:
+            pass  # the C++ object was already destroyed (a close race)
+
     # ── Worker binding (called by the window) ────────────────────────────
 
     def set_worker(self, worker):

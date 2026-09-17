@@ -95,6 +95,7 @@
   "search.placeholder": "Nach Alias / Host / IP suchen...",
   "lang.menu": "Sprache",
   "lang.switch_failed": "Sprache konnte nicht gewechselt werden",
+  "lang.reload": "Sprachdateien neu einlesen",
   "file.select_key": "Privaten SSH-Schlüssel auswählen",
   "filter.all_files": "Alle Dateien (*)",
   "ssh.user_required": "SSH-Benutzer eingeben.",
@@ -455,6 +456,7 @@
   "settings.hotkeys.conflict": "Dasselbe Tastenkürzel ist mehreren Aktionen zugewiesen — die markierten Zeilen funktionieren möglicherweise nicht. Speichern ist trotzdem möglich.",
   "connection.label_hint": "bis zu 20 Zeichen",
   "status.settings_saved": "Einstellungen gespeichert.",
+  "status.language_reloaded": "Sprachdateien neu eingelesen.",
   "status.collapse_both_forbidden": "Beide Bereiche können nicht eingeklappt werden — mindestens einer muss geöffnet bleiben",
   "msg.confirm_close_session": "SSH-Sitzung schließen?",
   "msg.close_session_title": "SSH-Sitzung"

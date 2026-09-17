@@ -95,6 +95,7 @@
   "search.placeholder": "Search by alias / host / IP...",
   "lang.menu": "Language",
   "lang.switch_failed": "Failed to switch language",
+  "lang.reload": "Rescan the language files",
   "file.select_key": "Select SSH Private Key",
   "filter.all_files": "All files (*)",
   "ssh.user_required": "Enter SSH user.",
@@ -455,6 +456,7 @@
   "settings.hotkeys.conflict": "The same hotkey is assigned to more than one action — the marked rows may not fire. You can still save.",
   "connection.label_hint": "up to 20 characters",
   "status.settings_saved": "Settings saved.",
+  "status.language_reloaded": "Language files rescanned.",
   "status.collapse_both_forbidden": "Cannot collapse both panels — at least one must stay open",
   "msg.confirm_close_session": "Close the SSH session?",
   "msg.close_session_title": "SSH Session"

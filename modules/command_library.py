@@ -471,6 +471,7 @@ class CommandLibraryPanel(QWidget):
 
         head = QHBoxLayout()
         title = QLabel(t("terminal.cmdlib.title"))
+        self._title = title   # v1.3.3.1: retranslate() re-texts the panel header
         tf = title.font()
         tf.setBold(True)
         title.setFont(tf)
@@ -519,6 +520,46 @@ class CommandLibraryPanel(QWidget):
 
         # The initial state — from the config (a read without a write-back).
         self.set_collapsed(_load_collapse_state(), persist=False)
+
+    # ── v1.3.3.1 (ROADMAP task 1): live i18n — re-text on a language switch ──
+
+    def retranslate(self):
+        """v1.3.3.1: re-text the panel in the current language.
+
+        The tooltips (strip/collapse), the header title, the search placeholder, the
+        two tree column headers, the Add/Edit/Delete buttons — plus the tree and the
+        info label, which carry translated CATEGORY names ("Uncategorised" for an
+        empty category) and the empty/no-matches hint. Every string already has an
+        i18n key (ZERO new keys); the module translator is looked up at call time, so
+        its cache needs no invalidation. Never raises — the dead-C++-object
+        discipline of every container method.
+        """
+        t = get_translator()
+        try:
+            self._strip.setToolTip(t("terminal.cmdlib.expand_tooltip"))
+            self._title.setText(t("terminal.cmdlib.title"))
+            self._collapse_btn.setToolTip(t("terminal.cmdlib.collapse_tooltip"))
+            self.search.setPlaceholderText(t("terminal.cmdlib.search_placeholder"))
+            self.tree.setHeaderLabels([t("terminal.cmdlib.name"),
+                                       t("terminal.cmdlib.command")])
+            self.add_btn.setText(t("terminal.cmdlib.add"))
+            self.edit_btn.setText(t("terminal.cmdlib.edit"))
+            self.del_btn.setText(t("terminal.cmdlib.delete"))
+        except RuntimeError:
+            return  # the C++ object is already deleted (a close race)
+        # The collapse state also owns the two tooltips (set_collapsed re-applies the
+        # one that belongs to the current state) — cheap and idempotent.
+        try:
+            self.set_collapsed(self._collapsed, persist=False)
+        except RuntimeError:
+            pass  # the C++ object is already deleted (a close race)
+        # The tree carries translated category names + the info label carries the
+        # empty/no-matches hint — rebuild both in the new language (the same path
+        # showEvent uses: a re-read of the store + a rebuild).
+        try:
+            self.reload()
+        except RuntimeError:
+            pass  # the C++ object is already deleted (a close race)
 
     # ── host / data ─────────────────────────────────────────────────────────
 

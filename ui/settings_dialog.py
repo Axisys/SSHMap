@@ -530,6 +530,45 @@ class SettingsDialog(QDialog):
         form.addRow(self._lbl_language, self.language_combo)
         self.tabs.addTab(tab, _t("settings.tab.language"))
 
+    def _refresh_language_combo(self):
+        """v1.3.3.1 (ROADMAP task 3): re-read the discovered languages at dialog open.
+
+        The combo was built once at dialog construction; a language file dropped into
+        `i18n/` afterwards must not need a restart — `showEvent` calls this. The
+        current language is preselected, so the refresh does not fire
+        `currentIndexChanged` for the already active language. Never raises.
+        """
+        combo = getattr(self, "language_combo", None)
+        if combo is None:
+            return
+        try:
+            from i18n import get_available_languages, get_current_language
+            langs = get_available_languages()
+            cur = get_current_language()
+        except Exception:  # noqa: BLE001 — a broken i18n leaves the combo as it is
+            return
+        try:
+            if [combo.itemData(i) for i in range(combo.count())] == [lg["code"] for lg in langs]:
+                return  # nothing changed — do not touch the selection
+            combo.blockSignals(True)   # a programmatic rebuild must not re-apply the language
+            combo.clear()
+            for lg in langs:
+                combo.addItem(lg["name"], lg["code"])
+            idx = next((i for i in range(combo.count())
+                        if combo.itemData(i) == cur), 0)
+            combo.setCurrentIndex(idx)
+            combo.blockSignals(False)
+        except RuntimeError:
+            pass  # Qt teardown — the combo is already destroyed
+
+    def showEvent(self, event):
+        """v1.3.3.1: refreshing the language list is part of "open the dialog"."""
+        super().showEvent(event)
+        try:
+            self._refresh_language_combo()
+        except Exception:  # noqa: BLE001 — show must never crash
+            pass
+
     # ── Slots ──────────────────────────────────────────────────────────────────
 
     def _on_language_changed(self, index: int):

@@ -204,7 +204,8 @@ check("no hardcoded code → display-name dict is left in i18n/__init__.py",
 check("the module docstring pins the \"name\" meta-key policy (v1.3.3)",
       "meta key" in (i18n.__doc__ or "") and "name" in (i18n.__doc__ or ""))
 check("the meta keys of the module and the harness agree",
-      tuple(I18N_META_KEYS) == tuple(i18n._META_KEYS), str((I18N_META_KEYS, i18n._META_KEYS)))
+      set(I18N_META_KEYS) == set(i18n._META_KEYS) == {"name", "partial"},
+      str((sorted(I18N_META_KEYS), sorted(i18n._META_KEYS))))
 
 # ════════════════════════════════════════════════════════════════════════════
 print("== §3 the meta key is NOT a translation (t() / load / fallback) ==")
@@ -285,7 +286,7 @@ _checker = load_check_script()
 _rc, _out = run_check_script(_checker, ROOT)
 check("the real project passes the check (exit 0)", _rc == 0, _out[-400:])
 check("the report names the discovered languages and the count",
-      "en, ru, zh" in _out and "458" in _out, _out[:300])
+      "en, ru, zh" in _out and str(EXPECTED_I18N_KEYS) in _out, _out[:300])
 
 _ok_root = make_fake_project("check_ok")
 _rc, _out = run_check_script(_checker, _ok_root)

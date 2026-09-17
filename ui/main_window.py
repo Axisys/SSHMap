@@ -503,14 +503,24 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
                 self.log.warning(f"Apply multi-input hotkey failed: {e}")
 
     def _apply_ui_translations(self):
-        """Translate the menus, toolbar, and service labels to the current language."""
+        """Translate the menus, toolbar, and service labels to the current language.
+
+        v1.3.3.1 (ROADMAP task 1): every stage is individually fault-isolated. The
+        re-text is a CROSS-CUTTING walk over widgets that may die at any moment (a
+        terminal window closing mid-switch, a torn-down container) — before, one
+        broken widget aborted the whole method, so the terminal containers stayed in
+        the previous language. A re-text is cosmetic: it must never break the switch.
+        """
         for widget, key in self._menu_i18n:
             if widget is None:
                 continue
-            if isinstance(widget, QMenu):
-                widget.setTitle(self.t(key))
-            else:
-                widget.setText(self.t(key))
+            try:
+                if isinstance(widget, QMenu):
+                    widget.setTitle(self.t(key))
+                else:
+                    widget.setText(self.t(key))
+            except RuntimeError:
+                pass  # Qt teardown — one menu/action is already destroyed
         # v0.9.9.4: sidebar strings (buttons, title, placeholder, "All tags") —
         # the panel registry; retranslate via the i18n callback (regression on the v0.9.2 bug:
         # these strings were not updated on language switch before).
@@ -524,9 +534,49 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         dock = getattr(self, "_terminals_dock", None)
         if dock is not None:
             try:
-                dock.setWindowTitle(self.t("terminal.dock_title"))
+                dock.retranslate()
             except RuntimeError:
                 pass  # Qt teardown — the dock is already destroyed
+            except AttributeError:
+                try:
+                    dock.setWindowTitle(self.t("terminal.dock_title"))
+                except RuntimeError:
+                    pass  # Qt teardown — the dock is already destroyed
+        # v1.3.3.1 (ROADMAP task 1): the terminal CONTAINERS follow the language too.
+        # The twin of the terminal-font loop in _apply_settings_from_dialog — same
+        # registry, same dead-C++-object discipline: a session that is being torn
+        # down must not break the switch. The registry stores SESSIONS (pages) in
+        # windows mode and the DOCK in tabs mode; both own retranslate(), and both
+        # re-text their own children — so nothing is missed either way. A page also
+        # points at its host window (page._host_window — the v1.2.1 contract), and
+        # the HOST owns the pieces the page cannot reach: the WINDOW TITLE and the
+        # tabs' close tooltips — so the host is re-texted as well (both calls are
+        # idempotent, the overlap costs nothing). The module translator cache
+        # (_t_cache) is deliberately NOT invalidated: the cached lambda calls i18n.t()
+        # at call time, and t() reads the current language on every call — so a
+        # re-text picks the new language up.
+        for _session in list(getattr(self, "_terminal_windows", [])):
+            try:
+                _session.retranslate()
+            except RuntimeError:
+                pass  # Qt teardown — the session/dock content is already destroyed
+            except AttributeError:
+                pass  # a session object without retranslate() (a test double) — skip it
+            except Exception:  # noqa: BLE001 — one container must not abort the re-text
+                if self.log:
+                    self.log.warning("retranslate failed for a terminal session", exc_info=True)
+            _host = getattr(_session, "_host_window", None)
+            if _host is None or _host is dock:
+                continue  # no host / the dock was already re-texted above
+            try:
+                _host.retranslate()
+            except RuntimeError:
+                pass  # Qt teardown — the host window is already destroyed
+            except AttributeError:
+                pass  # a host without retranslate() (a test double) — skip it
+            except Exception:  # noqa: BLE001 — one window must not abort the re-text
+                if self.log:
+                    self.log.warning("retranslate failed for a terminal window", exc_info=True)
         # v1.2.3: multi-input plaque — the exit button tooltip in the new language
         _multi_btn = getattr(self, "_multi_exit_btn", None)
         if _multi_btn is not None:
@@ -539,8 +589,8 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         if _sb_panel is not None:
             try:
                 _sb_panel.collapse_btn.setToolTip(self.t("view.toggle_sidebar"))
-            except RuntimeError:
-                pass  # Qt teardown — the panel is already destroyed
+            except (RuntimeError, AttributeError):
+                pass  # Qt teardown / a panel without the button — the tooltip is not critical
         for _widget, _key in ((getattr(self, "_map_collapse_btn", None), "view.toggle_map"),
                               (getattr(self, "_sidebar_strip", None), "view.strip_sidebar_tooltip"),
                               (getattr(self, "_map_strip", None), "view.strip_map_tooltip")):
@@ -549,7 +599,10 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
                     _widget.setToolTip(self.t(_key))
                 except RuntimeError:
                     pass  # Qt teardown — the widget is already destroyed
-        self.statusBar().showMessage(self.t("status.ready"))
+        try:
+            self.statusBar().showMessage(self.t("status.ready"))
+        except RuntimeError:
+            pass  # Qt teardown — the status bar is already destroyed
 
     @property
     def log(self):
@@ -872,6 +925,16 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
 
     def closeEvent(self, event):
         """Ask to save on exit if there are unsaved changes."""
+        # v1.3.3.1 (ROADMAP task 6): flush the pending note-text debounce BEFORE the
+        # "unsaved changes" question and before the autosave timer stops. Otherwise a
+        # note typed in the last 600 ms is not yet in the undo stack: the question
+        # would be asked on a stale dirty state, and on "Discard" the debounce timer
+        # could still fire into a window that is going away.
+        try:
+            self._commit_note_text()
+        except Exception:  # noqa: BLE001 — the flush must not block the close
+            pass
+
         # v1.1.2RC3 (AUDIT U2): save the window size/state BEFORE everything — even on
         # a cancelled close (event.ignore) the written values equal the current ones, and on
         # a normal exit the next start reads them (ui_window_geometry_main).
@@ -1289,19 +1352,21 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         self._add_menu_action(help_menu, "help.open_logs", self._open_log_file)
 
         # Language submenu (i18n)
+        # v1.3.3.1 (ROADMAP task 3): the submenu is no longer frozen at construction —
+        # it is (re)built from get_available_languages() every time it is ABOUT TO BE
+        # SHOWN (aboutToShow), so an i18n/<code>.json dropped in afterwards appears
+        # without a restart. An explicit "Rescan the language files" item makes the
+        # behaviour discoverable (and re-reads the ACTIVE file, so an edited
+        # translation is picked up too). See _build_language_menu()/_reload_languages().
         if self._i18n_available:
             try:
-                from i18n import get_available_languages as _get_langs
-                langs = _get_langs()
-                lang_menu = help_menu.addMenu(self.t("lang.menu"))
-                self._register_i18n(lang_menu, "lang.menu")
-                for lg in langs:
-                    action = lang_menu.addAction(lg["name"])
-                    action.setCheckable(True)
-                    action.setChecked(lg["code"] == self.current_language)
-                    action.setData(lg["code"])  # the language code — for the checkmark on switch
-                    code = lg["code"]
-                    action.triggered.connect(lambda checked, c=code: self._switch_language(c))
+                self._lang_menu = help_menu.addMenu(self.t("lang.menu"))
+                self._register_i18n(self._lang_menu, "lang.menu")
+                self._populate_language_menu(self._lang_menu)
+                # Rebuild the entries right before the menu opens (lang.reload keeps
+                # its place at the bottom — _populate_language_menu appends it).
+                self._lang_menu.aboutToShow.connect(
+                    lambda: self._populate_language_menu(self._lang_menu))
             except Exception as e:
                 if self.log:
                     self.log.warning(f"i18n lang menu error: {e}")
@@ -1320,12 +1385,99 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         # all such QActions in self._qaction_guard makes them immortal, and therefore
         # the attached QMenus live on. This fixes both _switch_language and the palette,
         # and any future code that walks menus via action.menu().
-        guard = []
-        for w, _key in self._menu_i18n:
-            if isinstance(w, QMenu):
-                guard.extend(list(w.actions()))
-        guard.extend(list(menubar.actions()))  # top-level titles (File/Edit/…)
-        self._qaction_guard = guard
+        # v1.3.3.1: the language submenu is now REBUILT on aboutToShow — the helper is
+        # called again after every rebuild, so the fresh QActions are guarded too.
+        self._rebuild_qaction_guard()
+
+    def _rebuild_qaction_guard(self):
+        """v0.9.8 / v1.3.3.1: keep every QAction that owns an attached QMenu alive.
+
+        The guard list (`self._qaction_guard`) is rebuilt from the i18n registry and
+        the menubar — see the PySide6 6.11 pitfall above. Called at the end of
+        `_setup_menubar()` and after `_populate_language_menu()` rebuilds the
+        Language submenu (its QActions are recreated, and unguarded wrappers would
+        take the C++ submenu down with them on GC).
+        """
+        try:
+            menubar = self.menuBar()
+            guard = []
+            for w, _key in self._menu_i18n:
+                if isinstance(w, QMenu):
+                    guard.extend(list(w.actions()))
+            guard.extend(list(menubar.actions()))  # top-level titles (File/Edit/…)
+            self._qaction_guard = guard
+        except RuntimeError:
+            pass  # Qt teardown — nothing to guard
+
+    # ── v1.3.3.1 (ROADMAP task 3): the language list without a restart ───────
+
+    def _populate_language_menu(self, menu):
+        """(Re)build the `Help → Language` submenu from the DISCOVERED files.
+
+        Called at construction and again on every `aboutToShow` (v1.3.3.1), so an
+        `i18n/<code>.json` dropped into the folder after startup shows up when the
+        menu is next opened — no restart, no code change. One `lang.reload` item
+        ("Rescan the language files") is appended under a separator: it re-reads the
+        available language files AND the active one, which makes the behaviour
+        discoverable (`MainWindow._reload_languages()`).
+
+        The children are QActions created MANUALLY (never the
+        `QMenu.addAction(text, slot)` auto-connection — PySide6 6.11 emits
+        `triggered` into a Python slot without the argument and cannot be
+        disconnected, gotcha #10). Never raises.
+        """
+        try:
+            from i18n import get_available_languages as _get_langs
+            langs = _get_langs()
+        except Exception as e:  # noqa: BLE001 — a broken i18n must not break the menu
+            if self.log:
+                self.log.warning(f"i18n lang menu error: {e}")
+            return
+        try:
+            menu.clear()
+            for lg in langs:
+                action = menu.addAction(lg["name"])
+                action.setCheckable(True)
+                action.setChecked(lg["code"] == self.current_language)
+                action.setData(lg["code"])  # the language code — for the checkmark on switch
+                code = lg["code"]
+                action.triggered.connect(lambda checked=False, c=code: self._switch_language(c))
+            if langs:
+                menu.addSeparator()
+            act_reload = menu.addAction(self.t("lang.reload"))
+            act_reload.triggered.connect(lambda checked=False: self._reload_languages())
+        except RuntimeError:
+            return  # Qt teardown — the menu is already destroyed
+        # The rebuilt QActions own no QMenu themselves, but the guard must follow the
+        # submenu contents (the palette walks the menus with temporary wrappers).
+        self._rebuild_qaction_guard()
+
+    def _reload_languages(self):
+        """"Rescan the language files" (v1.3.3.1, ROADMAP task 3).
+
+        Re-reads the ACTIVE language file (so an edited `i18n/<code>.json` is picked
+        up without a restart) and re-texts the UI — an action switcher that did not
+        exist before: the file list was only re-read by the menu rebuild. A file that
+        disappeared is reported in the status bar; the current language keeps working
+        from memory. Never raises.
+        """
+        try:
+            from i18n import reload_current_language as _reload
+            ok = bool(_reload())
+        except Exception as e:  # noqa: BLE001 — a broken file must not break the window
+            if self.log:
+                self.log.warning(f"i18n language reload failed: {e}")
+            ok = False
+        if ok:
+            self._apply_ui_translations()
+            self._update_window_title()
+        try:
+            self.statusBar().showMessage(
+                self.t("status.language_reloaded") if ok else self.t("lang.switch_failed"))
+        except Exception:  # noqa: BLE001 — teardown robustness
+            pass
+        if self.log:
+            self.log.info(f"i18n language files rescanned (active={self.current_language!r}, ok={ok})")
 
     def _setup_command_palette(self):
         """v0.9.2: create the command palette and the Ctrl+K hotkey."""

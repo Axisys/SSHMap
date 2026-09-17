@@ -171,19 +171,36 @@ def restore_i18n_config(snap):
 # in 12 i18n files + the APP_VERSION/requirements pins in 7 release-state sections).
 # The misses of the keys themselves against the code are caught by check_i18n_keys.py.
 # ─────────────────────────────────────────────────────────────────────────────
-EXPECTED_APP_VERSION = "1.3.3"  # the current release (a sentinel: it catches "a bump to the wrong version")
-EXPECTED_I18N_KEYS = 458        # the parity of the TRANSLATION keys (v1.3.3 has no new keys — the
-                                # "name" meta key of the language files is NOT a translation and is
-                                # excluded here and in check_i18n_keys.py). v1.3.2: +5 settings.hotkeys.*
-                                # / settings.tab.hotkeys → 458; before, 453 since v1.3.1
+EXPECTED_APP_VERSION = "1.3.3.1"  # the current release (a sentinel: it catches "a bump to the wrong version")
+EXPECTED_I18N_KEYS = 460        # the parity of the TRANSLATION keys (v1.3.3.1: +2 — lang.reload
+                                # "Rescan the language files" and status.language_reloaded; the
+                                # "name"/"partial" meta keys of the language files are NOT translations
+                                # and are excluded here and in check_i18n_keys.py).
+                                # v1.3.3: 458 (no new keys — the "name" meta key is not a translation);
+                                # v1.3.2: +5 settings.hotkeys.* / settings.tab.hotkeys → 458;
+                                # before, 453 since v1.3.1
 VERSION_FORMAT_RE = re.compile(r"^\d+(\.\d+){1,3}([Rr][Cc]\d+)?$")  # "1.1.3", "1.0RC4", "0.9.9.7", "1.2.10rc1" (v1.2.10: + lowercase rc)
 
+# The test-file counter quoted by README.md / ROADMAP.md is checked against the real
+# number of tests/test_*.py (v1.3.3.1, ROADMAP task 5): it went stale by one release
+# twice (v1.3.2/v1.3.3 dropped the README line). The guard parses the documents and
+# asserts every quoted counter equals this number (tests/test_i18n_live.py).
+TEST_FILE_COUNTER_RE = re.compile(r"(\d+)\s+(?:test[ _-]?files?|test_\*\.py)")
+# The key-count figures a version section quotes: "parity: 458", "parity **458 → 459**",
+# "parity baseline (v1.3.3.1): 460". A "~" marks a deliberately approximate figure and
+# is skipped (the guard compares EXACT numbers).
+I18N_PARITY_FIGURE_RE = re.compile(r"parity[^\n]{0,32}?(?<!~)(\d{3})")
+
 # v1.3.3: the meta keys of a language file — file metadata, not UI strings.
-# A language file: {"name": "Русский", "menu.file": "Файл", …}. "name" is the
-# language name in its own language; it is excluded from the key parity (a missing
-# one only degrades the display to the code, it does not break the language).
-I18N_META_KEYS = frozenset({"name"})
+# A language file: {"name": "Русский", "partial": true, "menu.file": "Файл", …}.
+# "name" is the language name in its own language; "partial": true (v1.3.3.1) marks a
+# DELIBERATELY incomplete file — it loads and works (the en-fallback is unchanged),
+# but its missing keys are a WARNING, not a defect. Both are excluded from the key
+# parity; a missing "name" only degrades the display to the code.
+I18N_META_KEYS = frozenset({"name", "partial"})
 I18N_REFERENCE = "en"   # the source language: every other file must cover 100% of its keys
+I18N_LANG_ENCODING = "utf-8-sig"   # v1.3.3.1: a Notepad "UTF-8 with BOM" file must load
+I18N_PARTIAL_KEY = "partial"       # the meta key of a deliberately incomplete language
 
 
 def i18n_lang_codes(root):
@@ -199,17 +216,121 @@ def translation_keys(data):
     return {k for k in data if k not in I18N_META_KEYS}
 
 
-def load_i18n_langs(root, codes=None):
+def is_partial_lang(data) -> bool:
+    """Is this loaded language file marked `"partial": true` (v1.3.3.1)?
+
+    Only a real JSON `true` counts — a string "true" / 1 / a missing key keeps the
+    file under the STRICT parity policy.
+    """
+    return isinstance(data, dict) and data.get(I18N_PARTIAL_KEY) is True
+
+
+def load_i18n_langs(root, codes=None, encoding=None):
     """i18n/*.json → {code: dict} (the shared loading for the parity checks).
 
     v1.3.3: auto-discovery (the file name is the code) — a dropped-in language file is
     picked up by the checks without touching them. codes=… narrows the set.
+    v1.3.3.1: read as "utf-8-sig" by default — a BOM saved by Notepad loads exactly
+    like a plain UTF-8 file (pass encoding=… to re-read a file as raw UTF-8).
     """
     langs = {}
     for code in (i18n_lang_codes(root) if codes is None else codes):
-        with open(os.path.join(root, "i18n", f"{code}.json"), encoding="utf-8") as f:
+        path = os.path.join(root, "i18n", f"{code}.json")
+        with open(path, encoding=encoding or I18N_LANG_ENCODING) as f:
             langs[code] = json.load(f)
     return langs
+
+
+# ── v1.3.3.1 (ROADMAP task 4): placeholders and line breaks ──────────────────
+# The two defect types the v1.3.3 policy could not see. The helpers live HERE (the
+# "one place" rule): both tests/check_i18n_keys.py and tests/test_i18n_languages.py /
+# tests/test_i18n_live.py consume them.
+
+PLACEHOLDER_RE = re.compile(r"\{([A-Za-z_][A-Za-z0-9_]*)\}")
+
+
+def placeholder_names(value) -> set:
+    """The SET of `{placeholder}` names of one translation value (not a string → empty).
+
+    The SET, not the list: the ORDER of the placeholders in a sentence is a language
+    matter ("{alias} auf {host}" vs "{host} → {alias}"), their PRESENCE is not.
+    """
+    if not isinstance(value, str):
+        return set()
+    return set(PLACEHOLDER_RE.findall(value))
+
+
+def newline_count(value) -> int:
+    """The COUNT of `\\n` line breaks of one translation value (not a string → 0).
+
+    The count (not the positions): word order differs between languages, the number
+    of lines a dialog shows does not.
+    """
+    if not isinstance(value, str):
+        return 0
+    return value.count("\n")
+
+
+def i18n_format_problems(langs, reference=I18N_REFERENCE):
+    """The placeholder / line-break defects of the discovered languages vs the reference.
+
+    For every translation key present in BOTH the reference and the language:
+    the SET of `{placeholder}` names must match, and the COUNT of `\\n` must match.
+    A partial language (`"partial": true`) skips the check — its strings are still
+    being written. Returns {code: [problem, …]} with only the languages that have any.
+    """
+    if reference not in langs:
+        return {}
+    ref = langs[reference]
+    out = {}
+    for code in sorted(langs):
+        if code == reference or is_partial_lang(langs[code]):
+            continue
+        problems = []
+        for key, ref_value in ref.items():
+            if key in I18N_META_KEYS or key not in langs[code]:
+                continue
+            value = langs[code][key]
+            ph_ref, ph_got = placeholder_names(ref_value), placeholder_names(value)
+            if ph_ref != ph_got:
+                problems.append(
+                    f"{key}: placeholders {sorted(ph_got)} vs {reference} {sorted(ph_ref)}")
+            nl_ref, nl_got = newline_count(ref_value), newline_count(value)
+            if nl_ref != nl_got:
+                problems.append(
+                    f"{key}: {nl_got} line break(s) vs {reference} {nl_ref}")
+        if problems:
+            out[code] = problems
+    return out
+
+
+def i18n_parity_warnings(langs, reference=I18N_REFERENCE):
+    """The parity WARNINGS of the discovered languages: [] = none.
+
+    v1.3.3.1 (ROADMAP task 2): a file with the meta key `"partial": true` is a
+    deliberately incomplete translation — it loads and works (the runtime
+    en-fallback covers the missing keys), so its MISSING keys and its key COUNT are
+    reported here as warnings instead of defects. Everything else stays strict.
+    """
+    if reference not in langs:
+        return []
+    ref_keys = translation_keys(langs[reference])
+    warnings = []
+    for code in sorted(langs):
+        data = langs[code]
+        if not is_partial_lang(data):
+            continue
+        keys = translation_keys(data)
+        missing = sorted(ref_keys - keys)
+        count_note = ""
+        if len(keys) != len(ref_keys):
+            count_note = f" ({len(keys)} of {len(ref_keys)} {reference} keys)"
+        if missing or count_note:
+            detail = ", ".join(missing[:5]) + ("…" if len(missing) > 5 else "")
+            warnings.append(
+                f"{code}: partial language — {len(missing)} key(s) fall back to {reference}"
+                + (f": {detail}" if detail else "") + count_note)
+    return warnings
 
 
 def i18n_parity_problems(langs, expected_keys=None, reference=I18N_REFERENCE):
@@ -219,6 +340,11 @@ def i18n_parity_problems(langs, expected_keys=None, reference=I18N_REFERENCE):
     keys — STRICT parity, so an extra key is a defect as well (it would be dead
     weight in one file only) — and the count is pinned by EXPECTED_I18N_KEYS.
     Meta keys are not translations and are ignored here.
+
+    v1.3.3.1: a `"partial": true` file is graded leniently — its MISSING keys and the
+    count mismatch are warnings (`i18n_parity_warnings`), not defects. An EXTRA key
+    is still a defect: a key that en does not have is dead weight / a typo, in a
+    partial file as much as in a strict one.
     """
     expected = EXPECTED_I18N_KEYS if expected_keys is None else expected_keys
     if reference not in langs:
@@ -227,15 +353,16 @@ def i18n_parity_problems(langs, expected_keys=None, reference=I18N_REFERENCE):
     problems = []
     for code in sorted(langs):
         keys = translation_keys(langs[code])
+        partial = is_partial_lang(langs[code])
         missing = sorted(ref_keys - keys)
         extra = sorted(keys - ref_keys)
-        if missing:
+        if missing and not partial:
             problems.append(f"{code}: {len(missing)} key(s) missing vs {reference}: "
                             + ", ".join(missing[:5]) + ("…" if len(missing) > 5 else ""))
         if extra:
             problems.append(f"{code}: {len(extra)} key(s) not in {reference}: "
                             + ", ".join(extra[:5]) + ("…" if len(extra) > 5 else ""))
-        if expected is not None and len(keys) != expected:
+        if expected is not None and len(keys) != expected and not partial:
             problems.append(f"{code}: {len(keys)} translation keys (the pin EXPECTED_I18N_KEYS = {expected})")
     return problems
 
@@ -249,6 +376,23 @@ def check_i18n_parity(langs):
         not problems,
         "; ".join(problems) + " | "
         + str({c: len(translation_keys(d)) for c, d in sorted(langs.items())}))
+
+
+def check_i18n_format(langs):
+    """v1.3.3.1: the placeholder / line-break parity of the discovered languages vs en.
+
+    Partial languages are skipped by `i18n_format_problems` (their strings are still
+    being written); the warnings of partial languages are reported in the detail so a
+    deliberate incompleteness is still visible in the log.
+    """
+    problems = i18n_format_problems(langs)
+    warnings = i18n_parity_warnings(langs)
+    check(
+        f"i18n format: placeholders + line breaks of {len(langs)} language(s) vs {I18N_REFERENCE}"
+        + (f" (+{len(warnings)} partial warning(s))" if warnings else ""),
+        not problems,
+        "; ".join(f"{c}: {p[0]} (+{len(p) - 1} more)" for c, p in sorted(problems.items()))
+        + (" | warnings: " + " | ".join(warnings) if warnings else ""))
 
 
 def check_release_state(root):

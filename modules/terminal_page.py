@@ -231,6 +231,31 @@ class TerminalSessionPage(QWidget):
         self.terminal_thread.start()
         self.widget.setFocus()
 
+    # ── v1.3.3.1 (ROADMAP task 1): live i18n — re-text on a language switch ──
+
+    def retranslate(self):
+        """v1.3.3.1: re-text the page's own strings in the current language.
+
+        The two tab titles of the inner QTabWidget (`Terminal | Files`); every
+        string already has an i18n key (ZERO new keys) and the module translator is
+        looked up at call time — no cache to invalidate. The status label carries the
+        LIVE session state (connecting/opened/closed — emitted by the thread), so it
+        is deliberately left alone; the SFTP tab re-texts itself. Never raises — the
+        dead-C++-object discipline of every container method.
+        """
+        try:
+            t = get_translator()
+            self.tabs.setTabText(0, t("sftp.tab_terminal"))
+            self.tabs.setTabText(1, t("sftp.tab_files"))
+        except RuntimeError:
+            pass  # the C++ object was already destroyed (a close race)
+        sftp_tab = getattr(self, "sftp_tab", None)
+        if sftp_tab is not None:
+            try:
+                sftp_tab.retranslate()
+            except RuntimeError:
+                pass  # Qt teardown — the tab is already destroyed
+
     # ── Host ────────────────────────────────────────────────────────────────
 
     def set_host_window(self, window):

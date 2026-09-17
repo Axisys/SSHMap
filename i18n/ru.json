@@ -95,6 +95,7 @@
   "search.placeholder": "Поиск по alias / host / IP...",
   "lang.menu": "Язык",
   "lang.switch_failed": "Не удалось переключить язык",
+  "lang.reload": "Обновить список языковых файлов",
   "file.select_key": "Выберите приватный SSH ключ",
   "filter.all_files": "Все файлы (*)",
   "ssh.user_required": "Укажите пользователя SSH.",
@@ -455,6 +456,7 @@
   "settings.hotkeys.conflict": "Одно сочетание назначено нескольким действиям — помеченные строки могут не срабатывать. Сохранить всё равно можно.",
   "connection.label_hint": "до 20 символов",
   "status.settings_saved": "Настройки сохранены.",
+  "status.language_reloaded": "Языковые файлы перечитаны.",
   "status.collapse_both_forbidden": "Нельзя свернуть обе панели — хотя бы одна должна остаться открытой",
   "msg.confirm_close_session": "Закрыть SSH-сессию?",
   "msg.close_session_title": "SSH-сессия"
