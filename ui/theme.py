@@ -78,6 +78,14 @@ STATUS_COLORS = {
     "offline": STATUS_OFFLINE,  # red: unreachable
 }
 
+# ── SFTP file tree (v1.3.1.1) ────────────────────────────────────────────────
+
+# A file the SFTP viewer cannot preview (a binary file or one over MAX_READ_BYTES):
+# the row's standard file icon is recoloured with it (modules/sftp_tab.py) — the
+# marker is a shape, not only a colour, and the NAME colour stays untouched
+# (an explicit setForeground() would override the style's selection colours).
+SFTP_PREVIEW_BLOCKED = STATUS_WARN
+
 # ── Tags / environment roles (v0.9.4) ────────────────────────────────────────
 
 TAG_TEST = "#a855f7"          # purple — test perimeter (tag + hash palette)

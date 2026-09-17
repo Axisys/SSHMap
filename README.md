@@ -18,7 +18,7 @@ pipx install .                    # or pip install . → sshmap command (install
 Tests — plain Python scripts without pytest: topical `test_*.py` files + a single parallel runner; each file is an isolated process (sandbox HOME, offscreen Qt, UTF-8 stdout — nothing extra needed on cp1251 consoles or in CI):
 
 ```bash
-python tests/run_all.py               # everything (68 test files + i18n check); auto workers = cores (cap 8, --workers N); exit 0 ⇔ all green
+python tests/run_all.py               # everything (69 test files + i18n check); auto workers = cores (cap 8, --workers N); exit 0 ⇔ all green
 python tests/run_all.py --fast        # daily profile: skips files tagged slow/network
 python tests/run_all.py --tag network # only network-tagged files — real-network sections run ONLY on explicit opt-in (env SSHMAP_TEST_TAGS)
 python tests/run_all.py --failed-only # re-run only files that failed in the last run (cache test-results/last_run.json)
@@ -47,7 +47,7 @@ graphics/                    # MapScene; MapView (zoom 0.1–5.0, panning, multi
 modules/                     # ssh_worker.py — one-shot SSH worker + registry; ssh_terminal.py — terminal thread + tabbed window;
                              # terminal_page.py — session as a reusable widget (single idempotent shutdown()); terminal_dock.py — "tabs" mode dock;
                              # command_library.py — terminal macros: user command/script library panel (~/.sshmap/commands.json);
-                             # multi_input.py — multi-input broadcast hub; sftp_worker.py / sftp_tab.py — SFTP over the live transport;
+                             # multi_input.py — multi-input broadcast hub; sftp_worker.py / sftp_tab.py — SFTP over the live transport (listing, upload/download, read-only preview with "no preview" row marks);
                              # terminal_widget.py — cell-based canvas (full keyboard, selection, scrollback); terminal_screen.py — pyte screen + palettes;
                              # window_geometry.py; host_key_policy.py; external_terminal.py; undo_commands.py (14 QUndoCommands); logger.py
 storage/                     # project.py — JSON save/load; autosave.py — autosave + backup ring buffer; export_drawio.py — .drawio export
@@ -188,7 +188,7 @@ en (default) / ru / zh. Rule: a new key is added to all 3 files at once; check �
 - collapsible sidebar and map panels — at most one at a time, state persists across restarts
 - context menus for all objects, fit/zoom/centering
 - built-in SSH terminal on pyte (scrollback, full keyboard, mouse selection with word/line clicks, context menu) + external system terminal
-- SFTP tab in the terminal window over the same SSH connection — listing/navigation, upload/download incl. drag & drop
+- SFTP tab in the terminal window over the same SSH connection — listing/navigation, upload/download incl. drag & drop, read-only text preview (≤ 1 MB) with non-previewable files marked in the tree
 - multiple sessions as tabs; separate windows or a detachable "Terminals" dock on the map — switch without restart
 - multi-input: typing of the focused session is broadcast to all other open sessions (F12 exits)
 - terminal command library (macros): one click sends a saved command/script to the active terminal (single-line raw, multi-line bracketed paste)
@@ -207,7 +207,8 @@ en (default) / ru / zh. Rule: a new key is added to all 3 files at once; check �
 - TOFU on first connect and keyring backend restrictions (§4 "Security").
 
 **Roadmap** (tasks, order, acceptance — in ROADMAP.md):
-- **v1.3.x series**: text viewer in the SFTP tab; configurable hotkeys; languages without writing code; lightweight plugins.
+- **v1.3.x series**: configurable hotkeys; languages without writing code; lightweight plugins.
+- **v1.4**: syntax highlighting in the SFTP viewer (numbers, JSON/XML/YAML) — opens the 1.4 line.
 
 ---
 

@@ -281,6 +281,8 @@ def wire_worker(worker, log):
     worker.task_done.connect(lambda tid, det: log.add("done", tid, det))
     worker.task_error.connect(lambda tid, k, m: log.add("error", tid, k, m))
     worker.task_cancelled.connect(lambda tid, k: log.add("cancelled", tid, k))
+    # v1.3.1: the viewer's read answer (task_id, remote_path, bytes)
+    worker.read_ready.connect(lambda tid, p, data: log.add("read", tid, p, data))
 
 
 # ════════════════════════════════════════════════════════════

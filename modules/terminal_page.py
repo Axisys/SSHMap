@@ -106,6 +106,11 @@ class TerminalSessionPage(QWidget):
     # not lost).
     INITIAL_COMMAND_DELAY_MS = 500
 
+    # v1.3.1: the SFTP task kinds that feed the progress bridge (the busy counter,
+    # the QProgressBar and the status-bar text). "read" is the viewer's read
+    # (ROADMAP v1.3.1) — its OUTCOME is rendered by the SFTP tab itself.
+    _SFTP_PROGRESS_KINDS = ("upload", "download", "read")
+
     # ── Host bridge (window/dock): the page does not know where messages go ─
     status_message = Signal(str, int)   # (text, timeout_ms); 0 — sticky (no timeout)
     progress_busy = Signal()            # SFTP: show the indeterminate bar
@@ -345,6 +350,14 @@ class TerminalSessionPage(QWidget):
             if sftp_worker.isRunning():
                 register_orphan_sftp_worker(sftp_worker)
 
+        # v1.3.1 (ROADMAP task 4): the preview panel closes together with the session —
+        # BEFORE the worker/thread teardown (the panel never outlives the transport it
+        # was read through). Idempotent; a destroyed C++ object must not block the close.
+        try:
+            self.sftp_tab.close_viewer()
+        except RuntimeError:
+            pass
+
         try:
             self._pty_timer.stop()
         except Exception:
@@ -578,53 +591,67 @@ class TerminalSessionPage(QWidget):
     def _on_sftp_task_started(self, task_id: int, kind: str, label: str):
         t = get_translator()
         self._sftp_tasks[task_id] = (kind, label)
-        if kind in ("upload", "download"):
+        if kind in self._SFTP_PROGRESS_KINDS:
             self._sftp_busy += 1
             self.progress_busy.emit()   # v1.1.x: setRange(0,0)+setValue(0)+show()
-            key = "sftp.uploading" if kind == "upload" else "sftp.downloading"
-            self.status_message.emit(t(key, name=label), 0)
+            if kind == "read":          # v1.3.1: the viewer's read (SFTP tab)
+                self.status_message.emit(t("sftp.viewer.reading", name=label), 0)
+            else:
+                key = "sftp.uploading" if kind == "upload" else "sftp.downloading"
+                self.status_message.emit(t(key, name=label), 0)
         else:  # list — without a progress bar
             self.status_message.emit(t("sftp.listing", path=label), 0)
 
     def _on_sftp_progress(self, task_id: int, done: int, total: int):
         t = get_translator()
         entry = self._sftp_tasks.get(task_id)
-        if entry is None or entry[0] not in ("upload", "download"):
+        if entry is None or entry[0] not in self._SFTP_PROGRESS_KINDS:
             return
-        _kind, label = entry
+        kind, label = entry
         if total > 0:
             self.progress_update.emit(done, total)   # v1.1.x: setRange(0,total)+setValue
             text = t("sftp.progress", name=label, pct=int(done * 100 // total),
                      done=format_size(done), total=format_size(total))
         else:  # total unknown — name only (an indeterminate bar)
             self.progress_update.emit(done, 0)
-            key = "sftp.uploading" if entry[0] == "upload" else "sftp.downloading"
-            text = t(key, name=label)
+            if kind == "read":
+                text = t("sftp.viewer.reading", name=label)
+            else:
+                key = "sftp.uploading" if kind == "upload" else "sftp.downloading"
+                text = t(key, name=label)
         self.status_message.emit(text, 0)
 
     def _on_sftp_task_done(self, task_id: int, detail: str):
         t = get_translator()
         entry = self._sftp_tasks.pop(task_id, None)
-        if entry is not None and entry[0] in ("upload", "download"):
+        if entry is not None and entry[0] in self._SFTP_PROGRESS_KINDS:
             self._sftp_busy = max(0, self._sftp_busy - 1)
             if self._sftp_busy == 0:
                 self.progress_hidden.emit()
-            self.status_message.emit(t("sftp.transfer_done", name=entry[1]), 5000)
+            # v1.3.1: a read is reported by the SFTP tab itself (the preview panel),
+            # not by a "transfer complete" line in the status bar.
+            if entry[0] != "read":
+                self.status_message.emit(t("sftp.transfer_done", name=entry[1]), 5000)
 
     def _on_sftp_task_error(self, task_id: int, kind: str, message: str):
         t = get_translator()
         entry = self._sftp_tasks.pop(task_id, None)
-        if entry is not None and entry[0] in ("upload", "download"):
+        if entry is not None and entry[0] in self._SFTP_PROGRESS_KINDS:
             self._sftp_busy = max(0, self._sftp_busy - 1)
             if self._sftp_busy == 0:
                 self.progress_hidden.emit()
+        if kind == "read":
+            # v1.3.1: the message of a read error is a MACHINE code — the SFTP tab
+            # translates it (its message signal → the bridge); showing it here as
+            # well would duplicate the hint with an untranslated code.
+            return
         prefix = t("terminal.error_prefix")
         self.status_message.emit(f"{prefix} {message}", 8000)
 
     def _on_sftp_task_cancelled(self, task_id: int, kind: str):
         t = get_translator()
         entry = self._sftp_tasks.pop(task_id, None)
-        if entry is not None and entry[0] in ("upload", "download"):
+        if entry is not None and entry[0] in self._SFTP_PROGRESS_KINDS:
             self._sftp_busy = max(0, self._sftp_busy - 1)
             if self._sftp_busy == 0:
                 self.progress_hidden.emit()

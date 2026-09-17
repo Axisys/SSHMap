@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """SFTP worker thread of the terminal window (v1.1.3, ROADMAP task 1).
 
-One worker thread per session with a FIFO task queue (list/upload/download):
+One worker thread per session with a FIFO task queue (list/upload/download/read):
 the paramiko SFTPClient does NOT guarantee thread-safety — all operations on
 the client are performed strictly in this thread; N threads for one client are
 forbidden. The window opens the client on top of a live transport
@@ -33,11 +33,16 @@ C++ object).
 Signals (emitted from the worker thread; delivery to the GUI — queued):
     list_ready(task_id, remote_dir, entries)  — entries: [{name,is_dir,size,mtime}]
                                                 (directories first, then by name)
-    task_started(task_id, kind, label)        — kind: "list" | "upload" | "download"
+    task_started(task_id, kind, label)        — kind: "list" | "upload" | "download" | "read"
     progress(task_id, done_bytes, total_bytes)
     task_done(task_id, detail)                — detail: final path (file/directory)
     task_error(task_id, kind, message)        — task error; the QUEUE does NOT die
     task_cancelled(task_id, kind)             — cancellation (not an error)
+    read_ready(task_id, remote_path, data)    — v1.3.1: the viewer's file content (bytes)
+
+For a "read" task the task_error message is a MACHINE CODE (READ_ERROR_*), not a
+human sentence: the SFTP tab maps it to an i18n message (the worker stays free of
+UI strings). Everything else reports str(exception) as before.
 
 The queue_* methods are intended to be called from the GUI thread (the task id
 counter is not synchronized — all calls come from a single thread).
@@ -60,10 +65,82 @@ CHUNK_SIZE = 32 * 1024
 KIND_LIST = "list"
 KIND_UPLOAD = "upload"
 KIND_DOWNLOAD = "download"
+KIND_READ = "read"          # v1.3.1: the SFTP viewer — read a text file into memory
+
+# ── v1.3.1 (ROADMAP task 2): the viewer's hard limit ─────────────────────────
+# A larger file is NOT read at all (not even partially): the task fails with
+# task_error(READ_ERROR_TOO_LARGE) at the very start when the size is known from
+# the listing, and mid-read when the size was unknown (the guard is checked on
+# every chunk, so at most one chunk beyond the limit is ever requested).
+MAX_READ_BYTES = 1024 * 1024
+
+# ── v1.3.1 (ROADMAP task 3): the text/binary heuristic ───────────────────────
+# The extension lists are a FAST PATH, not the decision: a known-binary extension
+# is refused without opening the file, a known-text one (or no extension at all —
+# README, Makefile) is read; the real check is the NULL BYTE in the FIRST chunk
+# (screens the whole file when the extension lies or is missing).
+TEXT_EXTENSIONS = frozenset({
+    ".txt", ".text", ".log", ".conf", ".cfg", ".config", ".ini", ".env",
+    ".properties", ".py", ".sh", ".bash", ".zsh", ".bat", ".ps1", ".pl",
+    ".rb", ".lua", ".json", ".jsonl", ".yml", ".yaml", ".toml", ".xml",
+    ".html", ".htm", ".css", ".js", ".ts", ".md", ".rst", ".csv", ".tsv",
+    ".sql", ".c", ".h", ".cpp", ".hpp", ".java", ".go", ".rs", ".php",
+    ".service", ".timer", ".socket", ".rules", ".list", ".repo", ".key",
+    ".pub", ".pem", ".crt", ".patch", ".diff", ".svg",
+})
+BINARY_EXTENSIONS = frozenset({
+    ".png", ".jpg", ".jpeg", ".gif", ".bmp", ".ico", ".webp", ".tif", ".tiff",
+    ".pdf", ".zip", ".gz", ".tgz", ".bz2", ".xz", ".zst", ".7z", ".rar",
+    ".tar", ".exe", ".dll", ".so", ".dylib", ".bin", ".class", ".jar", ".pyc",
+    ".pyo", ".o", ".a", ".lib", ".obj", ".iso", ".img", ".deb", ".rpm", ".apk",
+    ".msi", ".db", ".sqlite", ".sqlite3", ".mdb", ".mp3", ".mp4", ".avi",
+    ".mkv", ".mov", ".wav", ".flac", ".ogg", ".ttf", ".otf", ".woff", ".woff2",
+    ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx", ".core", ".dmp",
+})
+
+# task_error message codes for "read" (the tab maps them to i18n strings)
+READ_ERROR_BINARY = "binary"
+READ_ERROR_TOO_LARGE = "too_large"
+
+
+def classify_extension(name: str) -> str:
+    """v1.3.1: the extension heuristic — "text" | "binary" | "unknown".
+
+    The viewer uses only the "binary" answer as a fast refusal; "text" and
+    "unknown" files are read and then screened for a null byte. A missing
+    extension is "text" (README/Makefile/LICENSE and other extensionless configs).
+    """
+    base = posixpath.basename(name or "")
+    ext = posixpath.splitext(base)[1].lower()
+    if ext in TEXT_EXTENSIONS:
+        return "text"
+    if ext in BINARY_EXTENSIONS:
+        return "binary"
+    return "text" if not ext else "unknown"
 
 
 class _SftpCancelled(Exception):
     """Internal: cancel/stop was requested during a transfer (not an error)."""
+
+
+class _SftpReadError(Exception):
+    """Internal: the viewer refused a file (binary / over the limit).
+
+    str(e) is the MACHINE code (READ_ERROR_*) — the task_error payload; the SFTP
+    tab turns it into a translated message.
+    """
+    code = "read_failed"
+
+    def __str__(self):
+        return self.code
+
+
+class _SftpReadBinary(_SftpReadError):
+    code = READ_ERROR_BINARY
+
+
+class _SftpReadTooLarge(_SftpReadError):
+    code = READ_ERROR_TOO_LARGE
 
 
 class _SftpTask:
@@ -115,8 +192,9 @@ class SftpWorker(QThread):
     task_started = Signal(int, str, str)     # task_id, kind, label
     progress = Signal(int, int, int)         # task_id, done_bytes, total_bytes
     task_done = Signal(int, str)             # task_id, detail
-    task_error = Signal(int, str, str)       # task_id, kind, message
+    task_error = Signal(int, str, str)       # task_id, kind, message (READ_ERROR_* for reads)
     task_cancelled = Signal(int, str)        # task_id, kind
+    read_ready = Signal(int, str, bytes)     # v1.3.1: task_id, remote_path, content
 
     def __init__(self, sftp_client, parent=None):
         super().__init__(parent)
@@ -151,6 +229,19 @@ class SftpWorker(QThread):
             self._next_id, KIND_DOWNLOAD, name, remote_path=remote_path,
             local_path=local_path, total_size=int(total_size or 0),
             detail=local_path))
+
+    def queue_read(self, remote_path: str, total_size: int = 0) -> Optional[int]:
+        """v1.3.1 (ROADMAP task 2): read a remote file into memory for the viewer.
+
+        total_size — the size from the listing (0 — unknown): it is only a fast
+        path for the limit check; the hard limit is re-checked while reading.
+        The content arrives via read_ready(task_id, remote_path, data); a refusal
+        (binary / too large) — via task_error with a READ_ERROR_* code.
+        """
+        return self._queue_task(_SftpTask(
+            self._next_id, KIND_READ, posixpath.basename(remote_path),
+            remote_path=remote_path, total_size=int(total_size or 0),
+            detail=remote_path))
 
     def cancel(self):
         """Cancel the current transfer and everything still queued.
@@ -237,6 +328,8 @@ class SftpWorker(QThread):
                         self._do_list(task)
                     elif task.kind == KIND_UPLOAD:
                         self._do_upload(task)
+                    elif task.kind == KIND_READ:
+                        self._do_read(task)
                     else:
                         self._do_download(task)
                     self._emit(self.task_done, task.id, task.detail)
@@ -325,6 +418,44 @@ class SftpWorker(QThread):
                     local.write(chunk)
                     done += len(chunk)
                     self._emit(self.progress, task.id, done, task.total_size)
+        finally:
+            try:
+                remote_fh.close()
+            except Exception:
+                pass
+
+    def _do_read(self, task: _SftpTask):
+        """v1.3.1 (ROADMAP task 2): read a text file into memory (the viewer).
+
+        The download pattern (32 KB chunks, cancellation and progress between the
+        chunks), but the result is kept in memory and published as read_ready.
+        A hard limit MAX_READ_BYTES: a larger file is not read AT ALL — when the
+        size is known from the listing the task is refused before opening it, and
+        an unknown size trips the guard on the chunk that crosses the limit.
+        The null-byte screen runs on the FIRST chunk (a binary file stops after
+        one chunk, before anything is decoded or shown).
+        """
+        if int(task.total_size or 0) > MAX_READ_BYTES:
+            raise _SftpReadTooLarge()
+        if classify_extension(task.remote_path) == "binary":
+            raise _SftpReadBinary()
+        remote_fh = self._sftp.open(task.remote_path, "rb")  # no file → error
+        try:
+            chunks = []
+            done = 0
+            while True:
+                self._check_cancel()
+                chunk = remote_fh.read(CHUNK_SIZE)
+                if not chunk:
+                    break
+                if not chunks and b"\x00" in chunk:
+                    raise _SftpReadBinary()
+                done += len(chunk)
+                if done > MAX_READ_BYTES:
+                    raise _SftpReadTooLarge()
+                chunks.append(chunk)
+                self._emit(self.progress, task.id, done, int(task.total_size or 0))
+            self._emit(self.read_ready, task.id, task.remote_path, b"".join(chunks))
         finally:
             try:
                 remote_fh.close()
