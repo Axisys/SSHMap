@@ -141,9 +141,20 @@ class MultiInputHub:
                 f"Multi-input mode {'enabled' if on else 'disabled'}")
         except Exception:
             pass  # the logger is unavailable — the state change matters more than logging it
+        self.refresh()
+
+    def refresh(self):
+        """v1.3.3.4 (ROADMAP task 5): re-render the mode UI WITHOUT a state change.
+
+        The per-session exclusion toggle changes what the mode's UI must show (the
+        "NO MULTI" badge, the participants count on the plaque) while the mode itself
+        stays exactly as it was, so `set_active()` cannot express it (it returns early
+        when the state did not change). The listeners are called with the CURRENT
+        state — the same callback they already handle, idempotent by design (it
+        re-applies the highlights and the counters). Never raises."""
         for cb in list(self._listeners):
             try:
-                cb(on)
+                cb(self._active)
             except Exception:
                 pass  # a UI callback under teardown must not break the state change
 
@@ -161,7 +172,17 @@ class MultiInputHub:
         _send). Returns the number of receivers. Never raises: a dead
         C++ object/thread in the registry is silently skipped (the registry
         itself is updated by the standard teardown — destroyed →
-        _forget_terminal_window), the other sessions keep receiving input."""
+        _forget_terminal_window), the other sessions keep receiving input.
+
+        v1.3.3.4 (ROADMAP task 5): a session EXCLUDED from the broadcast
+        (widget.multi_excluded — the per-session toggle of the terminal's context
+        menu, in memory only) is skipped as well. The flag is read through
+        getattr(): the hub knows nothing about TerminalWidget beyond the `.widget`
+        it already duck-types, and a session without the attribute is simply not
+        excluded (the v1.2.3 compatibility — every duck-typed fake keeps working).
+        An excluded session gets NO bytes from anyone else (but its own typing
+        still goes to its own shell — the exclusion filters the RECEIVERS).
+        """
         if not data or self._provider is None:
             return 0
         try:
@@ -169,14 +190,18 @@ class MultiInputHub:
         except Exception:
             return 0
         sent = 0
-        others = 0   # sessions besides the source (for the "0 receivers" diagnostic)
-        dead = 0     # of those — dead threads/channels
+        others = 0     # sessions besides the source (for the "0 receivers" diagnostic)
+        dead = 0       # of those — dead threads/channels
+        excluded = 0   # of those — deliberately excluded from the broadcast
         for page in pages:
             try:
                 widget = getattr(page, "widget", None)
                 if widget is not None and widget is source_widget:
                     continue  # the source — the focused window/tab (already received it)
                 others += 1
+                if bool(getattr(widget, "multi_excluded", False)):
+                    excluded += 1
+                    continue  # v1.3.3.4: the user excluded this session on purpose
                 thread = getattr(page, "terminal_thread", None)
                 if thread is None or not _thread_alive(thread):
                     dead += 1
@@ -185,18 +210,20 @@ class MultiInputHub:
                 sent += 1
             except Exception:
                 continue  # a C++ object under teardown — skip it, the others receive it
-        if sent == 0 and others > 0:
-            self._warn_zero_receivers(others, dead)
+        if sent == 0 and others > excluded:
+            # v1.3.3.4: a registry where EVERY other session is excluded is not a
+            # silent failure — it is what the user asked for (no warning).
+            self._warn_zero_receivers(others, dead, excluded)
         return sent
 
-    def _warn_zero_receivers(self, others: int, dead: int):
+    def _warn_zero_receivers(self, others: int, dead: int, excluded: int = 0):
         """v1.2.4-fix (diagnostics): the mode is enabled but the bytes went nowhere.
 
         This is the silent-failure scenario of the "I type — nothing in the second
         terminal" manual test: a WARNING (visible in the console too) with details —
         how many sessions are in the registry besides the source and how many of them
-        are dead. Rate-limited to 5 s so fast typing does not spam the log; never
-        raises."""
+        are dead (v1.3.3.4: and how many were excluded by the user). Rate-limited to
+        5 s so fast typing does not spam the log; never raises."""
         now = time.monotonic()
         if now - self._last_zero_warn < 5.0:
             return
@@ -205,10 +232,37 @@ class MultiInputHub:
             from modules.logger import get_logger as _get_log
             _get_log("modules.multi_input").warning(
                 f"multi-input: active but 0 receivers "
-                f"(other sessions={others}, dead threads={dead}) — "
+                f"(other sessions={others}, dead threads={dead}, excluded={excluded}) — "
                 f"input is NOT being duplicated")
         except Exception:
             pass  # the logger is unavailable — the broadcast matters more than logging it
+
+    def participant_count(self, pages=None) -> int:
+        """v1.3.3.4 (ROADMAP task 5): how many sessions the broadcast would reach.
+
+        The plaque counter used to be `len(registry)`, which promised N sessions while
+        an excluded one was silently skipped; the counter now counts the SESSIONS THAT
+        PARTICIPATE (the excluded ones are not "MULTI" any more — their badge says so).
+        `pages` — an explicit registry (the test seam); without it the hub asks its own
+        provider. Never raises."""
+        if pages is None:
+            provider = self._provider
+            if provider is None:
+                return 0
+            try:
+                pages = list(provider())
+            except Exception:
+                return 0
+        count = 0
+        for page in pages:
+            try:
+                widget = getattr(page, "widget", None)
+                if bool(getattr(widget, "multi_excluded", False)):
+                    continue
+                count += 1
+            except Exception:
+                continue  # a dead C++ object under teardown — do not count it
+        return count
 
     def reset(self):
         """Test seam: a full state reset (mode disabled, no registry)."""
@@ -241,7 +295,16 @@ def apply_container_highlight(host, on: bool) -> bool:
     touched); for the window — the title prefix `terminal.multi_title_prefix`
     (the base is stored in `_multi_base_title`). On exit — everything is reset.
     Idempotent; a RuntimeError of a dead C++ object does not propagate
-    (teardown robustness). True — applied."""
+    (teardown robustness). True — applied.
+
+    v1.3.3.4 (ROADMAP task 5): a session EXCLUDED from the broadcast carries the
+    `terminal.multi_excluded_badge` instead of the plain "MULTI" badge — the tab
+    itself says which sessions the typing will NOT reach. The flag lives on the
+    session's canvas (`page.widget.multi_excluded`, in memory); reading it through
+    getattr() keeps every duck-typed fake/host working unchanged. The badge is
+    recomputed on every highlight pass, so `hub.refresh()` (the exclusion toggle)
+    is enough to update it.
+    """
     try:
         tabs = getattr(host, "session_tabs", None)
         if tabs is None:
@@ -251,10 +314,17 @@ def apply_container_highlight(host, on: bool) -> bool:
             try:
                 page = tabs.widget(i)
                 alias = getattr(getattr(page, "server_data", None), "alias", "?")
+                widget = getattr(page, "widget", None)
+                excluded = bool(getattr(widget, "multi_excluded", False))
             except RuntimeError:
                 continue  # C++ object already deleted (close race) — skip the tab
             try:
-                text = t("terminal.multi_tab_badge", alias=alias) if on else str(alias)
+                if not on:
+                    text = str(alias)
+                elif excluded:
+                    text = t("terminal.multi_excluded_badge", alias=alias)
+                else:
+                    text = t("terminal.multi_tab_badge", alias=alias)
                 tabs.setTabText(i, text)
             except RuntimeError:
                 pass  # C++ object already deleted (close race) — the badge is not critical

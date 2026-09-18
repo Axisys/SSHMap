@@ -30,6 +30,8 @@ fetched from the ssh_terminal module at call time — monkeypatching
 `ST.SSHTerminalThread`/`ST.QMessageBox.question` in tests works unchanged.
 """
 
+import time
+
 from PySide6.QtCore import Qt, QEvent, QTimer, Signal
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel, QTabWidget
 
@@ -77,6 +79,76 @@ def get_translator():
     """Safe i18n helper — returns cached translator or fallback (as in ssh_terminal)."""
     mod = _st_module()
     return mod.get_translator()
+
+
+# ── v1.3.3.4 (ROADMAP task 6): the transfer rate / ETA — the detachable task 7 of
+# v1.3.3.2, which its own changelog handed to this version. Two pure helpers ARE the
+# whole computation: the formatting of a duration and a sliding-window meter fed by
+# the progress signals of the SFTP worker (the sftp.progress line itself is unchanged
+# — the rate/ETA is appended to it, so a broken/absent measurement is invisible).
+
+def format_duration(seconds) -> str:
+    """A duration in seconds → "M:SS" / "H:MM:SS" ("" — no usable value).
+
+    A pure function (unit-tested without a GUI): the ETA is derived from measured
+    throughput and is therefore an estimate — it is rendered as a plain clock
+    reading, never as "about N minutes" (no word forms to translate).
+    """
+    try:
+        total = int(round(float(seconds)))
+    except (TypeError, ValueError):
+        return ""
+    if total < 0:
+        return ""
+    hours, rest = divmod(total, 3600)
+    minutes, secs = divmod(rest, 60)
+    if hours:
+        return f"{hours}:{minutes:02d}:{secs:02d}"
+    return f"{minutes}:{secs:02d}"
+
+
+class TransferMeter:
+    """v1.3.3.4 (ROADMAP task 6): the throughput (bytes/s) and the ETA of one SFTP task.
+
+    A SLIDING WINDOW of (time, bytes-done) samples (default 4 s): the average since
+    the start of a 100 MB transfer is useless after a stall, while the average over
+    the last few seconds follows the link. The clock is injectable (`clock=`) — the
+    tests drive the meter without sleeping. `update()` returns (rate, eta) or None
+    while there is nothing honest to show (a single sample, a zero/negative delta
+    between the samples, a stalled transfer); an unknown total gives (rate, None),
+    so a rate can still be displayed.
+    """
+
+    WINDOW_SEC = 4.0     # how far back the rate is measured
+    MIN_SAMPLES = 2      # one sample is not a measurement
+
+    def __init__(self, clock=time.monotonic, window_sec: float = None):
+        self._clock = clock
+        self._window = self.WINDOW_SEC if window_sec is None else float(window_sec)
+        self._samples = []       # [(t, done)] — oldest first
+
+    def update(self, done: int, total: int, now: float = None):
+        """Feed one progress sample → (bytes_per_sec, eta_seconds | None), or None."""
+        t = self._clock() if now is None else float(now)
+        done = int(done)
+        total = int(total) if total else 0
+        self._samples.append((t, done))
+        while len(self._samples) > self.MIN_SAMPLES and t - self._samples[0][0] > self._window:
+            self._samples.pop(0)
+        if len(self._samples) < self.MIN_SAMPLES:
+            return None
+        t0, d0 = self._samples[0]
+        dt = t - t0
+        moved = done - d0
+        if dt <= 0 or moved <= 0:
+            return None      # no time passed / nothing moved — a rate would be a guess
+        rate = moved / dt
+        eta = ((total - done) / rate) if (total > done and rate > 0) else None
+        return rate, eta
+
+    def reset(self):
+        """Forget the samples (a new task on the same id / a finished transfer)."""
+        self._samples = []
 
 
 class TerminalSessionPage(QWidget):
@@ -171,6 +243,9 @@ class TerminalSessionPage(QWidget):
         # the wheel mode from the config (terminal_wheel).
         self.widget = TerminalWidget(self.tscreen, self.terminal_thread,
                                      wheel_mode=term_cfg["wheel"])
+        # v1.3.3.4 (ROADMAP task 3): the transcript's suggested file name carries the
+        # host — the page owns the server data, the canvas owns the menu that asks.
+        self.widget.set_transcript_host(getattr(server_data, "host", "") or "")
         # v1.0 final: applying the config (an unknown palette → set_palette() False
         # → "default" stays; corrupt values were dropped in load_terminal_settings).
         if term_cfg["palette"] is not None:
@@ -196,6 +271,9 @@ class TerminalSessionPage(QWidget):
         self._sftp_worker = None
         self._sftp_tasks = {}      # task_id → (kind, label)
         self._sftp_busy = 0        # how many uploads/downloads are in flight
+        # v1.3.3.4 (ROADMAP task 6): task_id → TransferMeter (the rate/ETA of a transfer;
+        # dropped with the task — see _on_sftp_task_done/error/cancelled).
+        self._transfer_meters = {}
         self.tabs.currentChanged.connect(self._on_tab_changed)
         self.sftp_tab.message.connect(self._on_sftp_tab_message)
 
@@ -258,6 +336,13 @@ class TerminalSessionPage(QWidget):
                 sftp_tab.retranslate()
             except RuntimeError:
                 pass  # Qt teardown — the tab is already destroyed
+        # v1.3.3.4: the canvas's own strings (the find panel — if it is open)
+        widget = getattr(self, "widget", None)
+        if widget is not None:
+            try:
+                widget.retranslate()
+            except RuntimeError:
+                pass  # Qt teardown — the canvas is already destroyed
 
     # ── Host ────────────────────────────────────────────────────────────────
 
@@ -386,6 +471,15 @@ class TerminalSessionPage(QWidget):
         except RuntimeError:
             pass
 
+        # v1.3.3.4 (ROADMAP task 3): the transcript is a local file of the SESSION — it
+        # is closed here, on the single idempotent teardown path, so no tee survives a
+        # closed session (the ROADMAP requirement: it must never raise into the teardown,
+        # hence the broad guard: a full disk / a destroyed canvas must not block the close).
+        try:
+            self.widget.stop_transcript()
+        except Exception:  # noqa: BLE001 — the file close must not block the session teardown
+            pass
+
         try:
             self._pty_timer.stop()
         except Exception:
@@ -449,6 +543,13 @@ class TerminalSessionPage(QWidget):
             self.tscreen.feed(data)
         except Exception:
             return
+        # v1.3.3.4 (ROADMAP task 3): the transcript tee. Inside the output path but
+        # deliberately OUTSIDE the pyte block above: a broken file must not stop the
+        # rendering (write_transcript swallows everything and stops the tee itself).
+        try:
+            self.widget.write_transcript(data)
+        except Exception:  # noqa: BLE001 — the tee never breaks the session
+            pass
         # v1.1.2RC3 (N7): a history position change ⇔ an auto-return to live (feed() —
         # the only path that changes the position without a manual scroll). An active
         # selection on the "old" screen is reset before copying.
@@ -642,6 +743,11 @@ class TerminalSessionPage(QWidget):
             self.progress_update.emit(done, total)   # v1.1.x: setRange(0,total)+setValue
             text = t("sftp.progress", name=label, pct=int(done * 100 // total),
                      done=format_size(done), total=format_size(total))
+            # v1.3.3.4 (ROADMAP task 6): the measured throughput and the ETA, appended
+            # to the same line (an empty string while the meter has nothing honest to show).
+            detail = self._transfer_detail(task_id, done, total)
+            if detail:
+                text = f"{text} · {detail}"
         else:  # total unknown — name only (an indeterminate bar)
             self.progress_update.emit(done, 0)
             if kind == "read":
@@ -651,8 +757,43 @@ class TerminalSessionPage(QWidget):
                 text = t(key, name=label)
         self.status_message.emit(text, 0)
 
+    def _transfer_detail(self, task_id: int, done: int, total: int) -> str:
+        """v1.3.3.4 (ROADMAP task 6): "1.2 MB/s · ETA 0:42" — or "" while unmeasurable.
+
+        The meter is created on the first sample of the task and dropped with it
+        (SUCCESS, error and cancel all call _drop_transfer_meter). Never raises: a
+        broken measurement costs the suffix, not the progress line.
+        """
+        try:
+            meter = self._transfer_meters.get(task_id)
+            if meter is None:
+                meter = TransferMeter()
+                self._transfer_meters[task_id] = meter
+            sample = meter.update(done, total)
+            if sample is None:
+                return ""
+            rate, eta = sample
+            if rate is None or rate <= 0:
+                return ""
+            t = get_translator()
+            parts = [t("sftp.rate", rate=format_size(int(rate)))]
+            eta_text = format_duration(eta) if eta is not None else ""
+            if eta_text:
+                parts.append(t("sftp.eta", time=eta_text))
+            return " · ".join(parts)
+        except Exception:  # noqa: BLE001 — a cosmetic suffix must never break the transfer UI
+            return ""
+
+    def _drop_transfer_meter(self, task_id: int):
+        """Forget the rate meter of a finished/failed/cancelled task."""
+        try:
+            self._transfer_meters.pop(task_id, None)
+        except Exception:  # noqa: BLE001 — teardown race
+            pass
+
     def _on_sftp_task_done(self, task_id: int, detail: str):
         t = get_translator()
+        self._drop_transfer_meter(task_id)   # v1.3.3.4 (task 6): the meter dies with the task
         entry = self._sftp_tasks.pop(task_id, None)
         if entry is not None and entry[0] in self._SFTP_PROGRESS_KINDS:
             self._sftp_busy = max(0, self._sftp_busy - 1)
@@ -665,6 +806,7 @@ class TerminalSessionPage(QWidget):
 
     def _on_sftp_task_error(self, task_id: int, kind: str, message: str):
         t = get_translator()
+        self._drop_transfer_meter(task_id)   # v1.3.3.4 (task 6): the meter dies with the task
         entry = self._sftp_tasks.pop(task_id, None)
         if entry is not None and entry[0] in self._SFTP_PROGRESS_KINDS:
             self._sftp_busy = max(0, self._sftp_busy - 1)
@@ -684,6 +826,7 @@ class TerminalSessionPage(QWidget):
 
     def _on_sftp_task_cancelled(self, task_id: int, kind: str):
         t = get_translator()
+        self._drop_transfer_meter(task_id)   # v1.3.3.4 (task 6): the meter dies with the task
         entry = self._sftp_tasks.pop(task_id, None)
         if entry is not None and entry[0] in self._SFTP_PROGRESS_KINDS:
             self._sftp_busy = max(0, self._sftp_busy - 1)
@@ -698,6 +841,7 @@ class TerminalSessionPage(QWidget):
         try:
             self._sftp_worker = None
             self._sftp_tasks.clear()
+            self._transfer_meters.clear()   # v1.3.3.4 (task 6): no live task — no meter
             self._sftp_busy = 0
             self.progress_hidden.emit()
             self.sftp_tab.set_worker(None)

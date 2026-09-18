@@ -255,22 +255,29 @@ scr.feed(b"hello world\r\nsecond line\r\nthird row")
 w.resize(cw * 20, chh * 5)
 cb = app.clipboard()
 
-# The composition and the order: [Copy | Paste | Select all] (en — the default)
+# The composition and the order: [Copy | Paste | Select all] (en — the default).
+# v1.3.3.4 added four LOCAL items to the SAME menu (Find… | Copy | Paste | Select All |
+# Clear Scrollback | Reset Screen | Save Transcript… | Exclude from Multi-Input) —
+# the v1.2.7 trio keeps its place and its separators; the new items are covered by
+# tests/test_terminal_output.py.
 menu = w._build_context_menu()
-check("the menu is a QMenu with 3 items", isinstance(menu, QMenu) and len(menu.actions()) == 3,
-      f"actions={len(menu.actions())}")
+check("the menu is a QMenu with the v1.2.7 trio in it",
+      isinstance(menu, QMenu) and len(menu.actions()) == 11, f"actions={len(menu.actions())}")
 texts = [a.text() for a in menu.actions()]
-check("the order/labels en: Copy | Paste | Select All",
-      texts == ["Copy", "Paste", "Select All"], repr(texts))
+check("the order/labels en: Find… | Copy | Paste | Select All | Clear Scrollback | Reset Screen | Save Transcript… | Exclude from Multi-Input",
+      texts[2:5] == ["Copy", "Paste", "Select All"]
+      and texts[6:9] == ["Clear Scrollback", "Reset Screen", "Save Transcript…"]
+      and texts[10] == "Exclude from Multi-Input"
+      and texts[0] == "Find in terminal…", repr(texts))
 
 # Copy — disabled WITHOUT a selection
-act_copy, act_paste, act_all = menu.actions()
+act_copy, act_paste, act_all = menu.actions()[2], menu.actions()[3], menu.actions()[4]
 check("Copy without a selection → disabled", not act_copy.isEnabled())
 
 # A word selection → enabled; the trigger → the clipboard (Acceptance)
 double_click(w, 0, 7)
 menu = w._build_context_menu()
-act_copy = menu.actions()[0]
+act_copy = menu.actions()[2]
 check("Copy with a selection → enabled", act_copy.isEnabled())
 cb.setText("")
 sent.clear()
@@ -316,7 +323,7 @@ check("the real RMB path: exec got the global coordinates of the event",
 cb.setText("ls -la\r\npwd")
 sent.clear()
 menu = w._build_context_menu()
-act_paste = menu.actions()[1]
+act_paste = menu.actions()[3]
 check("Paste with a live thread → enabled", act_paste.isEnabled())
 act_paste.trigger()
 check("the Paste trigger → exactly \\x1b[200~ls -la\\npwd\\x1b[201~ into the PTY",
@@ -324,13 +331,13 @@ check("the Paste trigger → exactly \\x1b[200~ls -la\\npwd\\x1b[201~ into the P
 
 cb.setText("")
 sent.clear()
-w._build_context_menu().actions()[1].trigger()
+w._build_context_menu().actions()[3].trigger()
 check("Paste with an empty clipboard → nothing is sent", sent == [], f"sent={sent!r}")
 
 # Select all — the whole visible grid (Acceptance)
 w.clear_selection()
 menu = w._build_context_menu()
-act_all = menu.actions()[2]
+act_all = menu.actions()[4]
 check("Select All is always enabled", act_all.isEnabled())
 act_all.trigger()
 check("select_all: the bounds (0,0)-(4,19)",
@@ -343,9 +350,9 @@ check("selected_text() = all the lines, \\n, the tails trimmed",
 # thread=None: Paste is disabled (the input is off), Copy/Select all work
 scr0, w0 = make_widget(thread=None)
 menu0 = w0._build_context_menu()
-check("thread=None: Paste → disabled", not menu0.actions()[1].isEnabled())
-check("thread=None: Select All → enabled", menu0.actions()[2].isEnabled())
-menu0.actions()[2].trigger()
+check("thread=None: Paste → disabled", not menu0.actions()[3].isEnabled())
+check("thread=None: Select All → enabled", menu0.actions()[4].isEnabled())
+menu0.actions()[4].trigger()
 check("thread=None: select_all works locally",
       (w0._sel_anchor, w0._sel_active) == ((0, 0), (4, 19)),
       f"got=({w0._sel_anchor}, {w0._sel_active})")
@@ -356,12 +363,12 @@ saved_lang = _i18n.get_current_language()
 try:
     _i18n.set_language("ru")
     texts_ru = [a.text() for a in w._build_context_menu().actions()]
-    check("the ru labels",
-          texts_ru == ["Копировать", "Вставить", "Выделить всё"], repr(texts_ru))
+    check("the ru labels of the v1.2.7 trio",
+          texts_ru[2:5] == ["Копировать", "Вставить", "Выделить всё"], repr(texts_ru))
     _i18n.set_language("zh")
     texts_zh = [a.text() for a in w._build_context_menu().actions()]
-    check("the zh labels",
-          texts_zh == ["复制", "粘贴", "全选"], repr(texts_zh))
+    check("the zh labels of the v1.2.7 trio",
+          texts_zh[2:5] == ["复制", "粘贴", "全选"], repr(texts_zh))
 finally:
     _i18n.set_language(saved_lang)
 

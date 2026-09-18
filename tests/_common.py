@@ -171,9 +171,21 @@ def restore_i18n_config(snap):
 # in 12 i18n files + the APP_VERSION/requirements pins in 7 release-state sections).
 # The misses of the keys themselves against the code are caught by check_i18n_keys.py.
 # ─────────────────────────────────────────────────────────────────────────────
-EXPECTED_APP_VERSION = "1.3.3.3"  # the current release (a sentinel: it catches "a bump to the wrong version")
-EXPECTED_I18N_KEYS = 490        # the parity of the TRANSLATION keys (v1.3.3.3: +13 — view.zoom_in,
-                                # view.zoom_out, settings.hotkeys.reset, settings.hotkeys.reset_done,
+EXPECTED_APP_VERSION = "1.3.3.4"  # the current release (a sentinel: it catches "a bump to the wrong version")
+EXPECTED_I18N_KEYS = 507        # the parity of the TRANSLATION keys (v1.3.3.4: +17 — the terminal
+                                # output theme: 5 terminal.find.* (placeholder / count / next /
+                                # prev / close), 3 terminal.menu.* (clear_scrollback /
+                                # reset_screen / save_transcript), 5 terminal.cmdlib.seed.*
+                                # (the first-run seed names, now i18n keys), 2 multi-input
+                                # exclusion keys (terminal.multi_exclude + the tab badge
+                                # terminal.multi_excluded_badge), and 2 for the transfer
+                                # rate/ETA of the SFTP progress line (sftp.rate / sftp.eta —
+                                # ROADMAP task 6, the detachable task 7 of v1.3.3.2).
+                                # The ROADMAP's own "490 → 501" figure for this version was
+                                # arithmetic slippage: the enumerated key list of the section
+                                # already contains 15 keys, plus the 2 of task 6 → 507.
+                                # (v1.3.3.3: +13 — view.zoom_in, view.zoom_out,
+                                # settings.hotkeys.reset, settings.hotkeys.reset_done,
                                 # ctx.check_status, status.check_now, about.open, about.title,
                                 # about.license, about.config_path, about.logs_path, about.hotkeys,
                                 # about.open_config_dir; the "name"/"partial" meta keys of the language

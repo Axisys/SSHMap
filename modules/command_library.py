@@ -131,16 +131,36 @@ def _atomic_write_json(path: str, doc) -> bool:
 
 
 def _seed_entries() -> list:
-    """The first-run seed: 5 examples (the names — in English, as in the ROADMAP).
+    """The first-run seed: 5 examples (v1.3.3.4: the NAMES are i18n keys).
+
+    v1.3.3.4 (ROADMAP task 4): the five names were the only user-visible English
+    literals of the application that were not i18n keys — and they land in
+    `~/.sshmap/commands.json`, i.e. in the user's own content file, on the very
+    first run of a ru/zh/de user. The names now come from `terminal.cmdlib.seed.*`
+    (resolved through the cached translator, i.e. in the ACTIVE language at the
+    moment of the first seeding).
+
+    The seeding happens ONLY when the file does not exist (see load()): the stored
+    library is the user's own text and is NEVER re-translated — switching the
+    language afterwards leaves an existing `commands.json` exactly as it is
+    (the ROADMAP requirement of task 4). The CATEGORIES stay plain literals on
+    purpose: they are content of a user-editable file (like the commands
+    themselves — "df -h" is not translated either), and the ROADMAP fixes the key
+    set of this version at the five NAMES.
 
     The last entry — a multi-line script (awk with a line continuation): a live example
     of the macros going to the PTY as a bracketed-paste block, not as line-by-line input."""
+    t = get_translator()
     seeds = [
-        ("Tail nginx error log", "tail -f /var/log/nginx/error.log", "Logs"),
-        ("Restart Docker", "systemctl restart docker", "Services"),
-        ("Top processes (snapshot)", "top -bn1 | head -n 20", "System"),
-        ("Disk usage", "df -h", "System"),
-        ("Sum column (awk)",
+        (t("terminal.cmdlib.seed.tail_nginx"),
+         "tail -f /var/log/nginx/error.log", "Logs"),
+        (t("terminal.cmdlib.seed.restart_docker"),
+         "systemctl restart docker", "Services"),
+        (t("terminal.cmdlib.seed.top_processes"),
+         "top -bn1 | head -n 20", "System"),
+        (t("terminal.cmdlib.seed.disk_usage"),
+         "df -h", "System"),
+        (t("terminal.cmdlib.seed.sum_column"),
          "awk '{s+=$1} END {print \"total: \" s}' \\\n    /var/log/nginx/access.log",
          "Scripts"),
     ]

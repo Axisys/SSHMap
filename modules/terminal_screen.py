@@ -101,6 +101,7 @@ from the GUI thread (v1.1.2 final N13: the dead cursor property was removed —
 the declaration matches the code; the cursor comes from snapshot()).
 """
 
+import math
 import threading
 
 # v1.3rc1 (PYTE82_AUDIT.md "managed fork"): the import seam — the only place in
@@ -129,6 +130,17 @@ DEFAULT_BG_HEX = "#0f172a"   # the terminal window background (the QPlainTextEdi
 # behavior AFTER RC3 (scrollback ON); an explicit 0 — the user disabling it.
 DEFAULT_HISTORY_LINES = 1000
 SCROLL_RATIO = 0.1
+
+# ── v1.3.3.4 (ROADMAP task 1): the safety bound of the find bar's navigation ──
+# scroll_to_line()/scroll_to_position() move the viewport with pyte's own pages
+# (~10% of the grid each, SCROLL_RATIO). A page that does not move the border is
+# the edge of the history and ends the loop; this constant is the second belt —
+# a guard against a hypothetical pyte page that reports no progress. The real
+# budget per call is derived from the CURRENT history depth (_scroll_step_budget:
+# enough pages to cross the whole deque + a small margin), so a deep scrollback
+# (terminal_history_lines up to 1_000_000) stays fully searchable while the loop
+# remains finite; MAX_SCROLL_STEPS is the hard ceiling of that budget.
+MAX_SCROLL_STEPS = 200_000
 
 # Palettes: the REQUIRED keys black…white + br_* (8+8) — otherwise the SGR 33/93
 # and the bright colors fall to default (critical error #2 from TERMINAL.md §3).
@@ -335,6 +347,159 @@ class TerminalScreen:
         with self._lock:
             h = self.screen.history
             return h.position, h.size
+
+    # ── v1.3.3.4 (ROADMAP task 1): the scrollback DOCUMENT of the find bar ────
+    # pyte.HistoryScreen keeps three queues (the class docstring of the fork):
+    # history.top — the lines ABOVE the screen (oldest first), buffer — the visible
+    # grid, history.bottom — the lines BELOW it (non-empty only while the user has
+    # scrolled back). The document below is the three of them in that order, so it
+    # is the SAME line sequence at any scroll position — that is what makes a match
+    # index stable while Enter/Shift+Enter move the viewport through it.
+
+    def _row_text(self, row) -> str:
+        """One pyte grid row → str (the cells are a SPARSE dict: the width comes from columns).
+
+        Not `"".join(ch.data for ch in row)` — iterating a StaticDefaultDict yields
+        the KEYS (x indices), not the Chars (the v1.3.3.4 probe); the snapshot() of
+        the canvas indexes it the same way.
+        """
+        return "".join(row[x].data for x in range(self.columns))
+
+    def text_lines(self) -> list:
+        """The whole scrollback document: the history lines (oldest first) + the live grid.
+
+        Read under the same lock as feed(): a search over a half-fed chunk would
+        report a match in a line the canvas is about to repaint.
+        """
+        with self._lock:
+            scr = self.screen
+            lines = [self._row_text(row) for row in scr.history.top]
+            lines.extend(self._row_text(scr.buffer[y]) for y in range(scr.lines))
+            lines.extend(self._row_text(row) for row in scr.history.bottom)
+            return lines
+
+    def history_top_len(self) -> int:
+        """How many lines of the document sit ABOVE the visible grid (the mapping origin).
+
+        Document index → grid row: `row = doc_index - history_top_len()`. Read on
+        every paint of the canvas (the value changes with every scroll page).
+        """
+        with self._lock:
+            return len(self.screen.history.top)
+
+    def _scroll_step_budget(self) -> int:
+        """How many pyte pages may be moved in ONE navigation call (a locked screen).
+
+        pyte's page is `ceil(lines * SCROLL_RATIO)` lines (4 on the default 32-row
+        grid), so crossing a `history`-deep scrollback costs `history / page` pages.
+        The budget is derived from the CURRENT depth with a small margin — enough for
+        the whole deque whatever `terminal_history_lines` says — and capped by
+        MAX_SCROLL_STEPS so a pathological value cannot spin forever.
+        """
+        h = self.screen.history
+        page = max(1, int(math.ceil(self.screen.lines * SCROLL_RATIO)))
+        return max(64, min(MAX_SCROLL_STEPS, h.size // page + 8))
+
+    def scroll_to_line(self, index) -> bool:
+        """Scroll the viewport until the document line `index` is visible. True — moved.
+
+        The visible window is `buffer`, i.e. the document indices
+        [len(top), len(top) + lines). The viewport is moved with pyte's own pages
+        (prev_page/next_page — the same ~10% step as the wheel and Ctrl+Shift+PgUp/
+        PgDn), so the scrollback arithmetic stays pyte's. A page that does not move
+        the border means the edge of the history: the loop ends and the answer is
+        False (a match cannot be revealed by scrolling even further), not a hang.
+        """
+        with self._lock:
+            scr = self.screen
+            target = max(0, int(index))
+            moved = False
+            for _ in range(self._scroll_step_budget()):
+                top_len = len(scr.history.top)
+                if target < top_len:
+                    if not self._page_locked(scr, up=True):
+                        break
+                elif target >= top_len + scr.lines:
+                    if not self._page_locked(scr, up=False):
+                        break
+                else:
+                    break                 # already visible
+                moved = True
+            if moved:
+                scr.dirty = set(range(scr.lines))
+            return moved
+
+    @staticmethod
+    def _page_locked(scr, up: bool) -> bool:
+        """One prev_page()/next_page() of an ALREADY LOCKED screen. False — the page was a no-op."""
+        before = len(scr.history.top)
+        if up:
+            scr.prev_page()
+        else:
+            scr.next_page()
+        return len(scr.history.top) != before
+
+    def scroll_to_position(self, position) -> int:
+        """Restore a history position captured earlier (the find bar's Esc). Returns the new one.
+
+        `position` comes from scroll_info()[0]; the value is clamped to the valid
+        range and the very same page loop as scroll_to_line() is used, so the
+        restore always lands on a position pyte itself can reach (the pages are not
+        fine-grained — the result may be a few lines off, which is exactly what
+        "the state before the search" means for a paging scrollback).
+        """
+        with self._lock:
+            scr = self.screen
+            size = scr.history.size
+            target = max(0, min(int(position), size))
+            for _ in range(self._scroll_step_budget()):
+                current = scr.history.position
+                if current == target:
+                    break
+                if not self._page_locked(scr, up=current > target):
+                    break                 # the edge of the history — as close as pyte gets
+            scr.dirty = set(range(scr.lines))
+            return scr.history.position
+
+    # ── v1.3.3.4 (ROADMAP task 2): two LOCAL actions, no bytes to the PTY ────
+
+    def clear_history(self) -> bool:
+        """Drop the scrollback: the live grid is KEPT, the history (top+bottom) is emptied.
+
+        The exact semantics of `terminal_history_lines = 0` for the content that is
+        already there (new output accumulates again — the depth itself is not
+        changed). The user is first snapped back to the live line (before_event —
+        the bulk auto-return of the fork): otherwise the grid would keep showing
+        historical rows whose history entry is gone. Local only: pyte's history
+        queues are emptied, not one byte goes to the channel.
+        """
+        with self._lock:
+            scr = self.screen
+            h = scr.history
+            if h.position < h.size:
+                scr.before_event("clear_history")   # snap back to the live line (bulk restore)
+            h = scr.history
+            h.top.clear()
+            h.bottom.clear()
+            scr.history = h._replace(position=h.size)
+            scr.dirty = set(range(scr.lines))
+            return True
+
+    def reset_local(self) -> bool:
+        """A full LOCAL re-init of the grid (the "the screen is a mess" case).
+
+        pyte's own reset: the grid is cleared, the cursor is homed with the default
+        attributes, the margins/tabstops/charset and every private mode go back to
+        their initial state (DECTCEM and LNM come from _DEFAULT_MODE — fork patch
+        0002), the history is dropped. Nothing is sent to the channel and the
+        remote program is not told: it will keep writing into the (now empty) grid
+        and repaint it on its next output — the action is for a local screen that
+        a partial redraw left unreadable.
+        """
+        with self._lock:
+            self.screen.reset()
+            self.screen.dirty = set(range(self.screen.lines))
+            return True
 
     # ── v1.1.2RC3 (AUDIT U3): the DECCKM state for input ────────────────────
     def application_cursor_keys(self):

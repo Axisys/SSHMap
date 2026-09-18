@@ -83,9 +83,39 @@ stays a no-op (v1.2.12); the passthrough takes precedence over wheel_mode="off".
 
 Threading: paintEvent and snapshot() — the GUI thread; feed() from the SSH thread under the lock
 of TerminalScreen — a race in the middle of a frame is excluded.
+
+v1.3.3.4 (ROADMAP "Terminal: working with the output") — the canvas learns to work
+with what it shows:
+* SEARCH IN THE SCROLLBACK (task 1): Ctrl+Shift+F opens the floating find panel
+  (modules/terminal_find_bar.py — the map_search_bar pattern), a case-insensitive
+  LITERAL search (re.escape — regex search is explicitly NOT in this version) over
+  the visible grid AND the history. The document comes from TerminalScreen.text_lines()
+  (history.top → buffer → history.bottom: the same line sequence at any scroll
+  position, so a match index is stable) and TerminalScreen.scroll_to_line() brings
+  the target line into view with pyte's own pages. Enter/Shift+Enter walk the
+  matches with wraparound, the panel shows "k / N", Esc closes the panel and
+  RESTORES the history position the search started from. The key lives in this
+  widget (the terminal's own keys are the xterm protocol — §14a scope boundary:
+  nothing is added to the hotkey registry) and while the panel has the keyboard no
+  byte can reach the PTY;
+* CLEAR THE SCROLLBACK / RESET THE SCREEN (task 2): two LOCAL context-menu actions
+  (TerminalScreen.clear_history() / reset_local()) — not one byte goes to the
+  channel;
+* SAVE TRANSCRIPT… (task 3): a checkable context-menu item (terminal.menu.save_transcript)
+  opens a file dialog and starts a TEE of the session output — the page calls
+  write_transcript(data) on the same bytes it feeds to pyte, so the file holds the
+  raw stream (exactly the fed bytes, the `script(1)` semantics; ANSI included).
+  stop_transcript() is safe to call twice — the page closes it from its idempotent
+  shutdown() and no write ever raises into the session teardown;
+* EXCLUDING A SESSION FROM MULTI-INPUT (task 5): the checkable terminal.multi_exclude
+  item sets the in-memory per-session flag `multi_excluded`; MultiInputHub.broadcast()
+  skips such a session and the container badge shows it (terminal.multi_excluded_badge).
+  The state is deliberately NOT persisted (a session is short-lived) and the mode's
+  own rules (F12, the registry entry, the plaque counter) are unchanged.
 """
 
 import math
+import re
 import time
 
 # v1.2.9 (ROADMAP "terminal hygiene"): the full wcwidth(3) — the SAME library
@@ -109,6 +139,13 @@ try:
     from .multi_input import get_hub as _get_multi_hub
 except ImportError:
     from modules.multi_input import get_hub as _get_multi_hub
+
+# v1.3.3.4 (ROADMAP task 1): the floating find panel — the map_search_bar pattern.
+# The module imports only ui/theme (pure data) — no cycle with terminal_widget.
+try:
+    from .terminal_find_bar import TerminalFindBar
+except ImportError:
+    from modules.terminal_find_bar import TerminalFindBar
 
 # v1.2.4-fix (multi-input diagnostics): the app logger (lazy, the get_translator
 # pattern) — a DEBUG line per broadcast in _send. Without setup_logging
@@ -175,7 +212,7 @@ from PySide6.QtCore import QEvent, Qt, QTimer
 from PySide6.QtGui import (
     QBrush, QColor, QFont, QFontDatabase, QFontMetricsF, QPainter, QPen,
 )
-from PySide6.QtWidgets import QApplication, QMenu, QSizePolicy, QWidget
+from PySide6.QtWidgets import QApplication, QFileDialog, QMenu, QSizePolicy, QWidget
 
 
 def _fmt_key(ch):
@@ -360,6 +397,13 @@ class TerminalWidget(QWidget):
     SELECTION_COLOR = (59, 130, 246, 90)   # v1.0RC2: the selection overlay (RGBA, alpha≈35%)
     BLINK_INTERVAL_MS = 530       # v1.0RC3: the cursor blink period (ROADMAP task 8)
     DOUBLE_CLICK_MS = 500         # v1.2.7: the double/triple-click interval (the test hook)
+    # v1.3.3.4 (ROADMAP task 1): the find-bar overlays. Values — the central theme
+    # accents with the alpha of the SELECTION_COLOR precedent (theme.ACCENT for the
+    # other matches, theme.SELECTION_AMBER for the CURRENT one — the same
+    # amber/blue pair the map uses for "this one" vs "also matches").
+    FIND_MATCH_COLOR = (56, 189, 248, 60)     # theme.ACCENT @ ~24%
+    FIND_CURRENT_COLOR = (245, 158, 11, 130)  # theme.SELECTION_AMBER @ ~51%
+    TRANSCRIPT_SUGGESTED_SUFFIX = ".log"      # the default name of a transcript
 
     def __init__(self, tscreen, terminal_thread=None, parent=None,
                  palette_name="default", format_cache_limit=FORMAT_CACHE_LIMIT,
@@ -409,6 +453,32 @@ class TerminalWidget(QWidget):
         self._blink_timer = QTimer(self)
         self._blink_timer.setInterval(self.BLINK_INTERVAL_MS)
         self._blink_timer.timeout.connect(self._toggle_cursor_blink)
+
+        # v1.3.3.4 (ROADMAP task 1): the find bar. The panel is created LAZILY
+        # (a session that never searches pays nothing — hide() on a child of the
+        # canvas costs 0 px); _find_matches — list[(doc_index, col, length)] over
+        # TerminalScreen.text_lines(); _find_current — the index in that list (-1 =
+        # nothing to navigate); _find_saved_position — the history position captured
+        # on open, restored by Esc ("Esc restores the state").
+        self._find_bar = None
+        self._find_query = ""
+        self._find_matches = []
+        self._find_current = -1
+        self._find_saved_position = None
+
+        # v1.3.3.4 (ROADMAP task 3): the transcript — a tee of the session output into
+        # a local file. The state lives here (the menu that toggles it is this widget's
+        # context menu) and the page feeds it in _on_output; the file is opened in
+        # BINARY append mode, so the file holds exactly the fed bytes.
+        self._transcript_file = None
+        self._transcript_path = None
+        self._transcript_guard = False   # re-entrancy guard of the checkable menu item
+        self._transcript_host = ""       # the host name in the suggested file name
+
+        # v1.3.3.4 (ROADMAP task 5): the per-session multi-input exclusion. In memory
+        # only (a session is short-lived — the ROADMAP decision); the hub reads the
+        # flag through getattr() in broadcast().
+        self._multi_excluded = False
 
         # AUDIT v0.7.2 (low #18): the system monospace font (as in the HTML path),
         # point size 10 — the defaults = the current behavior.
@@ -564,6 +634,24 @@ class TerminalWidget(QWidget):
                                      brush_sel)
             stats["selection_cells"] = len(sel)
 
+        # v1.3.3.4 (ROADMAP task 1): the find-bar matches — the same translucent
+        # overlay technique as the selection (drawn after the text, so the glyphs
+        # stay readable); the CURRENT match in amber, the others in the accent blue.
+        find_rows = self._visible_find_cells()
+        if find_rows:
+            painter.setPen(Qt.PenStyle.NoPen)
+            brush_other = QBrush(QColor(*self.FIND_MATCH_COLOR))
+            brush_current = QBrush(QColor(*self.FIND_CURRENT_COLOR))
+            for row, spans in find_rows.items():
+                if not (0 <= row < len(rows)):
+                    continue
+                cell_y = row * self._cell_h
+                for col, length, is_current in spans:
+                    painter.fillRect(col * self._cell_w, cell_y,
+                                     max(1, length) * self._cell_w, self._cell_h,
+                                     brush_current if is_current else brush_other)
+            stats["find_matches"] = sum(len(v) for v in find_rows.values())
+
         # The block cursor via swap (TERMINAL.md §3.13): fill the cell with the cursor color
         # + redraw the glyph with the background color; NOT drawn when screen.cursor.hidden
         # (ESC[?25l/h — vim hides the cursor, fact #8) or in the "invisible" phase of the blink
@@ -610,7 +698,28 @@ class TerminalWidget(QWidget):
         on the terminal. Ctrl/Meta+Tab is NOT intercepted (a fall-through into
         super().event() → keyPressEvent — the previous semantics); terminal_thread=None
         — also not intercepted (input disabled = the guard at the top of keyPressEvent).
-        All the other events pass through super().event(e) unchanged."""
+        All the other events pass through super().event(e) unchanged.
+
+        v1.3.3.4-fix (a real defect found while checking the find key): the canvas must
+        OWN its keys whenever it has the focus — the §14a boundary is only true if Qt
+        actually delivers them. In `terminal_mode = "tabs"` the session lives INSIDE the
+        main window, whose window-level QActions claim Ctrl+F (map search), Ctrl+Shift+F
+        (fit map), Ctrl+D (duplicate), Ctrl+Z (undo), Ctrl+S (save), Ctrl+K (palette),
+        Delete (delete selection) and the rest of §4.9's defaults. Qt asks the FOCUS
+        WIDGET first through a ShortcutOverride event, and a plain QWidget ignores it —
+        so the QAction won and the shell never saw the key: Ctrl+D duplicated a map node
+        instead of sending \\x04, Ctrl+Z undid the scene instead of SIGTSTP, Delete wiped
+        the selection instead of \\x1b[3~, and Ctrl+Shift+F ran "fit map" instead of
+        opening the find bar. In `windows` mode none of that happened (a separate
+        terminal window has no such QActions) — the two modes contradicted each other.
+        Accepting the override for the keys the canvas serves restores the terminal
+        semantics in both: the CONTROL combinations and the function/Delete family stay
+        with the focused session, while plain typing (which cannot collide) and the
+        Alt-only combinations of the menubar mnemonics are NOT claimed.
+        """
+        if e.type() == QEvent.Type.ShortcutOverride and self._owns_shortcut(e):
+            e.accept()   # the terminal owns this key — do not let a QAction fire
+            return True
         if e.type() == QEvent.Type.KeyPress:
             key = e.key()
             if key in (Qt.Key.Key_Tab, Qt.Key.Key_Backtab):
@@ -622,6 +731,29 @@ class TerminalWidget(QWidget):
                     e.accept()
                     return True
         return super().event(e)
+
+    # ── v1.3.3.4-fix: the key family the canvas claims from window-level QActions ──
+    # Every Ctrl+… combination (the xterm control codes — Ctrl+C/D/Z/V, the canvas's
+    # own Ctrl+Shift+F / Ctrl+Shift+PgUp/PgDn) plus the function keys (the xterm table,
+    # F12 = the multi-input exit) and Delete (\\x1b[3~). A plain letter cannot collide
+    # with a QAction sequence (all of §4.9's defaults carry Ctrl/Shift/Alt), so typing
+    # is deliberately NOT claimed, and neither are the Alt-only combinations (the
+    # menubar mnemonics stay reachable while a session has the focus).
+    _CLAIMED_KEYS = frozenset({
+        Qt.Key.Key_Delete,
+        Qt.Key.Key_F1, Qt.Key.Key_F2, Qt.Key.Key_F3, Qt.Key.Key_F4,
+        Qt.Key.Key_F5, Qt.Key.Key_F6, Qt.Key.Key_F7, Qt.Key.Key_F8,
+        Qt.Key.Key_F9, Qt.Key.Key_F10, Qt.Key.Key_F11, Qt.Key.Key_F12,
+    })
+
+    def _owns_shortcut(self, e) -> bool:
+        """Does the canvas claim this key from the window-level QActions? (never raises)"""
+        try:
+            if e.modifiers() & Qt.KeyboardModifier.ControlModifier:
+                return True
+            return e.key() in self._CLAIMED_KEYS
+        except Exception:  # noqa: BLE001 — a broken event must not break the shortcut map
+            return False
 
     # ── the keyboard: the full table v1.0RC2 ──────────────
     def keyPressEvent(self, event):
@@ -682,6 +814,14 @@ class TerminalWidget(QWidget):
                     self.scroll_page_up()
                 else:
                     self.scroll_page_down()
+                return
+            # v1.3.3.4 (ROADMAP task 1): Ctrl+Shift+F — the find bar. The key belongs to
+            # the CANVAS (§14a scope boundary): the terminal's own keys are the xterm
+            # protocol and are NOT in the hotkey registry, so a plain Ctrl+F keeps going
+            # to the shell as \x06 (the readline forward-char) exactly as before.
+            if key == Qt.Key.Key_F and mod & Qt.KeyboardModifier.ShiftModifier:
+                self.open_find()
+                event.accept()
                 return
             if key == Qt.Key.Key_C:
                 # v0.9.3 semantics (preserved): Ctrl+C copies with a selection,
@@ -982,7 +1122,396 @@ class TerminalWidget(QWidget):
         except Exception:
             pass  # a dead channel/thread mid-teardown — the wheel silently does not go out
 
+    # ══════════════════════════════════════════════════════════════════════════
+    # v1.3.3.4 (ROADMAP task 1): the find bar — search in the visible grid AND
+    # the history. The panel is only the input surface; the search, the counter
+    # and the viewport movement are HERE (a single source of truth).
+    # ══════════════════════════════════════════════════════════════════════════
+
+    def _ensure_find_bar(self) -> TerminalFindBar:
+        """The find panel (created on first use — a session that never searches pays nothing)."""
+        bar = self._find_bar
+        if bar is None:
+            bar = TerminalFindBar(self)
+            bar.query_changed.connect(self._on_find_query)
+            bar.next_requested.connect(self.find_next)
+            bar.prev_requested.connect(self.find_prev)
+            bar.close_requested.connect(self.close_find)
+            self._find_bar = bar
+        return bar
+
+    def open_find(self):
+        """Open the find panel (Ctrl+Shift+F / the context menu) and focus its input.
+
+        The history position is remembered here — Esc restores it, so a search never
+        leaves the user somewhere else in the scrollback. A repeat call keeps the
+        ALREADY CAPTURED position (the second Ctrl+Shift+F must not overwrite the
+        origin with wherever the first search navigated to).
+        """
+        bar = self._ensure_find_bar()
+        if self._find_saved_position is None:
+            try:
+                self._find_saved_position = self.tscreen.scroll_info()[0]
+            except Exception:  # noqa: BLE001 — a screen under teardown: the restore is skipped
+                self._find_saved_position = None
+        bar.place(self.width(), self.height())
+        bar.show()
+        bar.raise_()
+        if bar.query.strip():
+            self._refresh_find_matches()   # recompute against the current document
+        bar.focus_input()
+
+    def close_find(self, restore: bool = True):
+        """Close the panel (Esc / the × button); with restore — back to the pre-search view.
+
+        The matches are dropped (nothing is highlighted any more) and the history
+        position captured on open is re-applied through TerminalScreen.scroll_to_position()
+        (the paging scrollback can only land on a page border — "the state before the
+        search", not a pixel-exact restore). Never raises: a dead C++ object or a
+        screen under teardown must not break the close path.
+        """
+        bar = self._find_bar
+        if bar is not None:
+            try:
+                bar.hide()
+            except RuntimeError:
+                self._find_bar = None   # the C++ object is gone — stop touching it
+                bar = None
+        self._find_matches = []
+        self._find_current = -1
+        self._find_query = ""
+        if bar is not None and bar.query:
+            bar.set_query("")   # emits query_changed → the handler already cleared the state
+        if restore and self._find_saved_position is not None:
+            try:
+                self.tscreen.scroll_to_position(self._find_saved_position)
+            except Exception:  # noqa: BLE001 — teardown race: the viewport restore is cosmetic
+                pass
+        self._find_saved_position = None
+        self.update()
+        try:
+            self.setFocus()
+        except RuntimeError:
+            pass  # the C++ object was already destroyed (a close race)
+
+    @property
+    def find_active(self) -> bool:
+        """Is the find panel open? (the test/debug seam)
+
+        isHidden(), not isVisible(): the panel is a CHILD of the canvas, so Qt reports
+        it invisible while the session's window is not shown (the offscreen tests, a
+        background tab) even though it is open; the hidden FLAG is the state the widget
+        itself controls (hide() in __init__/close_find, show() in open_find) — the same
+        check the multi-input plaque uses in the suite.
+        """
+        bar = self._find_bar
+        if bar is None:
+            return False
+        try:
+            return not bar.isHidden()
+        except RuntimeError:
+            return False
+
+    def find_state(self) -> dict:
+        """The state of the search: {"query", "current" (1-based), "total"} — the test seam.
+
+        current is 0 while there is nothing to navigate (no query / no matches) —
+        the panel then shows "No matches" (`terminal.find.count` is only rendered
+        with a real pair).
+        """
+        current = self._find_current + 1 if self._find_current >= 0 else 0
+        return {"query": self._find_query, "current": current,
+                "total": len(self._find_matches)}
+
+    def _on_find_query(self, text: str):
+        """A change of the query → a fresh match list, the first match revealed."""
+        self._find_query = text or ""
+        self._refresh_find_matches()
+
+    def _find_document_lines(self) -> list:
+        """The searchable text: TerminalScreen.text_lines() (history + live grid)."""
+        lines = self.tscreen.text_lines()
+        return lines if isinstance(lines, list) else []
+
+    def _refresh_find_matches(self):
+        """Recompute the matches of the current query over the WHOLE scrollback document.
+
+        A case-insensitive LITERAL search: the query is `re.escape`d, so a user's
+        ".*" is a dot and a star, not a pattern (regex search is explicitly not in
+        this version). re.IGNORECASE (not str.lower()) keeps the match OFFSETS valid
+        in the ORIGINAL line even for the rare case where a lowercase mapping
+        changes the string length. Every occurrence is collected (overlapping ones
+        included — "aa" in "aaa" is two matches, as in every terminal's find).
+        """
+        query = self._find_query.strip()
+        matches = []
+        if query:
+            try:
+                pattern = re.compile(re.escape(query), re.IGNORECASE)
+            except Exception:  # noqa: BLE001 — a broken pattern (never in practice): no matches
+                pattern = None
+            if pattern is not None:
+                for index, line in enumerate(self._find_document_lines()):
+                    for m in pattern.finditer(line):
+                        matches.append((index, m.start(), m.end() - m.start()))
+        self._find_matches = matches
+        total = len(matches)
+        self._find_current = 0 if total else -1
+        if total:
+            self._reveal_find_match()
+        self._update_find_counter()
+        self.update()
+
+    def _update_find_counter(self):
+        """Push "k / N" (or the empty state) into the panel — i18n resolved at call time."""
+        bar = self._find_bar
+        if bar is None:
+            return
+        total = len(self._find_matches)
+        try:
+            bar.set_count(self._find_current + 1 if total else 0, total)
+        except RuntimeError:
+            self._find_bar = None
+
+    def _reveal_find_match(self):
+        """Bring the current match into view (the viewport scrolls, the panel stays put)."""
+        if not (0 <= self._find_current < len(self._find_matches)):
+            return
+        index = self._find_matches[self._find_current][0]
+        try:
+            self.tscreen.scroll_to_line(index)
+        except Exception:  # noqa: BLE001 — a teardown race: the reveal is cosmetic
+            return
+
+    def find_next(self) -> bool:
+        """Enter: the next match, wrapping around to the first one. False — no matches."""
+        return self._step_find(+1)
+
+    def find_prev(self) -> bool:
+        """Shift+Enter: the previous match, wrapping around to the last one."""
+        return self._step_find(-1)
+
+    def _step_find(self, delta: int) -> bool:
+        """Move by delta through the matches with WRAPAROUND (the acceptance of task 1)."""
+        total = len(self._find_matches)
+        if total <= 0:
+            self._update_find_counter()
+            return False
+        self._find_current = (self._find_current + delta) % total
+        self._reveal_find_match()
+        self._update_find_counter()
+        self.update()
+        return True
+
+    def _visible_find_cells(self):
+        """{grid_row: [(col_start, length, is_current)]} — the matches on the VISIBLE grid.
+
+        The document index maps to a grid row through TerminalScreen.history_top_len()
+        (the number of history lines above the screen): reading it at PAINT time keeps
+        the highlight glued to the text while the user scrolls with the wheel.
+        """
+        if not self._find_matches:
+            return {}
+        try:
+            top_len = self.tscreen.history_top_len()
+            lines = getattr(self.tscreen, "lines", 24)
+        except Exception:  # noqa: BLE001 — a teardown race: no highlight
+            return {}
+        out = {}
+        for i, (index, col, length) in enumerate(self._find_matches):
+            row = index - top_len
+            if 0 <= row < lines:
+                out.setdefault(row, []).append((col, length, i == self._find_current))
+        return out
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # v1.3.3.4 (ROADMAP task 2): clear the scrollback / reset the screen — LOCAL
+    # actions (the context menu), not one byte to the PTY.
+    # ══════════════════════════════════════════════════════════════════════════
+
+    def clear_scrollback(self) -> bool:
+        """Drop the pyte history; the live grid stays as it is (TerminalScreen.clear_history()).
+
+        The "scrollback disabled" semantics of `terminal_history_lines = 0` applied to
+        the content that is already there: the history is emptied, the depth setting is
+        not touched (new output accumulates again). The find state is dropped with it —
+        a match index into a document that no longer exists is worse than no highlight.
+        """
+        self._drop_find_state()
+        try:
+            self.tscreen.clear_history()
+        except Exception:  # noqa: BLE001 — a teardown race: the clear is a no-op
+            return False
+        self.update()
+        return True
+
+    def reset_screen(self) -> bool:
+        """A full LOCAL re-init of the grid (the "the screen is a mess" case) + a repaint.
+
+        pyte's reset (grid cleared, cursor homed, modes/margins/tabstops back to the
+        defaults, history dropped) — the remote program is NOT told and keeps writing
+        into the fresh grid. The find state is dropped together with the document.
+        """
+        self._drop_find_state()
+        try:
+            self.tscreen.reset_local()
+        except Exception:  # noqa: BLE001 — a teardown race: the reset is a no-op
+            return False
+        self.update()
+        return True
+
+    def _drop_find_state(self):
+        """Forget the matches (the document they index into is about to change)."""
+        self._find_matches = []
+        self._find_current = -1
+        bar = self._find_bar
+        if bar is not None:
+            try:
+                bar.set_count(0, 0)
+            except RuntimeError:
+                self._find_bar = None
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # v1.3.3.4 (ROADMAP task 3): the transcript — a tee of the session output into
+    # a local file. The page feeds it in _on_output (the single output path) and
+    # closes it from shutdown(); nothing here ever raises into the session.
+    # ══════════════════════════════════════════════════════════════════════════
+
+    @property
+    def transcript_active(self) -> bool:
+        """Is the session being written to a local file?"""
+        return self._transcript_file is not None
+
+    @property
+    def transcript_path(self):
+        """The path of the active transcript (None — no transcript)."""
+        return self._transcript_path if self.transcript_active else None
+
+    def start_transcript(self, path: str) -> bool:
+        """Start (or restart) the tee into `path` — a BINARY append. False on an I/O error.
+
+        Binary append: the file receives exactly the bytes that were fed to pyte
+        (the `script(1)` semantics — the raw session stream, ANSI sequences
+        included), which is also what the acceptance pins. An existing file is
+        APPENDED to (a transcript of a second session of the same host is the
+        common case), never truncated — a wrong path cannot destroy anything.
+        """
+        self.stop_transcript()
+        if not path:
+            return False
+        try:
+            f = open(path, "ab")
+        except OSError as e:
+            _log = _get_app_log()
+            if _log is not None:
+                _log.warning(f"transcript: cannot open {path}: {e}")
+            return False
+        self._transcript_file = f
+        self._transcript_path = path
+        return True
+
+    def stop_transcript(self):
+        """Close the transcript (idempotent, never raises) — the session teardown path."""
+        f = self._transcript_file
+        self._transcript_file = None
+        self._transcript_path = None
+        if f is None:
+            return
+        try:
+            f.flush()
+            f.close()
+        except Exception:  # noqa: BLE001 — a full disk / a closed descriptor must not block the close
+            pass
+
+    def write_transcript(self, data: bytes):
+        """Append the fed bytes to the transcript (a no-op without an active one).
+
+        Called by TerminalSessionPage._on_output on the SAME bytes it feeds to pyte;
+        every failure is swallowed and the transcript is stopped: a broken file must
+        never raise into the session teardown (the ROADMAP requirement of task 3) and
+        must not retry a dead descriptor on every chunk either. The write is FLUSHED
+        right away — the point of a transcript is to be tail-able while the session
+        runs (and a crash of the application must not cost the last block).
+        """
+        f = self._transcript_file
+        if f is None or not data:
+            return
+        try:
+            f.write(data)
+            f.flush()
+        except Exception:  # noqa: BLE001 — a disk error stops the tee, the session lives on
+            _log = _get_app_log()
+            if _log is not None:
+                _log.warning("transcript: write failed — stopping the tee")
+            self.stop_transcript()
+
+    def _suggested_transcript_name(self) -> str:
+        """The default file name of the dialog: sshmap-<host>-<YYYYmmdd-HHMMSS>.log."""
+        host = getattr(self, "_transcript_host", "") or "session"
+        stamp = time.strftime("%Y%m%d-%H%M%S")
+        safe = "".join(c if (c.isalnum() or c in "-_.") else "_" for c in str(host)) or "session"
+        return f"sshmap-{safe}-{stamp}{self.TRANSCRIPT_SUGGESTED_SUFFIX}"
+
+    def set_transcript_host(self, host: str):
+        """The host name used in the suggested file name (the page knows its server)."""
+        self._transcript_host = host or ""
+
+    # ── v1.3.3.4 (ROADMAP task 5): the multi-input exclusion (in memory, per session) ──
+    @property
+    def multi_excluded(self) -> bool:
+        """Is this session excluded from the multi-input broadcast? (read by the hub)"""
+        return self._multi_excluded
+
+    def set_multi_excluded(self, excluded: bool):
+        """Exclude/include THIS session; the mode UI is refreshed without a state change.
+
+        The flag is per session and in memory (the ROADMAP decision — not persisted);
+        MultiInputHub.broadcast() reads it through getattr() and skips the session,
+        and hub.refresh() makes the plaque counter and the tab badges follow (the mode
+        is off — refresh() re-renders the hidden UI, which is a harmless no-op).
+        """
+        self._multi_excluded = bool(excluded)
+        hub = self._resolve_multi_hub()
+        if hub is not None:
+            try:
+                hub.refresh()   # the plaque counter + the "NO MULTI" badge follow
+            except Exception:  # noqa: BLE001 — a UI refresh must not break the toggle
+                pass
+
+    # ── v1.3.3.1 (invariant): re-text on a language switch ─────────────────────
+    def retranslate(self):
+        """v1.3.3.4: re-text the find panel (the canvas keeps no other strings).
+
+        The context menu is rebuilt on every right click and resolves its labels at
+        that moment, so only the OPEN find panel needs to be re-texted. Never raises —
+        the dead-C++-object discipline of every container method.
+        """
+        bar = self._find_bar
+        if bar is None:
+            return
+        try:
+            bar.retranslate()
+        except RuntimeError:
+            self._find_bar = None   # the C++ object is gone — stop touching it
+
     # ── v1.0RC3: the cursor blink (a dedicated QTimer, ROADMAP task 8) ─────
+    def resizeEvent(self, event):
+        """v1.3.3.4: keep the floating find panel at the top right of the canvas.
+
+        The panel is a child of the widget but OUTSIDE the layout (it floats over the
+        grid, the map_search_bar pattern), so Qt never repositions it — every real
+        canvas resize (a window resize, a tab switch, a page without the command
+        library panel) places it again.
+        """
+        super().resizeEvent(event)
+        bar = self._find_bar
+        if bar is None:
+            return
+        try:
+            bar.place(self.width(), self.height())
+        except RuntimeError:
+            self._find_bar = None   # the C++ object is gone — stop touching it
+
     def showEvent(self, event):
         super().showEvent(event)
         self._cursor_visible = True      # reset the phase when the window is shown
@@ -1169,16 +1698,32 @@ class TerminalWidget(QWidget):
         self.update()
 
     def _build_context_menu(self):
-        """The QMenu of the right-click context menu (v1.2.7): Copy | Paste | Select All.
+        """The QMenu of the right-click context menu (v1.2.7; v1.3.3.4 — +4 items).
 
         The test seam: contextMenuEvent builds the menu with this method and only shows
         it — the tests call _build_context_menu() directly and trigger the QActions,
         without entering menu.exec() (the offscreen hang). The labels — the i18n
-        terminal.menu.* (en/ru/zh). Copy — enabled ONLY with a selection; Paste — only
-        with a live thread (terminal_thread), the same path as Ctrl+V (_bracketed_paste →
-        _send: the bracketed-paste block to the PTY + the multi-input broadcast)."""
+        `terminal.menu.*` / `terminal.find.*` / `terminal.multi_exclude` keys
+        (en/ru/zh/de). Copy — enabled ONLY with a selection; Paste — only with a live
+        thread (terminal_thread), the same path as Ctrl+V (_bracketed_paste → _send:
+        the bracketed-paste block to the PTY + the multi-input broadcast).
+
+        v1.3.3.4 (ROADMAP tasks 1–3, 5) — four items, all of them LOCAL:
+          * Find… (Ctrl+Shift+F) — opens the floating find panel. Labelled with the
+            panel's own placeholder key (the ROADMAP key set of this version has no
+            separate menu string for it: terminal.find.placeholder reads
+            "Find in terminal…", which is exactly what the menu says);
+          * Clear scrollback / Reset screen — the two local actions of task 2 (no
+            bytes to the PTY: pyte's history is dropped / the grid is re-initialized);
+          * Save transcript… — CHECKABLE: on — a file dialog + a tee of the output,
+            off — the file is closed (task 3; the checkmark IS the on/off state);
+          * Exclude from multi-input — CHECKABLE, per session, in memory (task 5).
+        """
         t = get_translator()
         menu = QMenu(self)
+        act_find = menu.addAction(t("terminal.find.placeholder"))
+        act_find.triggered.connect(self.open_find)
+        menu.addSeparator()
         act_copy = menu.addAction(t("terminal.menu.copy"))
         act_copy.setEnabled(self.has_selection())
         act_copy.triggered.connect(self.copy_selection)
@@ -1187,7 +1732,57 @@ class TerminalWidget(QWidget):
         act_paste.triggered.connect(self._bracketed_paste)
         act_all = menu.addAction(t("terminal.menu.select_all"))
         act_all.triggered.connect(self.select_all)
+        menu.addSeparator()
+        act_clear = menu.addAction(t("terminal.menu.clear_scrollback"))
+        act_clear.triggered.connect(self.clear_scrollback)
+        act_reset = menu.addAction(t("terminal.menu.reset_screen"))
+        act_reset.triggered.connect(self.reset_screen)
+        # The transcript toggle: created manually + connected to toggled(bool) — the
+        # PySide6 6.11 gotcha #10 (addAction(text, slot) drops the state).
+        act_tr = menu.addAction(t("terminal.menu.save_transcript"))
+        act_tr.setCheckable(True)
+        act_tr.setChecked(self.transcript_active)
+        # The action is passed through the lambda: a cancelled dialog must put the
+        # checkmark back, and the action is the only handle on it at that moment.
+        act_tr.toggled.connect(lambda checked, a=act_tr: self.toggle_transcript(checked, action=a))
+        menu.addSeparator()
+        act_multi = menu.addAction(t("terminal.multi_exclude"))
+        act_multi.setCheckable(True)
+        act_multi.setChecked(self._multi_excluded)
+        act_multi.toggled.connect(self.set_multi_excluded)
         return menu
+
+    def toggle_transcript(self, on: bool, action=None):
+        """The transcript menu item: on — ask for a file and start the tee; off — close it.
+
+        The file dialog is a module attribute (QFileDialog) — the same seam as QMenu
+        in the tests. A cancelled dialog (or an I/O error) puts the checkmark back
+        without touching the previous state; the guard flag keeps that programmatic
+        setChecked(False) from re-entering this method.
+        """
+        if self._transcript_guard:
+            return
+        if not on:
+            self.stop_transcript()
+            return
+        try:
+            path, _filter = QFileDialog.getSaveFileName(
+                self, get_translator()("terminal.menu.save_transcript"),
+                self._suggested_transcript_name(), "")
+        except Exception:  # noqa: BLE001 — a native dialog failure must not break the terminal
+            path = ""
+        if path and self.start_transcript(path):
+            return
+        if action is not None:
+            self._transcript_guard = True
+            try:
+                action.setChecked(False)
+            except RuntimeError:
+                pass  # the menu was already destroyed — nothing to reset
+            finally:
+                self._transcript_guard = False
+
+
 
     def contextMenuEvent(self, event):
         """The RMB — the context menu (v1.2.7). Never raises: a menu-build failure

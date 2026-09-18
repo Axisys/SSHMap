@@ -652,16 +652,28 @@ class SshMixin:
           visibility;
         * the highlight of ALL open containers (frame + the tabs' "MULTI"
           badges, the window title) or its reset;
-        * the status message (status.multi_enabled / status.multi_disabled)."""
+        * the status message (status.multi_enabled / status.multi_disabled).
+
+        v1.3.3.4 (ROADMAP task 5): the callback is also reached through
+        `hub.refresh()` — the per-session exclusion toggle re-renders the very same
+        UI without a mode change. Everything here is idempotent, so a refresh is
+        harmless; only the status MESSAGE is guarded (a "Multi-input enabled" line
+        popping up because a session was excluded would be a lie), hence the
+        `_multi_shown_state` tracker: the message fires on a REAL state change only.
+        The counter is `_multi_participant_count()` — the sessions the broadcast
+        actually reaches (an excluded one is not a "MULTI" session any more).
+        """
         act = getattr(self, "act_multi_input", None)
         if act is not None:
             try:
                 act.setChecked(active)
             except RuntimeError:
                 pass  # C++ object already removed (close race) — nothing to update
+        state_changed = active != getattr(self, "_multi_shown_state", False)
+        self._multi_shown_state = active
         # v1.3.2 (task 4): the sequence — from the registry, still mode-conditional.
         self._sync_multi_shortcut()
-        count = len(getattr(self, "_terminal_windows", []))
+        count = self._multi_participant_count()
         try:
             label = getattr(self, "_multi_label", None)
             plaque = getattr(self, "_multi_plaque", None)
@@ -682,11 +694,32 @@ class SshMixin:
                 _apply_multi_highlight(host, active)
             except RuntimeError:
                 pass  # the container was already destroyed (close race) — skip
+        if not state_changed:
+            return  # v1.3.3.4: a refresh (the exclusion toggle) — no new status message
         try:
             key = "status.multi_enabled" if active else "status.multi_disabled"
             self.statusBar().showMessage(self.t(key), 4000)
         except Exception:  # noqa: BLE001 — the status bar is cosmetic during teardown
             pass
+
+    def _multi_participant_count(self) -> int:
+        """v1.3.3.4 (ROADMAP task 5): the sessions the broadcast actually reaches.
+
+        The plaque used to say "MULTI: N sessions" with N = the whole registry, which
+        promised an excluded session the bytes it will never get. The count now comes
+        from the hub (`participant_count`), which skips the sessions whose canvas
+        carries `multi_excluded`; the hub is asked with the LIVE registry, so the
+        counter follows both a new/closed session and an exclusion toggle. Without a
+        hub (a test fake) — the plain registry size (the v1.2.3 behaviour).
+        """
+        registry = list(getattr(self, "_terminal_windows", []))
+        hub = getattr(self, "_multi_hub", None)
+        if hub is not None:
+            try:
+                return hub.participant_count(registry)
+            except Exception:  # noqa: BLE001 — a counting failure must not break the mode
+                pass
+        return len(registry)
 
     def _multi_refresh_ui(self):
         """v1.2.3 (task 4): the registry changed (a session opened/closed) ->
@@ -697,7 +730,7 @@ class SshMixin:
         hub = getattr(self, "_multi_hub", None)
         if hub is None or not hub.active:
             return
-        count = len(getattr(self, "_terminal_windows", []))
+        count = self._multi_participant_count()   # v1.3.3.4: without the excluded sessions
         try:
             label = getattr(self, "_multi_label", None)
             plaque = getattr(self, "_multi_plaque", None)

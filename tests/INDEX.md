@@ -145,6 +145,7 @@ of the file itself.
 | `test_terminal_dock.py` | — | v1.2.2 — Terminals docked in the map window (terminal.mode: windows/tabs, ROADMAP v1.2.2). |
 | `test_terminal_input.py` | — | v1.0RC2 — keyboard + selection/copy (ROADMAP v1.0RC2). |
 | `test_terminal_mouse.py` | — | v1.2.13 — the mouse wheel in the full-screen TUI (SGR/X10 passthrough) (ROADMAP v1.2.13, PYTE82_AUDIT.md batch C). |
+| `test_terminal_output.py` | — | v1.3.3.4 — Terminal: working with the output (ROADMAP v1.3.3.4, the topical file). |
 | `test_terminal_page.py` | — | v1.2 — TerminalSessionPage refactor (window → page) + per-session tracking. |
 | `test_terminal_scroll.py` | — | v1.0RC3 — PTY resize + scrollback + dirty rendering (ROADMAP v1.0RC3). |
 | `test_terminal_selection_menu.py` | — | v1.2.7 — Terminal: double/triple-click selection + context menu (ROADMAP v1.2.7). |
