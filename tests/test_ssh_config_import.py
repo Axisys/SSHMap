@@ -496,10 +496,10 @@ from ui import hotkey_registry as HR  # noqa: E402
 check("§8 the action is in the registry with an EMPTY default",
       HR.default_sequence("file.import_ssh_config") == ""
       and "file.import_ssh_config" in HR.HOTKEY_ACTIONS)
-check("§8 the registry grew 43 → 44 actions",
-      len(HR.HOTKEY_ACTIONS) == 44, str(len(HR.HOTKEY_ACTIONS)))
-check("§8 …and the empty defaults 21 → 22",
-      len(HR.empty_default_action_ids()) == 22, str(len(HR.empty_default_action_ids())))
+check("§8 the registry grew 43 → 44 (and v1.4.2 added view.toggle_minimap → 45)",
+      len(HR.HOTKEY_ACTIONS) == 45, str(len(HR.HOTKEY_ACTIONS)))
+check("§8 …and the empty defaults 21 → 22 (v1.4.2: 23)",
+      len(HR.empty_default_action_ids()) == 23, str(len(HR.empty_default_action_ids())))
 
 
 def menu_action(win, action_id):
@@ -661,9 +661,9 @@ print("== §9 the release state ==")
 from _common import EXPECTED_APP_VERSION, EXPECTED_I18N_KEYS  # noqa: E402
 
 check("§9 the version pin is the version this test file describes",
-      EXPECTED_APP_VERSION == "1.4.1", EXPECTED_APP_VERSION)
-check("§9 the key pin counts this release (545 + the 21 keys of the import)",
-      EXPECTED_I18N_KEYS == 566, str(EXPECTED_I18N_KEYS))
+      EXPECTED_APP_VERSION == "1.4.2", EXPECTED_APP_VERSION)
+check("§9 the key pin counts the SHIPPED release (545 + the 21 keys of v1.4.1 + the 4 of v1.4.2)",
+      EXPECTED_I18N_KEYS == 570, str(EXPECTED_I18N_KEYS))
 check_i18n_parity(load_i18n_langs(ROOT))
 check_release_state(ROOT)
 for _code in i18n_lang_codes(ROOT):

@@ -87,6 +87,13 @@ class ProjectIOMixin:
                     width=float(raw_g.get("width") or NodeGroup.DEFAULT_W),
                     height=float(raw_g.get("height") or NodeGroup.DEFAULT_H),
                     group_id=str(raw_g.get("id") or "")[:8] or None,
+                    # v1.4.2 (ROADMAP task 5): the FOLD state — optional keys, written
+                    # only while a group is folded. The member badges arrive as ordinary
+                    # server records with their saved positions, so the group is rebuilt
+                    # with the flag alone (no re-layout: the file holds the grid).
+                    collapsed=bool(raw_g.get("collapsed")),
+                    expanded_width=raw_g.get("expanded_width"),
+                    expanded_height=raw_g.get("expanded_height"),
                 )
             except (TypeError, ValueError):
                 continue

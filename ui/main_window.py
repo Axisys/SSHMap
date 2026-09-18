@@ -947,6 +947,9 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         # v0.9.8: map search (Ctrl+F) — a floating bar over the canvas
         self._setup_map_search()
 
+        # v1.4.2 (ROADMAP task 2): the minimap — a floating panel in the top-right corner
+        self._setup_minimap()
+
         # Status bar
         if self._i18n_available:
             try:
@@ -1587,6 +1590,18 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         self.act_show_map.setIcon(get_icon("map_panel"))
         self.act_show_map.toggled.connect(self._on_map_toggled)
         self._register_i18n(self.act_show_map, "view.toggle_map")
+        # v1.4.2 (ROADMAP task 2): the minimap — a checkable item next to the panel
+        # toggles with the same "created manually + toggled(bool)" pattern. It is a
+        # REGISTRY action with an EMPTY default (no hotkey out of the box, assignable in
+        # "Settings → Hotkeys"); checked = the panel is shown (the config default is on).
+        self.act_show_minimap = view_menu.addAction(
+            self.t("view.toggle_minimap") if self._i18n_available else "Minimap")
+        self.act_show_minimap.setCheckable(True)
+        self.act_show_minimap.setChecked(bool(getattr(self, "_minimap_enabled", True)))
+        self.act_show_minimap.setIcon(get_icon("minimap"))
+        self.act_show_minimap.toggled.connect(self._toggle_minimap)
+        self._register_i18n(self.act_show_minimap, "view.toggle_minimap")
+        self._register_hotkey_target("view.toggle_minimap", self.act_show_minimap)
         # v1.2.4.1 (task 2): corner collapse buttons — the same QAction (toggle()).
         # v1.2.4.1-fix (QA request): the icon — a "◇" diamond on both panels, both
         # at the bottom right (the sidebar's bottom row / the map's right BOTTOM corner — the top is
@@ -2492,6 +2507,14 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
                     except Exception:  # noqa: BLE001 — the panel is cosmetic on teardown
                         pass
 
+                # v1.4.2: the minimap panel — its tooltip is its only text
+                _mini = getattr(self, "minimap", None)
+                if _mini is not None:
+                    try:
+                        _mini.retranslate()
+                    except Exception:  # noqa: BLE001 — the panel is cosmetic on teardown
+                        pass
+
                 # The window title (accounting for the project file and the [*] marker)
                 self._update_window_title()
 
@@ -2934,10 +2957,11 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
     def _connect_group_signals(self, group):
         """Wire the group's signals: the dirty marker + undo commands
         (v0.8.3-audit #6: move/resize/rename enter the stack);
-        renameRequested — to the rename dialog."""
+        renameRequested — to the rename dialog; v1.4.2: collapseRequested (the fold
+        chevron) and collapsedChanged (the fold is persisted → the dirty marker)."""
         try:
             for sig in (group.moved, group.resized, group.titleChanged,
-                        group.membershipChanged):
+                        group.membershipChanged, group.collapsedChanged):
                 sig.connect(lambda *_a: self._mark_dirty())
             # Undo commits of finished gestures (the node_drag_committed pattern)
             group.moveCommitted.connect(
@@ -2948,8 +2972,31 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
             # Double click on the title -> QInputDialog (the g closure — the source group)
             group.renameRequested.connect(
                 lambda *_a, g=group: self._rename_group(g))
+            # v1.4.2 (ROADMAP task 5): the fold chevron asks; the window pushes the
+            # command (the group must not mutate itself — the renameRequested contract).
+            group.collapseRequested.connect(
+                lambda *_a, g=group: self._toggle_group_collapsed(g))
         except Exception:  # noqa: BLE001 — re-wiring is not critical
             pass
+
+    # ── v1.4.2 (ROADMAP task 5): the group fold ─────────────────────
+
+    def _toggle_group_collapsed(self, group) -> bool:
+        """Fold or unfold a group as ONE undo step (the chevron / the context menu).
+
+        The command redoes the fold itself (`_push_command` → `QUndoStack.push` →
+        `redo()`), so nothing is mutated here — the v0.8.3 undo discipline.
+        """
+        if group is None:
+            return False
+        try:
+            target = not group.is_collapsed()
+        except (AttributeError, RuntimeError):
+            return False
+        from modules.undo_commands import CmdToggleGroupCollapse
+        self._push_command(CmdToggleGroupCollapse(self, group, target))
+        self._mark_dirty()
+        return True
 
     # ── v0.9.1: export the map to an image + a background image ────
 
@@ -3315,6 +3362,106 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         # an AttributeError and was silently swallowed by try/except (the panel kept its old x).
         self.view.resized.connect(self._position_map_search_bar)
 
+    # ── v1.4.2 (ROADMAP task 2): the minimap — the big-picture panel over the canvas ──
+
+    def _setup_minimap(self):
+        """Create the minimap panel (a child of the MapView), its state and its wiring.
+
+        The widget paints the scheme at fit scale and asks for a camera move through
+        `center_requested`; the CAMERA stays here (the search-bar split: the widget owns
+        no view logic). Visibility is the `ui_minimap` key of `~/.sshmap/config.json`
+        (a UI state written by its owner — NOT a settings-hub key, like
+        `ui_cmdlib_collapsed`), read once at startup with the default True.
+        """
+        try:
+            from ui.minimap import MinimapWidget
+        except ImportError:  # flat launch from the project root
+            from minimap import MinimapWidget
+
+        self.minimap = MinimapWidget(self.view)
+        self.minimap.center_requested.connect(self._on_minimap_center)
+        # Reposition on every view resize / splitter drag (the map_search pattern).
+        self.view.resized.connect(self._position_minimap)
+        self._minimap_enabled = self._read_minimap_enabled()
+        self.minimap.setVisible(bool(self._minimap_enabled))
+        self._position_minimap()
+
+    @staticmethod
+    def _read_minimap_enabled() -> bool:
+        """`ui_minimap` from the config: a bool wins, anything else (missing/broken) → True."""
+        try:
+            from i18n import load_config
+            value = load_config().get("ui_minimap")
+        except Exception:  # noqa: BLE001 — without a config the feature is simply on
+            return True
+        return bool(value) if isinstance(value, bool) else True
+
+    def _toggle_minimap(self, checked: bool):
+        """v1.4.2: show/hide the minimap + persist `ui_minimap` (a merge write)."""
+        mini = getattr(self, "minimap", None)
+        if mini is None:
+            return
+        visible = bool(checked)
+        try:
+            mini.setVisible(visible)
+            if visible:
+                self._position_minimap()
+                mini.refresh()   # the panel may have been hidden while the map changed
+        except RuntimeError:
+            return  # Qt teardown — the panel is already destroyed
+        try:
+            from i18n import save_config
+            save_config({"ui_minimap": visible})
+        except Exception:  # noqa: BLE001 — the state is cosmetic; a failed write must not break the toggle
+            pass
+
+    def _position_minimap(self):
+        """v1.4.2: the panel in the TOP-RIGHT corner of the map (12 px inset).
+
+        The top of the map was reserved for the minimap as early as the v1.2.4.1-fix
+        comment (the map-collapse diamond sits in the BOTTOM-right corner). While the
+        search bar is OPEN the panel moves BELOW it, so the two floating panels cannot
+        overlap on a narrow window.
+        """
+        mini = getattr(self, "minimap", None)
+        view = getattr(self, "view", None)
+        if mini is None or view is None:
+            return
+        try:
+            w, h = view.width(), view.height()
+            if w <= 0 or h <= 0:
+                return
+            y = 12
+            bar = getattr(self, "map_search", None)
+            if bar is not None and bar.isVisible():
+                y = max(int(bar.geometry().bottom()) + 8, y)
+            x = max(4, w - mini.width() - 12)
+            mini.move(int(x), int(y))
+            if mini.isVisible():
+                mini.raise_()
+        except RuntimeError:
+            pass  # Qt teardown — the widget is already destroyed
+
+    def _on_minimap_center(self, point):
+        """v1.4.2: the minimap asked for a camera move — clamp to the scene and centerOn.
+
+        The inset margin of the fit can ask for a point outside the content, and a
+        centerOn far outside the scene rect would fight the scrollbars: clamping keeps
+        the camera inside the map.
+        """
+        try:
+            x = float(point.x())
+            y = float(point.y())
+        except (TypeError, ValueError, AttributeError):
+            return
+        try:
+            rect = self.scene.sceneRect()
+            x = min(max(x, rect.left()), rect.right())
+            y = min(max(y, rect.top()), rect.bottom())
+            self.view.centerOn(x, y)
+        except RuntimeError:
+            pass  # Qt teardown — the view is gone
+
     def _toggle_map_search(self):
         """v0.9.8: Ctrl+F / "View -> Search map..." — open or close the panel."""
         if self.map_search.isVisible():
@@ -3333,6 +3480,7 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         self.map_search.show()
         self.map_search.raise_()
         self._position_map_search_bar()
+        self._position_minimap()   # v1.4.2: the minimap steps BELOW the search bar
         if self.map_search.query.strip():
             self._on_map_search_query(self.map_search.query)
         self.map_search.focus_input()
@@ -3346,6 +3494,7 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         """
         if getattr(self, "map_search", None) is not None:
             self.map_search.hide()
+        self._position_minimap()   # v1.4.2: the minimap returns to the top-right corner
         self._map_search_query = ""
         self._map_search_matches = []
         self._map_search_index = -1

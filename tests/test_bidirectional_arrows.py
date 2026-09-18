@@ -75,7 +75,9 @@ bi = sc.add_connection("bc03", "bd04", "two-way", "vpn", bidirectional=True)
 check("scene.add_connection(bidirectional=True) sets the flag",
       bi is not None and bi.bidirectional is True)
 
-rect_c, rect_d = nc.sceneBoundingRect(), nd.sceneBoundingRect()
+# v1.4.2 (ROADMAP task 4): the arrow heads sit on the CARD rect (`card_rect_scene()`),
+# not on the shadow halo-inflated boundingRect.
+rect_c, rect_d = nc.card_rect_scene(), nd.card_rect_scene()
 src_head = bi._arrow_head_src.path()
 tgt_head = bi._arrow_head.path()
 check("bidirectional arrow: both heads present (4 elements each)",

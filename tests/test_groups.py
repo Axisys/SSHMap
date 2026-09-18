@@ -103,7 +103,7 @@ check("second resize rescales from current local coords",
       f"({n_r.pos().x():.1f},{n_r.pos().y():.1f})")
 # The expected clamp is computed from the actual node size (font-independent):
 # the local (75, 25) → clamp [MARGIN, max(MARGIN, W - nsize - MARGIN)]
-_nr_rect = n_r.sceneBoundingRect()
+_nr_rect = n_r.card_rect_scene()   # v1.4.2: the member geometry math uses the CARD rect
 _exp_lx = min(max(25.0, _NG.MEMBER_MARGIN), max(_NG.MEMBER_MARGIN, 200.0 - _nr_rect.width() - _NG.MEMBER_MARGIN))
 _exp_ly = min(max(25.0, _NG.MEMBER_MARGIN), max(_NG.MEMBER_MARGIN, 200.0 - _nr_rect.height() - _NG.MEMBER_MARGIN))
 g2.set_group_size(200, 200)   # a group smaller than the node: x is clamped to [MARGIN, W-nw-M]

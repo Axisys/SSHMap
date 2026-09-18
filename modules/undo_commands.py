@@ -189,8 +189,47 @@ class CmdResizeGroup(_MapCommand):
         self._refresh()
 
 
-# ── EditGroupName: group renaming ────────────────────────────────
+# ── ToggleGroupCollapse: folding a group into badges (v1.4.2) ────
 
+class CmdToggleGroupCollapse(_MapCommand):
+    """v1.4.2 (ROADMAP task 5): fold a group's members into badges, or unfold them.
+
+    Why this IS an undo step while the v0.8.4 per-node collapse is not: the fold MOVES
+    the member cards and re-fits the frame — it is a real geometry change, and a Ctrl+Z
+    that skipped it would leave the stack pointing at the wrong step. The GROUP owns the
+    two states: `collapse()` snapshots the arrangement and `expand()` restores it, so
+    this command only decides WHICH one to apply — and a redo after an undo re-snapshots
+    whatever the current arrangement is, which keeps the chain consistent.
+
+    The title is fixed at construction (a QUndoCommand's text is read by the stack/menu);
+    a group whose C++ object is gone (a deleted node, a cleared scene) is a silent no-op
+    (the `_MapCommand` contract).
+    """
+
+    def __init__(self, win, group, collapsed: bool):
+        super().__init__(win, "Collapse group" if collapsed else "Expand group")
+        self._group = group
+        self._collapsed = bool(collapsed)
+
+    def _apply(self, collapsed: bool):
+        try:
+            grp = self._group
+            if grp.scene() is None:
+                return
+            grp.set_collapsed(bool(collapsed))
+        except RuntimeError:
+            pass  # Qt teardown — the item was destroyed, nothing to apply
+
+    def redo(self):
+        self._apply(self._collapsed)
+        self._refresh()
+
+    def undo(self):
+        self._apply(not self._collapsed)
+        self._refresh()
+
+
+# ── EditGroupName: group renaming ────────────────────────────────
 class CmdEditGroupName(_MapCommand):
     """Edits the group title (double-click / context menu)."""
 

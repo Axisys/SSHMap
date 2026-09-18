@@ -296,10 +296,14 @@ class MapScene(QGraphicsScene):
         is trusted — anchor_offset is computed from it relative to the anchor, the note
         does not jump into the corner (v1.2.4-fix: an attached note can be moved).
         Idempotent by id match; False — if the arguments are not on this scene.
+
+        v1.4.2 (ROADMAP task 4): the anchor is the node's CARD rect
+        (`card_rect_scene()`), not the painted boundingRect — otherwise the note would
+        hang 9 px off the card now that the drop-shadow is a halo on all four sides.
         """
         if note is None or node is None or getattr(note, "scene", lambda: None)() is not self:
             return False
-        r = node.sceneBoundingRect()
+        r = node.card_rect_scene()
         anchor_x = r.right() + self.NOTE_ANCHOR_OFFSET_X
         anchor_y = r.top() + self.NOTE_ANCHOR_OFFSET_Y
         if keep_position:
@@ -326,14 +330,15 @@ class MapScene(QGraphicsScene):
     def on_note_drag_updated(self, note=None):
         """v1.2.4-fix: the note is moved/resized with the mouse (dragUpdated) — an attached
         one stays attached: the offset from the anchor is recomputed, the anchor line
-        follows live. A free note / no living node — a no-op."""
+        follows live. A free note / no living node — a no-op.
+        v1.4.2: the anchor rect is the node's CARD (`card_rect_scene()` — task 4)."""
         if note is None or not getattr(note, "server_id", None):
             return
         node = self._nodes.get(note.server_id)
         if node is None:
             return
         try:
-            r = node.sceneBoundingRect()
+            r = node.card_rect_scene()
             p = note.pos()
             note.anchor_offset = (p.x() - (r.right() + self.NOTE_ANCHOR_OFFSET_X),
                                   p.y() - (r.top() + self.NOTE_ANCHOR_OFFSET_Y))
@@ -355,9 +360,10 @@ class MapScene(QGraphicsScene):
                 pass
 
     def _place_note_at_anchor(self, note, node):
-        """The note position = the node anchor (the top-right corner + a 12 px offset, D2)
-        + the note's anchor_offset (v1.2.4-fix: it can be moved — the offset is kept)."""
-        r = node.sceneBoundingRect()
+        """The note position = the node anchor (the card's top-right corner + a 12 px
+        offset, D2) + the note's anchor_offset (v1.2.4-fix: it can be moved — the
+        offset is kept). v1.4.2: the anchor rect is `card_rect_scene()` (task 4)."""
+        r = node.card_rect_scene()
         ox, oy = getattr(note, "anchor_offset", (0.0, 0.0))
         note.prepareGeometryChange()  # QGraphicsProxyWidget — without this there are artifacts
         note.setPos(r.right() + self.NOTE_ANCHOR_OFFSET_X + ox,
@@ -377,11 +383,13 @@ class MapScene(QGraphicsScene):
         self._update_note_anchor_line(note, node)
 
     def _update_note_anchor_line(self, note, node):
-        """A straight path from the note edge to the node edge via two edge_point calls (D3)."""
+        """A straight path from the note edge to the node edge via two edge_point calls (D3).
+        v1.4.2: the node end uses the CARD rect (`card_rect_scene()`) — the anchor line
+        ends on the card, not on its shadow halo (ROADMAP task 4)."""
         line = self._note_anchor_lines.get(getattr(note, "note_id", None))
         if line is None:
             return
-        nr, rr = note.sceneBoundingRect(), node.sceneBoundingRect()
+        nr, rr = note.sceneBoundingRect(), node.card_rect_scene()
         p0 = edge_point(nr, nr.center(), rr.center())
         p1 = edge_point(rr, rr.center(), nr.center())
         path = QPainterPath()
@@ -399,11 +407,17 @@ class MapScene(QGraphicsScene):
 
     def add_group(self, name: str = "", x: float = 0.0, y: float = 0.0,
                   width: Optional[float] = None, height: Optional[float] = None,
-                  group_id: Optional[str] = None) -> NodeGroup:
+                  group_id: Optional[str] = None,
+                  collapsed: bool = False,
+                  expanded_width=None, expanded_height=None) -> NodeGroup:
         """Create a group (frame + title) at a scene point (the top-left corner).
 
         The nodes already lying under the frame automatically become members (resync).
         An id collision — regenerate (the add_server/add_note pattern), the entry is not lost.
+
+        v1.4.2 (ROADMAP task 5): `collapsed` + the pre-fold frame size are the FOLD state
+        (`NodeGroup.__init__`); a folded group is created with the flag only — its member
+        badges arrive from the file with their own saved positions, so nothing is re-laid out.
         """
         if group_id is not None and any(g.group_id == group_id for g in self._groups):
             import uuid as _uuid
@@ -416,7 +430,9 @@ class MapScene(QGraphicsScene):
             name=name, x=x, y=y,
             width=width if width is not None else NodeGroup.DEFAULT_W,
             height=height if height is not None else NodeGroup.DEFAULT_H,
-            group_id=group_id)
+            group_id=group_id,
+            collapsed=collapsed,
+            expanded_width=expanded_width, expanded_height=expanded_height)
         self.addItem(grp)
         self._groups.append(grp)
         self.resync_group_members()  # auto-capture of the nodes under the frame (task v0.8.1 #2)
@@ -491,8 +507,11 @@ class MapScene(QGraphicsScene):
 
         desired = {}  # node_id -> NodeGroup | None (one per node — the topmost group)
         for nid, node in list(self._nodes.items()):
+            # v1.4.2 (ROADMAP task 4): the membership test uses the CARD rect
+            # (card_rect_scene()) — the shadow halo must not count as the card, and the
+            # halo-inflated rect would also shift the centre by SHADOW_DY/2.
             r = QRectF(node_overrides[nid]) if (node_overrides and nid in node_overrides) \
-                else node.sceneBoundingRect()
+                else node.card_rect_scene()
             if r.isEmpty():
                 continue
             center = r.center()
@@ -601,6 +620,24 @@ class MapScene(QGraphicsScene):
         painter.end()
         return pixmap
 
+    # ── v1.4.2 (ROADMAP task 3): the shadow halos of the cards ────────────────────
+
+    def set_shadows_visible(self, visible: bool):
+        """Show/hide every card's shadow halo (v1.4.2) — the vector export needs it OFF.
+
+        A shadow is a cached QPixmap (`ServerNode._shadow_pixmap`), and `QSvgGenerator`
+        writes a pixmap item as a base64 PNG: leaving the halos on would turn the SVG
+        into a partially raster file and break the v1.3.3.7 contract. PNG/PDF exports
+        keep the halo. Idempotent, never raises.
+        """
+        for node in list(self._nodes.values()):
+            setter = getattr(node, "set_shadow_visible", None)
+            if callable(setter):
+                try:
+                    setter(visible)
+                except RuntimeError:  # Qt teardown — the item is already destroyed
+                    continue
+
     # ── v1.3.3.7: SVG export of the map (the vector member of the format set) ──────
 
     def render_to_svg(self, path: str, scale: float = 1.0,
@@ -619,6 +656,11 @@ class MapScene(QGraphicsScene):
 
         Returns the file size in bytes. Raises OSError if the paint device did not
         start or the file was not created (the render_to_pdf error contract).
+
+        v1.4.2 (ROADMAP task 3): the cards' shadow halos are HIDDEN while the scene is
+        rendered — they are cached pixmaps, and `QSvgGenerator` would embed them as
+        base64 PNGs, i.e. the "vector" member of the format set would stop being vector.
+        PNG/PDF keep the halo (raster formats).
         """
         import os
 
@@ -646,7 +688,14 @@ class MapScene(QGraphicsScene):
             raise OSError(f"cannot start painting on SVG device: {path}")
         try:
             painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
-            self.render(painter, target=QRectF(0, 0, w, h), source=src)
+            # v1.4.2: the card shadows are cached PIXMAPS — a QGraphicsPixmapItem would be
+            # embedded as a base64 PNG and the file would stop being fully vector
+            # (the v1.3.3.7 contract). They are hidden for the duration of the export.
+            self.set_shadows_visible(False)
+            try:
+                self.render(painter, target=QRectF(0, 0, w, h), source=src)
+            finally:
+                self.set_shadows_visible(True)
         finally:
             painter.end()
 

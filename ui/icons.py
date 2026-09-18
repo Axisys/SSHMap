@@ -314,6 +314,24 @@ def _draw_map_panel(p):
     p.drawPath(line)
 
 
+def _draw_minimap(p):
+    """v1.4.2: the map frame with a smaller frame inside it — the minimap's viewport mark.
+
+    Four corner dots (the map's content) around a rectangle (the part of the map the
+    view is showing) — the View menu item of the minimap panel.
+    """
+    frame = QPainterPath()
+    frame.addRoundedRect(QRectF(3.0, 3.5, 14.0, 13.0), 1.8, 1.8)
+    p.drawPath(frame)
+    viewport = QPainterPath()
+    viewport.addRect(QRectF(6.2, 6.8, 7.6, 7.0))
+    p.drawPath(viewport)
+    for cx, cy in ((5.0, 5.4), (15.0, 5.4), (5.0, 15.2), (15.0, 15.2)):
+        dot = QPainterPath()
+        dot.addEllipse(QPointF(float(cx), float(cy)), 1.0, 1.0)
+        p.drawPath(dot)
+
+
 def _draw_zoom_in(p):
     """v1.3.3.3: magnifier with a "+" inside — "Zoom In" (View menu)."""
     _draw_magnifier(p)
@@ -387,6 +405,8 @@ _DRAWERS = {
     # v1.2.4.1: panel-collapse icon pair (View menu + corner buttons)
     "sidebar_panel": _draw_sidebar_panel,
     "map_panel": _draw_map_panel,
+    # v1.4.2 (ROADMAP task 2): the minimap panel (the View menu item)
+    "minimap": _draw_minimap,
     # v1.3.3.3 (task 2): the zoom pair of the View menu (project-drawn, no image files)
     "zoom_in": _draw_zoom_in,
     "zoom_out": _draw_zoom_out,

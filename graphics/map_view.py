@@ -362,7 +362,10 @@ class MapView(QGraphicsView):
     def mouseMoveEvent(self, event: QMouseEvent):
         if self._connect_source is not None and self._rubber_band is not None:
             scene_pos = self.mapToScene(event.position().toPoint())
-            src_rect = self._connect_source.sceneBoundingRect()
+            # v1.4.2 (ROADMAP task 4): the band starts on the CARD edge (card_rect_scene),
+            # not on the shadow halo-inflated boundingRect.
+            _rect_fn = getattr(self._connect_source, "card_rect_scene", None)
+            src_rect = _rect_fn() if callable(_rect_fn) else self._connect_source.sceneBoundingRect()
             p0 = edge_point(src_rect, src_rect.center(), scene_pos)
             path, _, _ = build_curve(p0, scene_pos)
             self._rubber_band.setPath(path)
@@ -881,6 +884,19 @@ class MapView(QGraphicsView):
                     if hasattr(w, "_rename_group"):
                         w._rename_group(g)
                 act_rg.triggered.connect(_rename)
+                # v1.4.2 (ROADMAP task 5): the fold — the mirror of the title-band chevron.
+                # The window owns the action (it pushes CmdToggleGroupCollapse).
+                try:
+                    _folded = bool(grp.is_collapsed())
+                except (AttributeError, RuntimeError):
+                    _folded = False
+                act_fold = menu.addAction(
+                    _t("ctx.expand_group") if _folded else _t("ctx.collapse_group"))
+                def _fold(checked=False, g=win_grp):  # checked — a bool from triggered
+                    w = self.window()
+                    if hasattr(w, "_toggle_group_collapsed"):
+                        w._toggle_group_collapsed(g)
+                act_fold.triggered.connect(_fold)
                 act_dg = menu.addAction(_t("ctx.delete_group"))
                 def _del_grp(checked=False, g=win_grp):  # v0.8.1: checked — a bool from triggered
                     w = self.window()

@@ -45,7 +45,24 @@ def _tint(hex_color: str, alpha: int) -> "QColor":
 
 
 class NodeGroup(QGraphicsObject):
-    """A cluster/folder on the map: a frame + a title, drag/resize, server membership."""
+    """A cluster/folder on the map: a frame + a title, drag/resize, server membership.
+
+    **v1.4.2 (ROADMAP task 5) — the FOLD.** A chevron in the title band (and a
+    context-menu pair of the window) folds the group: every member card becomes its
+    v0.8.4 BADGE and the badges are laid out in a grid inside the frame, which is then
+    re-fitted to the grid. Unfolding restores the frame size, every member's position
+    and its previous badge flag from the snapshot taken at the fold. While folded the
+    members are NOT draggable (a folded group is a summary view; a manual move would be
+    undone by the very next unfold) — the GROUP still drags as a whole, and a corner
+    resize re-lays the badges out instead of scaling them.
+
+    The state is PERSISTED (`collapsed` + `expanded_width`/`expanded_height`, written
+    only while folded) and travels through `CmdToggleGroupCollapse` as one undo step —
+    the fold moves real node positions, so it is not a pure view state like the per-node
+    collapse. Known limitation: after a save+reload the pre-fold CARD arrangement is
+    gone (the folded grid is what was saved); unfolding then restores the frame size and
+    un-badges the members where they lie.
+    """
 
     Z_VALUE = -5.0     # below the nodes (z=0) and the arrows (z=-2) — the map's "background" zone
     MIN_W, MIN_H = 160.0, 100.0
@@ -55,6 +72,9 @@ class NodeGroup(QGraphicsObject):
     CORNER_HIT = 18.0      # "grab the corner" zone for resize (px from the bottom-right, as with the notes)
     TITLE_ZONE_H = 28.0    # the top band: a double click — rename
     MEMBER_MARGIN = 8.0    # the minimum inset of the members from the frame when clamping on resize
+    # v1.4.2: the fold (the grid of badges + the chevron's click zone in the title band)
+    BADGE_GAP = 8.0        # the gap between two badges of a folded group
+    CHEVRON_ZONE = 26.0    # the chevron's click zone in the RIGHT corner of the title band
 
     CORNER_RADIUS = theme.RADIUS_GROUP   # rounding of the frame (in one style with the node card)
 
@@ -72,13 +92,20 @@ class NodeGroup(QGraphicsObject):
     titleChanged = Signal(str)     # the title was renamed (the new name — the argument)
     membershipChanged = Signal()   # the member composition changed (a user dragged a node into/out of the group)
     renameRequested = Signal()     # a double click on the title → MainWindow opens the dialog
+    # v1.4.2: a click on the fold chevron → MainWindow pushes CmdToggleGroupCollapse (the
+    # group never mutates itself — the same "ask, do not act" split as renameRequested)
+    collapseRequested = Signal()
+    # v1.4.2: the folded state changed (the dirty marker — the fold is persisted)
+    collapsedChanged = Signal(bool)
     # v0.8.3-audit (#6): completed gestures — for the undo commands (the node_drag_committed pattern)
     moveCommitted = Signal(object, object)   # (the old position as a QPointF, the new one)
     resizeCommitted = Signal(float, float, float, float)  # (w0, h0, w1, h1)
 
     def __init__(self, x: float = 0.0, y: float = 0.0, width: Optional[float] = None,
                  height: Optional[float] = None, name: str = "",
-                 group_id: Optional[str] = None):
+                 group_id: Optional[str] = None,
+                 collapsed: bool = False,
+                 expanded_width=None, expanded_height=None):
         super().__init__()
 
         self.group_id = (str(group_id)[:8] if group_id else "") or None
@@ -93,6 +120,30 @@ class NodeGroup(QGraphicsObject):
         # Members: ServerNode (NOT child QGraphicsItems — independent scene objects;
         # their data.x/data.y stay SCENE coordinates and are saved correctly in the JSON).
         self._members = set()
+
+        # v1.4.2 (ROADMAP task 5): the fold state.
+        # `_collapsed`            — the flag (persisted);
+        # `_expanded_state`       — the session snapshot {node_id: (x, y, collapsed, movable)};
+        # `_expanded_size`        — the frame size to return to on unfold (persisted, so a
+        #                           group restored from a file can unfold sensibly);
+        # `_laying_out`           — the re-entry guard of the badge grid.
+        self._collapsed = bool(collapsed)
+        self._expanded_state = None
+        self._expanded_size = None
+        # v1.4.2: the badge grid must not be re-laid out in the MIDDLE of a bulk move or
+        # of an unfold — the members of a group are shifted one by one, so every
+        # intermediate resync would otherwise see a half-moved composition and rewrite
+        # the grid (the "a folded group drags as a whole" regression).
+        self._suspend_layout = False
+        if self._collapsed:
+            try:
+                ew = float(expanded_width)
+                eh = float(expanded_height)
+                if ew > 0.0 and eh > 0.0:
+                    self._expanded_size = (ew, eh)
+            except (TypeError, ValueError):
+                self._expanded_size = None
+        self._laying_out = False
 
         # Manual move/resize (the StickyNote pattern: otherwise ScrollHandDrag would steal the gesture)
         self._drag_mode = None        # None | "move" | "resize"
@@ -111,6 +162,9 @@ class NodeGroup(QGraphicsObject):
 
         self._display_name = ""
         self._update_title_text()
+        # v1.4.2: a member captured while the group is folded joins the grid (a session
+        # fold only — a group restored folded from a file keeps its saved arrangement)
+        self.membershipChanged.connect(self._on_membership_changed)
 
     # ── Geometry helpers (the StickyNote/ServerNode pattern: explicit geometry) ──
 
@@ -155,8 +209,63 @@ class NodeGroup(QGraphicsObject):
                 self._height - self.CORNER_HIT <= local.y() <= self._height)
 
     def _in_title_zone(self, local: QPointF) -> bool:
-        """The top band — the double-click zone for renaming."""
+        """The top band — the double-click zone for renaming (the chevron zone excluded)."""
+        if self._in_chevron(local):
+            return False  # v1.4.2: the fold chevron lives in the right corner of the band
         return 0.0 <= local.x() <= self._width and 0.0 <= local.y() <= self.TITLE_ZONE_H
+
+    def _in_chevron(self, local: QPointF) -> bool:
+        """v1.4.2: is the local point inside the fold chevron's click zone?"""
+        try:
+            return self.chevron_rect().contains(QPointF(local))
+        except (TypeError, AttributeError):
+            return False
+
+    def chevron_rect(self) -> QRectF:
+        """v1.4.2: the fold chevron's click zone — the RIGHT corner of the title band.
+
+        The ServerNode pattern (a chevron in the top-right corner of the card), so the
+        fold is discoverable without opening a menu; the same click is available as the
+        `ctx.collapse_group`/`ctx.expand_group` pair of the context menu.
+        """
+        z = self.CHEVRON_ZONE
+        return QRectF(max(self._width - z, 0.0), 0.0, z, self.TITLE_ZONE_H)
+
+    def _chevron_path(self) -> QPainterPath:
+        """The chevron glyph: ▾ while folded ("can be unfolded") / ▴ while expanded."""
+        path = QPainterPath()
+        cx = self._width - self.CHEVRON_ZONE / 2.0
+        cy = self.TITLE_ZONE_H / 2.0
+        if self._collapsed:
+            path.moveTo(cx - 5.0, cy - 2.0)
+            path.lineTo(cx + 5.0, cy - 2.0)
+            path.lineTo(cx, cy + 4.0)
+        else:
+            path.moveTo(cx - 5.0, cy + 2.0)
+            path.lineTo(cx + 5.0, cy + 2.0)
+            path.lineTo(cx, cy - 4.0)
+        path.closeSubpath()
+        return path
+
+    def set_frame_size(self, width: float, height: float, resync: bool = True) -> bool:
+        """v1.4.2: set the FRAME size only — the members are NOT touched.
+
+        The shared half of the fold (`_layout_badges` re-fits the frame around the badge
+        grid) and of `set_group_size` in its folded branch; the expanded branch keeps its
+        own proportional member scaling and does not come through here.
+        Returns True if the size really changed. `resync=False` is for a caller that
+        lays the members out itself right afterwards.
+        """
+        w, h = self._clamp_size(width, height)
+        if abs(w - self._width) < 0.5 and abs(h - self._height) < 0.5:
+            return False
+        self.prepareGeometryChange()
+        self._width, self._height = float(w), float(h)
+        self._update_title_text()  # the title eliding depends on the width
+        if resync:
+            self._resync_members()
+        self.update()
+        return True
 
     def set_group_size(self, width: float, height: float) -> bool:
         """Change the group size (clamped MIN/MAX).
@@ -166,8 +275,19 @@ class NodeGroup(QGraphicsObject):
         top-left corner), then clamped inside the frame with MEMBER_MARGIN, so they
         do not "fall out" of the folder even if the group became smaller than a node.
 
+        v1.4.2 (ROADMAP task 5): a FOLDED group is the exception — its badges are a grid,
+        so a resize re-lays the grid out (the column count follows the new width) instead
+        of scaling cards that are not cards at the moment.
+
         Returns True if the size really changed.
         """
+        if self._collapsed:
+            if not self.set_frame_size(width, height, resync=False):
+                return False
+            self._layout_badges()
+            self.resized.emit()
+            return True
+
         w, h = self._clamp_size(width, height)
         if abs(w - self._width) < 0.5 and abs(h - self._height) < 0.5:
             return False
@@ -183,7 +303,10 @@ class NodeGroup(QGraphicsObject):
         self._width, self._height = float(w), float(h)
 
         for node in list(self._members):
-            r = node.sceneBoundingRect()  # a node — an independent scene item: scene coordinates
+            # v1.4.2 (ROADMAP task 4): the member geometry is its CARD rect
+            # (`card_rect_scene()`), not the painted boundingRect — the drop-shadow halo
+            # would otherwise shift and inflate every proportional reposition.
+            r = node.card_rect_scene()  # a node — an independent scene item: scene coordinates
             lx = (r.left() - gpos.x()) * sx
             ly = (r.top() - gpos.y()) * sy
             nw, nh = r.width(), r.height()
@@ -203,21 +326,28 @@ class NodeGroup(QGraphicsObject):
         return True
 
     def _apply_move(self, delta: QPointF):
-        """Shift the group AND all members by delta (task v0.8.1 #2 — the drag part)."""
+        """Shift the group AND all members by delta (task v0.8.1 #2 — the drag part).
+
+        v1.4.2: the whole shift is atomic for the badge grid (`_suspend_layout`) — the
+        members move one by one, and a re-layout triggered by an intermediate resync
+        would fight the very move it is part of.
+        """
         if abs(delta.x()) < 0.5 and abs(delta.y()) < 0.5:
             return
         self.prepareGeometryChange()
         self._applying_move = True
+        self._suspend_layout = True
         try:
             self.setPos(self.pos() + delta)
+            for node in list(self._members):
+                # ServerNode.itemChange syncs data.x/data.y and the connection arrows by itself
+                node.setPos(node.pos() + delta)
+            sc = self.scene()
+            if sc is not None and hasattr(sc, "resync_group_members"):
+                sc.resync_group_members()  # other nodes may have ended up under the frame
         finally:
+            self._suspend_layout = False
             self._applying_move = False
-        for node in list(self._members):
-            # ServerNode.itemChange syncs data.x/data.y and the connection arrows by itself
-            node.setPos(node.pos() + delta)
-        sc = self.scene()
-        if sc is not None and hasattr(sc, "resync_group_members"):
-            sc.resync_group_members()  # other nodes may have ended up under the frame
         self.moved.emit()
 
     def itemChange(self, change, value):
@@ -229,6 +359,7 @@ class NodeGroup(QGraphicsObject):
 
         As with ServerNode, the hook is called BEFORE the position is applied: the frame for
         the resync is computed from value explicitly (the moving_group override in MapScene).
+        v1.4.2: the same atomicity as in _apply_move (the badge grid is not re-laid mid-move).
         """
         if change == QGraphicsItem.ItemPositionChange and not getattr(self, "_applying_move", False):
             try:
@@ -238,13 +369,17 @@ class NodeGroup(QGraphicsObject):
                 return super().itemChange(change, value)
             if abs(dx) + abs(dy) > 0.5:
                 result = super().itemChange(change, value)  # accept → Qt applies the position
-                for node in list(self._members):
-                    node.setPos(node.pos() + QPointF(dx, dy))
-                sc = self.scene()
-                if sc is not None and hasattr(sc, "resync_group_members"):
-                    target_rect = QRectF(float(value.x()), float(value.y()),
-                                         self._width, self._height)
-                    sc.resync_group_members(moving_group=(self, target_rect))
+                self._suspend_layout = True
+                try:
+                    for node in list(self._members):
+                        node.setPos(node.pos() + QPointF(dx, dy))
+                    sc = self.scene()
+                    if sc is not None and hasattr(sc, "resync_group_members"):
+                        target_rect = QRectF(float(value.x()), float(value.y()),
+                                             self._width, self._height)
+                        sc.resync_group_members(moving_group=(self, target_rect))
+                finally:
+                    self._suspend_layout = False
                 return result
         return super().itemChange(change, value)
 
@@ -284,6 +419,217 @@ class NodeGroup(QGraphicsObject):
         if self._members:
             self._members.clear()
             self.membershipChanged.emit()
+
+    # ── v1.4.2 (ROADMAP task 5): the FOLD — the members become a grid of badges ──────
+
+    def is_collapsed(self) -> bool:
+        """Is the group folded (its members shown as badges)?"""
+        return bool(self._collapsed)
+
+    @property
+    def collapsed(self) -> bool:
+        """The folded flag (the persisted state — `is_collapsed()` in property form)."""
+        return bool(self._collapsed)
+
+    def set_collapsed(self, collapsed: bool) -> bool:
+        """Fold (True) or unfold (False); idempotent. Returns True if the state changed.
+
+        The API `CmdToggleGroupCollapse` drives — the group never folds itself on a click
+        (`collapseRequested` asks the window, which pushes the command).
+        """
+        return self.collapse() if collapsed else self.expand()
+
+    def collapse(self) -> bool:
+        """Fold the group: badge every member, lay the badges out, re-fit the frame.
+
+        The snapshot (`_expanded_state` + `_expanded_size`) is taken FIRST, so `expand()`
+        can restore the exact arrangement; a repeated call is a no-op.
+        """
+        if self._collapsed:
+            return False
+        self._expanded_size = (float(self._width), float(self._height))
+        self._expanded_state = {}
+        self._collapsed = True
+        self._fold_members()
+        self._layout_badges()
+        self.update()
+        self.collapsedChanged.emit(True)
+        return True
+
+    def expand(self) -> bool:
+        """Unfold the group: restore the frame size and every member's arrangement.
+
+        Without a snapshot (a group restored FOLDED from a project file, whose pre-fold
+        card layout was never saved) the members are un-badged WHERE THEY LIE and only
+        the frame size is restored — the documented v1.4.2 limitation.
+        """
+        if not self._collapsed:
+            return False
+        state = self._expanded_state or {}
+        # `_collapsed` goes False BEFORE the loop: the members are un-badged one by one, and
+        # a resync triggered by an intermediate setPos must not see a "folded" group and
+        # re-fold the very members this call is restoring (the v1.4.2 expand regression).
+        self._collapsed = False
+        self._suspend_layout = True
+        try:
+            if self._expanded_size:
+                self.set_frame_size(self._expanded_size[0], self._expanded_size[1], resync=False)
+            gpos = self.pos()
+            for member in list(self._members):
+                data = getattr(member, "data", None)
+                if data is None:
+                    continue
+                entry = state.get(str(getattr(data, "id", "") or ""))
+                if entry is not None:
+                    lx, ly, was_collapsed, was_movable = entry
+                    data.collapsed = bool(was_collapsed)
+                else:
+                    data.collapsed = False
+                    was_movable = True
+                try:
+                    member.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsMovable, bool(was_movable))
+                    if entry is not None:
+                        # the snapshot holds LOCAL offsets from the frame's top-left corner,
+                        # so a group dragged while folded unfolds into its CURRENT place
+                        member.setPos(gpos.x() + float(lx), gpos.y() + float(ly))
+                except RuntimeError:
+                    continue  # Qt teardown — the item is gone
+                updater = getattr(member, "update_appearance", None)
+                if callable(updater):
+                    updater()
+            self._resync_members()
+        finally:
+            self._suspend_layout = False
+        self._expanded_state = None
+        self._expanded_size = None
+        self.update()
+        self.collapsedChanged.emit(False)
+        return True
+
+    def _fold_members(self):
+        """Switch every member into its v0.8.4 badge and freeze it (no dragging while folded).
+
+        Called by `collapse()` and by a membership change of a session-owned fold; the
+        snapshot entry is added only when one is due (`_expanded_state` is not None).
+        """
+        for member in list(self._members):
+            data = getattr(member, "data", None)
+            if data is None:
+                continue
+            if self._expanded_state is not None:
+                try:
+                    movable = bool(member.flags() & QGraphicsItem.GraphicsItemFlag.ItemIsMovable)
+                    gpos = self.pos()
+                    self._expanded_state.setdefault(
+                        str(getattr(data, "id", "") or ""),
+                        (float(member.pos().x()) - float(gpos.x()),
+                         float(member.pos().y()) - float(gpos.y()),
+                         bool(getattr(data, "collapsed", False)), movable))
+                except RuntimeError:
+                    continue
+            if not getattr(data, "collapsed", False):
+                data.collapsed = True
+            try:
+                member.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsMovable, False)
+            except RuntimeError:
+                continue
+            updater = getattr(member, "update_appearance", None)
+            if callable(updater):
+                updater()
+
+    @staticmethod
+    def _grid_sort_key(member) -> tuple:
+        """A STABLE reading order of the badge grid: alias (lower-cased), then id.
+
+        Deliberately not the current position: a re-layout after an undo (or a resize of
+        a folded group) must reproduce the same grid, and a position-derived order would
+        shuffle as soon as the layout itself moved the cards.
+        """
+        data = getattr(member, "data", None)
+        return (str(getattr(data, "alias", "") or "").lower(),
+                str(getattr(data, "id", "") or ""))
+
+    @staticmethod
+    def _badge_size(member) -> tuple:
+        """(width, height) a member occupies while folded (the badge metrics)."""
+        try:
+            width = float(getattr(member, "_current_width", 0.0) or 0.0)
+        except (TypeError, ValueError):
+            width = 0.0
+        try:
+            height = float(getattr(member, "COLLAPSED_HEIGHT", 0.0) or 0.0)
+        except (TypeError, ValueError):
+            height = 0.0
+        return max(width, 60.0), max(height, 1.0)
+
+    def _resync_members(self):
+        """Recompute the membership of the scene (the group's frame just changed)."""
+        sc = self.scene()
+        if sc is not None and hasattr(sc, "resync_group_members"):
+            sc.resync_group_members()
+
+    def _layout_badges(self) -> bool:
+        """Lay the members' badges out in a grid inside the frame and re-fit the frame.
+
+        The grid: a uniform column width (the widest badge), `BADGE_GAP` between the
+        cells, the first row under the title band, `MEMBER_MARGIN` insets. The column
+        count starts from what the CURRENT width takes and grows until the grid fits
+        `MAX_H`, so a wide group gets a table and a narrow one a column. Every badge is
+        placed INSIDE the new frame — that is what preserves the geometric membership.
+        Returns False when there is nothing to lay out (or on re-entry).
+        """
+        if self._laying_out:
+            return False
+        members = [m for m in self._members if getattr(m, "data", None) is not None]
+        if not members:
+            return False
+        self._laying_out = True
+        try:
+            members.sort(key=self._grid_sort_key)
+            m = self.MEMBER_MARGIN
+            gap = self.BADGE_GAP
+            top = self.TITLE_ZONE_H + m
+            col_w = max(self._badge_size(x)[0] for x in members)
+            badge_h = max(self._badge_size(x)[1] for x in members)
+            n = len(members)
+
+            columns = int(max(1.0, (self._width - 2.0 * m + gap) // (col_w + gap)))
+            columns = max(1, min(columns, n))
+            cols, need_w, need_h = columns, 0.0, 0.0
+            for candidate in range(columns, n + 1):
+                rows = (n + candidate - 1) // candidate
+                need_w = 2.0 * m + candidate * col_w + (candidate - 1) * gap
+                need_h = top + rows * badge_h + (rows - 1) * gap + m
+                cols = candidate
+                if need_h <= self.MAX_H:
+                    break
+
+            self.set_frame_size(max(need_w, self.MIN_W), max(need_h, self.MIN_H), resync=False)
+            gpos = self.pos()
+            for i, member in enumerate(members):
+                row, col = divmod(i, cols)
+                member.setPos(gpos.x() + m + col * (col_w + gap),
+                              gpos.y() + top + row * (badge_h + gap))
+            self._resync_members()
+        finally:
+            self._laying_out = False
+        self.update()
+        return True
+
+    def _on_membership_changed(self):
+        """v1.4.2: a member joined/left while the group is folded.
+
+        A SESSION fold re-lays the grid (and badges the newcomer); a group restored
+        folded from a FILE keeps its saved arrangement — there is no snapshot, and a
+        re-layout would destroy exactly the positions the file stored. A bulk move
+        (`_apply_move` / a programmatic setPos) and the unfold itself are ATOMIC: the
+        grid is not touched while they run (`_suspend_layout`).
+        """
+        if (not self._collapsed or self._laying_out or self._suspend_layout
+                or self._expanded_state is None):
+            return
+        self._fold_members()
+        self._layout_badges()
 
     # ── Title ──────────────────────────────────────────────
 
@@ -337,9 +683,17 @@ class NodeGroup(QGraphicsObject):
             painter.setFont(self._title_font())
             painter.setPen(QPen(title_color))
             painter.drawText(
-                QRectF(14.0, 3.0, max(w - 28.0, 1.0), self.TITLE_ZONE_H - 6.0),
+                QRectF(14.0, 3.0, max(w - 28.0 - self.CHEVRON_ZONE, 1.0), self.TITLE_ZONE_H - 6.0),
                 Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
                 self._display_name)
+
+        # v1.4.2: the fold chevron in the right corner of the title band (▾ folded /
+        # ▴ expanded) — always visible, so the fold is discoverable without a menu.
+        chevron_pen = QPen(title_color, 1.6)
+        chevron_pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+        painter.setPen(chevron_pen)
+        painter.setBrush(QBrush(Qt.BrushStyle.NoBrush))
+        painter.drawPath(self._chevron_path())
 
         # The resize-corner marker — visible on hover/selection (a "drag by this corner" hint)
         if self._hover or self.isSelected():
@@ -356,6 +710,17 @@ class NodeGroup(QGraphicsObject):
             local = self.mapFromScene(scene_pos) if scene_pos is not None else None
             if local is None or not self.boundingRect().contains(local):
                 super().mousePressEvent(event)  # a click outside the group — the standard path
+                return
+            # v1.4.2: the fold chevron — the group ASKS (the window pushes the undo
+            # command); checked BEFORE the move/resize branch so a click on it can never
+            # start a drag or a resize.
+            if self._in_chevron(local):
+                self.setSelected(True)
+                try:
+                    self.collapseRequested.emit()
+                except RuntimeError:
+                    pass  # Qt teardown — the receiver is gone
+                event.accept()
                 return
             self.setSelected(True)
             if self._in_corner(local):
@@ -456,7 +821,10 @@ class NodeGroup(QGraphicsObject):
     # Membership is NOT stored — the geometric invariant recomputes it on load.
 
     def to_dict(self) -> dict:
-        return {
+        """The `groups` record. v1.4.2: the fold state is written ONLY while folded
+        (the optional-field pattern — an old file has no such keys and loads unfolded,
+        an older application ignores them)."""
+        data = {
             "id": self.group_id,
             "name": self._name,
             "x": float(self.pos().x()),
@@ -464,10 +832,22 @@ class NodeGroup(QGraphicsObject):
             "width": float(self._width),
             "height": float(self._height),
         }
+        if self._collapsed:
+            data["collapsed"] = True
+            if self._expanded_size:
+                data["expanded_width"] = float(self._expanded_size[0])
+                data["expanded_height"] = float(self._expanded_size[1])
+        return data
 
     @classmethod
     def from_dict(cls, raw: dict) -> "NodeGroup":
-        """Create a group from a JSON entry (corrupt values — defaults; the StickyNote pattern)."""
+        """Create a group from a JSON entry (corrupt values — defaults; the StickyNote pattern).
+
+        v1.4.2: `collapsed` + the pre-fold frame size are read back. A FOLDED group is
+        rebuilt WITHOUT re-laying the badges out — the saved member positions ARE the
+        grid (the loader adds them afterwards), only the flag and the unfold size are
+        restored.
+        """
         try:
             x = float(raw.get("x") or 0.0)
             y = float(raw.get("y") or 0.0)
@@ -476,7 +856,11 @@ class NodeGroup(QGraphicsObject):
         except (TypeError, ValueError):
             x, y, w, h = 0.0, 0.0, cls.DEFAULT_W, cls.DEFAULT_H
         group_id = str(raw.get("id") or "")[:8] or None
+        collapsed = bool(raw.get("collapsed"))
+        expanded_w = raw.get("expanded_width") if collapsed else None
+        expanded_h = raw.get("expanded_height") if collapsed else None
         return cls(
             name=str(raw.get("name") or ""),
             x=x, y=y, width=w, height=h, group_id=group_id,
+            collapsed=collapsed, expanded_width=expanded_w, expanded_height=expanded_h,
         )

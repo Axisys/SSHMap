@@ -1,7 +1,8 @@
 """UI polish: nodes, grid, fit/zoom, status bar, icons, arrow hit zones (former smoke_test).
 
 A part of the suite split out of smoke_test.py v0.6–v0.9.2 (see INDEX.md).
-  * the node's boundingRect includes the shadow strip; the decorative 🔒 button removed;
+  * the node's boundingRect includes the shadow halo (v1.4.2: a cached pixmap);
+    the decorative 🔒 button removed; the anchors use `card_rect_scene()`;
   * the status dot + the dimming of the offline node's content down to 0.55;
   * the adaptive grid: a 20px step at zoom >= 1, the doubling at a small zoom;
   * fit_to_content (with the content → True, an empty scene → False without a crash);
@@ -22,7 +23,7 @@ from _common import bootstrap, check, finish, snapshot_i18n_config, restore_i18n
 
 ROOT, WORK = bootstrap()  # BEFORE the app module imports
 
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QGraphicsPixmapItem
 app = QApplication(sys.argv)
 
 import ui.main_window as MW
@@ -41,10 +42,20 @@ d_b = server_data_from_dict({"alias": "ctx-b", "host": "192.168.3.53", "user": "
 n_a = win.scene.add_server(d_a)
 n_b = win.scene.add_server(d_b)
 
-# The node: the shadow strip is in the boundingRect; the decorative 🔒 button is removed
-check("node boundingRect includes shadow strip",
-      abs(n_a.boundingRect().height() - (_SN.MIN_NODE_HEIGHT + _SN.SHADOW_BOTTOM)) < 0.5,
+# The node: the shadow halo is in the boundingRect (v1.4.2 — a cached pixmap on all four
+# sides, SHADOW_BOTTOM = 2*SHADOW_BLUR + SHADOW_DY is the derived total); the card rect
+# (`card_rect_scene`) is what the anchors use. The decorative 🔒 button is removed.
+check("node boundingRect includes the shadow halo",
+      abs(n_a.boundingRect().height() - (_SN.MIN_NODE_HEIGHT + _SN.SHADOW_BOTTOM)) < 0.5
+      and abs(n_a.boundingRect().top() + _SN.SHADOW_BLUR) < 0.5,
       str(n_a.boundingRect()))
+check("v1.4.2: card_rect_scene() is the card inside the halo",
+      abs(n_a.card_rect_scene().width() - n_a._current_width) < 0.5
+      and abs(n_a.card_rect_scene().height() - n_a._current_height) < 0.5,
+      str(n_a.card_rect_scene()))
+check("v1.4.2: the shadow is a shared cached PIXMAP (not an effect, not a path)",
+      isinstance(n_a._shadow, QGraphicsPixmapItem) and not n_a._shadow.pixmap().isNull(),
+      type(n_a._shadow).__name__)
 check("decorative SSH lock button removed from node", not hasattr(n_a, "_ssh_btn"))
 
 # The status dot + dimming the offline node's content (the frame and the dots stay bright)
@@ -111,8 +122,10 @@ check("unknown icon name -> empty QIcon", _gi_up("no_such_icon").isNull())
 from graphics.connection_arrow import build_curve as _bc73, curve_midpoint as _cm73, edge_point as _ep73
 _arrow_hit = win.scene.add_connection(d_a.id, d_b.id, "up-hit", "ssh")
 if _arrow_hit is not None:
-    _s_r = _arrow_hit.source.sceneBoundingRect()
-    _t_r = _arrow_hit.target.sceneBoundingRect()
+    # v1.4.2 (ROADMAP task 4): the arrow geometry is anchored on the CARD rect —
+    # the probe rebuilds the same curve from `card_rect_scene()`.
+    _s_r = _arrow_hit.source.card_rect_scene()
+    _t_r = _arrow_hit.target.card_rect_scene()
     _hp0 = _ep73(_s_r, _s_r.center(), _t_r.center())
     _hp3 = _ep73(_t_r, _t_r.center(), _s_r.center())
     _hpath, _hc1, _hc2 = _bc73(_hp0, _hp3)

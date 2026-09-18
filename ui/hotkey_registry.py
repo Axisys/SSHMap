@@ -116,6 +116,9 @@ HOTKEY_ACTIONS: Dict[str, dict] = {
     "view.center_map":      {"label": "view.center_map",      "default": ""},
     "view.collapse_all":    {"label": "view.collapse_all",    "default": ""},
     "view.expand_all":      {"label": "view.expand_all",      "default": ""},
+    # v1.4.2 (ROADMAP task 2): the minimap panel — a checkable View item, and (like the
+    # rest of the overlay family) assignable without stealing a key from anyone.
+    "view.toggle_minimap":  {"label": "view.toggle_minimap",  "default": ""},
     "view.set_background":  {"label": "view.set_background",  "default": ""},
     "view.remove_background": {"label": "view.remove_background", "default": ""},
     "profile.manage":       {"label": "profile.manage",       "default": ""},

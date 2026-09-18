@@ -1,3 +1,4 @@
+import functools
 from typing import Optional
 
 try:
@@ -16,10 +17,11 @@ except ImportError:
     from ui import theme
 
 from PySide6.QtCore import Qt, QPointF, QRectF, QVariantAnimation
-from PySide6.QtGui import QBrush, QColor, QFont, QPainterPath, QPen, QFontMetrics, QTransform
+from PySide6.QtGui import (QBrush, QColor, QFont, QPainter, QPainterPath, QPen,
+                           QFontMetrics, QPixmap, QTransform)
 from PySide6.QtWidgets import (
     QGraphicsEllipseItem, QGraphicsItemGroup, QGraphicsItem,
-    QGraphicsPathItem, QGraphicsTextItem,
+    QGraphicsPathItem, QGraphicsPixmapItem, QGraphicsTextItem,
 )
 
 
@@ -30,6 +32,72 @@ def _t(key: str) -> str:
         return _translate(key)
     except Exception:
         return key
+
+
+# ── v1.4.2 (ROADMAP task 3): the card drop-shadow — ONE cached pixmap per SIZE ──────
+# The v1.2.5 shadow was a single QGraphicsPathItem: a hard-edged strip that extended the
+# card only DOWNWARD (SHADOW_BOTTOM = 3), so sceneBoundingRect() could double as the
+# arrow/note anchor. The v1.4.2 halo covers all four sides, and a per-item
+# QGraphicsDropShadowEffect is FORBIDDEN here — every effect is a separate render layer,
+# and the pain at 500 nodes was pinned by the v1.2.10 audit. The soft falloff is painted
+# ONCE per distinct card size into a QPixmap and shared by every card of that size
+# (a bounded LRU — 500 cards have a handful of distinct widths/heights).
+SHADOW_BLUR = 9.0          # the halo's thickness on every side, in scene px
+SHADOW_DY = 3.0            # the shadow sits a little lower than the card
+SHADOW_LAYERS = 9          # the "blur" = N inflated rounded rects with a low alpha each
+SHADOW_LAYER_ALPHA = 12    # per layer; the overlap accumulates to the v1.2.5 tone (~110)
+SHADOW_CACHE_SIZE = 64     # at most this many distinct card SIZES keep a pixmap
+
+
+@functools.lru_cache(maxsize=SHADOW_CACHE_SIZE)
+def _shadow_pixmap(width: int, height: int, radius: float) -> QPixmap:
+    """The soft shadow of a card of this size (v1.4.2) — the cache key is the SIZE.
+
+    The pixmap is `SHADOW_BLUR` wider than the card on every side (+`SHADOW_DY` at the
+    bottom), and the card's top-left corner sits exactly at `(SHADOW_BLUR, SHADOW_BLUR)`
+    inside it — that is what the `_shadow` item's position relies on. The falloff is
+    built by drawing the card-shaped rounded rect `SHADOW_LAYERS` times, each time
+    inflated by `SHADOW_BLUR/LAYERS` and with `SHADOW_LAYER_ALPHA` — the inner layers
+    overlap the outer ones, so the alpha grows towards the card and the edge fades.
+
+    `lru_cache` is the whole point of the feature (the v1.2.10 audit): a cache HIT
+    costs nothing, a MISS paints ~9 paths once. A QPixmap needs a live QGuiApplication,
+    and this function is only ever reached from a card being built — i.e. after one.
+    """
+    blur = int(SHADOW_BLUR)
+    w = max(int(width), 1)
+    h = max(int(height), 1)
+    pm = QPixmap(w + 2 * blur, h + 2 * blur + int(SHADOW_DY))
+    pm.fill(Qt.GlobalColor.transparent)
+    painter = QPainter(pm)
+    try:
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        painter.setPen(Qt.PenStyle.NoPen)
+        layer = QColor(0, 0, 0)
+        layer.setAlpha(SHADOW_LAYER_ALPHA)
+        painter.setBrush(QBrush(layer))
+        dy = float(SHADOW_DY)
+        r = max(float(radius), 0.0)
+        for i in range(SHADOW_LAYERS, 0, -1):
+            grow = SHADOW_BLUR * i / SHADOW_LAYERS
+            path = QPainterPath()
+            path.addRoundedRect(
+                QRectF(blur - grow, blur - grow + dy, w + 2 * grow, h + 2 * grow),
+                r + grow * 0.5, r + grow * 0.5)
+            painter.drawPath(path)
+    finally:
+        painter.end()
+    return pm
+
+
+def shadow_cache_info():
+    """The `lru_cache` stats of the shadow pixmaps (v1.4.2 — the topical test)."""
+    return _shadow_pixmap.cache_info()
+
+
+def clear_shadow_cache():
+    """Drop the cached shadow pixmaps (tests / a theme switch; harmless in the app)."""
+    _shadow_pixmap.cache_clear()
 
 
 class ServerNode(QGraphicsItemGroup):
@@ -62,12 +130,18 @@ class ServerNode(QGraphicsItemGroup):
     # Collapsed line: the icon is raised to visually center with the text.
     COLLAPSED_ICON_DY = -8.0
 
-    # UI polish: card corner radius and "shadow" — a narrow strip under the bottom edge.
-    # The shadow is drawn INSIDE the boundingRect (Qt clips child elements by it),
-    # so boundingRect() is extended downward by SHADOW_BOTTOM px; the arrows then
-    # reach exactly the shadow boundary instead of "hanging in the air" (edge_point works from the boundingRect).
+    # UI polish: card corner radius and the drop-shadow.
+    # v1.4.2 (ROADMAP task 3): the shadow is a CACHED PIXMAP HALO (see _shadow_pixmap):
+    # it extends the card on all four sides, so boundingRect() is inflated by
+    # SHADOW_BLUR everywhere (+ SHADOW_DY at the bottom — the shadow sits lower).
+    # SHADOW_BOTTOM is kept as the DERIVED total ("how much taller the boundingRect is
+    # than the card", 2*BLUR + DY) — the v0.8.4 collapse checks and the suite read it.
+    # The ANCHORS (arrows, pinned notes, group membership) no longer come from the
+    # boundingRect: they use card_rect()/card_rect_scene() (task 4).
     CORNER_RADIUS = theme.RADIUS_NODE
-    SHADOW_BOTTOM = 3.0
+    SHADOW_BLUR = SHADOW_BLUR
+    SHADOW_DY = SHADOW_DY
+    SHADOW_BOTTOM = 2 * SHADOW_BLUR + SHADOW_DY
 
     # v1.2.5: all colors — from the central theme (ui/theme.py); values unchanged.
     COLOR_BG = QColor(theme.NODE_BG)
@@ -85,8 +159,9 @@ class ServerNode(QGraphicsItemGroup):
     SEARCH_MATCH_COLOR = QColor(theme.ACCENT)
     COLOR_TEXT = QColor(theme.NODE_TEXT)
     COLOR_LABEL = QColor(theme.NODE_LABEL)
-    # UI polish: "shadow" under the card and the gray indicator-dot color until checked.
-    COLOR_SHADOW = QColor(0, 0, 0, 110)
+    # UI polish: the gray indicator-dot color until checked.
+    # (v1.4.2: the old flat shadow color is gone — the halo is painted by
+    #  `_shadow_pixmap()` from a black layer color, see the module constants.)
     COLOR_DOT_IDLE = QColor(theme.DOT_IDLE)
 
     # v0.7.1: frame colors by availability status (StatusChecker).
@@ -155,13 +230,14 @@ class ServerNode(QGraphicsItemGroup):
         self._rebuild_tag_strip()
 
     def _build_appearance(self):
-        # UI polish: "shadow" under the card — a narrow strip below the bottom edge.
-        # Drawn inside the boundingRect (Qt clips child elements by it),
-        # so the boundingRect is extended downward by SHADOW_BOTTOM px.
-        self._shadow = QGraphicsPathItem(self)
-        self._shadow.setPen(QPen(Qt.PenStyle.NoPen))
-        self._shadow.setBrush(QBrush(self.COLOR_SHADOW))
+        # v1.4.2 (ROADMAP task 3): the drop-shadow — a cached PIXMAP HALO, not a path item
+        # and not a QGraphicsDropShadowEffect (one render layer per item at 500 cards was
+        # the v1.2.10 pain). The pixmap comes from the shared per-SIZE cache; the item is
+        # mouse-transparent (a halo is not a hit zone) and sits under the card.
+        self._shadow = QGraphicsPixmapItem(self)
+        self._shadow.setAcceptedMouseButtons(Qt.MouseButton.NoButton)
         self._shadow.setZValue(-2)
+        self._apply_shadow(self._current_width, self._current_height)
 
         # Node background (rounded; the pen is the selection/status frame, see _state_pen).
         # QGraphicsRectItem replaced with PathItem: rounded corners (UI polish),
@@ -271,13 +347,27 @@ class ServerNode(QGraphicsItemGroup):
                             float(r), float(r))
         return path
 
+    def _apply_shadow(self, width: float, height: float):
+        """v1.4.2: give the shadow item the cached pixmap of THIS card size.
+
+        The cache is keyed by whole pixels (a 0.4 px difference must not cost a miss),
+        and the card's top-left corner sits at (SHADOW_BLUR, SHADOW_BLUR) inside the
+        pixmap — hence the item's position. The pixmap is generated once per distinct
+        size and SHARED by every card of that size (the memory story of the feature);
+        an unchanged size reaches `lru_cache` and costs nothing.
+        """
+        pixmap = _shadow_pixmap(int(round(float(width))), int(round(float(height))),
+                                float(self.CORNER_RADIUS))
+        if self._shadow.pixmap().cacheKey() != pixmap.cacheKey():
+            self._shadow.setPixmap(pixmap)
+        self._shadow.setPos(-SHADOW_BLUR, -SHADOW_BLUR)
+
     def _rebuild_frame_paths(self, width: float, height: float):
-        """Rebuild the rounded background/pulse/shadow paths on geometry change."""
+        """Rebuild the rounded background/pulse paths and the shadow pixmap on a size change."""
         r = self.CORNER_RADIUS
         self._bg.setPath(self._rounded(0, 0, width, height, r))
-        # Shadow: the top is hidden under the card; the visible strip is y ∈ [height, height+SHADOW_BOTTOM]
-        self._shadow.setPath(self._rounded(8, 5, max(width - 16, 20),
-                                           height + self.SHADOW_BOTTOM - 5, r + 2))
+        # v1.4.2: the shadow is a cached pixmap halo around the whole card
+        self._apply_shadow(width, height)
         # Pulse follows the background (v0.7.1) — the same rounded frame
         self._pulse.setPath(self._rounded(0, 0, width, height, r))
 
@@ -451,7 +541,7 @@ class ServerNode(QGraphicsItemGroup):
         new_height = max(int(needed_height), self.MIN_NODE_HEIGHT)
 
         # If the geometry changed — notify the scene before repainting.
-        # UI polish: the boundingRect includes the shadow (SHADOW_BOTTOM) — prepareGeometryChange
+        # v1.4.2: the boundingRect includes the shadow halo — prepareGeometryChange
         # is required for both width and height changes, as before.
         if new_width != self._current_width or new_height != self._current_height:
             self.prepareGeometryChange()  
@@ -601,17 +691,62 @@ class ServerNode(QGraphicsItemGroup):
         super().mousePressEvent(event)
 
     def boundingRect(self) -> QRectF:
-        """Explicit node geometry.
+        """Explicit node geometry: the card + the shadow halo (v1.4.2).
 
         QGraphicsItemGroup in PySide6/Qt6 doesn't recompute boundingRect from child
         elements automatically (verified: it stays zero), so sceneBoundingRect()
         gave the top-left corner point — the v0.6 arrows effectively went "from the corner".
-        We return the node background rectangle + the shadow strip below (UI polish); the size
-        change is already protected by prepareGeometryChange() in update_appearance(). The shadow is in the
-        boundingRect deliberately: Qt clips child elements by it, and the arrows via
-        edge_point() reach exactly its edge — no "hanging" ends.
+        The rect is the CARD inflated by the cached shadow halo on all four sides
+        (SHADOW_BLUR; + SHADOW_DY at the bottom, because the shadow sits lower) — Qt
+        clips child elements by it, so the pixmap item needs the room. The size change
+        is protected by prepareGeometryChange() in update_appearance().
+
+        This rect IS "everything the item paints" (fit/zoom, the rubber band, the export).
+        The ANCHORS are `card_rect_scene()` (v1.4.2, task 4) — they must not move when
+        the shadow's blur changes.
         """
-        return QRectF(0, 0, self._current_width, self._current_height + self.SHADOW_BOTTOM)
+        return QRectF(-SHADOW_BLUR, -SHADOW_BLUR,
+                      self._current_width + 2 * SHADOW_BLUR,
+                      self._current_height + 2 * SHADOW_BLUR + SHADOW_DY)
+
+    def card_rect(self) -> QRectF:
+        """v1.4.2 (ROADMAP task 4): the card WITHOUT the shadow halo — the anchor rect.
+
+        Until v1.4.1 the shadow was a 3 px strip below the card, so the boundingRect
+        could double as the anchor of the arrows and of the pinned notes. With the halo
+        that shortcut would leave every arrow tip 9 px away from the card, so the anchors
+        ask for THIS rect (via `card_rect_scene()`); the boundingRect keeps meaning
+        "everything the item paints".
+        """
+        return QRectF(0.0, 0.0, float(self._current_width), float(self._current_height))
+
+    def card_rect_scene(self) -> QRectF:
+        """v1.4.2: `card_rect()` in scene coordinates — the single anchor of the map.
+
+        Consumers: `ConnectionArrow._compute_geometry` (both ends), the pinned-note
+        anchor (`MapScene.attach_note_to_node` / `update_note_anchor_for_node` /
+        `_update_note_anchor_line`), the geometric group membership
+        (`MapScene.resync_group_members`), `NodeGroup.set_group_size` and the `MapView`
+        Shift-drag rubber band. Falls back to the painted rect if the C++ object is gone
+        (Qt teardown).
+        """
+        try:
+            return self.mapRectToScene(self.card_rect())
+        except (RuntimeError, AttributeError):
+            return QRectF(self.sceneBoundingRect())
+
+    def set_shadow_visible(self, visible: bool):
+        """v1.4.2: show/hide the shadow halo of this card.
+
+        Used by the VECTOR export (`MapScene.render_to_svg`): a QGraphicsPixmapItem is
+        written into an SVG as a base64 PNG, which would break the v1.3.3.7 promise
+        ("the SVG is vector text, not a raster blob"). PNG/PDF keep the halo — they are
+        raster formats anyway.
+        """
+        try:
+            self._shadow.setVisible(bool(visible))
+        except RuntimeError:
+            pass  # Qt teardown — the item is already destroyed
 
     def _apply_content_opacity(self):
         """UI polish: dim the card content of offline nodes (frame and dots stay bright)."""

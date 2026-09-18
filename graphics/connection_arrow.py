@@ -81,6 +81,19 @@ def type_color(ctype: str) -> QColor:
     return QColor(CONNECTION_TYPES.get(ctype, CONNECTION_TYPES[DEFAULT_CONNECTION_TYPE]))
 
 
+def _anchor_rect(node) -> QRectF:
+    """v1.4.2 (ROADMAP task 4): the node's CARD rect in scene coordinates.
+
+    The single anchor of an arrow end. `card_rect_scene()` is the v1.4.2 API of
+    ServerNode (the card without the shadow halo); the fallback covers a duck-typed
+    node (a stand-in in a test) and keeps the pre-v1.4.2 behaviour for it.
+    """
+    getter = getattr(node, "card_rect_scene", None)
+    if callable(getter):
+        return QRectF(getter())
+    return QRectF(node.sceneBoundingRect())
+
+
 def edge_point(rect: QRectF, center: QPointF, toward: QPointF) -> QPointF:
     """The point where the ray (from `center` toward `toward`) intersects the rect boundary.
 
@@ -204,9 +217,16 @@ class ConnectionArrow(QGraphicsPathItem):
     # ── Geometry (v0.7): Bezier + edge-to-edge ───────────────────
 
     def _compute_geometry(self):
-        """Returns (path, p0, p3, c1, c2), or None in the degenerate case."""
-        src_rect = self.source.sceneBoundingRect()
-        tgt_rect = self.target.sceneBoundingRect()
+        """Returns (path, p0, p3, c1, c2), or None in the degenerate case.
+
+        v1.4.2 (ROADMAP task 4): the ends are computed from the node's CARD rect
+        (`card_rect_scene()`), not from its painted boundingRect — since the drop-shadow
+        became a halo on all four sides, the boundingRect is `SHADOW_BLUR` bigger than
+        the card and the arrow tips would stop short of it. The fallback keeps a
+        duck-typed source/target (a fake node in a test) working.
+        """
+        src_rect = _anchor_rect(self.source)
+        tgt_rect = _anchor_rect(self.target)
         src_center = src_rect.center()
         tgt_center = tgt_rect.center()
 

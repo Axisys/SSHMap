@@ -58,13 +58,20 @@ else:  # a fallback, so the checks below do not fail with AttributeError
 check("arrow path is a single cubic Bezier (moveTo + curve)",
       _gpath.elementCount() == 4 and _gpath.elementAt(0).isMoveTo()
       and _gpath.elementAt(1).isCurveTo(), str(_gpath.elementCount()))
-rect_a, rect_b = node_a.sceneBoundingRect(), node_b.sceneBoundingRect()
+# v1.4.2 (ROADMAP task 4): the arrow ends on the node's CARD, not on its painted
+# boundingRect — the drop-shadow became a halo on all four sides, so the boundingRect is
+# SHADOW_BLUR bigger than the card. `card_rect_scene()` is the anchor API.
+rect_a, rect_b = node_a.card_rect_scene(), node_b.card_rect_scene()
 check("edge-to-edge: starts on source boundary (right edge of A)",
       abs(p0.x() - rect_a.right()) < 1.5 and rect_a.top() - 1 <= p0.y() <= rect_a.bottom() + 1,
       f"p0=({p0.x():.1f},{p0.y():.1f}) right={rect_a.right()}")
 check("edge-to-edge: ends on target boundary (left edge of B)",
       abs(p3.x() - rect_b.left()) < 1.5 and rect_b.top() - 1 <= p3.y() <= rect_b.bottom() + 1,
       f"p3=({p3.x():.1f},{p3.y():.1f}) left={rect_b.left()}")
+check("v1.4.2: the tip is ON the card, not on the shadow halo",
+      p0.x() < node_a.sceneBoundingRect().right() - 1.0
+      and p3.x() > node_b.sceneBoundingRect().left() + 1.0,
+      f"p0.x={p0.x():.1f} halo_right={node_a.sceneBoundingRect().right():.1f}")
 check("arrow is a curve (bbox taller than the chord)",
       arrow_ab.path().boundingRect().height() > 2, str(arrow_ab.path().boundingRect()))
 

@@ -83,6 +83,8 @@ EMPTY_DEFAULT_ACTIONS = {
     "plugins.run_on_nodes",
     # v1.4.1: the second import path — "Import from SSH Config…" (File menu).
     "file.import_ssh_config",
+    # v1.4.2: the minimap panel — a checkable View item (ROADMAP task 2).
+    "view.toggle_minimap",
 }
 
 # v1.3.3.3 i18n additions (13 keys: 477 → 490).
@@ -135,10 +137,10 @@ class _FakeChecker:
 print("== 1. the registry is complete ==")
 
 ids = HR.action_ids()
-check("registry: 44 actions — the v1.3.2 set + Save As + the zoom family + the empty defaults "
+check("registry: 45 actions — the v1.3.2 set + Save As + the zoom family + the empty defaults "
       "(v1.3.3.7: +file.export_svg; v1.4rc1: +plugins.reload; v1.4rc3: +plugins.run_on_nodes; "
-      "v1.4.1: +file.import_ssh_config)",
-      len(ids) == 44 and len(set(ids)) == 44, str(len(ids)))
+      "v1.4.1: +file.import_ssh_config; v1.4.2: +view.toggle_minimap)",
+      len(ids) == 45 and len(set(ids)) == 45, str(len(ids)))
 check("registry: the 4 new SEQUENCED actions carry exactly the promised defaults",
       {a: HR.default_sequence(a) for a in NEW_DEFAULT_ACTIONS} == NEW_DEFAULT_ACTIONS,
       str({a: HR.default_sequence(a) for a in NEW_DEFAULT_ACTIONS}))
@@ -188,6 +190,12 @@ check("source audit: the named ids cover every menu family (file/edit/view/profi
       str(sorted(_lit_ids)))
 
 # (c) Runtime: wrap _add_menu_action BEFORE the window is built and record every call.
+#      The three ids below are created MANUALLY (never through _add_menu_action) and are
+#      therefore absent from the record: the two dynamic/multi-input ones (multi_input is
+#      installed by the mode, palette.open is a QShortcut) and, since v1.4.2,
+#      view.toggle_minimap — a CHECKABLE item, which must be connected to toggled(bool)
+#      (the v1.2.4-fix pitfall: the auto-connection of addAction(text, slot) carries no
+#      state), so it is built by hand and registered through _register_hotkey_target.
 _recorded = []
 _orig_add_menu_action = MW.MainWindow._add_menu_action
 
@@ -215,8 +223,10 @@ _bad_ids = sorted({a for _k, a in _recorded if a} - set(ids))
 check("runtime audit: every action_id the menu passes is a registry action", not _bad_ids,
       str(_bad_ids))
 check("runtime audit: the menubar covers the whole registry (every action has a menu item)",
-      set(ids) <= {a for _k, a in _recorded} | {"view.multi_input", "palette.open"},
-      str(sorted(set(ids) - {a for _k, a in _recorded} - {"view.multi_input", "palette.open"})))
+      set(ids) <= {a for _k, a in _recorded}
+      | {"view.multi_input", "palette.open", "view.toggle_minimap"},
+      str(sorted(set(ids) - {a for _k, a in _recorded}
+                 - {"view.multi_input", "palette.open", "view.toggle_minimap"})))
 
 check("window: EVERY registry action is bound to a real object (no unregistered id)",
       set(mw._hotkey_targets) == set(ids) and all(mw._hotkey_targets.values()),

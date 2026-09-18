@@ -166,7 +166,7 @@ check("ctx.plugin_id is the plugin's own MANIFEST name",
 check("ctx.api_version reports the API version of the contract (1)",
       _ctx.api_version == 1 and _ctx.api_version == PM.API_VERSION, str(_ctx.api_version))
 check("ctx.app_version is the running application version (version.py)",
-      _ctx.app_version == _version.APP_VERSION == "1.4.1",
+      _ctx.app_version == _version.APP_VERSION == "1.4.2",
       f"{_ctx.app_version} vs {_version.APP_VERSION}")
 check("a context without a core is inert: log/status/run_command report 'not available' "
       "instead of raising",

@@ -259,8 +259,18 @@ def clear_cfg(*extra_paths: str) -> None:
 # in 12 i18n files + the APP_VERSION/requirements pins in 7 release-state sections).
 # The misses of the keys themselves against the code are caught by check_i18n_keys.py.
 # ─────────────────────────────────────────────────────────────────────────────
-EXPECTED_APP_VERSION = "1.4.1"  # the current release (a sentinel: it catches "a bump to the wrong version")
-EXPECTED_I18N_KEYS = 566        # the parity of the TRANSLATION keys (v1.4.1 — import from ~/.ssh/config:
+EXPECTED_APP_VERSION = "1.4.2"  # the current release (a sentinel: it catches "a bump to the wrong version")
+EXPECTED_I18N_KEYS = 570        # the parity of the TRANSLATION keys (v1.4.2 — the big-picture map
+                                # level: +4 keys × en/ru/zh/de. `view.toggle_minimap` (the checkable
+                                # View item / the registry action with an EMPTY default),
+                                # `minimap.tooltip` (the panel's ONLY text — the minimap draws shapes,
+                                # no text, by design) and the group-fold pair `ctx.collapse_group` /
+                                # `ctx.expand_group` (the group context menu + the title-band chevron
+                                # tooltip, symmetric with `ctx.collapse_server`/`ctx.expand_server`).
+                                # The cached shadow pixmap, the `card_rect_scene()` anchors and
+                                # `CmdToggleGroupCollapse` add no other string: the fold is a gesture,
+                                # the shadow a paint, the anchors geometry.)
+                                # (v1.4.1 — import from ~/.ssh/config:
                                 # the second release of the 1.4 line and the first one after the base
                                 # release, so the chain starts at the v1.4 pin, 545).
                                 # +21 keys × en/ru/zh/de: `btn.import` (the picker's confirm button — the

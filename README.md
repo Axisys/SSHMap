@@ -21,7 +21,7 @@ pipx install .                    # or pip install . → sshmap command (install
 Tests — plain Python scripts without pytest: topical `test_*.py` files + a single parallel runner; each file is an isolated process (sandbox HOME, offscreen Qt, UTF-8 stdout — nothing extra needed on cp1251 consoles or in CI):
 
 ```bash
-python tests/run_all.py               # everything (84 test files + i18n check); auto workers = cores (cap 16), longest file first; exit 0 ⇔ all green
+python tests/run_all.py               # everything (85 test files + i18n check); auto workers = cores (cap 16), longest file first; exit 0 ⇔ all green
 python tests/run_all.py --fast        # daily profile: skips files tagged slow/network
 python tests/run_all.py --tag network # only network-tagged files — real-network sections run ONLY on explicit opt-in (env SSHMAP_TEST_TAGS)
 python tests/run_all.py --failed-only # re-run only files that failed in the last run (cache test-results/last_run.json)
@@ -55,13 +55,14 @@ modules/                     # ssh_worker.py — one-shot SSH worker + registry;
                              # command_library.py — terminal macros: user command/script library panel (~/.sshmap/commands.json);
                              # multi_input.py — multi-input broadcast hub; sftp_worker.py / sftp_tab.py — SFTP over the live transport (listing, upload/download, a file manager: new folder/rename/delete, an overwrite prompt, atomic transfers, drag-out of a path, read-only preview with "no preview" row marks);
                              # terminal_widget.py — cell-based canvas (full keyboard, selection, scrollback); terminal_screen.py — pyte screen + palettes;
-                             # window_geometry.py; host_key_policy.py; external_terminal.py; undo_commands.py (14 QUndoCommands); logger.py
+                             # window_geometry.py; host_key_policy.py; external_terminal.py; undo_commands.py (15 QUndoCommands); logger.py
 storage/                     # project.py — JSON save/load; autosave.py — autosave + backup ring buffer; export_drawio.py — .drawio export (tags + comment included)
 services/                    # credential_manager.py (keyring); diagnostics.py (ping / reverse DNS off the GUI thread); host_importer.py (TXT import);
                              # ssh_config_importer.py (~/.ssh/config import); status_checker.py (parallel SSH probes); system_info_collector.py (OS/CPU/RAM/disk)
 dialogs/                     # AddServer, SSHConnect (+ external terminal), Connection/EditConnection, ProfileManager, Backups, QuickLaunch,
                              # SshConfigImport (the checkbox picker of the ~/.ssh/config import)
 ui/                          # main_window.py — façade over ProjectIOMixin / NodeOpsMixin / SshMixin; sidebar.py; map_search_bar.py (Ctrl+F);
+                             # minimap.py (the big-picture panel: the scheme at fit scale + a viewport frame);
                              # command_palette.py (Ctrl+K); hotkey_registry.py (configurable hotkeys); about_dialog.py (Help → About);
                              # icons.py; mixin_support.py; theme.py (central UI palette, radii, fonts)
 i18n/                        # t(key, **kwargs); every *.json is a language (file name = code, root "name" = display name);
@@ -109,6 +110,11 @@ Format invariants:
 ---
 
 ## 4. Key Behaviors (important for code changes)
+
+### Map cards, groups and the minimap (v1.4.2)
+- **A card paints its shadow, it does not define it.** `ServerNode.boundingRect()` is the card + the cached shadow halo (`_shadow_pixmap()`, one pixmap per card SIZE — never a `QGraphicsDropShadowEffect`), while every ANCHOR (arrow tips, pinned notes, group membership, the connect-drag band) goes through **`card_rect_scene()`** — the card without the halo. Add a new consumer of a node's edge through that API, not through `sceneBoundingRect()`, or it will sit 9 px off the card. The SVG export hides the halos while it renders (a pixmap would land in the file as base64); PNG/PDF keep them.
+- **Folding a group is a real, undoable change** (`NodeGroup.collapse()/expand()`, `CmdToggleGroupCollapse`): the members become their badges in a grid inside a re-fitted frame, the pre-fold arrangement is snapshotted as LOCAL offsets and restored on unfold, the members are not draggable while folded, and the state persists in the project file as optional group fields (`collapsed`, `expanded_width/height`). A group restored folded from a file unfolds in place (the card layout of a previous session is not stored).
+- **The minimap** (`ui/minimap.py`) is a floating child of `MapView` — never a scene item, so it stays out of every export. It keeps ONE cached layer of `(rect, colour)` in scene coordinates, rebuilt on a debounced `scene.changed`, and asks the window for a camera move with `center_requested` (the window owns `centerOn`).
 
 ### Statuses
 `probe_ssh(host, port)`: TCP open + SSH banner → `online`; port open without a banner → `warn`; otherwise → `offline`.
@@ -176,7 +182,7 @@ Format invariants:
   - `language` (applied immediately, before OK);
   - `hotkeys` (a dict action_id → sequence, e.g. `"file.save": "Ctrl+S"`;
     the whole set is edited in the "Hotkeys" tab from the action registry `ui/hotkey_registry.py` —
-    every one of the 43 global actions has a row, an empty string means "no hotkey" (the value the actions without a shortcut ship with) and "Reset to defaults" restores the whole map, a missing/broken value falls back to the default;
+    every one of the 45 global actions has a row, an empty string means "no hotkey" (the value the actions without a shortcut ship with) and "Reset to defaults" restores the whole map, a missing/broken value falls back to the default;
     applied live after OK;
     the terminal's own keys —
     F1–F12, Ctrl+C/D/Z, arrows —
@@ -190,7 +196,7 @@ Format invariants:
 ### Undo/Redo
 - Any scene change goes through `MainWindow._push_command(cmd)`; the scene is modified **only** inside a command's `redo()/undo()` — `QUndoStack.push()` calls redo itself.
 - Dirty marker: `self._dirty = undo_stack.canUndo() or self._undo_baseline_dirty`; `_do_save()` calls `_reset_undo_stack()` (new baseline). `_undo_baseline_dirty` covers non-undo dirty causes (statuses, background).
-- NOT in undo: node statuses, coordinates on load, background geometry. Groups (move/resize/rename) — ARE included (CmdMoveGroup/CmdResizeGroup/CmdEditGroupName).
+- NOT in undo: node statuses, coordinates on load, background geometry, collapsing a single card (a view state). Groups (move/resize/rename) — ARE included (CmdMoveGroup/CmdResizeGroup/CmdEditGroupName) — and so is the **group fold** (v1.4.2, CmdToggleGroupCollapse — it moves the member cards).
 - Node drag: MapView catches the release and emits `node_drag_committed(node, old, new)` → CmdMoveNode.
 - Group drag: if an already-selected node is dragged and >1 are selected — ALL selected move; one CmdMoveNodes command per gesture.
 - Note pinning: `CmdAttachNote` — attaching/detaching a note to/from a node is undoable; undo of attach restores the note's pre-attach position; when deleting a node that has attached notes, the detach commands are pushed **before** the removal command (LIFO: undo first restores the node, then re-attaches the notes).
@@ -209,7 +215,7 @@ Format invariants:
   **Ctrl+0 / Ctrl+= / Ctrl+-** — reset zoom / zoom in / zoom out;
   Ctrl+Shift+F — fit map;
   **Ctrl+F** — map search (search bar over the canvas, Enter/Shift+Enter — jump between matches with centering and an accent frame, Esc — close).
-- **Every action is assignable** ("Settings → Hotkeys", v1.3.3.3): the tab lists **all 43 global actions**, not only the ones that happen to have a shortcut — so `File → Save As…`, the exports, the backups, "Check statuses now", "Reload plugins", "Run on selected servers", the About window and the rest can get a key of your own, on top of the zoom family this release gave real keys to. One row per action with a key recorder;
+- **Every action is assignable** ("Settings → Hotkeys", v1.3.3.3): the tab lists **all 45 global actions**, not only the ones that happen to have a shortcut — so `File → Save As…`, the exports, the backups, "Check statuses now", "Reload plugins", "Run on selected servers", the minimap, the About window and the rest can get a key of your own, on top of the zoom family this release gave real keys to. One row per action with a key recorder;
   a duplicate combination marks both rows and warns, but still saves;
   a row left empty means "no hotkey" (the menu item keeps working);
   **"Reset to defaults"** puts every row back at once. Stored in `~/.sshmap/config.json` and applied instantly — no restart. Multi-input keeps its own rule: whatever key you pick works only while the mode is on, so it never steals a key from your shell.
@@ -265,6 +271,7 @@ en (default) / ru / zh / de — and any language you drop in, without touching t
 
 **Implemented features** (details in sections 3–4):
 - interactive map: nodes, Bezier connections of 6 types (one-way or bidirectional), notes, groups, background image with drag/resize
+- big-picture level (v1.4.2): a **minimap** panel (the whole scheme at fit scale + a viewport frame; click or drag it to move the view, View → Minimap), a soft **drop-shadow** on every card (one cached pixmap per card size) and the **group fold** — one click turns a cluster into a tidy grid of badges, Ctrl+Z brings the cards back
 - node statuses online/warn/offline — parallel SSH probes, auto-interval for large maps; "Check statuses now" for a selection
 - note pinning: a note pinned to a server follows it on any movement; undoable, survives save/load
 - multi-selection: Ctrl+click, rubber band, group drag, "connect/delete selected"; tags with a sidebar filter
@@ -304,8 +311,8 @@ en (default) / ru / zh / de — and any language you drop in, without touching t
 - plugins run inside the application's process (v1.4): a plugin with a broken C extension can take it down — install plugins you trust.
 
 **Roadmap** (tasks, order, acceptance — in ROADMAP.md):
-- **v1.4 line** — the plugin foundation, released at **v1.4** (discovery + the "Plugins" menu and the frozen API (`PLUGINS.md`), commands on selected servers, a plugin status on the card, palette commands, node-menu rows, "Run on selected servers", two working example plugins), and **v1.4.1** — import from `~/.ssh/config` (with the TXT import that no longer drops the extra words of a line).
-- **Next (v1.4.2 → v1.4.7):** minimap and a cached card drop-shadow; light theme + accent color; motion standards; a denser UI with first-run hints; list mode; syntax highlighting in the SFTP viewer.
+- **v1.4 line** — the plugin foundation, released at **v1.4** (discovery + the "Plugins" menu and the frozen API (`PLUGINS.md`), commands on selected servers, a plugin status on the card, palette commands, node-menu rows, "Run on selected servers", two working example plugins), **v1.4.1** — import from `~/.ssh/config` (with the TXT import that no longer drops the extra words of a line) and **v1.4.2** — the big-picture map level (the minimap, the cached card drop-shadow, the group fold).
+- **Next (v1.4.3 → v1.4.7):** light theme + accent color; motion standards; a denser UI with first-run hints; list mode; syntax highlighting in the SFTP viewer.
 
 ---
 

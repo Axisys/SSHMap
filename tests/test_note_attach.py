@@ -46,8 +46,13 @@ import os
 
 
 def _anchor(node):
-    """The anchor position of the note: the top-right corner of the node + (12, 12)."""
-    r = node.sceneBoundingRect()
+    """The anchor position of the note: the top-right corner of the node's CARD + (12, 12).
+
+    v1.4.2 (ROADMAP task 4): the anchor is `card_rect_scene()` — the drop-shadow became
+    a halo on all four sides, so the painted boundingRect is SHADOW_BLUR bigger and the
+    note would otherwise be expected 9 px off the card.
+    """
+    r = node.card_rect_scene()
     return (r.right() + 12.0, r.top() + 12.0)
 
 
@@ -145,7 +150,7 @@ check("§2 line zValue == -1 (above arrows -2, below nodes/notes 0)",
       abs(line.zValue() + 1.0) < 0.001, str(line.zValue()))
 
 # The line ends — edge_point on the borders of both rects
-nr, rr = note_x.sceneBoundingRect(), n_x.sceneBoundingRect()
+nr, rr = note_x.sceneBoundingRect(), n_x.card_rect_scene()
 exp_p0 = _ep(nr, nr.center(), rr.center())   # the note side (moveTo)
 exp_p1 = _ep(rr, rr.center(), nr.center())   # the node side (lineTo → currentPosition)
 path = line.path()
@@ -162,14 +167,14 @@ check("§2 line node-side endpoint matches edge_point",
 # Moving a node: itemChange is called BEFORE the position is applied (a Qt nuance) — the note
 # behaves exactly like the arrows: after a single setPos it lags by one step, on the next
 # step (a repeated setPos — the "release self-healing" of CmdMoveNode) — an exact match.
-r_before = n_x.sceneBoundingRect()
+r_before = n_x.card_rect_scene()
 anchor_before = (r_before.right() + 12.0, r_before.top() + 12.0)
 n_x.setPos(n_x.pos().x() + 100, n_x.pos().y() + 50)
 app.processEvents()
 check("§2 single setPos: note lags one step (same as arrows; itemChange pre-apply)",
       _at((note_x.pos().x(), note_x.pos().y()), anchor_before),
       f"note=({note_x.pos().x()}, {note_x.pos().y()}) anchor(before)={anchor_before}")
-r_mid = n_x.sceneBoundingRect()
+r_mid = n_x.card_rect_scene()
 n_x.setPos(n_x.pos().x() + 0.5, n_x.pos().y())
 app.processEvents()
 check("§2 next setPos: note exactly at previous geometry anchor",
@@ -179,7 +184,7 @@ check("§2 next setPos: note exactly at previous geometry anchor",
 # v1.2.4-fix: an attached note can be moved — dragUpdated recomputes the offset
 # (relative to the CURRENT node geometry), the anchor line follows live; the node leads on
 # the note WITH the offset preserved
-r_off0 = n_x.sceneBoundingRect()   # the node geometry at the moment of the drag
+r_off0 = n_x.card_rect_scene()   # the node geometry at the moment of the drag
 note_x.prepareGeometryChange()
 note_x.setPos(note_x.pos().x() + 80.0, note_x.pos().y() + 40.0)
 note_x.dragUpdated.emit(note_x)
@@ -191,7 +196,7 @@ check("§2 drag of attached note: NO detach, offset stored",
       and abs(note_x.anchor_offset[0] - exp_off[0]) < 0.5
       and abs(note_x.anchor_offset[1] - exp_off[1]) < 0.5,
       f"server_id={note_x.server_id} offset={note_x.anchor_offset}")
-nr_d, rr_d = note_x.sceneBoundingRect(), n_x.sceneBoundingRect()
+nr_d, rr_d = note_x.sceneBoundingRect(), n_x.card_rect_scene()
 exp_d0 = _ep(nr_d, nr_d.center(), rr_d.center())
 e0_d = line.path().elementAt(0)
 check("§2 drag: anchor line follows live (note endpoint recomputed)",
@@ -199,7 +204,7 @@ check("§2 drag: anchor line follows live (note endpoint recomputed)",
       f"start=({e0_d.x}, {e0_d.y}) expected=({exp_d0.x()}, {exp_d0.y()})")
 n_x.setPos(n_x.pos().x() + 60, n_x.pos().y() - 30)
 app.processEvents()
-r_off_mid = n_x.sceneBoundingRect()
+r_off_mid = n_x.card_rect_scene()
 n_x.setPos(n_x.pos().x() + 0.5, n_x.pos().y())
 app.processEvents()
 check("§2 node move: attached note follows WITH offset",
@@ -212,13 +217,13 @@ check("§2 node move: attached note follows WITH offset",
 # the line ends are recomputed for the new card height; the note offset is preserved
 n_x.toggle_collapsed()
 app.processEvents()
-rc = n_x.sceneBoundingRect()
+rc = n_x.card_rect_scene()
 check("§2 collapse: note exactly at new anchor + offset",
       _at((note_x.pos().x(), note_x.pos().y()),
           (rc.right() + 12.0 + note_x.anchor_offset[0],
            rc.top() + 12.0 + note_x.anchor_offset[1])),
       f"note=({note_x.pos().x()}, {note_x.pos().y()}) offset={note_x.anchor_offset}")
-nr_c, rr_c = note_x.sceneBoundingRect(), n_x.sceneBoundingRect()
+nr_c, rr_c = note_x.sceneBoundingRect(), n_x.card_rect_scene()
 exp_c = _ep(rr_c, rr_c.center(), nr_c.center())
 end_c = (line.path().currentPosition().x(), line.path().currentPosition().y())
 check("§2 collapse: line node-side endpoint recomputed",
@@ -226,7 +231,7 @@ check("§2 collapse: line node-side endpoint recomputed",
       f"end={end_c} expected={exp_c.x()},{exp_c.y()}")
 n_x.toggle_collapsed()
 app.processEvents()
-re_ = n_x.sceneBoundingRect()
+re_ = n_x.card_rect_scene()
 check("§2 expand back: note exactly at restored anchor + offset",
       _at((note_x.pos().x(), note_x.pos().y()),
           (re_.right() + 12.0 + note_x.anchor_offset[0],
@@ -476,6 +481,7 @@ def _drag(view, vp_, from_sp, to_sp, steps=6):
 
 
 # Drag 1: a free note → release over a node = attach
+# (v1.4.2: the CENTRE of the painted rect — a hit point; the anchor checks use card_rect_scene)
 ne_cx, ne_cy = n_e.sceneBoundingRect().center().x(), n_e.sceneBoundingRect().center().y()
 drag1_from = _QP(note_e.pos().x() + 120, note_e.pos().y() + 80)   # the center of the note
 _drag(win_e.view, vp, drag1_from, _QP(ne_cx, ne_cy))
@@ -508,7 +514,7 @@ check("§5 E2E: attached note stays at drop position",
       f"pos=({note_e.pos().x()}, {note_e.pos().y()}) expected≈{exp2}")
 check("§5 E2E: anchor line survives the move",
       note_e.note_id in win_e.scene._note_anchor_lines)
-ne_r = n_e.sceneBoundingRect()
+ne_r = n_e.card_rect_scene()   # v1.4.2: the anchor rect (not the shadow-inflated one)
 check("§5 E2E: offset from anchor preserved after drag",
       abs(note_e.anchor_offset[0] - (exp2[0] - ne_r.right() - 12.0)) < 3
       and abs(note_e.anchor_offset[1] - (exp2[1] - ne_r.top() - 12.0)) < 3,
