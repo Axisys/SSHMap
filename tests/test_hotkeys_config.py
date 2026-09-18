@@ -31,6 +31,8 @@ v1.3.3.7 added `file.export_svg` (the SVG export) as one more empty-default acti
 v1.4rc1 added `plugins.reload` (the plugin re-discovery) — 42, 20 of them empty-default.
 v1.4rc3 added `plugins.run_on_nodes` (the `run_on_nodes` hook for the selection) — 43,
 21 of them empty-default.
+v1.4.1 added `file.import_ssh_config` (the second import path, File menu) — 44,
+22 of them empty-default.
 
 Run: python tests/test_hotkeys_config.py   (from the project root) or python tests/run_all.py
 """
@@ -39,7 +41,8 @@ import os
 import re
 import sys
 
-from _common import bootstrap, check, finish, load_i18n_langs, check_i18n_parity, check_release_state
+from _common import (bootstrap, check, finish, load_i18n_langs, check_i18n_parity,
+                     check_release_state, read_cfg, write_cfg, clear_cfg)
 
 ROOT, WORK = bootstrap()  # BEFORE the app module imports (the HOME isolation inside)
 
@@ -92,29 +95,9 @@ EMPTY_DEFAULT_IDS = {
     # v1.4rc3: the plugin foundation — "Run on selected servers" (the `run_on_nodes` hook
     # of every loaded plugin for the current selection).
     "plugins.run_on_nodes",
+    # v1.4.1: the second import path — "Import from SSH Config…" (File menu).
+    "file.import_ssh_config",
 }
-
-
-def read_cfg():
-    if not os.path.isfile(CFG_PATH):
-        return {}
-    with open(CFG_PATH, encoding="utf-8") as f:
-        return json.load(f)
-
-
-def write_cfg(d):
-    os.makedirs(os.path.dirname(CFG_PATH), exist_ok=True)
-    with open(CFG_PATH, "w", encoding="utf-8") as f:
-        json.dump(d, f)
-
-
-def clear_cfg():
-    try:
-        os.remove(CFG_PATH)
-    except OSError:
-        pass
-
-
 def new_window():
     """A MainWindow with the autosave timer stopped (no event loop in the tests)."""
     w = MW.MainWindow()
@@ -152,13 +135,13 @@ ALL_IDS = sorted(set(EXPECTED_DEFAULTS) | EMPTY_DEFAULT_IDS)
 print("== 1. the action registry ==")
 
 ids = HR.action_ids()
-check("registry: the grown v1.3.3.3 action set (22 sequenced + 21 empty-default)",
-      set(ids) == set(ALL_IDS) and len(ids) == 43,
+check("registry: the grown v1.3.3.3 action set (22 sequenced + 22 empty-default)",
+      set(ids) == set(ALL_IDS) and len(ids) == 44,
       str(sorted(set(ids) ^ set(ALL_IDS))))
 check("registry: the sequenced defaults are the v1.3.1.1 set + the v1.3.3.3 additions",
       {a: HR.default_sequence(a) for a in ids if HR.default_sequence(a)} == EXPECTED_DEFAULTS,
       str({a: HR.default_sequence(a) for a in ids if HR.default_sequence(a)}))
-check("registry: exactly the 21 remaining global actions carry an EMPTY default",
+check("registry: exactly the 22 remaining global actions carry an EMPTY default",
       {a for a in ids if not HR.default_sequence(a)} == EMPTY_DEFAULT_IDS
       and set(HR.empty_default_action_ids()) == EMPTY_DEFAULT_IDS,
       str(sorted(EMPTY_DEFAULT_IDS ^ {a for a in ids if not HR.default_sequence(a)})))
@@ -294,21 +277,21 @@ check("load: an empty-default action keeps a sequence the user assigned to it",
 clear_cfg()
 check("save: save_hotkeys() writes the 40 registry ids and returns True",
       HR.save_hotkeys({"file.save": "Ctrl+Alt+S"}) and
-      set(read_cfg()["hotkeys"]) == set(ALL_IDS))
+      set(read_cfg({})["hotkeys"]) == set(ALL_IDS))
 check("save: normalized values (a broken mapping value is stored as the default)",
-      read_cfg()["hotkeys"]["file.save"] == "Ctrl+Alt+S"
-      and HR.save_hotkeys({"file.open": 42}) and read_cfg()["hotkeys"]["file.open"] == "Ctrl+O")
+      read_cfg({})["hotkeys"]["file.save"] == "Ctrl+Alt+S"
+      and HR.save_hotkeys({"file.open": 42}) and read_cfg({})["hotkeys"]["file.open"] == "Ctrl+O")
 check("save: the empty defaults are written as \"\" (a documented value, not a hole)",
-      read_cfg()["hotkeys"]["help.open_logs"] == ""
-      and read_cfg()["hotkeys"]["node.check_status"] == "")
+      read_cfg({})["hotkeys"]["help.open_logs"] == ""
+      and read_cfg({})["hotkeys"]["node.check_status"] == "")
 write_cfg({"language": "ru", "terminal_palette": "nord"})
 HR.save_hotkeys({"file.save": "Ctrl+Alt+S"})
-cfg = read_cfg()
+cfg = read_cfg({})
 check("save: the merge keeps the foreign config keys (language / terminal_palette)",
       cfg.get("language") == "ru" and cfg.get("terminal_palette") == "nord"
       and cfg["hotkeys"]["file.save"] == "Ctrl+Alt+S", str(sorted(cfg)))
 check("save: the file stays valid JSON with the 'hotkeys' key",
-      isinstance(read_cfg().get("hotkeys"), dict))
+      isinstance(read_cfg({}).get("hotkeys"), dict))
 
 # ════════════════════════════════════════════════════════════
 # 3. The "Hotkeys" tab of the settings dialog (task 2)
@@ -380,8 +363,8 @@ dlg._refresh_hotkey_conflicts()
 check("dialog: two disabled (empty) hotkeys are not a conflict",
       HR.find_conflicts(dlg.hotkey_sequences()) == set()
       and dlg.hotkey_sequences()["file.open"] == "" == dlg.hotkey_sequences()["edit.properties"])
-check("dialog: the 21 empty-default rows are not a conflict among themselves",
-      len([a for a in EMPTY_DEFAULT_IDS if dlg.hotkey_sequences()[a] == ""]) == 21
+check("dialog: the 22 empty-default rows are not a conflict among themselves",
+      len([a for a in EMPTY_DEFAULT_IDS if dlg.hotkey_sequences()[a] == ""]) == 22
       and HR.find_conflicts(dlg.hotkey_sequences()) == set())
 
 # A prefill from the config (a saved value shows up in the table)
@@ -452,9 +435,9 @@ check("live: the QShortcut (the command palette) follows the table too",
       action_sequences(mw4, "palette.open") == ["Ctrl+Shift+K"]
       and mw4._palette_shortcut.key().toString() == "Ctrl+Shift+K")
 check("live: the new values are persisted in config.json",
-      read_cfg()["hotkeys"]["file.save"] == canon("Ctrl+Shift+Alt+S")
-      and read_cfg()["hotkeys"]["edit.redo"] == "Ctrl+Alt+R"
-      and read_cfg()["hotkeys"]["palette.open"] == "Ctrl+Shift+K")
+      read_cfg({})["hotkeys"]["file.save"] == canon("Ctrl+Shift+Alt+S")
+      and read_cfg({})["hotkeys"]["edit.redo"] == "Ctrl+Alt+R"
+      and read_cfg({})["hotkeys"]["palette.open"] == "Ctrl+Shift+K")
 
 # A disabled hotkey applied live
 dlg4 = SettingsDialog(mw4)

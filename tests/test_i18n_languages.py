@@ -36,8 +36,8 @@ from contextlib import redirect_stdout
 
 from _common import (bootstrap, check, finish, load_i18n_langs, check_i18n_parity,
                      check_release_state, snapshot_i18n_config, restore_i18n_config,
-                     i18n_lang_codes, i18n_parity_problems, translation_keys,
-                     I18N_META_KEYS, I18N_REFERENCE, EXPECTED_I18N_KEYS)
+                     i18n_lang_codes, i18n_parity_problems, translation_keys, I18N_META_KEYS,
+                     I18N_REFERENCE, EXPECTED_I18N_KEYS)
 
 ROOT, WORK = bootstrap()  # BEFORE the app module imports (the HOME isolation inside)
 

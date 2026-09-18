@@ -44,8 +44,8 @@ import os
 import sys
 import time
 
-from _common import (bootstrap, check, finish, wait_until, load_i18n_langs,
-                     check_i18n_parity, check_release_state, i18n_lang_codes)
+from _common import (bootstrap, check, finish, wait_until, load_i18n_langs, check_i18n_parity,
+                     check_release_state, i18n_lang_codes)
 
 ROOT, WORK = bootstrap()  # BEFORE the app module imports
 

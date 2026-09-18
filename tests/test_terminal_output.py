@@ -45,8 +45,8 @@ import json
 import os
 import sys
 
-from _common import (bootstrap, check, finish, load_i18n_langs,
-                     check_i18n_parity, check_release_state)
+from _common import (bootstrap, check, finish, load_i18n_langs, check_i18n_parity,
+                     check_release_state)
 
 ROOT, WORK = bootstrap()  # BEFORE the app module imports (the HOME isolation and faulthandler inside)
 

@@ -34,7 +34,8 @@ import sys
 import time
 
 from _common import (bootstrap, check, finish, check_i18n_parity, check_i18n_format,
-                     check_release_state, load_i18n_langs, translation_keys)
+                     check_release_state, load_i18n_langs, translation_keys, clear_cfg,
+                     wait_for as _wait_for)
 
 ROOT, WORK = bootstrap()  # BEFORE the app module imports (the HOME isolation inside)
 
@@ -78,15 +79,6 @@ def clean_plugins():
                 pass
     for key in [k for k in sys.modules if k.startswith(PM.LOCAL_MODULE_PREFIX)]:
         sys.modules.pop(key, None)
-
-
-def clear_cfg():
-    try:
-        os.remove(CONFIG_FILE)
-    except OSError:
-        pass
-
-
 def new_window():
     win = MW.MainWindow()
     win._autosave_timer.stop()
@@ -99,14 +91,8 @@ def local(name):
 
 
 def wait_until(predicate, timeout_ms=4000):
-    deadline = time.monotonic() + timeout_ms / 1000.0
-    while time.monotonic() < deadline:
-        app.processEvents()
-        if predicate():
-            return True
-        time.sleep(0.01)
-    app.processEvents()
-    return predicate()
+    """The v1.4.1 suite cleanup: the shared boolean poll (see _common.wait_for)."""
+    return _wait_for(predicate, timeout_ms=timeout_ms)
 
 
 def add_node(win, node_id="n1", alias="web-1", host="10.0.0.1"):

@@ -47,8 +47,8 @@ import json
 import os
 import sys
 
-from _common import (bootstrap, check, finish, wait_until,
-                     load_i18n_langs, check_i18n_parity, check_release_state)
+from _common import (bootstrap, check, finish, wait_until, load_i18n_langs, check_i18n_parity,
+                     check_release_state, cfg_path, write_cfg, clear_cfg)
 
 ROOT, WORK = bootstrap()  # BEFORE the app module imports (the HOME isolation and faulthandler inside)
 
@@ -72,7 +72,8 @@ import ui.main_window as MW
 # The harness: fake threads (the same API as SSHTerminalThread) — _fakes.py
 # ════════════════════════════════════════════════════════════
 
-from _fakes import FakeSSHThread as _FakeThread, BlockingFakeSSHThread as _BlockingThread
+from _fakes import (FakeSSHThread as _FakeThread, BlockingFakeSSHThread as _BlockingThread,
+                    QuestionStub)
 
 
 class _FakeSftpAttr:
@@ -142,26 +143,6 @@ class _FakeSftpClient:
 # The paramiko SSHClient surface for _ensure_sftp — shared (_fakes.FakeSSHClient):
 # get_transport/open_sftp; open_sftp() with sftp=None raises an Exception.
 from _fakes import FakeSSHClient as _FakeSshClient
-
-
-def _cfg_path():
-    return os.path.join(os.path.expanduser("~"), ".sshmap", "config.json")
-
-
-def write_config(d):
-    p = _cfg_path()
-    os.makedirs(os.path.dirname(p), exist_ok=True)
-    with open(p, "w", encoding="utf-8") as f:
-        json.dump(d, f)
-
-
-def clear_config():
-    try:
-        os.remove(_cfg_path())
-    except OSError:
-        pass
-
-
 def alive(w):
     """Is the C++ object alive (WA_DeleteOnClose: after the accept — already destroyed)."""
     try:
@@ -192,7 +173,7 @@ def make_page(alias, password=None, initial_command=""):
 # ════════════════════════════════════════════════════════════
 print("== page construction ==")
 
-clear_config()
+clear_cfg()
 data_pw = ServerData(id="tp-pw", alias="pw", host="10.99.0.2", user="root", password="nodepw")
 p1 = make_page("pw", password="explicit")
 check("the page is a QWidget with the session (server_data is kept)",
@@ -219,7 +200,7 @@ check("the status line: terminal.initializing",
       p1d.status_label.text() != "" , p1d.status_label.text())
 
 # The terminal_* config — read on page creation (load_terminal_settings)
-write_config({"terminal_wheel": "off", "terminal_palette": "nord",
+write_cfg({"terminal_wheel": "off", "terminal_palette": "nord",
               "terminal_font": "Consolas", "terminal_font_size": 12,
               "terminal_history_lines": 50})
 pcfg = make_page("cfg")
@@ -234,7 +215,7 @@ for _ in range(200):
 pos, size = pcfg.tscreen.scroll_info()
 check("config: the history depth is 50 (terminal_history_lines)", size == 50 and pos == 50,
       f"pos={pos} size={size}")
-clear_config()
+clear_cfg()
 
 
 # ════════════════════════════════════════════════════════════
@@ -343,19 +324,11 @@ check("e: page.close_terminal() closed the host window (WA_DeleteOnClose)",
 print("== confirm_close 'ask' gate ==")
 
 asked = []
-_q_result = [QMessageBox.StandardButton.Cancel]
-_orig_question = ST.QMessageBox.question
-
-
-def _fake_question(*a, **k):
-    asked.append(a[1] if len(a) > 1 else None)
-    return _q_result[0]
-
-
-ST.QMessageBox.question = staticmethod(_fake_question)
+_question = QuestionStub(QMessageBox.StandardButton.Cancel,
+                         record=lambda title, text: asked.append(title)).install(ST)
 try:
     # "close" (the v1.0/v1.1 default) — no dialog
-    clear_config()
+    clear_cfg()
     pg1 = make_page("ask-close")
     check("the close_behavior default is 'close'", getattr(pg1, "_close_behavior", None) == "close")
     asked.clear()
@@ -363,16 +336,16 @@ try:
           pg1.confirm_close() is True and len(asked) == 0, str(asked))
 
     # "ask" + an active session: Cancel → False (the window survives), Close → True
-    write_config({"terminal_close_behavior": "ask"})
+    write_cfg({"terminal_close_behavior": "ask"})
     ST.SSHTerminalThread = _BlockingThread
     pg2 = make_page("ask-live")
     wait_until(lambda: pg2.terminal_thread.isRunning(), timeout_ms=3000)
     asked.clear()
-    _q_result[0] = QMessageBox.StandardButton.Cancel
+    _question.answer = QMessageBox.StandardButton.Cancel
     check("'ask' + an active session + Cancel → False (the teardown is not started)",
           pg2.confirm_close() is False and len(asked) == 1 and pg2._shut_down is False,
           f"asked={asked}")
-    _q_result[0] = QMessageBox.StandardButton.Close
+    _question.answer = QMessageBox.StandardButton.Close
     check("'ask' + an active session + Close → True", pg2.confirm_close() is True)
 
     # _force_close (the v1.1.1 limit path): the decision is confirmed — no dialog
@@ -385,15 +358,15 @@ try:
     ST.SSHTerminalThread = _FakeThread
 
     # "ask", but the session is already finished → no dialog
-    write_config({"terminal_close_behavior": "ask"})
+    write_cfg({"terminal_close_behavior": "ask"})
     pg3 = make_page("ask-dead")
     pg3.terminal_thread.wait(2000)   # a guaranteed inactive session (no race)
     asked.clear()
     check("'ask' + a finished session: no dialog → True",
           pg3.confirm_close() is True and len(asked) == 0, str(asked))
 finally:
-    ST.QMessageBox.question = _orig_question
-    clear_config()
+    _question.restore()
+    clear_cfg()
 
 
 # ════════════════════════════════════════════════════════════
@@ -401,7 +374,7 @@ finally:
 # ════════════════════════════════════════════════════════════
 print("== window lifecycle regression (thin wrapper) ==")
 
-clear_config()
+clear_cfg()
 wv = ST.SSHTerminalWindow(
     ServerData(id="tp-win", alias="win", host="10.99.0.5", user="root"), None, password="pw")
 _windows.append(wv)
@@ -479,12 +452,12 @@ app.processEvents()
 check("the bridge: progress_hidden → the bar is hidden", wv._sftp_progress.isHidden())
 
 # ── the geometry: closeEvent saves, a new window restores (U2) ─────────
-clear_config()
+clear_cfg()
 wv.resize(640, 480)   # the terminal window default — 800×600, the restoration is visible
 app.processEvents()
 wv.close()
 wait_until(lambda: not alive(wv), timeout_ms=4000)
-with open(_cfg_path(), encoding="utf-8") as f:
+with open(cfg_path(), encoding="utf-8") as f:
     _val = json.load(f).get("ui_window_geometry_terminal")
 check("the geometry: closeEvent wrote ui_window_geometry_terminal {geometry, state}",
       isinstance(_val, dict) and set(_val) == {"geometry", "state"}, f"got={_val!r}")
@@ -505,7 +478,7 @@ check("WA_DeleteOnClose: the window is alive before close()", alive(wv3))
 wv3.close()
 wait_until(lambda: not alive(wv3), timeout_ms=4000)
 check("WA_DeleteOnClose: after close the C++ object is destroyed", not alive(wv3))
-clear_config()
+clear_cfg()
 
 
 # ════════════════════════════════════════════════════════════
@@ -513,7 +486,7 @@ clear_config()
 # ════════════════════════════════════════════════════════════
 print("== session tracking in MainWindow ==")
 
-clear_config()
+clear_cfg()
 mw = MW.MainWindow()
 mw.show()
 app.processEvents()
@@ -559,7 +532,7 @@ check("_ssh_connected_nodes: the node id is reset after all the sessions",
       node1.data.id not in mw._ssh_connected_nodes)
 
 # ── the "own terminals" limit is counted by SESSIONS (terminal_max_open) ────────
-write_config({"terminal_max_open": 2})
+write_cfg({"terminal_max_open": 2})
 node2 = mw.scene.add_server(
     ServerData(id="sess-b", alias="sessB", host="10.98.1.2", user="root"))
 w_a = mw._spawn_terminal_window(node2)
@@ -569,16 +542,8 @@ check("the limit: 2 sessions are open (terminal_max_open=2; both tabs in one win
       len(mw._terminal_windows) == 2 and w_a.session_tabs.count() == 2,
       f"registry={len(mw._terminal_windows)} tabs={w_a.session_tabs.count() if alive(w_a) else '?'}")
 
-_limit_result = [QMessageBox.StandardButton.Cancel]
-_orig_mw_question = MW.QMessageBox.question
-
-
-def _mw_fake_question(*a, **k):
-    asked.append(a[1] if len(a) > 1 else None)
-    return _limit_result[0]
-
-
-MW.QMessageBox.question = staticmethod(_mw_fake_question)
+_limit_stub = QuestionStub(QMessageBox.StandardButton.Cancel,
+                           record=lambda title, text: asked.append(title)).install(MW)
 try:
     # Cancel → None, the registry is untouched
     node3 = mw.scene.add_server(
@@ -590,7 +555,7 @@ try:
           f"asked={asked} registry={len(mw._terminal_windows)}")
 
     # Close → the oldest SESSION is closed (_force_close), a new one is registered
-    _limit_result[0] = QMessageBox.StandardButton.Close
+    _limit_stub.answer = QMessageBox.StandardButton.Close
     asked.clear()
     oldest_sess = mw._terminal_windows[0]   # the first tab of the node2 window (the creation order)
     node4 = mw.scene.add_server(
@@ -610,8 +575,8 @@ try:
           and mw._terminal_windows[-1] is w_new.page,
           f"registry={[type(s).__name__ for s in mw._terminal_windows]}")
 finally:
-    MW.QMessageBox.question = _orig_mw_question
-clear_config()
+    _limit_stub.restore()
+clear_cfg()
 
 
 # ════════════════════════════════════════════════════════════

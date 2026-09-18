@@ -21,7 +21,7 @@ pipx install .                    # or pip install . → sshmap command (install
 Tests — plain Python scripts without pytest: topical `test_*.py` files + a single parallel runner; each file is an isolated process (sandbox HOME, offscreen Qt, UTF-8 stdout — nothing extra needed on cp1251 consoles or in CI):
 
 ```bash
-python tests/run_all.py               # everything (83 test files + i18n check); auto workers = cores (cap 8, --workers N); exit 0 ⇔ all green
+python tests/run_all.py               # everything (84 test files + i18n check); auto workers = cores (cap 16), longest file first; exit 0 ⇔ all green
 python tests/run_all.py --fast        # daily profile: skips files tagged slow/network
 python tests/run_all.py --tag network # only network-tagged files — real-network sections run ONLY on explicit opt-in (env SSHMAP_TEST_TAGS)
 python tests/run_all.py --failed-only # re-run only files that failed in the last run (cache test-results/last_run.json)
@@ -58,8 +58,9 @@ modules/                     # ssh_worker.py — one-shot SSH worker + registry;
                              # window_geometry.py; host_key_policy.py; external_terminal.py; undo_commands.py (14 QUndoCommands); logger.py
 storage/                     # project.py — JSON save/load; autosave.py — autosave + backup ring buffer; export_drawio.py — .drawio export (tags + comment included)
 services/                    # credential_manager.py (keyring); diagnostics.py (ping / reverse DNS off the GUI thread); host_importer.py (TXT import);
-                             # status_checker.py (parallel SSH probes); system_info_collector.py (OS/CPU/RAM/disk)
-dialogs/                     # AddServer, SSHConnect (+ external terminal), Connection/EditConnection, ProfileManager, Backups, QuickLaunch
+                             # ssh_config_importer.py (~/.ssh/config import); status_checker.py (parallel SSH probes); system_info_collector.py (OS/CPU/RAM/disk)
+dialogs/                     # AddServer, SSHConnect (+ external terminal), Connection/EditConnection, ProfileManager, Backups, QuickLaunch,
+                             # SshConfigImport (the checkbox picker of the ~/.ssh/config import)
 ui/                          # main_window.py — façade over ProjectIOMixin / NodeOpsMixin / SshMixin; sidebar.py; map_search_bar.py (Ctrl+F);
                              # command_palette.py (Ctrl+K); hotkey_registry.py (configurable hotkeys); about_dialog.py (Help → About);
                              # icons.py; mixin_support.py; theme.py (central UI palette, radii, fonts)
@@ -283,7 +284,7 @@ en (default) / ru / zh / de — and any language you drop in, without touching t
 - undo/redo of scene operations (incl. groups and note pinning)
 - automatic info collection for Linux servers (OS/CPU/RAM/disk); profiles and passwords in the OS keyring — never written to JSON
 - autosave + ring buffer of backups with rollback ("File → Backups…")
-- export to PNG/JPEG/PDF, SVG and draw.io `.drawio` (tags and the comment included); bulk server import from TXT
+- export to PNG/JPEG/PDF, SVG and draw.io `.drawio` (tags and the comment included); bulk server import from TXT and from `~/.ssh/config` (alias, host, user, port and key file — with a checkbox picker and one undo for the whole batch)
 - i18n: en (default) / ru / zh / de — plus any language as one dropped-in JSON file, no code changes; the UI follows a switch live
 - your own languages live in `~/.sshmap/languages/` (a file there shadows the built-in one of the same code); `Help → Language` rescans, "Settings → Language" imports and exports
 - settings hub — single `~/.sshmap/config.json`, live application without restart, every user-facing key in one place
@@ -303,8 +304,8 @@ en (default) / ru / zh / de — and any language you drop in, without touching t
 - plugins run inside the application's process (v1.4): a plugin with a broken C extension can take it down — install plugins you trust.
 
 **Roadmap** (tasks, order, acceptance — in ROADMAP.md):
-- **v1.4 line** — the plugin foundation, released at **v1.4**: discovery + the "Plugins" menu and the frozen API (`PLUGINS.md`), commands on selected servers, a plugin status on the card, palette commands, node-menu rows, "Run on selected servers", two working example plugins.
-- **Next (v1.4.1 → v1.4.7):** import from `~/.ssh/config`; minimap and a cached card drop-shadow; light theme + accent color; motion standards; a denser UI with first-run hints; list mode; syntax highlighting in the SFTP viewer.
+- **v1.4 line** — the plugin foundation, released at **v1.4** (discovery + the "Plugins" menu and the frozen API (`PLUGINS.md`), commands on selected servers, a plugin status on the card, palette commands, node-menu rows, "Run on selected servers", two working example plugins), and **v1.4.1** — import from `~/.ssh/config` (with the TXT import that no longer drops the extra words of a line).
+- **Next (v1.4.2 → v1.4.7):** minimap and a cached card drop-shadow; light theme + accent color; motion standards; a denser UI with first-run hints; list mode; syntax highlighting in the SFTP viewer.
 
 ---
 

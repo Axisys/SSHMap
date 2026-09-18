@@ -34,8 +34,8 @@ import re
 import sys
 import inspect  # v1.3.3.3: the audit reads the live signature / the worker source
 
-from _common import (bootstrap, check, finish, check_i18n_parity,
-                     check_i18n_format, check_release_state)
+from _common import (bootstrap, check, finish, check_i18n_parity, check_i18n_format,
+                     check_release_state, read_cfg, write_cfg, clear_cfg)
 
 ROOT, WORK = bootstrap()  # BEFORE the app module imports (the HOME isolation inside)
 
@@ -81,6 +81,8 @@ EMPTY_DEFAULT_ACTIONS = {
     # v1.4rc3 (the plugin foundation): "Run on selected servers" — the `run_on_nodes`
     # hook of every loaded plugin for the current selection.
     "plugins.run_on_nodes",
+    # v1.4.1: the second import path — "Import from SSH Config…" (File menu).
+    "file.import_ssh_config",
 }
 
 # v1.3.3.3 i18n additions (13 keys: 477 → 490).
@@ -91,28 +93,6 @@ NEW_I18N_KEYS = [
     "about.open", "about.title", "about.license", "about.config_path",
     "about.logs_path", "about.hotkeys", "about.open_config_dir",
 ]
-
-
-def read_cfg():
-    if not os.path.isfile(CFG_PATH):
-        return {}
-    with open(CFG_PATH, encoding="utf-8") as f:
-        return json.load(f)
-
-
-def write_cfg(d):
-    os.makedirs(os.path.dirname(CFG_PATH), exist_ok=True)
-    with open(CFG_PATH, "w", encoding="utf-8") as f:
-        json.dump(d, f)
-
-
-def clear_cfg():
-    try:
-        os.remove(CFG_PATH)
-    except OSError:
-        pass
-
-
 def new_window():
     w = MW.MainWindow()
     w._autosave_timer.stop()
@@ -155,9 +135,10 @@ class _FakeChecker:
 print("== 1. the registry is complete ==")
 
 ids = HR.action_ids()
-check("registry: 43 actions — the v1.3.2 set + Save As + the zoom family + the empty defaults "
-      "(v1.3.3.7: +file.export_svg; v1.4rc1: +plugins.reload; v1.4rc3: +plugins.run_on_nodes)",
-      len(ids) == 43 and len(set(ids)) == 43, str(len(ids)))
+check("registry: 44 actions — the v1.3.2 set + Save As + the zoom family + the empty defaults "
+      "(v1.3.3.7: +file.export_svg; v1.4rc1: +plugins.reload; v1.4rc3: +plugins.run_on_nodes; "
+      "v1.4.1: +file.import_ssh_config)",
+      len(ids) == 44 and len(set(ids)) == 44, str(len(ids)))
 check("registry: the 4 new SEQUENCED actions carry exactly the promised defaults",
       {a: HR.default_sequence(a) for a in NEW_DEFAULT_ACTIONS} == NEW_DEFAULT_ACTIONS,
       str({a: HR.default_sequence(a) for a in NEW_DEFAULT_ACTIONS}))
@@ -432,7 +413,7 @@ check("reset: the LIVE window follows without a restart (the applied signal)",
       and mw3._hotkey_targets["view.collapse_all"][0].shortcut().toString() == "",
       str(mw3._hotkey_targets["file.save"][0].shortcut().toString()))
 
-_saved_cfg = read_cfg()
+_saved_cfg = read_cfg({})
 check("reset: the defaults are written through the existing merge-write",
       _saved_cfg.get("hotkeys") == _defaults, str(sorted(_saved_cfg.get("hotkeys", {})))[:120])
 check("reset: the FOREIGN keys of config.json survive (language / terminal_palette)",
@@ -442,11 +423,11 @@ check("reset: an unknown id in the stored config is still ignored (the v1.3.2 ru
       "nope.id" not in _saved_cfg.get("hotkeys", {}) and set(_saved_cfg["hotkeys"]) == set(ids))
 
 # Idempotent: a second click writes the very same mapping
-_first = json.dumps(read_cfg(), sort_keys=True)
+_first = json.dumps(read_cfg({}), sort_keys=True)
 dlg3.reset_hotkeys_btn.click()
 app.processEvents()
 check("reset: the button is idempotent (a second click changes nothing)",
-      json.dumps(read_cfg(), sort_keys=True) == _first
+      json.dumps(read_cfg({}), sort_keys=True) == _first
       and all(dlg3.hotkey_edits[a].keySequence().toString() == _defaults[a] for a in ids))
 _dlg_fresh = SettingsDialog(None)   # kept in a variable: a temporary would be GC'd mid-check
 check("reset: a fresh dialog sees the defaults (the round-trip through the file)",

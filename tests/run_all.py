@@ -13,6 +13,12 @@ Run from the project root:
     python tests/run_all.py --failed-only   # only the files that failed in the previous run
     python tests/run_all.py --junit [PATH]  # the JUnit XML (by default test-results/junit.xml)
 
+The schedule (v1.4.1): the workers default to the cores (capped by WORKER_CAP = 16) and the files
+are submitted LONGEST FIRST — the run is WAIT-bound (a "slow" file spends 6–27 % of its wall time
+on the CPU, the rest is Qt event-loop waiting), so the core count is the cheap win and the LPT
+order shaves off the tail. Measured on 16 cores: 8 workers alphabetical = 20.2 s,
+8 + longest-first = 17.7 s, 16 alphabetical = 13.9 s, 16 + longest-first = 11.2 s.
+
 The tags of the files: the comment `# tags: slow network` in the header of the file (the first such
 line in the first 40 lines). The known tags:
     slow    — deliberately long wait budgets/teardown (part of the specification, not a "slowdown");
@@ -50,8 +56,12 @@ RESULTS_DIR = os.path.join(ROOT, "test-results")
 JUNIT_DEFAULT = os.path.join(RESULTS_DIR, "junit.xml")
 CACHE_PATH = os.path.join(RESULTS_DIR, "last_run.json")
 
-# The auto workers: the machine cores, but no more than 8 (each worker — a process with PySide6).
-WORKER_CAP = 8
+# The auto workers: the machine cores, but no more than WORKER_CAP (each worker — a process with
+# PySide6, ~110 MB peak). v1.4.1: the cap was 8, which left half of a 16-core machine idle — the
+# suite is WAIT-bound, not CPU-bound (measured: a "slow" file spends 6–27 % of its wall time on the
+# CPU, the rest is Qt event-loop waiting), so the processes oversubscribe the cores safely.
+# Measured on 16 cores: 8 workers = 20.2 s wall, 16 = 13.9 s, 16 + the longest-first order below = 11.2 s.
+WORKER_CAP = 16
 # The tags excluded by the --fast profile.
 FAST_EXCLUDE = {"slow", "network"}
 TAG_LINE_RE = re.compile(r"^\s*#\s*tags:\s*(.+?)\s*$")
@@ -148,6 +158,32 @@ def load_cache():
         return runs if isinstance(runs, dict) else {}
     except (OSError, ValueError):
         return {}
+
+
+def order_files(files, cache=None):
+    """The submission order: LONGEST FIRST (v1.4.1 — the LPT rule of the scheduling theory).
+
+    The wall time of the run is set by the file that finishes LAST, so feeding the long
+    files first lets them overlap with everything else instead of being started at the
+    end by the only still-free worker. Measured on 16 cores: alphabetical = 13.9 s,
+    longest-first = 11.2 s (and 17.7 vs 20.2 s with 8 workers).
+
+    The expected duration comes from the cache of the previous run (test-results/last_run.json,
+    written by main()); a file with no history is placed by its SIZE (bytes are a decent proxy
+    for "this file builds a lot of Qt objects"), then by name for a stable order.
+    """
+    cache = load_cache() if cache is None else cache
+
+    def expected(name):
+        entry = cache.get(name)
+        if isinstance(entry, dict) and entry.get("time_s") is not None:
+            return float(entry["time_s"] or 0.0)
+        try:
+            return float(os.path.getsize(os.path.join(TESTS, name))) / 1024.0
+        except OSError:
+            return 0.0
+
+    return sorted(files, key=lambda n: (-expected(n), n))
 
 
 def save_cache(cache):
@@ -286,6 +322,10 @@ def main():
     if not files:
         print("no files left to run after filters/tags")
         return 1
+
+    # v1.4.1: the LONGEST files go first (the LPT rule) — the tail of the schedule is what
+    # the wall time really is. The artifacts below still report the results sorted by name.
+    files = order_files(files)
 
     t_start = time.time()
     print(f"SSHMap test suite: {len(files)} file(s), workers={workers}"

@@ -32,8 +32,8 @@ import sys
 import threading
 import time
 
-from _common import (bootstrap, check, finish, wait_until,
-                     load_i18n_langs, check_i18n_parity, check_release_state)
+from _common import (bootstrap, check, finish, wait_until, load_i18n_langs, check_i18n_parity,
+                     check_release_state, cfg_path, write_cfg, clear_cfg)
 
 ROOT, WORK = bootstrap()  # BEFORE the app module imports
 
@@ -110,32 +110,12 @@ class _BlockingTermThread(QThread):
 
     def release(self):
         self._release.set()
-
-
-def _cfg_path():
-    return os.path.join(os.path.expanduser("~"), ".sshmap", "config.json")
-
-
-def write_config(d):
-    p = _cfg_path()
-    os.makedirs(os.path.dirname(p), exist_ok=True)
-    with open(p, "w", encoding="utf-8") as f:
-        json.dump(d, f)
-
-
-def clear_config():
-    try:
-        os.remove(_cfg_path())
-    except OSError:
-        pass
-
-
 # ════════════════════════════════════════════════════════════
 # 1. DNS guard (AUDIT auto #2): a repeated "Copy Hostname" does not clobber the thread
 # ════════════════════════════════════════════════════════════
 print("== §1 DNS guard: second 'Copy Hostname' is ignored ==")
 
-clear_config()
+clear_cfg()
 win = MW.MainWindow()
 node = win.scene.add_server(ServerData(id="rc1-dns", alias="rc1", host="192.0.2.55", user="root"))
 
@@ -190,7 +170,7 @@ finally:
 # ════════════════════════════════════════════════════════════
 print("== §2 closeEvent + hanging DNS thread → orphan registry ==")
 
-clear_config()
+clear_cfg()
 win2 = MW.MainWindow()
 fake = _HangingDnsThread("192.0.2.77", parent=win2)
 win2._dns_thread = fake   # simulating a request stuck on an unreachable resolver
@@ -227,7 +207,7 @@ finally:
 # ════════════════════════════════════════════════════════════
 print("== §3 shutdown with terminal_close_behavior='ask': zero dialogs ==")
 
-write_config({"terminal_close_behavior": "ask"})
+write_cfg({"terminal_close_behavior": "ask"})
 
 _orig_term_cls = ST.SSHTerminalThread
 ST.SSHTerminalThread = _BlockingTermThread   # the seam: the thread class — from the ssh_terminal module
@@ -293,7 +273,7 @@ finally:
               f"registry={len(ST._orphan_threads)}")
     ST.QMessageBox.question = _orig_q
     ST.SSHTerminalThread = _orig_term_cls
-    clear_config()
+    clear_cfg()
 
 
 # ════════════════════════════════════════════════════════════

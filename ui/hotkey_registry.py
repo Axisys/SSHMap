@@ -101,6 +101,9 @@ HOTKEY_ACTIONS: Dict[str, dict] = {
     # exists, the keyboard cannot reach it) but every one of them is assignable in the
     # "Hotkeys" tab. "Reset to defaults" clears exactly these fields.
     "file.import_servers":  {"label": "file.import_servers",  "default": ""},
+    # v1.4.1: the second import path (the OpenSSH client config) — no hotkey out
+    # of the box, assignable like the rest.
+    "file.import_ssh_config": {"label": "file.import_ssh_config", "default": ""},
     "file.export_png":      {"label": "file.export_png",      "default": ""},
     "file.export_drawio":   {"label": "file.export_drawio",   "default": ""},
     "file.export_pdf":      {"label": "file.export_pdf",      "default": ""},

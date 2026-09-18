@@ -50,8 +50,8 @@ import os
 import sys
 import time
 
-from _common import (bootstrap, check, finish, wait_until,
-                     load_i18n_langs, check_i18n_parity, check_release_state)
+from _common import (bootstrap, check, finish, wait_until, load_i18n_langs, check_i18n_parity,
+                     check_release_state, cfg_path, merge_cfg, clear_cfg)
 
 ROOT, WORK = bootstrap()  # BEFORE the app module imports (the HOME isolation and faulthandler inside)
 
@@ -71,39 +71,8 @@ import ui.main_window as MW
 # The harness: fake threads (the same API as SSHTerminalThread) — _fakes.py
 # ════════════════════════════════════════════════════════════
 
-from _fakes import FakeSSHThread as _FakeThread, BlockingFakeSSHThread as _BlockingThread
-
-
-def _cfg_path():
-    return os.path.join(os.path.expanduser("~"), ".sshmap", "config.json")
-
-
-def write_config(d):
-    """A merge write into config.json (the i18n.save_config semantics: the existing keys
-    are preserved — changing one setting does not reset the others)."""
-    p = _cfg_path()
-    os.makedirs(os.path.dirname(p), exist_ok=True)
-    cur = {}
-    if os.path.isfile(p):
-        try:
-            with open(p, "r", encoding="utf-8") as f:
-                data = json.load(f)
-            if isinstance(data, dict):
-                cur = data
-        except (json.JSONDecodeError, OSError):
-            pass
-    cur.update(d)
-    with open(p, "w", encoding="utf-8") as f:
-        json.dump(cur, f)
-
-
-def clear_config():
-    try:
-        os.remove(_cfg_path())
-    except OSError:
-        pass
-
-
+from _fakes import (FakeSSHThread as _FakeThread, BlockingFakeSSHThread as _BlockingThread,
+                    QuestionStub)
 def alive(w):
     """Is the C++ object alive (WA_DeleteOnClose: after the accept — already destroyed)."""
     try:
@@ -153,22 +122,22 @@ def make_main():
 # ════════════════════════════════════════════════════════════
 print("== 1. terminal_mode config validation ==")
 
-clear_config()
+clear_cfg()
 check("no key → the default 'windows' (the current behavior)",
       ST.load_terminal_settings()["mode"] == "windows")
-write_config({"terminal_mode": "tabs"})
+merge_cfg({"terminal_mode": "tabs"})
 check("'tabs' → 'tabs'", ST.load_terminal_settings()["mode"] == "tabs")
-write_config({"terminal_mode": " TABS "})
+merge_cfg({"terminal_mode": " TABS "})
 check("' TABS ' (strip+lower) → 'tabs'", ST.load_terminal_settings()["mode"] == "tabs")
-write_config({"terminal_mode": "garbage"})
+merge_cfg({"terminal_mode": "garbage"})
 check("a broken value → the default 'windows'", ST.load_terminal_settings()["mode"] == "windows")
-write_config({"terminal_mode": 123})
+merge_cfg({"terminal_mode": 123})
 check("a foreign type (int) → the default 'windows'", ST.load_terminal_settings()["mode"] == "windows")
-write_config({"terminal_mode": "tabs", "terminal_max_open": 7})
+merge_cfg({"terminal_mode": "tabs", "terminal_max_open": 7})
 _ts = ST.load_terminal_settings()
 check("the other keys are read in parallel (max_open=7, mode=tabs)",
       _ts["max_open"] == 7 and _ts["mode"] == "tabs")
-clear_config()
+clear_cfg()
 
 
 # ════════════════════════════════════════════════════════════
@@ -176,7 +145,7 @@ clear_config()
 # ════════════════════════════════════════════════════════════
 print("== 2. dock structure + spawn in tabs mode ==")
 
-write_config({"terminal_mode": "tabs"})
+merge_cfg({"terminal_mode": "tabs"})
 mw = make_main()
 check("before the first session there is no dock (the lazy creation)",
       getattr(mw, "_terminals_dock", None) is None)
@@ -231,7 +200,7 @@ print("== 3. apply without restart ==")
 page_b = content.session_tabs.widget(1)
 
 # tabs → windows: a new session — a separate window; the dock sessions live as they are
-write_config({"terminal_mode": "windows"})
+merge_cfg({"terminal_mode": "windows"})
 node_c = mw.scene.add_server(
     ServerData(id="td-c", alias="gamma", host="10.97.3.3", user="root"))
 win_c = mw._spawn_terminal_window(node_c)
@@ -246,7 +215,7 @@ check("the registry: 3 sessions (2 in the dock + 1 in the window)", len(mw._term
       f"registry={len(mw._terminal_windows)}")
 
 # windows → tabs: the session goes to the dock; the node's old window is NOT reused — it lives
-write_config({"terminal_mode": "tabs"})
+merge_cfg({"terminal_mode": "tabs"})
 win_c2 = mw._spawn_terminal_window(node_c)   # the same node, but the mode is already "tabs"
 app.processEvents()
 check("windows→tabs: the new session — the tab in the dock (the old window is not reused)",
@@ -308,7 +277,7 @@ check("the cross on the tab (tabCloseRequested): the last tab is closed → the 
       f"tabs={content.session_tabs.count()}")
 
 # ── the "ask" gate in the dock: Cancel holds / Close closes only this tab ───────
-write_config({"terminal_close_behavior": "ask"})
+merge_cfg({"terminal_close_behavior": "ask"})
 ST.SSHTerminalThread = _BlockingThread
 node_d = mw.scene.add_server(
     ServerData(id="td-d", alias="delta", host="10.97.3.4", user="root"))
@@ -322,16 +291,10 @@ page_e = content.session_tabs.widget(1)
 wait_until(lambda: page_d.terminal_thread.isRunning(), timeout_ms=3000)
 
 asked = []
-_q_result = [QMessageBox.StandardButton.Cancel]
-_orig_question = ST.QMessageBox.question
+_question = QuestionStub(QMessageBox.StandardButton.Cancel,
+                         record=lambda title, text: asked.append(title)).install(ST)
 
 
-def _fake_question(*a, **k):
-    asked.append(a[1] if len(a) > 1 else None)
-    return _q_result[0]
-
-
-ST.QMessageBox.question = staticmethod(_fake_question)
 try:
     asked.clear()
     content.close_page(page_d)   # "ask" + an active session → a confirmation
@@ -340,7 +303,7 @@ try:
           len(asked) == 1 and content.session_tabs.count() == 2
           and page_d._shut_down is False, f"asked={asked}")
 
-    _q_result[0] = QMessageBox.StandardButton.Close
+    _question.answer = QMessageBox.StandardButton.Close
     asked.clear()
     content.close_page(page_d)   # "ask" + Close → teardown of THIS tab ONLY
     wait_until(lambda: content.session_tabs.count() == 1, timeout_ms=4000)
@@ -349,7 +312,7 @@ try:
           len(asked) == 1 and content.session_tabs.count() == 1
           and not alive(page_d) and page_e._shut_down is False, f"asked={asked}")
 finally:
-    ST.QMessageBox.question = _orig_question
+    _question.restore()
 
 # the ask-section cleanup: release the blocked threads, close the remaining tabs
 page_d.terminal_thread.release()
@@ -357,7 +320,7 @@ page_e.terminal_thread.release()
 wait_until(lambda: (not page_d.terminal_thread.isRunning()
                     and not page_e.terminal_thread.isRunning()), timeout_ms=8000)
 ST.SSHTerminalThread = _FakeThread
-clear_config()
+clear_cfg()
 content.close_page(content.session_tabs.widget(0))   # beta
 content.close_page(content.session_tabs.widget(0))   # eps
 wait_until(lambda: len(mw._terminal_windows) == 1, timeout_ms=4000)
@@ -372,7 +335,7 @@ check("the cleanup of the ask section: the dock sessions are closed (the window 
 # ════════════════════════════════════════════════════════════
 print("== 5. dock status strip: active tab only ==")
 
-write_config({"terminal_mode": "tabs"})   # the "tabs" mode (the ask section ended on a clean config)
+merge_cfg({"terminal_mode": "tabs"})   # the "tabs" mode (the ask section ended on a clean config)
 node_f = mw.scene.add_server(
     ServerData(id="td-f", alias="fio", host="10.97.3.6", user="root"))
 node_g = mw.scene.add_server(
@@ -441,7 +404,7 @@ check("the cleanup of the section: all the sessions are closed, the registry is 
 # ════════════════════════════════════════════════════════════
 print("== 6. detach dock to a window and back ==")
 
-write_config({"terminal_mode": "tabs"})
+merge_cfg({"terminal_mode": "tabs"})
 node_h = mw.scene.add_server(
     ServerData(id="td-h", alias="eta", host="10.97.3.8", user="root"))
 node_i = mw.scene.add_server(
@@ -485,13 +448,13 @@ check("the cleanup of the section: the registry is empty", len(mw._terminal_wind
 # ════════════════════════════════════════════════════════════
 print("== 7. MainWindow shutdown: all sessions (dock + windows) ==")
 
-clear_config()
+clear_cfg()
 mw2 = make_main()
-write_config({"terminal_mode": "tabs"})
+merge_cfg({"terminal_mode": "tabs"})
 n1 = mw2.scene.add_server(
     ServerData(id="td-s1", alias="sig-1", host="10.97.4.1", user="root"))
 d2 = mw2._spawn_terminal_window(n1)      # the dock tab
-write_config({"terminal_mode": "windows"})
+merge_cfg({"terminal_mode": "windows"})
 n2 = mw2.scene.add_server(
     ServerData(id="td-s2", alias="sig-2", host="10.97.4.2", user="root"))
 w2 = mw2._spawn_terminal_window(n2)      # a separate window
@@ -523,13 +486,13 @@ check("the shutdown: the green dots of the nodes are off",
 # ════════════════════════════════════════════════════════════
 print("== 8. limit counts sessions across containers ==")
 
-clear_config()
+clear_cfg()
 mw3 = make_main()
-write_config({"terminal_max_open": 2, "terminal_mode": "windows"})
+merge_cfg({"terminal_max_open": 2, "terminal_mode": "windows"})
 n1 = mw3.scene.add_server(
     ServerData(id="td-l1", alias="lim-1", host="10.97.5.1", user="root"))
 w1 = mw3._spawn_terminal_window(n1)      # the window, session 1
-write_config({"terminal_mode": "tabs"})
+merge_cfg({"terminal_mode": "tabs"})
 n2 = mw3.scene.add_server(
     ServerData(id="td-l2", alias="lim-2", host="10.97.5.2", user="root"))
 d3 = mw3._spawn_terminal_window(n2)      # the dock tab, session 2 → the limit (2)
@@ -539,17 +502,9 @@ check("the limit: 2 sessions in different containers (1 window + 1 tab of the do
       and d3.content.session_tabs.count() == 1,
       f"registry={len(mw3._terminal_windows)}")
 
-_limit_result = [QMessageBox.StandardButton.Cancel]
-_orig_mw_question = MW.QMessageBox.question
 asked8 = []
-
-
-def _mw_fake_question(*a, **k):
-    asked8.append(a[1] if len(a) > 1 else None)
-    return _limit_result[0]
-
-
-MW.QMessageBox.question = staticmethod(_mw_fake_question)
+_limit_stub = QuestionStub(QMessageBox.StandardButton.Cancel,
+                           record=lambda title, text: asked8.append(title)).install(MW)
 try:
     n3 = mw3.scene.add_server(
         ServerData(id="td-l3", alias="lim-3", host="10.97.5.3", user="root"))
@@ -559,7 +514,7 @@ try:
           w_cancel is None and len(asked8) == 1 and len(mw3._terminal_windows) == 2,
           f"asked={asked8} registry={len(mw3._terminal_windows)}")
 
-    _limit_result[0] = QMessageBox.StandardButton.Close
+    _limit_stub.answer = QMessageBox.StandardButton.Close
     asked8.clear()
     oldest_sess = mw3._terminal_windows[0]   # the window-session (created first)
     n4 = mw3.scene.add_server(
@@ -577,8 +532,8 @@ try:
           and d3.content.session_tabs.count() == 2,
           f"tabs={d3.content.session_tabs.count() if alive(d3) else '?'}")
 finally:
-    MW.QMessageBox.question = _orig_mw_question
-clear_config()
+    _limit_stub.restore()
+clear_cfg()
 
 # cleanup: close all mw3 sessions (the dock tabs; the window is already destroyed)
 while d3.content.session_tabs.count() > 0:

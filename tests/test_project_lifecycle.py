@@ -25,9 +25,9 @@ import os
 import sys
 from datetime import datetime
 
-from _common import (bootstrap, check, finish, check_release_state,
-                     load_i18n_langs, check_i18n_parity, check_i18n_format,
-                     placeholder_names, newline_count)
+from _common import (bootstrap, check, finish, check_release_state, load_i18n_langs,
+                     check_i18n_parity, check_i18n_format, placeholder_names, newline_count,
+                     clear_cfg)
 
 ROOT, WORK = bootstrap()  # BEFORE the app module imports (HOME isolation + faulthandler inside)
 
@@ -43,6 +43,7 @@ import services.status_checker as _SC
 _SC.probe_ssh = lambda host, port, timeout=3.0: "offline"
 
 from i18n import load_config, save_config
+from _fakes import QuestionStub
 from storage import autosave as AS
 from storage.project import write_project_json
 from models.server import ServerData
@@ -57,33 +58,15 @@ from modules.window_geometry import (
 boxes = []
 question_replies = []
 
-
-def _fake_question(*a, **k):
-    boxes.append(("question", str(a[1]) if len(a) > 1 else ""))
-    return question_replies.pop(0) if question_replies else QMessageBox.Yes
-
-
-MW.QMessageBox.question = staticmethod(_fake_question)
+MW.QMessageBox.question = QuestionStub(
+    QMessageBox.Yes, replies=question_replies,
+    record=lambda title, text: boxes.append(("question", title))).install(MW)
 MW.QMessageBox.critical = staticmethod(
     lambda *a, **k: boxes.append(("critical", str(a[1]), str(a[2]))))
 MW.QMessageBox.warning = staticmethod(
     lambda *a, **k: boxes.append(("warning", str(a[1]), str(a[2]))))
 MW.QMessageBox.information = staticmethod(
     lambda *a, **k: boxes.append(("information", str(a[1]), str(a[2]))))
-
-
-def _config_path() -> str:
-    return os.path.join(os.path.expanduser("~"), ".sshmap", "config.json")
-
-
-def clear_config():
-    """A clean config.json — the sections below write single keys and must not see leftovers."""
-    try:
-        os.remove(_config_path())
-    except OSError:
-        pass
-
-
 def make_window(show=False):
     """An offscreen MainWindow with a stopped autosave timer (ticks are called by hand)."""
     win = MW.MainWindow()
@@ -136,7 +119,7 @@ def drop_event(mime):
 print("== 1. the MRU: recent_projects in config.json ==")
 # ════════════════════════════════════════════════════════════════════════════════
 
-clear_config()
+clear_cfg()
 MRU_FILES = [os.path.join(WORK, f"mru_{i:02d}.json") for i in range(12)]
 for _i, p in enumerate(MRU_FILES):
     make_project(p, (f"mru{_i}",))
@@ -277,7 +260,7 @@ make_project(MRU_FILES[0])
 print("== 3. dropping a project onto the window ==")
 # ════════════════════════════════════════════════════════════════════════════════
 
-clear_config()
+clear_cfg()
 drop_json = make_project(os.path.join(WORK, "drop_one.json"), ("DropOne", "DropTwo"))
 drop_sshmap = make_project(os.path.join(WORK, "drop_two.sshmap"), ("ShOne",))
 drop_txt = os.path.join(WORK, "drop_foreign.txt")
@@ -635,7 +618,7 @@ check("collapsing both panels is still forbidden (the v1.2.4.1-fix invariant)",
       w_coll2._set_panel_collapsed("sidebar", True) == "forbidden")
 
 # closeEvent writes the key next to the geometry (never throws, one save per window)
-clear_config()
+clear_cfg()
 w_close = make_window(show=True)
 w_close.scene.add_server(
     ServerData(id="closepj1", alias="Close", host="10.12.0.1", user="root"))

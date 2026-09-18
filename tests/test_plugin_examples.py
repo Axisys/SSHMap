@@ -26,7 +26,7 @@ Sections:
   §7 the REPORTER end to end: the real manager + the runner's documented transport seam,
      the merged opinion (the worse of the two), a disabled plugin, and the window's
      "Run on selected servers" pass;
-  §8 the release state: the examples add NO i18n key (the pin stays 545), `examples/`
+  §8 the release state: the examples add NO i18n key (the pin is the shipped one), `examples/`
      documented, the suite index regenerated.
 
 Run: python tests/test_plugin_examples.py   (from the project root) or python tests/run_all.py
@@ -41,7 +41,8 @@ import time
 
 from _common import (bootstrap, check, finish, check_i18n_parity, check_i18n_format,
                      check_release_state, load_i18n_langs, translation_keys,
-                     EXPECTED_APP_VERSION, EXPECTED_I18N_KEYS)
+                     EXPECTED_APP_VERSION, EXPECTED_I18N_KEYS, clear_cfg,
+                     wait_for as _wait_for)
 
 ROOT, WORK = bootstrap()  # BEFORE the app module imports (the HOME isolation inside)
 
@@ -87,15 +88,6 @@ def clean_plugins():
                 pass
     for key in [k for k in sys.modules if k.startswith(PM.LOCAL_MODULE_PREFIX)]:
         sys.modules.pop(key, None)
-
-
-def clear_cfg():
-    try:
-        os.remove(CONFIG_FILE)
-    except OSError:
-        pass
-
-
 def install_examples():
     """Copy BOTH examples into the sandbox plugin folder — what a user does by hand."""
     os.makedirs(PLUGIN_DIR, exist_ok=True)
@@ -115,14 +107,8 @@ def new_manager():
 
 
 def wait_until(predicate, timeout_ms=6000):
-    deadline = time.monotonic() + timeout_ms / 1000.0
-    while time.monotonic() < deadline:
-        app.processEvents()
-        if predicate():
-            return True
-        time.sleep(0.01)
-    app.processEvents()
-    return predicate()
+    """The v1.4.1 suite cleanup: the shared boolean poll (see _common.wait_for)."""
+    return _wait_for(predicate, timeout_ms=timeout_ms)
 
 
 def menu_texts(menu):
@@ -655,16 +641,17 @@ _langs = load_i18n_langs(ROOT)
 check("the examples contribute no translation key (a plugin's text is the AUTHOR's)",
       not any("Say hello" == value or "Hello on this server" == value
               for data in _langs.values() for value in data.values()))
-check("the parity pin is UNCHANGED by this release (545 — the examples add nothing)",
-      EXPECTED_I18N_KEYS == 545 and all(len(translation_keys(d)) == 545
+check("the parity pin is the shipped one (566 since v1.4.1 — the examples add nothing: "
+      "the SSH-config import moved the pin, not this file)",
+      EXPECTED_I18N_KEYS == 566 and all(len(translation_keys(d)) == EXPECTED_I18N_KEYS
                                          for d in _langs.values()),
       str({c: len(translation_keys(d)) for c, d in _langs.items()}))
 check_i18n_parity(_langs)
 check_i18n_format(_langs)
 check("the plugin strings of both examples stay outside the parity policy",
       "disk: " not in json.dumps(_langs["en"]) and "threshold 90" not in json.dumps(_langs["en"]))
-check("the release is the base release of the 1.4 line",
-      EXPECTED_APP_VERSION == "1.4", EXPECTED_APP_VERSION)
+check("the release is the version this file ships with (post-base-release of the 1.4 line)",
+      EXPECTED_APP_VERSION == "1.4.1", EXPECTED_APP_VERSION)
 check_release_state(ROOT)
 check("the example file for these tasks is described in examples/README.md",
       "disk_monitor" in read(os.path.join(EXAMPLES_DIR, "README.md"))

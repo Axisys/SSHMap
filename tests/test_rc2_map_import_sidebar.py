@@ -30,11 +30,14 @@ import sys
 import threading
 import time
 
-from _common import bootstrap, check, finish, wait_until, viewport_point as _vp, load_i18n_langs, check_i18n_parity, check_release_state
+from _common import (bootstrap, check, finish, wait_until, viewport_point as _vp,
+                     load_i18n_langs, check_i18n_parity, check_release_state)
 
 ROOT, WORK = bootstrap()  # BEFORE the app module imports (the HOME isolation and faulthandler inside)
 
 from PySide6.QtWidgets import QApplication, QMessageBox
+
+from _fakes import QuestionStub
 app = QApplication(sys.argv)
 
 
@@ -378,12 +381,13 @@ check("N10: profile visible in the dialog table",
       str(dlg.table.rowCount()))
 dlg.table.setCurrentCell(0, 0)
 _qcalls = []
-_orig_question = QMessageBox.question
-QMessageBox.question = staticmethod(lambda *a, **k: (_qcalls.append(a), QMessageBox.Yes)[1])
+# the same shape the check reads: (…, title, text) — the stub hands over (title, text)
+_question = QuestionStub(QMessageBox.Yes,
+                         record=lambda title, text: _qcalls.append((None, title, text))).install()
 try:
     dlg._on_delete_selected()
 finally:
-    QMessageBox.question = _orig_question
+    _question.restore()
 check("N10: question text is msg.confirm_delete_profile (alias substituted)",
       len(_qcalls) == 1 and _qcalls[0][2] == i18n.t("msg.confirm_delete_profile", alias="RC2Profile"),
       str(_qcalls[:1]))

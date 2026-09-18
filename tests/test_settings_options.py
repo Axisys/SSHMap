@@ -27,12 +27,15 @@ import json
 import os
 import sys
 
-from _common import bootstrap, check, finish, load_i18n_langs, check_i18n_parity, check_release_state
+from _common import (bootstrap, check, finish, load_i18n_langs, check_i18n_parity,
+                     check_release_state, read_cfg, write_cfg, clear_cfg)
 
 ROOT, WORK = bootstrap()  # BEFORE the app module imports (the HOME isolation inside)
 
 from PySide6.QtCore import QObject, Signal as QtSignal
 from PySide6.QtWidgets import QApplication, QDialog, QMessageBox
+
+from _fakes import QuestionStub
 
 app = QApplication(sys.argv)
 
@@ -47,28 +50,6 @@ from ui.settings_dialog import SettingsDialog, load_ui_settings
 from modules.ssh_terminal import load_terminal_settings
 
 CFG_PATH = os.path.join(os.path.expanduser("~"), ".sshmap", "config.json")
-
-
-def read_cfg():
-    if not os.path.isfile(CFG_PATH):
-        return None
-    with open(CFG_PATH, encoding="utf-8") as f:
-        return json.load(f)
-
-
-def write_cfg(d):
-    os.makedirs(os.path.dirname(CFG_PATH), exist_ok=True)
-    with open(CFG_PATH, "w", encoding="utf-8") as f:
-        json.dump(d, f)
-
-
-def clear_cfg():
-    try:
-        os.remove(CFG_PATH)
-    except OSError:
-        pass
-
-
 # ════════════════════════════════════════════════════════════
 # 0. i18n: +14 keys × en/ru/zh (v1.1.1), parity 359 → 375 → 377 (+2 in v1.1.2 final)
 # ════════════════════════════════════════════════════════════
@@ -235,17 +216,10 @@ def _mk(alias, host="10.98.0.1"):
 
 
 asked = []
-_limit_result = [QMessageBox.Close]
-_orig_question = MW.QMessageBox.question
+_limit_stub = QuestionStub(QMessageBox.Close,
+                           record=lambda title, text: asked.append((title, text))).install(MW)
 _orig_win_cls = MW.SSHTerminalWindow  # BEFORE try: finally restores even on a body crash
 
-
-def _fake_question(parent, title, text, buttons=0, default=0):
-    asked.append((title, text))
-    return _limit_result[0]
-
-
-MW.QMessageBox.question = staticmethod(_fake_question)
 try:
     # Below the limit (3 < 4) — no dialog, the window is created directly
     win2._terminal_windows.extend([_mk("a"), _mk("b"), _mk("c")])
@@ -267,7 +241,7 @@ try:
 
     # At the limit (4 >= 4): a proposal to close the oldest → Close → the oldest is closed
     asked.clear()
-    _limit_result[0] = QMessageBox.Close
+    _limit_stub.answer = QMessageBox.Close
     node4 = win2.scene.add_server(
         ServerData(id="lim-e", alias="e", host="10.98.0.5", user="root"))
     oldest_before = win2._terminal_windows[0]
@@ -286,7 +260,7 @@ try:
 
     # At the limit: Cancel → the window is not created, the registry is untouched
     asked.clear()
-    _limit_result[0] = QMessageBox.Cancel
+    _limit_stub.answer = QMessageBox.Cancel
     node5 = win2.scene.add_server(
         ServerData(id="lim-f", alias="f", host="10.98.0.6", user="root"))
     list_before = list(win2._terminal_windows)
@@ -298,14 +272,14 @@ try:
     # The limit from the config (terminal_max_open=2): it fires earlier
     write_cfg({"terminal_max_open": 2})
     asked.clear()
-    _limit_result[0] = QMessageBox.Close
+    _limit_stub.answer = QMessageBox.Close
     node6 = win2.scene.add_server(
         ServerData(id="lim-g", alias="g", host="10.98.0.7", user="root"))
     w_new3 = win2._spawn_terminal_window(node6)
     check("the terminal_max_open=2: the limit is read from the config (the dialog at 4 open ones)",
           len(asked) == 1 and "2" in asked[0][1] and w_new3 is not None, str(asked))
 finally:
-    MW.QMessageBox.question = _orig_question
+    _limit_stub.restore()
     MW.SSHTerminalWindow = _orig_win_cls
     clear_cfg()
 

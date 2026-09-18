@@ -35,8 +35,8 @@ import json
 import os
 import sys
 
-from _common import (bootstrap, check, finish, wait_until,
-                     load_i18n_langs, check_i18n_parity, check_release_state)
+from _common import (bootstrap, check, finish, wait_until, load_i18n_langs, check_i18n_parity,
+                     check_release_state, cfg_path, write_cfg, clear_cfg, read_cfg)
 
 ROOT, WORK = bootstrap()  # BEFORE the app module imports (the HOME isolation and faulthandler inside)
 
@@ -58,36 +58,7 @@ import ui.main_window as MW
 # The harness: fake threads (the same API as SSHTerminalThread) — _fakes.py
 # ════════════════════════════════════════════════════════════
 
-from _fakes import FakeSSHThread as _FakeThread
-
-
-def cfg_path():
-    return os.path.join(os.path.expanduser("~"), ".sshmap", "config.json")
-
-
-def write_config(d):
-    clear_config()
-    p = cfg_path()
-    os.makedirs(os.path.dirname(p), exist_ok=True)
-    with open(p, "w", encoding="utf-8") as f:
-        json.dump(d, f)
-
-
-def clear_config():
-    try:
-        os.remove(cfg_path())
-    except OSError:
-        pass
-
-
-def read_config():
-    try:
-        with open(cfg_path(), encoding="utf-8") as f:
-            return json.load(f)
-    except Exception:  # noqa: BLE001 — no file / a broken file
-        return {}
-
-
+from _fakes import FakeSSHThread as _FakeThread, QuestionStub
 def alive(w):
     """Is the C++ object alive (WA_DeleteOnClose: after the accept — already destroyed)."""
     try:
@@ -114,7 +85,7 @@ def dot_color(node):
 _orig_thread_cls = ST.SSHTerminalThread
 ST.SSHTerminalThread = _FakeThread   # all the pages/windows in this file — on the fake
 
-clear_config()
+clear_cfg()
 mw = MW.MainWindow()
 mw.show()
 app.processEvents()
@@ -450,16 +421,10 @@ check("closing a window with a live pane shuts BOTH sessions down",
 
 # ── the limit really ignores the pane ──────────────────────────────────────
 _limit_asked = []
-_limit_result = [QMessageBox.StandardButton.Cancel]
-_orig_mw_question = MW.QMessageBox.question
+_limit_stub = QuestionStub(QMessageBox.StandardButton.Cancel,
+                           record=lambda title, text: _limit_asked.append(title)).install(MW)
 
-
-def _fake_question(*a, **k):
-    _limit_asked.append(a[1] if len(a) > 1 else None)
-    return _limit_result[0]
-
-
-write_config({"terminal_max_open": 2})
+write_cfg({"terminal_max_open": 2})
 node_c = new_node("charlie", "10.90.0.3")
 win_c = mw._spawn_terminal_window(node_c, password="pw")
 app.processEvents()
@@ -470,7 +435,6 @@ check("1 session + 1 pane: the REGISTRY is at terminal_max_open (2) already",
       len(mw._terminal_windows) == 2 and len(mw._limit_terminal_sessions()) == 1,
       f"limit={len(mw._limit_terminal_sessions())} registry={len(mw._terminal_windows)}")
 
-MW.QMessageBox.question = staticmethod(_fake_question)
 try:
     node_d = new_node("delta", "10.90.0.4")
     _limit_asked.clear()
@@ -488,7 +452,7 @@ try:
     check("the limit fires at max_open REGULAR sessions (the pane never counted)",
           w_over is None and len(_limit_asked) == 1)
 
-    _limit_result[0] = QMessageBox.StandardButton.Close
+    _limit_stub.answer = QMessageBox.StandardButton.Close
     _limit_asked.clear()
     _oldest = mw._limit_terminal_sessions()[0]
     check("the 'close the oldest' candidate is a REGULAR session, never the pane",
@@ -500,7 +464,7 @@ try:
           and len(_limit_asked) == 1, f"asked={len(_limit_asked)}")
     wait_until(lambda: _oldest not in mw._terminal_windows, timeout_ms=4000)
 finally:
-    MW.QMessageBox.question = _orig_mw_question
+    _limit_stub.restore()
 
 # clean up the limit section (windows + panes)
 for _w in (win_c, win_d, w_new):
@@ -533,7 +497,7 @@ wait_until(lambda: len(mw._terminal_windows) == 0, timeout_ms=4000)
 app.processEvents()
 check("after the pane is gone too, the dot goes out and the registry is empty",
       dot_color(node_f) == "#64748b" and len(mw._terminal_windows) == 0, dot_color(node_f))
-clear_config()
+clear_cfg()
 
 
 # ════════════════════════════════════════════════════════════
@@ -604,7 +568,7 @@ app.processEvents()
 check("the registry is empty after the window close", len(mw._terminal_windows) == 0)
 
 # ── d) MainWindow._shutdown_background_threads tears the pane down too ──────
-clear_config()   # win_g.close() persisted its split state — start this window single-pane
+clear_cfg()   # win_g.close() persisted its split state — start this window single-pane
 node_h = new_node("hotel", "10.90.0.8")
 win_h = mw._spawn_terminal_window(node_h, password="pw")
 app.processEvents()
@@ -630,7 +594,7 @@ check("the shutdown section left no session in the registry",
 # ════════════════════════════════════════════════════════════
 print("== 8. persistence ==")
 
-clear_config()
+clear_cfg()
 node_i = new_node("india", "10.90.0.9")
 win_i = mw._spawn_terminal_window(node_i, password="pw")
 win_i.show()
@@ -647,7 +611,7 @@ _ratio_saved = win_i._split_ratio
 win_i.close()
 wait_until(lambda: not alive(win_i), timeout_ms=4000)
 app.processEvents()
-_cfg = read_config()
+_cfg = read_cfg({})
 check("closeEvent merged ui_terminal_split into the geometry write (one config file)",
       _cfg.get("ui_terminal_split") is True
       and isinstance(_cfg.get("ui_terminal_split_ratio"), float)
@@ -672,7 +636,7 @@ wait_until(lambda: not alive(win_j), timeout_ms=4000)
 app.processEvents()
 
 # ── the split OFF must not clobber the remembered ratio with 0 ──────────────
-clear_config()
+clear_cfg()
 node_j2 = new_node("juliet2", "10.90.0.13")
 win_j2 = mw._spawn_terminal_window(node_j2, password="pw")
 win_j2.show()
@@ -689,7 +653,7 @@ app.processEvents()
 win_j2.close()
 wait_until(lambda: not alive(win_j2), timeout_ms=4000)
 app.processEvents()
-_cfg_off = read_config()
+_cfg_off = read_cfg({})
 check("with the split OFF the state is saved false but the RATIO the user left is kept",
       _cfg_off.get("ui_terminal_split") is False
       and abs(float(_cfg_off.get("ui_terminal_split_ratio")) - _ratio_kept) < 0.05,
@@ -697,15 +661,15 @@ check("with the split OFF the state is saved false but the RATIO the user left i
       f"ratio={_cfg_off.get('ui_terminal_split_ratio')!r} kept={_ratio_kept:.3f}")
 
 # a broken ratio / a foreign type → the default (a broken config never squeezes the panes)
-write_config({"ui_terminal_split": True, "ui_terminal_split_ratio": 42})
+write_cfg({"ui_terminal_split": True, "ui_terminal_split_ratio": 42})
 check("a foreign (out of range) ratio is clamped to the ceiling, not trusted",
       ST.load_split_settings()["ratio"] == ST.SPLIT_RATIO_MAX,
       str(ST.load_split_settings()))
-write_config({"ui_terminal_split": "yes", "ui_terminal_split_ratio": "0.5"})
+write_cfg({"ui_terminal_split": "yes", "ui_terminal_split_ratio": "0.5"})
 check("a foreign split value falls back to the default (off, 0.25)",
       ST.load_split_settings() == {"split": False, "ratio": ST.SPLIT_RATIO_DEFAULT},
       str(ST.load_split_settings()))
-clear_config()
+clear_cfg()
 node_k = new_node("kilo", "10.90.0.11")
 win_k = mw._spawn_terminal_window(node_k, password="pw")
 app.processEvents()

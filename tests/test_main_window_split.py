@@ -41,20 +41,18 @@ import ui.main_window_project_io as PI
 import ui.main_window_node_ops as NO
 import ui.main_window_ssh as SS
 from ui.mixin_support import host_attr
+from _fakes import (FakeLineEdit as _FL, FakeSpinBox as _FS, FakeTermWin as _FakeTermWin,
+                    QuestionStub)
 
 # ── QMessageBox: no modals in offscreen, the calls are logged; question — controlled ──
 boxes = []
 question_replies = []  # the queue of the ready answers for question()
 
-
-def _fake_question(*a, **k):
-    boxes.append(("question", str(a[1]) if len(a) > 1 else ""))
-    return question_replies.pop(0) if question_replies else QMessageBox.Yes
-
-
 # QMessageBox — one class for all modules (main_window and the mixins import it
 # from PySide6): the patch via MW.QMessageBox works everywhere, including the moved methods.
-MW.QMessageBox.question = staticmethod(_fake_question)
+MW.QMessageBox.question = QuestionStub(
+    QMessageBox.Yes, replies=question_replies,
+    record=lambda title, text: boxes.append(("question", title))).install(MW)
 MW.QMessageBox.critical = staticmethod(lambda *a, **k: boxes.append(("critical", str(a[1]), str(a[2]))))
 MW.QMessageBox.warning = staticmethod(lambda *a, **k: boxes.append(("warning", str(a[1]), str(a[2]))))
 MW.QMessageBox.information = staticmethod(lambda *a, **k: boxes.append(("information", str(a[1]), str(a[2]))))
@@ -265,7 +263,6 @@ ns = winS.scene.add_server(
     ServerData(id="splitssh1", alias="SplitSSH", host="10.8.0.1", user="root"))
 
 
-from _fakes import FakeLineEdit as _FL, FakeSpinBox as _FS, FakeTermWin as _FakeTermWin
 
 
 class _FakeSSHDialog:

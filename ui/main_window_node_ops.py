@@ -241,7 +241,19 @@ class NodeOpsMixin:
             )
             added_data.append(data)
 
-        # The imported nodes are laid out in a grid from the center of the visible area
+        self._commit_import_batch(added_data, path)
+        QMessageBox.information(self, self.t("msg.success_title"),
+                                self.t("msg.import_servers_result",
+                                       added=len(added_data), skipped=skipped))
+
+    # ── v1.4.1: the shared half of every bulk import ─────────────────────────
+
+    def _layout_imported_nodes(self, added_data):
+        """Place an imported batch in a grid from the centre of the visible area.
+
+        Shared by the TXT import (v0.9.5.5) and the SSH-config import (v1.4.1) —
+        one placement rule for every import, so a new import cannot drift.
+        """
         center = self.view.mapToScene(self.view.viewport().rect().center())
         col_w, row_h, cols = ServerNode.MIN_NODE_WIDTH + 30, ServerNode.MIN_NODE_HEIGHT + 30, 6
         for i, data in enumerate(added_data):
@@ -249,18 +261,120 @@ class NodeOpsMixin:
             data.x = center.x() - 90 + c * col_w
             data.y = center.y() - 65 + r * row_h
 
+    def _commit_import_batch(self, added_data, source_label):
+        """Add a batch of ServerData as ONE undo command + the usual post-add refresh.
+
+        Never raises on an empty list — the caller decides what to report.
+        """
+        if not added_data:
+            return
+        self._layout_imported_nodes(added_data)
         from modules.undo_commands import CmdAddRemoveNodeBatch
         self._push_command(CmdAddRemoveNodeBatch(self, self.scene, added_data, "add"))
         self.refresh_sidebar()
         self._sync_status_targets()
         self._mark_dirty()
         if self.log:
-            self.log.info(f"Imported {len(added_data)} servers from {path}")
+            self.log.info(f"Imported {len(added_data)} servers from {source_label}")
         self.statusBar().showMessage(
             self.t("status.servers_imported", count=len(added_data)), 5000)
-        QMessageBox.information(self, self.t("msg.success_title"),
-                                self.t("msg.import_servers_result",
-                                       added=len(added_data), skipped=skipped))
+
+    def _map_import_keys(self) -> set:
+        """The `(host, port, user)` keys of the nodes already on the map.
+
+        v1.4.1: the deduplication rule of the SSH-config import — the same
+        machine reached with another login or on another port is another node,
+        so the port and the user are part of the key (the TXT import compares
+        host/ip alone: it has no port or user to compare).
+        """
+        keys = set()
+        for node in self.scene.nodes():
+            d = node.data
+            keys.add(((d.host or "").strip().lower(),
+                      int(d.ssh_port or 22),
+                      (d.user or "").strip().lower()))
+        return keys
+
+    def _import_servers_from_ssh_config(self):
+        """v1.4.1 (ROADMAP task 3): bulk import from the OpenSSH client config.
+
+        `~/.ssh/config` → the parser (`services/ssh_config_importer.py`) →
+        deduplication against the map (a host the map already knows is reported,
+        never added twice) → the checkbox dialog → ONE `CmdAddRemoveNodeBatch`
+        (the TXT-import precedent: Ctrl+Z rolls the whole import back at once).
+        `Host/HostName/User/Port/IdentityFile` land in `alias/host/user/ssh_port/
+        key_path`; a wildcard pattern, a `Match` block and an unreadable
+        `Include` are reported by the dialog and imported by nobody.
+        """
+        from services.ssh_config_importer import (
+            ERROR_MISSING, REASON_DUPLICATE, SshConfigError, SshConfigIssue,
+            dedupe_hosts, default_config_path, load_ssh_config,
+        )
+
+        config_path = default_config_path()
+        try:
+            result = load_ssh_config(config_path)
+        except SshConfigError as e:
+            if e.code == ERROR_MISSING:
+                QMessageBox.information(self, self.t("msg.info_title"),
+                                        self.t("sshconfig.not_found", path=config_path))
+            else:
+                QMessageBox.critical(self, self.t("msg.error_title"),
+                                     self.t("msg.import_servers_failed",
+                                            error=e.detail or e.code))
+            return
+
+        fresh, duplicates = dedupe_hosts(result.hosts, self._map_import_keys())
+        skipped = list(result.skipped) + [
+            SshConfigIssue(subject=host.alias, reason=REASON_DUPLICATE,
+                           detail=host.host, source=host.source, line=host.line)
+            for host in duplicates
+        ]
+        if not fresh:
+            QMessageBox.information(
+                self, self.t("msg.info_title"),
+                self.t("msg.import_ssh_config_result", added=0, skipped=len(skipped)))
+            return
+
+        try:
+            dlg_cls = host_attr(self, "SshConfigImportDialog")
+            if dlg_cls is None:
+                raise RuntimeError("SshConfigImportDialog is not available in the MainWindow module")
+            dlg = dlg_cls(fresh, skipped, result.notes, result.path, self)
+            if dlg.exec() != QDialog.Accepted:
+                return
+            selected = list(dlg.selected_hosts())
+        except Exception as e:  # noqa: BLE001 — the dialog must never kill the window
+            if self.log:
+                self.log.exception("SSH config import dialog failed")
+            QMessageBox.critical(self, self.t("msg.error_title"),
+                                 self.t("msg.import_servers_failed", error=str(e)))
+            return
+
+        import uuid as _uuid
+        from models.server import ServerData
+        from services.host_importer import is_ip_address
+
+        added_data = []
+        for host in selected:
+            host_name = str(host.host or host.alias)
+            added_data.append(ServerData(
+                id=str(_uuid.uuid4())[:8],
+                alias=str(host.alias),
+                host=host_name,
+                user=str(host.user or ""),
+                password="",
+                key_path=str(host.key_path or ""),
+                ssh_port=int(host.port or 22),
+                # a HostName that IS an address gives the node its ip field for free
+                ip=host_name if is_ip_address(host_name) else "",
+            ))
+
+        self._commit_import_batch(added_data, result.path or config_path)
+        QMessageBox.information(
+            self, self.t("msg.success_title"),
+            self.t("msg.import_ssh_config_result",
+                   added=len(added_data), skipped=len(skipped)))
 
     def _add_connection(self, default_source_id=None, default_target_id=None):
         """Create a connection: the dialog with the node, label and type choice (v0.7).

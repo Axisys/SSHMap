@@ -48,7 +48,7 @@ from contextlib import redirect_stdout
 from _common import (bootstrap, check, finish, check_i18n_parity, check_i18n_format,
                      check_release_state, load_i18n_langs, i18n_lang_codes,
                      i18n_parity_problems, translation_keys, EXPECTED_I18N_KEYS,
-                     I18N_REFERENCE)
+                     I18N_REFERENCE, clear_cfg)
 
 ROOT, WORK = bootstrap()  # BEFORE the app module imports (the HOME isolation inside)
 
@@ -78,15 +78,6 @@ PKG_CODES = i18n_lang_codes(ROOT)
 
 def write_cfg(data):
     return i18n.save_config(data)
-
-
-def clear_cfg():
-    try:
-        os.remove(CONFIG_FILE)
-    except OSError:
-        pass
-
-
 def folder_files():
     """The *.json names currently in the user language folder ([] when it is absent)."""
     if not os.path.isdir(LANG_DIR):

@@ -16,7 +16,74 @@ import threading
 import time
 
 from PySide6.QtCore import QThread, Signal as QtSignal
-from PySide6.QtWidgets import QMenu
+from PySide6.QtWidgets import QMenu, QMessageBox
+
+
+# ════════════════════════════════════════════════════════════
+# QMessageBox.question (v1.4.1 suite cleanup): offscreen there are no modals
+# ════════════════════════════════════════════════════════════
+
+class QuestionStub:
+    """A `QMessageBox.question` replacement: records every call and answers it.
+
+    Twelve test files used to declare their own `_fake_question()` plus an
+    `_orig_question = …` save/restore pair — and the variants disagreed on WHAT
+    they recorded (the title alone, a `("question", title, text)` tuple) and on
+    WHERE the answer came from (a constant, a one-element list flipped between
+    the phases, a queue of answers). All three are arguments here:
+
+        stub = QuestionStub(QMessageBox.StandardButton.Cancel,
+                            record=lambda title, text: asked.append(title)).install(ST)
+        ...
+        stub.answer = QMessageBox.StandardButton.Close   # the next phase answers differently
+        ...
+        stub.restore()                                   # or: `with stub:` around the block
+
+    `replies` is a QUEUE consumed before `answer` (the "first Yes, then No" case);
+    `calls` always keeps `[(title, text), …]` for an assertion that does not want a
+    journal of its own. `install()` patches `QMessageBox.question` of the given
+    module (or of the real class when called without one — the module attribute IS
+    the class, so both spellings patch the same object).
+    """
+
+    def __init__(self, answer=None, replies=None, record=None):
+        self.answer = QMessageBox.Yes if answer is None else answer
+        # the caller's LIST is kept by reference (not copied): a test that appends an answer
+        # AFTER the stub was installed must be seen — that is how the queue idiom works.
+        self.replies = replies if replies is not None else []
+        self.record = record
+        self.calls = []
+        self._target = None
+        self._original = None
+
+    def __call__(self, parent=None, title="", text="", *args, **kwargs):
+        title, text = str(title), str(text)
+        self.calls.append((title, text))
+        if self.record is not None:
+            self.record(title, text)
+        if self.replies:
+            return self.replies.pop(0)
+        return self.answer
+
+    def install(self, module=None):
+        """Patch `question` on `module.QMessageBox` (default: the real Qt class)."""
+        target = QMessageBox if module is None else module.QMessageBox
+        self._target = target
+        self._original = target.question
+        target.question = self
+        return self
+
+    def restore(self):
+        """Put the original `question` back (idempotent — a second call is a no-op)."""
+        if self._target is not None:
+            self._target.question = self._original
+        self._target = self._original = None
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc_info):
+        self.restore()
 
 
 # ════════════════════════════════════════════════════════════

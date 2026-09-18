@@ -23,7 +23,8 @@ import os
 import sys
 import xml.etree.ElementTree as ET
 
-from _common import bootstrap, check, finish, load_i18n_langs, check_i18n_parity, check_release_state
+from _common import (bootstrap, check, finish, load_i18n_langs, check_i18n_parity,
+                     check_release_state)
 
 ROOT, WORK = bootstrap()  # BEFORE the app module imports
 
@@ -32,6 +33,7 @@ from PySide6.QtWidgets import QApplication, QMessageBox
 app = QApplication(sys.argv)
 
 import ui.main_window as MW
+from _fakes import QuestionStub
 from models.server import ServerData
 from graphics.map_scene import MapScene
 from dialogs.connection_dialog import ConnectionDialog, EditConnectionDialog
@@ -227,18 +229,11 @@ m1 = win5.scene.add_server(ServerData(id="m1", alias="M1", host="10.3.3.1", user
 m2 = win5.scene.add_server(ServerData(id="m2", alias="M2", host="10.3.3.2", user="root"))
 win5.scene.add_connection("m1", "m2", "stash-bi", "nfs", bidirectional=True)
 
-_orig_question = QMessageBox.question
-
-
-def _fake_question(*a, **k):
-    return QMessageBox.Yes
-
-
-QMessageBox.question = staticmethod(_fake_question)
+_question = QuestionStub(QMessageBox.Yes).install()
 try:
     removed = win5._remove_node_guarded(m2)
 finally:
-    QMessageBox.question = _orig_question
+    _question.restore()
 check("_remove_node_guarded deleted the node and its arrow",
       removed is True and not win5.scene.has_node("m2")
       and _find_arrow(win5.scene, "m1", "m2") is None)

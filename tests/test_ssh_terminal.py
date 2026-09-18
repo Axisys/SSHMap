@@ -20,7 +20,7 @@ Run:  python tests/test_ssh_terminal.py   (from the project root) or python test
 """
 import os, sys, hashlib, traceback
 
-from _common import bootstrap, check, finish
+from _common import bootstrap, check, finish, wait_until
 
 ROOT, WORK = bootstrap()  # BEFORE the app module imports (the HOME isolation and faulthandler inside)
 
@@ -34,26 +34,6 @@ app = QApplication(sys.argv)
 def _key(text="", key_code=None):
     """A QKeyEvent in the current PySide6 signature (modifiers — as an enum, by position)."""
     return QKeyEvent(QKeyEvent.Type.KeyPress, int(key_code), Qt.NoModifier, text)
-
-
-def wait_until(cond, timeout_ms=2000, tick_ms=50):
-    """The real event loop until cond() or the deadline (processEvents does not guarantee
-    the lifetime of the timers — the offscreen render needs the real loop)."""
-    loop = QEventLoop()
-    ticks = {"n": 0}
-
-    def _tick():
-        if not cond() and ticks["n"] * tick_ms < timeout_ms:
-            ticks["n"] += 1
-        elif loop.isRunning():
-            loop.quit()
-
-    tmr = QTimer()
-    tmr.setInterval(tick_ms)
-    tmr.timeout.connect(_tick)
-    tmr.start()
-    loop.exec()
-    tmr.stop()
 
 
 # ════════════════════════════════════════════════════════════
@@ -205,7 +185,7 @@ finally:
 print("== map context menu (bug #2) ==")
 import graphics.map_view as MVm
 from i18n import t as it
-from _fakes import CaptureMenu as _CaptureMenu
+from _fakes import CaptureMenu as _CaptureMenu, QuestionStub
 
 captured_menus = []
 _CaptureMenu.captured = captured_menus   # the exec/exec_ interception offscreen (_fakes)
@@ -300,8 +280,7 @@ try:
 
     # (d) right-click on a node → "Delete server" — the guarded path with confirmation
     from PySide6.QtWidgets import QMessageBox as _QMB
-    _orig_question = _QMB.question
-    _QMB.question = staticmethod(lambda *a, **k: _QMB.Yes)
+    _question = QuestionStub(_QMB.Yes).install()
     try:
         win2b_node_id = node2.data.id
         captured_menus.clear()
@@ -314,7 +293,7 @@ try:
     except Exception as e:
         check("node menu 'delete server' triggers without crash", False, repr(e))
     finally:
-        _QMB.question = _orig_question
+        _question.restore()
 finally:
     MVm.QMenu = _orig_menu_cls
 

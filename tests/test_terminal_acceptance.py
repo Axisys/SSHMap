@@ -27,7 +27,8 @@ import json
 import os
 import sys
 
-from _common import bootstrap, check, finish, wait_until, load_i18n_langs, check_i18n_parity, check_release_state
+from _common import (bootstrap, check, finish, wait_until, load_i18n_langs, check_i18n_parity,
+                     check_release_state, cfg_path, write_cfg, clear_cfg)
 
 ROOT, WORK = bootstrap()  # BEFORE the app module imports
 
@@ -120,24 +121,6 @@ def grab(win):
 
 
 # ── the config ~/.sshmap/config.json (the HOME is isolated by the bootstrap) ───────────────
-def _cfg_path():
-    return os.path.join(os.path.expanduser("~"), ".sshmap", "config.json")
-
-
-def write_config(d):
-    p = _cfg_path()
-    os.makedirs(os.path.dirname(p), exist_ok=True)
-    with open(p, "w", encoding="utf-8") as f:
-        json.dump(d, f)
-
-
-def clear_config():
-    try:
-        os.remove(_cfg_path())
-    except OSError:
-        pass
-
-
 # ════════════════════════════════════════════════════════════
 # 0. Release state (pins — tests/_common.py: EXPECTED_APP_VERSION)
 # ════════════════════════════════════════════════════════════
@@ -154,7 +137,7 @@ check_i18n_parity(load_i18n_langs(ROOT))
 # ════════════════════════════════════════════════════════════
 print("== bash ==")
 
-clear_config()
+clear_cfg()
 win = make_window("bash")
 # Input — \r\n only (the convention since v1.0RC3; fact №10 was closed in v1.2.11: LNM is now
 # is enabled by default and a bare \n = CR+LF, but the \r\n convention remains).
@@ -367,14 +350,14 @@ from modules.ssh_terminal import load_terminal_settings
 # ("close" by default; "ask" — confirmation for closing an active session);
 # v1.1.1: + max_open (the limit of own terminals, default 4);
 # v1.2.2: + mode (the display mode: "windows" the default | "tabs" — the dock on the map).
-clear_config()
+clear_cfg()
 s = load_terminal_settings()
 check("no config → the defaults (the palette default, pt 10, the history 1000 — the scrollback is on, close_behavior=close, max_open=4, wheel=scrollback, mode=windows)",
       s == {"palette": None, "font_family": "", "font_size": None,
             "history_lines": TS.DEFAULT_HISTORY_LINES, "close_behavior": "close",
             "max_open": 4, "wheel": "scrollback", "mode": "windows"}, str(s))
 
-write_config({"terminal_palette": " nord ", "terminal_font": " Consolas ",
+write_cfg({"terminal_palette": " nord ", "terminal_font": " Consolas ",
               "terminal_font_size": 12, "terminal_history_lines": 50})
 s = load_terminal_settings()
 check("the valid values are read (the trimming of the spaces)",
@@ -382,7 +365,7 @@ check("the valid values are read (the trimming of the spaces)",
             "history_lines": 50, "close_behavior": "close", "max_open": 4,
             "wheel": "scrollback", "mode": "windows"}, str(s))
 
-write_config({"terminal_palette": 42, "terminal_font": 7,
+write_cfg({"terminal_palette": 42, "terminal_font": 7,
               "terminal_font_size": "big", "terminal_history_lines": -5})
 s = load_terminal_settings()
 check("the broken values (the foreign types / out of the range) → the defaults",
@@ -391,49 +374,49 @@ check("the broken values (the foreign types / out of the range) → the defaults
             "max_open": 4, "wheel": "scrollback", "mode": "windows"}, str(s))
 
 # v1.1.1: terminal_max_open — the limit of own terminals (default 4, the range 1..32)
-write_config({"terminal_max_open": 8})
+write_cfg({"terminal_max_open": 8})
 check("v1.1.1: the terminal_max_open=8 is read", load_terminal_settings()["max_open"] == 8)
-write_config({"terminal_max_open": "many"})
+write_cfg({"terminal_max_open": "many"})
 check("v1.1.1: the broken terminal_max_open (str) → the default 4",
       load_terminal_settings()["max_open"] == 4)
-write_config({"terminal_max_open": 99})
+write_cfg({"terminal_max_open": 99})
 check("v1.1.1: the terminal_max_open out of the range (99) → the default 4",
       load_terminal_settings()["max_open"] == 4)
 
 # v1.2.2: terminal_mode — the display mode ("windows" the default | "tabs" — the dock on the map);
 # the validation following the pattern of the other keys (a corrupt value/a foreign type → the default)
-write_config({"terminal_mode": "tabs"})
+write_cfg({"terminal_mode": "tabs"})
 check("v1.2.2: the terminal_mode='tabs' is read", load_terminal_settings()["mode"] == "tabs")
-write_config({"terminal_mode": " TABS "})
+write_cfg({"terminal_mode": " TABS "})
 check("v1.2.2: terminal_mode ' TABS ' (strip+lower) → 'tabs'",
       load_terminal_settings()["mode"] == "tabs")
-write_config({"terminal_mode": 123})
+write_cfg({"terminal_mode": 123})
 check("v1.2.2: the broken terminal_mode (int) → the default 'windows'",
       load_terminal_settings()["mode"] == "windows")
 
-write_config({"terminal_close_behavior": " ask "})
+write_cfg({"terminal_close_behavior": " ask "})
 check("v1.1: the terminal_close_behavior='ask' is read (the trimming of the spaces)",
       load_terminal_settings()["close_behavior"] == "ask")
 
-write_config({"terminal_close_behavior": "yell"})
+write_cfg({"terminal_close_behavior": "yell"})
 check("v1.1: the broken terminal_close_behavior → the default 'close'",
       load_terminal_settings()["close_behavior"] == "close")
 
-write_config({"terminal_history_lines": 0})
+write_cfg({"terminal_history_lines": 0})
 check("the explicit terminal_history_lines=0 — the scrollback is off (a deliberate choice)",
       load_terminal_settings()["history_lines"] == 0)
 
 # v1.1.2RC3 (U3 remainder): terminal_wheel — "scrollback" (the default) | "off";
 # the full wheel SGR passthrough in a TUI is deferred to v1.2+ (pyte does not track DECSET
 # 1000/1002/1006). The key is config only — no UI in the settings dialog.
-write_config({"terminal_wheel": "off"})
+write_cfg({"terminal_wheel": "off"})
 check("v1.1.2RC3: the terminal_wheel='off' is read", load_terminal_settings()["wheel"] == "off")
-write_config({"terminal_wheel": "bogus"})
+write_cfg({"terminal_wheel": "bogus"})
 check("v1.1.2RC3: the broken terminal_wheel → the default 'scrollback'",
       load_terminal_settings()["wheel"] == "scrollback")
 
 # A window with a full config: the nord palette + Consolas 12 + the history depth of 50
-write_config({"terminal_palette": "nord", "terminal_font": "Consolas",
+write_cfg({"terminal_palette": "nord", "terminal_font": "Consolas",
               "terminal_font_size": 12, "terminal_history_lines": 50})
 win = make_window("cfg")
 check("the config: the palette nord is applied to the canvas", win.widget._palette_name == "nord",
@@ -458,7 +441,7 @@ check("the config: the history depth 50 (the deque limit terminal_history_lines)
 win.close()
 
 # An unknown palette → silently stays "default" (set_palette() False)
-write_config({"terminal_palette": "neon"})
+write_cfg({"terminal_palette": "neon"})
 win = make_window("cfgbad")
 check("the config: the unknown palette → 'default' (without an error)",
       win.widget._palette_name == "default", win.widget._palette_name)
@@ -469,7 +452,7 @@ check("the config: the background is the default palette (#0f172a)",
 win.close()
 
 # Corrupt values in the window → the defaults (pt 10, history 1000)
-write_config({"terminal_palette": 42, "terminal_font_size": "big",
+write_cfg({"terminal_palette": 42, "terminal_font_size": "big",
               "terminal_history_lines": -5})
 win = make_window("cfgbad2")
 check("the config: the broken values → the font pt 10 (the default)",
@@ -482,7 +465,7 @@ check("the config: the broken terminal_history_lines → the default 1000 (the s
 win.close()
 
 # No config at all → the behaviour AFTER RC3: a HistoryScreen with the built-in depth
-clear_config()
+clear_cfg()
 win = make_window("cfgnone")
 for _ in range(1200):
     win.tscreen.feed(b"x\r\n")
@@ -495,7 +478,7 @@ win.close()
 # Cleanup
 # ════════════════════════════════════════════════════════════
 ST.SSHTerminalThread = _orig_thread_cls
-clear_config()
+clear_cfg()
 for w in _windows:
     try:
         w.close()

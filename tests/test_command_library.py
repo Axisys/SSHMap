@@ -47,8 +47,8 @@ import json
 import os
 import sys
 
-from _common import (bootstrap, check, finish,
-                     load_i18n_langs, check_i18n_parity, check_release_state)
+from _common import (bootstrap, check, finish, load_i18n_langs, check_i18n_parity,
+                     check_release_state, cfg_path, merge_cfg, clear_cfg, read_cfg)
 
 ROOT, WORK = bootstrap()  # BEFORE the app module imports (the HOME isolation and faulthandler inside)
 
@@ -78,45 +78,6 @@ _orig_thread_cls = ST.SSHTerminalThread
 ST.SSHTerminalThread = _FakeThread   # all the pages/windows in this file — on the fake
 
 _windows = []
-
-
-def _cfg_path():
-    return os.path.join(os.path.expanduser("~"), ".sshmap", "config.json")
-
-
-def write_config(d):
-    """A merge write into config.json (the i18n.save_config semantics)."""
-    p = _cfg_path()
-    os.makedirs(os.path.dirname(p), exist_ok=True)
-    cur = {}
-    if os.path.isfile(p):
-        try:
-            with open(p, "r", encoding="utf-8") as f:
-                data = json.load(f)
-            if isinstance(data, dict):
-                cur = data
-        except (json.JSONDecodeError, OSError):
-            pass
-    cur.update(d)
-    with open(p, "w", encoding="utf-8") as f:
-        json.dump(cur, f)
-
-
-def clear_config():
-    try:
-        os.remove(_cfg_path())
-    except OSError:
-        pass
-
-
-def read_config():
-    if not os.path.isfile(_cfg_path()):
-        return {}
-    with open(_cfg_path(), encoding="utf-8") as f:
-        d = json.load(f)
-    return d if isinstance(d, dict) else {}
-
-
 def _commands_path():
     return os.path.join(os.path.expanduser("~"), ".sshmap", "commands.json")
 
@@ -284,7 +245,7 @@ print("== 3. widget.send_macro: exact bytes / dead channel ==")
 bw = TW.TerminalWidget(TerminalScreen(80, 24), None)
 check("terminal_thread=None → False", bw.send_macro("df -h") is False)
 
-clear_config()
+clear_cfg()
 clear_commands()
 w3 = make_window("send3")
 page3 = w3.page
@@ -308,7 +269,7 @@ check("a dead channel (closed=True) → False + 0 bytes",
 # ════════════════════════════════════════════════
 print("== 4. window container: QSplitter + collapse ==")
 
-clear_config()
+clear_cfg()
 clear_commands()
 wA = make_window("structA")
 check("the window: the central widget is a QSplitter (v1.3)", isinstance(wA.centralWidget(), QSplitter))
@@ -330,7 +291,7 @@ check("a click on the button → collapsed (the strip is visible, the body is hi
       wA.cmdlib_panel.is_collapsed() is True
       and wA.cmdlib_panel._strip.isVisible() and not wA.cmdlib_panel._body.isVisible())
 check("the state is written to the config (ui_cmdlib_collapsed=true)",
-      read_config().get("ui_cmdlib_collapsed") is True)
+      read_cfg({}).get("ui_cmdlib_collapsed") is True)
 
 wB = make_window("structB")
 check("a new window starts collapsed per the config", wB.cmdlib_panel.is_collapsed() is True)
@@ -339,11 +300,11 @@ QTest.mouseClick(wB.cmdlib_panel._strip, Qt.MouseButton.LeftButton)
 app.processEvents()
 check("a click on the strip → expanded", wB.cmdlib_panel.is_collapsed() is False)
 check("the state is written to the config (ui_cmdlib_collapsed=false)",
-      read_config().get("ui_cmdlib_collapsed") is False)
+      read_cfg({}).get("ui_cmdlib_collapsed") is False)
 
 wA.cmdlib_panel.set_collapsed(True, persist=False)
 check("set_collapsed(persist=False): the state is switched, the config is untouched",
-      wA.cmdlib_panel.is_collapsed() is True and read_config().get("ui_cmdlib_collapsed") is False)
+      wA.cmdlib_panel.is_collapsed() is True and read_cfg({}).get("ui_cmdlib_collapsed") is False)
 wA.cmdlib_panel.set_collapsed(False)   # return it (it will write false — as-is)
 
 
@@ -352,7 +313,7 @@ wA.cmdlib_panel.set_collapsed(False)   # return it (it will write false — as-i
 # ════════════════════════════════════════════════
 print("== 5. dock container: structure + shared collapse key ==")
 
-write_config({"ui_cmdlib_collapsed": True})   # the state written by the "window"
+merge_cfg({"ui_cmdlib_collapsed": True})   # the state written by the "window"
 dc = TerminalDockContent()
 dc.resize(700, 400)
 dc.show()
@@ -369,11 +330,11 @@ check("the dock: it honours the shared key (it starts collapsed)", dc.cmdlib_pan
 QTest.mouseClick(dc.cmdlib_panel._strip, Qt.MouseButton.LeftButton)
 app.processEvents()
 check("the dock: a click on the strip → expanded + the config is false",
-      dc.cmdlib_panel.is_collapsed() is False and read_config().get("ui_cmdlib_collapsed") is False)
+      dc.cmdlib_panel.is_collapsed() is False and read_cfg({}).get("ui_cmdlib_collapsed") is False)
 dc.cmdlib_panel._collapse_btn.click()
 app.processEvents()
 check("the dock: the button → collapsed + the config is true (the same key as the window)",
-      dc.cmdlib_panel.is_collapsed() is True and read_config().get("ui_cmdlib_collapsed") is True)
+      dc.cmdlib_panel.is_collapsed() is True and read_cfg({}).get("ui_cmdlib_collapsed") is True)
 
 
 # ════════════════════════════════════════════════
@@ -381,7 +342,7 @@ check("the dock: the button → collapsed + the config is true (the same key as 
 # ════════════════════════════════════════════════
 print("== 6. panel send: dblclick / Enter / disabled / no session ==")
 
-clear_config()
+clear_cfg()
 clear_commands()
 wS = make_window("send")
 panelS = wS.cmdlib_panel

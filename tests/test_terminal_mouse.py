@@ -25,7 +25,8 @@ Run:  python tests/test_terminal_mouse.py   (from the project root) or python te
 """
 import sys
 
-from _common import bootstrap, check, finish, check_release_state, load_i18n_langs, check_i18n_parity
+from _common import (bootstrap, check, finish, check_release_state, load_i18n_langs,
+                     check_i18n_parity)
 
 ROOT, WORK = bootstrap()  # BEFORE the app module imports (the HOME isolation and faulthandler inside)
 

@@ -20,7 +20,8 @@ import os
 import sys
 import traceback
 
-from _common import bootstrap, check, finish, wait_until, viewport_point, load_i18n_langs, check_i18n_parity
+from _common import (bootstrap, check, finish, wait_until, viewport_point, load_i18n_langs,
+                     check_i18n_parity)
 
 ROOT, WORK = bootstrap()  # BEFORE the app module imports
 

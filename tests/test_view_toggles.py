@@ -54,8 +54,8 @@ import json
 import os
 import sys
 
-from _common import (bootstrap, check, finish, load_i18n_langs,
-                     check_i18n_parity, check_release_state)
+from _common import (bootstrap, check, finish, load_i18n_langs, check_i18n_parity,
+                     check_release_state, cfg_path, merge_cfg, clear_cfg)
 
 ROOT, WORK = bootstrap()  # BEFORE the app module imports (the HOME isolation and faulthandler inside)
 
@@ -78,52 +78,17 @@ import ui.main_window as MW
 # ════════════════════════════════════════════════════════════
 # The harness
 # ════════════════════════════════════════════════════════════
-
-def _cfg_path():
-    return os.path.join(os.path.expanduser("~"), ".sshmap", "config.json")
-
-
-def write_config(d):
-    """A merge write into config.json (the i18n.save_config semantics)."""
-    p = _cfg_path()
-    os.makedirs(os.path.dirname(p), exist_ok=True)
-    cur = {}
-    if os.path.isfile(p):
-        try:
-            with open(p, "r", encoding="utf-8") as f:
-                data = json.load(f)
-            if isinstance(data, dict):
-                cur = data
-        except (json.JSONDecodeError, OSError):
-            pass
-    cur.update(d)
-    with open(p, "w", encoding="utf-8") as f:
-        json.dump(cur, f)
-
-
-def clear_config():
-    try:
-        os.remove(_cfg_path())
-    except OSError:
-        pass
-
-
 # QMessageBox — no modals offscreen; question → Discard (closing without saving).
 boxes = []
 
+from _fakes import FakeSSHThread as _FakeSSHThreadBase, QuestionStub
 
-def _fake_question(*a, **k):
-    boxes.append(("question", str(a[1]) if len(a) > 1 else ""))
-    return QMessageBox.Discard
-
-
-MW.QMessageBox.question = staticmethod(_fake_question)
+MW.QMessageBox.question = QuestionStub(
+    QMessageBox.Discard,
+    record=lambda title, text: boxes.append(("question", title))).install(MW)
 MW.QMessageBox.critical = staticmethod(lambda *a, **k: boxes.append(("critical",)))
 MW.QMessageBox.warning = staticmethod(lambda *a, **k: boxes.append(("warning",)))
 MW.QMessageBox.information = staticmethod(lambda *a, **k: boxes.append(("information",)))
-
-
-from _fakes import FakeSSHThread as _FakeSSHThreadBase
 
 
 class _FakeThread(_FakeSSHThreadBase):
@@ -152,7 +117,7 @@ STRIP_W = 18
 # ════════════════════════════════════════════════════════════
 print("== 1. structure ==")
 
-clear_config()
+clear_cfg()
 win = make_main()
 sp = win._splitter
 check("QSplitter: two members (the panel containers)", sp.count() == 2, f"count={sp.count()}")
@@ -415,7 +380,7 @@ check("the drawio export with the map collapsed: the file is created",
 # ════════════════════════════════════════════════════════════
 print("== 7. terminals dock with map collapsed ==")
 
-write_config({"terminal_mode": "tabs"})
+merge_cfg({"terminal_mode": "tabs"})
 node_d = win.scene.add_server(ServerData(id="vt-d", alias="DockNode", host="10.99.0.2", user="root"))
 dock = win._spawn_terminal_window(node_d)
 app.processEvents()
@@ -459,8 +424,8 @@ win._dirty = False
 win.close()
 app.processEvents()
 
-clear_config()
-write_config({"terminal_mode": "tabs", "language": "en"})  # foreign keys — for the merge check
+clear_cfg()
+merge_cfg({"terminal_mode": "tabs", "language": "en"})  # foreign keys — for the merge check
 win_p = make_main()
 win_p.act_show_sidebar.setChecked(False)  # only ONE panel (a second one — forbidden, §4)
 app.processEvents()
@@ -476,7 +441,7 @@ app.processEvents()
 # A manual write of BOTH keys as True (for example, an old config): it is applied at startup
 # only the first panel (the sidebar — first in the application order), collapsing the map
 # forbidden by the §4 invariant — the map stays expanded.
-write_config({"ui_sidebar_collapsed": True, "ui_map_collapsed": True})
+merge_cfg({"ui_sidebar_collapsed": True, "ui_map_collapsed": True})
 win_p2 = make_main()  # a new window — the state is applied at startup (after restoreState)
 check("a new window: the sidebar is collapsed at startup",
       win_p2._sidebar_collapsed is True and win_p2.sidebar.isHidden()
@@ -501,7 +466,7 @@ app.processEvents()
 # ════════════════════════════════════════════════════════════
 print("== 9. splitter handle cannot reach zero ==")
 
-clear_config()
+clear_cfg()
 win_h = make_main()
 win_h._splitter.setSizes([0, 1200])
 app.processEvents()

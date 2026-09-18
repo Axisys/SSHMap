@@ -19,10 +19,13 @@ try:
     from ..dialogs.add_server_dialog import AddServerDialog
     from ..dialogs.connection_dialog import ConnectionDialog
     from ..dialogs.ssh_connect_dialog import SSHConnectDialog
+    # v1.4.1: the SSH-config import picker (used by NodeOpsMixin via host_attr — the test seam)
+    from ..dialogs.ssh_config_import_dialog import SshConfigImportDialog
 except ImportError:
     from dialogs.add_server_dialog import AddServerDialog
     from dialogs.connection_dialog import ConnectionDialog
     from dialogs.ssh_connect_dialog import SSHConnectDialog
+    from dialogs.ssh_config_import_dialog import SshConfigImportDialog
 
 # v1.1.4: AddServerDialog/ConnectionDialog/SSHConnectDialog/SSHTerminalWindow/_ext_term —
 # TEST SUBSTITUTION POINTS (MW.<name> = Fake): methods moved to mixins
@@ -1491,6 +1494,10 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         # v0.9.5.5: bulk import of servers from a text file
         self._add_menu_action(file_menu, "file.import_servers", self._import_servers_from_txt,
                               "file.import_servers")
+        # v1.4.1: bulk import from the OpenSSH client config (~/.ssh/config) — the
+        # second import path of the same family; both add their batch as ONE undo command.
+        self._add_menu_action(file_menu, "file.import_ssh_config",
+                              self._import_servers_from_ssh_config, "file.import_ssh_config")
         # v0.9.1: export the map to an image (PNG/JPEG)
         file_menu.addSeparator()
         self._add_menu_action(file_menu, "file.export_png", self._export_map_image, "file.export_png")

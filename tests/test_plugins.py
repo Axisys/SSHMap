@@ -38,7 +38,7 @@ import os
 import sys
 
 from _common import (bootstrap, check, finish, check_i18n_parity, check_i18n_format,
-                     check_release_state, load_i18n_langs, translation_keys)
+                     check_release_state, load_i18n_langs, translation_keys, clear_cfg)
 
 ROOT, WORK = bootstrap()  # BEFORE the app module imports (the HOME isolation inside)
 
@@ -96,15 +96,6 @@ def clean_plugins():
                 pass
     for key in [k for k in sys.modules if k.startswith(PM.LOCAL_MODULE_PREFIX)]:
         sys.modules.pop(key, None)
-
-
-def clear_cfg():
-    try:
-        os.remove(CONFIG_FILE)
-    except OSError:
-        pass
-
-
 def new_manager():
     """A fresh manager (a test sees exactly the plugins the section just wrote)."""
     return PM.PluginManager()

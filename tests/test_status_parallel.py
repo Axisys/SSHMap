@@ -25,7 +25,8 @@ import sys
 import threading
 import time
 
-from _common import bootstrap, check, finish, wait_until, load_i18n_langs, check_i18n_parity, check_release_state
+from _common import (bootstrap, check, finish, wait_until, load_i18n_langs, check_i18n_parity,
+                     check_release_state, clear_cfg)
 
 ROOT, WORK = bootstrap()  # BEFORE the app module imports (the HOME isolation and faulthandler inside)
 
@@ -179,14 +180,7 @@ check("the cancelled before the probe start gave no results (delivered < 6, ≤ 
 print("== status_max_parallel config ==")
 from i18n import save_config as _save_cfg, load_config as _load_cfg
 
-
-def _clear_cfg():
-    for p in (os.path.join(os.path.expanduser("~"), ".sshmap", "config.json"),):
-        try:
-            os.remove(p)
-        except OSError:
-            pass
-
+_clear_cfg = clear_cfg      # v1.4.1: the shared helper (the same ~/.sshmap/config.json)
 
 _clear_cfg()
 st = get_status_settings()

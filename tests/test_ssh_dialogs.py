@@ -21,14 +21,13 @@ from PySide6.QtWidgets import QApplication, QMessageBox, QDialog as _QDialog
 app = QApplication(sys.argv)
 
 import ui.main_window as MW
+from _fakes import QuestionStub
 # patch QMessageBox to avoid modal blocking in offscreen mode; record calls
 boxes = []
 
-def _fake_question(*a, **k):
-    boxes.append(("question", str(a[1]) if len(a) > 1 else "", str(a[2]) if len(a) > 2 else ""))
-    return QMessageBox.Save
-
-MW.QMessageBox.question = staticmethod(_fake_question)
+MW.QMessageBox.question = QuestionStub(
+    QMessageBox.Save,
+    record=lambda title, text: boxes.append(("question", title, text))).install(MW)
 MW.QMessageBox.critical = staticmethod(lambda *a, **k: boxes.append(("critical", str(a[1]), str(a[2]))))
 MW.QMessageBox.warning = staticmethod(lambda *a, **k: boxes.append(("warning", str(a[1]), str(a[2]))))
 

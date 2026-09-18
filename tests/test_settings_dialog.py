@@ -31,7 +31,8 @@ import json
 import os
 import sys
 
-from _common import bootstrap, check, finish, load_i18n_langs, check_i18n_parity
+from _common import (bootstrap, check, finish, load_i18n_langs, check_i18n_parity, read_cfg,
+                     write_cfg, clear_cfg)
 
 ROOT, WORK = bootstrap()  # BEFORE the app module imports (the HOME isolation inside)
 
@@ -54,29 +55,6 @@ from ui.settings_dialog import SettingsDialog
 
 CFG_PATH = os.path.join(os.path.expanduser("~"), ".sshmap", "config.json")
 LEGACY_PATH = _legacy_settings_path()
-
-
-def read_cfg():
-    if not os.path.isfile(CFG_PATH):
-        return None
-    with open(CFG_PATH, encoding="utf-8") as f:
-        return json.load(f)
-
-
-def write_cfg(d):
-    os.makedirs(os.path.dirname(CFG_PATH), exist_ok=True)
-    with open(CFG_PATH, "w", encoding="utf-8") as f:
-        json.dump(d, f)
-
-
-def clear_cfg():
-    for p in (CFG_PATH, LEGACY_PATH):
-        try:
-            os.remove(p)
-        except OSError:
-            pass
-
-
 # ════════════════════════════════════════════════════════════
 # 1. i18n: +33 keys × en/ru/zh, parity 326 → 359 → … → 377 (since v1.1.2 final)
 # ════════════════════════════════════════════════════════════
@@ -142,7 +120,7 @@ check("the button's label is translated (btn.settings)",
 # 4. Task 7: external_terminal — a single config.json + migration
 # ════════════════════════════════════════════════════════════
 print("== external terminal: single config.json ==")
-clear_cfg()
+clear_cfg(LEGACY_PATH)
 check("a fresh HOME: load → 'auto', the file is not created",
       load_external_terminal_setting() == "auto" and read_cfg() is None)
 
@@ -175,13 +153,13 @@ check("save_external_terminal_setting → config.json, the legacy is not created
 
 write_cfg({"external_terminal": "no-such-terminal"})
 check("a broken value in config.json → 'auto'", load_external_terminal_setting() == "auto")
-clear_cfg()
+clear_cfg(LEGACY_PATH)
 
 # ════════════════════════════════════════════════════════════
 # 5. Task 4: the status settings (get_status_settings + live)
 # ════════════════════════════════════════════════════════════
 print("== status settings ==")
-clear_cfg()
+clear_cfg(LEGACY_PATH)
 st = get_status_settings()
 check("no config → the v1.0 defaults (30 s / 3.0 s / 16 parallel, the v1.1.2 final)",
       st == {"interval_sec": 30, "probe_timeout_sec": 3.0, "max_parallel": 16}, str(st))
@@ -211,7 +189,7 @@ chk.set_probe_timeout(0.01)
 check("set_interval/set_probe_timeout are applied (the timeout clamp ≥ 0.2)",
       chk.interval_ms == 60000 and abs(chk.probe_timeout - 0.2) < 1e-9,
       f"interval={chk.interval_ms} timeout={chk.probe_timeout}")
-clear_cfg()
+clear_cfg(LEGACY_PATH)
 
 # ════════════════════════════════════════════════════════════
 # 6. Task 3: the session closing behaviour (terminal_close_behavior)
@@ -219,7 +197,7 @@ clear_cfg()
 print("== terminal close behavior ==")
 
 
-from _fakes import FakeSSHThread as _FakeSSHThreadBase
+from _fakes import FakeSSHThread as _FakeSSHThreadBase, QuestionStub
 
 
 class _FakeSSHThread(_FakeSSHThreadBase):
@@ -265,16 +243,8 @@ def make_term(alias):
 
 
 asked = []
-_question_result = [QMessageBox.StandardButton.Cancel]
-_orig_question = ST.QMessageBox.question
-
-
-def _fake_question(*a, **k):
-    asked.append(a[1] if len(a) > 1 else None)
-    return _question_result[0]
-
-
-ST.QMessageBox.question = staticmethod(_fake_question)
+_question = QuestionStub(QMessageBox.StandardButton.Cancel,
+                         record=lambda title, text: asked.append(title)).install(ST)
 
 try:
     # "ask" + an active session → confirmation; Cancel → the window survives
@@ -291,7 +261,7 @@ try:
     check("Cancel → the window survives (event.ignore, WA_DeleteOnClose did not fire)",
           alive(w))
 
-    _question_result[0] = QMessageBox.StandardButton.Close
+    _question.answer = QMessageBox.StandardButton.Close
     asked.clear()
     w.close()
     app.processEvents()
@@ -299,7 +269,7 @@ try:
           len(asked) == 1 and not alive(w), f"asked={asked}")
 
     # "close" (the v1.0 default) + an active session → no dialog
-    clear_cfg()
+    clear_cfg(LEGACY_PATH)
     w2 = make_term("cl1")
     check("no config → the default 'close' (the v1.0 behavior)",
           getattr(w2, "_close_behavior", None) == "close")
@@ -320,15 +290,15 @@ try:
     check("'ask' + a finished session: no dialog", len(asked) == 0 and not alive(w3),
           f"asked={asked}")
 finally:
-    ST.QMessageBox.question = _orig_question
+    _question.restore()
     ST.SSHTerminalThread = _orig_thread_cls
-    clear_cfg()
+    clear_cfg(LEGACY_PATH)
 
 # ════════════════════════════════════════════════════════════
 # 7. The dialog: 7 tabs (v1.3.2: + Hotkeys), widgets, prefill from the config, collect/OK/Cancel
 # ════════════════════════════════════════════════════════════
 print("== settings dialog ==")
-clear_cfg()
+clear_cfg(LEGACY_PATH)
 dlg = SettingsDialog(None)
 check("a QTabWidget with 7 tabs (v1.3.2: + Hotkeys)", dlg.tabs.count() == 7, str(dlg.tabs.count()))
 expected_tabs = [i18n.t(k) for k in ("settings.tab.general", "settings.tab.terminal",
@@ -347,7 +317,7 @@ _expected_rows = len(_HR.action_ids())
 check("'Hotkeys': one row per registry action, prefilled from the registry defaults",
       dlg.hotkeys_table.rowCount() == _expected_rows
       and len(dlg.hotkey_edits) == _expected_rows
-      and _expected_rows == 43,
+      and _expected_rows == 44,
       f"rows={dlg.hotkeys_table.rowCount()} registry={_expected_rows}")
 check("'Hotkeys': the row names come from the registry label keys",
       [dlg.hotkeys_table.item(r, 0).text() for r in range(_expected_rows)]
@@ -465,7 +435,7 @@ check("Cancel: the config is unchanged, the applied is not emitted",
 # 8. The "Language" tab: immediate application (before OK) + retranslating the dialog
 # ════════════════════════════════════════════════════════════
 print("== language tab ==")
-clear_cfg()
+clear_cfg(LEGACY_PATH)
 # The "ru → en" scenario requires an explicit starting point: since v1.1.1 the default language — en
 # (new users), and without this the combo already sits on en, so setCurrentIndex("en") —
 # a no-op without a signal (the immediate application checked here would go blind).
@@ -498,7 +468,7 @@ check("the return to ru (the signal + the current language)",
 #    live application (_apply_settings_from_dialog)
 # ════════════════════════════════════════════════════════════
 print("== main window entry points ==")
-clear_cfg()
+clear_cfg(LEGACY_PATH)
 import ui.main_window as MW
 
 win = MW.MainWindow()
@@ -564,6 +534,6 @@ check("applied: the autosave is restarted (enabled=True, 60 s)",
 win._dirty = False
 win.close()
 app.processEvents()
-clear_cfg()
+clear_cfg(LEGACY_PATH)
 
 finish()

@@ -7,7 +7,7 @@ Shared harness — `_common.py`; a single run of all files — `run_all.py`.
 ## Running
 
 ```
-python tests/run_all.py                 # all test_*.py + check_i18n_keys.py, auto workers (cores, <=8), table
+python tests/run_all.py                 # all test_*.py + check_i18n_keys.py, auto workers (cores, <=16), longest file first, table
 python tests/run_all.py --workers 8     # number of workers (1 = sequential)
 python tests/run_all.py keyring         # only files whose name contains the substring
 python tests/run_all.py --fast          # daily profile: without slow/network tags
@@ -54,9 +54,25 @@ finish()                          # summary + exit code + file time
 and the total time in the summary line: `ALL PASS (N) [X.XXs]`.
 
 Helper utilities: `wait_until(cond)` — a real Qt event loop until the condition;
+`wait_for(predicate)` (v1.4.1) — the same wait as a BOOL, driving `processEvents() in a sleep loop
+(for a predicate fed by plain threads; `check(..., wait_for(...))` therefore fails honestly on a
+timeout — do not swap it for `wait_until`, whose return is `None`);
 `viewport_point(view, scene_pos)` — scene → viewport coordinates;
 `snapshot_i18n_config()` / `restore_i18n_config()` — a snapshot of the i18n config
 (needed only with SSHMAP_TEST_NO_HOME_ISOLATION=1).
+
+**The config.json fixture (v1.4.1):** `cfg_path()` / `read_cfg(default=None)` / `write_cfg(data)` /
+`merge_cfg(data)` / `clear_cfg(*extra_paths)` — ONE implementation of what 21 files used to
+re-declare under three spellings (`_cfg_path`/`write_config`/`clear_config`,
+`CFG_PATH`/`read_cfg`/`write_cfg`, `cfg_path`/`read_config`). Two behaviours were previously a
+per-file accident and are now explicit: a MISSING file reads as `{}` or `None` (the `default`
+argument), and a write REPLACES the document (`write_cfg`) or MERGES it (`merge_cfg`, the
+`i18n.save_config` semantics). Call them after `bootstrap()`.
+
+Shared stubs (`tests/_fakes.py`): `QuestionStub` (v1.4.1) replaces `QMessageBox.question` and
+records the calls — `install(module)` / `restore()`, `answer` (settable between the phases),
+`replies` (a queue), `calls` and an optional `record(title, text)` journal; it subsumes the 15
+hand-written `_fake_question()` copies and their `_orig_question` save/restore pairs.
 
 Release pins and shared checks (at the bottom of the file): the constants
 `EXPECTED_APP_VERSION` / `EXPECTED_I18N_KEYS` + the i18n policy constants
@@ -140,6 +156,7 @@ of the file itself.
 | `test_sftp_viewer.py` | — | v1.3.1 — File viewer in the SFTP tab (text ≤ 1 MB over SFTP, ROADMAP v1.3.1). |
 | `test_sidebar_context_menu.py` | — | Regression v0.9.6 — the context menu in the sidebar (server list). |
 | `test_sidebar_panel.py` | — | ui/sidebar.py: SidebarPanel — a MainWindow facade + retranslate (v0.9.9.4). |
+| `test_ssh_config_import.py` | — | v1.4.1 — Import from ~/.ssh/config (ROADMAP v1.4.1, tasks 1–6). |
 | `test_ssh_dialogs.py` | — | SSH dialogs: assembly, keyring save v0.9.5.6, the "Connect" button (former smoke_test §6a+§7). |
 | `test_ssh_terminal.py` | — | Regression tests v0.8.1 — four fixes: |
 | `test_ssh_undo_lifecycle.py` | — | v1.1.2RC1 — the SSH path: undo, paramiko defaults, thread lifecycle (release theme). |
@@ -171,9 +188,9 @@ of the file itself.
 
 | file | role |
 |---|---|
-| `_common.py` | the harness: bootstrap/check/finish/wait_until etc. (not a test — run_all skips it); check() times the segment, finish() prints "slowest checks" + the file time |
-| `_fakes.py` | shared test fakes (suite optimization phase 2): FakeSSHChannel/FakeSSHThread/BlockingFakeSSHThread (the same API as SSHTerminalThread; RECORD — the channel capture mode "list"/"last"/None), CaptureMenu (captures exec/exec_ offscreen, the list — a class attribute captured), a fake SFTP (FakeSftpFS/File/Client + EventLog + wire_worker — the journal of the worker's signals, incl. the v1.3.1 read_ready as the kind "read"), FakeSSHClient/FakeTransport (the paramiko surface for the terminal window), FakeLineEdit/FakeSpinBox/DummySignal/FakeTermWin, FakeWidgetThread (the TerminalWidget level). Not a test — run_all skips it; each test file is a separate process, so class attributes are configured without cross-interference |
-| `run_all.py` | the single runner: collects exactly `test_*.py` + `check_i18n_keys.py` (itself and other meta-scripts are NOT included — otherwise recursion), in parallel (ThreadPoolExecutor, auto workers = cores ≤ 8; `--workers N`), each file — a separate process, a table + a single exit code. Flags: `--fast` (without the slow/network tags), `--tag NAME`, `--failed-only` (by the test-results/last_run.json cache), `--junit [PATH]` (JUnit XML into test-results/junit.xml). File tags — a `# tags: …` line in the header |
+| `_common.py` | the harness: bootstrap/check/finish/wait_until + the v1.4.1 shared fixtures — `wait_for` (a boolean wait) and the config.json family (`cfg_path`/`read_cfg`/`write_cfg`/`merge_cfg`/`clear_cfg`) (not a test — run_all skips it); check() times the segment, finish() prints "slowest checks" + the file time |
+| `_fakes.py` | shared test fakes (suite optimization phase 2): FakeSSHChannel/FakeSSHThread/BlockingFakeSSHThread (the same API as SSHTerminalThread; RECORD — the channel capture mode "list"/"last"/None), CaptureMenu (captures exec/exec_ offscreen, the list — a class attribute captured), a fake SFTP (FakeSftpFS/File/Client + EventLog + wire_worker — the journal of the worker's signals, incl. the v1.3.1 read_ready as the kind "read"), FakeSSHClient/FakeTransport (the paramiko surface for the terminal window), FakeLineEdit/FakeSpinBox/DummySignal/FakeTermWin, FakeWidgetThread (the TerminalWidget level), QuestionStub (v1.4.1: a `QMessageBox.question` replacement — answer/replies/calls/record + install/restore). Not a test — run_all skips it; each test file is a separate process, so class attributes are configured without cross-interference |
+| `run_all.py` | the single runner: collects exactly `test_*.py` + `check_i18n_keys.py` (itself and other meta-scripts are NOT included — otherwise recursion), in parallel (ThreadPoolExecutor, auto workers = cores ≤ 16 — v1.4.1, `--workers N`; the LONGEST file first — `order_files()`, the times from the cache of the previous run), each file — a separate process, a table + a single exit code. Flags: `--fast` (without the slow/network tags), `--tag NAME`, `--failed-only` (by the test-results/last_run.json cache), `--junit [PATH]` (JUnit XML into test-results/junit.xml). File tags — a `# tags: …` line in the header |
 | `check_i18n_keys.py` | parity of the i18n keys en/ru/zh (the keys used in code × 3 languages) — included in run_all |
 | `_gen_index.py` | auto-generation of the "Suite files" table below from the test_*.py docstrings and tags (ast, without importing; the file set and tag parsing — the same functions as in run_all.py). `python tests/_gen_index.py` — rewrites the block between the AUTOGEN markers; `--check` — a freshness check without writing (exit 1 on mismatch, for CI/gate). Not a test — run_all skips it |
 | `_bench_rubber.py` | the v1.2.10rc3 measurement: a rubber-band drag over a 500-node map, ms before/after the fix (numbers — CHANGELOG.md); NOT part of the suite (files with the _ prefix are skipped by run_all) |
@@ -218,6 +235,10 @@ of the file itself.
    File-specific values (passwords/paths/capture lists) stay in the test;
    configurable class attributes (CaptureMenu.captured, FakeTermWin.spawned,
    FakeWidgetThread.sent) are assigned before the scenario.
+   The same rule covers the fixture HELPERS (v1.4.1): a local `_cfg_path`/`write_config`/
+   `_fake_question`/`wait_until` copy is a defect — `_common.py` (config.json + waits) and
+   `_fakes.py` (QuestionStub) own them, and the `record=`/`default=`/`answer` arguments
+   carry the per-file differences that used to justify the copies.
 9. **INDEX.md is auto-generated:** the "Suite files" table between the AUTOGEN markers —
    the output of `tests/_gen_index.py` (each file's first docstring line + tags);
    the module docstring is the single source of truth about coverage. After adding/

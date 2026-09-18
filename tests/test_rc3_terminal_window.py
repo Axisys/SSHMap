@@ -60,7 +60,8 @@ import sys
 import threading
 import time
 
-from _common import bootstrap, check, finish, wait_until, check_release_state
+from _common import (bootstrap, check, finish, wait_until, check_release_state, cfg_path,
+                     write_cfg, clear_cfg, read_cfg)
 
 ROOT, WORK = bootstrap()  # BEFORE the app module imports (the HOME isolation and faulthandler inside)
 
@@ -353,42 +354,17 @@ check("E2E through output_signal: the auto-return + the selection reset",
 # 6. U3 remainder: the wheel — the terminal_wheel config ("scrollback" | "off")
 # ════════════════════════════════════════════════════════════
 print("== wheel: config validation + wheelEvent modes ==")
-
-
-def _cfg_path():
-    return os.path.join(os.path.expanduser("~"), ".sshmap", "config.json")
-
-
-def write_config(d):
-    p = _cfg_path()
-    os.makedirs(os.path.dirname(p), exist_ok=True)
-    with open(p, "w", encoding="utf-8") as f:
-        json.dump(d, f)
-
-
-def clear_config():
-    try:
-        os.remove(_cfg_path())
-    except OSError:
-        pass
-
-
-def read_cfg():
-    with open(_cfg_path(), encoding="utf-8") as f:
-        return json.load(f)
-
-
 # ── the key validation (load_terminal_settings) ────────────────────────────────
-clear_config()
+clear_cfg()
 check("wheel: no key → the default 'scrollback'", load_terminal_settings()["wheel"] == "scrollback")
-write_config({"terminal_wheel": "off"})
+write_cfg({"terminal_wheel": "off"})
 check("wheel: 'off' → 'off'", load_terminal_settings()["wheel"] == "off")
-write_config({"terminal_wheel": " OFF "})
+write_cfg({"terminal_wheel": " OFF "})
 check("wheel: ' OFF ' (strip+lower) → 'off'", load_terminal_settings()["wheel"] == "off")
-write_config({"terminal_wheel": "garbage"})
+write_cfg({"terminal_wheel": "garbage"})
 check("wheel: a broken value → the default 'scrollback'",
       load_terminal_settings()["wheel"] == "scrollback")
-write_config({"terminal_wheel": 123})
+write_cfg({"terminal_wheel": 123})
 check("wheel: a foreign type (int) → the default 'scrollback'",
       load_terminal_settings()["wheel"] == "scrollback")
 
@@ -442,13 +418,13 @@ check("scrollback: the wheel down returns to live + accept",
       scr_sb.at_bottom() and ev_dn2.isAccepted())
 
 # ── the terminal window: the mode is read from the config on creation ──────────────────
-write_config({"terminal_wheel": "off"})
+write_cfg({"terminal_wheel": "off"})
 win_w_off = ST.SSHTerminalWindow(
     ServerData(id="rc3-w-off", alias="w-off", host="10.99.0.1", user="root"), None, password="pw")
 _term_windows.append(win_w_off)
 check("the window: terminal_wheel='off' → widget._wheel_mode == 'off'",
       win_w_off.widget._wheel_mode == "off")
-clear_config()
+clear_cfg()
 win_w_def = ST.SSHTerminalWindow(
     ServerData(id="rc3-w-def", alias="w-def", host="10.99.0.1", user="root"), None, password="pw")
 _term_windows.append(win_w_def)
@@ -472,12 +448,12 @@ def plain_main_win():
 
 
 # ── the helper round-trip: save → restore into a fresh window (a non-default size) ───
-clear_config()
+clear_cfg()
 w_a = plain_main_win()
 w_a.resize(700, 500)   # the QMainWindow default — 640×480, hence the restoration is visible
 app.processEvents()
 check("U2: save_window_geometry → True", save_window_geometry("rc3_test_key", w_a) is True)
-_val = read_cfg().get("rc3_test_key")
+_val = read_cfg({}).get("rc3_test_key")
 check("U2: the value — a dict {geometry, state} (the base64 strings)",
       isinstance(_val, dict) and set(_val) == {"geometry", "state"}
       and bool(_val["geometry"]) and bool(_val["state"]), f"got={_val!r}")
@@ -488,24 +464,24 @@ check("U2: the 700×500 size is restored (not the default 640×480)",
       w_b.size() == QSize(700, 500), f"got={w_b.size()}")
 
 # ── the broken values / a foreign type / no key → a no-op + False ──────────────────
-write_config({"rc3_test_key": {"geometry": "!!!not-base64", "state": "zzz"}})
+write_cfg({"rc3_test_key": {"geometry": "!!!not-base64", "state": "zzz"}})
 w_c = plain_main_win()
 check("U2: a broken base64 → False", restore_window_geometry("rc3_test_key", w_c) is False)
 check("U2: a broken value — the size stays the default 640×480",
       w_c.size() == QSize(640, 480), f"got={w_c.size()}")
 
-write_config({"rc3_test_key": "just-a-string"})
+write_cfg({"rc3_test_key": "just-a-string"})
 w_d = plain_main_win()
 check("U2: the value is not a dict → False", restore_window_geometry("rc3_test_key", w_d) is False)
 
-clear_config()
+clear_cfg()
 w_e = plain_main_win()
 check("U2: no key → False + the default size",
       restore_window_geometry("rc3_test_key", w_e) is False
       and w_e.size() == QSize(640, 480), f"got={w_e.size()}")
 
 # ── E2E the terminal window: closeEvent saves, a new window restores ─────
-clear_config()
+clear_cfg()
 win_t1 = ST.SSHTerminalWindow(
     ServerData(id="rc3-geo-1", alias="geo-1", host="10.99.0.1", user="root"), None, password="pw")
 _term_windows.append(win_t1)
@@ -514,7 +490,7 @@ app.processEvents()
 _ev_close = QCloseEvent()
 win_t1.closeEvent(_ev_close)
 check("U2: the terminal's closeEvent is accepted (no 'ask' dialog)", _ev_close.isAccepted())
-_val = read_cfg().get("ui_window_geometry_terminal")
+_val = read_cfg({}).get("ui_window_geometry_terminal")
 check("U2: the ui_window_geometry_terminal key is written {geometry, state}",
       isinstance(_val, dict) and set(_val) == {"geometry", "state"}, f"got={_val!r}")
 
@@ -526,7 +502,7 @@ check("U2: the new terminal window restored 640×480 (the default 800×600)",
       win_t2.size() == QSize(640, 480), f"got={win_t2.size()}")
 
 # ── E2E the main window: closeEvent saves, a new MainWindow restores ─
-clear_config()
+clear_cfg()
 mw1 = MW.MainWindow()
 _geo_windows.append(mw1)
 mw1.resize(700, 500)   # the main window default — 1200×850 (offscreen: clamped to 800×800)
@@ -534,7 +510,7 @@ app.processEvents()
 _ev_close2 = QCloseEvent()
 mw1.closeEvent(_ev_close2)
 check("U2: the MainWindow's closeEvent is accepted (_dirty=False → no dialog)", _ev_close2.isAccepted())
-_val = read_cfg().get("ui_window_geometry_main")
+_val = read_cfg({}).get("ui_window_geometry_main")
 check("U2: the ui_window_geometry_main key is written {geometry, state}",
       isinstance(_val, dict) and set(_val) == {"geometry", "state"}, f"got={_val!r}")
 
@@ -544,7 +520,7 @@ app.processEvents()
 check("U2: the new MainWindow restored 700×500 (the default 1200×850)",
       mw2.size() == QSize(700, 500), f"got={mw2.size()}")
 
-clear_config()
+clear_cfg()
 
 
 # ════════════════════════════════════════════════════════════

@@ -31,7 +31,8 @@ import threading
 import time
 
 from _common import (bootstrap, check, finish, wait_until, check_i18n_parity,
-                     check_i18n_format, check_release_state, load_i18n_langs, translation_keys)
+                     check_i18n_format, check_release_state, load_i18n_langs, translation_keys,
+                     clear_cfg)
 
 ROOT, WORK = bootstrap()  # BEFORE the app module imports (the HOME isolation inside)
 
@@ -82,15 +83,6 @@ def clean_plugins():
                 pass
     for key in [k for k in sys.modules if k.startswith(PM.LOCAL_MODULE_PREFIX)]:
         sys.modules.pop(key, None)
-
-
-def clear_cfg():
-    try:
-        os.remove(CONFIG_FILE)
-    except OSError:
-        pass
-
-
 def local_module(stem):
     """The module object of a folder plugin after a discovery."""
     return sys.modules.get(f"{PM.LOCAL_MODULE_PREFIX}{stem}")
@@ -174,7 +166,7 @@ check("ctx.plugin_id is the plugin's own MANIFEST name",
 check("ctx.api_version reports the API version of the contract (1)",
       _ctx.api_version == 1 and _ctx.api_version == PM.API_VERSION, str(_ctx.api_version))
 check("ctx.app_version is the running application version (version.py)",
-      _ctx.app_version == _version.APP_VERSION == "1.4",
+      _ctx.app_version == _version.APP_VERSION == "1.4.1",
       f"{_ctx.app_version} vs {_version.APP_VERSION}")
 check("a context without a core is inert: log/status/run_command report 'not available' "
       "instead of raising",

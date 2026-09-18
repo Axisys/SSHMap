@@ -1,7 +1,9 @@
 """Host Importer — bulk import of servers from a text file (v0.9.5.5).
 
-File format: one server per line — an IP address or a host DNS name.
-Empty lines and comments (# ...) are ignored.
+File format: one server per line — an IP address or a host DNS name; a line may
+carry SEVERAL whitespace-separated entries (v1.4.1, see parse_hosts_file()).
+Empty lines are ignored, and '#' or '//' — at the start of a line or inside it —
+starts a comment that runs to the end of the line.
 
 Logic:
   • a line looks like an IPv4/IPv6 → take it as-is (host = IP);
@@ -22,15 +24,42 @@ from PySide6.QtCore import QThread, Signal
 
 
 def parse_hosts_file(text: str) -> List[str]:
-    """Parse the file text: non-empty lines without '#' and '//' (trimmed)."""
+    """Parse the file text: EVERY whitespace-separated word of every data line.
+
+    v1.4.1 (ROADMAP task 4): the parser used to take ``entry.split()[0]``, so a
+    line like ``web-1 web-2 db-master`` imported ONLY ``web-1`` — the remaining
+    words were neither imported nor counted in the "skipped" report (a silent
+    loss; the v1.3.3 audit, confirmed by the third-party review). The pinned
+    reading is now the multi-host one: every word of the line becomes an entry.
+
+    Consequences, deliberately accepted:
+      • the historical ``host ip`` form yields TWO entries — the name and the IP
+        (``is_ip_address()``/the DNS step handle both, an IP simply becomes a
+        node with ``host == ip``);
+      • an unquoted ``#`` or ``//`` starts a COMMENT and ends the line, so a
+        trailing note can no longer turn into a host (``web-1 # prod`` → one
+        entry, not three);
+      • a word that repeats a word already seen (in the file or on the map) is
+        dropped by the caller's case-insensitive deduplication and counted in
+        the "skipped" report — never silently.
+
+    The stricter variant (one host per line, the extra words reported as
+    skipped) was REJECTED: it keeps dropping hosts the user wrote down, and
+    "no silent loss" is the whole point of the fix.
+    """
     hosts = []
     for line in text.splitlines():
         entry = line.strip()
         if not entry or entry.startswith("#") or entry.startswith("//"):
             continue
-        # A line may be "host ip" separated by a tab/space — take the first word
-        entry = entry.split()[0]
-        hosts.append(entry)
+        # v1.4.1: an inline comment ends the line (before "//" too — the
+        # historical comment marker of the TXT format).
+        for marker in ("#", "//"):
+            cut = entry.find(marker)
+            if cut >= 0:
+                entry = entry[:cut]
+        for word in entry.split():
+            hosts.append(word)
     return hosts
 
 

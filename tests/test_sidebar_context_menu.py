@@ -56,7 +56,7 @@ def _row_center(item):
 
 
 # ── The QMenu interception (the regression_v081 pattern): exec does not block offscreen ──
-from _fakes import CaptureMenu as _CaptureMenu
+from _fakes import CaptureMenu as _CaptureMenu, QuestionStub
 
 captured = []
 _CaptureMenu.captured = captured
@@ -266,8 +266,7 @@ try:
 
         # ══ #1. "Delete" — the guarded path (the confirmation → the worker guard → remove) ══
         rows_before = win.tree.topLevelItemCount()
-        _orig_question = QMessageBox.question
-        QMessageBox.question = staticmethod(lambda *a, **k: QMessageBox.Yes)
+        _question = QuestionStub(QMessageBox.Yes).install()
         try:
             menu5 = _ctx_row(item1)
             if menu5:
@@ -284,7 +283,7 @@ try:
                   f"rows {rows_before} -> {win.tree.topLevelItemCount()}")
             check("delete marks the project dirty", bool(win._dirty))
         finally:
-            QMessageBox.question = _orig_question
+            _question.restore()
 
     # ══ The empty area of the tree — the menu is not shown, no crashes ══
     print("== empty area ==")

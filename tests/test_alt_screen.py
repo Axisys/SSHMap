@@ -30,7 +30,8 @@ Run: python tests/test_alt_screen.py   (from the project root) or python tests/r
 """
 import sys
 
-from _common import bootstrap, check, finish, load_i18n_langs, check_i18n_parity, check_release_state
+from _common import (bootstrap, check, finish, load_i18n_langs, check_i18n_parity,
+                     check_release_state)
 
 ROOT, WORK = bootstrap()  # BEFORE the app module imports
 

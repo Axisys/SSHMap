@@ -20,11 +20,8 @@ import os
 import re
 import sys
 
-from _common import (
-    bootstrap, check, finish,
-    load_i18n_langs, check_i18n_parity, check_release_state,
-    VERSION_FORMAT_RE,
-)
+from _common import (bootstrap, check, finish, load_i18n_langs, check_i18n_parity,
+                     check_release_state, VERSION_FORMAT_RE)
 
 ROOT, WORK = bootstrap()  # BEFORE the app module imports (the HOME isolation inside)
 

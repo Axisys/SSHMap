@@ -38,8 +38,8 @@ import json
 import os
 import sys
 
-from _common import (bootstrap, check, finish, wait_until,
-                     load_i18n_langs, check_i18n_parity, check_release_state)
+from _common import (bootstrap, check, finish, wait_until, load_i18n_langs, check_i18n_parity,
+                     check_release_state, cfg_path, write_cfg, clear_cfg)
 
 ROOT, WORK = bootstrap()  # BEFORE the app module imports (the HOME isolation and faulthandler inside)
 
@@ -59,27 +59,8 @@ import ui.main_window as MW
 # The harness: fake threads (the same API as SSHTerminalThread) — _fakes.py
 # ════════════════════════════════════════════════════════════
 
-from _fakes import FakeSSHThread as _FakeThread, BlockingFakeSSHThread as _BlockingThread
-
-
-def _cfg_path():
-    return os.path.join(os.path.expanduser("~"), ".sshmap", "config.json")
-
-
-def write_config(d):
-    p = _cfg_path()
-    os.makedirs(os.path.dirname(p), exist_ok=True)
-    with open(p, "w", encoding="utf-8") as f:
-        json.dump(d, f)
-
-
-def clear_config():
-    try:
-        os.remove(_cfg_path())
-    except OSError:
-        pass
-
-
+from _fakes import (FakeSSHThread as _FakeThread, BlockingFakeSSHThread as _BlockingThread,
+                    QuestionStub)
 def alive(w):
     """Is the C++ object alive (WA_DeleteOnClose: after the accept — already destroyed)."""
     try:
@@ -114,7 +95,7 @@ def dot_color(node):
 # ════════════════════════════════════════════════════════════
 print("== 1. window structure: QTabWidget of sessions ==")
 
-clear_config()
+clear_cfg()
 w1 = make_window("struct")
 check("the window: WA_DeleteOnClose is kept",
       bool(w1.testAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)) is True)
@@ -263,7 +244,7 @@ check("the cross on the tab (tabCloseRequested): the last tab is closed → the 
       f"registry={len(mw._terminal_windows)}")
 
 # ── the "ask" gate on tab close: Cancel holds / Close closes ────────────
-write_config({"terminal_close_behavior": "ask"})
+write_cfg({"terminal_close_behavior": "ask"})
 ST.SSHTerminalThread = _BlockingThread
 node_c = mw.scene.add_server(
     ServerData(id="tt-c", alias="gamma", host="10.98.3.3", user="root"))
@@ -275,16 +256,8 @@ page_c2 = win_c1.session_tabs.widget(1)
 wait_until(lambda: page_c1.terminal_thread.isRunning(), timeout_ms=3000)
 
 asked = []
-_q_result = [QMessageBox.StandardButton.Cancel]
-_orig_question = ST.QMessageBox.question
-
-
-def _fake_question(*a, **k):
-    asked.append(a[1] if len(a) > 1 else None)
-    return _q_result[0]
-
-
-ST.QMessageBox.question = staticmethod(_fake_question)
+_question = QuestionStub(QMessageBox.StandardButton.Cancel,
+                         record=lambda title, text: asked.append(title)).install(ST)
 try:
     asked.clear()
     win_c1.close_page(page_c1)   # "ask" + an active session → a confirmation
@@ -293,7 +266,7 @@ try:
           len(asked) == 1 and alive(win_c1) and win_c1.session_tabs.count() == 2
           and page_c1._shut_down is False, f"asked={asked}")
 
-    _q_result[0] = QMessageBox.StandardButton.Close
+    _question.answer = QMessageBox.StandardButton.Close
     asked.clear()
     win_c1.close_page(page_c1)   # "ask" + Close → teardown of THIS tab ONLY
     wait_until(lambda: len(mw._terminal_windows) == 1, timeout_ms=4000)
@@ -302,7 +275,7 @@ try:
           len(asked) == 1 and alive(win_c1) and win_c1.session_tabs.count() == 1
           and not alive(page_c1), f"asked={asked}")
 finally:
-    ST.QMessageBox.question = _orig_question
+    _question.restore()
 
 # the "ask" section cleanup: release the blocked threads, close the remainder
 page_c1.terminal_thread.release()
@@ -310,7 +283,7 @@ page_c2.terminal_thread.release()
 wait_until(lambda: (not page_c1.terminal_thread.isRunning()
                     and not page_c2.terminal_thread.isRunning()), timeout_ms=8000)
 ST.SSHTerminalThread = _FakeThread
-clear_config()
+clear_cfg()
 if alive(win_c1):
     win_c1.close()   # the sessions are finished — no dialog; the last tab → the window
 wait_until(lambda: len(mw._terminal_windows) == 0, timeout_ms=4000)
@@ -324,7 +297,7 @@ check("the ask-section cleanup: all the sessions are closed, the registry is emp
 # ════════════════════════════════════════════════════════════
 print("== 4. error path in a tabbed window ==")
 
-clear_config()
+clear_cfg()
 node_d = mw.scene.add_server(
     ServerData(id="tt-d", alias="delta", host="10.98.3.4", user="root"))
 win_d1 = mw._spawn_terminal_window(node_d)
@@ -370,7 +343,7 @@ check("the error path: closing the last tab → the window is destroyed", not al
 # ════════════════════════════════════════════════════════════
 print("== 5. limit counts sessions across all windows ==")
 
-write_config({"terminal_max_open": 3})
+write_cfg({"terminal_max_open": 3})
 node_e = mw.scene.add_server(
     ServerData(id="tt-e", alias="eps", host="10.98.3.5", user="root"))
 win_e1 = mw._spawn_terminal_window(node_e)   # tab 1
@@ -384,17 +357,9 @@ check("the limit: 3 sessions (2 tabs in one window + 1 in another)",
       and win_e1.session_tabs.count() == 2 and win_f is not win_e1,
       f"registry={len(mw._terminal_windows)}")
 
-_limit_result = [QMessageBox.StandardButton.Cancel]
-_orig_mw_question = MW.QMessageBox.question
 asked5 = []
-
-
-def _mw_fake_question(*a, **k):
-    asked5.append(a[1] if len(a) > 1 else None)
-    return _limit_result[0]
-
-
-MW.QMessageBox.question = staticmethod(_mw_fake_question)
+_limit_stub = QuestionStub(QMessageBox.StandardButton.Cancel,
+                           record=lambda title, text: asked5.append(title)).install(MW)
 try:
     node_g = mw.scene.add_server(
         ServerData(id="tt-g", alias="gma", host="10.98.3.7", user="root"))
@@ -404,7 +369,7 @@ try:
           w_cancel is None and len(asked5) == 1 and len(mw._terminal_windows) == 3,
           f"asked={asked5} registry={len(mw._terminal_windows)}")
 
-    _limit_result[0] = QMessageBox.StandardButton.Close
+    _limit_stub.answer = QMessageBox.StandardButton.Close
     asked5.clear()
     oldest_sess = mw._terminal_windows[0]   # the first tab of the eps window
     node_h = mw.scene.add_server(
@@ -424,8 +389,8 @@ try:
           and mw._terminal_windows[-1] is w_new.page and w_new is not win_e1,
           f"registry={[type(s).__name__ for s in mw._terminal_windows]}")
 finally:
-    MW.QMessageBox.question = _orig_mw_question
-clear_config()
+    _limit_stub.restore()
+clear_cfg()
 
 # cleanup: close all the remaining windows (sessions)
 for ww in (win_e1, win_f, w_new):
@@ -442,7 +407,7 @@ check("the limit-section cleanup: all the sessions are closed, the registry is e
 # ════════════════════════════════════════════════════════════
 print("== 6. status bridge: active tab only ==")
 
-clear_config()
+clear_cfg()
 node_i = mw.scene.add_server(
     ServerData(id="tt-i", alias="iota", host="10.98.3.9", user="root"))
 win_i1 = mw._spawn_terminal_window(node_i)

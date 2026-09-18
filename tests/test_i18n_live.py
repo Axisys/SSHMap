@@ -42,11 +42,10 @@ from contextlib import redirect_stdout
 
 from _common import (bootstrap, check, finish, check_i18n_parity, check_i18n_format,
                      check_release_state, snapshot_i18n_config, restore_i18n_config,
-                     load_i18n_langs, translation_keys, is_partial_lang,
-                     i18n_parity_problems, i18n_parity_warnings, i18n_format_problems,
-                     placeholder_names, newline_count, i18n_lang_codes,
-                     I18N_META_KEYS, I18N_REFERENCE, I18N_LANG_ENCODING,
-                     EXPECTED_I18N_KEYS, EXPECTED_APP_VERSION,
+                     load_i18n_langs, translation_keys, is_partial_lang, i18n_parity_problems,
+                     i18n_parity_warnings, i18n_format_problems, placeholder_names,
+                     newline_count, i18n_lang_codes, I18N_META_KEYS, I18N_REFERENCE,
+                     I18N_LANG_ENCODING, EXPECTED_I18N_KEYS, EXPECTED_APP_VERSION,
                      TEST_FILE_COUNTER_RE, I18N_PARITY_FIGURE_RE)
 
 ROOT, WORK = bootstrap()  # BEFORE the app module imports (the HOME isolation inside)
@@ -776,10 +775,10 @@ print("== §9 the release state ==")
 # ════════════════════════════════════════════════════════════════════════════
 
 check("EXPECTED_APP_VERSION is the version this test file describes",
-      EXPECTED_APP_VERSION == "1.4", EXPECTED_APP_VERSION)
-check("the pin counts the keys of this release (v1.4: the base release adds NO key — the "
-      "two example plugins carry the author's own strings, not i18n keys)",
-      EXPECTED_I18N_KEYS == 545, str(EXPECTED_I18N_KEYS))
+      EXPECTED_APP_VERSION == "1.4.1", EXPECTED_APP_VERSION)
+check("the pin counts the keys of this release (v1.4.1: +21 — the SSH-config import: "
+      "the menu item, the picker dialog, its reason codes and the two reports)",
+      EXPECTED_I18N_KEYS == 566, str(EXPECTED_I18N_KEYS))
 check_release_state(ROOT)
 for _code in i18n_lang_codes(ROOT):
     check(f"i18n/{_code}.json carries the new sftp.conflict.title key",
@@ -816,6 +815,14 @@ for _code in i18n_lang_codes(ROOT):
           "plugins.run_on_nodes" in translation_keys(read_lang(_code)))
     check(f"i18n/{_code}.json carries the v1.4rc3 plugins.status.run_on_nodes key",
           "plugins.status.run_on_nodes" in translation_keys(read_lang(_code)))
+    check(f"i18n/{_code}.json carries the v1.4.1 file.import_ssh_config key",
+          "file.import_ssh_config" in translation_keys(read_lang(_code)))
+    check(f"i18n/{_code}.json carries the v1.4.1 sshconfig.reason.wildcard key",
+          "sshconfig.reason.wildcard" in translation_keys(read_lang(_code)))
+    check(f"i18n/{_code}.json carries the v1.4.1 sshconfig.col_key key",
+          "sshconfig.col_key" in translation_keys(read_lang(_code)))
+    check(f"i18n/{_code}.json carries the v1.4.1 msg.import_ssh_config_result key",
+          "msg.import_ssh_config_result" in translation_keys(read_lang(_code)))
 
 # cleanup: back to en + the original config, then close the windows
 i18n.set_language("en")

@@ -134,6 +134,32 @@ def wait_until(cond, timeout_ms=3000, tick_ms=50):
     tmr.stop()
 
 
+def wait_for(predicate, timeout_ms=3000, tick_ms=10):
+    """Drive `processEvents()` until predicate() is true; return a BOOL (v1.4.1 suite cleanup).
+
+    `wait_until()` above runs a REAL Qt event loop and returns nothing; this poll is for a
+    predicate fed by plain Python threads / queued signals (the plugin tests): it returns
+    True/False, so `check(..., wait_for(...))` fails honestly on a timeout.
+
+    Do not swap one for the other: `wait_until(...) is not False` against the event-loop
+    version is TRUE even on a timeout (`None is not False`), which is a silently passing check.
+    """
+    import time as _time
+    from PySide6.QtWidgets import QApplication
+
+    app = QApplication.instance()
+    deadline = _time.monotonic() + timeout_ms / 1000.0
+    while _time.monotonic() < deadline:
+        if app is not None:
+            app.processEvents()
+        if predicate():
+            return True
+        _time.sleep(tick_ms / 1000.0)
+    if app is not None:
+        app.processEvents()
+    return bool(predicate())
+
+
 def viewport_point(view, scene_pos):
     """The scene → a QPoint in the coordinates of the viewport (Qt 6.11: mapFromScene can give a QPoint or a QPointF)."""
     from PySide6.QtCore import QPoint
@@ -167,12 +193,97 @@ def restore_i18n_config(snap):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# config.json — the shared fixture helpers (v1.4.1 suite cleanup).
+# The suite re-declared this family 50 times in 21 files under three spellings
+# (`_cfg_path`/`write_config`/`clear_config`, `CFG_PATH`/`read_cfg`/`write_cfg`,
+# `cfg_path`/`read_config`) — and the variants disagreed on two things: whether a
+# missing file reads as {} or None, and whether the write MERGES (the
+# `i18n.save_config` semantics) or REPLACES the document. Both are now explicit
+# arguments instead of a per-file accident.
+# Call them AFTER bootstrap(): the path is resolved from the isolated HOME.
+# ─────────────────────────────────────────────────────────────────────────────
+
+def cfg_path() -> str:
+    """`~/.sshmap/config.json` of the sandbox HOME."""
+    return os.path.join(os.path.expanduser("~"), ".sshmap", "config.json")
+
+
+def read_cfg(default=None):
+    """The parsed config.json.
+
+    `default` is what a MISSING or unreadable file yields — `{}` for "no settings
+    yet" (the usual test fixture) or `None` for "was the file there at all?".
+    A non-object JSON root counts as missing (the app ignores such a file too).
+    """
+    try:
+        with open(cfg_path(), encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, ValueError):
+        return default
+    return data if isinstance(data, dict) else default
+
+
+def write_cfg(data) -> None:
+    """A WHOLE-DOCUMENT write: what is on disk is exactly `data` (the folder is created)."""
+    path = cfg_path()
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(data, f)
+
+
+def merge_cfg(data) -> None:
+    """A MERGE write — the `i18n.save_config` semantics: the foreign keys survive.
+
+    This is the behaviour a test needs when it changes ONE setting and then checks
+    that the others are still there.
+    """
+    current = read_cfg({}) or {}
+    current.update(data)
+    write_cfg(current)
+
+
+def clear_cfg(*extra_paths: str) -> None:
+    """Remove config.json (and any extra path passed — e.g. a legacy settings file).
+
+    No arguments = the ordinary "a clean config for this section" call.
+    """
+    for path in (cfg_path(),) + tuple(extra_paths):
+        try:
+            os.remove(path)
+        except OSError:
+            pass
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # The release pins: at every release update ONLY HERE (earlier: the "N keys" number
 # in 12 i18n files + the APP_VERSION/requirements pins in 7 release-state sections).
 # The misses of the keys themselves against the code are caught by check_i18n_keys.py.
 # ─────────────────────────────────────────────────────────────────────────────
-EXPECTED_APP_VERSION = "1.4"    # the current release (a sentinel: it catches "a bump to the wrong version")
-EXPECTED_I18N_KEYS = 545        # the parity of the TRANSLATION keys (v1.4 — the base release of the
+EXPECTED_APP_VERSION = "1.4.1"  # the current release (a sentinel: it catches "a bump to the wrong version")
+EXPECTED_I18N_KEYS = 566        # the parity of the TRANSLATION keys (v1.4.1 — import from ~/.ssh/config:
+                                # the second release of the 1.4 line and the first one after the base
+                                # release, so the chain starts at the v1.4 pin, 545).
+                                # +21 keys × en/ru/zh/de: `btn.import` (the picker's confirm button — the
+                                # `btn.*` family), `file.import_ssh_config` (the File-menu item / the
+                                # registry action, an EMPTY default), `msg.import_ssh_config_result`
+                                # ({added} + {skipped} — the end-of-import report), `sshconfig.not_found`
+                                # ({path} — the missing ~/.ssh/config hint) and 17 keys of the picker
+                                # dialog itself: `sshconfig.title` / `.hint` ({path} + {count}) /
+                                # `.skipped` ({count}) / `.notes` ({count}) / `.select_all` /
+                                # `.select_none`, the 5 column headers (`sshconfig.col_alias`, `.col_host`,
+                                # `.col_port`, `.col_user`, `.col_key` — the dialog is a table, so it gets
+                                # its own headers instead of the `server.*` form labels), the 4 skip
+                                # reasons (`sshconfig.reason.wildcard`, `.reason.match`,
+                                # `.reason.include_missing` with {detail}, `.reason.duplicate`) and the
+                                # 2 dropped-directive notes (`sshconfig.note.proxy`,
+                                # `sshconfig.note.identity_extra` with {detail}). The parser, the loader
+                                # and `MainWindow._import_servers_from_ssh_config()` add no other string:
+                                # the parser reports reason CODES and the dialog translates them.
+                                # (v1.4.1: the TXT-parser fix in `parse_hosts_file()` — every
+                                # whitespace-separated word of a line becomes an entry — is a behaviour
+                                # change with NO new UI string: the extra entries already travel through
+                                # the existing "skipped" counter of `msg.import_servers_result`.)
+                                # (v1.4: the base release of the
                                 # 1.4 line: the plugin foundation is COMPLETE, and the release itself
                                 # adds NO key — it ships the two example plugins
                                 # (`examples/plugins/hello.py`, `examples/plugins/disk_monitor.py`)
