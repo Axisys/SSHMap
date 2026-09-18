@@ -3,7 +3,7 @@
 Desktop application (Python + PySide6): an interactive map of your IT infrastructure with direct SSH connections to nodes.
 *"Draw your infrastructure. Organize it. Connect to it."*
 
-Single source of truth for the version — `version.py` (`APP_VERSION`); released versions — `CHANGELOG.md`; planned features — `ROADMAP.md`; full documentation (architecture, project format, Qt gotchas) — `DOCUMENTATION.md`; **for AI agents** — `AGENTS.md` (condensed, agent-oriented onboarding: run/test, architecture invariants, Qt gotchas, release conventions).
+Single source of truth for the version — `version.py` (`APP_VERSION`); released versions — `CHANGELOG.md` (the closed lines live in the `CHANGELOG_HISTORY_*.md` files); planned features — `ROADMAP.md`; full documentation (architecture, project format, Qt gotchas) — `DOCUMENTATION.md`; **for AI agents** — `AGENTS.md` (condensed, agent-oriented onboarding: run/test, architecture invariants, Qt gotchas, release conventions).
 
 ---
 
@@ -18,7 +18,7 @@ pipx install .                    # or pip install . → sshmap command (install
 Tests — plain Python scripts without pytest: topical `test_*.py` files + a single parallel runner; each file is an isolated process (sandbox HOME, offscreen Qt, UTF-8 stdout — nothing extra needed on cp1251 consoles or in CI):
 
 ```bash
-python tests/run_all.py               # everything (78 test files + i18n check); auto workers = cores (cap 8, --workers N); exit 0 ⇔ all green
+python tests/run_all.py               # everything (79 test files + i18n check); auto workers = cores (cap 8, --workers N); exit 0 ⇔ all green
 python tests/run_all.py --fast        # daily profile: skips files tagged slow/network
 python tests/run_all.py --tag network # only network-tagged files — real-network sections run ONLY on explicit opt-in (env SSHMAP_TEST_TAGS)
 python tests/run_all.py --failed-only # re-run only files that failed in the last run (cache test-results/last_run.json)
@@ -58,7 +58,9 @@ ui/                          # main_window.py — façade over ProjectIOMixin / 
                              # command_palette.py (Ctrl+K); hotkey_registry.py (configurable hotkeys); about_dialog.py (Help → About);
                              # icons.py; mixin_support.py; theme.py (central UI palette, radii, fonts)
 i18n/                        # t(key, **kwargs); every *.json is a language (file name = code, root "name" = display name);
-                             # en/ru/zh/de with identical translation key sets (parity pinned in tests); en is the default for new users
+                             # en/ru/zh/de with identical translation key sets (parity pinned in tests); en is the default for new users;
+                             # ~/.sshmap/languages/*.json is the USER folder — it shadows the built-in file of the same code
+                             # (import/export in "Settings → Language") and needs no change to the installed package
 tests/                       # test_*.py without pytest + _common.py harness + run_all.py (parallel runner) + check_i18n_keys.py — map: tests/INDEX.md
 third_party/                 # pyte 0.8.2 managed fork (vendored): PyPI sdist + patches 0001–0003; provenance/sha256 — third_party/pyte-patches/MANIFEST.md
 ```
@@ -126,7 +128,7 @@ Format invariants:
 - Storage — a SINGLE `~/.sshmap/config.json` (`i18n.save_config`, atomic merge write): all keys are optional, defaults = behavior. Statuses, autosave, the UI options and the hotkeys apply live; terminal and external terminal read the config on next window creation/launch.
 - Keys:
   - `external_terminal` (moved from a separate `~/.sshmap_settings.json`, with migration on read — the old file is deleted);
-  - `terminal_palette` (`default|nord|dracula|tokyo_night`, unknown → default), `terminal_font` (family; empty → system monospace; live for open windows), `terminal_font_size` (pt 6–72, otherwise 10), `terminal_history_lines` (scrollback depth; default 1000, explicit 0 — disabled), `terminal_close_behavior` (`"close"` | `"ask"` — confirm via `page.confirm_close()`; an already-finished session closes without a dialog), `terminal_max_open` (default 4 — counts SESSIONS in the registry across all containers, SPLIT PANES excluded; when reached — a suggestion to close the oldest, not a refusal), `terminal_mode` (`"windows"` | `"tabs"` — see "Terminal"; broken value → default; applied to new sessions only), `terminal_wheel` (`"scrollback"` | `"off"` — config-only key, no UI), `ui_terminal_split` (`true` — open a terminal window with the bottom pane already on) and `ui_terminal_split_ratio` (the pane's share of the height, default 0.25, clamped 0.10–0.75) — written with the window geometry on close;
+  - `terminal_palette` (`default|nord|dracula|tokyo_night`, unknown → default), `terminal_font` (family; empty → system monospace; live for open windows), `terminal_font_size` (pt 6–72, otherwise 10), `terminal_history_lines` (scrollback depth; default 1000, explicit 0 — disabled), `terminal_close_behavior` (`"close"` | `"ask"` — confirm via `page.confirm_close()`; an already-finished session closes without a dialog), `terminal_max_open` (default 4, range **1..32** — counts SESSIONS in the registry across all containers, SPLIT PANES excluded; when reached — a suggestion to close the oldest, not a refusal), `terminal_mode` (`"windows"` | `"tabs"` — see "Terminal"; broken value → default; applied to new sessions only), `terminal_wheel` (`"scrollback"` | `"off"` — the local scrollback or the application; its combo lives in "Settings → Terminal"), `ui_terminal_split` (`true` — open a terminal window with the bottom pane already on) and `ui_terminal_split_ratio` (the pane's share of the height, default 0.25, clamped 0.10–0.75) — written with the window geometry on close;
   - `status_interval_sec`/`status_probe_timeout_sec`/`status_max_parallel` (defaults 30 s / 3.0 s / 16 parallel probes; live via `StatusChecker.set_interval/set_probe_timeout/set_max_parallel`);
   - `autosave_enabled/autosave_interval_sec/backup_count` (live — the autosave QTimer);
   - `language` (applied immediately, before OK);
@@ -180,7 +182,7 @@ Passwords: keyring only (profiles `"profile:{id}"`, servers by server_id). If th
 from i18n import t, set_language, get_available_languages
 t("btn.add_server", alias="web-1")   # {alias} formatting
 ```
-en (default) / ru / zh / de — plus any language you drop in: every `i18n/*.json` is a language (the file name is the code, the root key `"name"` is the name shown in the menus, a file saved with a BOM loads fine), so adding one takes no code changes and needs no restart — `Help → Language` rescans the folder (and re-reads your file) on every open. Rule: a new key goes into all the files at once and a built-in language must cover 100% of en — in keys, in `{placeholders}` and in line breaks; a deliberately incomplete translation may declare itself with the root key `"partial": true`, which turns its missing keys into a warning instead of a defect. Check — `python tests/check_i18n_keys.py`. Modules on the hot path (ssh_worker, ssh_terminal) use a cached `get_translator()`.
+en (default) / ru / zh / de — plus any language you drop in: every `i18n/*.json` is a language (the file name is the code, the root key `"name"` is the name shown in the menus, a file saved with a BOM loads fine), so adding one takes no code changes and needs no restart — `Help → Language` rescans the folder (and re-reads your file) on every open. **Your own languages live in `~/.sshmap/languages/`**, next to the installed package rather than inside it: a file there with the code of a built-in language **replaces it** for you, a new code adds one, and the folder is created only when you actually use it. **"Settings → Language"** imports a file into that folder after checking it (an object root, at least one translation key, a `"name"`; a file that is merely incomplete is imported with a note and the rest falls back to English) and exports the language you are using — or the English template to start a new translation. A file that cannot be used is refused and the folder stays clean. Rule: a new key goes into all the files at once and a built-in language must cover 100% of en — in keys, in `{placeholders}` and in line breaks; a deliberately incomplete translation may declare itself with the root key `"partial": true`, which turns its missing keys into a warning instead of a defect. Check — `python tests/check_i18n_keys.py`. Modules on the hot path (ssh_worker, ssh_terminal) use a cached `get_translator()`.
 
 ---
 
@@ -210,8 +212,8 @@ en (default) / ru / zh / de — plus any language you drop in: every `i18n/*.jso
 - autosave + ring buffer of backups with rollback ("File → Backups…")
 - the project is always close at hand: **File → Recent** remembers the last 10 maps (file name, full path in the tooltip, "Clear the list"), a `.json`/`.sshmap` can simply be **dropped onto the window** to open it, and a map that cannot be read offers its **autosave or a backup** — with the date — instead of a dead-end error
 - export to PNG/JPEG/PDF, SVG (a vector file that stays sharp at any zoom) and draw.io `.drawio` — the drawio vertex carries the same data as the map, tags and comment included; bulk server import from TXT
-- i18n: en (default) / ru / zh / de — and any language as one dropped-in JSON file, no code changes; the interface follows a language switch everywhere, terminals and SFTP tabs included; `Help → Language` rescans the folder without a restart
-- settings hub — single `~/.sshmap/config.json`, live application without restart
+- i18n: en (default) / ru / zh / de — and any language as one dropped-in JSON file, no code changes; the interface follows a language switch everywhere, terminals and SFTP tabs included; `Help → Language` rescans the folder without a restart; **your languages live in `~/.sshmap/languages/`**, so the installed package is never touched — a file there shadows the built-in language of the same code, and "Settings → Language" imports and exports them for you
+- settings hub — single `~/.sshmap/config.json`, live application without restart; every user-facing key has a home in the hub now — the terminal's mouse-wheel mode and its 1..32 session limit included
 - hotkeys + command palette (Ctrl+K) — the FULL action registry is editable in "Settings → Hotkeys" (a key for Save As, the zoom steps, the exports, the backups), duplicates flagged, "Reset to defaults" one click away, applied without restart
 - "Check statuses now" — an on-demand status round for the selected nodes (the map/sidebar context menu and the Edit menu), without waiting for the periodic sweep
 - Help → About — the version, the license, where `~/.sshmap` lives (with a button that opens the folder) and a hotkey cheat-sheet built live from the registry
@@ -222,8 +224,8 @@ en (default) / ru / zh / de — plus any language you drop in: every `i18n/*.jso
 - TOFU on first connect and keyring backend restrictions (§4 "Security").
 
 **Roadmap** (tasks, order, acceptance — in ROADMAP.md):
-- **v1.3.x series** — the branch closes at v1.3.4: lightweight plugins (entry points + a local scripts folder).
-- **v1.4 line** — opens at v1.4.1: import from `~/.ssh/config`; minimap and a cached card drop-shadow; light theme + accent color; motion standards; a denser UI with first-run hints; list mode; syntax highlighting in the SFTP viewer.
+- **v1.3 line** — CLOSED at v1.3.3.8 (this release): the settings/language/UI polish of the 1.3.3.x follow-ups is where the branch stops.
+- **v1.4 line** — opens with lightweight plugins (`~/.sshmap/plugins/` + entry points, an rc series ending at v1.4): then import from `~/.ssh/config`; minimap and a cached card drop-shadow; light theme + accent color; motion standards; a denser UI with first-run hints; list mode; syntax highlighting in the SFTP viewer.
 
 ---
 

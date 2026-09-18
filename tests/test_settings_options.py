@@ -141,10 +141,10 @@ dlg = SettingsDialog(None)
 check("'General': the UI font family field + the size spin (0 = the system one)",
       dlg.ui_font_family_edit.text() == "Consolas" and dlg.ui_font_size_spin.value() == 12
       and dlg.ui_font_size_spin.minimum() == 0)
-check("'Terminal': the terminal font family field + the limit spin (1..16)",
+check("'Terminal': the terminal font family field + the limit spin (1..32 — the v1.3.3.8 range unification)",
       dlg.term_font_family_edit.text() == "JetBrains Mono"
       and dlg.max_open_spin.value() == 6
-      and dlg.max_open_spin.minimum() == 1 and dlg.max_open_spin.maximum() == 16)
+      and dlg.max_open_spin.minimum() == 1 and dlg.max_open_spin.maximum() == 32)
 check("'Map': the double-click combo (properties/connect) + the 'the type on the plaque' checkbox",
       [dlg.node_dblclick_combo.itemData(i) for i in range(dlg.node_dblclick_combo.count())]
       == ["properties", "connect"]

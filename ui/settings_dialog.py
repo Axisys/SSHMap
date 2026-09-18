@@ -17,8 +17,10 @@ merge-write); all keys are optional, defaults = current behavior:
                      (v1.0 keys) + terminal_close_behavior (v1.1: "close"|"ask")
                      + v1.1.1: terminal_font (family; read since v1.0, UI for
                      the first time), terminal_max_open (own-terminals limit,
-                     default 4)
-                      + v1.2.2: terminal_mode ("windows" default | "tabs" — the dock on the map);
+                     default 4; v1.3.3.8: the spin is 1..32 — the VALIDATOR's range)
+                      + v1.2.2: terminal_mode ("windows" default | "tabs" — the dock on the map)
+                      + v1.3.3.8: terminal_wheel ("scrollback" default | "off" — the
+                      mouse wheel; the LAST key that had no UI at all);
   * Statuses:         status_interval_sec / status_probe_timeout_sec (v1.1; defaults
                      30 s / 3.0 s — v1.0 behavior, services/status_checker.py);
   * Autosave:         autosave_enabled / autosave_interval_sec / backup_count (v0.9.7);
@@ -26,6 +28,13 @@ merge-write); all keys are optional, defaults = current behavior:
                      ui_show_connection_type (type on the connection plaque);
   * Language:         language — applied immediately (signal language_changed →
                      MainWindow._switch_language; the "Help → Language" item is kept).
+                     v1.3.3.8 (ROADMAP task 2): the tab also carries the language
+                     MANAGER — "Import a language file…" (validated + copied into
+                     ~/.sshmap/languages/, the user folder, created on demand; the
+                     imported language becomes active at once) and "Export the current
+                     language…" (the file that WINS for the active language, or the
+                     `en` template); both report through `language.*` in a status
+                     label. Import/export only — no editor, no downloading.
   * Hotkeys (v1.3.2): hotkeys — a nested dict action_id → sequence string
                      ("" = the hotkey is disabled); the rows come from the action
                      registry ui/hotkey_registry.py, the action NAMES reuse the
@@ -60,7 +69,7 @@ from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QFormLayout, QTabWidget, QWidget,
     QLabel, QComboBox, QSpinBox, QDoubleSpinBox, QLineEdit, QCheckBox,
     QPushButton, QMessageBox, QTableWidget, QTableWidgetItem, QHeaderView,
-    QAbstractItemView, QKeySequenceEdit,
+    QAbstractItemView, QKeySequenceEdit, QFileDialog,
 )
 
 try:  # v1.2.5: central theme (colors/radii/fonts — ui/theme.py); no literals in the UI code
@@ -118,6 +127,37 @@ def _log_dialog(message: str) -> None:
         get_logger("ui.settings_dialog").warning(message)
     except Exception:  # noqa: BLE001 — logging must never break the dialog
         pass
+
+
+# v1.3.3.8 (ROADMAP task 2): the technical detail behind a refused language file.
+# `language.import_failed` / `language.exported` carry it as {error} — exactly like
+# `msg.save_failed{error=…}` and `msg.import_servers_failed{error=…}` carry a path or
+# an exception text: a reason is a diagnostic, not a translatable UI sentence. The
+# reason CODES come from i18n.import_language_file()/export_language_file().
+_IMPORT_ERROR_DETAIL = {
+    "unreadable": "the file cannot be read",
+    "not_json": "not a JSON file",
+    "not_object": "the root is not a JSON object",
+    "no_keys": "no translation keys",
+    "name_missing": None,       # translated — language.name_missing (see _import_error_detail)
+    "bad_code": "the file name is not usable as a language code",
+    "copy_failed": "the file could not be written into ~/.sshmap/languages/",
+}
+_EXPORT_ERROR_DETAIL = {
+    "unknown_language": "no such language file",
+    "unreadable": "the language file cannot be read",
+    "not_json": "the language file is not valid JSON",
+    "not_object": "the language file's root is not a JSON object",
+    "write_failed": "the destination file could not be written",
+}
+
+
+def _import_error_detail(reason: str) -> str:
+    """The {error} text of a refused import (v1.3.3.8) — the one reason that is a real
+    UI sentence instead of a diagnostic is translated (`language.name_missing`)."""
+    if reason == "name_missing":
+        return _t("language.name_missing")
+    return _IMPORT_ERROR_DETAIL.get(reason, reason or "unknown error")
 
 
 def load_ui_settings():
@@ -295,8 +335,13 @@ class SettingsDialog(QDialog):
         # v1.1.1 (item 3): the limit of own open terminals — when reached,
         # not a refusal but an offer to close the oldest session
         # (MainWindow._spawn_terminal_window).
+        # v1.3.3.8 (ROADMAP task 3): the spin follows the VALIDATOR (1..32 in
+        # load_terminal_settings) instead of the old 1..16. That was a bug, not only
+        # a narrower range: a saved 20 was DISPLAYED as 16 and an OK wrote 16 back,
+        # silently lowering a valid value. The two limits are ONE limit now, pinned
+        # by tests/test_language_folder.py.
         self.max_open_spin = QSpinBox()
-        self.max_open_spin.setRange(1, 16)
+        self.max_open_spin.setRange(1, 32)
         self.max_open_spin.setValue(cfg["max_open"])
         self._lbl_max_open = QLabel(_t("settings.terminal.max_open"))
         form.addRow(self._lbl_max_open, self.max_open_spin)
@@ -319,6 +364,21 @@ class SettingsDialog(QDialog):
         self.close_behavior_combo.setCurrentIndex(idx)
         self._lbl_close_behavior = QLabel(_t("settings.terminal.close_behavior"))
         form.addRow(self._lbl_close_behavior, self.close_behavior_combo)
+
+        # v1.3.3.8 (ROADMAP task 4): the mouse wheel — the LAST key that had no UI at
+        # all (documented as deliberate in v1.1.2RC3 and never revisited). "scrollback"
+        # (default) = the wheel scrolls the local scrollback; "off" = the wheel is not
+        # intercepted, only the full SGR/X10 passthrough of a mouse-tracking TUI is
+        # left (widget._wheel_mode — modules/terminal_widget.py). The page/window reads
+        # the key on creation exactly as before: only the UI is new.
+        self.wheel_combo = QComboBox()
+        self.wheel_combo.addItem(_t("settings.terminal.wheel.scrollback"), "scrollback")
+        self.wheel_combo.addItem(_t("settings.terminal.wheel.off"), "off")
+        idx = next((i for i in range(self.wheel_combo.count())
+                    if self.wheel_combo.itemData(i) == cfg["wheel"]), 0)
+        self.wheel_combo.setCurrentIndex(idx)
+        self._lbl_wheel = QLabel(_t("settings.terminal.wheel"))
+        form.addRow(self._lbl_wheel, self.wheel_combo)
 
         self.tabs.addTab(tab, _t("settings.tab.terminal"))
 
@@ -598,15 +658,146 @@ class SettingsDialog(QDialog):
         self.language_combo.currentIndexChanged.connect(self._on_language_changed)
         self._lbl_language = QLabel(_t("settings.language.label"))
         form.addRow(self._lbl_language, self.language_combo)
+
+        # v1.3.3.8 (ROADMAP task 2): the language manager — IMPORT / EXPORT only
+        # (a language EDITOR inside the app is deliberately NOT in this version: the
+        # file stays the user's to edit in any text editor). The buttons copy a file
+        # into ~/.sshmap/languages/ (the user folder, created on demand) and back out;
+        # the result is reported in the label below them.
+        lang_btns = QHBoxLayout()
+        self.import_lang_btn = QPushButton(_t("language.import"))
+        self.export_lang_btn = QPushButton(_t("language.export"))
+        self.import_lang_btn.clicked.connect(self._on_import_language)
+        self.export_lang_btn.clicked.connect(self._on_export_language)
+        lang_btns.addWidget(self.import_lang_btn)
+        lang_btns.addWidget(self.export_lang_btn)
+        lang_btns.addStretch(1)
+        form.addRow("", lang_btns)
+        self.lang_status_lbl = QLabel("")
+        self.lang_status_lbl.setWordWrap(True)
+        form.addRow("", self.lang_status_lbl)
+
         self.tabs.addTab(tab, _t("settings.tab.language"))
 
-    def _refresh_language_combo(self):
+    def _set_language_status(self, text: str):
+        """The report line of the language manager (v1.3.3.8). Never raises."""
+        try:
+            self.lang_status_lbl.setText(text)
+        except RuntimeError:
+            pass  # Qt teardown — the label is already destroyed
+
+    def _on_import_language(self):
+        """v1.3.3.8 (ROADMAP task 2): "Import a language file…".
+
+        Validate + copy the chosen `.json` into `~/.sshmap/languages/`
+        (`i18n.import_language_file()` does the validation and the atomic write — a
+        broken / non-JSON / key-less file never reaches the folder), report the key
+        count (plus the English-fallback note for an incomplete file, which is
+        imported with `"partial": true`) and make the imported language ACTIVE
+        immediately. Never raises.
+        """
+        try:
+            from i18n import import_language_file
+        except Exception as e:  # noqa: BLE001 — a broken i18n must not break the tab
+            self._set_language_status(_t("language.import_failed", error=str(e)))
+            return
+        try:
+            path, _selected = QFileDialog.getOpenFileName(
+                self, _t("language.import"), "", "JSON (*.json);;All files (*)")
+        except Exception as e:  # noqa: BLE001
+            _log_dialog(f"language import: file dialog failed: {e!r}")
+            return
+        if not path:
+            return  # the user cancelled — nothing to report
+        try:
+            result = import_language_file(path)
+        except Exception as e:  # noqa: BLE001 — the report must survive any failure
+            _log_dialog(f"language import failed: {e!r}")
+            result = {"ok": False, "error": str(e)}
+        if not result.get("ok"):
+            self._set_language_status(
+                _t("language.import_failed", error=_import_error_detail(str(result.get("error") or ""))))
+            return
+        message = _t("language.imported", name=result["name"], keys=result["keys"])
+        if result.get("missing"):
+            message += " " + _t("language.incomplete_warning", keys=result["missing"])
+        self._set_language_status(message)
+        # The list CHANGED (a new code) or the NAME of an existing one did (shadowing)
+        # — a forced rebuild is what makes both visible; then activate the language.
+        self._refresh_language_combo(force=True)
+        self._activate_language(result["code"])
+
+    def _on_export_language(self):
+        """v1.3.3.8 (ROADMAP task 2): "Export the current language…".
+
+        Writes the file that WINS for the ACTIVE language (`i18n.export_language_file`)
+        — or the `en` template when the active file is unavailable — to a path the
+        user chooses, and reports it. The default file name is the language code, so
+        an exported file imports back under the same code. Never raises.
+        """
+        try:
+            from i18n import export_language_file, get_current_language
+            code = get_current_language()
+        except Exception as e:  # noqa: BLE001
+            _log_dialog(f"language export: i18n unavailable: {e!r}")
+            self._set_language_status(_t("language.import_failed", error=str(e)))
+            return
+        default_name = f"{code or 'en'}.json"
+        try:
+            path, _selected = QFileDialog.getSaveFileName(
+                self, _t("language.export"), default_name, "JSON (*.json);;All files (*)")
+        except Exception as e:  # noqa: BLE001
+            _log_dialog(f"language export: file dialog failed: {e!r}")
+            return
+        if not path:
+            return  # the user cancelled
+        if not path.lower().endswith(".json"):
+            path += ".json"
+        try:
+            result = export_language_file(code, path)
+        except Exception as e:  # noqa: BLE001 — the report must survive any failure
+            _log_dialog(f"language export failed: {e!r}")
+            result = {"ok": False, "error": str(e)}
+        if not result.get("ok"):
+            reason = str(result.get("error") or "")
+            detail = _EXPORT_ERROR_DETAIL.get(reason, reason or "unknown error")
+            self._set_language_status(_t("language.import_failed", error=detail))
+            return
+        self._set_language_status(_t("language.exported", path=result["path"]))
+
+    def _activate_language(self, code: str):
+        """Select `code` in the combo and APPLY it (v1.3.3.8).
+
+        The ordinary path is `setCurrentIndex` → `currentIndexChanged` →
+        `_on_language_changed` (the immediate application of the tab). When the combo
+        already sits on that code — the import SHADOWED the active language — no
+        signal would fire, so the slot is called directly: the point of that case is
+        precisely to re-read the freshly copied file. Never raises.
+        """
+        combo = getattr(self, "language_combo", None)
+        if combo is None or not code:
+            return
+        try:
+            idx = combo.findData(code)
+            if idx < 0:
+                return
+            if idx == combo.currentIndex():
+                self._on_language_changed(idx)
+            else:
+                combo.setCurrentIndex(idx)
+        except RuntimeError:
+            pass  # Qt teardown — the combo is already destroyed
+
+    def _refresh_language_combo(self, force: bool = False):
         """v1.3.3.1 (ROADMAP task 3): re-read the discovered languages at dialog open.
 
         The combo was built once at dialog construction; a language file dropped into
-        `i18n/` afterwards must not need a restart — `showEvent` calls this. The
-        current language is preselected, so the refresh does not fire
-        `currentIndexChanged` for the already active language. Never raises.
+        `i18n/` (or into the user folder since v1.3.3.8) afterwards must not need a
+        restart — `showEvent` calls this. The current language is preselected, so the
+        refresh does not fire `currentIndexChanged` for the already active language.
+        `force=True` (the import path) rebuilds even when the code list is unchanged,
+        because a SHADOWING import changes the displayed NAME of an existing code.
+        Never raises.
         """
         combo = getattr(self, "language_combo", None)
         if combo is None:
@@ -618,7 +809,7 @@ class SettingsDialog(QDialog):
         except Exception:  # noqa: BLE001 — a broken i18n leaves the combo as it is
             return
         try:
-            if [combo.itemData(i) for i in range(combo.count())] == [lg["code"] for lg in langs]:
+            if not force and [combo.itemData(i) for i in range(combo.count())] == [lg["code"] for lg in langs]:
                 return  # nothing changed — do not touch the selection
             combo.blockSignals(True)   # a programmatic rebuild must not re-apply the language
             combo.clear()
@@ -699,6 +890,9 @@ class SettingsDialog(QDialog):
         "" = the hotkey is disabled). The values come from the QKeySequenceEdit
         cells; MainWindow._apply_hotkeys() installs them live after the
         applied signal (no restart). Conflict rows are saved as-is by design.
+        v1.3.3.8: +1 key — terminal_wheel ("scrollback"|"off", the combo gives
+        fixed ids). This closes the LAST config-only key: the hub's 20 UI-facing
+        keys become 21 and every setting now lives in the hub.
         """
         return {
             "external_terminal": self.ext_term_combo.currentData() or "auto",
@@ -708,6 +902,8 @@ class SettingsDialog(QDialog):
             "terminal_font_size": int(self.font_size_spin.value()),
             "terminal_history_lines": int(self.history_spin.value()),
             "terminal_close_behavior": self.close_behavior_combo.currentData() or "close",
+            # v1.3.3.8 (ROADMAP task 4): the mouse-wheel mode
+            "terminal_wheel": self.wheel_combo.currentData() or "scrollback",
             "status_interval_sec": int(self.status_interval_spin.value()),
             "status_probe_timeout_sec": float(self.probe_timeout_spin.value()),
             # v1.1.2 final (task 2): the cap on parallel probes per round
@@ -790,6 +986,17 @@ class SettingsDialog(QDialog):
             if key:
                 self.close_behavior_combo.setItemText(i, _t(key))
 
+        # v1.3.3.8 (ROADMAP task 4): the wheel combo + the language manager buttons
+        self._lbl_wheel.setText(_t("settings.terminal.wheel"))
+        for i in range(self.wheel_combo.count()):
+            wid = self.wheel_combo.itemData(i)
+            key = {
+                "scrollback": "settings.terminal.wheel.scrollback",
+                "off": "settings.terminal.wheel.off",
+            }.get(wid)
+            if key:
+                self.wheel_combo.setItemText(i, _t(key))
+
         self._lbl_status_interval.setText(_t("settings.statuses.interval"))
         self._lbl_probe_timeout.setText(_t("settings.statuses.timeout"))
         self._lbl_max_parallel.setText(_t("settings.statuses.max_parallel"))
@@ -819,6 +1026,10 @@ class SettingsDialog(QDialog):
         self._refresh_hotkey_conflicts()   # re-marks the rows + re-texts the warning
 
         self._lbl_language.setText(_t("settings.language.label"))
+        # v1.3.3.8: the language manager's own two buttons (the status line carries a
+        # REPORT of a past action — data, not a label — and is left alone)
+        self.import_lang_btn.setText(_t("language.import"))
+        self.export_lang_btn.setText(_t("language.export"))
 
         self.ok_btn.setText(_t("settings.ok"))
         self.cancel_btn.setText(_t("settings.cancel"))

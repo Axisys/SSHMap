@@ -770,9 +770,9 @@ print("== §9 the release state ==")
 # ════════════════════════════════════════════════════════════════════════════
 
 check("EXPECTED_APP_VERSION is the version this test file describes",
-      EXPECTED_APP_VERSION == "1.3.3.7", EXPECTED_APP_VERSION)
-check("the pin counts the keys of this release (v1.3.3.7: +2 — the SVG export)",
-      EXPECTED_I18N_KEYS == 520, str(EXPECTED_I18N_KEYS))
+      EXPECTED_APP_VERSION == "1.3.3.8", EXPECTED_APP_VERSION)
+check("the pin counts the keys of this release (v1.3.3.8: +10 — the language manager + the wheel combo)",
+      EXPECTED_I18N_KEYS == 530, str(EXPECTED_I18N_KEYS))
 check_release_state(ROOT)
 for _code in i18n_lang_codes(ROOT):
     check(f"i18n/{_code}.json carries the new sftp.conflict.title key",
@@ -795,6 +795,10 @@ for _code in i18n_lang_codes(ROOT):
           "file.export_svg" in translation_keys(read_lang(_code)))
     check(f"i18n/{_code}.json carries the v1.3.3.7 status.export_svg_ok key",
           "status.export_svg_ok" in translation_keys(read_lang(_code)))
+    check(f"i18n/{_code}.json carries the v1.3.3.8 language.import key",
+          "language.import" in translation_keys(read_lang(_code)))
+    check(f"i18n/{_code}.json carries the v1.3.3.8 settings.terminal.wheel.off key",
+          "settings.terminal.wheel.off" in translation_keys(read_lang(_code)))
 
 # cleanup: back to en + the original config, then close the windows
 i18n.set_language("en")

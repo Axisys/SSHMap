@@ -107,6 +107,7 @@ of the file itself.
 | `test_i18n_live.py` | slow | v1.3.3.1 — Live i18n: the containers follow a language switch + the checks of the policy. |
 | `test_keyring_fail_backend.py` | — | Regression v0.9.4b: the keyring fail backend + review notes. |
 | `test_keyring_validation.py` | — | Regression v0.9.5.5 (security #1): the keyring backend — validation and guard. |
+| `test_language_folder.py` | — | v1.3.3.8 — What the app supports but the UI cannot reach: the user language folder, the import/export manager, one range for `terminal_max_open`, a UI for `terminal_wheel`. |
 | `test_main_window_split.py` | — | v1.1.4: main_window.py hygiene — split into mixins (ROADMAP v1.1.4 acceptance). |
 | `test_map_search.py` | — | Regression v0.9.8 — map search (Ctrl+F). |
 | `test_menu_actions_regression.py` | — | v1.2.4-fix — REGRESSION: the real click path on checkable menu items (QAction.trigger()). |

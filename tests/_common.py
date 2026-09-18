@@ -171,8 +171,23 @@ def restore_i18n_config(snap):
 # in 12 i18n files + the APP_VERSION/requirements pins in 7 release-state sections).
 # The misses of the keys themselves against the code are caught by check_i18n_keys.py.
 # ─────────────────────────────────────────────────────────────────────────────
-EXPECTED_APP_VERSION = "1.3.3.7"  # the current release (a sentinel: it catches "a bump to the wrong version")
-EXPECTED_I18N_KEYS = 520        # the parity of the TRANSLATION keys (v1.3.3.7: +2 — the SVG export,
+EXPECTED_APP_VERSION = "1.3.3.8"  # the current release (a sentinel: it catches "a bump to the wrong version")
+EXPECTED_I18N_KEYS = 530        # the parity of the TRANSLATION keys (v1.3.3.8: +10 — the
+                                # reachable-from-the-UI release. 7 `language.*` for the language
+                                # manager (`language.import` / `language.export` — the two buttons
+                                # of the "Language" tab; `language.imported` / `language.exported`
+                                # — the success reports; `language.import_failed` with the {error}
+                                # detail; `language.incomplete_warning` — the English-fallback note
+                                # of a file imported with `"partial": true`; `language.name_missing`
+                                # — the file carries no "name" meta key) and 3 `settings.terminal.wheel`
+                                # (+ `.scrollback` / `.off` — the v1.3.3.8 UI for the last config-only
+                                # key). The ROADMAP named 5 + 3; the two extra reports
+                                # (`language.exported`, `language.name_missing`) are the deliberate
+                                # +2 — the plan listed the minimum key set, and a success line and a
+                                # missing-meta warning cannot be expressed by the listed five.
+                                # The user language folder itself (`~/.sshmap/languages/`,
+                                # the shadowing rule, import/export) adds no other string.
+                                # (v1.3.3.7: +2 — the SVG export,
                                 # `file.export_svg` + `status.export_svg_ok`. The drawio half of the
                                 # release adds NO UI string: the label carries the data and the failure
                                 # path reuses `msg.export_failed`.)
