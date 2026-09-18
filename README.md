@@ -18,7 +18,7 @@ pipx install .                    # or pip install . → sshmap command (install
 Tests — plain Python scripts without pytest: topical `test_*.py` files + a single parallel runner; each file is an isolated process (sandbox HOME, offscreen Qt, UTF-8 stdout — nothing extra needed on cp1251 consoles or in CI):
 
 ```bash
-python tests/run_all.py               # everything (76 test files + i18n check); auto workers = cores (cap 8, --workers N); exit 0 ⇔ all green
+python tests/run_all.py               # everything (77 test files + i18n check); auto workers = cores (cap 8, --workers N); exit 0 ⇔ all green
 python tests/run_all.py --fast        # daily profile: skips files tagged slow/network
 python tests/run_all.py --tag network # only network-tagged files — real-network sections run ONLY on explicit opt-in (env SSHMAP_TEST_TAGS)
 python tests/run_all.py --failed-only # re-run only files that failed in the last run (cache test-results/last_run.json)
@@ -193,7 +193,7 @@ en (default) / ru / zh / de — plus any language you drop in: every `i18n/*.jso
 - map search (Ctrl+F): match highlighting, Enter/Shift+Enter navigation, dimming of non-matches
 - tags: color strip on the card + sidebar filter with dimming of non-matching nodes
 - quick launch per server: URLs (open in the default browser) and commands (first terminal command)
-- collapsible sidebar and map panels — at most one at a time, state persists across restarts
+- collapsible sidebar and map panels — at most one at a time; the collapse state and the divider position persist across restarts
 - context menus for all objects, fit/zoom/centering
 - zoom as real actions: Ctrl+0 / Ctrl+= / Ctrl+- in the View menu, plus the wheel
 - built-in SSH terminal on pyte (scrollback, full keyboard, mouse selection with word/line clicks, context menu) + external system terminal
@@ -207,6 +207,7 @@ en (default) / ru / zh / de — plus any language you drop in: every `i18n/*.jso
 - automatic info collection for Linux servers (OS/CPU/RAM/disk)
 - profiles and passwords in the OS keyring — never written to JSON
 - autosave + ring buffer of backups with rollback ("File → Backups…")
+- the project is always close at hand: **File → Recent** remembers the last 10 maps (file name, full path in the tooltip, "Clear the list"), a `.json`/`.sshmap` can simply be **dropped onto the window** to open it, and a map that cannot be read offers its **autosave or a backup** — with the date — instead of a dead-end error
 - export to PNG/JPEG/PDF and draw.io `.drawio`; bulk server import from TXT
 - i18n: en (default) / ru / zh / de — and any language as one dropped-in JSON file, no code changes; the interface follows a language switch everywhere, terminals and SFTP tabs included; `Help → Language` rescans the folder without a restart
 - settings hub — single `~/.sshmap/config.json`, live application without restart

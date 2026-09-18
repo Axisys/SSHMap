@@ -13,6 +13,12 @@ Ownership of shared state (AUDIT §3, pinned by this comment):
     MainWindow.__init__, tick — ``_autosave_tick`` below).
 The mixin does NOT import ui.main_window (cycle) — duck-typing on the
 instance only.
+
+v1.3.3.6 (ROADMAP "Projects: open, recover, remember"):
+  * the RECENT list (``recent_projects`` in config.json — see ``_recent_projects``);
+  * the recovery path of an UNREADABLE project file (``_recover_unreadable_project``):
+    the backup ring + the autosave are consulted automatically, but NOTHING is
+    written without an explicit "Restore" click.
 """
 import os
 
@@ -29,6 +35,14 @@ try:
 except ImportError:
     from graphics.node_group import NodeGroup
     from graphics.connection_arrow import DEFAULT_CONNECTION_TYPE
+
+
+# v1.3.3.6 (ROADMAP task 1): the MRU list of the project files. ``config.json`` key,
+# newest first, deduplicated by the normalized absolute path, missing files pruned on
+# read. The cap is deliberately small: the File menu is a way back to yesterday's map,
+# not a file browser (a welcome screen with a longer list is NOT in v1.3.3.6).
+RECENT_PROJECTS_KEY = "recent_projects"
+RECENT_PROJECTS_MAX = 10
 
 
 class ProjectIOMixin:
@@ -195,6 +209,123 @@ class ProjectIOMixin:
             return
         self._load_project_at(path)
 
+    # ── v1.3.3.6 (ROADMAP task 1): Recent projects (MRU) ────────────────────
+    #
+    # Storage — the `recent_projects` key of ~/.sshmap/config.json (merge-write, like
+    # every other settings key). The list is the raw material of the "File → Recent"
+    # submenu: it is pruned on READ (a project moved or deleted on disk must not leave
+    # a dead entry behind) and every read rebuilds it from the config, so the menu and
+    # the config can never drift apart.
+
+    def _recent_projects(self) -> list:
+        """The MRU list: newest first, deduplicated, capped, missing files pruned.
+
+        A broken value (not a list / not strings inside) is IGNORED — the same
+        "broken config value → the default" rule as everywhere else. The result is
+        never longer than RECENT_PROJECTS_MAX and never contains a path that does
+        not exist on disk right now.
+        """
+        try:
+            from i18n import load_config as _load_cfg
+            raw = _load_cfg().get(RECENT_PROJECTS_KEY)
+        except Exception:  # noqa: BLE001 — a broken config must not break the menu
+            return []
+        if not isinstance(raw, list):
+            return []
+        out, seen = [], set()
+        for item in raw:
+            if not isinstance(item, str) or not item.strip():
+                continue
+            try:
+                if not os.path.isfile(item):
+                    continue  # pruned: the file was moved / deleted
+            except OSError:
+                continue
+            norm = os.path.normcase(os.path.abspath(item))
+            if norm in seen:
+                continue  # deduplicated by the NORMALIZED ABSOLUTE path
+            seen.add(norm)
+            out.append(item)
+            if len(out) >= RECENT_PROJECTS_MAX:
+                break
+        return out
+
+    def _remember_recent_project(self, path: str) -> None:
+        """Put `path` at the head of the MRU list (merge-write; never raises).
+
+        Called by `_load_project_at()` (a successful open) and `_do_save()` (a
+        successful save — Save As included: the new path becomes the head).
+        """
+        if not isinstance(path, str) or not path.strip():
+            return
+        try:
+            entry = os.path.abspath(path)
+            norm = os.path.normcase(entry)
+            items = [p for p in self._recent_projects()
+                     if os.path.normcase(os.path.abspath(p)) != norm]
+            items.insert(0, entry)
+            from i18n import save_config as _save_cfg
+            _save_cfg({RECENT_PROJECTS_KEY: items[:RECENT_PROJECTS_MAX]})
+        except Exception as e:  # noqa: BLE001 — the MRU is a convenience, never a condition
+            if self.log:
+                self.log.warning(f"Could not update the recent-projects list: {e}")
+
+    def _clear_recent_projects(self) -> None:
+        """Empty the MRU list (the "Clear the list" item of the Recent submenu)."""
+        try:
+            from i18n import save_config as _save_cfg
+            _save_cfg({RECENT_PROJECTS_KEY: []})
+        except Exception as e:  # noqa: BLE001 — a broken write must not break the menu
+            if self.log:
+                self.log.warning(f"Could not clear the recent-projects list: {e}")
+        menu = getattr(self, "_recent_menu", None)
+        if menu is not None:
+            self._populate_recent_menu(menu)  # the submenu follows the click immediately
+
+    def _populate_recent_menu(self, menu) -> None:
+        """(Re)build the `File → Recent` submenu from the config.
+
+        Called at construction and again on every `aboutToShow` (the v1.3.3.1
+        language-submenu pattern), so a project opened by ANY path — the dialog, a
+        drop, a recovery — is one click away the next time the menu is opened.
+        Children are created MANUALLY (never the `QMenu.addAction(text, slot)`
+        auto-connection: PySide6 6.11 emits `triggered` into a Python slot without
+        the argument and cannot be disconnected, gotcha #10) and the rebuilt
+        wrappers are re-registered in `MainWindow._qaction_guard` (gotcha #9 — an
+        unguarded wrapper takes the C++ submenu down with it on GC). Never raises.
+        """
+        try:
+            menu.clear()
+            items = self._recent_projects()
+            if not items:
+                act_empty = menu.addAction(self.t("file.recent_empty"))
+                act_empty.setEnabled(False)
+            else:
+                for p in items:
+                    act = menu.addAction(os.path.basename(p))
+                    act.setToolTip(p)  # the label is the file name — the path lives here
+                    act.setData(p)
+                    act.triggered.connect(
+                        lambda checked=False, path=p: self._open_recent_project(path))
+                menu.addSeparator()
+                act_clear = menu.addAction(self.t("file.recent_clear"))
+                act_clear.triggered.connect(
+                    lambda checked=False: self._clear_recent_projects())
+        except RuntimeError:
+            return  # Qt teardown — the menu is already destroyed
+        self._rebuild_qaction_guard()
+
+    def _open_recent_project(self, path: str) -> bool:
+        """Open a project from the Recent list — the very same path as File → Open."""
+        if not isinstance(path, str) or not os.path.isfile(path):
+            # pruned between the menu build and the click (the file just disappeared):
+            # the rebuild drops the entry — that IS the feedback.
+            menu = getattr(self, "_recent_menu", None)
+            if menu is not None:
+                self._populate_recent_menu(menu)
+            return False
+        return self._load_project_at(path)
+
     def _load_project_at(self, path: str, skip_autosave_prompt: bool = False) -> bool:
         """v0.9.7: the common load path (File→Open and restore from a backup/autosave).
 
@@ -204,11 +335,24 @@ class ProjectIOMixin:
         on a later save). skip_autosave_prompt — the explicit restore path
         (the user already chose the source; a repeated prompt about a newer
         autosave would be disorienting).
+
+        v1.3.3.6 (ROADMAP task 1/3): a successful load puts the path at the head of
+        the `recent_projects` MRU; a load that RAISES no longer ends in a bare
+        critical dialog — `_recover_unreadable_project` asks the backup ring and the
+        autosave first (with consent). The recovery offer is keyed on the FILE being
+        unreadable, not on any later failure: an error thrown while APPLYING an
+        already-parsed project (the keyring, the sidebar, the view) must not offer to
+        overwrite a perfectly good file — that keeps the historic dialog.
         """
         try:
             from storage.project import load_project as _load_project
             raw = _load_project(path)
+        except Exception as e:  # noqa: BLE001 — the file cannot be read: recover, do not dead-end
+            # v1.3.3.6 (task 3): the ring buffer and the autosave are consulted BEFORE
+            # the critical dialog (which stays for the "nothing to restore" case).
+            return self._recover_unreadable_project(path, e)
 
+        try:
             # v0.9.7 #3: the autosave is newer than the file → offer a restore
             if not skip_autosave_prompt:
                 try:
@@ -276,13 +420,159 @@ class ProjectIOMixin:
             self._reset_undo_stack()  # v0.8.3: a load — a new undo reference point
             self._update_window_title()
             self.statusBar().showMessage(self.t("status.project_loaded"))
+            # v1.3.3.6 (task 1): a load IS the definition of "recent"
+            self._remember_recent_project(path)
 
             if self.log:
                 self.log.info("Project loaded", extra={"file": path, "servers": server_count})
             return True
         except Exception as e:
-            QMessageBox.critical(self, self.t("msg.error_title"), self.t("msg.load_failed", error=str(e)))
+            # The file PARSED — something later failed (the keyring, the scene, the
+            # tree). This is NOT a case for a recovery offer: replacing a readable
+            # file with a backup would be data loss. The historic dialog stays.
+            if self.log:
+                self.log.exception(f"Failed to apply the loaded project {path}")
+            QMessageBox.critical(
+                self, self.t("msg.error_title"), self.t("msg.load_failed", error=str(e)))
             return False
+
+    # ── v1.3.3.6 (ROADMAP task 3): recovery when the project cannot be read ──
+
+    def _unreadable_sources(self, path: str) -> list:
+        """The recovery material of an unreadable project, NEWEST first.
+
+        The ring buffer of backups (`storage.autosave.list_backups` — slot 1 is the
+        newest) and the last autosave (`read_autosave`/`autosave_mtime`); Qt-free, so
+        the "is there anything to offer at all" decision is testable on its own. Only a
+        source that really PARSES counts (`read_json` returns None for a corrupt one —
+        for the autosave AND for each ring slot): offering a broken file as a rescue
+        would just move the failure, and restoring one could loop the user straight
+        back into this dialog. Item shape: ``{"label", "path", "mtime", "kind"}``.
+        """
+        out = []
+        try:
+            from storage import autosave as _as_mod
+        except Exception:  # noqa: BLE001 — no storage module — no sources
+            return out
+        try:
+            if _as_mod.read_autosave(path) is not None:
+                out.append({
+                    "label": self.t("backups.autosave"),
+                    "path": _as_mod.autosave_path_for(path),
+                    "mtime": float(_as_mod.autosave_mtime(path) or 0.0),
+                    "kind": "autosave",
+                })
+        except Exception as e:  # noqa: BLE001 — one bad source must not hide the others
+            if self.log:
+                self.log.warning(f"Autosave lookup failed: {e}")
+        try:
+            for b in _as_mod.list_backups(path):
+                if _as_mod.read_json(b["path"]) is None:
+                    continue  # a corrupt slot is not a rescue
+                out.append({
+                    "label": self.t("backups.backup", n=b["slot"]),
+                    "path": b["path"], "mtime": float(b["mtime"]), "kind": "backup",
+                })
+        except Exception as e:  # noqa: BLE001
+            if self.log:
+                self.log.warning(f"Backup ring lookup failed: {e}")
+        out.sort(key=lambda it: it["mtime"], reverse=True)
+        return out
+
+    def _recovery_prompt_text(self, error, source: dict) -> str:
+        """The question of the recovery dialog — the source and its DATE spelled out.
+
+        Split out of `_ask_recovery_source` on purpose: the text is the part a headless
+        test can assert on (the slot name and its timestamp), while the dialog below is
+        patched away.
+        """
+        try:
+            from datetime import datetime as _dt
+            when = _dt.fromtimestamp(source["mtime"]).strftime("%Y-%m-%d %H:%M:%S")
+        except (OSError, OverflowError, ValueError, KeyError, TypeError):
+            when = "-"
+        return self.t("msg.project_unreadable", error=str(error),
+                      source=source.get("label", ""), date=when)
+
+    def _ask_recovery_source(self, error, source: dict) -> str:
+        """The three-way recovery question → "restore" | "list" | "skip".
+
+        The instance-level seam for the offscreen tests (the `_collect_node_info`
+        pattern of tests/test_main_window_split.py): a modal QMessageBox with three
+        custom buttons cannot be answered without an event loop, so the test replaces
+        THIS method instead of driving the dialog.
+        """
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Warning)
+        box.setWindowTitle(self.t("dialog.project_unreadable"))
+        box.setText(self._recovery_prompt_text(error, source))
+        btn_restore = box.addButton(self.t("msg.project_unreadable_restore"),
+                                    QMessageBox.AcceptRole)
+        btn_list = box.addButton(self.t("msg.project_unreadable_backups"),
+                                 QMessageBox.ActionRole)
+        box.addButton(self.t("msg.project_unreadable_skip"), QMessageBox.RejectRole)
+        box.setDefaultButton(btn_restore)
+        box.exec()
+        clicked = box.clickedButton()
+        if clicked is btn_restore:
+            return "restore"
+        if clicked is btn_list:
+            return "list"
+        return "skip"
+
+    def _recover_unreadable_project(self, path: str, error) -> bool:
+        """Offer a restore when the project file cannot be read (v1.3.3.6, task 3).
+
+        Returns True only when a restore happened AND the project loaded. NOTHING is
+        overwritten without an explicit choice: "Restore" copies the chosen slot over
+        the unreadable file and re-enters the normal load path; "Open the backup
+        list…" hands the decision to the existing `BackupsDialog`; "Cancel" leaves the
+        file exactly as it was found. With no source at all — the historic critical
+        dialog, unchanged.
+        """
+        sources = self._unreadable_sources(path)
+        if not sources:
+            QMessageBox.critical(
+                self, self.t("msg.error_title"), self.t("msg.load_failed", error=str(error)))
+            return False
+        newest = sources[0]
+        if self.log:
+            self.log.warning("Project file unreadable, offering recovery",
+                             extra={"file": path, "source": newest.get("path", "")})
+        choice = self._ask_recovery_source(error, newest)
+        if choice == "restore":
+            return self._restore_unreadable_from(newest, path)
+        if choice == "list":
+            # The ring of THIS file, not of the open project: the dialog is handed the
+            # path that failed (a drop / a Recent item may differ from _project_file).
+            self._show_backups_dialog(path)
+        return False
+
+    def _restore_unreadable_from(self, source: dict, target_path: str) -> bool:
+        """Copy a recovery slot over the unreadable file and re-enter the load path.
+
+        `restore_to_project()` + a re-entrant
+        `_load_project_at(..., skip_autosave_prompt=True)` — the `_restore_from_source`
+        mechanics with an explicit target (the file that failed to load is not
+        necessarily the open project). Only ever called after an explicit "Restore".
+        """
+        try:
+            from storage import autosave as _as_mod
+            _as_mod.restore_to_project(source["path"], target_path)
+        except Exception as e:  # noqa: BLE001 — the user must see the reason
+            if self.log:
+                self.log.exception(f"Failed to recover {target_path} from {source.get('path')}")
+            QMessageBox.critical(self, self.t("msg.error_title"),
+                                 self.t("msg.restore_failed", error=str(e)))
+            return False
+        ok = self._load_project_at(target_path, skip_autosave_prompt=True)
+        if ok:
+            self.statusBar().showMessage(
+                self.t("status.restored", source=source.get("label", "")))
+            if self.log:
+                self.log.info("Project recovered from an unreadable file",
+                              extra={"file": target_path, "source": source.get("path", "")})
+        return ok
 
     def _save_project(self) -> bool:
         """Save the current project. Returns True if the save succeeded."""
@@ -387,6 +677,9 @@ class ProjectIOMixin:
                     "\n".join(self.t("msg.credentials_save_failed", alias=a) for a in unsaved_aliases))
 
             self.statusBar().showMessage(self.t("status.project_saved"))
+            # v1.3.3.6 (task 1): a successful save joins the MRU too — Save As makes the
+            # NEW path the head (the previous path stays below it until it is pruned).
+            self._remember_recent_project(path)
 
             if self.log:
                 self.log.info("Project saved", extra={
@@ -456,13 +749,20 @@ class ProjectIOMixin:
             return
         self._restore_from_source(src, self.t("backups.autosave"))
 
-    def _backup_items(self) -> list:
-        """v0.9.7 #2: rows for the backup dialog — autosave + ring slots (newest first)."""
-        if not self._project_file:
+    def _backup_items(self, project_path: str = None) -> list:
+        """v0.9.7 #2: rows for the backup dialog — autosave + ring slots (newest first).
+
+        v1.3.3.6 (task 3): `project_path` defaults to the OPEN project, but the
+        recovery path passes the file that failed to load (a drop / a Recent item is
+        not necessarily `self._project_file`).
+        """
+        target = project_path if isinstance(project_path, str) and project_path \
+            else self._project_file
+        if not target:
             return []
         from storage import autosave as _as_mod
         items = []
-        auto_path = _as_mod.autosave_path_for(self._project_file)
+        auto_path = _as_mod.autosave_path_for(target)
         if os.path.isfile(auto_path):
             try:
                 st = os.stat(auto_path)
@@ -472,20 +772,28 @@ class ProjectIOMixin:
                 })
             except OSError:
                 pass
-        for b in _as_mod.list_backups(self._project_file):
+        for b in _as_mod.list_backups(target):
             items.append({
                 "label": self.t("backups.backup", n=b["slot"]),
                 "path": b["path"], "mtime": b["mtime"], "size": b["size"],
             })
         return items
 
-    def _show_backups_dialog(self):
-        """v0.9.7 #2: the dialog with the ring buffer of backups (+ the latest autosave)."""
-        if not self._project_file:
+    def _show_backups_dialog(self, project_path: str = None):
+        """v0.9.7 #2: the dialog with the ring buffer of backups (+ the latest autosave).
+
+        v1.3.3.6 (task 3): an optional explicit target — the recovery path opens the
+        list of the file it could not read. Called as a QAction slot it receives no
+        argument (or a bool from an auto-connection), which the `isinstance` guard
+        below turns back into the open project.
+        """
+        target = project_path if isinstance(project_path, str) and project_path \
+            else self._project_file
+        if not target:
             QMessageBox.information(
                 self, self.t("msg.info_title"), self.t("msg.open_project_first"))
             return
-        items = self._backup_items()
+        items = self._backup_items(target)
         if not items:
             QMessageBox.information(
                 self, self.t("dialog.backups"), self.t("backups.empty"))
@@ -495,18 +803,24 @@ class ProjectIOMixin:
         except ImportError:  # flat layout without the package (the main_window pattern)
             from backups_dialog import BackupsDialog
         dlg = BackupsDialog(items, parent=self)
-        dlg.restore_requested.connect(self._restore_from_source)
+        dlg.restore_requested.connect(
+            lambda src, label, _t=target: self._restore_from_source(src, label, _t))
         dlg.exec()
 
-    def _restore_from_source(self, src_path: str, label: str):
+    def _restore_from_source(self, src_path: str, label: str, target_path: str = None):
         """v0.9.7 #2/#3: the single restore path — backup/autosave → project file.
 
         Confirmation (with a warning about unsaved edits when dirty) → an
         atomic copy into the project file → a reload via _load_project_at
         (the same logic as File→Open: undo stack, dirty, keyring keys,
         statuses).
+
+        v1.3.3.6 (task 3): `target_path` — the explicit target of a recovery restore
+        (defaults to the open project file).
         """
-        if not self._project_file:
+        target = target_path if isinstance(target_path, str) and target_path \
+            else self._project_file
+        if not target:
             return
         msg = (self.t("msg.confirm_restore_dirty") if self._dirty
                else self.t("msg.confirm_restore"))
@@ -517,8 +831,8 @@ class ProjectIOMixin:
             return
         try:
             from storage import autosave as _as_mod
-            _as_mod.restore_to_project(src_path, self._project_file)
-            ok = self._load_project_at(self._project_file, skip_autosave_prompt=True)
+            _as_mod.restore_to_project(src_path, target)
+            ok = self._load_project_at(target, skip_autosave_prompt=True)
             if not ok:
                 return  # the error was already shown (msg.load_failed)
             self.statusBar().showMessage(self.t("status.restored", source=label))

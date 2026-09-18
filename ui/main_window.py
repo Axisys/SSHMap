@@ -60,10 +60,13 @@ except ImportError:
 try:  # v1.1.2RC3 (AUDIT U2): window sizes — saveGeometry()/saveState() into config.json
     from ..modules.window_geometry import (
         save_window_geometry, restore_window_geometry,
+        # v1.3.3.6 (ROADMAP task 4): the panel widths — base64 QSplitter.saveState()
+        save_splitter_state, restore_splitter_state,
     )
 except ImportError:
     from modules.window_geometry import (
         save_window_geometry, restore_window_geometry,
+        save_splitter_state, restore_splitter_state,
     )
 
 try:  # v1.2.3 (ROADMAP v1.2.3): multi-input — hub broadcasting input to all sessions
@@ -203,6 +206,65 @@ class _CollapseStrip(QWidget):
         p.end()
 
 
+# ── v1.3.3.6 (ROADMAP task 2): dropping a project onto the window ──────────────
+# Dragging a saved `.json`/`.sshmap` onto the window is the standard gesture of the
+# platform, and it went through nothing: `setAcceptDrops(True)` existed only on the
+# SFTP tab (`modules/sftp_tab.py:293/419`). The drop is deliberately narrow — ONE
+# existing local FILE with a project suffix — and it goes through `_load_project_at()`
+# (the File → Open entry point), so every downstream rule (the autosave prompt, the
+# undo reset, the status round, the MRU) is shared instead of re-implemented.
+
+PROJECT_DROP_SUFFIXES = (".json", ".sshmap")
+
+
+def _dropped_local_paths(mime_data) -> list:
+    """Local file paths carried by a drop — no suffix filter, no existence filter.
+
+    The `SftpTab._local_files` precedent narrowed to "is this even a local drag":
+    a text drag (a URL/plain text from another application) is not a gesture this
+    window advertises, so it is not accepted at all and the OS keeps its "no drop"
+    cursor. Everything else reaches `dropEvent`, where the strict validation runs
+    and a refusal can be EXPLAINED instead of silently ignored.
+    """
+    out = []
+    if mime_data is None:
+        return out
+    try:
+        if not mime_data.hasUrls():
+            return out
+        urls = mime_data.urls()
+    except (AttributeError, RuntimeError):
+        return out
+    for url in urls:
+        try:
+            if url.isLocalFile():
+                out.append(url.toLocalFile())
+        except (AttributeError, RuntimeError):
+            continue
+    return out
+
+
+def _project_drop_candidate(mime_data) -> str:
+    """The ONE project file a drop carries — '' when the drop must be refused.
+
+    Strict on purpose (ROADMAP task 2): exactly one path, it must be an existing
+    FILE (a directory is refused) and carry a `.json`/`.sshmap` suffix (case
+    insensitive — Windows hands out `MyMap.JSON`).
+    """
+    paths = _dropped_local_paths(mime_data)
+    if len(paths) != 1:
+        return ""
+    path = paths[0]
+    try:
+        if not os.path.isfile(path):
+            return ""  # a directory / a path that vanished mid-drag
+    except OSError:
+        return ""
+    if os.path.splitext(path)[1].lower() not in PROJECT_DROP_SUFFIXES:
+        return ""
+    return path
+
+
 class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
     def __init__(self):
         super().__init__()
@@ -327,6 +389,15 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         except Exception as e:
             if self.log:
                 self.log.warning(f"Apply UI options at startup failed: {e}")
+
+        # ── v1.3.3.6 (ROADMAP task 4): the panel widths — the LAST piece of window
+        #    state, applied AFTER restore_window_geometry()/restoreState() above and
+        #    AFTER the collapsed-panel states of _apply_ui_options_from_config(). ──
+        try:
+            self._apply_splitter_state_from_config()
+        except Exception as e:  # noqa: BLE001 — the widths must not break startup
+            if self.log:
+                self.log.warning(f"Restore splitter state failed: {e}")
 
         # ── v0.7.1: background node status checks (online/warn/offline) ──
         # Probes run in a separate thread — the GUI is not blocked.
@@ -636,6 +707,11 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         self.setCentralWidget(central)
         layout = QHBoxLayout(central)
         layout.setContentsMargins(0, 0, 0, 0)
+
+        # v1.3.3.6 (ROADMAP task 2): the window accepts a dropped project file
+        # (dragEnterEvent/dragMoveEvent/dropEvent below). Until now only the SFTP tab
+        # had this — dragging a .json onto the window did nothing at all.
+        self.setAcceptDrops(True)
 
         # v1.2.4.1: self._splitter — a facade reference (panel collapse mechanics).
         # Splitter children are CONTAINERS [panel | strip], not the widgets themselves: in
@@ -962,6 +1038,15 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         except Exception:  # noqa: BLE001 — geometry must not block closing
             pass
 
+        # v1.3.3.6 (ROADMAP task 4): the panel widths — written right next to the
+        # geometry and with the same "before everything" rule. `saveState()` covers the
+        # dock/toolbar layout only, so the [sidebar | map] divider used to reset to
+        # 250/950 on every start (ui_splitter_state).
+        try:
+            save_splitter_state("ui_splitter_state", getattr(self, "_splitter", None))
+        except Exception:  # noqa: BLE001 — the widths must not block closing
+            pass
+
         # v0.9.7: autosave stops BEFORE the dialog — while the user decides
         # (Save/Discard/Cancel) no writes to ~/.sshmap/autosave are needed.
         try:
@@ -1121,6 +1206,36 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
                 return True
         return super().eventFilter(source, event)
 
+    # ── v1.3.3.6 (ROADMAP task 2): dropping a project onto the window ────────
+    # `setAcceptDrops(True)` is called in `_setup_ui`. Nothing else in the main window
+    # accepts drops (the SFTP tab of the "tabs"-mode dock does, natively takes
+    # precedence and keeps working), so a local-file drag lands here.
+
+    def dragEnterEvent(self, event):
+        # Any local-file drag is ACCEPTED here so that a refused drop still reaches
+        # `dropEvent` and can be explained; the strict validation is one step later.
+        # The alternative (validating at enter time) shows nothing at all for two
+        # files or a foreign suffix — the "silence" this task exists to remove.
+        if _dropped_local_paths(event.mimeData()):
+            event.acceptProposedAction()
+
+    def dragMoveEvent(self, event):
+        # The same answer as dragEnter — otherwise Qt resets the action before Drop
+        # (the `SftpTab.dragMoveEvent` rule).
+        if _dropped_local_paths(event.mimeData()):
+            event.acceptProposedAction()
+
+    def dropEvent(self, event):
+        path = _project_drop_candidate(event.mimeData())
+        if path:
+            event.acceptProposedAction()
+            # The ONE load entry point (File → Open, Recent, recovery): the autosave
+            # prompt, the undo reset, the status round and the MRU behave identically.
+            self._load_project_at(path)
+            return
+        event.ignore()
+        self.statusBar().showMessage(self.t("msg.drop_project"), 8000)
+
     def _setup_toolbar(self):
         toolbar = QToolBar()
         # v1.1.2RC3 (AUDIT U2): objectName is needed by saveState()/restoreState() —
@@ -1254,6 +1369,18 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         # v1.3.2: the Ctrl+N/O/S hints come from the hotkey registry (action_ids below).
         file_menu = menubar.addMenu(self.t("menu.file") if self._i18n_available else "File")
         self._register_i18n(file_menu, "menu.file")
+        # v1.3.3.6 (ROADMAP task 1): "Recent" — the FIRST item of the File menu (the
+        # gesture it replaces is the top of the menu: File → Open → dialog). Rebuilt
+        # from `recent_projects` on every aboutToShow (the v1.3.3.1 language-submenu
+        # pattern); the rebuild re-registers its QActions in `_qaction_guard`
+        # (gotcha #9).
+        self._recent_menu = file_menu.addMenu(
+            self.t("file.recent") if self._i18n_available else "Recent")
+        self._register_i18n(self._recent_menu, "file.recent")
+        self._populate_recent_menu(self._recent_menu)
+        self._recent_menu.aboutToShow.connect(
+            lambda: self._populate_recent_menu(self._recent_menu))
+        file_menu.addSeparator()
         self._add_menu_action(file_menu, "file.new_project", self._new_project, "file.new")
         self._add_menu_action(file_menu, "file.open", self._open_project, "file.open")
         self._add_menu_action(file_menu, "file.save", self._save_project, "file.save")
@@ -1710,12 +1837,7 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
                     setattr(self, saved_attr, int(own_w))  # the width BEFORE collapsing
                 panel.hide()
                 strip.show()
-                container.setMinimumWidth(w_strip)
-                total = max(self._splitter.width(), 2 * w_strip + 10)
-                if which == "sidebar":
-                    self._splitter.setSizes([w_strip, total - w_strip])
-                else:
-                    self._splitter.setSizes([total - w_strip, w_strip])
+                self._apply_collapsed_strip_sizes(which)
             else:
                 container.setMinimumWidth(min_w)
                 panel.show()
@@ -1745,6 +1867,50 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         except Exception:  # noqa: BLE001 — persistence must not break the toggle
             pass
         return "changed"
+
+    def _apply_collapsed_strip_sizes(self, which: str) -> None:
+        """Force the [strip | expanded panel] sizes of a COLLAPSED panel.
+
+        v1.2.4.1 had this arithmetic inline in `_set_panel_collapsed`; v1.3.3.6
+        (ROADMAP task 4) reuses it after the splitter-state restore, so a saved layout
+        can never resurrect the width of a panel the user collapsed before closing the
+        window. The caller guarantees the OTHER panel is expanded (collapsing both is
+        forbidden — `_set_panel_collapsed` returns "forbidden").
+        """
+        w_strip = _CollapseStrip.STRIP_WIDTH
+        container = self._sidebar_container if which == "sidebar" else self._map_container
+        container.setMinimumWidth(w_strip)
+        total = max(self._splitter.width(), 2 * w_strip + 10)
+        if which == "sidebar":
+            self._splitter.setSizes([w_strip, total - w_strip])
+        else:
+            self._splitter.setSizes([total - w_strip, w_strip])
+
+    def _apply_splitter_state_from_config(self) -> None:
+        """v1.3.3.6 (ROADMAP task 4): restore the panel widths — applied LAST.
+
+        The ORDER is the contract (the v1.4.5 splitter-handle rules build on it):
+        this runs AFTER `restore_window_geometry()`/`restoreState()` (early in
+        `__init__`) and AFTER the collapsed-panel states applied by
+        `_apply_ui_options_from_config()`, and it re-applies the 18px strip sizes of
+        every panel that is collapsed — a saved layout must not resurrect a width the
+        user collapsed away.
+
+        A missing key / a broken value leaves the 250/950 defaults of `_setup_ui`
+        untouched (`restore_splitter_state` returns False and never raises).
+        """
+        splitter = getattr(self, "_splitter", None)
+        if splitter is None:
+            return
+        try:
+            if not restore_splitter_state("ui_splitter_state", splitter):
+                return
+            for which, flag in (("sidebar", "_sidebar_collapsed"),
+                                ("map", "_map_collapsed")):
+                if getattr(self, flag, False):
+                    self._apply_collapsed_strip_sizes(which)
+        except RuntimeError:
+            pass  # Qt teardown — the splitter is already destroyed
 
     def _position_map_collapse_btn(self):
         """v1.2.4.1 (task 2): the map collapse button — the right BOTTOM corner of the MapView.

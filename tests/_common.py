@@ -171,8 +171,15 @@ def restore_i18n_config(snap):
 # in 12 i18n files + the APP_VERSION/requirements pins in 7 release-state sections).
 # The misses of the keys themselves against the code are caught by check_i18n_keys.py.
 # ─────────────────────────────────────────────────────────────────────────────
-EXPECTED_APP_VERSION = "1.3.3.5"  # the current release (a sentinel: it catches "a bump to the wrong version")
-EXPECTED_I18N_KEYS = 509        # the parity of the TRANSLATION keys (v1.3.3.5: +2 — terminal.split
+EXPECTED_APP_VERSION = "1.3.3.6"  # the current release (a sentinel: it catches "a bump to the wrong version")
+EXPECTED_I18N_KEYS = 518        # the parity of the TRANSLATION keys (v1.3.3.6: +9 — the project
+                                # life cycle: 3 for the Recent submenu (`file.recent`,
+                                # `file.recent_clear`, `file.recent_empty`), `msg.drop_project`
+                                # (the refused-drop hint) and 5 for the unreadable-file recovery
+                                # (`dialog.project_unreadable` + `msg.project_unreadable` with its
+                                # restore / backup-list / skip options). Panel widths and the MRU
+                                # storage add no strings.
+                                # (v1.3.3.5: +2 — terminal.split
                                 # ("Split Terminal" — the checkable action of the terminal split:
                                 # the toolbar button and the window's context-menu item) and
                                 # terminal.split_tooltip (the hint of that action). The split itself
