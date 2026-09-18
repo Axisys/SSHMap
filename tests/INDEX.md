@@ -97,6 +97,7 @@ of the file itself.
 | `test_drawio_export.py` | — | Map export to drawio (.drawio) v0.9.5 (former tests/smoke_v095_drawio.py). |
 | `test_duplicate_multiselect.py` | — | Regression v0.9.3: node duplication + multi-select + group drag. |
 | `test_export_background.py` | — | Regression v0.9.1: map export to image + background image. |
+| `test_export_fidelity.py` | — | v1.3.3.7 — Export fidelity: the drawio vertex keeps the map's data, SVG joins the formats. |
 | `test_ext_terminal_dialog.py` | — | Regression v0.9.9.2 — the external terminal UI (presets + reset to defaults). |
 | `test_external_terminal.py` | — | External (system) terminal v0.8.2: modules/external_terminal.py (former smoke_test). |
 | `test_groups.py` | — | Node groups on the map v0.8.1 (former smoke_test.py "v0.8.1 groups"). |
@@ -114,7 +115,7 @@ of the file itself.
 | `test_node_labels.py` | — | Review fixes v0.8.0: node elide/max width, status markers in the sidebar (former smoke_test). |
 | `test_note_attach.py` | — | v1.2.4: attaching notes to servers + a special line (the v1.2.4 release theme). |
 | `test_notes.py` | — | Sticky notes: drag/resize/edit/delete + JSON round-trip (former smoke_test.py §6e "v0.7.2"). |
-| `test_pdf_export.py` | — | v0.9.9.7 — Map PDF export (ROADMAP v0.9.9.7). |
+| `test_pdf_export.py` | — | v0.9.9.7 — Map PDF export (ROADMAP v0.9.9.7); geometry pinned in v1.3.3.7-fix. |
 | `test_project_lifecycle.py` | — | v1.3.3.6 (ROADMAP "Projects: open, recover, remember"): the life cycle of a project file. |
 | `test_pyproject.py` | — | v0.9.9.6 — pyproject.toml: installable identity for 1.0 (ROADMAP). |
 | `test_pyte_compat.py` | — | v1.2.11 — Terminal: pyte 0.8.2 compatibility (private SGR + LNM). |

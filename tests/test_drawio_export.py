@@ -6,6 +6,10 @@ Checks (DOCUMENTATION.md v0.9.5 #6):
   2. The file opens by the XML validator (ET.parse).
   3. The coordinates of the members of the groups are recalculated relative to the parent.
 
+v1.3.3.7 (ROADMAP task 4): the structure counting is done INLINE here — the module's
+`load_drawio_structure()` was deleted as production-dead (see CHANGELOG.md, v1.3.3.7),
+so `count_structure()` below is the same `ET.iter("mxCell")` scan the helper used.
+
 Run: python tests/test_drawio_export.py   (from the project root) or python tests/run_all.py
 """
 import os
@@ -21,7 +25,7 @@ app = QApplication.instance() or QApplication([])
 
 from models.server import ServerData
 from graphics.map_scene import MapScene
-from storage.export_drawio import export_scene_to_drawio, load_drawio_structure
+from storage.export_drawio import export_scene_to_drawio
 
 
 def find_cells(root):
@@ -29,6 +33,24 @@ def find_cells(root):
     for c in root.iter("mxCell"):
         cells[c.get("id")] = c
     return cells
+
+
+def count_structure(root):
+    """The vertex/edge/note/container counters (the deleted load_drawio_structure scan)."""
+    vertices = edges = notes = containers = 0
+    for cell in root.iter("mxCell"):
+        style = cell.get("style") or ""
+        if cell.get("edge") == "1":
+            edges += 1
+        elif cell.get("vertex") == "1":
+            if "shape=note" in style:
+                notes += 1
+            elif "container=1" in style:
+                containers += 1
+            else:
+                vertices += 1
+    return {"vertices": vertices, "edges": edges,
+            "notes": notes, "containers": containers}
 
 
 scene = MapScene()
@@ -63,7 +85,7 @@ except ET.ParseError as e:
 check("the root tag == mxfile", root.tag == "mxfile", f"got {root.tag!r}")
 
 cells = find_cells(root)
-stats = load_drawio_structure(path)
+stats = count_structure(root)
 
 # ── 2. The structure: 3 node corners + 1 sticker; 1 container; 1 edge ───────────
 check("vertices == 3 (n1, n2, the group member)", stats.get("vertices") == 3, str(stats))

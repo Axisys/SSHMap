@@ -27,6 +27,7 @@ selection operations, profile/logs/exit) entered the registry with an EMPTY defa
 the "no hotkey, but assignable" value. This file keeps covering the STORAGE +
 APPLICATION contract for the grown registry; the completeness audit, the real
 shortcut firing and the dialog's reset button live in tests/test_actions_keyboard.py.
+v1.3.3.7 added `file.export_svg` (the SVG export) as one more empty-default action — 41.
 
 Run: python tests/test_hotkeys_config.py   (from the project root) or python tests/run_all.py
 """
@@ -77,6 +78,7 @@ EXPECTED_DEFAULTS = {
 EMPTY_DEFAULT_IDS = {
     "node.check_status",
     "file.import_servers", "file.export_png", "file.export_drawio", "file.export_pdf",
+    "file.export_svg",
     "file.backups", "file.restore_autosave", "file.exit",
     "edit.connect_selected", "edit.delete_selected",
     "view.center_map", "view.collapse_all", "view.expand_all",
@@ -142,13 +144,13 @@ ALL_IDS = sorted(set(EXPECTED_DEFAULTS) | EMPTY_DEFAULT_IDS)
 print("== 1. the action registry ==")
 
 ids = HR.action_ids()
-check("registry: the grown v1.3.3.3 action set (22 sequenced + 18 empty-default)",
-      set(ids) == set(ALL_IDS) and len(ids) == 40,
+check("registry: the grown v1.3.3.3 action set (22 sequenced + 19 empty-default)",
+      set(ids) == set(ALL_IDS) and len(ids) == 41,
       str(sorted(set(ids) ^ set(ALL_IDS))))
 check("registry: the sequenced defaults are the v1.3.1.1 set + the v1.3.3.3 additions",
       {a: HR.default_sequence(a) for a in ids if HR.default_sequence(a)} == EXPECTED_DEFAULTS,
       str({a: HR.default_sequence(a) for a in ids if HR.default_sequence(a)}))
-check("registry: exactly the 18 remaining global actions carry an EMPTY default",
+check("registry: exactly the 19 remaining global actions carry an EMPTY default",
       {a for a in ids if not HR.default_sequence(a)} == EMPTY_DEFAULT_IDS
       and set(HR.empty_default_action_ids()) == EMPTY_DEFAULT_IDS,
       str(sorted(EMPTY_DEFAULT_IDS ^ {a for a in ids if not HR.default_sequence(a)})))
@@ -370,8 +372,8 @@ dlg._refresh_hotkey_conflicts()
 check("dialog: two disabled (empty) hotkeys are not a conflict",
       HR.find_conflicts(dlg.hotkey_sequences()) == set()
       and dlg.hotkey_sequences()["file.open"] == "" == dlg.hotkey_sequences()["edit.properties"])
-check("dialog: the 18 empty-default rows are not a conflict among themselves",
-      len([a for a in EMPTY_DEFAULT_IDS if dlg.hotkey_sequences()[a] == ""]) == 18
+check("dialog: the 19 empty-default rows are not a conflict among themselves",
+      len([a for a in EMPTY_DEFAULT_IDS if dlg.hotkey_sequences()[a] == ""]) == 19
       and HR.find_conflicts(dlg.hotkey_sequences()) == set())
 
 # A prefill from the config (a saved value shows up in the table)

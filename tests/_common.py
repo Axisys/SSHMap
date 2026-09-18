@@ -171,8 +171,12 @@ def restore_i18n_config(snap):
 # in 12 i18n files + the APP_VERSION/requirements pins in 7 release-state sections).
 # The misses of the keys themselves against the code are caught by check_i18n_keys.py.
 # ─────────────────────────────────────────────────────────────────────────────
-EXPECTED_APP_VERSION = "1.3.3.6"  # the current release (a sentinel: it catches "a bump to the wrong version")
-EXPECTED_I18N_KEYS = 518        # the parity of the TRANSLATION keys (v1.3.3.6: +9 — the project
+EXPECTED_APP_VERSION = "1.3.3.7"  # the current release (a sentinel: it catches "a bump to the wrong version")
+EXPECTED_I18N_KEYS = 520        # the parity of the TRANSLATION keys (v1.3.3.7: +2 — the SVG export,
+                                # `file.export_svg` + `status.export_svg_ok`. The drawio half of the
+                                # release adds NO UI string: the label carries the data and the failure
+                                # path reuses `msg.export_failed`.)
+                                # (v1.3.3.6: +9 — the project
                                 # life cycle: 3 for the Recent submenu (`file.recent`,
                                 # `file.recent_clear`, `file.recent_empty`), `msg.drop_project`
                                 # (the refused-drop hint) and 5 for the unreadable-file recovery

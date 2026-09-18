@@ -1,10 +1,12 @@
 # -*- coding: utf-8 -*-
-"""Export the map to the draw.io format (.drawio) — v0.9.5.
+"""Export the map to the draw.io format (.drawio) — v0.9.5, label completed in v1.3.3.7.
 
 An mxGraph XML serializer via xml.etree.ElementTree, no new dependencies.
 
 What is exported:
-  - ServerNode      → an mxCell vertex (geometry + alias/host/OS/CPU/RAM text);
+  - ServerNode      → an mxCell vertex (geometry + alias/host/OS/CPU/RAM text
+                      + the tag line + the comment — see _node_label());
+
   - ConnectionArrow → an mxCell edge source→target with a label and the connection type color;
   - StickyNote      → a vertex with the shape=note style;
   - NodeGroup       → a container (container=1), members — child cells
@@ -25,6 +27,16 @@ decodeRoot: the iteration goes over the direct children of <root>):
 
 The file opens in draw.io / diagrams.net / the VS Code plugin as an ordinary
 diagram and remains an editable infrastructure scheme.
+
+DECISIONS pinned here so the next reader does not "fix" them (v1.3.3.7):
+  * The vertex text carries the map's DATA — the tag line (`[tag1, tag2]`, the shape
+    the sidebar row uses) and the comment included, so a `.drawio` export says the
+    same as the PNG/JPEG/PDF ones (which render the live scene). Tag COLOURS are NOT
+    replicated: drawio rich-text styling (`html=1` + `<font>`/`<span>` markup) is a
+    separate rabbit hole, the label carries the text.
+  * `status` (online/warn/offline) is deliberately NOT exported. It is a RUNTIME fact —
+    the result of the last SSH probe — not project data, so writing it would make two
+    exports of one unchanged project differ. Same decision in DOCUMENTATION.md §28.
 """
 
 from __future__ import annotations
@@ -66,7 +78,21 @@ def _node_geometry(node) -> tuple:
 
 
 def _node_label(node) -> str:
-    """The node's text card: alias, host, OS/CPU/RAM."""
+    """The node's text card: alias, host, OS/CPU/RAM, tags, comment.
+
+    v1.3.3.7 — export fidelity: the label carries the map's DATA, not only the
+    hardware summary. The tag line uses the `[tag1, tag2]` shape of the sidebar row
+    (ALL the tags, not the first three the row shows — an export must not lose data)
+    and the comment follows it — multi-line safe: its line breaks go through the
+    `\\x01` placeholder and become `&#xa;` in to_xml_bytes(), so no line is lost.
+    An empty field adds NO line (the optional-field pattern of the project format).
+
+    Deliberately NOT part of the label:
+      * `status` — a RUNTIME fact (the result of the last SSH probe), not project
+        data; two exports of one unchanged project must stay identical (module
+        docstring + DOCUMENTATION.md §28);
+      * tag colours — drawio rich-text styling is out of scope, the text is enough.
+    """
     data = getattr(node, "data", None)
     if data is None:
         return ""
@@ -81,6 +107,12 @@ def _node_label(node) -> str:
     if getattr(data, "ip", "") and data.ip != data.host:
         details.append(data.ip)
     lines.extend(details)
+    tags = [str(t).strip() for t in (getattr(data, "tags", None) or []) if str(t).strip()]
+    if tags:
+        lines.append(f"[{', '.join(tags)}]")
+    comment = str(getattr(data, "comment", "") or "")
+    if comment.strip():
+        lines.extend(comment.splitlines() or [comment])
     # Newlines in value: drawio requires the &#xa; entity. A literal "\n"
     # in an XML attribute is normalized to a space by the parser, so in to_xml_bytes()
     # the placeholder is replaced with "&#xa;" AFTER serialization (ET can't do it itself).
@@ -319,27 +351,12 @@ def export_scene_to_drawio(scene, path: str, dark: bool = True) -> int:
         fh.write(data)
     return cells
 
-
-def load_drawio_structure(path: str) -> Optional[dict]:
-    """A lightweight parser of "our own" files (import — the optional task v0.9.5 #5).
-
-    Returns a dict with vertex/edge counters, or None on corrupt XML.
-    """
-    try:
-        tree = ET.parse(path)
-    except ET.ParseError:
-        return None
-    vertices = edges = notes = containers = 0
-    for cell in tree.iter("mxCell"):
-        style = cell.get("style") or ""
-        if cell.get("edge") == "1":
-            edges += 1
-        elif cell.get("vertex") == "1":
-            if "shape=note" in style:
-                notes += 1
-            elif "container=1" in style:
-                containers += 1
-            else:
-                vertices += 1
-    return {"vertices": vertices, "edges": edges,
-            "notes": notes, "containers": containers}
+# v1.3.3.7 (ROADMAP task 4) — the fate of `load_drawio_structure()` is decided: DELETED.
+# The helper counted vertices/edges/notes/containers of "our own" files and was
+# production-dead since v0.9.5 (its only caller was tests/test_drawio_export.py), while
+# NO version of ROADMAP.md owns the drawio IMPORT. A parser without a consumer is not
+# import groundwork but dead weight that silently rots — the decision and its reason are
+# in CHANGELOG.md (v1.3.3.7). The test's structure counting now scans the XML inline
+# with the same `ET.iter("mxCell")` pattern, so the round-trip check lost nothing.
+# Bringing the IMPORT back = one version section in ROADMAP.md + the parser written
+# against the reader's needs (which cannot be guessed today), not a resurrected counter.

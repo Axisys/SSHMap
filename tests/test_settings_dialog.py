@@ -347,7 +347,7 @@ _expected_rows = len(_HR.action_ids())
 check("'Hotkeys': one row per registry action, prefilled from the registry defaults",
       dlg.hotkeys_table.rowCount() == _expected_rows
       and len(dlg.hotkey_edits) == _expected_rows
-      and _expected_rows == 40,
+      and _expected_rows == 41,
       f"rows={dlg.hotkeys_table.rowCount()} registry={_expected_rows}")
 check("'Hotkeys': the row names come from the registry label keys",
       [dlg.hotkeys_table.item(r, 0).text() for r in range(_expected_rows)]

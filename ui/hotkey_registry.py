@@ -104,6 +104,7 @@ HOTKEY_ACTIONS: Dict[str, dict] = {
     "file.export_png":      {"label": "file.export_png",      "default": ""},
     "file.export_drawio":   {"label": "file.export_drawio",   "default": ""},
     "file.export_pdf":      {"label": "file.export_pdf",      "default": ""},
+    "file.export_svg":      {"label": "file.export_svg",      "default": ""},
     "file.backups":         {"label": "file.backups",         "default": ""},
     "file.restore_autosave": {"label": "file.restore_autosave", "default": ""},
     "file.exit":            {"label": "file.exit",            "default": ""},

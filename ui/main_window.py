@@ -1403,6 +1403,8 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
                               "file.export_drawio")
         # v0.9.9.7: export the map to PDF (QPdfWriter on top of render_to_pixmap)
         self._add_menu_action(file_menu, "file.export_pdf", self._export_map_pdf, "file.export_pdf")
+        # v1.3.3.7: export the map to SVG (QSvgGenerator — the vector member of the set)
+        self._add_menu_action(file_menu, "file.export_svg", self._export_map_svg, "file.export_svg")
         file_menu.addSeparator()
         self._add_menu_action(file_menu, "file.exit", self.close, "file.exit")
 
@@ -2485,6 +2487,30 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
             if self.log:
                 self.log.info(
                     "Map exported to PDF", extra={"file": path, "bytes": size})
+        except Exception as e:  # noqa: BLE001
+            QMessageBox.critical(
+                self, self.t("msg.error_title"),
+                self.t("msg.export_failed", error=str(e)))
+
+    def _export_map_svg(self):
+        """Export the map to SVG (v1.3.3.7): the open scene -> a vector file.
+
+        The same shape as the PDF/PNG paths (QFileDialog + the extension + the status
+        bar/log + `msg.export_failed`), but the render itself is `render_to_svg`
+        (`QSvgGenerator`) — the map leaves as VECTOR data, background and grid included.
+        """
+        path, _ = QFileDialog.getSaveFileName(
+            self, self.t("file.export_svg"), "", "SVG Images (*.svg)")
+        if not path:
+            return
+        if not path.lower().endswith(".svg"):
+            path += ".svg"
+        try:
+            size = self.scene.render_to_svg(path)
+            self.statusBar().showMessage(self.t("status.export_svg_ok"))
+            if self.log:
+                self.log.info(
+                    "Map exported to SVG", extra={"file": path, "bytes": size})
         except Exception as e:  # noqa: BLE001
             QMessageBox.critical(
                 self, self.t("msg.error_title"),

@@ -73,6 +73,7 @@ EMPTY_DEFAULT_ACTIONS = {
     "view.set_background", "view.remove_background",
     "edit.connect_selected", "edit.delete_selected",
     "file.import_servers", "file.export_png", "file.export_pdf", "file.export_drawio",
+    "file.export_svg",
     "file.backups", "file.restore_autosave", "file.exit",
     "profile.manage", "help.open_logs", "help.about",
 }
@@ -149,12 +150,13 @@ class _FakeChecker:
 print("== 1. the registry is complete ==")
 
 ids = HR.action_ids()
-check("registry: 40 actions — the v1.3.2 set + Save As + the zoom family + the empty defaults",
-      len(ids) == 40 and len(set(ids)) == 40, str(len(ids)))
+check("registry: 41 actions — the v1.3.2 set + Save As + the zoom family + the empty defaults "
+      "(v1.3.3.7: +file.export_svg)",
+      len(ids) == 41 and len(set(ids)) == 41, str(len(ids)))
 check("registry: the 4 new SEQUENCED actions carry exactly the promised defaults",
       {a: HR.default_sequence(a) for a in NEW_DEFAULT_ACTIONS} == NEW_DEFAULT_ACTIONS,
       str({a: HR.default_sequence(a) for a in NEW_DEFAULT_ACTIONS}))
-check("registry: the 18 promoted global actions ARE registered (task 3)",
+check("registry: the promoted global actions ARE registered (task 3; v1.3.3.7: +file.export_svg)",
       EMPTY_DEFAULT_ACTIONS <= set(ids),
       str(sorted(EMPTY_DEFAULT_ACTIONS - set(ids))))
 check("registry: each of them has an EMPTY default (no hotkey, so no behaviour change)",

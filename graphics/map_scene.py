@@ -601,15 +601,92 @@ class MapScene(QGraphicsScene):
         painter.end()
         return pixmap
 
-    # ── v0.9.9.7: PDF export of the map (on top of render_to_pixmap) ───────────────
+    # ── v1.3.3.7: SVG export of the map (the vector member of the format set) ──────
 
-    def render_to_pdf(self, path: str, scale: float = 2.0) -> int:
+    def render_to_svg(self, path: str, scale: float = 1.0,
+                      padding: float = 60.0) -> int:
+        """Render the whole map into an SVG file (v1.3.3.7) — the VECTOR export.
+
+        Same composition as `render_to_pixmap`/`render_to_pdf`: the area is
+        `itemsBoundingRect` (+padding) — the whole map, regardless of the current
+        zoom/pan — and the scene paints itself through `QSvgGenerator`, so the
+        canvas background and the grid arrive via `drawBackground` exactly like in
+        the PDF one. `scale` only sets the DECLARED size of the drawing — `setSize`
+        (written into the root `width`/`height`, in mm at the generator's default
+        90 dpi) plus the matching `setViewBox`; the geometry itself stays vector, so
+        a larger scale costs nothing in quality. No new dependencies: `QSvgGenerator`
+        ships with PySide6 (QtSvg).
+
+        Returns the file size in bytes. Raises OSError if the paint device did not
+        start or the file was not created (the render_to_pdf error contract).
+        """
+        import os
+
+        from PySide6.QtCore import QRect, QSize
+        from PySide6.QtGui import QPainter
+        from PySide6.QtSvg import QSvgGenerator  # QtSvg ships with PySide6 (no new dependency)
+
+        src = self.itemsBoundingRect().adjusted(
+            -float(padding), -float(padding), float(padding), float(padding))
+        if src.isEmpty():
+            src = QRectF(-400, -300, 800, 600)
+
+        w = max(int(src.width() * scale), 1)
+        h = max(int(src.height() * scale), 1)
+
+        generator = QSvgGenerator()
+        generator.setFileName(path)
+        generator.setSize(QSize(w, h))
+        generator.setViewBox(QRect(0, 0, w, h))
+        generator.setTitle("SSH Map")
+        generator.setDescription("Infrastructure map exported from SSHMap")
+
+        painter = QPainter(generator)
+        if not painter.isActive():
+            raise OSError(f"cannot start painting on SVG device: {path}")
+        try:
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+            self.render(painter, target=QRectF(0, 0, w, h), source=src)
+        finally:
+            painter.end()
+
+        if not os.path.isfile(path):
+            raise OSError(f"SVG file was not created: {path}")
+        return os.path.getsize(path)
+
+    # ── v0.9.9.7: PDF export of the map (on top of render_to_pixmap) ───────────────
+    # v1.3.3.7-fix: the geometry constants of that export (see render_to_pdf).
+    PDF_PAGE_LONG_SIDE_PT = 1200.0     # the page's long side ≈ 42 cm — the map fills the page
+    PDF_RESOLUTION_DPI = 300           # the PAINT DEVICE unit (QPdfWriter defaults to 1200 dpi!)
+    PDF_RASTER_DPI = 150               # the floor density of the embedded map image
+
+    def render_to_pdf(self, path: str, scale: float = 2.0, padding: float = 60.0) -> int:
         """Render the whole map into a PDF file (v0.9.9.7): one page for the entire map.
 
-        On top of the ready `render_to_pixmap`: the rendered pixmap is stretched to
-        the PDF page while preserving the proportions. The page — a custom size for
-        the map's proportions (the long side 1200 pt ≈ 42 cm, zero margins), so the
-        map fills the page entirely, without A4 "stripes".
+        On top of the ready `render_to_pixmap`: the whole map (itemsBoundingRect + the
+        same `padding` as the pixmap/SVG exports) is stretched to ONE custom-sized page
+        whose long side is `PDF_PAGE_LONG_SIDE_PT` (1200 pt ≈ 42 cm) and whose short side
+        follows the map's proportions — so the map fills the page, without A4 "stripes".
+
+        **v1.3.3.7-fix — the two geometry defects of the v0.9.9.7 implementation** (found
+        while verifying the export set; the old code produced a ~72 pt thumbnail in the
+        corner of an 870×1200 pt page):
+          * `QPdfWriter` paints in DEVICE PIXELS (`resolution()`, 1200 dpi by default),
+            while the old draw target was expressed in POINTS — the map was drawn
+            1/16.7 of its intended size. The device resolution is now set explicitly
+            (`PDF_RESOLUTION_DPI`) and the map is drawn into the device's OWN rect.
+          * `QPageLayout` TRANSPOSES a custom page size when the orientation is
+            Landscape, so the old code turned a landscape map into a PORTRAIT page
+            (and vice versa). The page size is now given in its portrait form and the
+            orientation carries the map's proportions.
+        Both are pinned by `tests/test_pdf_export.py` (page box + ink coverage).
+
+        `scale` is the raster scale of the embedded image (the pixmap is `scale`× the
+        scene size); independently of it, a map with content is rendered at least at
+        `PDF_RASTER_DPI` for the 42 cm page — a three-node map no longer prints at
+        ~40 dpi. The floor is bounded by construction (the page follows the map, so it
+        always means ≈2500 px on the long side) and never lowers a bigger `scale`. An
+        EMPTY scene keeps the cheap fallback rect (a blank page needs no 25 MB raster).
 
         The PDF device: `QPdfWriter` (QtGui; Qt 6.11+/PySide6 6.11 — the replacement
         for `QPdfPrinter`, mentioned in CHANGELOG v0.9.1) with a fallback to
@@ -632,17 +709,37 @@ class MapScene(QGraphicsScene):
             device = _PdfDevice()
             device.setOutputFileName(path)
 
-        pixmap = self.render_to_pixmap(scale=scale)
+        # The raster floor: the page is sized to the map, so without it a small map
+        # would be blown up to 42 cm from a thumbnail-sized pixmap. The floor keeps the
+        # long side at ≈ PDF_PAGE_LONG_SIDE_PT/72 * PDF_RASTER_DPI px for ANY scene size.
+        effective_scale = float(scale)
+        if self.items():
+            src = self.itemsBoundingRect().adjusted(
+                -float(padding), -float(padding), float(padding), float(padding))
+            long_side = max(float(src.width()), float(src.height()))
+            if long_side > 0:
+                effective_scale = max(
+                    effective_scale,
+                    (self.PDF_PAGE_LONG_SIDE_PT / 72.0 * self.PDF_RASTER_DPI) / long_side)
+
+        pixmap = self.render_to_pixmap(scale=effective_scale, padding=padding)
         if pixmap.isNull():
             raise ValueError("render_to_pixmap returned a null pixmap")
 
-        k = 1200.0 / max(float(pixmap.width()), float(pixmap.height()))
-        page_size = QSizeF(max(float(pixmap.width()) * k, 1.0),
-                           max(float(pixmap.height()) * k, 1.0))
+        k = self.PDF_PAGE_LONG_SIDE_PT / max(float(pixmap.width()), float(pixmap.height()))
+        page_w = max(float(pixmap.width()) * k, 1.0)    # the FINAL (oriented) page, in points
+        page_h = max(float(pixmap.height()) * k, 1.0)
+
+        try:  # QPdfWriter (Qt 6.11+) — the resolution defines the paint device unit
+            device.setResolution(self.PDF_RESOLUTION_DPI)
+        except AttributeError:  # a device without setResolution — its own default applies
+            pass
+        # QPageLayout TRANSPOSES a custom size for Landscape: pass the portrait form.
+        portrait = QSizeF(min(page_w, page_h), max(page_w, page_h))
         layout = QPageLayout(
-            QPageSize(page_size, QPageSize.Unit.Point),
-            QPageLayout.Orientation.Landscape if pixmap.width() >= pixmap.height()
-            else QPageLayout.Orientation.Portrait,
+            QPageSize(portrait, QPageSize.Unit.Point),
+            QPageLayout.Orientation.Portrait if page_h >= page_w
+            else QPageLayout.Orientation.Landscape,
             QMarginsF())  # zero margins: the map fills the whole page
         device.setPageLayout(layout)
 
@@ -651,9 +748,11 @@ class MapScene(QGraphicsScene):
             raise OSError(f"cannot start painting on PDF device: {path}")
         try:
             painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
+            # The target is the device's OWN rect (device pixels at device.resolution()),
+            # never the page size in points — that confusion was the v1.3.3.7-fix bug.
             painter.drawPixmap(
-                QRectF(0.0, 0.0, page_size.width(), page_size.height()),
-                pixmap, pixmap.rect())
+                QRectF(0.0, 0.0, float(device.width()), float(device.height())),
+                pixmap, QRectF(pixmap.rect()))
         finally:
             painter.end()
 
