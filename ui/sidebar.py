@@ -60,6 +60,9 @@ CONTEXT_MENU_ITEMS = (
     ("copy_hostname", "ctx.copy_hostname"),
     ("ping", "ctx.ping"),
     ("collect_info", "ctx.collect_info"),
+    # v1.3.3.3 (ROADMAP task 5): the on-demand status round — the same entry point as
+    # on the map; the row's node is the fallback when nothing is selected.
+    ("check_status", "ctx.check_status"),
     None,
     ("reveal", "ctx.reveal_on_map"),
     None,

@@ -314,6 +314,41 @@ def _draw_map_panel(p):
     p.drawPath(line)
 
 
+def _draw_zoom_in(p):
+    """v1.3.3.3: magnifier with a "+" inside — "Zoom In" (View menu)."""
+    _draw_magnifier(p)
+    plus = QPainterPath()
+    plus.moveTo(5.6, 8.4)
+    plus.lineTo(9.4, 8.4)
+    plus.moveTo(7.5, 6.5)
+    plus.lineTo(7.5, 10.3)
+    p.drawPath(plus)
+
+
+def _draw_zoom_out(p):
+    """v1.3.3.3: magnifier with a "−" inside — "Zoom Out" (View menu)."""
+    _draw_magnifier(p)
+    minus = QPainterPath()
+    minus.moveTo(5.6, 8.4)
+    minus.lineTo(9.4, 8.4)
+    p.drawPath(minus)
+
+
+def _draw_magnifier(p):
+    """The shared body of the zoom pair: a lens ring + an SE handle at 20×20.
+
+    The glyph works at MENU size (16 px): the ring is 10 px wide, the handle is a
+    single thick stroke, the +/- sign inside is 3.8 px — below that they smear.
+    """
+    ring = QPainterPath()
+    ring.addEllipse(QPointF(8.2, 8.2), 5.0, 5.0)
+    p.drawPath(ring)
+    handle = QPainterPath()
+    handle.moveTo(11.9, 11.9)
+    handle.lineTo(16.2, 16.2)
+    p.drawPath(handle)
+
+
 _DRAWERS = {
     "new": _draw_new,
     "open": _draw_open,
@@ -331,6 +366,9 @@ _DRAWERS = {
     # v1.2.4.1: panel-collapse icon pair (View menu + corner buttons)
     "sidebar_panel": _draw_sidebar_panel,
     "map_panel": _draw_map_panel,
+    # v1.3.3.3 (task 2): the zoom pair of the View menu (project-drawn, no image files)
+    "zoom_in": _draw_zoom_in,
+    "zoom_out": _draw_zoom_out,
 }
 
 

@@ -94,9 +94,12 @@ try:
     check_i18n_parity(langs)
     _sidebar_keys = ["ctx.ssh_connect", "ctx.ssh_external", "ctx.edit_server",
                      "ctx.copy_ip", "ctx.copy_hostname", "ctx.ping",
-                     "ctx.collect_info", "ctx.reveal_on_map", "ctx.delete_server"]
+                     "ctx.collect_info",
+                     # v1.3.3.3 (ROADMAP task 5): the on-demand status round
+                     "ctx.check_status",
+                     "ctx.reveal_on_map", "ctx.delete_server"]
     check("all sidebar menu keys exist in every language",
-          all(k in langs[c] for k in _sidebar_keys for c in ("en", "ru", "zh")))
+          all(k in langs[c] for k in _sidebar_keys for c in ("en", "ru", "zh", "de")))
 
     # ══ #1. The menu composition and order (ROADMAP v0.9.6, item 1; v1.0RC4: +Quick launch) ══
     print("== menu composition ==")
@@ -107,11 +110,12 @@ try:
         non_sep = [a.text() for a in actions if a.isSeparator() is False]
         n_sep = sum(1 for a in actions if a.isSeparator())
         # v1.0RC4: the first item — the "Quick launch" submenu (sb6a has no items →
-        # in it only "Configure…"), then a separator and 9 ROADMAP actions.
+        # in it only "Configure…"), then a separator and the ROADMAP actions
+        # (v1.3.3.3: +"Check statuses now" → 10 items).
         expected_order = [it("ctx.quick_launch")] + [it(k) for k in _sidebar_keys]
-        check("menu has the Quick Launch submenu + the 9 ROADMAP actions",
-              len(non_sep) == 10, f"got {len(non_sep)}: {non_sep}")
-        check("action order: quick launch FIRST, then ROADMAP (ssh → … → delete)",
+        check("menu has the Quick Launch submenu + the 10 ROADMAP actions",
+              len(non_sep) == 11, f"got {len(non_sep)}: {non_sep}")
+        check("action order: quick launch FIRST, then ROADMAP (ssh → … → check statuses → delete)",
               non_sep == expected_order, f"got={non_sep} want={expected_order}")
         check("menu grouped by 5 separators (4 ROADMAP + 1 after Quick Launch)",
               n_sep == 5, f"separators={n_sep}")

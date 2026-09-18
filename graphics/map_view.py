@@ -44,7 +44,7 @@ if TYPE_CHECKING:
 
 from PySide6.QtCore import Qt, Signal, QRectF, QEvent
 from PySide6.QtGui import (QPainter, QWheelEvent, QKeyEvent, QMouseEvent, QFocusEvent,
-                           QBrush, QColor, QPen)
+                           QBrush, QColor, QPen, QTransform)  # QTransform — v1.3.3.3 zoom step
 from PySide6.QtWidgets import QGraphicsView, QGraphicsPathItem, QMenu
 
 
@@ -100,6 +100,9 @@ class MapView(QGraphicsView):
     # UI polish: allowed zoom range (shared by wheel, fit, and restore).
     ZOOM_MIN = 0.1
     ZOOM_MAX = 5.0
+    # v1.3.3.3 (task 2): one keyboard step of the Zoom In / Zoom Out actions
+    # (the wheel keeps its own cursor-anchored 1.15/0.87 factors).
+    ZOOM_STEP = 1.25
 
     @property
     def zoom(self) -> float:
@@ -118,6 +121,56 @@ class MapView(QGraphicsView):
         self.resetTransform()
         self._zoom = 1.0
         self._notify_zoom()
+
+    # v1.3.3.3 (ROADMAP v1.3.3.3, task 2): a step API next to reset_zoom()/
+    # set_zoom_and_center() — the "View → Zoom In / Zoom Out" actions need a
+    # keyboard-reachable zoom that does not depend on the pointer position.
+
+    def zoom_in(self, step: float = None) -> bool:
+        """Zoom in by ``step`` (default ``ZOOM_STEP``) around the view centre."""
+        return self._zoom_by(self.ZOOM_STEP if step is None else step)
+
+    def zoom_out(self, step: float = None) -> bool:
+        """Zoom out by ``step`` (default ``ZOOM_STEP``) around the view centre."""
+        return self._zoom_by(1.0 / float(self.ZOOM_STEP if step is None else step))
+
+    def _zoom_by(self, factor: float) -> bool:
+        """Scale around the CENTRE of the viewport, clamped to [ZOOM_MIN, ZOOM_MAX].
+
+        The wheel anchors on the cursor (the natural zoom of a map); an explicit
+        keyboard action must not depend on where the pointer happens to be, so the
+        scene point under the CENTRE of the visible area stays put. That is done with
+        one QTransform edit — translate the viewport matrix in DEVICE terms, then
+        scale — instead of QGraphicsView.scale() + translate(): the latter composes
+        translations in the pre-scale basis and the content drifts away (verified by
+        the anchoring check of tests/test_actions_keyboard.py).
+
+        The bounds are the wheel's own (0.1..5.0): a step that would leave them is
+        refused (returns False) rather than silently squashed. ``_zoom`` and the real
+        transform are kept in sync (the set_zoom_and_center rule).
+        """
+        try:
+            factor = float(factor)
+        except (TypeError, ValueError):
+            return False
+        if factor <= 0.0:
+            return False
+        target = self._zoom * factor
+        if not (self.ZOOM_MIN <= target <= self.ZOOM_MAX):
+            return False
+        viewport = self.viewport()
+        if viewport is None or viewport.width() <= 0 or viewport.height() <= 0:
+            return False  # not shown yet — nothing to anchor on
+        centre = QPointF(viewport.rect().center())    # a point in the VIEW coordinates
+        before = self.transform().map(self.mapToScene(centre.toPoint()))
+        transform = QTransform(self.transform())
+        transform.translate(before.x(), before.y())
+        transform.scale(factor, factor)
+        transform.translate(-before.x(), -before.y())
+        self.setTransform(transform)
+        self._zoom = target
+        self._notify_zoom()
+        return True
 
     def resizeEvent(self, event):
         """v0.9.9.1: notify about a size change — floating panels over the viewport
@@ -670,6 +723,14 @@ class MapView(QGraphicsView):
                 act_host.triggered.connect(lambda _=False, n=win_node: self.window()._copy_node_info(n, "hostname"))
                 act_ping = menu.addAction(_t("ctx.ping"))
                 act_ping.triggered.connect(lambda _=False, n=win_node: self.window()._ping_node(n))
+            # v1.3.3.3 (ROADMAP task 5): "Check statuses now" — one on-demand round for
+            # the SELECTION (the clicked node when nothing is selected). The probes stay
+            # off the GUI thread (StatusChecker.start_round → _ProbeThread); the action
+            # is registered (an empty default) and appears in the sidebar menu too.
+            if hasattr(win, "_check_statuses_now"):
+                act_status = menu.addAction(_t("ctx.check_status"))
+                act_status.triggered.connect(
+                    lambda _=False, n=win_node: self.window()._check_statuses_now(n))
             menu.addSeparator()
             if hasattr(win, "_duplicate_node"):
                 # v0.9.3: node duplication (copy of fields + keyring password under a new id)

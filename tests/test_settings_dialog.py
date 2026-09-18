@@ -127,7 +127,7 @@ check("_BUTTONS: exactly 6 buttons, the 6th — (btn_settings, settings, btn.set
       str(_BUTTONS))
 _actions = {k: (lambda node, _k=k: None) for k in
             ("ssh", "external", "edit", "copy_ip", "copy_hostname", "ping",
-             "collect_info", "reveal", "delete")}
+             "collect_info", "check_status", "reveal", "delete")}   # v1.3.3.3: + check_status
 sb = SidebarPanel(translate_fn=i18n.t, actions=_actions)
 check("btn_settings exists and carries the vector gear",
       hasattr(sb, "btn_settings") and not sb.btn_settings.icon().isNull())
@@ -338,6 +338,32 @@ expected_tabs = [i18n.t(k) for k in ("settings.tab.general", "settings.tab.termi
 got_tabs = [dlg.tabs.tabText(i) for i in range(dlg.tabs.count())]
 check("the tab order: General / Terminal / Status Checks / Autosave / Map / Hotkeys / Language",
       got_tabs == expected_tabs, str(got_tabs))
+
+# v1.3.3.3 (task 3/4): the "Hotkeys" tab grew to the FULL action registry (~40 rows, most
+# of them with an empty default) and gained the "Reset to defaults" button.
+import ui.hotkey_registry as _HR
+
+_expected_rows = len(_HR.action_ids())
+check("'Hotkeys': one row per registry action, prefilled from the registry defaults",
+      dlg.hotkeys_table.rowCount() == _expected_rows
+      and len(dlg.hotkey_edits) == _expected_rows
+      and _expected_rows == 40,
+      f"rows={dlg.hotkeys_table.rowCount()} registry={_expected_rows}")
+check("'Hotkeys': the row names come from the registry label keys",
+      [dlg.hotkeys_table.item(r, 0).text() for r in range(_expected_rows)]
+      == [i18n.t(_HR.action_label_key(a)) for a in _HR.action_ids()])
+check("'Hotkeys': the v1.3.3.3 defaults are prefilled (Save As / Reset zoom / Zoom In / Zoom Out)",
+      dlg.hotkey_edits["file.save_as"].keySequence().toString() == "Ctrl+Shift+S"
+      and dlg.hotkey_edits["view.reset_zoom"].keySequence().toString() == "Ctrl+0"
+      and dlg.hotkey_edits["view.zoom_in"].keySequence().toString() == "Ctrl+="
+      and dlg.hotkey_edits["view.zoom_out"].keySequence().toString() == "Ctrl+-")
+check("'Hotkeys': an empty-default action shows an EMPTY field (assignable, no hotkey)",
+      dlg.hotkey_edits["help.open_logs"].keySequence().toString() == ""
+      and dlg.hotkey_edits["view.center_map"].keySequence().toString() == ""
+      and dlg.hotkey_edits["file.export_png"].keySequence().toString() == "")
+check("'Hotkeys': the 'Reset to defaults' button is present with its own i18n label",
+      dlg.reset_hotkeys_btn.text() == i18n.t("settings.hotkeys.reset")
+      and bool(dlg.reset_hotkeys_btn.text()))
 
 choices = TERMINAL_CHOICES_WINDOWS if sys.platform == "win32" else TERMINAL_CHOICES_LINUX
 check("'General': the combo of the external terminal — the platform presets",

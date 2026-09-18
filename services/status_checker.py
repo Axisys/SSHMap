@@ -115,6 +115,27 @@ def probe_ssh(host: str, port: int, timeout: float = PROBE_TIMEOUT_S) -> str:
         return STATUS_OFFLINE
 
 
+def _build_targets(servers) -> list:
+    """Normalize an iterable of ``(id, host, port)`` into the probe target list.
+
+    Shared by ``StatusChecker.set_servers`` and ``MainWindow._sync_status_targets``
+    (v1.3.3.3, ROADMAP task 5: the manual round builds its targets with the SAME
+    normalization instead of a second, drifting copy). An entry without an id or a
+    host is dropped — the probe would be meaningless; a broken port falls back to 22
+    and is clamped to the protocol range.
+    """
+    targets = []
+    for sid, host, port in servers or ():
+        if not sid or not host:
+            continue
+        try:
+            p = int(port) if port else 22
+        except (TypeError, ValueError):
+            p = 22
+        targets.append((sid, str(host).strip(), max(1, min(65535, p))))
+    return targets
+
+
 class _ProbeThread(QThread):
     """One check round: probes in parallel (ThreadPoolExecutor, v1.1.2 final),
     results — as they complete."""
@@ -286,28 +307,44 @@ class StatusChecker(QObject):
 
     def set_servers(self, servers):
         """Update the target list. `servers` — an iterable of (id, host, port)."""
-        targets = []
-        for sid, host, port in servers or ():
-            if not sid or not host:
-                continue  # without id/host the probe is meaningless
-            try:
-                p = int(port) if port else 22
-            except (TypeError, ValueError):
-                p = 22
-            targets.append((sid, str(host).strip(), max(1, min(65535, p))))
-        self._targets = targets
+        self._targets = _build_targets(servers)
+
+    def _subset(self, server_ids=None) -> list:
+        """The targets of a round: all of them, or only the given server ids.
+
+        v1.3.3.3 (ROADMAP task 5): the on-demand round of the node context menu checks
+        the SELECTION, not the map — ``server_ids=None`` keeps the periodic behaviour
+        (every target), a list restricts it (an unknown id is skipped). The order
+        follows the stored target list, so a manual round of the whole selection behaves
+        exactly like a periodic one.
+        """
+        if server_ids is None:
+            return list(self._targets)
+        wanted = {str(sid) for sid in server_ids if sid}
+        return [t for t in self._targets if t[0] in wanted]
 
     def last_status(self, server_id: str) -> str:
         """The last determined status of the server ("" — never probed yet)."""
         return self._last_results.get(server_id, "")
 
-    def start_round(self):
-        """Start a check round. If the previous one is still running — do nothing."""
-        if self._busy or not self._targets:
-            return
+    def start_round(self, server_ids=None) -> bool:
+        """Start a check round. If the previous one is still running — do nothing.
+
+        v1.3.3.3 (ROADMAP task 5): an optional ``server_ids`` restricts the round to
+        those servers (the "Check statuses now" action probes the selection). Returns
+        True when a round really started — False for "already busy" / "nothing to
+        probe", so the caller can tell the user the truth. The probes themselves are
+        unchanged: a ``_ProbeThread`` with the same timeout/parallel cap/cancel flag,
+        i.e. off the GUI thread.
+        """
+        if self._busy:
+            return False
+        targets = self._subset(server_ids)
+        if not targets:
+            return False
         self._busy = True
         self._cancel.clear()  # new round — clear the previous round's cancel flag
-        thread = _ProbeThread(self._targets, self._probe_timeout, parent=self,
+        thread = _ProbeThread(targets, self._probe_timeout, parent=self,
                               cancel=self._cancel, max_parallel=self._max_parallel)
         results = []
 
@@ -333,6 +370,7 @@ class StatusChecker(QObject):
         thread.probed.connect(_on_probed)
         thread.finished.connect(_on_done)
         thread.start()
+        return True
 
     def start(self):
         """Enable periodic checks + the first round a bit after startup.

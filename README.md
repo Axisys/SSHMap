@@ -18,7 +18,7 @@ pipx install .                    # or pip install . → sshmap command (install
 Tests — plain Python scripts without pytest: topical `test_*.py` files + a single parallel runner; each file is an isolated process (sandbox HOME, offscreen Qt, UTF-8 stdout — nothing extra needed on cp1251 consoles or in CI):
 
 ```bash
-python tests/run_all.py               # everything (73 test files + i18n check); auto workers = cores (cap 8, --workers N); exit 0 ⇔ all green
+python tests/run_all.py               # everything (74 test files + i18n check); auto workers = cores (cap 8, --workers N); exit 0 ⇔ all green
 python tests/run_all.py --fast        # daily profile: skips files tagged slow/network
 python tests/run_all.py --tag network # only network-tagged files — real-network sections run ONLY on explicit opt-in (env SSHMAP_TEST_TAGS)
 python tests/run_all.py --failed-only # re-run only files that failed in the last run (cache test-results/last_run.json)
@@ -55,8 +55,8 @@ services/                    # credential_manager.py (keyring); diagnostics.py (
                              # status_checker.py (parallel SSH probes); system_info_collector.py (OS/CPU/RAM/disk)
 dialogs/                     # AddServer, SSHConnect (+ external terminal), Connection/EditConnection, ProfileManager, Backups, QuickLaunch
 ui/                          # main_window.py — façade over ProjectIOMixin / NodeOpsMixin / SshMixin; sidebar.py; map_search_bar.py (Ctrl+F);
-                             # command_palette.py (Ctrl+K); hotkey_registry.py (configurable hotkeys); icons.py; mixin_support.py;
-                             # theme.py (central UI palette, radii, fonts)
+                             # command_palette.py (Ctrl+K); hotkey_registry.py (configurable hotkeys); about_dialog.py (Help → About);
+                             # icons.py; mixin_support.py; theme.py (central UI palette, radii, fonts)
 i18n/                        # t(key, **kwargs); every *.json is a language (file name = code, root "name" = display name);
                              # en/ru/zh/de with identical translation key sets (parity pinned in tests); en is the default for new users
 tests/                       # test_*.py without pytest + _common.py harness + run_all.py (parallel runner) + check_i18n_keys.py — map: tests/INDEX.md
@@ -128,7 +128,7 @@ Format invariants:
   - `status_interval_sec`/`status_probe_timeout_sec`/`status_max_parallel` (defaults 30 s / 3.0 s / 16 parallel probes; live via `StatusChecker.set_interval/set_probe_timeout/set_max_parallel`);
   - `autosave_enabled/autosave_interval_sec/backup_count` (live — the autosave QTimer);
   - `language` (applied immediately, before OK);
-  - `hotkeys` (a dict action_id → sequence, e.g. `"file.save": "Ctrl+S"`; the whole set is edited in the "Hotkeys" tab from the action registry `ui/hotkey_registry.py` — an empty string disables a hotkey, a missing/broken value falls back to the default; applied live after OK; the terminal's own keys — F1–F12, Ctrl+C/D/Z, arrows — are the xterm protocol and are NOT configurable);
+  - `hotkeys` (a dict action_id → sequence, e.g. `"file.save": "Ctrl+S"`; the whole set is edited in the "Hotkeys" tab from the action registry `ui/hotkey_registry.py` — every one of the 40 global actions has a row, an empty string means "no hotkey" (the value the actions without a shortcut ship with) and "Reset to defaults" restores the whole map, a missing/broken value falls back to the default; applied live after OK; the terminal's own keys — F1–F12, Ctrl+C/D/Z, arrows — are the xterm protocol and are NOT configurable);
   - `ui_font_family/ui_font_size` (UI font, live via `QApplication.setFont`, 0 = system), `ui_node_double_click` (`"properties"` by default | `"connect"` — double-clicking a node opens SSHConnectDialog directly), `ui_show_sidebar_buttons` (the sidebar button block; the whole sidebar is hidden via the "View → Sidebar" menu item), `ui_show_connection_type` (type on the connection badge: "SSH · <label>", handy for PNG/PDF export) + 20-character limit on the connection label (input only — old projects with long labels load unchanged).
 
 ### Undo/Redo
@@ -140,8 +140,8 @@ Format invariants:
 - Note pinning: `CmdAttachNote` — attaching/detaching a note to/from a node is undoable; undo of attach restores the note's pre-attach position; when deleting a node that has attached notes, the detach commands are pushed **before** the removal command (LIFO: undo first restores the node, then re-attaches the notes).
 
 ### Hotkeys + Command Palette
-- Hotkeys: Ctrl+N/O/S — project; Ctrl+Z/Y(+Shift) — undo/redo; Ctrl+Shift+A/G/C — server/group/connection; Ctrl+I — properties; **Ctrl+Enter** — SSH to the selected node; **Ctrl+E** — edit node; **Ctrl+D** — duplicate node; **Ctrl+Shift+N** — note in the center of the visible area; Delete — delete selection; Ctrl+Shift+F — fit map; **Ctrl+F** — map search (search bar over the canvas, Enter/Shift+Enter — jump between matches with centering and an accent frame, Esc — close).
-- **All of them are configurable** ("Settings → Hotkeys", v1.3.2): one row per action with a key recorder — record your own combination, or clear the field to switch that hotkey off (the action stays in the menu). A duplicate combination marks both rows and warns, but still saves. Stored in `~/.sshmap/config.json` and applied instantly — no restart. Multi-input keeps its own rule: whatever key you pick works only while the mode is on, so it never steals a key from your shell.
+- Hotkeys: Ctrl+N/O/S — project; **Ctrl+Shift+S** — Save As…; Ctrl+Z/Y(+Shift) — undo/redo; Ctrl+Shift+A/G/C — server/group/connection; Ctrl+I — properties; **Ctrl+Enter** — SSH to the selected node; **Ctrl+E** — edit node; **Ctrl+D** — duplicate node; **Ctrl+Shift+N** — note in the center of the visible area; Delete — delete selection; **Ctrl+0 / Ctrl+= / Ctrl+-** — reset zoom / zoom in / zoom out; Ctrl+Shift+F — fit map; **Ctrl+F** — map search (search bar over the canvas, Enter/Shift+Enter — jump between matches with centering and an accent frame, Esc — close).
+- **Every action is assignable** ("Settings → Hotkeys", v1.3.3.3): the tab lists **all 40 global actions**, not only the ones that happen to have a shortcut — so `File → Save As…`, the exports, the backups, "Check statuses now", the About window and the rest can get a key of your own, on top of the zoom family this release gave real keys to. One row per action with a key recorder; a duplicate combination marks both rows and warns, but still saves; a row left empty means "no hotkey" (the menu item keeps working); **"Reset to defaults"** puts every row back at once. Stored in `~/.sshmap/config.json` and applied instantly — no restart. Multi-input keeps its own rule: whatever key you pick works only while the mode is on, so it never steals a key from your shell.
 - The terminal canvas keeps its own keys (F1–F12, Ctrl+C/D/Z, arrows) — they are the xterm protocol, deliberately not configurable.
 - Multi-selection: Ctrl+click on a node adds to the selection (native Qt), **Ctrl+drag on empty space** — rubber-band selection (Shift+Ctrl adds to current); group drag moves all selected; right-click during multi-selection → "Connect selected" / "Delete selected" (one confirmation, guarded per item).
 - **Ctrl+K** — command palette (`ui/command_palette.py`): fuzzy search (subsequence scoring, no dependencies) over all menu QActions + project servers; selecting a server → select node + centerOn. Enter/Up/Down/Esc.
@@ -193,6 +193,7 @@ en (default) / ru / zh / de — plus any language you drop in: every `i18n/*.jso
 - quick launch per server: URLs (open in the default browser) and commands (first terminal command)
 - collapsible sidebar and map panels — at most one at a time, state persists across restarts
 - context menus for all objects, fit/zoom/centering
+- zoom as real actions: Ctrl+0 / Ctrl+= / Ctrl+- in the View menu, plus the wheel
 - built-in SSH terminal on pyte (scrollback, full keyboard, mouse selection with word/line clicks, context menu) + external system terminal
 - SFTP tab in the terminal window over the same SSH connection — a small file manager: listing/navigation, upload/download incl. drag & drop, new folder / rename / delete, an overwrite prompt (Overwrite/Skip/Rename/Apply to all), transfers that never truncate an existing file (download to `.part` + replace, upload to `.part` + rename), drag a file row out as its remote path, read-only text preview (≤ 1 MB) with non-previewable files marked in the tree
 - multiple sessions as tabs; separate windows or a detachable "Terminals" dock on the map — switch without restart
@@ -205,7 +206,9 @@ en (default) / ru / zh / de — plus any language you drop in: every `i18n/*.jso
 - export to PNG/JPEG/PDF and draw.io `.drawio`; bulk server import from TXT
 - i18n: en (default) / ru / zh / de — and any language as one dropped-in JSON file, no code changes; the interface follows a language switch everywhere, terminals and SFTP tabs included; `Help → Language` rescans the folder without a restart
 - settings hub — single `~/.sshmap/config.json`, live application without restart
-- hotkeys + command palette (Ctrl+K) — every shortcut editable in "Settings → Hotkeys", duplicates flagged, applied without restart
+- hotkeys + command palette (Ctrl+K) — the FULL action registry is editable in "Settings → Hotkeys" (a key for Save As, the zoom steps, the exports, the backups), duplicates flagged, "Reset to defaults" one click away, applied without restart
+- "Check statuses now" — an on-demand status round for the selected nodes (the map/sidebar context menu and the Edit menu), without waiting for the periodic sweep
+- Help → About — the version, the license, where `~/.sshmap` lives (with a button that opens the folder) and a hotkey cheat-sheet built live from the registry
 
 **Known limitations:**
 - undo/redo does not cover node statuses or background geometry (§4 "Undo/Redo");

@@ -107,6 +107,19 @@ def _t(key: str, **kw) -> str:
     return key
 
 
+def _log_dialog(message: str) -> None:
+    """A lazy logger for the dialog's non-fatal failures (the hotkey reset path).
+
+    Mirrors the `_log` of ui/hotkey_registry.py: a broken registry / a failed save
+    must be visible in ~/.sshmap/logs without ever breaking the open dialog.
+    """
+    try:
+        from modules.logger import get_logger
+        get_logger("ui.settings_dialog").warning(message)
+    except Exception:  # noqa: BLE001 — logging must never break the dialog
+        pass
+
+
 def load_ui_settings():
     """v1.1.1 (ROADMAP v1.1.1): reads and validates the ui_* keys from ~/.sshmap/config.json.
 
@@ -418,6 +431,12 @@ class SettingsDialog(QDialog):
         action stays available from the menu. Two actions with the same sequence are
         BOTH marked + the warning label appears — saving is still possible (Qt
         resolves the ambiguity at runtime, and the user may be mid-edit).
+
+        v1.3.3.3 (ROADMAP task 3/4): the registry grew to ~30 rows, most of them with an
+        EMPTY default (assignable, no hotkey out of the box), so "clearing a field is the
+        documented way" stops being a reasonable answer to "I want the defaults back" —
+        the "Reset to defaults" button (`_on_reset_hotkeys`) restores every registry
+        default through the same merge-write.
         """
         try:
             from ui.hotkey_registry import (
@@ -468,6 +487,14 @@ class SettingsDialog(QDialog):
 
         layout.addWidget(self.hotkeys_table, 1)
         layout.addWidget(self._lbl_hotkeys_disabled_hint)
+        # v1.3.3.3 (task 4): "Reset to defaults" — right-aligned under the hint; the
+        # action is idempotent (a second click writes the very same mapping).
+        _reset_row = QHBoxLayout()
+        _reset_row.addStretch(1)
+        self.reset_hotkeys_btn = QPushButton(_t("settings.hotkeys.reset"))
+        self.reset_hotkeys_btn.clicked.connect(self._on_reset_hotkeys)
+        _reset_row.addWidget(self.reset_hotkeys_btn)
+        layout.addLayout(_reset_row)
         layout.addWidget(self._lbl_hotkeys_conflict)
 
         self.tabs.addTab(tab, _t("settings.tab.hotkeys"))
@@ -477,6 +504,49 @@ class SettingsDialog(QDialog):
         """The table's current values: {action_id: sequence string} ("" = disabled)."""
         return {aid: edit.keySequence().toString()
                 for aid, edit in getattr(self, "hotkey_edits", {}).items()}
+
+    def _on_reset_hotkeys(self):
+        """v1.3.3.3 (task 4): restore every registry default in the table AND on disk.
+
+        The mapping comes from the registry (``default_hotkeys``) — no default is
+        duplicated here, so a new action in ``ui/hotkey_registry.py`` is reset for free.
+        It goes through the ordinary merge-write (``save_hotkeys`` → ``i18n.save_config``),
+        which is what keeps the FOREIGN keys of ``config.json`` (language, fonts, …)
+        untouched; an unknown id in the stored config stays ignored (the v1.3.2 rule
+        lives in the registry, not here).
+
+        The write is deliberate — the button says what it does, and the table already
+        showed the current values; the ``applied`` signal then reinstalls the sequences
+        on the live window without a restart. Idempotent: a second click writes the same
+        bytes. Never raises.
+        """
+        try:
+            try:
+                from ui.hotkey_registry import default_hotkeys, save_hotkeys
+            except ImportError:
+                from hotkey_registry import default_hotkeys, save_hotkeys
+            defaults = default_hotkeys()
+        except Exception as e:  # noqa: BLE001 — a broken registry must not break the tab
+            _log_dialog(f"hotkey reset: registry unavailable: {e!r}")
+            return
+        for action_id, edit in getattr(self, "hotkey_edits", {}).items():
+            try:
+                edit.setKeySequence(QKeySequence(defaults.get(action_id, "")))
+            except RuntimeError:
+                continue  # Qt teardown — this editor is already destroyed
+        self._refresh_hotkey_conflicts()
+        try:
+            ok = bool(save_hotkeys(defaults))
+        except Exception as e:  # noqa: BLE001 — saving must not break the dialog
+            _log_dialog(f"hotkey reset: save failed: {e!r}")
+            ok = False
+        if ok:
+            self.applied.emit()   # the live window follows without a restart
+        try:
+            self._lbl_hotkeys_conflict.setText(
+                _t("settings.hotkeys.reset_done") if ok else _t("msg.save_failed", error="config.json"))
+        except RuntimeError:
+            pass  # Qt teardown — the label is already destroyed
 
     def _on_hotkey_changed(self, *_args):
         """A QKeySequenceEdit changed — re-evaluate the conflicts (both rows are marked)."""
@@ -745,6 +815,7 @@ class SettingsDialog(QDialog):
         self.hotkeys_table.setHorizontalHeaderLabels(
             [_t("settings.hotkeys.action"), _t("settings.hotkeys.sequence")])
         self._lbl_hotkeys_disabled_hint.setText(_t("settings.hotkeys.disabled_hint"))
+        self.reset_hotkeys_btn.setText(_t("settings.hotkeys.reset"))   # v1.3.3.3
         self._refresh_hotkey_conflicts()   # re-marks the rows + re-texts the warning
 
         self._lbl_language.setText(_t("settings.language.label"))

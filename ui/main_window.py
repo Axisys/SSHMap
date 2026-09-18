@@ -390,15 +390,24 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
     # ── v0.7.1: node statuses ────────────────────────────────
 
     def _sync_status_targets(self):
-        """Update the StatusChecker target list to match the current scene nodes."""
+        """Update the StatusChecker target list to match the current scene nodes.
+
+        v1.3.3.3 (task 5): the normalization lives in ``status_checker._build_targets``
+        — the on-demand round of "Check statuses now" builds its list with the same
+        helper instead of a drifting copy.
+        """
         checker = getattr(self, "_status_checker", None)
         if checker is None:
             return
         try:
-            checker.set_servers([
+            from services.status_checker import _build_targets as _mk
+        except ImportError:  # flat layout
+            from status_checker import _build_targets as _mk
+        try:
+            checker.set_servers(_mk([
                 (n.data.id, n.data.host, n.data.ssh_port or 22)
                 for n in self.scene.nodes()
-            ])
+            ]))
         except Exception as e:
             if self.log:
                 self.log.warning(f"StatusChecker set_servers failed: {e}")
@@ -483,6 +492,13 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         ``_apply_settings_from_dialog`` — an OK in the settings dialog applies the new
         sequences WITHOUT a restart. Never raises: a broken registry/config must not
         break startup or the settings dialog.
+
+        v1.3.3.3: ``self._hotkey_targets`` holds the MENU/shortcut-owning objects only —
+        the toolbar buttons are mirrors marked by ``_mark_toolbar_mirror()`` and carry
+        no sequence of their own. Registering both objects left two enabled QActions
+        with one sequence, which Qt answers with an "Ambiguous shortcut overload" that
+        fires NEITHER (the Ctrl+Shift+S regression found while writing
+        tests/test_actions_keyboard.py).
         """
         try:
             try:
@@ -648,6 +664,9 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
                 "copy_hostname": lambda n: self._copy_node_info(n, "hostname"),
                 "ping": lambda n: self._ping_node(n),
                 "collect_info": lambda n: self._collect_node_info(n),
+                # v1.3.3.3 (task 5): one round for the selection (the row's node when
+                # nothing is selected) — the map's context menu calls the same method.
+                "check_status": lambda n: self._check_statuses_now(n),
                 "reveal": lambda n: self._reveal_node_on_map(n),
                 "delete": lambda n: self._remove_node_guarded(n),
                 # v1.0RC4: Quick launch — a submenu as the first item (above SSH);
@@ -1111,15 +1130,19 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
 
         # UI polish: all actions get vector icons (ui/icons.py, replacing emoji);
         # text-only actions in the toolbar would look out of place.
+        # v1.3.3.3 (task 3): the 4th tuple element is the REGISTRY action_id — the
+        # toolbar buttons of global actions join the "no orphans" audit and follow a
+        # hotkey assigned to their action (before, Ctrl+Shift+A worked in the menu
+        # and silently not on the toolbar button of the same action).
         groups = (
-            ((("file.new_project"), self._new_project, "new"),
-             ("file.open", self._open_project, "open"),
-             ("file.save", self._save_project, "save"),
-             ("file.save_as", self._save_project_as, "save")),
-            (("btn.add_server", self._add_server, "add_server"),
-             ("btn.add_connection", self._add_connection, "connection"),
-             ("view.center_map", self._center_view, "center"),
-             ("view.fit_map", self._fit_to_content, "fit")),
+            ((("file.new_project"), self._new_project, "new", "file.new"),
+             ("file.open", self._open_project, "open", "file.open"),
+             ("file.save", self._save_project, "save", "file.save"),
+             ("file.save_as", self._save_project_as, "save", "file.save_as")),
+            (("btn.add_server", self._add_server, "add_server", "edit.add_server"),
+             ("btn.add_connection", self._add_connection, "connection", "edit.add_connection"),
+             ("view.center_map", self._center_view, "center", "view.center_map"),
+             ("view.fit_map", self._fit_to_content, "fit", "view.fit_map")),
         )
         # Text without i18n (as in the old else branch) — UI polish: icons now exist
         _fallback = {
@@ -1132,10 +1155,14 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         for gi, group in enumerate(groups):
             if gi:
                 toolbar.addSeparator()
-            for key, slot, icon_name in group:
+            for key, slot, icon_name, action_id in group:
                 text = self.t(key) if self._i18n_available else _fallback[key]
                 action = toolbar.addAction(text, slot)
                 self._register_i18n(action, key)
+                # v1.3.3.3 (task 3): every one of these also exists in a menu, and the
+                # MENU item is the hotkey target — the toolbar button only mirrors the
+                # same slot (see the note above _apply_hotkeys).
+                self._mark_toolbar_mirror(action)
                 try:
                     icon = get_icon(icon_name)
                     if icon is not None and not icon.isNull():
@@ -1144,13 +1171,14 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
                     pass
 
         # v0.8.3: undo/redo in the toolbar (icons + text; enabled state driven by QUndoStack)
-        # v1.3.2: the sequences come from the action registry (no literal here) —
-        # "edit.undo"/"edit.redo" are registered as hotkey targets below.
+        # v1.3.2: the sequences come from the action registry — "edit.undo"/"edit.redo"
+        # are registered as hotkey targets on their EDIT-MENU items; the toolbar buttons
+        # are mirrors (a second target would make Ctrl+Z an "Ambiguous shortcut overload").
         toolbar.addSeparator()
         self.act_undo = toolbar.addAction(
             self.t("edit.undo") if self._i18n_available else "Undo",
             self._undo)
-        self._register_hotkey_target("edit.undo", self.act_undo)
+        self._mark_toolbar_mirror(self.act_undo)
         self.act_undo.setEnabled(False)
         try:
             icon = get_icon("undo")
@@ -1163,7 +1191,7 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         self.act_redo = toolbar.addAction(
             self.t("edit.redo") if self._i18n_available else "Redo",
             self._redo)
-        self._register_hotkey_target("edit.redo", self.act_redo)
+        self._mark_toolbar_mirror(self.act_redo)
         self.act_redo.setEnabled(False)
         try:
             icon = get_icon("redo")
@@ -1173,7 +1201,27 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
             pass
         self.undo_stack.canRedoChanged.connect(self.act_redo.setEnabled)
 
-    def _add_menu_action(self, menu, key: str, slot, action_id: str = ""):
+    def _mark_toolbar_mirror(self, action) -> None:
+        """v1.3.3.3: keep a toolbar button that MIRRORS a menu action shortcut-free.
+
+        Every toolbar button duplicates a menu item one-to-one, and both QActions live
+        in the same window. Registering BOTH as hotkey targets made
+        ``_apply_hotkeys()`` give the same sequence to two enabled QActions — Qt then
+        resolves the click with "Ambiguous shortcut overload" and fires NEITHER
+        (verified offscreen: Ctrl+Shift+S was dead; v1.3.2 never hit this because the
+        toolbar carried a literal ``setShortcut`` only for undo/redo, which Qt silently
+        ignored as a duplicate).
+
+        So: the MENU item owns the sequence, the toolbar button owns the click. This
+        also removes a real duplication — ``toolbar.addAction(text, slot)`` used to
+        auto-install Qt's own "Ctrl+S"-style shortcut from the action text.
+        """
+        try:
+            action.setShortcut(QKeySequence())   # the same "no shortcut" value the registry uses
+        except (RuntimeError, TypeError):
+            pass  # Qt teardown / an unexpected wrapper — the button still clicks
+
+    def _add_menu_action(self, menu, key: str, slot, action_id: str = "", icon_name: str = ""):
         """Add a translated menu item and register it for re-translation.
 
         v1.3.2 (ROADMAP v1.3.2, task 1): the shortcut is NOT a literal any more.
@@ -1181,9 +1229,20 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         registry (``ui/hotkey_registry.py``) and receives its sequence from there in
         ``_apply_hotkeys()`` — at startup and live after the settings dialog's OK.
         Without an action_id the item has no hotkey at all.
+
+        v1.3.3.3 (task 2): an optional vector ``icon_name`` (``ui/icons.py``) — the
+        zoom items of the View menu carry one, like the toolbar buttons do. Unknown
+        name / a missing ui.icons → the item simply stays text-only.
         """
         action = menu.addAction(self.t(key), slot)
         self._register_i18n(action, key)
+        if icon_name:
+            try:
+                icon = get_icon(icon_name)
+                if icon is not None and not icon.isNull():
+                    action.setIcon(icon)
+            except Exception:  # noqa: BLE001 — the icon is cosmetic; do not break the menu
+                pass
         if action_id:
             self._register_hotkey_target(action_id, action)
         return action
@@ -1198,24 +1257,27 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         self._add_menu_action(file_menu, "file.new_project", self._new_project, "file.new")
         self._add_menu_action(file_menu, "file.open", self._open_project, "file.open")
         self._add_menu_action(file_menu, "file.save", self._save_project, "file.save")
-        self._add_menu_action(file_menu, "file.save_as", self._save_project_as)
+        # v1.3.3.3 (task 1): "Save As…" gets a home in the registry (Ctrl+Shift+S).
+        self._add_menu_action(file_menu, "file.save_as", self._save_project_as, "file.save_as")
         # v0.9.7: autosave + a ring buffer of backups (ROADMAP v0.9.7 #2/#3) —
         # enabled state driven by _update_window_title (an open project file is required).
         self.act_restore_autosave = self._add_menu_action(
-            file_menu, "file.restore_autosave", self._restore_from_autosave)
+            file_menu, "file.restore_autosave", self._restore_from_autosave, "file.restore_autosave")
         self.act_backups = self._add_menu_action(
-            file_menu, "file.backups", self._show_backups_dialog)
+            file_menu, "file.backups", self._show_backups_dialog, "file.backups")
         # v0.9.5.5: bulk import of servers from a text file
-        self._add_menu_action(file_menu, "file.import_servers", self._import_servers_from_txt)
+        self._add_menu_action(file_menu, "file.import_servers", self._import_servers_from_txt,
+                              "file.import_servers")
         # v0.9.1: export the map to an image (PNG/JPEG)
         file_menu.addSeparator()
-        self._add_menu_action(file_menu, "file.export_png", self._export_map_image)
+        self._add_menu_action(file_menu, "file.export_png", self._export_map_image, "file.export_png")
         # v0.9.5: export the map to drawio (.drawio)
-        self._add_menu_action(file_menu, "file.export_drawio", self._export_map_drawio)
+        self._add_menu_action(file_menu, "file.export_drawio", self._export_map_drawio,
+                              "file.export_drawio")
         # v0.9.9.7: export the map to PDF (QPdfWriter on top of render_to_pixmap)
-        self._add_menu_action(file_menu, "file.export_pdf", self._export_map_pdf)
+        self._add_menu_action(file_menu, "file.export_pdf", self._export_map_pdf, "file.export_pdf")
         file_menu.addSeparator()
-        self._add_menu_action(file_menu, "file.exit", self.close)
+        self._add_menu_action(file_menu, "file.exit", self.close, "file.exit")
 
         # Edit menu
         edit_menu = menubar.addMenu(self.t("menu.edit") if self._i18n_available else "Edit")
@@ -1237,19 +1299,33 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         # v0.9.3: duplication + multi-selection group operations
         self._add_menu_action(edit_menu, "edit.duplicate", self._duplicate_selected_node, "edit.duplicate")
         edit_menu.addSeparator()
-        self._add_menu_action(edit_menu, "edit.connect_selected", self._connect_selected_nodes)
-        self._add_menu_action(edit_menu, "edit.delete_selected", self._delete_selected_nodes)
+        self._add_menu_action(edit_menu, "edit.connect_selected", self._connect_selected_nodes,
+                              "edit.connect_selected")
+        self._add_menu_action(edit_menu, "edit.delete_selected", self._delete_selected_nodes,
+                              "edit.delete_selected")
+        # v1.3.3.3 (task 5): the on-demand status round — a permanent Edit-menu item
+        # (the same method the map/sidebar context menus call), which is also what makes
+        # the action a real hotkey target: a context menu is rebuilt on every right
+        # click, so its QAction cannot carry a configurable sequence.
+        self._add_menu_action(edit_menu, "ctx.check_status", self._check_statuses_now,
+                              "node.check_status")
 
         # Profile menu
         profile_menu = menubar.addMenu(self.t("menu.profile") if self._i18n_available else "Profile")
         self._register_i18n(profile_menu, "menu.profile")
-        self._add_menu_action(profile_menu, "profile.manage", self._open_profile_manager)
+        self._add_menu_action(profile_menu, "profile.manage", self._open_profile_manager,
+                              "profile.manage")
 
         # View menu
         view_menu = menubar.addMenu(self.t("menu.view") if self._i18n_available else "View")
         self._register_i18n(view_menu, "menu.view")
-        self._add_menu_action(view_menu, "view.center_map", self._center_view)
-        self._add_menu_action(view_menu, "view.reset_zoom", self._reset_zoom)
+        self._add_menu_action(view_menu, "view.center_map", self._center_view, "view.center_map")
+        # v1.3.3.3 (task 2): the whole zoom family — a menu item + a vector icon + a
+        # registry entry each (Reset zoom Ctrl+0 has NO use for an icon: reset is a
+        # state, not a direction). The step API lives on MapView.
+        self._add_menu_action(view_menu, "view.reset_zoom", self._reset_zoom, "view.reset_zoom")
+        self._add_menu_action(view_menu, "view.zoom_in", self._zoom_in, "view.zoom_in", "zoom_in")
+        self._add_menu_action(view_menu, "view.zoom_out", self._zoom_out, "view.zoom_out", "zoom_out")
         # UI polish: "Fit map" — fitInView by content (Ctrl+Shift+F: a bare F key
         # would conflict with typing into the sidebar search field)
         self._add_menu_action(view_menu, "view.fit_map", self._fit_to_content, "view.fit_map")
@@ -1300,12 +1376,16 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         # v0.8.4 (former DESIGN.md §D): bulk collapse — half of the feature's value
         # for large maps.
         view_menu.addSeparator()
-        self._add_menu_action(view_menu, "view.collapse_all", self._collapse_all_servers)
-        self._add_menu_action(view_menu, "view.expand_all", self._expand_all_servers)
+        self._add_menu_action(view_menu, "view.collapse_all", self._collapse_all_servers,
+                              "view.collapse_all")
+        self._add_menu_action(view_menu, "view.expand_all", self._expand_all_servers,
+                              "view.expand_all")
         # v0.9.1: a map background image (a building diagram / a data-center layout)
         view_menu.addSeparator()
-        self._add_menu_action(view_menu, "view.set_background", self._set_background_image)
-        self._add_menu_action(view_menu, "view.remove_background", self._remove_background_image)
+        self._add_menu_action(view_menu, "view.set_background", self._set_background_image,
+                              "view.set_background")
+        self._add_menu_action(view_menu, "view.remove_background", self._remove_background_image,
+                              "view.remove_background")
         # v1.2.3 (ROADMAP tasks 2/3): multi-input — a checkable item; F12 = EXIT from
         # the mode (not Esc — that goes to the shell as \x1b!). ApplicationShortcut: the key
         # is caught regardless of where the focus is (map / terminal window / dock). While
@@ -1349,7 +1429,12 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         # Help menu
         help_menu = menubar.addMenu(self.t("menu.help") if self._i18n_available else "Help")
         self._register_i18n(help_menu, "menu.help")
-        self._add_menu_action(help_menu, "help.open_logs", self._open_log_file)
+        self._add_menu_action(help_menu, "help.open_logs", self._open_log_file, "help.open_logs")
+        # v1.3.3.3 (task 6): the About window — the version, the license, the paths and
+        # the hotkey cheat-sheet generated FROM the registry. Registered in the action
+        # registry as well (an empty default: assignable, no hotkey out of the box).
+        self.act_about = self._add_menu_action(help_menu, "about.open", self._open_about_dialog,
+                                               "help.about")
 
         # Language submenu (i18n)
         # v1.3.3.1 (ROADMAP task 3): the submenu is no longer frozen at construction —
@@ -2679,6 +2764,47 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
     def _reset_zoom(self):
         # AUDIT v0.7.2 (low #19): the public MapView method instead of poking view._zoom
         self.view.reset_zoom()
+
+    # ── v1.3.3.3 (ROADMAP task 2): the zoom actions of the View menu ──────────────
+    # The step API lives on MapView (zoom_in/zoom_out/_zoom_by); these two slots only
+    # add the "the map is collapsed" guard that every view action of the window has
+    # (v1.2.4.1 task 5: a view action on a collapsed map is a silent no-op).
+
+    def _zoom_in(self):
+        """View → Zoom In (Ctrl+=): one step in, anchored on the view centre."""
+        if self._map_collapsed:
+            return
+        self.view.zoom_in()
+
+    def _zoom_out(self):
+        """View → Zoom Out (Ctrl+-): one step out, anchored on the view centre."""
+        if self._map_collapsed:
+            return
+        self.view.zoom_out()
+
+    def _open_about_dialog(self):
+        """v1.3.3.3 (task 6): Help → About — the version, the license, the paths, the
+        config-folder button and the hotkey cheat-sheet built FROM the registry.
+
+        A modal dialog (like the settings hub); the dialog is self-contained and
+        read-only — closing it is the only outcome. Never raises: a broken dialog must
+        not take the window down.
+        """
+        try:
+            from ui.about_dialog import AboutDialog
+        except ImportError:  # flat launch from the project root
+            try:
+                from about_dialog import AboutDialog
+            except ImportError as e:
+                if self.log:
+                    self.log.warning(f"About dialog unavailable: {e}")
+                return
+        try:
+            dlg = AboutDialog(self)
+            dlg.exec()
+        except Exception as e:  # noqa: BLE001 — a UI error must not break the window
+            if self.log:
+                self.log.warning(f"About dialog failed: {e}")
 
     def _open_profile_manager(self):
         """Open the profile manager dialog."""

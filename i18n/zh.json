@@ -476,5 +476,18 @@
   "status.language_reloaded": "已重新扫描语言文件。",
   "status.collapse_both_forbidden": "无法同时折叠两个面板 — 至少需保持一个展开",
   "msg.confirm_close_session": "关闭 SSH 会话？",
-  "msg.close_session_title": "SSH 会话"
+  "msg.close_session_title": "SSH 会话",
+  "view.zoom_in": "放大",
+  "view.zoom_out": "缩小",
+  "ctx.check_status": "立即检查状态",
+  "status.check_now": "正在检查 {count} 台服务器的状态…",
+  "settings.hotkeys.reset": "恢复默认值",
+  "settings.hotkeys.reset_done": "快捷键已恢复为默认值。",
+  "about.open": "关于 SSH Map",
+  "about.title": "关于 SSH Map",
+  "about.license": "许可证：{license} — 请参阅项目根目录下的 LICENSE 文件。",
+  "about.config_path": "设置文件：",
+  "about.logs_path": "日志：",
+  "about.hotkeys": "快捷键（当前设置）：",
+  "about.open_config_dir": "打开设置文件夹"
 }

@@ -81,6 +81,7 @@ of the file itself.
 
 | file | tags | what it checks (first line of the docstring) |
 |---|---|---|
+| `test_actions_keyboard.py` | — | v1.3.3.3 — The action registry, completed: keyboard, on-demand operations, About. |
 | `test_alt_screen.py` | — | v1.2.12 — Terminal: alternate screen (private modes 47/1047/1048/1049). |
 | `test_audit_rc1_threads.py` | slow | v1.2.10rc1 — Audit: threads and teardown (AUDIT.md auto #2 + manual #1 + a verification finding). |
 | `test_audit_rc2_robustness.py` | — | v1.2.10rc2 — Audit: robustness and code hygiene (AUDIT.md manual #5, auto #7, manual #6). |

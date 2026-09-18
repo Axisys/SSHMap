@@ -770,15 +770,20 @@ print("== §9 the release state ==")
 # ════════════════════════════════════════════════════════════════════════════
 
 check("EXPECTED_APP_VERSION is the version this test file describes",
-      EXPECTED_APP_VERSION == "1.3.3.2", EXPECTED_APP_VERSION)
-check("the pin counts the keys of this release (v1.3.3.2: +17 sftp.op/conflict/drag)",
-      EXPECTED_I18N_KEYS == 477, str(EXPECTED_I18N_KEYS))
+      EXPECTED_APP_VERSION == "1.3.3.3", EXPECTED_APP_VERSION)
+check("the pin counts the keys of this release (v1.3.3.3: +13 — the zoom pair, the reset "
+      "labels, the on-demand status and the About window)",
+      EXPECTED_I18N_KEYS == 490, str(EXPECTED_I18N_KEYS))
 check_release_state(ROOT)
 for _code in i18n_lang_codes(ROOT):
     check(f"i18n/{_code}.json carries the new sftp.conflict.title key",
           "sftp.conflict.title" in translation_keys(read_lang(_code)))
     check(f"i18n/{_code}.json carries the new sftp.op.new_folder key",
           "sftp.op.new_folder" in translation_keys(read_lang(_code)))
+    check(f"i18n/{_code}.json carries the v1.3.3.3 view.zoom_in key",
+          "view.zoom_in" in translation_keys(read_lang(_code)))
+    check(f"i18n/{_code}.json carries the v1.3.3.3 about.title key",
+          "about.title" in translation_keys(read_lang(_code)))
 
 # cleanup: back to en + the original config, then close the windows
 i18n.set_language("en")

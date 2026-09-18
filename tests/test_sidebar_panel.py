@@ -32,6 +32,21 @@ from i18n import t as _t
 import ui.sidebar as SB
 
 
+def _ctx_action_keys():
+    """The action keys the panel REQUIRES — from its own composition (v1.3.3.3).
+
+    The sidebar menu is data (``SidebarPanel.CONTEXT_MENU_ITEMS``) and the panel refuses
+    to build without a callback for every entry, so a test double must ask the module
+    instead of carrying a frozen list (which is exactly how v1.3.3.3's "Check statuses
+    now" broke these fakes)."""
+    return [e[0] for e in SB.CONTEXT_MENU_ITEMS if e is not None]
+
+
+def _ctx_i18n_keys():
+    """The i18n keys of the same composition, in the same order (the labels are data too)."""
+    return [e[1] for e in SB.CONTEXT_MENU_ITEMS if e is not None]
+
+
 # ══ 1. The MainWindow facade: the panel is built in, the public API is unchanged ═══════
 print("== v0.9.9.4 sidebar panel: facade ==")
 
@@ -134,8 +149,7 @@ print("== v0.9.9.4 sidebar panel: unit level ==")
 
 # Without i18n (translate_fn=None): the English fallback literals from construction, retranslate is a no-op
 panel_ru = SB.SidebarPanel(translate_fn=None, actions={k: (lambda n: None) for k in
-                                 ("ssh", "external", "edit", "copy_ip", "copy_hostname",
-                                  "ping", "collect_info", "reveal", "delete")}, show_title=False)
+                                 _ctx_action_keys()}, show_title=False)
 check("panel without i18n keeps the English fallback button literals", panel_ru.btn_add.text() == "Add Server",
       panel_ru.btn_add.text())
 check("panel without i18n: no title label (as before v0.9.9.4)", panel_ru.title_label is None)
@@ -149,12 +163,10 @@ try:
 except ValueError as e:
     check("panel raises ValueError on missing action callback", "ssh" in str(e) or "no callbacks" in str(e), str(e))
 
-# fill_context_menu: 9 items + 4 separators in the ROADMAP v0.9.6 order, the labels — i18n
+# fill_context_menu: one item per CONTEXT_MENU_ITEMS entry + the separators, the labels — i18n
 _calls = []
 panel_ctx = SB.SidebarPanel(translate_fn=_t, actions={k: (lambda n, _k=k: _calls.append(_k))
-                                   for k in ("ssh", "external", "edit", "copy_ip",
-                                             "copy_hostname", "ping", "collect_info",
-                                             "reveal", "delete")}, show_title=False)
+                                   for k in _ctx_action_keys()}, show_title=False)
 # The fill_context_menu/refresh_rows contract: node — a wrapper with .data (in production it is
 # A ServerNode from the scene: MainWindow._on_sidebar_context_menu passes scene.get_node()).
 # A bare ServerData is not passed here — the fake repeats the contract, not a subset of it.
@@ -168,13 +180,17 @@ menu = QMenu()
 panel_ctx.fill_context_menu(menu, fake_node)
 _actions = [a for a in menu.actions() if not a.isSeparator()]
 _seps = sum(1 for a in menu.actions() if a.isSeparator())
-check("fill_context_menu: exactly 9 actions", len(_actions) == 9, f"got {len(_actions)}")
-check("fill_context_menu: grouped by 4 separators", _seps == 4, f"separators={_seps}")
-_expected = [_t(k) for k in ("ctx.ssh_connect", "ctx.ssh_external", "ctx.edit_server",
-                             "ctx.copy_ip", "ctx.copy_hostname", "ctx.ping",
-                             "ctx.collect_info", "ctx.reveal_on_map", "ctx.delete_server")]
-check("fill_context_menu: action order + i18n labels per ROADMAP v0.9.6",
+_n_actions = len(_ctx_action_keys())
+_n_seps = sum(1 for e in SB.CONTEXT_MENU_ITEMS if e is None)
+check(f"fill_context_menu: exactly {_n_actions} actions (one per CONTEXT_MENU_ITEMS entry)",
+      len(_actions) == _n_actions, f"got {len(_actions)}")
+check(f"fill_context_menu: grouped by {_n_seps} separators", _seps == _n_seps,
+      f"separators={_seps}")
+_expected = [_t(k) for k in _ctx_i18n_keys()]
+check("fill_context_menu: action order + i18n labels per CONTEXT_MENU_ITEMS",
       [a.text() for a in _actions] == _expected, str([a.text() for a in _actions]))
+check("fill_context_menu: the v1.3.3.3 'Check statuses now' entry is present",
+      _t("ctx.check_status") in [a.text() for a in _actions], str([a.text() for a in _actions]))
 _actions[3].trigger()  # ctx.copy_ip
 check("context menu action triggers its callback with the node", _calls == ["copy_ip"], str(_calls))
 
@@ -183,8 +199,7 @@ print("== v1.0RC4 quick launch submenu ==")
 
 _ql_calls = []
 panel_ql = SB.SidebarPanel(translate_fn=_t, actions={k: (lambda n, _k=k: None) for k in
-                                   ("ssh", "external", "edit", "copy_ip", "copy_hostname",
-                                    "ping", "collect_info", "reveal", "delete")},
+                                 _ctx_action_keys()},
                           show_title=False)
 # The optional callbacks outside CONTEXT_MENU_ITEMS — the panel without them does not change the menu.
 panel_ql._actions["ql_entry"] = lambda n, e: _ql_calls.append(("entry", n.data.id, dict(e)))

@@ -476,5 +476,18 @@
   "status.language_reloaded": "Sprachdateien neu eingelesen.",
   "status.collapse_both_forbidden": "Beide Bereiche können nicht eingeklappt werden — mindestens einer muss geöffnet bleiben",
   "msg.confirm_close_session": "SSH-Sitzung schließen?",
-  "msg.close_session_title": "SSH-Sitzung"
+  "msg.close_session_title": "SSH-Sitzung",
+  "view.zoom_in": "Vergrößern",
+  "view.zoom_out": "Verkleinern",
+  "ctx.check_status": "Status jetzt prüfen",
+  "status.check_now": "Prüfe den Status von {count} Server(n)…",
+  "settings.hotkeys.reset": "Auf Standard zurücksetzen",
+  "settings.hotkeys.reset_done": "Tastenkürzel auf die Standardwerte zurückgesetzt.",
+  "about.open": "Über SSH Map",
+  "about.title": "Über SSH Map",
+  "about.license": "Lizenz: {license} — siehe LICENSE im Projektstammverzeichnis.",
+  "about.config_path": "Einstellungsdatei:",
+  "about.logs_path": "Protokolle:",
+  "about.hotkeys": "Tastenkürzel (Ihre aktuellen Belegungen):",
+  "about.open_config_dir": "Einstellungsordner öffnen"
 }

@@ -19,8 +19,14 @@ inverts the checked and emits the signals (that is how both the menu item and th
 the same QAction work). SSH is not needed: the hub/provider/the plaque live without the terminals; for
 the check of the frame/badge one duck-typed fake container is put into the registry.
 
+v1.3.3.3 (ROADMAP task 2/5) extends the same real-click discipline to four new menu items:
+View → Zoom In / Zoom Out / Reset zoom (they must move the view scale, with the two new
+vector icons) and "Check statuses now" (it must start exactly ONE round for the selection,
+with the probes off the GUI thread).
+
 Run:  python tests/test_menu_actions_regression.py   (from the project root) or python tests/run_all.py
 """
+import inspect
 import sys
 
 from _common import bootstrap, check, finish
@@ -33,7 +39,11 @@ app = QApplication(sys.argv)
 
 import i18n  # noqa: E402
 import ui.main_window as MW  # noqa: E402
+import ui.sidebar as SB  # noqa: E402
+from models.server import ServerData  # noqa: E402
 from modules.multi_input import get_hub, MULTI_FRAME_OBJECT_NAME  # noqa: E402
+from services.status_checker import StatusChecker  # noqa: E402
+from ui.icons import get_icon  # noqa: E402
 
 
 class _FakePageData:
@@ -62,6 +72,34 @@ class _FakeHost(QWidget):
         page.server_data = _FakePageData()
         self.session_tabs.addTab(page, "fake-a")
         self._multi_base_title = "fake host"
+
+
+class _FakeChecker:
+    """Records the calls of the on-demand status path.
+
+    NEVER touches the network and never spawns a thread — the real
+    ``StatusChecker.start_round()`` is the only place that builds a ``_ProbeThread``,
+    and this double replaces it wholesale (the module-level import seam).
+    """
+
+    def __init__(self):
+        self.rounds = []
+
+    def start_round(self, server_ids=None):
+        self.rounds.append(list(server_ids) if server_ids is not None else None)
+        return True
+
+
+def menu_action(window, menu_key, action_key):
+    """The QAction of a menu item — found through the ``_menu_i18n`` registry.
+
+    Never ``action.menu()``: PySide6 6.11 destroys the C++ QMenu when the temporary
+    Python wrapper of the parent QAction dies (gotcha #9) — the registry holds the
+    wrapper permanently, so this is the safe path (the established test pattern).
+    """
+    items = [w for w, k in window._menu_i18n if k == action_key]
+    assert items, f"no QAction registered for {action_key!r}"
+    return items[-1]
 
 
 hub = get_hub()   # the process singleton (the same one as in MainWindow and the widgets)
@@ -152,4 +190,129 @@ check("✕: the mode is off, the checkmark is removed, the plaque is hidden",
 
 # cleanup: we remove the fake from the registry (the real teardown does this on destroyed)
 mw._terminal_windows.clear()
+
+# ════════════════════════════════════════════════════════════
+# 5. v1.3.3.3 (task 2): the zoom menu items — a real click moves the view scale
+# ════════════════════════════════════════════════════════════
+print("== 5. View → Zoom In / Zoom Out / Reset zoom (v1.3.3.3) ==")
+
+act_zoom_in = menu_action(mw, "menu.view", "view.zoom_in")
+act_zoom_out = menu_action(mw, "menu.view", "view.zoom_out")
+act_reset_zoom = menu_action(mw, "menu.view", "view.reset_zoom")
+
+act_reset_zoom.trigger()
+app.processEvents()
+z0 = mw.view.zoom
+check("zoom: Reset zoom puts the window at exactly 100%",
+      abs(z0 - 1.0) < 1e-9 and abs(mw.view.transform().m11() - 1.0) < 1e-9, str(z0))
+
+act_zoom_in.trigger()
+app.processEvents()
+z_in = mw.view.zoom
+check("zoom in: a click on the menu item scales the view up by the step",
+      z_in > z0 and abs(z_in - z0 * mw.view.ZOOM_STEP) < 1e-9, f"{z0} -> {z_in}")
+check("zoom in: the reported zoom and the real transform agree",
+      abs(mw.view.transform().m11() - z_in) < 1e-9,
+      f"zoom={z_in} m11={mw.view.transform().m11()}")
+check("zoom in: the percentage in the status bar follows",
+      mw.zoom_label.text() == f"{int(round(z_in * 100))}%", mw.zoom_label.text())
+
+act_zoom_out.trigger()
+app.processEvents()
+check("zoom out: a click returns to the starting scale",
+      abs(mw.view.zoom - z0) < 1e-9 and abs(mw.view.transform().m11() - z0) < 1e-9,
+      str(mw.view.zoom))
+
+act_zoom_in.trigger()
+act_zoom_in.trigger()
+act_reset_zoom.trigger()
+app.processEvents()
+check("reset zoom: the menu item returns the scale to 1.0 after two steps",
+      abs(mw.view.zoom - 1.0) < 1e-9 and abs(mw.view.transform().m11() - 1.0) < 1e-9,
+      str(mw.view.zoom))
+
+# The zoom pair carries the two NEW vector icons (ui/icons.py — the project draws them)
+for _name in ("zoom_in", "zoom_out"):
+    _icon = get_icon(_name)
+    _img = _icon.pixmap(20, 20).toImage()
+    _ink = sum(1 for y in range(_img.height()) for x in range(_img.width())
+               if _img.pixelColor(x, y).alpha() > 0)
+    check(f"icon: get_icon('{_name}') is drawn (the ink on the transparent canvas)",
+          not _icon.isNull() and _ink > 25, f"ink={_ink}")
+check("icon: the in/out pair differs (the +/- sign inside the lens is really there)",
+      get_icon("zoom_in").pixmap(20, 20).toImage()
+      != get_icon("zoom_out").pixmap(20, 20).toImage())
+check("menu: the zoom items carry the vector icons",
+      not act_zoom_in.icon().isNull() and not act_zoom_out.icon().isNull())
+
+# ════════════════════════════════════════════════════════════
+# 6. v1.3.3.3 (task 5): "Check statuses now" — exactly ONE round for the selection
+# ════════════════════════════════════════════════════════════
+print("== 6. Check statuses now (v1.3.3.3) ==")
+
+made = []
+for _i in (1, 2, 3):
+    made.append(mw.scene.add_server(ServerData(id=f"chk-{_i}", alias=f"chk-{_i}",
+                                               host=f"10.99.0.{_i}", user="root")))
+mw.scene.clearSelection()
+app.processEvents()
+
+fake = _FakeChecker()
+mw._status_checker = fake
+
+started = mw._check_statuses_now(made[0])
+check("no selection: the node the menu was opened on is probed (one round, one server)",
+      started is True and fake.rounds == [["chk-1"]], str(fake.rounds))
+
+fake.rounds.clear()
+for _n in made[:2]:
+    _n.setSelected(True)
+app.processEvents()
+started = mw._check_statuses_now(made[2])
+check("with a selection: exactly ONE round, only the SELECTED ids",
+      started is True and len(fake.rounds) == 1 and sorted(fake.rounds[0]) == ["chk-1", "chk-2"],
+      str(fake.rounds))
+check("the clicked node is ignored while a selection exists (the selection wins)",
+      "chk-3" not in fake.rounds[0], str(fake.rounds))
+
+fake.rounds.clear()
+mw.scene.clearSelection()
+app.processEvents()
+started = mw._check_statuses_now()
+check("no selection and no node: nothing to probe, no round starts",
+      started is False and fake.rounds == [], str(fake.rounds))
+
+# The menu/toolbar path hands QAction.triggered's bool over as the first argument
+for _n in made[:2]:
+    _n.setSelected(True)
+app.processEvents()
+fake.rounds.clear()
+mw._check_statuses_now(True)   # exactly what QAction.triggered delivers to a plain slot
+check("a QAction.triggered bool is not mistaken for a node (gotchas #10/#12)",
+      len(fake.rounds) == 1 and sorted(fake.rounds[0]) == ["chk-1", "chk-2"],
+      str(fake.rounds))
+mw.scene.clearSelection()
+
+fake.rounds.clear()
+mw._status_checker = None
+check("without a StatusChecker the action is a silent no-op (never raises)",
+      mw._check_statuses_now(made[0]) is False and fake.rounds == [])
+
+# The same method is the Edit-menu item AND both context menus' entry
+edit_status = [w for w, k in mw._menu_i18n if k == "ctx.check_status"]
+check("the action is a permanent Edit-menu item (a context menu is rebuilt on every click)",
+      len(edit_status) == 1
+      and edit_status[0] in mw._hotkey_targets.get("node.check_status", []))
+check("the sidebar context menu composition gained 'check_status'",
+      any(e is not None and e[0] == "check_status" for e in SB.CONTEXT_MENU_ITEMS),
+      str(SB.CONTEXT_MENU_ITEMS))
+
+# The GUI thread is never blocked: start_round() only builds the target list and starts
+# a QThread — the probing lives in _ProbeThread (the source is the contract here).
+_src = inspect.getsource(StatusChecker.start_round)
+check("the round starter only builds targets + starts a QThread (no probe inline)",
+      "_ProbeThread(" in _src and "thread.start()" in _src
+      and "probe_ssh(" not in _src and "_probe_one" not in _src)
+
+mw._dirty = False
 finish()

@@ -13,6 +13,7 @@ The registry is one declarative list ``{action_id: {...}}``:
                 (no new strings for the settings table); the value is a key, not a
                 literal.
 * ``default`` — the sequence of v1.3.1.1 (the behavior documented for this version).
+                v1.3.3.3: an EMPTY default is a first-class value — see below.
 * ``alt``     — optional extra sequences that follow the DEFAULT only (the legacy
                 redo alias Ctrl+Y): they are dropped as soon as the user picks a
                 sequence of their own for that action.
@@ -20,10 +21,20 @@ The registry is one declarative list ``{action_id: {...}}``:
                 v1.2.3 / v1.2.4-fix): ``apply_to()`` skips such actions, the mode
                 implementation owns them (``SshMixin._sync_multi_shortcut``).
 
+**The empty default (v1.3.3.3, ROADMAP task 3).** The registry is the single source of
+truth for the ACTIONS, not only for the sequences that happened to exist in v1.3.1.1:
+EVERY global action of the menus/sidebar/palette has an entry here. An action whose
+``default`` is ``""`` simply has NO hotkey out of the box — it behaves exactly as
+before (the menu item exists, the keyboard cannot reach it) — but it becomes
+ASSIGNABLE in the "Hotkeys" tab. This is what closes "the action exists but the
+keyboard cannot reach it": the audit in ``tests/test_actions_keyboard.py`` requires
+every global action to be registered (no orphans), and a new global action = one line
+here + ``MainWindow._register_hotkey_target()`` at creation.
+
 Storage — the ``hotkeys`` key of ``~/.sshmap/config.json`` (dict action_id → "Ctrl+K",
 merge-write via ``i18n.save_config``; the key itself is optional). Rules:
 
-* a missing action_id → the default sequence;
+* a missing action_id → the default sequence (which may be "" = no hotkey);
 * an unknown action_id → ignored (a downgrade / a rename must not break the config);
 * a broken value (not a string / an unparsable sequence) → the default + a log line;
 * an empty string → the action's hotkey is DISABLED (the action itself stays available
@@ -43,11 +54,18 @@ from typing import Dict, List, Optional, Sequence
 from PySide6.QtGui import QKeySequence, QShortcut
 
 # ── The registry (declaration order = the order of the settings table's rows) ──────
+# v1.3.3.3: 30 actions — the 18 of v1.3.2 (each with the sequence it had) + 4 NEW
+# defaults (file.save_as Ctrl+Shift+S, view.reset_zoom Ctrl+0, view.zoom_in Ctrl+=,
+# view.zoom_out Ctrl+-) + 8 more that had no shortcut and now have an EMPTY default
+# (assignable, no behavior change). `test_actions_keyboard.py` keeps the count and the
+# completeness honest.
 HOTKEY_ACTIONS: Dict[str, dict] = {
     # File
     "file.new":             {"label": "file.new_project",    "default": "Ctrl+N"},
     "file.open":            {"label": "file.open",           "default": "Ctrl+O"},
     "file.save":            {"label": "file.save",           "default": "Ctrl+S"},
+    # v1.3.3.3 (task 1): "Save As…" had no shortcut and no way to get one.
+    "file.save_as":         {"label": "file.save_as",        "default": "Ctrl+Shift+S"},
     # Edit
     "edit.undo":            {"label": "edit.undo",           "default": "Ctrl+Z"},
     # Ctrl+Y — the legacy alias of redo (v0.8.3): it follows the default only.
@@ -63,15 +81,47 @@ HOTKEY_ACTIONS: Dict[str, dict] = {
     "node.ssh_connect":     {"label": "ctx.ssh_connect",     "default": "Ctrl+Return"},
     "node.edit_server":     {"label": "ctx.edit_server",     "default": "Ctrl+E"},
     "node.add_note":        {"label": "ctx.add_note",        "default": "Ctrl+Shift+N"},
+    # v1.3.3.3 (task 5): the on-demand status round — the node context menu on the map
+    # and in the sidebar; no hotkey by default.
+    "node.check_status":    {"label": "ctx.check_status",    "default": ""},
     # View
     "view.fit_map":         {"label": "view.fit_map",        "default": "Ctrl+Shift+F"},
     "view.find_on_map":     {"label": "view.find_on_map",    "default": "Ctrl+F"},
+    # v1.3.3.3 (task 2): zoom becomes a first-class action — a real step API on MapView.
+    "view.reset_zoom":      {"label": "view.reset_zoom",     "default": "Ctrl+0"},
+    "view.zoom_in":         {"label": "view.zoom_in",        "default": "Ctrl+="},
+    "view.zoom_out":        {"label": "view.zoom_out",       "default": "Ctrl+-"},
     # The command palette (a QShortcut in MainWindow._setup_command_palette)
     "palette.open":         {"label": "palette.title",       "default": "Ctrl+K"},
     # v1.2.3: multi-input — installed ONLY while the mode is on (see _sync_multi_shortcut)
     "view.multi_input":     {"label": "view.multi_input",    "default": "F12",
                              "dynamic": True},
+    # ── v1.3.3.3 (task 3): the remaining GLOBAL actions — EMPTY defaults ───────────
+    # They have no hotkey out of the box (the behaviour is unchanged: the menu item
+    # exists, the keyboard cannot reach it) but every one of them is assignable in the
+    # "Hotkeys" tab. "Reset to defaults" clears exactly these fields.
+    "file.import_servers":  {"label": "file.import_servers",  "default": ""},
+    "file.export_png":      {"label": "file.export_png",      "default": ""},
+    "file.export_drawio":   {"label": "file.export_drawio",   "default": ""},
+    "file.export_pdf":      {"label": "file.export_pdf",      "default": ""},
+    "file.backups":         {"label": "file.backups",         "default": ""},
+    "file.restore_autosave": {"label": "file.restore_autosave", "default": ""},
+    "file.exit":            {"label": "file.exit",            "default": ""},
+    "edit.connect_selected": {"label": "edit.connect_selected", "default": ""},
+    "edit.delete_selected": {"label": "edit.delete_selected", "default": ""},
+    "view.center_map":      {"label": "view.center_map",      "default": ""},
+    "view.collapse_all":    {"label": "view.collapse_all",    "default": ""},
+    "view.expand_all":      {"label": "view.expand_all",      "default": ""},
+    "view.set_background":  {"label": "view.set_background",  "default": ""},
+    "view.remove_background": {"label": "view.remove_background", "default": ""},
+    "profile.manage":       {"label": "profile.manage",       "default": ""},
+    "help.open_logs":       {"label": "help.open_logs",       "default": ""},
+    "help.about":           {"label": "about.open",           "default": ""},
 }
+
+# v1.3.3.3: the actions that ship WITHOUT a hotkey (an empty registry default).
+EMPTY_DEFAULT_ACTIONS = tuple(aid for aid, spec in HOTKEY_ACTIONS.items()
+                              if not str(spec.get("default", "")).strip())
 
 CONFIG_KEY = "hotkeys"   # the ~/.sshmap/config.json key (merge-write)
 
@@ -101,8 +151,24 @@ def action_label_key(action_id: str) -> str:
 
 
 def default_sequence(action_id: str) -> str:
-    """The v1.3.1.1 sequence of the action (canonical; "" for an unknown id)."""
+    """The registry default of the action (canonical; "" = no hotkey / unknown id)."""
     return _DEFAULTS.get(action_id, "")
+
+
+def default_hotkeys() -> Dict[str, str]:
+    """The FULL registry default mapping {action_id: sequence} (v1.3.3.3, task 4).
+
+    The single source for the "Reset to defaults" button of the "Hotkeys" tab: it
+    writes THIS mapping through the ordinary merge-write (``save_hotkeys``), so no
+    default is duplicated in the dialog. An empty value is a real default (the action
+    ships without a hotkey) — the mapping covers every registry id.
+    """
+    return {aid: default_sequence(aid) for aid in action_ids()}
+
+
+def empty_default_action_ids() -> List[str]:
+    """The ids whose registry default is empty = "no hotkey" (v1.3.3.3, task 3)."""
+    return list(EMPTY_DEFAULT_ACTIONS)
 
 
 def alt_sequences(action_id: str) -> tuple:

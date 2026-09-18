@@ -476,5 +476,18 @@
   "status.language_reloaded": "Языковые файлы перечитаны.",
   "status.collapse_both_forbidden": "Нельзя свернуть обе панели — хотя бы одна должна остаться открытой",
   "msg.confirm_close_session": "Закрыть SSH-сессию?",
-  "msg.close_session_title": "SSH-сессия"
+  "msg.close_session_title": "SSH-сессия",
+  "view.zoom_in": "Приблизить",
+  "view.zoom_out": "Отдалить",
+  "ctx.check_status": "Проверить статусы сейчас",
+  "status.check_now": "Проверяю статус серверов: {count}…",
+  "settings.hotkeys.reset": "Сбросить настройки",
+  "settings.hotkeys.reset_done": "Горячие клавиши сброшены к значениям по умолчанию.",
+  "about.open": "О программе SSH Map",
+  "about.title": "О программе SSH Map",
+  "about.license": "Лицензия: {license} — см. файл LICENSE в корне проекта.",
+  "about.config_path": "Файл настроек:",
+  "about.logs_path": "Журналы:",
+  "about.hotkeys": "Горячие клавиши (текущие значения):",
+  "about.open_config_dir": "Открыть папку настроек"
 }

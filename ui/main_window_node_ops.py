@@ -373,6 +373,58 @@ class NodeOpsMixin:
         except RuntimeError:
             return []
 
+    # ── v1.3.3.3 (ROADMAP task 5): "Check statuses now" ─────────────────────────
+
+    def _check_statuses_now(self, node: "ServerNode" = None) -> bool:
+        """Run ONE status round for the selected nodes, on demand.
+
+        The periodic rounds (``StatusChecker.start``, ~every 30 s) probe the WHOLE map;
+        this is the explicit "check these right now" of the node context menu (the map
+        and the sidebar both call it) and of the Edit-menu item. The nodes probed are
+        the current SELECTION when there is one, otherwise the node the menu was opened
+        on — so "check this one" and "check the selected five" are the same entry point.
+
+        ``node`` is duck-typed on purpose: the menu/toolbar path connects the slot to
+        ``QAction.triggered``, which delivers a bool ``checked`` as the first argument
+        (gotchas #10/#12 of AGENTS.md, the ``_is_scene_point`` guard pattern) — anything
+        that is not a node object is ignored and the selection decides.
+
+        Not one byte of network traffic happens here: ``start_round`` spawns the
+        existing ``_ProbeThread`` (``ThreadPoolExecutor``, cap ``status_max_parallel``)
+        — the GUI thread only builds the target list. The interval/cancellation
+        semantics are untouched (``_busy`` still refuses a second concurrent round, and
+        a manual round does not restart the QTimer countdown).
+
+        Returns True when a round was actually started. Never raises.
+        """
+        checker = getattr(self, "_status_checker", None)
+        if checker is None:
+            return False
+        targets = [(n.data.id, n.data.host, n.data.ssh_port or 22)
+                   for n in self.selected_nodes()]
+        if not targets:
+            data = node.data if node is not None and not isinstance(node, bool) \
+                and hasattr(node, "data") else None
+            if data is not None:
+                targets = [(data.id, data.host, data.ssh_port or 22)]
+        if not targets:
+            return False
+        try:
+            started = bool(checker.start_round([t[0] for t in targets]))
+        except Exception as e:  # noqa: BLE001 — a probe must not break the menu action
+            if self.log:
+                self.log.warning(f"Check statuses now failed: {e}")
+            return False
+        if started:
+            try:
+                self.statusBar().showMessage(
+                    self.t("status.check_now", count=len(targets)), 5000)
+            except (RuntimeError, AttributeError):
+                pass  # Qt teardown / no i18n — the round is already running
+            if self.log:
+                self.log.info(f"Manual status round started for {len(targets)} node(s)")
+        return started
+
     def _delete_selected_nodes(self):
         """v0.9.3: delete ALL selected nodes (each via the guarded path)."""
         nodes = self.selected_nodes()
