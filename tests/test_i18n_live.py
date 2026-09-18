@@ -770,11 +770,10 @@ print("== §9 the release state ==")
 # ════════════════════════════════════════════════════════════════════════════
 
 check("EXPECTED_APP_VERSION is the version this test file describes",
-      EXPECTED_APP_VERSION == "1.3.3.4", EXPECTED_APP_VERSION)
-check("the pin counts the keys of this release (v1.3.3.4: +17 — the terminal-output theme: "
-      "terminal.find.*, the three terminal.menu.* local actions, the 5 seed names, the "
-      "multi-input exclusion pair, and the SFTP rate/ETA pair)",
-      EXPECTED_I18N_KEYS == 507, str(EXPECTED_I18N_KEYS))
+      EXPECTED_APP_VERSION == "1.3.3.5", EXPECTED_APP_VERSION)
+check("the pin counts the keys of this release (v1.3.3.5: +2 — terminal.split and "
+      "terminal.split_tooltip, the checkable action of the terminal split)",
+      EXPECTED_I18N_KEYS == 509, str(EXPECTED_I18N_KEYS))
 check_release_state(ROOT)
 for _code in i18n_lang_codes(ROOT):
     check(f"i18n/{_code}.json carries the new sftp.conflict.title key",
@@ -787,6 +786,8 @@ for _code in i18n_lang_codes(ROOT):
           "terminal.find.count" in translation_keys(read_lang(_code)))
     check(f"i18n/{_code}.json carries the v1.3.3.4 sftp.eta key",
           "sftp.eta" in translation_keys(read_lang(_code)))
+    check(f"i18n/{_code}.json carries the v1.3.3.5 terminal.split key",
+          "terminal.split" in translation_keys(read_lang(_code)))
 
 # cleanup: back to en + the original config, then close the windows
 i18n.set_language("en")

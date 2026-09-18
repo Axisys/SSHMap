@@ -27,6 +27,16 @@ Ownership of shared state (AUDIT §3, pinned down by this comment):
     SESSIONS regardless of the container; v1.2.3: the same registry is the
     provider of the multi-input hub modules/multi_input.py (broadcasting input
     to all open sessions));
+    **v1.3.3.5 (ROADMAP task 2): the registry also holds the terminal SPLIT
+    PANES** — the second pane of a terminal window (modules/ssh_terminal.py) is a
+    real session (it keeps the node's green dot, it joins the multi-input
+    broadcast, it is torn down by the same loops) and it is marked
+    `page._is_split_pane`, so `_limit_terminal_sessions()` (the terminal_max_open
+    limit + the "close the oldest" candidate) and `_find_terminal_window_for()`
+    skip it — a pane is a second shell INSIDE a session, never a reason to refuse
+    the user a new terminal. The window hands its pane over through the
+    duck-typed host hook `_adopt_split_session()` (the window looks it up on its
+    PARENT — no import of ui.main_window from modules/*);
   * ``self._terminals_dock`` — the "Terminals" dock (v1.2.2, lazy creation;
     modules/terminal_dock.TerminalsDock), None until the "tabs" mode was used;
   * ``self._ssh_connected_nodes`` — ids of nodes with an active session (green dot);
@@ -75,9 +85,17 @@ class SshMixin:
         """v1.2.1 (task 1): the node's live terminal window — so that a new
         session can be opened as a TAB in it. The registry holds sessions (pages);
         the page knows its host (set_host_window). A dead C++ object / a fake
-        without _host_window -> None (duck-typing, RuntimeError does not crash)."""
+        without _host_window -> None (duck-typing, RuntimeError does not crash).
+
+        v1.3.3.5 (ROADMAP task 2): a SPLIT PANE is skipped — it points at the same
+        window as its parent tab, but a pane is not a reason to re-target a new
+        session at its window (a window whose tab was closed but whose pane still
+        lives is NOT the node's "live terminal window" for the connect path).
+        """
         for s in list(getattr(self, "_terminal_windows", [])):
             try:
+                if getattr(s, "_is_split_pane", False):
+                    continue  # v1.3.3.5: the pane of a window is not the window's tab
                 sd = getattr(s, "server_data", None)
                 if sd is None or getattr(sd, "id", None) != node_id:
                     continue
@@ -89,6 +107,49 @@ class SshMixin:
             except RuntimeError:
                 continue  # C++ object removed during teardown — keep looking
         return None
+
+    def _limit_terminal_sessions(self):
+        """v1.3.3.5 (ROADMAP task 2): the sessions the terminal_max_open limit counts.
+
+        The registry `_terminal_windows` deliberately holds EVERY live session,
+        SPLIT PANES included — they keep the node's green dot lit, they receive the
+        multi-input broadcast and they are shut down by the same loops. The LIMIT
+        needs a narrower view: a pane is a second shell the user asked for INSIDE an
+        existing session, never a reason to refuse a new terminal, so panes are
+        filtered out here. The same list picks the "close the oldest" candidate.
+        """
+        return [s for s in list(getattr(self, "_terminal_windows", []))
+                if not getattr(s, "_is_split_pane", False)]
+
+    def _adopt_split_session(self, page):
+        """v1.3.3.5 (ROADMAP task 2): register the terminal window's SPLIT PANE.
+
+        The host hook the window finds on its parent (duck-typed —
+        `SSHTerminalWindow._session_sink()`), called once per pane right after the pane
+        was created: the pane joins the SAME registry as a tab, so `page.shutdown()`
+        loops (MainWindow shutdown), the green dot (`_forget_terminal_window`) and the
+        multi-input provider see it — while the limit and `_find_terminal_window_for`
+        skip it through the `_is_split_pane` marker. Idempotent: a repeated call does
+        not register the page twice (the `destroyed → _forget_terminal_window` hook is
+        connected once).
+        """
+        if page is None:
+            return
+        try:
+            page._is_split_pane = True
+        except Exception:  # noqa: BLE001 — a foreign object: the marker is best-effort
+            pass
+        if page in getattr(self, "_terminal_windows", []):
+            return
+        try:
+            page.destroyed.connect(lambda *_a, s=page: self._forget_terminal_window(s))
+        except (AttributeError, RuntimeError):
+            pass  # a duck-typed double without the signal — the pane lives with its window
+        self._terminal_windows.append(page)
+        # v1.2.3: in multi-input mode the new pane is highlighted immediately
+        # (frame/badge) + the plaque counter is updated — the same call as in
+        # _spawn_terminal_window.
+        self._multi_refresh_ui()
 
     def _ensure_terminals_dock(self):
         """v1.2.2 (task 2): the "Terminals" dock in MainWindow — lazy creation.
@@ -160,8 +221,13 @@ class SshMixin:
         ts_cfg = _load_ts()
         max_open = ts_cfg["max_open"]
         mode = ts_cfg["mode"]   # v1.2.2: "windows" (default, current behavior) | "tabs"
-        if len(self._terminal_windows) >= max_open and self._terminal_windows:
-            oldest = self._terminal_windows[0]  # creation order — list order (sessions)
+        # v1.3.3.5 (ROADMAP task 2): counted over the sessions the limit really owns —
+        # the SPLIT PANES are excluded (a pane is a second shell inside a session the
+        # user already opened, not a new terminal), and the "close the oldest" candidate
+        # is picked from the same list.
+        limit_sessions = self._limit_terminal_sessions()
+        if len(limit_sessions) >= max_open and limit_sessions:
+            oldest = limit_sessions[0]  # creation order — list order (sessions)
             alias = getattr(getattr(oldest, "server_data", None), "alias", "?")
             reply = QMessageBox.question(
                 self, self.t("msg.terminal_limit_title"),

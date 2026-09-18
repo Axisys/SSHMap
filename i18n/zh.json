@@ -167,6 +167,8 @@
   "terminal.window_title": "SSH终端 — {alias} ({host})",
   "terminal.tab_close_tooltip": "关闭会话",
   "terminal.session_new_tab": "{alias} 的会话已在新标签页打开",
+  "terminal.split": "拆分终端",
+  "terminal.split_tooltip": "在下方窗格中打开同一节点的第二个 shell",
   "terminal.dock_title": "终端",
   "terminal.multi_status": "多路：{count} 个会话",
   "terminal.multi_exit_button": "退出多路输入（F12）",

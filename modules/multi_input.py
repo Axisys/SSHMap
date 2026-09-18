@@ -62,6 +62,10 @@ def get_translator():
 # the MULTI_ACCENT name is kept (used in the MainWindow status-bar badge QSS).
 MULTI_ACCENT = theme.SELECTION_AMBER              # amber — the mode frame/badge
 MULTI_FRAME_OBJECT_NAME = "sshmap_multi_frame"    # QSS selector for the container only
+# v1.3.3.5: the frame of the terminal SPLIT PANE (the pane has no tab strip of its own,
+# so its HOST carries the frame — a separate objectName so one selector cannot leak into
+# the other; see apply_container_highlight).
+MULTI_PANE_FRAME_OBJECT_NAME = "sshmap_multi_frame_pane"
 
 
 def _thread_alive(thread) -> bool:
@@ -304,6 +308,14 @@ def apply_container_highlight(host, on: bool) -> bool:
     getattr() keeps every duck-typed fake/host working unchanged. The badge is
     recomputed on every highlight pass, so `hub.refresh()` (the exclusion toggle)
     is enough to update it.
+
+    v1.3.3.5 (ROADMAP task 6): the container may own a SPLIT PANE — a session that has
+    no tab in `session_tabs`. The highlight walks the tabs above and then reaches the
+    pane through the container's duck-typed `split_pane` / `split_host`: the FRAME
+    goes on the pane's own host (there is no tab strip to frame) and the badge goes on
+    the only title the pane owns — its inner `Terminal` tab (`page.set_session_badge()`,
+    the SAME `terminal.multi_tab_badge` / `terminal.multi_excluded_badge` text, no new
+    key). Containers without a pane (the dock) are unaffected.
     """
     try:
         tabs = getattr(host, "session_tabs", None)
@@ -339,6 +351,7 @@ def apply_container_highlight(host, on: bool) -> bool:
                 tabs.setStyleSheet("")
         except RuntimeError:
             pass  # C++ object already deleted (close race) — the frame is not critical
+        _highlight_split_pane(host, on)
         base_title = getattr(host, "_multi_base_title", None)
         if base_title is not None:
             try:
@@ -349,3 +362,50 @@ def apply_container_highlight(host, on: bool) -> bool:
         return True
     except Exception:
         return False
+
+
+def _highlight_split_pane(host, on: bool) -> None:
+    """v1.3.3.5 (ROADMAP task 6): mark the container's SPLIT PANE (if any).
+
+    A pane is a session of the container (`host.split_pane` — duck-typed; the dock and
+    older fakes simply do not have it) that owns no tab in `session_tabs`. Frame — on
+    the pane's host (`host.split_host`), badge — on the pane's inner `Terminal` tab
+    (`page.set_session_badge()`, which takes the i18n KEY so the badge follows a
+    language switch). Never raises: the highlight is cosmetic and the containers die
+    under it.
+    """
+    try:
+        pane = getattr(host, "split_pane", None)
+    except RuntimeError:
+        return  # C++ object already deleted (close race)
+    if pane is None:
+        return
+    frame_host = getattr(host, "split_host", None)
+    if frame_host is not None:
+        try:
+            if on:
+                frame_host.setObjectName(MULTI_PANE_FRAME_OBJECT_NAME)
+                frame_host.setStyleSheet(
+                    f"QWidget#{MULTI_PANE_FRAME_OBJECT_NAME} "
+                    f"{{ border: 2px solid {MULTI_ACCENT}; }}")
+            else:
+                frame_host.setObjectName("")
+                frame_host.setStyleSheet("")
+        except RuntimeError:
+            pass  # C++ object already deleted (close race) — the frame is not critical
+    try:
+        widget = getattr(pane, "widget", None)
+        excluded = bool(getattr(widget, "multi_excluded", False))
+        alias = getattr(getattr(pane, "server_data", None), "alias", "?")
+        setter = getattr(pane, "set_session_badge", None)
+        if callable(setter):
+            if not on:
+                setter(None)
+            elif excluded:
+                # the KEY + kwargs (not the rendered text): the pane's badge then
+                # follows a language switch through its own retranslate()
+                setter("terminal.multi_excluded_badge", alias=alias)
+            else:
+                setter("terminal.multi_tab_badge", alias=alias)
+    except RuntimeError:
+        pass  # C++ object already deleted (close race) — the badge is not critical

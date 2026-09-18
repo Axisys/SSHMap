@@ -121,10 +121,12 @@ check("the window: WA_DeleteOnClose is kept",
 check("the window: the title is terminal.window_title (alias+host)",
       "struct" in w1.windowTitle() and "10.98.2.1" in w1.windowTitle(), w1.windowTitle())
 # v1.3: the central widget — QSplitter [cmdlib_panel | session_tabs] (the "Terminal macros" panel)
-check("the window: the central widget is a QSplitter [cmdlib_panel | session_tabs] (v1.3)",
+# v1.3.3.5: the right member is the VERTICAL splitter [session_tabs | split_host] (the terminal split)
+check("the window: the central widget is a QSplitter [cmdlib_panel | QSplitter(session_tabs | split_host)]",
       isinstance(w1.centralWidget(), QSplitter)
       and w1.cmdlib_panel is w1.centralWidget().widget(0)
-      and w1.session_tabs is w1.centralWidget().widget(1))
+      and w1._v_splitter is w1.centralWidget().widget(1)
+      and w1.session_tabs is w1._v_splitter.widget(0))
 check("the window: the tabs are closable (the cross on the tab)",
       w1.session_tabs.tabsClosable() is True)
 check("the window: the first tab is a TerminalSessionPage (the v1.2 compat: win.page)",

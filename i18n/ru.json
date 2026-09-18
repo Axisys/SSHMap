@@ -167,6 +167,8 @@
   "terminal.window_title": "SSH терминал — {alias} ({host})",
   "terminal.tab_close_tooltip": "Закрыть сессию",
   "terminal.session_new_tab": "Сессия «{alias}» открыта новой вкладкой",
+  "terminal.split": "Разделить терминал",
+  "terminal.split_tooltip": "Показать вторую оболочку того же узла на панели ниже",
   "terminal.dock_title": "Терминалы",
   "terminal.multi_status": "МУЛЬТИ: {count} сессий",
   "terminal.multi_exit_button": "Выйти из мультинабора (F12)",

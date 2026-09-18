@@ -463,6 +463,11 @@ class CommandLibraryPanel(QWidget):
         t = get_translator()
         self._store = store if store is not None else CommandLibraryStore()
         self.session_tabs = session_tabs   # duck-typed QTabWidget (set_session_tabs)
+        # v1.3.3.5 (ROADMAP task 6): the container may host MORE than the tabs (the
+        # terminal window's split pane) and knows which session the user is in — it
+        # installs a callable here (SSHTerminalWindow.active_session); without one the
+        # active session stays session_tabs.currentWidget() (the v1.3 behaviour).
+        self._active_session_provider = None
         self._entries = []                 # the current state (from the file)
         self._by_id = {}                   # id → the live entry (item.data stores ONLY the id — see _rebuild_tree)
         self._collapsed = False
@@ -587,6 +592,34 @@ class CommandLibraryPanel(QWidget):
         """The duck-typed session QTabWidget (the active one = currentWidget())."""
         self.session_tabs = tabs
 
+    def set_active_session_provider(self, provider):
+        """v1.3.3.5 (ROADMAP task 6): the container's "what is the active session" callable.
+
+        A container with a SPLIT pane (the terminal window) has more than the tabs and
+        owns the focus rule, so it passes `active_session` here; the panel stays
+        duck-typed (it never learns about pages/branches — it just asks). `None`
+        restores the v1.3 behaviour: the active session is the current TAB.
+        """
+        self._active_session_provider = provider if callable(provider) else None
+
+    def _active_page(self):
+        """The session a macro must go to (the container first, the current tab after)."""
+        provider = getattr(self, "_active_session_provider", None)
+        if callable(provider):
+            try:
+                page = provider()
+                if page is not None:
+                    return page
+            except Exception:   # noqa: BLE001 — a container teardown race / a fake
+                pass
+        tabs = self.session_tabs
+        if tabs is None:
+            return None
+        try:
+            return tabs.currentWidget()
+        except RuntimeError:
+            return None  # the C++ object was already destroyed (a close race)
+
     def reload(self):
         """Re-read the file and rebuild the tree (showEvent + after changes)."""
         self._entries = self._store.load()
@@ -688,20 +721,16 @@ class CommandLibraryPanel(QWidget):
     def send_entry(self, entry: dict):
         """Send the command to the ACTIVE session (ROADMAP v1.3).
 
-        The active session — session_tabs.currentWidget(); the send — a dynamic
-        call of page.widget.send_macro(text) (a direct terminal_thread.send_data(),
-        NOT the multi-input broadcast). A disabled entry — a quiet no-op. No active
-        / a dead session — a status message, no exceptions."""
+        The active session — the container's `active_session` if it installed one
+        (v1.3.3.5: the terminal window's SPLIT pane, i.e. the pane the user clicked —
+        ROADMAP task 6), otherwise `session_tabs.currentWidget()` (the v1.3 rule); the
+        send — a dynamic call of page.widget.send_macro(text) (a direct
+        terminal_thread.send_data(), NOT the multi-input broadcast). A disabled entry —
+        a quiet no-op. No active / a dead session — a status message, no exceptions."""
         t = get_translator()
         if not entry or not entry.get("enabled", True):
             return   # a disabled entry is not sent (muted in the tree)
-        page = None
-        tabs = self.session_tabs
-        if tabs is not None:
-            try:
-                page = tabs.currentWidget()
-            except RuntimeError:
-                page = None
+        page = self._active_page()
         ok = False
         alias = ""
         if page is not None:

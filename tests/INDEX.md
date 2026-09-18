@@ -149,6 +149,7 @@ of the file itself.
 | `test_terminal_page.py` | — | v1.2 — TerminalSessionPage refactor (window → page) + per-session tracking. |
 | `test_terminal_scroll.py` | — | v1.0RC3 — PTY resize + scrollback + dirty rendering (ROADMAP v1.0RC3). |
 | `test_terminal_selection_menu.py` | — | v1.2.7 — Terminal: double/triple-click selection + context menu (ROADMAP v1.2.7). |
+| `test_terminal_split.py` | — | v1.3.3.5 — Terminal split: a second pane under the sessions (ROADMAP v1.3.3.5). |
 | `test_terminal_tabs.py` | — | v1.2.1 — Multiple SSH sessions as tabs in one terminal window (ROADMAP v1.2.1). |
 | `test_theme.py` | — | v1.2.5 — The central theme ui/theme.py (release theme, ROADMAP v1.2.5). |
 | `test_ui_polish.py` | — | UI polish: nodes, grid, fit/zoom, status bar, icons, arrow hit zones (former smoke_test). |

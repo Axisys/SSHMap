@@ -176,6 +176,8 @@
   "terminal.window_title": "SSH Terminal — {alias} ({host})",
   "terminal.tab_close_tooltip": "Close session",
   "terminal.session_new_tab": "Session for {alias} opened in a new tab",
+  "terminal.split": "Split Terminal",
+  "terminal.split_tooltip": "Show a second shell of the same node in a pane below",
   "terminal.dock_title": "Terminals",
   "terminal.multi_status": "MULTI: {count} sessions",
   "terminal.multi_exit_button": "Exit multi input (F12)",

@@ -410,10 +410,13 @@ check("the window: WA_DeleteOnClose is kept",
 check("the window: the title is terminal.window_title (alias+host)",
       "win" in wv.windowTitle() and "10.99.0.5" in wv.windowTitle(), wv.windowTitle())
 # v1.3: the central widget — QSplitter [cmdlib_panel | session_tabs] (the "Terminal macros" panel)
-check("the window: the central widget is a QSplitter [cmdlib_panel | session_tabs] (v1.3; the compat win.page)",
+# v1.3.3.5: the right member is the VERTICAL splitter [session_tabs | split_host] (the terminal split)
+check("the window: the central widget is a QSplitter [cmdlib_panel | QSplitter(session_tabs | split_host)]",
       isinstance(wv.centralWidget(), QSplitter)
       and wv.cmdlib_panel is wv.centralWidget().widget(0)
-      and wv.session_tabs is wv.centralWidget().widget(1)
+      and wv._v_splitter is wv.centralWidget().widget(1)
+      and wv.session_tabs is wv._v_splitter.widget(0)
+      and wv.split_host is wv._v_splitter.widget(1)
       and wv.session_tabs.widget(0) is wv.page)
 check("the window: the compat server_data (the BUGFIX v0.9.5.5 is kept)",
       wv.server_data.alias == "win")

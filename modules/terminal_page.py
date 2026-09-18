@@ -166,6 +166,11 @@ class TerminalSessionPage(QWidget):
       * call set_host_window(w) — close_terminal() will close this session's tab
         on the host (v1.2.1: the last tab closes the window);
       * run the teardown through shutdown() (a single method, idempotent).
+
+    v1.3.3.5 (the terminal SPLIT): `with_sftp=False` builds a page WITHOUT the SFTP
+    tab — the split pane is a command line (see __init__): `tabs` then holds the
+    canvas alone and `sftp_tab` is None. The default (True) is every other caller —
+    tabs and the dock are untouched.
     """
 
     # v1.0RC3: resize PTY — a grid-change guard + a ~150 ms debounce before
@@ -193,12 +198,30 @@ class TerminalSessionPage(QWidget):
     progress_hidden = Signal()          # SFTP: hide the bar
 
     def __init__(self, server_data, parent=None, password: str = None,
-                 initial_command: str = ""):
+                 initial_command: str = "", with_sftp: bool = True,
+                 with_status_line: bool = True):
         super().__init__(parent)
         self.server_data = server_data
         self._host_window = None     # the host window (SSHTerminalWindow); close_terminal() closes it
         self._force_close = False    # v1.1.1: the limit path — a confirmed decision, "ask" does not ask again
         self._shut_down = False      # shutdown() is idempotent (all teardown paths go through one method)
+        # v1.3.3.5 (ROADMAP task 2): the SPLIT marker — the page was created as the second
+        # pane of a terminal window (add_session(split=True)), NOT as a tab. The registry
+        # of MainWindow (_terminal_windows) keeps it for the green dot and the multi-input
+        # provider, while the terminal_max_open limit and _find_terminal_window_for skip
+        # it (ui/main_window_ssh.py): a pane is a session, not a reason to refuse a new
+        # terminal.
+        self._is_split_pane = False
+        # v1.3.3.5: the multi-input badge of the pane — it has no tab in session_tabs,
+        # so the highlight marks its inner `Terminal` tab instead (set_session_badge).
+        self._session_badge = None
+
+        # v1.3.3.5: the LIVE status text of the session — the status LINE when the page
+        # has one, and the inner `Terminal` tab title when it does not (the split pane,
+        # `with_status_line=False`: a whole line under a ~140 px pane costs ~40 px of it
+        # — measured — so the pane puts the same text on its tab instead).
+        self._session_status = ""
+        self._with_status_line = bool(with_status_line)
 
         t = get_translator()
         layout = QVBoxLayout(self)
@@ -206,6 +229,13 @@ class TerminalSessionPage(QWidget):
         self.status_label = QLabel(t("terminal.initializing"))
         # v1.2.5: the colour — from the central theme (ui/theme.py); the value is unchanged
         self.status_label.setStyleSheet(f"color: {theme.TEXT_MUTED}; padding: 4px 0;")
+        # A hidden member of a QBoxLayout costs no geometry at all (no height, no
+        # spacing) — the compact page gives that space back to the canvas. The label
+        # object itself is deliberately KEPT (every reader in this module, the window's
+        # compat property and the tests keep working — it is simply not shown).
+        if not self._with_status_line:
+            self.status_label.hide()
+            self._session_status = t("terminal.initializing")
         layout.addWidget(self.status_label)
 
         # AUDIT v0.7.2 (medium #7): an explicit password takes priority over node.data.password —
@@ -259,11 +289,26 @@ class TerminalSessionPage(QWidget):
         # reuses the same transport (terminal_thread.client.open_sftp() —
         # without a second authentication and known_hosts pass); the worker is
         # created lazily — on the first switch to "Files" / after connected_signal.
+        # v1.3.3.5 (the terminal SPLIT, ROADMAP task 4): `with_sftp=False` builds the
+        # page WITHOUT the SFTP tab — the split pane is a COMMAND LINE, and a second
+        # channel, a second worker and a file tree squeezed into ~130 px are pure cost
+        # there. The flag also keeps the page's own layout minimum small, which is what
+        # makes the 25% default of the split honest (the floor is then driven by the
+        # canvas rows, not by the tree). Everything else keeps working unchanged:
+        # `page.tabs` still exists (ONE tab — the canvas; the multi-input badge of a
+        # pane lands on it) and `page.sftp_tab` is None (every reader is guarded below).
+        self._with_sftp = bool(with_sftp)
         self.tabs = QTabWidget()
         self.tabs.addTab(self.widget, t("sftp.tab_terminal"))
-        self.sftp_tab = SftpTab()
-        self.tabs.addTab(self.sftp_tab, t("sftp.tab_files"))
+        self.sftp_tab = SftpTab() if self._with_sftp else None
+        if self.sftp_tab is not None:
+            self.tabs.addTab(self.sftp_tab, t("sftp.tab_files"))
         layout.addWidget(self.tabs)
+        # v1.3.3.5: a page WITHOUT a status line shows its initial state on the inner
+        # `Terminal` tab at once ("Terminal  Initializing SSH session...") — the tab
+        # title is the only status surface it has.
+        if not self._with_status_line:
+            self._apply_session_tab_title()
 
         # v1.1.3: the SFTP state (the worker is lazy; a task registry for the progress text).
         # Visualisation — the bridge signals progress_* (in windows mode the window
@@ -275,7 +320,8 @@ class TerminalSessionPage(QWidget):
         # dropped with the task — see _on_sftp_task_done/error/cancelled).
         self._transfer_meters = {}
         self.tabs.currentChanged.connect(self._on_tab_changed)
-        self.sftp_tab.message.connect(self._on_sftp_tab_message)
+        if self.sftp_tab is not None:
+            self.sftp_tab.message.connect(self._on_sftp_tab_message)
 
         # v1.0RC3: resize PTY — a grid-change guard + a ~150 ms debounce. The canvas
         # lives inside the tab (not in the window's resizeEvent): the eventFilter on
@@ -317,7 +363,11 @@ class TerminalSessionPage(QWidget):
     def retranslate(self):
         """v1.3.3.1: re-text the page's own strings in the current language.
 
-        The two tab titles of the inner QTabWidget (`Terminal | Files`); every
+        The tab titles of the inner QTabWidget (`Terminal | Files`; a page built with
+        `with_sftp=False` has the `Terminal` tab only — guarded by the tab count; and
+        v1.3.3.5: the `Terminal` title is re-composed by `_apply_session_tab_title()` —
+        the multi-input badge a SPLIT PANE carries there AND its live status text, both
+        of which must survive the switch); every
         string already has an i18n key (ZERO new keys) and the module translator is
         looked up at call time — no cache to invalidate. The status label carries the
         LIVE session state (connecting/opened/closed — emitted by the thread), so it
@@ -325,11 +375,14 @@ class TerminalSessionPage(QWidget):
         dead-C++-object discipline of every container method.
         """
         try:
-            t = get_translator()
-            self.tabs.setTabText(0, t("sftp.tab_terminal"))
-            self.tabs.setTabText(1, t("sftp.tab_files"))
+            if self.tabs.count() > 1:
+                self.tabs.setTabText(1, get_translator()("sftp.tab_files"))
         except RuntimeError:
             pass  # the C++ object was already destroyed (a close race)
+        # v1.3.3.5: the inner `Terminal` title carries the multi-input badge of a SPLIT
+        # PANE and — when the page has no status line — its live status: re-composed
+        # here so a language switch re-texts the badge instead of dropping it.
+        self._apply_session_tab_title()
         sftp_tab = getattr(self, "sftp_tab", None)
         if sftp_tab is not None:
             try:
@@ -343,6 +396,43 @@ class TerminalSessionPage(QWidget):
                 widget.retranslate()
             except RuntimeError:
                 pass  # Qt teardown — the canvas is already destroyed
+
+    # ── v1.3.3.5 (ROADMAP task 6): the multi-input badge of a SPLIT PANE ─────
+
+    def set_session_badge(self, key=None, **kwargs):
+        """v1.3.3.5: mark THIS session's inner `Terminal` tab with the i18n key `key`.
+
+        The container's multi-input highlight badges the TABS of `session_tabs`
+        (modules/multi_input.py) — a split pane has no tab there, so the badge of the
+        pane goes on the only title it owns (its `Terminal` tab). The KEY (plus its
+        format kwargs) is stored instead of the rendered text, so the badge follows a
+        language switch: `retranslate()` re-renders it in the new language. `key=None`
+        restores the plain title. No new i18n key — the caller passes the SAME
+        `terminal.multi_tab_badge` / `terminal.multi_excluded_badge`. Never raises.
+        """
+        self._session_badge = (str(key), dict(kwargs)) if key else None
+        self._apply_session_tab_title()
+
+    def _apply_session_tab_title(self):
+        """Compose the inner `Terminal` tab title of THIS session (v1.3.3.5).
+
+        Base — `sftp.tab_terminal`; plus the multi-input badge if the container set one
+        (a split pane); plus the LIVE status text when the page has no status line (the
+        compact split pane — "Terminal  SSH session opened"). The status is LIVE session
+        state and is deliberately not re-translated (§4.5); the badge is a KEY and is
+        rendered with the current language. Never raises.
+        """
+        try:
+            t = get_translator()
+            title = t("sftp.tab_terminal")
+            if self._session_badge is not None:
+                key, kwargs = self._session_badge
+                title = t(key, **kwargs) if kwargs else t(key)
+            if not self._with_status_line and self._session_status:
+                title = f"{title}  {self._session_status}"
+            self.tabs.setTabText(0, title)
+        except RuntimeError:
+            pass  # the C++ object was already destroyed (a close race)
 
     # ── Host ────────────────────────────────────────────────────────────────
 
@@ -466,10 +556,13 @@ class TerminalSessionPage(QWidget):
         # v1.3.1 (ROADMAP task 4): the preview panel closes together with the session —
         # BEFORE the worker/thread teardown (the panel never outlives the transport it
         # was read through). Idempotent; a destroyed C++ object must not block the close.
-        try:
-            self.sftp_tab.close_viewer()
-        except RuntimeError:
-            pass
+        # v1.3.3.5: a page without the SFTP tab (`with_sftp=False`) has no panel at all.
+        sftp_tab = getattr(self, "sftp_tab", None)
+        if sftp_tab is not None:
+            try:
+                sftp_tab.close_viewer()
+            except RuntimeError:
+                pass
 
         # v1.3.3.4 (ROADMAP task 3): the transcript is a local file of the SESSION — it
         # is closed here, on the single idempotent teardown path, so no tee survives a
@@ -511,8 +604,10 @@ class TerminalSessionPage(QWidget):
                     _st_module().register_orphan_thread(thread)
 
         # The "Files" tab's slot is disconnected too (the worker's list_ready goes
-        # straight into the tab — it will die together with the page).
-        _dissig(self.sftp_tab.message, self._on_sftp_tab_message)
+        # straight into the tab — it will die together with the page). v1.3.3.5: nothing
+        # to unbind on a page built without the SFTP tab.
+        if getattr(self, "sftp_tab", None) is not None:
+            _dissig(self.sftp_tab.message, self._on_sftp_tab_message)
 
     # ── v1.0RC3: dirty rendering without a timer (ROADMAP task 8) ───────────
 
@@ -603,12 +698,29 @@ class TerminalSessionPage(QWidget):
             pass  # the channel died during the debounce — nothing to do
 
     def _set_status(self, text: str):
-        self.status_label.setText(text)
+        self._set_status_text(text)
         self.status_message.emit(text, 0)   # v1.1.x: statusBar().showMessage(text) (sticky)
+
+    def _set_status_text(self, text: str):
+        """The SINGLE status write of the page (v1.3.3.5).
+
+        The text goes to the status line AND — when the page has no status line (the
+        compact split pane, `with_status_line=False`) — onto the inner `Terminal` tab
+        title, so the live state ("SSH session opened", "SSH session closed", an error)
+        is never lost and never costs a row of the pane. Never raises: a dying C++ object
+        must not break the status path.
+        """
+        self._session_status = text or ""
+        try:
+            self.status_label.setText(self._session_status)
+        except RuntimeError:
+            pass  # the C++ object was already destroyed (a close race)
+        if not self._with_status_line:
+            self._apply_session_tab_title()
 
     def _show_error(self, error: str):
         t = get_translator()
-        self.status_label.setText(f"{t('terminal.error_prefix')} {error}")
+        self._set_status_text(f"{t('terminal.error_prefix')} {error}")
         box = _st_module().QMessageBox   # test seam (ST.QMessageBox)
         box.critical(
             self._host_window,
@@ -619,7 +731,7 @@ class TerminalSessionPage(QWidget):
 
     def _on_closed(self):
         t = get_translator()
-        self.status_label.setText(t("terminal.session_closed"))
+        self._set_status_text(t("terminal.session_closed"))
         self.status_message.emit(t("terminal.session_closed"), 0)
 
     # ── v1.0RC4: Quick Launch ───────────────────────────────────────────────
@@ -660,9 +772,12 @@ class TerminalSessionPage(QWidget):
         The session is not connected yet → False (the tab waits). The server's
         SFTP subsystem is unavailable → an error in the status (the
         status_message bridge), the worker is not created (a retry — on the next
-        switch to the tab).
+        switch to the tab). v1.3.3.5: a page built WITHOUT the SFTP tab
+        (`with_sftp=False`) never opens a channel — no Files tab exists to ask for it.
         """
         t = get_translator()
+        if getattr(self, "sftp_tab", None) is None:
+            return False   # v1.3.3.5: a split pane is a command line — no SFTP channel
         worker = getattr(self, "_sftp_worker", None)
         if worker is not None and not worker.isFinished():
             return True
@@ -701,8 +816,12 @@ class TerminalSessionPage(QWidget):
         return True
 
     def _on_tab_changed(self, index: int):
-        """A switch to the "Files" tab — a lazy SFTP start (idempotent)."""
-        if self.tabs.widget(index) is self.sftp_tab:
+        """A switch to the "Files" tab — a lazy SFTP start (idempotent).
+
+        v1.3.3.5: on a page without the SFTP tab `self.sftp_tab` is None and no widget
+        can be it, so the guard is a no-op by itself (kept for symmetry).
+        """
+        if self.sftp_tab is not None and self.tabs.widget(index) is self.sftp_tab:
             self._ensure_sftp()
 
     def _on_sftp_tab_message(self, msg: str):
@@ -837,13 +956,15 @@ class TerminalSessionPage(QWidget):
     def _on_sftp_worker_finished(self):
         """The worker stopped on its own (the transport died — the session
         closed/crashed): a state reset; the tab returns to "waiting", a restart —
-        on the next switch to it, if a live connection appears."""
+        on the next switch to it, if a live connection appears. v1.3.3.5: a page
+        without the SFTP tab has no worker to reset — the guard keeps it symmetrical."""
         try:
             self._sftp_worker = None
             self._sftp_tasks.clear()
             self._transfer_meters.clear()   # v1.3.3.4 (task 6): no live task — no meter
             self._sftp_busy = 0
             self.progress_hidden.emit()
-            self.sftp_tab.set_worker(None)
+            if getattr(self, "sftp_tab", None) is not None:
+                self.sftp_tab.set_worker(None)
         except RuntimeError:
             pass  # the C++ object was already destroyed (a close race)

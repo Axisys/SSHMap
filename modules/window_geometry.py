@@ -62,11 +62,17 @@ def _b64_to_qba(b64str):
     return qba
 
 
-def save_window_geometry(key: str, window) -> bool:
+def save_window_geometry(key: str, window, extra: dict = None) -> bool:
     """Save the window's saveGeometry()/saveState() to config.json under key.
 
     window — a QMainWindow (MainWindow / SSHTerminalWindow). True — written;
     False — the window gave no data or the config write failed. Never raises.
+
+    v1.3.3.5: `extra` — additional TOP-LEVEL config keys written by the very same
+    `save_config()` call (the terminal window merges the split state/ratio of
+    `ui_terminal_split` / `ui_terminal_split_ratio` into its geometry write, so the
+    restore path of a window stays ONE call and one merge-write). A non-dict extra is
+    ignored; the key value itself is never overwritten by it.
     """
     try:
         from i18n import save_config
@@ -79,8 +85,13 @@ def save_window_geometry(key: str, window) -> bool:
         return False
     if not geom and not state:
         return False
+    payload = {key: {"geometry": geom, "state": state}}
+    if isinstance(extra, dict):
+        for k, v in extra.items():
+            if k != key:      # the geometry record is never clobbered by an extra key
+                payload[k] = v
     try:
-        return bool(save_config({key: {"geometry": geom, "state": state}}))
+        return bool(save_config(payload))
     except Exception:  # noqa: BLE001 — save_config does not raise itself, but just in case
         return False
 

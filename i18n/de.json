@@ -167,6 +167,8 @@
   "terminal.window_title": "SSH-Terminal — {alias} ({host})",
   "terminal.tab_close_tooltip": "Sitzung schließen",
   "terminal.session_new_tab": "Sitzung für {alias} in neuem Tab geöffnet",
+  "terminal.split": "Terminal teilen",
+  "terminal.split_tooltip": "Eine zweite Shell desselben Knotens in einem Bereich darunter anzeigen",
   "terminal.dock_title": "Terminals",
   "terminal.multi_status": "MULTI: {count} Sitzungen",
   "terminal.multi_exit_button": "Multi-Eingabe beenden (F12)",

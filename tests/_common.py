@@ -171,8 +171,14 @@ def restore_i18n_config(snap):
 # in 12 i18n files + the APP_VERSION/requirements pins in 7 release-state sections).
 # The misses of the keys themselves against the code are caught by check_i18n_keys.py.
 # ─────────────────────────────────────────────────────────────────────────────
-EXPECTED_APP_VERSION = "1.3.3.4"  # the current release (a sentinel: it catches "a bump to the wrong version")
-EXPECTED_I18N_KEYS = 507        # the parity of the TRANSLATION keys (v1.3.3.4: +17 — the terminal
+EXPECTED_APP_VERSION = "1.3.3.5"  # the current release (a sentinel: it catches "a bump to the wrong version")
+EXPECTED_I18N_KEYS = 509        # the parity of the TRANSLATION keys (v1.3.3.5: +2 — terminal.split
+                                # ("Split Terminal" — the checkable action of the terminal split:
+                                # the toolbar button and the window's context-menu item) and
+                                # terminal.split_tooltip (the hint of that action). The split itself
+                                # adds no other string: the pane's multi-input badge reuses
+                                # terminal.multi_tab_badge / terminal.multi_excluded_badge.
+                                # (v1.3.3.4: +17 — the terminal
                                 # output theme: 5 terminal.find.* (placeholder / count / next /
                                 # prev / close), 3 terminal.menu.* (clear_scrollback /
                                 # reset_screen / save_transcript), 5 terminal.cmdlib.seed.*

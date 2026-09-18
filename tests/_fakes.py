@@ -25,11 +25,15 @@ from PySide6.QtWidgets import QMenu
 
 class FakeSSHChannel:
     """The channel stub. record — the accumulation mode of send():
-    "list" — all the bytes (a list), "last" — only the last one, None — does not accumulate."""
+    "list" — all the bytes (a list), "last" — only the last one, None — does not accumulate.
+    resizes (v1.3.3.5) — the (width, height) pairs of every resize_pty() call: the
+    terminal-split test counts the debounced PTY resizes of a pane through them.
+    """
 
     def __init__(self, record="list"):
         self.closed = False
         self.sent = [] if record == "list" else None
+        self.resizes = []
         self._record = record
 
     def send(self, data):
@@ -37,6 +41,9 @@ class FakeSSHChannel:
             self.sent.append(data)
         elif self._record == "last":
             self.sent = data
+
+    def resize_pty(self, width=None, height=None):
+        self.resizes.append((width, height))
 
     def close(self):
         self.closed = True

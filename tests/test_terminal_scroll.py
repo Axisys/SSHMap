@@ -362,12 +362,16 @@ try:
     check("the scroll API on the window's screen", all(
         hasattr(win2.tscreen, m) for m in ("scroll_up", "scroll_down", "at_bottom", "scroll_info")))
     # v1.0RC3: the "Close terminal" button is removed; v1.1.3: buttons appeared in the window —
-    # on the SFTP tab; v1.3: + the command library panel (Add/Edit/Delete).
-    # The terminal widget itself contains no QPushButton.
+    # on the SFTP tab; v1.3: + the command library panel (Add/Edit/Delete);
+    # v1.3.3.5: + the "Split Terminal" button in the corner of the session tab bar.
+    # The terminal CANVAS itself still contains no QPushButton.
     _stray = [b for b in win2.findChildren(QPushButton)
-              if not (win2.sftp_tab.isAncestorOf(b) or win2.cmdlib_panel.isAncestorOf(b))]
-    check("the 'Close terminal' button is removed: a QPushButton only on the SFTP tab and the cmdlib panel",
-          not _stray, f"stray buttons: {len(_stray)}")
+              if not (win2.sftp_tab.isAncestorOf(b) or win2.cmdlib_panel.isAncestorOf(b))
+              and b is not win2.btn_split]
+    check("the 'Close terminal' button is removed: a QPushButton only on the SFTP tab, "
+          "the cmdlib panel and the split corner",
+          not _stray and not win2.widget.findChildren(QPushButton),
+          f"stray buttons: {len(_stray)}")
     check("close_terminal() is kept (the MainWindow cleanup path)",
           callable(getattr(win2, "close_terminal", None)))
 finally:
