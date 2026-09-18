@@ -460,8 +460,14 @@ check("the active language carries the checkmark",
 check("the rebuilt actions stay in the QAction guard (PySide6 6.11 pitfall #9)",
       all(a in mw._qaction_guard for a in _lang_actions))
 
-# A language file dropped in AFTER the window was built appears on the next aboutToShow
-_drop = os.path.join(I18N_DIR, "zz.json")
+# A language file dropped in AFTER the window was built appears on the next aboutToShow.
+# The drop goes into the USER language folder (`~/.sshmap/languages/`, isolated per test
+# through the sandboxed HOME): the PACKAGE `i18n/` folder is shared with the parity checks
+# of the OTHER test files running in parallel, so a temporary 5th language written there
+# made them flaky (the suite is parallel — `tests/run_all.py`).
+USER_LANG_DIR = i18n.user_language_dir()
+os.makedirs(USER_LANG_DIR, exist_ok=True)
+_drop = os.path.join(USER_LANG_DIR, "zz.json")
 try:
     with open(_drop, "w", encoding="utf-8") as f:
         json.dump({"name": "Zz", "menu.file": "File-zz"}, f, ensure_ascii=False)
@@ -504,7 +510,7 @@ check("_refresh_language_combo() is idempotent and keeps the current selection",
       (_dlg._refresh_language_combo() is None
        and _dlg.language_combo.currentData() == i18n.get_current_language()),
       str(_dlg.language_combo.currentData()))
-_drop2 = os.path.join(I18N_DIR, "zz.json")
+_drop2 = os.path.join(USER_LANG_DIR, "zz.json")
 try:
     with open(_drop2, "w", encoding="utf-8") as f:
         json.dump({"name": "Zz", "menu.file": "File-zz"}, f, ensure_ascii=False)
@@ -770,9 +776,10 @@ print("== §9 the release state ==")
 # ════════════════════════════════════════════════════════════════════════════
 
 check("EXPECTED_APP_VERSION is the version this test file describes",
-      EXPECTED_APP_VERSION == "1.3.3.8", EXPECTED_APP_VERSION)
-check("the pin counts the keys of this release (v1.3.3.8: +10 — the language manager + the wheel combo)",
-      EXPECTED_I18N_KEYS == 530, str(EXPECTED_I18N_KEYS))
+      EXPECTED_APP_VERSION == "1.4", EXPECTED_APP_VERSION)
+check("the pin counts the keys of this release (v1.4: the base release adds NO key — the "
+      "two example plugins carry the author's own strings, not i18n keys)",
+      EXPECTED_I18N_KEYS == 545, str(EXPECTED_I18N_KEYS))
 check_release_state(ROOT)
 for _code in i18n_lang_codes(ROOT):
     check(f"i18n/{_code}.json carries the new sftp.conflict.title key",
@@ -799,6 +806,16 @@ for _code in i18n_lang_codes(ROOT):
           "language.import" in translation_keys(read_lang(_code)))
     check(f"i18n/{_code}.json carries the v1.3.3.8 settings.terminal.wheel.off key",
           "settings.terminal.wheel.off" in translation_keys(read_lang(_code)))
+    check(f"i18n/{_code}.json carries the v1.4rc1 menu.plugins key",
+          "menu.plugins" in translation_keys(read_lang(_code)))
+    check(f"i18n/{_code}.json carries the v1.4rc1 plugins.status.error key",
+          "plugins.status.error" in translation_keys(read_lang(_code)))
+    check(f"i18n/{_code}.json carries the v1.4rc2 plugins.status.hook_timeout key",
+          "plugins.status.hook_timeout" in translation_keys(read_lang(_code)))
+    check(f"i18n/{_code}.json carries the v1.4rc3 plugins.run_on_nodes key",
+          "plugins.run_on_nodes" in translation_keys(read_lang(_code)))
+    check(f"i18n/{_code}.json carries the v1.4rc3 plugins.status.run_on_nodes key",
+          "plugins.status.run_on_nodes" in translation_keys(read_lang(_code)))
 
 # cleanup: back to en + the original config, then close the windows
 i18n.set_language("en")

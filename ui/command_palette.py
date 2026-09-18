@@ -47,6 +47,10 @@ def _t(key: str) -> str:
     return key
 
 
+# v1.4rc3: the glyph of each palette section (a plugin command is not a core action).
+_ICON_BY_KIND = {"server": "add_server", "plugin": "plugin"}
+
+
 def fuzzy_score(pattern: str, text: str):
     """Subsequence fuzzy: return (score, matched) or None.
 
@@ -185,7 +189,42 @@ class CommandPalette(QDialog):
             cmds.append((label, "server",
                          lambda n=node: self._reveal_node(n)))
 
+        # 3) v1.4rc3 (plugin foundation, task 7): the commands contributed by plugins.
+        # The section comes AFTER the core ones, so a plugin can never shadow a built-in
+        # command (PLUGINS.md §3). The manager calls `register_commands` synchronously
+        # (a UI hook, budget 200 ms) and hands back frozen records; the callback is run
+        # through the manager too (`call_hook_wrapped`), so an exception in plugin code
+        # is a log line + a status-bar report, never a crash of the palette. `text` is
+        # the AUTHOR's string — not an i18n key (PLUGINS.md §7).
+        plugin_manager = getattr(self.mw, "_plugin_manager", None)
+        if plugin_manager is not None:
+            try:
+                pairs = plugin_manager.plugin_commands()
+            except Exception:  # noqa: BLE001 — a broken plugin must not break Ctrl+K
+                pairs = []
+            for plugin_id, cmd in pairs:
+                cmds.append((cmd.text, "plugin",
+                             lambda pid=plugin_id, c=cmd: self._run_plugin_command(pid, c)))
+
         self._commands = cmds
+
+    def _run_plugin_command(self, plugin_id, cmd):
+        """v1.4rc3: run ONE command a plugin contributed (through the manager's wrapper).
+
+        The context is the PLUGIN's own (the command sees the same `ctx` its
+        `register_commands` got) and the manager owns the timing budget and the "never
+        throws" guarantee (`call_hook_wrapped`) — an exception in plugin code is a log
+        line plus a status-bar report, never a broken palette. A command whose callback
+        is not callable is a no-op. Returns True when the callback was invoked.
+        """
+        manager = getattr(self.mw, "_plugin_manager", None)
+        callback = getattr(cmd, "callback", None)
+        if manager is None or not callable(callback):
+            return False
+        rec = manager.get(plugin_id)
+        ctx = getattr(rec, "context", None) if rec is not None else None
+        manager.call_hook_wrapped(plugin_id, "register_commands", callback, ctx)
+        return True
 
     @staticmethod
     def _reveal_node(node):
@@ -241,9 +280,10 @@ class CommandPalette(QDialog):
             # v0.9.3 fix: the "🖥/⚡" emojis were removed — the project
             # deliberately moved to vector icons (ui/icons.py,
             # Segoe UI Emoji renders poorly).
+            # v1.4rc3: the plugin commands get the puzzle glyph of the "Plugins" menu.
             try:
                 from ui.icons import get_icon
-                icon = get_icon("add_server" if kind == "server" else "connection")
+                icon = get_icon(_ICON_BY_KIND.get(kind, "connection"))
                 if icon is not None and not icon.isNull():
                     item.setIcon(icon)
             except Exception:  # noqa: BLE001 — icons are cosmetic, don't break the palette

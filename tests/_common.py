@@ -171,8 +171,51 @@ def restore_i18n_config(snap):
 # in 12 i18n files + the APP_VERSION/requirements pins in 7 release-state sections).
 # The misses of the keys themselves against the code are caught by check_i18n_keys.py.
 # ─────────────────────────────────────────────────────────────────────────────
-EXPECTED_APP_VERSION = "1.3.3.8"  # the current release (a sentinel: it catches "a bump to the wrong version")
-EXPECTED_I18N_KEYS = 530        # the parity of the TRANSLATION keys (v1.3.3.8: +10 — the
+EXPECTED_APP_VERSION = "1.4"    # the current release (a sentinel: it catches "a bump to the wrong version")
+EXPECTED_I18N_KEYS = 545        # the parity of the TRANSLATION keys (v1.4 — the base release of the
+                                # 1.4 line: the plugin foundation is COMPLETE, and the release itself
+                                # adds NO key — it ships the two example plugins
+                                # (`examples/plugins/hello.py`, `examples/plugins/disk_monitor.py`)
+                                # and their topical test. The examples are deliberately silent in the
+                                # parity policy: a plugin's strings are the AUTHOR's text
+                                # (`PLUGINS.md` §7), so the pin STAYS 545 — the number the three rcs
+                                # built up. (v1.4rc3: +5 — the UI hooks of
+                                # the plugin foundation, ROADMAP tasks 7–9: `plugins.run_on_nodes`
+                                # (the "Run on selected servers" menu item / the registry action),
+                                # `plugins.run_hint` (the menu row shown while a plugin implements
+                                # `run_on_nodes` but the map has no servers yet),
+                                # `plugins.no_selection` (the status line of that same case when
+                                # the action is triggered), `plugins.status.run_on_nodes` ({count}
+                                # — the start report of the action) and `palette.kind_plugin`
+                                # (the palette's section label — the `palette.kind_server`
+                                # counterpart). The plugin rows go STRAIGHT into the node context
+                                # menu (no submenu) and the palette renders the commands as a
+                                # section of its own list, so neither a `plugin.node_menu`
+                                # nor a `plugin.commands` header exists — two keys written while
+                                # implementing rc3 turned out unused and were dropped, keeping
+                                # the pinned set honest (`PLUGINS.md` §3 documents the flat
+                                # behaviour). `PluginCommand`, the manager's `plugin_commands()` /
+                                # `plugin_node_context_menu()` / `plugin_run_on_nodes()` and the
+                                # QAction guard add no strings: a plugin's own text is the AUTHOR's
+                                # and stays outside the parity policy (PLUGINS.md §7).
+                                # (v1.4rc2: +2 — the execution
+                                # half of the plugin foundation. `plugins.status.hook_failed`
+                                # ({name} + {hook} + {error}) reports a hook that RAISED and
+                                # `plugins.status.hook_timeout` ({name} + {hook} + {ms}) reports one
+                                # that was ABANDONED after its wait budget — the two outcomes of the
+                                # "never throws / never hangs the host" discipline with a user-visible
+                                # line. `PluginContext`, `plugin_runner`, the status merge and the
+                                # worker/orphan registries add no strings. (v1.4rc1: +8 — the plugin
+                                # foundation, part 1. `menu.plugins` (the new top-level menu next
+                                # to "Settings"), `plugins.reload` (the re-discovery action, a
+                                # registry action with an empty default), `plugins.empty` (the
+                                # placeholder naming ~/.sshmap/plugins/) and 5 status-bar reports:
+                                # `plugins.status.loaded` / `.error` ({name} + {error}) /
+                                # `.enabled` / `.disabled` / `.reloaded` ({count}). The discovery
+                                # itself, the `plugins` key of config.json and the module name of a
+                                # folder plugin add no strings — plugin strings are the AUTHOR's
+                                # text and stay outside the parity policy (PLUGINS.md §7).
+                                # (v1.3.3.8: +10 — the
                                 # reachable-from-the-UI release. 7 `language.*` for the language
                                 # manager (`language.import` / `language.export` — the two buttons
                                 # of the "Language" tab; `language.imported` / `language.exported`

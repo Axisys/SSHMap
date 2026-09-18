@@ -56,6 +56,17 @@ def main():
         win = MainWindow()
         win.show()
 
+        # v1.4rc1 (plugin foundation, rc series): the plugin discovery — after the
+        # window exists and BEFORE the event loop (ROADMAP rc1: "after MainWindow
+        # creation, before app.exec()"). A broken plugin is reported in the status bar
+        # and in the log; it can never stop the application (the call itself is
+        # defensive as well — a plugin must not be able to break the startup).
+        try:
+            win.start_plugin_discovery()
+        except Exception as e:
+            if log is not None:
+                log.warning(f"Plugin discovery did not run: {e}")
+
         # v0.7.1: periodic node status checks (online/warn/offline) —
         # started once after show(): the first round in ~2 s, then driven by QTimer.
         try:

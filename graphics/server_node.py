@@ -128,6 +128,9 @@ class ServerNode(QGraphicsItemGroup):
         self._hover = False
         # v0.7.1: availability status (online/warn/offline) — "" until checked
         self._status = ""
+        # v1.4rc2 (plugin foundation, rc2): the plugin detail merged into the status
+        # tooltip ("" — the status-only tooltip of v0.7.1)
+        self._status_detail = ""
         # v0.9.8: map search (Ctrl+F) — True if the node matches the active query
         self._search_matched = False
 
@@ -657,25 +660,33 @@ class ServerNode(QGraphicsItemGroup):
         color = QColor(theme.STATUS_ONLINE) if connected else QColor(theme.DOT_IDLE)
         self._ssh_status.setBrush(QBrush(color))
 
-    def set_status(self, status: str):
+    def set_status(self, status: str, detail: str = ""):
         """v0.7.1: set the availability status (online/warn/offline).
 
         Updates the frame color (via _state_pen) and starts a short
         pulse animation of the overlay on status change. Unknown statuses
-        are ignored; a repeated call with the same status — no-op.
+        are ignored; a repeated call with the same status — no-op (the pulse is not
+        restarted), EXCEPT for the tooltip detail below.
+
+        v1.4rc2 (plugin foundation, rc2): `detail` is the optional text a plugin's
+        `status_probe` contributed to the merged result (`PLUGINS.md` §3 — "appended to
+        the node's tooltip"). It travels on its own signal and can arrive after the
+        status, so a changed detail updates the tooltip without restarting the pulse;
+        an empty detail keeps the status-only tooltip of v0.7.1.
         """
-        if status not in self.STATUS_COLORS or status == self._status:
+        if status not in self.STATUS_COLORS:
+            return
+        detail = str(detail or "")
+        if status == self._status:
+            if detail != self._status_detail:
+                self._status_detail = detail
+                self._apply_status_tooltip(status)
             return
         color = self.STATUS_COLORS[status]
         self._status = status
+        self._status_detail = detail
 
-        # Tooltip with the status (i18n, host is substituted into the text)
-        try:
-            from i18n import t as _translate
-            tip = _translate(f"node.status.{status}", host=self.data.host or "")
-        except Exception:
-            tip = f"{status}: {self.data.host}"
-        self.setToolTip(tip if not tip.startswith("[") else f"{status} — {self.data.host}")
+        self._apply_status_tooltip(status)
 
         # UI polish: the availability dot (reads faster than the frame at a small zoom)
         # + dimming the card content for offline nodes
@@ -685,6 +696,19 @@ class ServerNode(QGraphicsItemGroup):
         # Static frame + pulse (overlay fade-out: opacity 1 -> 0)
         self._apply_visual_state()
         self._start_pulse(color)
+
+    def _apply_status_tooltip(self, status: str):
+        """v0.7.1/v1.4rc2: the status tooltip, with a plugin's detail appended when present."""
+        try:
+            from i18n import t as _translate
+            tip = _translate(f"node.status.{status}", host=self.data.host or "")
+        except Exception:
+            tip = f"{status}: {self.data.host}"
+        if tip.startswith("["):  # i18n unavailable — the English literal of en.json
+            tip = f"{status} — {self.data.host}"
+        if self._status_detail:
+            tip = f"{tip}\n{self._status_detail}"
+        self.setToolTip(tip)
 
     def _start_pulse(self, color: QColor):
         """v0.7.1/v0.9.6: start the fade-out overlay of a frame in the given color.
@@ -747,6 +771,7 @@ class ServerNode(QGraphicsItemGroup):
         if not self._status:
             return
         self._status = ""
+        self._status_detail = ""   # v1.4rc2: the plugin detail goes with the status
         self.setToolTip("")
         # UI polish: the dot — gray (not checked), the content — full brightness
         self._status_dot.setBrush(QBrush(self.COLOR_DOT_IDLE))

@@ -1,6 +1,7 @@
 import os
 import sys
 import copy
+import itertools
 from typing import Optional, List, Dict
 
 try:
@@ -74,6 +75,11 @@ try:  # v1.2.3 (ROADMAP v1.2.3): multi-input — hub broadcasting input to all s
 except ImportError:
     from modules import multi_input as _multi_input_mod
 
+try:  # v1.4rc1 (plugin foundation): discovery + the registry of the plugins
+    from ..modules import plugin_manager as plugin_manager
+except ImportError:
+    from modules import plugin_manager as plugin_manager
+
 try:  # v1.2.5: central theme (palette/radii/fonts — ui/theme.py)
     from . import theme
 except ImportError:
@@ -86,6 +92,7 @@ except ImportError:
 from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtGui import (
     QFont,      # v1.1.1: UI font from config (QApplication.setFont)
+    QAction,    # v1.4rc1: the per-plugin rows of the "Plugins" menu (insertAction)
     QMouseEvent,
     QUndoStack,  # v0.8.3: undo/redo
     QKeySequence,  # v1.3.2: an empty sequence = the multi-input hotkey is not installed
@@ -365,6 +372,39 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         self._sidebar_collapsed = False
         self._map_collapsed = False
 
+        # ── v1.4rc1 (plugin foundation, rc series): the plugin registry ─────
+        # The manager is created HERE because the "Plugins" menu is built from it; the
+        # DISCOVERY itself runs later — main.py calls start_plugin_discovery() after
+        # show() and before app.exec() (ROADMAP rc1), so merely constructing a window
+        # (every test does) never imports third-party code. The rows of the menu are
+        # rebuilt from the records; `_plugin_rows` holds the dynamic QActions, so a
+        # rebuild removes exactly its own items and never the permanent "Reload" item.
+        self._plugin_manager = plugin_manager.PluginManager(self)
+        self._plugin_menu = None
+        self.act_plugins_reload = None
+        self.act_plugins_run = None
+        self._plugin_sep = None
+        self._plugin_rows: List = []
+        # v1.4rc3: the QActions a plugin added to a CONTEXT menu. They live outside the
+        # i18n registry (the menu is built per right-click), so `_rebuild_qaction_guard()`
+        # keeps their wrappers alive from here (gotcha #9) — bounded, because a context
+        # menu is ephemeral and only the newest ones can still be on screen.
+        self._plugin_menu_actions: List = []
+        # v1.4rc2 (plugin foundation, rc2): the services of PluginContext — the manager
+        # reports FACTS through signals, the window owns the widgets. `_plugin_status_*`
+        # is the token guard of `ctx.status()` (the v1.2.2 pattern of the dock's status
+        # line): a newer message always invalidates the pending auto-clear of an older
+        # one, so an asynchronous plugin result can never blank a fresher message.
+        self._plugin_status_tokens = itertools.count()
+        self._plugin_status_token = None
+        try:
+            self._plugin_manager.status_requested.connect(self._on_plugin_status_requested)
+            self._plugin_manager.hook_failed.connect(self._on_plugin_hook_failed)
+            self._plugin_manager.hook_timeout.connect(self._on_plugin_hook_timeout)
+        except Exception as e:  # noqa: BLE001 — a missing signal must not break the window
+            if self.log:
+                self.log.warning(f"Plugin service signals unavailable: {e}")
+
         self._setup_ui()
         self._setup_toolbar()
         self._setup_menubar()
@@ -418,6 +458,17 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
                 probe_timeout=float(_st_cfg["probe_timeout_sec"]),
                 max_parallel=int(_st_cfg["max_parallel"]), parent=self)
             self._status_checker.status_changed.connect(self._on_node_status_changed)
+            # v1.4rc2 (plugin foundation, rc2): a plugin's `status_probe` joins the round.
+            # The provider is called INSIDE the probe pool worker (a worker thread — the
+            # PLUGINS.md §6 discipline); the merged status arrives on `status_changed` and
+            # the plugin's detail (a tooltip line) on its own signal. With no plugin
+            # implementing the hook the provider returns None and nothing changes.
+            self._status_checker.status_detail.connect(self._on_node_status_detail)
+            try:
+                self._status_checker.set_status_provider(self._plugin_manager.status_provider)
+            except Exception as e:  # noqa: BLE001 — the probes must run without plugins too
+                if self.log:
+                    self.log.warning(f"Plugin status provider not installed: {e}")
             # On window destruction — stop the timer and wait for the current round
             # so a probe thread is not killed in flight with its parent.
             self.destroyed.connect(lambda *_a: self._status_checker.shutdown())
@@ -475,10 +526,26 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         except ImportError:  # flat layout
             from status_checker import _build_targets as _mk
         try:
+            _nodes = list(self.scene.nodes())
             checker.set_servers(_mk([
                 (n.data.id, n.data.host, n.data.ssh_port or 22)
-                for n in self.scene.nodes()
+                for n in _nodes
             ]))
+            # v1.4rc2 (plugin foundation, rc2): the SAME pass feeds the plugin registry —
+            # a `status_probe` / `run_on_nodes` hook sees exactly the nodes the map holds
+            # (narrowed to {id, alias, host, port, user} by the manager, PLUGINS.md §5).
+            # The internal facts carry the private key path, which is deliberately NOT
+            # part of the plugin-visible record but IS needed by the core's credential
+            # resolver for `ctx.run_command`.
+            try:
+                self._plugin_manager.set_nodes(
+                    [(n.data.id, n.data.alias, n.data.host, n.data.ssh_port or 22, n.data.user)
+                     for n in _nodes],
+                    facts={n.data.id: {"key_path": getattr(n.data, "key_path", "") or ""}
+                           for n in _nodes})
+            except Exception as e:  # noqa: BLE001 — a plugin never breaks the probes
+                if self.log:
+                    self.log.warning(f"Plugin node registry not synced: {e}")
         except Exception as e:
             if self.log:
                 self.log.warning(f"StatusChecker set_servers failed: {e}")
@@ -496,6 +563,23 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
                 self._auto_interval_hinted = False  # below the threshold again — the hint may fire once more
         except (AttributeError, RuntimeError):
             pass  # Qt teardown — the status bar is already destroyed
+
+    def _on_node_status_detail(self, server_id: str, detail: str):
+        """v1.4rc2 (plugin foundation, rc2): the plugin detail of a merged status.
+
+        `StatusChecker.status_detail` carries what a plugin's `status_probe` contributed
+        (`PLUGINS.md` §3 — "appended to the node's tooltip"). It travels AFTER
+        `status_changed`, so the node already has its colour; the detail only refines the
+        tooltip. An empty detail removes a stale one.
+        """
+        node = self.scene.get_node(server_id)
+        if node is None:
+            return  # node already removed — it needs no tooltip
+        try:
+            node.set_status(node.status, detail)
+        except Exception as e:  # noqa: BLE001
+            if self.log:
+                self.log.warning(f"status detail failed for {server_id}: {e}")
 
     def _on_node_status_changed(self, server_id: str, status: str):
         """Handle the probe result for a single node."""
@@ -1177,6 +1261,18 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
             except Exception:  # noqa: BLE001 — the registry must not block exit
                 pass
 
+        # v1.4rc2 (plugin foundation, rc2): the plugin workers. The manager owns them and
+        # its shutdown() asks each one to stop, waits with the wait budget and registers
+        # whatever outlives it in the orphan registry — a plugin thread must never be
+        # destroyed with its parent ("QThread: Destroyed while thread is still running").
+        try:
+            manager = getattr(self, "_plugin_manager", None)
+            shutdown = getattr(manager, "shutdown", None)
+            if callable(shutdown):
+                shutdown()
+        except Exception:  # noqa: BLE001 — a plugin must never block the exit
+            pass
+
     @property
     def _has_unsaved_changes(self) -> bool:
         """Check if current project has unsaved changes."""
@@ -1555,6 +1651,37 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         self.act_settings = self._add_menu_action(
             settings_menu, "settings.open", self._open_settings_dialog)
 
+        # ── v1.4rc1 (plugin foundation, rc series): the "Plugins" menu ─────
+        # BETWEEN "Settings" and "Help" (next to the settings hub). The manager holds
+        # the records, this menu renders them: one checkable row per discovered plugin
+        # (the enable/disable switch — persisted in `plugins` of config.json) plus
+        # "Reload" (a re-discovery of the folder: new/changed ~/.sshmap/plugins/*.py are
+        # picked up without a restart). The rows are rebuilt on aboutToShow (the
+        # v1.3.3.1 language-submenu pattern) and created MANUALLY with an explicit
+        # toggled(bool) connection (gotcha #10: a checkable item must not use the
+        # `QMenu.addAction(text, slot)` auto-connection); "Reload" is an ordinary
+        # registry action, so the keyboard can reach it like any other menu item.
+        self._plugin_menu = menubar.addMenu(
+            self.t("menu.plugins") if self._i18n_available else "Plugins")
+        self._register_i18n(self._plugin_menu, "menu.plugins")
+        self.act_plugins_reload = self._add_menu_action(
+            self._plugin_menu, "plugins.reload", self._reload_plugins, "plugins.reload")
+        # v1.4rc3 (task 8): "Run on selected servers" — the entry point of the headless
+        # `run_on_nodes` hook (rc2 machinery) for the CURRENT selection. A registry
+        # action like every other global action (an EMPTY default: assignable in
+        # "Settings → Hotkeys"), enabled only while a loaded plugin really implements
+        # the hook — `_populate_plugin_items()` recomputes that on every menu open.
+        self.act_plugins_run = self._add_menu_action(
+            self._plugin_menu, "plugins.run_on_nodes", self._run_plugins_on_nodes,
+            "plugins.run_on_nodes", "plugin")
+        # The rows go ABOVE the separator, "Reload"/"Run" stay below it; the separator is
+        # inserted before the permanent actions so a rebuild of the rows can never
+        # destroy either of them (the language menu rebuilds its own children —
+        # here the permanent pieces must survive `_populate_plugin_items`).
+        self._plugin_sep = self._plugin_menu.insertSeparator(self.act_plugins_reload)
+        self._populate_plugin_items()
+        self._plugin_menu.aboutToShow.connect(self._populate_plugin_items)
+
         # Help menu
         help_menu = menubar.addMenu(self.t("menu.help") if self._i18n_available else "Help")
         self._register_i18n(help_menu, "menu.help")
@@ -1608,17 +1735,37 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
 
         The guard list (`self._qaction_guard`) is rebuilt from the i18n registry and
         the menubar — see the PySide6 6.11 pitfall above. Called at the end of
-        `_setup_menubar()` and after `_populate_language_menu()` rebuilds the
-        Language submenu (its QActions are recreated, and unguarded wrappers would
-        take the C++ submenu down with them on GC).
+        `_setup_menubar()`, after `_populate_language_menu()` / `_populate_plugin_items()`
+        rebuild their children and after a plugin extended a context menu (its QActions
+        are created OUTSIDE this window, so without the guard a plugin that keeps no
+        reference of its own would lose the row the moment the Python wrapper died).
+
+        v1.4rc3: the registry is walked for QMenus as well as QActions. Until rc2 it held
+        only leaf QActions and the "Plugins" menu — whose checkable rows are built by
+        `_populate_plugin_items()` — went unguarded; the plugin menu is a QMenu of the
+        registry and contributes all of its children, its submenus included (the
+        `QMenu.addMenu()` wrapper is a child QAction of its parent, exactly the object
+        gotcha #9 is about).
         """
         try:
             menubar = self.menuBar()
+
+            def collect(menu, out, depth=0):
+                if menu is None or depth > 8:
+                    return
+                for act in list(menu.actions()):
+                    out.append(act)
+                    child = act.menu()
+                    if child is not None:
+                        collect(child, out, depth + 1)
+
             guard = []
             for w, _key in self._menu_i18n:
                 if isinstance(w, QMenu):
-                    guard.extend(list(w.actions()))
-            guard.extend(list(menubar.actions()))  # top-level titles (File/Edit/…)
+                    collect(w, guard)
+            collect(menubar, guard)  # the top-level menus and their children
+            # Context-menu rows a plugin created (`_extend_node_context_menu`).
+            guard.extend(self._plugin_menu_actions)
             self._qaction_guard = guard
         except RuntimeError:
             pass  # Qt teardown — nothing to guard
@@ -1692,6 +1839,385 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
             pass
         if self.log:
             self.log.info(f"i18n language files rescanned (active={self.current_language!r}, ok={ok})")
+
+    # ── v1.4rc1 (plugin foundation, rc series): the "Plugins" menu ──────────────
+    # The manager (modules/plugin_manager.py) reports FACTS — records and events; the
+    # window turns them into a menu and into status-bar lines. This is the rc1 half of
+    # the frozen API v1 contract (PLUGINS.md): discovery + manager + the enable/disable
+    # switch. The hooks themselves (commands, the context menu, status probes, running
+    # on selected servers) are rc2/rc3 — nothing here calls into a plugin.
+
+    def start_plugin_discovery(self):
+        """Discover the plugins — called ONCE from main.py, after show(), before app.exec().
+
+        The ROADMAP places the discovery exactly there: the window exists (so a load
+        error can be reported in its status bar) while the event loop has not started
+        yet (so the registry is complete before the first frame the user sees). Never
+        raises: a plugin must not be able to break the startup (ROADMAP rc1 task 1).
+        """
+        try:
+            self._plugin_manager.discover()
+        except Exception as e:  # noqa: BLE001 — the discovery is wrapped internally too
+            if self.log:
+                self.log.warning(f"Plugin discovery failed: {e}")
+        self._populate_plugin_items()
+        self._report_plugin_events()
+        if self.log:
+            self.log.info(f"Plugins: {len(self._plugin_manager.loaded_records())} loaded "
+                          f"of {len(self._plugin_manager.records())} discovered")
+
+    def _reload_plugins(self):
+        """`Plugins → Reload` (a registry action): re-run the discovery and re-render.
+
+        This is what makes a dropped-in `~/.sshmap/plugins/<name>.py` usable without a
+        restart — every folder plugin is exec'd fresh (a changed file is really re-read).
+        """
+        try:
+            self._plugin_manager.reload()
+        except Exception as e:  # noqa: BLE001
+            if self.log:
+                self.log.warning(f"Plugin reload failed: {e}")
+        self._populate_plugin_items()
+        self._report_plugin_events()
+
+    def _populate_plugin_items(self):
+        """(Re)build the per-plugin rows of the "Plugins" menu from the manager's records.
+
+        Called at construction and on every `aboutToShow` (the v1.3.3.1 pattern: the
+        list is never frozen at construction). Only the DYNAMIC rows are removed —
+        `_plugin_rows` holds them, so the permanent "Run"/"Reload" items and their
+        separator survive every rebuild. An error record is shown too: disabled and
+        unchecked, with the failure in its tooltip (the user must see that the file was
+        found and why it did not load). With no records at all — a disabled placeholder
+        naming the folder, so the feature is discoverable. Never raises.
+
+        v1.4rc3: the pass also (a) re-feeds the plugin node registry (the same narrowing
+        the startup discovery does, so a node added later is visible to `run_on_nodes`)
+        and (b) enables "Run on selected servers" only while a plugin implements the hook
+        — otherwise the item would be a silent no-op.
+        """
+        self._sync_plugin_nodes()
+        menu = getattr(self, "_plugin_menu", None)
+        if menu is None:
+            return
+        try:
+            for act in self._plugin_rows:
+                menu.removeAction(act)          # exactly the rows of the previous build
+            self._plugin_rows = []
+            before = self._plugin_sep if self._plugin_sep is not None else self.act_plugins_reload
+            records = self._plugin_manager.records()
+            run_records = [r for r in records
+                           if plugin_manager.HOOK_RUN_ON_NODES in r.hooks]
+            if not records:
+                placeholder = QAction(self.t("plugins.empty"), menu)
+                placeholder.setEnabled(False)   # informative, not a command
+                menu.insertAction(before, placeholder)
+                self._plugin_rows.append(placeholder)
+            else:
+                for rec in records:
+                    act = QAction(rec.label(), menu)
+                    act.setCheckable(True)
+                    act.setChecked(rec.ok)
+                    act.setToolTip(self._plugin_tooltip(rec))
+                    try:  # v1.4rc3: the puzzle glyph (a menu of plugins reads as one family)
+                        icon = get_icon("plugin")
+                        if icon is not None and not icon.isNull():
+                            act.setIcon(icon)
+                    except Exception:  # noqa: BLE001 — the icon is cosmetic
+                        pass
+                    if rec.failed:
+                        act.setEnabled(False)   # found, but not loadable — nothing to switch
+                    else:
+                        act.toggled.connect(
+                            lambda checked, pid=rec.plugin_id: self._on_plugin_toggled(pid, checked))
+                    menu.insertAction(before, act)
+                    self._plugin_rows.append(act)
+                if run_records and not self._plugin_manager.node_records():
+                    # v1.4rc3: a plugin-ready action with no nodes to act on — say so
+                    # instead of leaving a disabled item without a reason.
+                    hint = QAction(self.t("plugins.run_hint"), menu)
+                    hint.setEnabled(False)
+                    menu.insertAction(before, hint)
+                    self._plugin_rows.append(hint)
+            # The permanent "Run" item follows the plugins that can serve it AND the
+            # registry it would act on — an enabled item with no servers in the plugin
+            # registry can only answer "nothing to run on".
+            run_act = getattr(self, "act_plugins_run", None)
+            if run_act is not None:
+                run_act.setEnabled(bool(run_records)
+                                   and bool(self._plugin_manager.node_records()))
+        except RuntimeError:
+            return  # Qt teardown — the menu is already destroyed
+        # The rebuilt rows are QActions of a menu that the palette walks with temporary
+        # wrappers (gotcha #9) — keep them in the guard like the language submenu's children.
+        self._rebuild_qaction_guard()
+
+    def _sync_plugin_nodes(self):
+        """v1.4rc3: refresh the plugin-visible node registry from the CURRENT map.
+
+        The startup discovery (`start_plugin_discovery`) feeds the registry once; a
+        project opened or edited afterwards would otherwise leave a plugin looking at a
+        stale map (an empty one at startup). The pass is cheap, idempotent and runs on
+        every "Plugins" menu open — the same place the palette takes its records from.
+        The internal `key_path` FACTS travel separately (the credential resolver of
+        `ctx.run_command` needs them, a plugin never sees them). Never raises.
+        """
+        try:
+            nodes = list(self.scene.nodes())
+        except (AttributeError, RuntimeError):
+            return
+        facts = {}
+        for node in nodes:
+            key_path = getattr(node.data, "key_path", "") or ""
+            if key_path:
+                facts[node.data.id] = {"key_path": key_path}
+        try:
+            self._plugin_manager.set_nodes([n.data for n in nodes], facts=facts)
+        except Exception as e:  # noqa: BLE001 — a plugin registry must never break the menu
+            if self.log:
+                self.log.warning(f"Plugin node registry refresh failed: {e}")
+        # The registry may have just become EMPTY (the last node removed, a new project):
+        # the "Run on selected servers" item must follow immediately, or the user keeps an
+        # enabled item that can only answer "nothing to run on" (every refresh_sidebar
+        # path lands here, the menu open included).
+        run_act = getattr(self, "act_plugins_run", None)
+        if run_act is not None:
+            try:
+                run_act.setEnabled(bool(self._plugin_manager.node_records())
+                                   and bool(self._plugin_records_with_hook(
+                                       plugin_manager.HOOK_RUN_ON_NODES)))
+            except RuntimeError:
+                pass  # Qt teardown
+
+    def _plugin_records_with_hook(self, hook_name: str) -> list:
+        """The loaded plugins that declare a hook ([] — no plugin, no hook)."""
+        try:
+            return [r for r in self._plugin_manager.loaded_records() if hook_name in r.hooks]
+        except Exception:  # noqa: BLE001 — a broken manager must not break a context menu
+            return []
+
+    def _extend_node_context_menu(self, menu, node=None):
+        """v1.4rc3 (ROADMAP task 7): let every plugin add rows to a node context menu.
+
+        The ONE entry point behind both surfaces of the contract ("the node context menu
+        of the map or of the sidebar", PLUGINS.md §3): the caller passes the live QMenu
+        and either the clicked `ServerNode` (map) or its node id (sidebar); the manager
+        narrows whatever it gets to the frozen `{id, alias, host, port, user}` records.
+
+        The hooks run synchronously on the GUI thread inside the contract's 200 ms budget
+        and are wrapped by the manager ("never throws"): a plugin that raises contributes
+        nothing and is reported, the menu still opens. The QActions a plugin created are
+        the manager's to keep alive, so the guard is re-run right after the call
+        (gotcha #9: a dead Python QAction wrapper takes the C++ menu down with it).
+
+        Returns the number of plugins asked. Never raises.
+        """
+        if menu is None:
+            return 0
+        asked = 0
+        try:
+            asked = int(self._plugin_manager.plugin_node_context_menu(menu, node))
+        except Exception as e:  # noqa: BLE001 — a plugin must not be able to kill the menu
+            if self.log:
+                self.log.warning(f"Plugin context menu hook failed: {e}")
+        if asked:
+            # The rows a plugin created live in a menu built outside the i18n registry:
+            # keep their wrappers in the guard (gotcha #9), then re-run the rebuild so the
+            # two sources end up in one list. A context menu of a window without plugins
+            # pays for none of this.
+            try:
+                self._plugin_menu_actions.extend(list(menu.actions()))
+                if len(self._plugin_menu_actions) > 200:      # bounded: context menus are ephemeral
+                    del self._plugin_menu_actions[:-100]
+            except RuntimeError:
+                pass  # the menu died under us — nothing to guard
+            self._rebuild_qaction_guard()
+        return asked
+
+    def _run_plugins_on_nodes(self):
+        """v1.4rc3 (task 8): "Run on selected servers" — the `run_on_nodes` hook.
+
+        Scope: the CURRENT selection; with nothing selected the whole map is the target
+        (the action stays useful, and the status line says which scope was used). The
+        manager starts one managed worker per plugin that declares the hook — the work
+        itself (`ctx.run_command`) runs on its own managed workers, so nothing blocks the
+        GUI thread (PLUGINS.md §6). The status line reports how many plugins started and
+        on how many nodes; a plugin reports its own results through `ctx.status()`.
+
+        Never raises: a broken plugin is a log line + a status report, and the action
+        with no capable plugin is a no-op (the menu item is disabled in that case).
+        """
+        try:
+            nodes = list(self.selected_nodes())
+        except Exception:  # noqa: BLE001 — a selection problem must not break the action
+            nodes = []
+        try:
+            if nodes:
+                started = int(self._plugin_manager.plugin_run_on_nodes(nodes))
+            else:
+                started = int(self._plugin_manager.plugin_run_on_nodes(None))
+            if started:
+                # The scope really used: the selection, or the whole map when there is
+                # none — the count comes from what the plugins were actually given.
+                count = len(nodes) if nodes else len(self._plugin_manager.node_records())
+                self.statusBar().showMessage(
+                    self.t("plugins.status.run_on_nodes", count=count), 8000)
+            else:
+                # Nothing could run: no node in the plugin registry (an unsaved map) or
+                # no plugin implementing the hook — the status line says which. The
+                # `plugins.run_hint` wording is reused deliberately (one key, one fact:
+                # "add a server to use plugin commands on nodes").
+                self.statusBar().showMessage(
+                    self.t("plugins.no_selection")
+                    if not self._plugin_manager.node_records()
+                    else self.t("plugins.run_hint"), 8000)
+        except Exception as e:  # noqa: BLE001 — an action must never crash the window
+            if self.log:
+                self.log.warning(f"Plugin run_on_nodes failed: {e}")
+
+    def _plugin_tooltip(self, rec) -> str:
+        """The tooltip of one plugin row: the version + the description, or the failure.
+
+        The plugin's own strings (name/version/description) are the author's text — they
+        are NOT i18n keys (the frozen contract: plugin strings stay outside the parity
+        policy, `PLUGINS.md`). Only the failure sentence is translated.
+        """
+        if rec.failed:
+            return self.t("plugins.status.error",
+                          name=rec.label(), error=rec.detail or rec.error)
+        text = f"v{rec.version}" if rec.version else ""
+        if rec.description:
+            text = f"{text} — {rec.description}" if text else rec.description
+        return text
+
+    def _on_plugin_toggled(self, plugin_id: str, enabled: bool):
+        """The enable/disable switch of one plugin row (persisted in config.json)."""
+        try:
+            ok = bool(self._plugin_manager.set_enabled(plugin_id, enabled))
+        except Exception as e:  # noqa: BLE001 — a switch must not break the window
+            ok = False
+            if self.log:
+                self.log.warning(f"Plugin switch failed for {plugin_id!r}: {e}")
+        if not ok:
+            # The model did not move (an unknown id / a failed plugin) — put the checkbox
+            # back to the state the manager really holds instead of leaving a lie on screen.
+            self._populate_plugin_items()
+            return
+        self._report_plugin_events()
+
+    def _report_plugin_events(self):
+        """Turn the manager's events into status-bar lines (ROADMAP rc1: loaded/error/disabled).
+
+        One line per event, in order (a QStatusBar keeps the last one); when the round
+        carried an ERROR it is re-shown at the end, so a broken plugin stays the visible
+        message instead of being overwritten by the round report. The "loaded" line is
+        shown only for a RELOAD round — at startup the menu already says what is on and
+        a status line per plugin would outlive its own usefulness. Never raises.
+        """
+        try:
+            events = self._plugin_manager.drain_events()
+        except Exception:  # noqa: BLE001
+            return
+        if not events:
+            return
+        lines = []                # [(text, timeout_ms)]
+        first_error = None
+        reloading = any(ev.get("kind") == plugin_manager.EVENT_RELOADED for ev in events)
+        for ev in events:
+            kind, rec = ev.get("kind"), ev.get("record")
+            if kind == plugin_manager.EVENT_ERROR and rec is not None:
+                text = self.t("plugins.status.error",
+                              name=rec.label(), error=rec.detail or rec.error)
+                first_error = first_error or (text, 10000)
+                lines.append((text, 10000))
+            elif kind == plugin_manager.EVENT_LOADED and rec is not None and reloading:
+                lines.append((self.t("plugins.status.loaded", name=rec.label()), 5000))
+            elif kind == plugin_manager.EVENT_ENABLED and rec is not None:
+                lines.append((self.t("plugins.status.enabled", name=rec.label()), 5000))
+            elif kind == plugin_manager.EVENT_DISABLED and rec is not None:
+                lines.append((self.t("plugins.status.disabled", name=rec.label()), 5000))
+            elif kind == plugin_manager.EVENT_HOOK_ERROR:
+                # v1.4rc2: a hook that raised — drained from the queue (the signal path
+                # has already shown it live; a drain must not lose it either).
+                pid = rec.plugin_id if rec is not None else ""
+                lines.append((self.t("plugins.status.hook_failed",
+                                     name=self._plugin_label(pid),
+                                     hook=str(ev.get("hook", "")),
+                                     error=str(ev.get("error", ""))), 10000))
+            elif kind == plugin_manager.EVENT_HOOK_TIMEOUT:
+                # v1.4rc2: a hook that was abandoned after its budget.
+                pid = rec.plugin_id if rec is not None else ""
+                lines.append((self.t("plugins.status.hook_timeout",
+                                     name=self._plugin_label(pid),
+                                     hook=str(ev.get("hook", "")),
+                                     ms=int(ev.get("budget_ms", 0))), 10000))
+            elif kind == plugin_manager.EVENT_RELOADED:
+                lines.append((self.t("plugins.status.reloaded", count=int(ev.get("count", 0))), 5000))
+        if not lines:
+            return
+        if first_error is not None:
+            lines.append(first_error)   # a failure must be the message that stays
+        try:
+            for text, timeout in lines:
+                self.statusBar().showMessage(text, timeout)
+        except RuntimeError:
+            pass  # Qt teardown — the status bar is already destroyed
+
+    def _plugin_label(self, plugin_id: str) -> str:
+        """The display name of a plugin id (the id itself when the record is gone)."""
+        try:
+            rec = self._plugin_manager.get(plugin_id)
+            if rec is not None:
+                return rec.label()
+        except Exception:  # noqa: BLE001
+            pass
+        return plugin_id or "?"
+
+    def _on_plugin_status_requested(self, plugin_id: str, text: str, timeout_ms: int):
+        """v1.4rc2: `ctx.status()` — a status-bar line with the TOKEN GUARD.
+
+        A plugin may call this from a worker thread (the manager's signal carries it to
+        the GUI thread). The guard is the v1.2.2 pattern of the dock's status line: every
+        message takes a fresh token and the pending auto-clear of an older one is
+        invalidated, so a slow asynchronous result can never blank a newer message.
+        """
+        try:
+            message = str(text)
+            if not message:
+                return
+            token = next(self._plugin_status_tokens)
+            self._plugin_status_token = token
+            self.statusBar().showMessage(message, max(0, int(timeout_ms)))
+            if int(timeout_ms) > 0:
+                QTimer.singleShot(int(timeout_ms), lambda tk=token: self._expire_plugin_status(tk))
+        except (RuntimeError, TypeError, ValueError):
+            pass  # Qt teardown / a broken timeout — a plugin line must never break the UI
+
+    def _expire_plugin_status(self, token):
+        """The auto-clear of a plugin status line — only if nothing newer arrived."""
+        try:
+            if token == self._plugin_status_token:
+                self.statusBar().clearMessage()
+        except RuntimeError:
+            pass  # Qt teardown
+
+    def _on_plugin_hook_failed(self, plugin_id: str, hook_name: str, detail: str):
+        """v1.4rc2: a hook raised — the user hears about it (the contract's "never throws")."""
+        try:
+            self.statusBar().showMessage(
+                self.t("plugins.status.hook_failed", name=self._plugin_label(plugin_id),
+                       hook=hook_name, error=detail), 10000)
+        except (RuntimeError, AttributeError):
+            pass
+
+    def _on_plugin_hook_timeout(self, plugin_id: str, hook_name: str, budget_ms: int):
+        """v1.4rc2: a hook was abandoned after its budget — the app keeps living."""
+        try:
+            self.statusBar().showMessage(
+                self.t("plugins.status.hook_timeout", name=self._plugin_label(plugin_id),
+                       hook=hook_name, ms=int(budget_ms)), 10000)
+        except (RuntimeError, AttributeError):
+            pass
 
     def _setup_command_palette(self):
         """v0.9.2: create the command palette and the Ctrl+K hotkey."""
@@ -2662,6 +3188,11 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
 
         menu = QMenu(self)  # v0.9.9.4: the panel fills it; the window creates and shows it
         self.sidebar.fill_context_menu(menu, node)
+        # v1.4rc3 (ROADMAP task 7): the plugin hooks append their rows to the SAME menu
+        # (the frozen contract names "the node context menu of the map or of the
+        # sidebar" as one surface). The panel passed the rows of the real tree, so the
+        # node travels as its ID — the manager narrows it to a plugin node record.
+        self._extend_node_context_menu(menu, node.data.id)
 
         try:
             menu.exec(self.tree.mapToGlobal(pos))

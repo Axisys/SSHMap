@@ -603,7 +603,37 @@ class MapView(QGraphicsView):
             super().contextMenuEvent(event)
             return
         scene_pos = self.mapToScene(self._event_point(event))
+        menu = self.build_context_menu(scene_pos)
 
+        if not menu.isEmpty():
+            # AUDIT v0.7.2 (medium #9): we don't swallow exceptions wholesale — a bare "pass"
+            # silently turned any error into "the menu simply didn't open". Coordinates are
+            # already converted to QPoint by the explicit helper above; if something still
+            # goes wrong, let it be visible (log + traceback), not invisible.
+            try:
+                menu.exec(self._event_global_point(event))
+            except Exception as e:  # noqa: BLE001 — a GUI component must not crash the app
+                # v1.0-fix (audit #11): logger instead of print to stderr, like the rest of the code.
+                try:
+                    from modules.logger import get_logger
+                    get_logger(__name__).error(f"contextMenuEvent: menu.exec failed: {e}")
+                except Exception:  # noqa: BLE001 — a logger failure must not break the context menu
+                    pass
+        else:
+            super().contextMenuEvent(event)
+
+    def build_context_menu(self, scene_pos):
+        """The node/note/arrow/empty-space context menu for a scene point.
+
+        v1.4rc3: extracted from `contextMenuEvent()` so the composition is reachable
+        WITHOUT showing the menu — the project's test-seam convention for QMenu
+        (`tests/test_context_menus.py`: no `menu.exec()` in a test, the QActions are
+        triggered directly). The returned QMenu owns its QActions; the caller shows it
+        and must keep the wrapper alive until then (the gotcha #9 pattern).
+        """
+        scene = self.scene()
+        if scene is None:
+            return QMenu(self)
         win = self.window()
         node, arrow, note = self._classify_at(scene_pos)
         menu = QMenu(self)
@@ -741,6 +771,25 @@ class MapView(QGraphicsView):
                 act_delnode = menu.addAction(_t("ctx.delete_server"))
                 act_delnode.triggered.connect(
                     lambda _=False, n=win_node: self.window()._remove_node_guarded(n))
+            # ── v1.4rc3 (plugin foundation, task 7): the plugin rows ──────────────
+            # The frozen API v1 contract (`PLUGINS.md` §3) gives a plugin
+            # `extend_node_context_menu(menu, nodes)`: the manager calls it
+            # synchronously on the GUI thread (200 ms budget, "never throws") and
+            # hands over the live QMenu plus the narrowed node records — never the
+            # scene objects. The call sits LAST in the node block, so a plugin's
+            # rows live under the built-in ones; `_extend_node_context_menu()`
+            # re-runs the QAction guard (a plugin's QAction wrapper must outlive
+            # the Python frame that created it — gotcha #9).
+            if hasattr(win, "_extend_node_context_menu"):
+                fn = getattr(win, "_extend_node_context_menu")
+                try:
+                    fn(menu, win_node)
+                except Exception as e:  # noqa: BLE001 — a plugin must not break the menu
+                    try:
+                        from modules.logger import get_logger
+                        get_logger(__name__).warning(f"plugin context menu failed: {e}")
+                    except Exception:  # noqa: BLE001
+                        pass
 
         # ── v0.9.3: group operations on multi-selection ─────────
         if node is not None and hasattr(win, "selected_nodes"):
@@ -841,22 +890,7 @@ class MapView(QGraphicsView):
                         scene.remove_group(g)
                 act_dg.triggered.connect(_del_grp)
 
-        if not menu.isEmpty():
-            # AUDIT v0.7.2 (medium #9): we don't swallow exceptions wholesale — a bare "pass"
-            # silently turned any error into "the menu simply didn't open". Coordinates are
-            # already converted to QPoint by the explicit helper above; if something still
-            # goes wrong, let it be visible (log + traceback), not invisible.
-            try:
-                menu.exec(self._event_global_point(event))
-            except Exception as e:  # noqa: BLE001 — a GUI component must not crash the app
-                # v1.0-fix (audit #11): logger instead of print to stderr, like the rest of the code.
-                try:
-                    from modules.logger import get_logger
-                    get_logger(__name__).error(f"contextMenuEvent: menu.exec failed: {e}")
-                except Exception:  # noqa: BLE001 — a logger failure must not break the context menu
-                    pass
-        else:
-            super().contextMenuEvent(event)
+        return menu
 
     def _toggle_and_mark(self, node):
         """v0.8.4 (former DESIGN.md §D): toggle_collapsed + mark the project as modified."""

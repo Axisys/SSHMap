@@ -118,6 +118,14 @@ HOTKEY_ACTIONS: Dict[str, dict] = {
     "profile.manage":       {"label": "profile.manage",       "default": ""},
     "help.open_logs":       {"label": "help.open_logs",       "default": ""},
     "help.about":           {"label": "about.open",           "default": ""},
+    # v1.4rc1 (plugin foundation): "Reload plugins" — a re-discovery of the plugin
+    # sources (entry points + ~/.sshmap/plugins/*.py) without a restart. No hotkey out
+    # of the box; assignable like every other action.
+    "plugins.reload":       {"label": "plugins.reload",       "default": ""},
+    # v1.4rc3 (ROADMAP task 8): "Run on selected servers" — the `run_on_nodes` hook of
+    # every loaded plugin for the current selection. No hotkey out of the box (the item
+    # is enabled only while a plugin really implements the hook).
+    "plugins.run_on_nodes": {"label": "plugins.run_on_nodes", "default": ""},
 }
 
 # v1.3.3.3: the actions that ship WITHOUT a hotkey (an empty registry default).

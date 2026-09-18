@@ -349,6 +349,27 @@ def _draw_magnifier(p):
     p.drawPath(handle)
 
 
+def _draw_plugin(p):
+    """v1.4rc3: a puzzle piece — the plugin glyph of the palette and the menu.
+
+    An outline body (a rounded square) with one knob on the right edge and a notch
+    where the neighbouring piece would sit on the top edge: readable at MENU size
+    (16 px), where the details of a real jigsaw outline would smear into a blob.
+    """
+    body = QPainterPath()
+    body.addRoundedRect(QRectF(4.0, 4.6, 10.0, 10.0), 1.6, 1.6)
+    p.drawPath(body)
+    knob = QPainterPath()
+    knob.addEllipse(QPointF(14.0, 9.6), 1.9, 1.9)
+    p.drawPath(knob)
+    notch = QPainterPath()
+    notch.moveTo(7.0, 4.6)
+    notch.lineTo(7.0, 6.6)
+    notch.lineTo(10.6, 6.6)
+    notch.lineTo(10.6, 4.6)
+    p.drawPath(notch)
+
+
 _DRAWERS = {
     "new": _draw_new,
     "open": _draw_open,
@@ -369,6 +390,9 @@ _DRAWERS = {
     # v1.3.3.3 (task 2): the zoom pair of the View menu (project-drawn, no image files)
     "zoom_in": _draw_zoom_in,
     "zoom_out": _draw_zoom_out,
+    # v1.4rc3 (plugin foundation): the puzzle glyph of the "Plugins" menu items and
+    # of the plugin section of the command palette.
+    "plugin": _draw_plugin,
 }
 
 

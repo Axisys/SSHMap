@@ -30,6 +30,14 @@ one timeout). Previously shutdown waited only probe_timeout + 2 s, which with
 ≥ 2 nodes is shorter than a whole round — the QObject was destroyed together
 with a running QThread (AUDIT v0.7.2, high #5).
 
+v1.4rc2 (plugin foundation, rc2): an optional PLUGIN STATUS PROVIDER joins a probe. The
+manager installs it with `set_status_provider(provider)`; the provider is called inside
+the pool worker (a worker thread — never the GUI thread, PLUGINS.md §6) with
+`(server_id, ssh_status)` and returns `(kind, detail) | None`. The round keeps the WORSE
+of the two by severity and the plugin's detail travels on its own `status_detail` signal
+(a tooltip line on the card); a hung plugin is abandoned by the manager's hook budget, so
+it cannot hang a round. With no provider installed the round is exactly the pre-rc2 probe.
+
 In a headless environment without a running event loop the timers never fire —
 child threads do not start, which makes the module safe for smoke tests.
 """
@@ -43,6 +51,10 @@ from PySide6.QtCore import QObject, QThread, QTimer, Signal
 STATUS_ONLINE = "online"    # green: TCP + SSH banner
 STATUS_WARN = "warn"        # yellow: port open, but no banner
 STATUS_OFFLINE = "offline"  # red: unreachable
+
+# v1.4rc2 (plugin foundation, rc2): the severity ladder of the status merge with a
+# plugin's `status_probe` (PLUGINS.md §3 — "the worse of the two by severity").
+SEVERITY = {STATUS_ONLINE: 0, STATUS_WARN: 1, STATUS_OFFLINE: 2}
 
 DEFAULT_INTERVAL_MS = 30_000   # interval between periodic checks
 DEFAULT_INTERVAL_SEC = 30      # the same, in seconds — default for the status_interval_sec key (v1.1)
@@ -141,14 +153,24 @@ class _ProbeThread(QThread):
     results — as they complete."""
 
     probed = Signal(str, str)  # (server_id, status)
+    # v1.4rc2 (plugin foundation, rc2): the plugin detail of a merged result — a tooltip
+    # line ("HTTP 503", "3 containers"). Emitted only when a plugin had something to say,
+    # so the SSH-only path stays byte-for-byte what it was.
+    detail = Signal(str, str)  # (server_id, plugin detail)
 
     def __init__(self, targets, timeout: float = PROBE_TIMEOUT_S, parent=None,
                  cancel: "threading.Event | None" = None,
-                 max_parallel: int = DEFAULT_MAX_PARALLEL):
+                 max_parallel: int = DEFAULT_MAX_PARALLEL,
+                 status_provider=None):
         super().__init__(parent)
         self._targets = list(targets)  # [(id, host, port), ...]
         self._timeout = max(0.2, float(timeout))
         self._cancel = cancel
+        # v1.4rc2: the plugin status provider — `provider(server_id, ssh_status)` returns
+        # `(kind, detail) | None` and is called INSIDE the pool worker (a worker thread,
+        # never the GUI thread: the PLUGINS.md §6 discipline). The manager owns the hook
+        # budget, so a hung plugin cannot hang the round.
+        self._status_provider = status_provider
         try:
             mp = int(max_parallel)
         except (TypeError, ValueError):
@@ -173,12 +195,22 @@ class _ProbeThread(QThread):
             # (FIFO of a single sender) are preserved unchanged.
             for fut in as_completed(futures):
                 try:
-                    status = fut.result()
+                    answer = fut.result()
                 except Exception:
-                    status = STATUS_OFFLINE  # a probe must not crash the round
-                if status is None:
+                    answer = (STATUS_OFFLINE, "")  # a probe must not crash the round
+                if answer is None:
                     continue  # probe cancelled before it started — no result (as before)
+                if isinstance(answer, tuple):
+                    status, detail = answer
+                else:  # a foreign return shape (an exotic monkeypatch) — status only
+                    status, detail = answer, ""
+                if status is None:
+                    continue
                 self.probed.emit(futures[fut], status)
+                if detail:
+                    # v1.4rc2: after `probed`, so a receiver that reacts to the status
+                    # (node.set_status) is already in the detail-aware state.
+                    self.detail.emit(futures[fut], detail)
 
     def _probe_one(self, sid: str, host: str, port: int):
         """One probe in a pool worker (the network timeout is bounded by timeout).
@@ -189,13 +221,33 @@ class _ProbeThread(QThread):
         "exit between nodes". Without this check cancellation would be useless: the
         submit loop hands all N tasks to the pool in microseconds, and the round would
         run out the whole ceil(N/mp) × timeout.
+
+        v1.4rc2: the answer is `(status, plugin_detail)` — the SSH probe's result MERGED
+        with the status plugins' opinions (the worse by severity, the details
+        concatenated, `PLUGINS.md` §3). A plugin can only make a status worse, never
+        better: the SSH probe is the transport-level truth.
         """
         if self._cancel is not None and self._cancel.is_set():
             return None
         try:
-            return probe_ssh(host, port, self._timeout)
+            status = probe_ssh(host, port, self._timeout)
         except Exception:
-            return STATUS_OFFLINE  # a probe must not crash the round
+            status = STATUS_OFFLINE  # a probe must not crash the round
+        detail = ""
+        if self._status_provider is not None:
+            try:
+                merged = self._status_provider(sid, status)
+            except Exception:
+                merged = None  # a broken provider never breaks a round
+            if merged:
+                try:
+                    merged_status, merged_detail = merged[0], merged[1]
+                    if merged_status in SEVERITY:
+                        status = merged_status
+                    detail = str(merged_detail or "")
+                except (IndexError, TypeError):
+                    detail = ""
+        return status, detail
 
 
 class StatusChecker(QObject):
@@ -214,6 +266,9 @@ class StatusChecker(QObject):
 
     status_changed = Signal(str, str)
     round_finished = Signal(list)
+    # v1.4rc2 (plugin foundation, rc2): the optional plugin detail of a merged probe
+    # result — a tooltip line on the card. Emitted only when a plugin produced one.
+    status_detail = Signal(str, str)
 
     def __init__(self, interval_ms: int = DEFAULT_INTERVAL_MS,
                  probe_timeout: float = PROBE_TIMEOUT_S,
@@ -229,6 +284,8 @@ class StatusChecker(QObject):
         self._targets: list = []          # [(id, host, port), ...]
         self._busy = False                # is a round already running?
         self._last_results: dict = {}     # id -> last status
+        self._last_details: dict = {}     # id -> last plugin detail (v1.4rc2)
+        self._status_provider = None      # v1.4rc2: provider(sid, ssh_status) -> (kind, detail)
         self._thread: _ProbeThread | None = None
         self._cancel = threading.Event()  # AUDIT v0.7.2 #5: cancel the current round
 
@@ -305,6 +362,21 @@ class StatusChecker(QObject):
             mp = DEFAULT_MAX_PARALLEL
         self._max_parallel = max(1, min(mp, MAX_PARALLEL_LIMIT))
 
+    def set_status_provider(self, provider) -> None:
+        """v1.4rc2: install the plugin status provider (`provider(sid, ssh_status)`).
+
+        The provider returns `(kind, detail) | None` and is called INSIDE the round's pool
+        worker — a worker thread, never the GUI thread (PLUGINS.md §6). The plugin manager
+        owns the hook budget, so a hung plugin cannot hang a round; a provider that raises
+        is ignored (the SSH probe's own result stands). `None` removes it — the round is
+        then exactly the pre-v1.4rc2 probe.
+        """
+        self._status_provider = provider if callable(provider) else None
+
+    def last_detail(self, server_id: str) -> str:
+        """v1.4rc2: the last plugin detail of the server ("" — none was ever reported)."""
+        return self._last_details.get(server_id, "")
+
     def set_servers(self, servers):
         """Update the target list. `servers` — an iterable of (id, host, port)."""
         self._targets = _build_targets(servers)
@@ -345,13 +417,20 @@ class StatusChecker(QObject):
         self._busy = True
         self._cancel.clear()  # new round — clear the previous round's cancel flag
         thread = _ProbeThread(targets, self._probe_timeout, parent=self,
-                              cancel=self._cancel, max_parallel=self._max_parallel)
+                              cancel=self._cancel, max_parallel=self._max_parallel,
+                              status_provider=self._status_provider)
         results = []
 
         def _on_probed(sid: str, status: str):
             results.append((sid, status))
             self._last_results[sid] = status
             self.status_changed.emit(sid, status)
+
+        def _on_detail(sid: str, detail: str):
+            # v1.4rc2: the plugin detail of a merged result travels on its own signal, so
+            # `status_changed` (and every existing receiver) keeps its exact semantics.
+            self._last_details[sid] = detail
+            self.status_detail.emit(sid, detail)
 
         def _on_done():
             self._busy = False
@@ -368,6 +447,7 @@ class StatusChecker(QObject):
 
         self._thread = thread
         thread.probed.connect(_on_probed)
+        thread.detail.connect(_on_detail)
         thread.finished.connect(_on_done)
         thread.start()
         return True

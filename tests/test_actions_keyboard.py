@@ -76,6 +76,11 @@ EMPTY_DEFAULT_ACTIONS = {
     "file.export_svg",
     "file.backups", "file.restore_autosave", "file.exit",
     "profile.manage", "help.open_logs", "help.about",
+    # v1.4rc1 (the plugin foundation): the "Reload plugins" menu item of the new menu.
+    "plugins.reload",
+    # v1.4rc3 (the plugin foundation): "Run on selected servers" — the `run_on_nodes`
+    # hook of every loaded plugin for the current selection.
+    "plugins.run_on_nodes",
 }
 
 # v1.3.3.3 i18n additions (13 keys: 477 → 490).
@@ -150,9 +155,9 @@ class _FakeChecker:
 print("== 1. the registry is complete ==")
 
 ids = HR.action_ids()
-check("registry: 41 actions — the v1.3.2 set + Save As + the zoom family + the empty defaults "
-      "(v1.3.3.7: +file.export_svg)",
-      len(ids) == 41 and len(set(ids)) == 41, str(len(ids)))
+check("registry: 43 actions — the v1.3.2 set + Save As + the zoom family + the empty defaults "
+      "(v1.3.3.7: +file.export_svg; v1.4rc1: +plugins.reload; v1.4rc3: +plugins.run_on_nodes)",
+      len(ids) == 43 and len(set(ids)) == 43, str(len(ids)))
 check("registry: the 4 new SEQUENCED actions carry exactly the promised defaults",
       {a: HR.default_sequence(a) for a in NEW_DEFAULT_ACTIONS} == NEW_DEFAULT_ACTIONS,
       str({a: HR.default_sequence(a) for a in NEW_DEFAULT_ACTIONS}))
