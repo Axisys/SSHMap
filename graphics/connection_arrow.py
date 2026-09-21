@@ -463,9 +463,34 @@ class ConnectionArrow(QGraphicsPathItem):
     def hoverEnterEvent(self, event):
         self._hover = True
         self._apply_visual_state()
+        self._report_hover_focus(True)   # v1.4.4 (ROADMAP task 4)
         super().hoverEnterEvent(event)
 
     def hoverLeaveEvent(self, event):
         self._hover = False
         self._apply_visual_state()
+        self._report_hover_focus(False)  # v1.4.4 (ROADMAP task 4)
         super().hoverLeaveEvent(event)
+
+    def _report_hover_focus(self, focused: bool):
+        """v1.4.4 (ROADMAP task 4): report the hover to the SCENE, which owns the focus state.
+
+        The arrow only REPORTS (the `MapSearchBar` split: a widget emits, the window decides).
+        `MapScene.set_hover_focus_arrow()`/`clear_hover_focus()` are idempotent and the scene
+        drops the focus by itself when the hovered arrow dies (`remove_connection`), so a fast
+        hover/un-hover can never leave a stuck dim behind.
+        """
+        scene = self.scene()
+        if scene is None:
+            return  # not on a map (a bare item in a unit test) — nothing to focus
+        try:
+            if focused:
+                setter = getattr(scene, "set_hover_focus_arrow", None)
+                if callable(setter):
+                    setter(self)
+            else:
+                clearer = getattr(scene, "clear_hover_focus", None)
+                if callable(clearer):
+                    clearer(self)
+        except RuntimeError:
+            pass  # Qt teardown — the scene is already destroyed

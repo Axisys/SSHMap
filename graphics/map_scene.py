@@ -28,13 +28,28 @@ try:  # v1.2.5: central theme (palette/radii/fonts — ui/theme.py)
 except ImportError:
     from ui import theme
 
-from PySide6.QtCore import Qt, QRectF
+try:  # v1.4.4 (ROADMAP task 3): the motion standards — the node scale-in
+    from ..ui import motion
+except ImportError:
+    try:
+        from ui import motion
+    except ImportError:  # flat layout: the ui/ directory itself is on sys.path
+        motion = None
+
+from PySide6.QtCore import Qt, QRectF, Signal
 from PySide6.QtGui import QBrush, QColor, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import QGraphicsScene
 
 
 class MapScene(QGraphicsScene):
     """The main map scene."""
+
+    # v1.4.4 (ROADMAP task 4): the HOVER FOCUS of a connection arrow.
+    # The scene owns the STATE (the arrows live here, and only the scene knows when one
+    # dies while it is hovered — `remove_connection`/`remove_server` clear it), while
+    # `MainWindow` stays the ONE owner of the resulting dim (`_apply_map_dimming` merges
+    # this focus with the tag filter and the search query, so the two can never stack).
+    hover_focus_changed = Signal(object)
 
     # v1.2.4: anchor attachment of a note — the note's top-left corner = the node's
     # top-right corner + an offset (ROADMAP "top-right corner + 12px")
@@ -46,6 +61,8 @@ class MapScene(QGraphicsScene):
         self.setSceneRect(-5000, -5000, 10000, 10000)
         self._nodes: Dict[str, ServerNode] = {}
         self._arrows: List[ConnectionArrow] = []
+        # v1.4.4: the arrow under the cursor (the hover focus), or None
+        self._hover_focus_arrow: Optional[ConnectionArrow] = None
         # v0.7.2: standalone notes (not linked to servers)
         self._notes: List[StickyNote] = []
         # v1.2.4: anchor lines of the attached notes (note_id → QGraphicsPathItem)
@@ -198,7 +215,7 @@ class MapScene(QGraphicsScene):
             painter.setPen(major_pen if (y // step) % self._grid_major_every == 0 else minor_pen)
             painter.drawLine(int(rect.left()), y, int(rect.right()), y)
 
-    def add_server(self, data: ServerData) -> ServerNode:
+    def add_server(self, data: ServerData, animate: bool = False) -> ServerNode:
         # AUDIT v0.7.2 (low #17): a uuid[:8] collision — we regenerate the id instead of
         # silently clobbering an existing node (the notes already had such a check in add_note).
         if data.id in self._nodes:
@@ -215,6 +232,15 @@ class MapScene(QGraphicsScene):
         # (the geometric invariant — see resync_group_members). Cheap: only when groups exist.
         if self._groups:
             self.resync_group_members()
+        # v1.4.4 (ROADMAP task 3): the node APPEARS — a 200 ms scale-in (scale 0.9 → 1.0 +
+        # a fade) driven by `ui/motion.py` on the item's OWN properties. Only the ADD paths
+        # ask for it (`CmdAddRemoveNode`/`CmdAddRemoveNodeBatch`); a project load, an
+        # import of a saved map and a test fixture stay instant.
+        if animate and motion is not None:
+            try:
+                motion.scale_in(node)
+            except Exception:  # noqa: BLE001 — the appearance is cosmetic, the node is on the map
+                pass
         return node
 
     def remove_server(self, node_id: str):
@@ -229,6 +255,7 @@ class MapScene(QGraphicsScene):
             arrows_to_remove = [a for a in self._arrows
                                 if a.source == node or a.target == node]
             for a in arrows_to_remove:
+                self.clear_hover_focus(a)  # v1.4.4: a dying arrow drops the hover focus
                 self.removeItem(a)
                 getattr(a, 'deleteLater', lambda: None)()  # v0.9.3 fix: we drop the C++ object (otherwise a leak until the end of the session)
                 self._arrows.remove(a)
@@ -273,11 +300,53 @@ class MapScene(QGraphicsScene):
         Returns True if the arrow was found and removed.
         """
         if arrow in self._arrows:
+            self.clear_hover_focus(arrow)  # v1.4.4: an arrow cannot stay the hover focus dead
             self.removeItem(arrow)
             getattr(arrow, 'deleteLater', lambda: None)()  # v0.9.3 fix: the C++ object must not live until the scene's death (deleteLater is available on QObject subclasses)
             self._arrows.remove(arrow)
             return True
         return False
+
+    # ── v1.4.4 (ROADMAP task 4): the arrow hover focus ─────────────────────
+
+    def hover_focus_arrow(self) -> Optional[ConnectionArrow]:
+        """The arrow under the cursor (the hover focus), or None."""
+        return self._hover_focus_arrow
+
+    def set_hover_focus_arrow(self, arrow) -> bool:
+        """The arrow under the cursor became the focus — emit `hover_focus_changed`.
+
+        Idempotent (a repeated enter of the same arrow is a no-op) and never raises: the
+        signal only carries a FACT to the window, which owns the dim state.
+        """
+        if arrow is None:
+            return self.clear_hover_focus()
+        if arrow is self._hover_focus_arrow:
+            return False
+        self._hover_focus_arrow = arrow
+        self._emit_hover_focus()
+        return True
+
+    def clear_hover_focus(self, arrow=None) -> bool:
+        """Drop the focus — the cursor left `arrow` (or that arrow died).
+
+        `arrow=None` clears unconditionally (the project was replaced / the map cleared);
+        a specific arrow clears only while IT is the focus — a fast hover/un-hover
+        sequence therefore cannot clear a focus that a newer event has already moved.
+        """
+        if self._hover_focus_arrow is None:
+            return False
+        if arrow is not None and arrow is not self._hover_focus_arrow:
+            return False
+        self._hover_focus_arrow = None
+        self._emit_hover_focus()
+        return True
+
+    def _emit_hover_focus(self):
+        try:
+            self.hover_focus_changed.emit(self._hover_focus_arrow)
+        except RuntimeError:
+            pass  # Qt teardown — the scene is already destroyed
 
     def update_connections_for_node(self, node: ServerNode):
         for arrow in self._arrows:
@@ -608,6 +677,9 @@ class MapScene(QGraphicsScene):
         self.clear()  # removes the nodes, the arrows, the notes, the groups, and the background (all the QGraphicsItems)
         self._nodes.clear()
         self._arrows.clear()
+        # v1.4.4: the hover focus died with its arrow — drop the state (and tell the window,
+        # so a dim left over by a replaced project cannot survive the switch)
+        self._hover_focus_arrow = None
         self._notes.clear()
         # v1.2.4: the anchor lines are scene items too — clear() already destroyed them
         # (the C++ objects are dead, a removeItem on them raises a RuntimeError), just

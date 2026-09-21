@@ -308,7 +308,9 @@ class CmdAddRemoveNode(_MapCommand):
 
     def redo(self):
         if self._mode == "add":
-            self._scene.add_server(self._data)
+            # v1.4.4 (ROADMAP task 3): the appearing node plays the 200 ms scale-in
+            # (ui/motion.py — the item's OWN setScale/setOpacity, never an opacity effect).
+            self._scene.add_server(self._data, animate=True)
             # v1.1.2RC1 (bonus-N11): restore the keyring password stashed when the
             # command was created (duplication scenario: undo deleted the record —
             # redo restores it).
@@ -385,7 +387,9 @@ class CmdAddRemoveNodeBatch(_MapCommand):
         for d in self._data_list:
             if self._mode == "add":
                 if not self._scene.has_node(d.id):
-                    self._scene.add_server(d)
+                    # v1.4.4 (ROADMAP task 3): a bulk import is a row of appearing cards —
+                    # every node of the batch plays the same 200 ms scale-in as a single add.
+                    self._scene.add_server(d, animate=True)
             else:
                 if self._scene.has_node(d.id):
                     self._scene.remove_server(d.id)

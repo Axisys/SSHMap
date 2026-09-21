@@ -14,7 +14,8 @@ Run:  python tests/test_sidebar_context_menu.py   (from the project root) or pyt
 """
 import os, sys, tempfile, traceback
 
-from _common import bootstrap, check, finish, wait_until, load_i18n_langs, check_i18n_parity
+from _common import (bootstrap, check, finish, wait_until, wait_for, load_i18n_langs,
+                     check_i18n_parity)
 
 ROOT, WORK = bootstrap()  # BEFORE the app module imports (the HOME isolation and faulthandler inside)
 
@@ -154,14 +155,21 @@ try:
         app.processEvents()
         check("reveal selects the node on the map", win.scene.get_selected_node() is n1,
               f"selected={win.scene.get_selected_node()}")
-        c = view.mapFromScene(n1.sceneBoundingRect().center())
-        vc = view.viewport().rect().center()
-        check("reveal centers the view on the node",
-              abs(float(c.x()) - float(vc.x())) < 3.0 and abs(float(c.y()) - float(vc.y())) < 3.0,
-              f"node=({c.x():.1f},{c.y():.1f}) vp=({vc.x():.1f},{vc.y():.1f})")
         check("reveal accent flash is visible right after the action",
               n1._pulse.isVisible() and abs(n1._pulse.opacity() - 1.0) < 1e-6,
               f"visible={n1._pulse.isVisible()} opacity={n1._pulse.opacity()}")
+        # v1.4.4 (ROADMAP task 2): "Show on map" is a smooth camera FLIGHT (ui/motion.py) —
+        # the centering is asserted once it lands (the flight is interruptible and takes 250 ms).
+        import ui.motion as _motion
+        check("reveal flies the camera (v1.4.4 motion)",
+              wait_for(lambda: not _motion.is_flying(view), timeout_ms=2500))
+        # The flight's target is the CARD centre (`card_rect_scene()` — the v1.4.2 anchor),
+        # not the shadow-inflated `sceneBoundingRect()` the pre-v1.4.4 `centerOn(node)` used.
+        c = view.mapFromScene(n1.card_rect_scene().center())
+        vc = view.viewport().rect().center()
+        check("reveal centers the view on the node's CARD",
+              abs(float(c.x()) - float(vc.x())) < 3.0 and abs(float(c.y()) - float(vc.y())) < 3.0,
+              f"node=({c.x():.1f},{c.y():.1f}) vp=({vc.x():.1f},{vc.y():.1f})")
         check("reveal does NOT change the node status (navigation signal, not a probe)",
               n1.status == status_before, f"{status_before!r} -> {n1.status!r}")
         wait_until(lambda: not n1._pulse.isVisible(), timeout_ms=2500)

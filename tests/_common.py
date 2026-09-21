@@ -259,8 +259,16 @@ def clear_cfg(*extra_paths: str) -> None:
 # in 12 i18n files + the APP_VERSION/requirements pins in 7 release-state sections).
 # The misses of the keys themselves against the code are caught by check_i18n_keys.py.
 # ─────────────────────────────────────────────────────────────────────────────
-EXPECTED_APP_VERSION = "1.4.3"  # the current release (a sentinel: it catches "a bump to the wrong version")
-EXPECTED_I18N_KEYS = 586        # the parity of the TRANSLATION keys (v1.4.3 — "Appearance:
+EXPECTED_APP_VERSION = "1.4.4"  # the current release (a sentinel: it catches "a bump to the wrong version")
+EXPECTED_I18N_KEYS = 586        # the parity of the TRANSLATION keys (v1.4.4 — "Motion: camera
+                                # flights, node scale-in, hover focus/dim on arrows": +0 keys
+                                # × en/ru/zh/de. The release is BEHAVIOUR only — `ui/motion.py`
+                                # holds the durations/easing and the two gestures, and every
+                                # user-visible string already exists (the reveal, the fit, the
+                                # dimmed cards and the accent frame are the v0.9.6/v0.9.8 ones).
+                                # So the pin STAYS 586, the v1.4.3 figure — a release may move
+                                # the pin, it is not obliged to.
+                                # (v1.4.3 — "Appearance:
                                 # light theme + accent color", the `Theme` object):
                                 # +16 keys × en/ru/zh/de. 15 under `settings.appearance.*`
                                 # — the tab label (`settings.tab.appearance`, the hub grew

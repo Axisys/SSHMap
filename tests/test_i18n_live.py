@@ -775,9 +775,10 @@ print("== §9 the release state ==")
 # ════════════════════════════════════════════════════════════════════════════
 
 check("EXPECTED_APP_VERSION is the version this test file describes",
-      EXPECTED_APP_VERSION == "1.4.3", EXPECTED_APP_VERSION)
-check("the pin counts the keys of this release (v1.4.3: +16 — \"Appearance\": the tab, the "
-      "mode pair, the accent row with its 8 swatches, the own colour, the picker and the hint)",
+      EXPECTED_APP_VERSION == "1.4.4", EXPECTED_APP_VERSION)
+check("the pin counts the keys of the SHIPPED release (v1.4.4 adds none — motion is behaviour "
+      "only, so the v1.4.3 figure stands: \"Appearance\" — the tab, the mode pair, the accent "
+      "row with its 8 swatches, the own colour, the picker and the hint)",
       EXPECTED_I18N_KEYS == 586, str(EXPECTED_I18N_KEYS))
 check_release_state(ROOT)
 for _code in i18n_lang_codes(ROOT):

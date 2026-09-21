@@ -1097,6 +1097,9 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         # v0.9.9.1: reentry guard for selection sync (instead of blockSignals — see _select_node)
         self._selection_syncing = False
         self.scene.selectionChanged.connect(self._sync_selection_state)
+        # v1.4.4 (ROADMAP task 4): the scene reports the hover focus of an ARROW; the
+        # window stays the ONE owner of the resulting dim (`_apply_map_dimming`).
+        self.scene.hover_focus_changed.connect(self._on_hover_focus_changed)
         self.view = MapView(self.scene, self)
 
         # v0.8.3: undo stack — dirty by index, refresh after undo/redo
@@ -2970,7 +2973,7 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
                 self.log.exception(f"Error updating server {node.data.alias}")
             QMessageBox.critical(self, self.t("msg.error_title"), self.t("msg.update_failed", error=str(e)))
 
-    def _select_node(self, node: ServerNode, center: bool = False):
+    def _select_node(self, node: ServerNode, center: bool = False, smooth: bool = False):
         # v0.9.9.1: a reentry guard instead of scene.blockSignals — the other
         # selectionChanged slots keep working during the programmatic change; the echo
         # handler returns immediately on the flag, and the explicit sync below
@@ -2986,7 +2989,45 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         # and the accent still work; no exceptions and no auto-show of the map). All paths
         # are covered: "Show on map" (_reveal_node_on_map) and the search navigation Enter/Shift+Enter.
         if center and not getattr(self, "_map_collapsed", False):
+            # v1.4.4 (ROADMAP task 2): `smooth=True` is the "Show on map" reveal — the camera
+            # FLIES (ui/motion.py) instead of jumping; every other caller keeps the instant
+            # centering (a search step and the palette want the result NOW, and their tests
+            # compare the scroll state with a direct centerOn).
+            if smooth and self._fly_camera_to_node(node):
+                return
+            self.view.stop_camera_flight()  # v1.4.4: an instant move cancels a running flight
             self.view.centerOn(node)
+
+    # ── v1.4.4 (ROADMAP task 2): the camera flights ─────────────────────
+
+    def _fly_camera_to_node(self, node: "ServerNode") -> bool:
+        """Fly the camera to a node's CARD centre, keeping the current zoom (True — flying).
+
+        The reveal is a "here it is", not a zoom change: the target SCALE is the live one,
+        so the flight is a pure pan. The anchor is `card_rect_scene()` (the card without
+        the v1.4.2 shadow halo) — the v1.4.2 rule for every consumer of a node's edge.
+        """
+        try:  # v1.4.4: the motion standards (ui/motion.py)
+            from ui.motion import fly_camera
+        except ImportError:  # flat launch from the project root
+            try:
+                from motion import fly_camera
+            except ImportError:
+                return False
+        getter = getattr(node, "card_rect_scene", None)
+        try:
+            rect = getter() if callable(getter) else node.sceneBoundingRect()
+        except (RuntimeError, AttributeError):
+            return False
+        return fly_camera(self.view, self.view.zoom, rect.center()) is not None
+
+    def _on_hover_focus_changed(self, _arrow=None):
+        """v1.4.4 (ROADMAP task 4): the arrow hover focus moved — recompute the ONE dim state.
+
+        The arrow's hover is a REASON to re-evaluate the map, never a second writer of the
+        dim: `_apply_map_dimming` merges the hover focus with the tag filter and the search.
+        """
+        self._apply_map_dimming()
 
     def _sync_selection_state(self):
         # v0.9.9.1: reentry guard — while the programmatic selection change is in flight,
@@ -3481,15 +3522,17 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
                 self.log.warning(f"sidebar context menu exec failed: {e}")
 
     def _reveal_node_on_map(self, node: "ServerNode"):
-        """v0.9.6 (ROADMAP #1): "Show on map" — centering + an accent.
+        """v0.9.6 (ROADMAP #1): "Show on map" — a smooth flight + an accent.
 
         Selecting the node (the tree row and the map frame are synced via
-        _sync_selection_state); centerOn — the ready-made _select_node(center=True) path;
-        the accent — the ServerNode.reveal_flash flash frame (the set_status pulse pattern).
+        _sync_selection_state); the camera — the `_select_node(center=True, smooth=True)`
+        path, which v1.4.4 (ROADMAP task 2) turns into a `ui/motion.py` FLIGHT (250 ms,
+        OutQuad, interruptible) instead of an instant jump; the accent — the
+        ServerNode.reveal_flash flash frame (the set_status pulse pattern).
         """
         if node is None or node.scene() is None:
             return  # the node was removed while the menu was open
-        self._select_node(node, center=True)
+        self._select_node(node, center=True, smooth=True)
         flash = getattr(node, "reveal_flash", None)
         if callable(flash):
             try:
@@ -3523,18 +3566,36 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         if hasattr(self, "tree"):
             self.refresh_sidebar()
 
+    def _hover_focus(self):
+        """v1.4.4 (ROADMAP task 4): the arrow under the cursor (the scene's focus), or None."""
+        try:
+            getter = getattr(self.scene, "hover_focus_arrow", None)
+            return getter() if callable(getter) else None
+        except (AttributeError, RuntimeError):
+            return None
+
     def _apply_map_dimming(self):
-        """v0.9.4/v0.9.8: dimming + highlighting of the active filters on the map.
+        """v0.9.4/v0.9.8/v1.4.4: dimming + highlighting of the active filters on the map.
 
         A node "glows" only if it passes ALL active filters (the same semantics as in
         the sidebar — refresh_sidebar applies the query and the tag at once):
         - the v0.9.4 tag filter: nodes without the selected tag are dimmed;
         - the v0.9.8 map search (Ctrl+F): non-matches are dimmed,
-          matches get the accent frame (ServerNode.set_search_match).
+          matches get the accent frame (ServerNode.set_search_match);
+        - the v1.4.4 arrow hover focus (ROADMAP task 4): hovering a connection highlights
+          its TWO ends and dims everything else. It is merged HERE on purpose — this method
+          is the single owner of the dim state, so the hover, the tag filter and the search
+          cannot stack into a "stuck" opacity (the ROADMAP's "one owner" rule).
         The arrows are not touched: connections between dimmed nodes are read from context.
         """
         active = self._active_tag_filter()
         query = (getattr(self, "_map_search_query", "") or "").strip().lower()
+        focus = self._hover_focus()
+        focus_ids = set()
+        if focus is not None:
+            for end in (getattr(focus, "source", None), getattr(focus, "target", None)):
+                if end is not None:
+                    focus_ids.add(id(end))
         try:
             nodes = list(self.scene.nodes())
         except (AttributeError, RuntimeError):
@@ -3549,9 +3610,19 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
                 match_ok = query in haystack
             else:
                 match_ok = True
+            dimmed = not (tag_ok and match_ok)
+            matched = bool(query) and match_ok
+            if focus is not None:
+                # The hover focus wins: the two ends are read, the rest recedes — and the
+                # accent frame belongs to the hovered ends alone while the hover lasts
+                # (the search's own frames come back the moment the cursor leaves).
+                if id(node) in focus_ids:
+                    dimmed, matched = False, True
+                else:
+                    dimmed, matched = True, False
             try:
-                node.set_dimmed(not (tag_ok and match_ok))
-                node.set_search_match(bool(query) and match_ok)
+                node.set_dimmed(dimmed)
+                node.set_search_match(matched)
             except (AttributeError, RuntimeError):
                 pass
 
@@ -3684,6 +3755,9 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
             rect = self.scene.sceneRect()
             x = min(max(x, rect.left()), rect.right())
             y = min(max(y, rect.top()), rect.bottom())
+            # v1.4.4 (ROADMAP task 1): dragging the minimap is manual control — a running
+            # camera flight is cancelled (it would otherwise keep overriding the frame).
+            self.view.stop_camera_flight()
             self.view.centerOn(x, y)
         except RuntimeError:
             pass  # Qt teardown — the view is gone
@@ -3829,6 +3903,8 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         if self._map_collapsed:
             return
         rect = self.view.content_bounding_rect()
+        # v1.4.4 (ROADMAP task 1): "center the map" is an instant move — cancel a flight
+        self.view.stop_camera_flight()
         if rect is None or rect.isEmpty():
             self.view.centerOn(0, 0)
             return
@@ -3837,11 +3913,15 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
     def _fit_to_content(self):
         """UI polish: "Fit map" — all nodes and notes inside the visible area.
 
+        v1.4.4 (ROADMAP task 2): the ACTION flies to the fit target (ui/motion.py — 250 ms,
+        OutQuad, interruptible) instead of snapping; `MapView.fit_to_content()` stays the
+        instant primitive for tools/tests and is the fallback when there is nothing to
+        frame (an empty map → the same "nothing to fit" line) or the view has no geometry yet.
         v1.2.4.1 (task 5): the map is collapsed — a no-op (no exceptions, no auto-show).
         """
         if self._map_collapsed:
             return
-        if not self.view.fit_to_content():
+        if not self.view.fly_to_content():
             self.statusBar().showMessage(self.t("status.fit_nothing"))
 
     def _on_zoom_changed(self, zoom: float):

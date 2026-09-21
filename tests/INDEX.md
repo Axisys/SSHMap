@@ -128,6 +128,7 @@ of the file itself.
 | `test_map_bigpicture.py` | — | v1.4.2 — The big-picture map level: the minimap, the cached card drop-shadow, the group fold. |
 | `test_map_search.py` | — | Regression v0.9.8 — map search (Ctrl+F). |
 | `test_menu_actions_regression.py` | — | v1.2.4-fix — REGRESSION: the real click path on checkable menu items (QAction.trigger()). |
+| `test_motion.py` | — | v1.4.4 — Motion: the standards, the camera flights, the node scale-in, the hover focus/dim. |
 | `test_multi_input.py` | — | v1.2.3 — Multi-input (broadcast of the active session's keystrokes to all other open sessions, ROADMAP v1.2.3). |
 | `test_multi_input_e2e.py` | — | v1.2.4 — Multi-input: E2E on REAL SSH channels (paramiko), no fake threads. |
 | `test_node_labels.py` | — | Review fixes v0.8.0: node elide/max width, status markers in the sidebar (former smoke_test). |

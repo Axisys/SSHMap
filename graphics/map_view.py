@@ -37,6 +37,14 @@ try:  # v1.2.5: central theme (palette/radii/fonts — ui/theme.py)
 except ImportError:
     from ui import theme
 
+try:  # v1.4.4 (ROADMAP task 1/2): the motion standards — the camera flights
+    from ..ui import motion
+except ImportError:
+    try:
+        from ui import motion
+    except ImportError:  # flat layout: the ui/ directory itself is on sys.path
+        motion = None
+
 
 if TYPE_CHECKING:
     from ..graphics.map_scene import MapScene
@@ -116,6 +124,10 @@ class MapView(QGraphicsView):
     # v1.3.3.3 (task 2): one keyboard step of the Zoom In / Zoom Out actions
     # (the wheel keeps its own cursor-anchored 1.15/0.87 factors).
     ZOOM_STEP = 1.25
+    # v1.4.4 (task 2): Qt's own margin inside `QGraphicsView::fitInView()` — the fit
+    # target of the camera flight has to reproduce it, or the flight lands next to the
+    # instant fit instead of on it.
+    FIT_VIEW_MARGIN_PX = 2
 
     @property
     def zoom(self) -> float:
@@ -131,9 +143,66 @@ class MapView(QGraphicsView):
 
     def reset_zoom(self):
         """Reset zoom to 100% and clear the transform (AUDIT v0.7.2, low #19)."""
+        self.stop_camera_flight()  # v1.4.4: an instant move always wins over a flight
         self.resetTransform()
         self._zoom = 1.0
         self._notify_zoom()
+
+    # ── v1.4.4 (ROADMAP task 1/2): the camera — flights, interruption, the fit target ──
+    # The camera is ONE state: a scale + a scene point under the centre of the viewport.
+    # `apply_camera()` is the single writer (ui/motion.py calls it every frame); a flight
+    # is always interruptible, and every INSTANT path stops a running one first, so the
+    # user's wheel/drag/navigation can never be fought by a dying animation.
+
+    def apply_camera(self, scale, center) -> bool:
+        """Move the camera NOW: the scale + the centre in one write (the motion sink).
+
+        Keeps `_zoom` and the status-bar percentage in sync with the real transform —
+        the invariant `set_zoom_and_center()` already established. Not a user action:
+        it must NOT stop a flight (the flight is what calls it).
+        """
+        try:
+            scale = float(scale)
+        except (TypeError, ValueError):
+            return False
+        if scale <= 0.0:
+            return False
+        transform = QTransform()
+        transform.scale(scale, scale)
+        self.setTransform(transform)
+        self._zoom = scale
+        try:
+            self.centerOn(center)
+        except (TypeError, RuntimeError):
+            pass  # an unusable point — the scale still landed
+        self._notify_zoom()
+        return True
+
+    def stop_camera_flight(self) -> bool:
+        """v1.4.4: cancel a running camera flight (True — one was running).
+
+        Called by the wheel, by a mouse press (a pan/drag) and by every instant
+        navigation path: manual control always wins over an animation.
+        """
+        if motion is None:
+            return False
+        return bool(motion.stop_camera(self))
+
+    @property
+    def camera_center(self) -> QPointF:
+        """The scene point under the centre of the viewport (v1.4.4)."""
+        if motion is None:
+            viewport = self.viewport()
+            return QPointF(self.mapToScene(viewport.rect().center()))
+        return motion.camera_center(self)
+
+    def fly_to(self, scale, center, ms: int = None) -> bool:
+        """v1.4.4: fly the camera to (scale, centre) instead of jumping (False — no motion API)."""
+        if motion is None:
+            return self.apply_camera(scale, center)
+        return motion.fly_camera(
+            self, scale, center,
+            motion.DURATION_NORMAL if ms is None else ms) is not None
 
     # v1.3.3.3 (ROADMAP v1.3.3.3, task 2): a step API next to reset_zoom()/
     # set_zoom_and_center() — the "View → Zoom In / Zoom Out" actions need a
@@ -171,6 +240,7 @@ class MapView(QGraphicsView):
         target = self._zoom * factor
         if not (self.ZOOM_MIN <= target <= self.ZOOM_MAX):
             return False
+        self.stop_camera_flight()  # v1.4.4: a keyboard zoom is manual control too
         viewport = self.viewport()
         if viewport is None or viewport.width() <= 0 or viewport.height() <= 0:
             return False  # not shown yet — nothing to anchor on
@@ -192,6 +262,9 @@ class MapView(QGraphicsView):
         self.resized.emit()
 
     def wheelEvent(self, event: QWheelEvent):
+        # v1.4.4 (ROADMAP task 1): the wheel is manual control — a flying camera is
+        # stopped immediately (the animation never fights the user's hand).
+        self.stop_camera_flight()
         delta = event.angleDelta().y()
         zoom_factor = 1.15 if delta > 0 else 0.87
         new_zoom = self._zoom * zoom_factor
@@ -218,11 +291,15 @@ class MapView(QGraphicsView):
         return rect
 
     def fit_to_content(self, margin: float = 80.0) -> bool:
-        """Fit the map content into the view area (KeepAspectRatio).
+        """Fit the map content into the view area (KeepAspectRatio) — the INSTANT primitive.
 
         Returns False if there is no content. Zoom is clamped to the
         [ZOOM_MIN, ZOOM_MAX] range like the wheel; _zoom is kept in sync with the transform.
+        v1.4.4 (ROADMAP task 2): the USER action ("Fit map", Ctrl+Shift+F) flies to the
+        same target through `fly_to_content()`; this method stays the instant one (tools,
+        tests and the fallback of the flight when the viewport has no geometry yet).
         """
+        self.stop_camera_flight()  # v1.4.4: a full transform reset is an instant move
         rect = self.content_bounding_rect()
         if rect is None or rect.isEmpty():
             return False
@@ -242,6 +319,51 @@ class MapView(QGraphicsView):
         self._notify_zoom()
         return True
 
+    def fit_view_target(self, margin: float = 80.0):
+        """v1.4.4 (ROADMAP task 2): the (scale, centre) `fit_to_content()` would apply.
+
+        The pure half of the fit — separated so the camera FLIGHT can fly to exactly the
+        transform the instant primitive would produce (same KeepAspectRatio arithmetic,
+        same clamp). Returns None when there is nothing to frame (an empty map) or when
+        the viewport has no geometry yet (not shown — the caller falls back to instant).
+
+        `FIT_VIEW_MARGIN_PX` mirrors Qt's own 2 px margin: `QGraphicsView::fitInView()`
+        fits into `viewport()->rect().adjusted(2, 2, -2, -2)`, and without it the flight
+        would land 0.5 % off the instant fit (measured: 0.8008 vs 0.7967 on a 1000x700
+        window — the values the test pins).
+        """
+        rect = self.content_bounding_rect()
+        if rect is None or rect.isEmpty():
+            return None
+        viewport = self.viewport()
+        if viewport is None:
+            return None
+        view_rect = QRectF(viewport.rect().adjusted(
+            self.FIT_VIEW_MARGIN_PX, self.FIT_VIEW_MARGIN_PX,
+            -self.FIT_VIEW_MARGIN_PX, -self.FIT_VIEW_MARGIN_PX))
+        if view_rect.isEmpty():
+            return None
+        adjusted = rect.adjusted(-margin, -margin, margin, margin)
+        width = float(adjusted.width())
+        height = float(adjusted.height())
+        if width <= 0.0 or height <= 0.0:
+            return None
+        scale = min(view_rect.width() / width, view_rect.height() / height)
+        scale = max(self.ZOOM_MIN, min(self.ZOOM_MAX, scale))
+        return scale, QPointF(rect.center())
+
+    def fly_to_content(self, margin: float = 80.0, ms: int = None) -> bool:
+        """v1.4.4 (ROADMAP task 2): "Fit map" as a smooth camera FLIGHT (250 ms, OutQuad).
+
+        The same `fit_to_content()` result, reached in motion instead of a snap. Nothing
+        to frame (an empty map) → False, exactly as the instant primitive; no viewport
+        geometry yet / no motion module → the instant primitive decides.
+        """
+        target = self.fit_view_target(margin)
+        if target is None or motion is None:
+            return self.fit_to_content(margin)
+        return self.fly_to(target[0], target[1], ms)
+
     def set_zoom_and_center(self, zoom: float, center_x: float, center_y: float):
         """Apply the zoom and center saved in the project (UI polish: previously ignored)."""
         try:
@@ -250,6 +372,7 @@ class MapView(QGraphicsView):
             cy = float(center_y)
         except (TypeError, ValueError):
             return  # corrupt values from another file — keep the current view
+        self.stop_camera_flight()  # v1.4.4: restoring a saved view is an instant move
         if not (self.ZOOM_MIN <= z <= self.ZOOM_MAX):
             z = max(self.ZOOM_MIN, min(self.ZOOM_MAX, z))
         self.resetTransform()
@@ -322,6 +445,9 @@ class MapView(QGraphicsView):
         self.unsetCursor()
 
     def mousePressEvent(self, event: QMouseEvent):
+        # v1.4.4 (ROADMAP task 1): any press is manual control — a flying camera is
+        # stopped before the gesture starts (pan, node drag, rubber band, connect drag).
+        self.stop_camera_flight()
         # Shift+LMB on a node → create a connection by dragging (v0.7).
         # Don't pass the event on: the node doesn't move and panning doesn't start.
         if (event.button() == Qt.LeftButton

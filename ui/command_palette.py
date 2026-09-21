@@ -239,6 +239,12 @@ class CommandPalette(QDialog):
         node.setSelected(True)
         if mw is not None and hasattr(mw, "view") \
                 and not getattr(mw, "_map_collapsed", False):
+            # v1.4.4 (ROADMAP task 1): the palette jumps to the node NOW — a running
+            # camera flight (a sidebar reveal / a fit) is cancelled first, otherwise the
+            # animation would keep moving the camera over the palette's centering.
+            stopper = getattr(mw.view, "stop_camera_flight", None)
+            if callable(stopper):
+                stopper()
             mw.view.centerOn(node)
 
     # ── Show / filter / run ─────────────────────────────────────

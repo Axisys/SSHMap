@@ -21,7 +21,7 @@ pipx install .                    # or pip install . → sshmap command (install
 Tests — plain Python scripts without pytest: topical `test_*.py` files + a single parallel runner; each file is an isolated process (sandbox HOME, offscreen Qt, UTF-8 stdout — nothing extra needed on cp1251 consoles or in CI):
 
 ```bash
-python tests/run_all.py               # everything (85 test files + i18n check); auto workers = cores (cap 16), longest file first; exit 0 ⇔ all green
+python tests/run_all.py               # everything (86 test files + i18n check); auto workers = cores (cap 16), longest file first; exit 0 ⇔ all green
 python tests/run_all.py --fast        # daily profile: skips files tagged slow/network
 python tests/run_all.py --tag network # only network-tagged files — real-network sections run ONLY on explicit opt-in (env SSHMAP_TEST_TAGS)
 python tests/run_all.py --failed-only # re-run only files that failed in the last run (cache test-results/last_run.json)
@@ -63,6 +63,7 @@ dialogs/                     # AddServer, SSHConnect (+ external terminal), Conn
                              # SshConfigImport (the checkbox picker of the ~/.ssh/config import)
 ui/                          # main_window.py — façade over ProjectIOMixin / NodeOpsMixin / SshMixin; sidebar.py; map_search_bar.py (Ctrl+F);
                              # minimap.py (the big-picture panel: the scheme at fit scale + a viewport frame);
+                             # motion.py (the animation standards: camera flights, the node scale-in);
                              # command_palette.py (Ctrl+K); hotkey_registry.py (configurable hotkeys); about_dialog.py (Help → About);
                              # icons.py; mixin_support.py; theme.py (the `Theme` object — DARK/LIGHT, the accent hue; pure data);
                              # theme_qss.py (the palette + the ONE QSS builder + the live switch)
@@ -116,6 +117,12 @@ Format invariants:
 - **A card paints its shadow, it does not define it.** `ServerNode.boundingRect()` is the card + the cached shadow halo (`_shadow_pixmap()`, one pixmap per card SIZE — never a `QGraphicsDropShadowEffect`), while every ANCHOR (arrow tips, pinned notes, group membership, the connect-drag band) goes through **`card_rect_scene()`** — the card without the halo. Add a new consumer of a node's edge through that API, not through `sceneBoundingRect()`, or it will sit 9 px off the card. The SVG export hides the halos while it renders (a pixmap would land in the file as base64); PNG/PDF keep them.
 - **Folding a group is a real, undoable change** (`NodeGroup.collapse()/expand()`, `CmdToggleGroupCollapse`): the members become their badges in a grid inside a re-fitted frame, the pre-fold arrangement is snapshotted as LOCAL offsets and restored on unfold, the members are not draggable while folded, and the state persists in the project file as optional group fields (`collapsed`, `expanded_width/height`). A group restored folded from a file unfolds in place (the card layout of a previous session is not stored).
 - **The minimap** (`ui/minimap.py`) is a floating child of `MapView` — never a scene item, so it stays out of every export. It keeps ONE cached layer of `(rect, colour)` in scene coordinates, rebuilt on a debounced `scene.changed`, and asks the window for a camera move with `center_requested` (the window owns `centerOn`).
+
+### Motion (v1.4.4)
+- **One module owns the timing** (`ui/motion.py`): 150 / 250 / 300 ms and one easing (OutQuad) — nothing invents its own numbers next to a call site.
+- **The map moves smoothly**: "Show on map" from the sidebar and Fit map (Ctrl+Shift+F) fly the camera (250 ms) instead of jumping, and a newly added card scales in (0.9 → 1.0, 200 ms, its own opacity — never an opacity effect). A flight interpolates the zoom AND the centre, and the status-bar percentage follows.
+- **Everything is interruptible, and the user always wins**: the wheel, a mouse drag and every instant navigation (the palette, a search step, the minimap drag) stop a running flight where it is; a second flight starts from the current camera, never from the abandoned target. A cancelled or undone scale-in settles the card back to unit, so `boundingRect()`/`edge_point` are never left shifted.
+- **Hovering a connection focuses it**: its two nodes light up with the accent frame while every other card dims to 25 %; leaving restores the map. The dim has ONE owner (`MainWindow._apply_map_dimming`), so the hover, the tag filter and the map search merge instead of stacking.
 
 ### Theme (v1.4.3)
 - **One `Theme` object is the whole look.** `ui/theme.py` holds `DARK` (the default) and `LIGHT` — the same field set, colours only — and the accent is a HUE that generates its three shades. The module is pure data (no PySide6); the Qt half (the `QPalette`, the application QSS and the switch) is `ui/theme_qss.py`.
@@ -304,6 +311,7 @@ en (default) / ru / zh / de — and any language you drop in, without touching t
 - your own languages live in `~/.sshmap/languages/` (a file there shadows the built-in one of the same code); `Help → Language` rescans, "Settings → Language" imports and exports
 - settings hub — single `~/.sshmap/config.json`, live application without restart, every user-facing key in one place
 - **dark or light theme and your own accent colour** (v1.4.3) — "Settings → Appearance": the dark theme stays the default, the light one is a slate palette built on the same `Theme` object, and the accent is one hue (eight presets or any colour you pick) that generates its own shades. It applies live, before you press OK — and Cancel puts the previous look back
+- **motion** (v1.4.4) — the map glides instead of jumping (Show on map, Fit map), a new server scales in, and hovering a connection dims everything but its two ends; every animation is interruptible, so the wheel or a drag always wins
 - hotkeys + command palette (Ctrl+K) — the full action registry is editable in "Settings → Hotkeys" (reset to defaults, duplicates flagged) and applied without restart
 - Help → About — the version, the license, the `~/.sshmap` paths and a hotkey cheat-sheet built from the registry
 - plugins: an installed package (`pip install sshmap-<name>-plugin`) or one file dropped into `~/.sshmap/plugins/`
@@ -320,8 +328,8 @@ en (default) / ru / zh / de — and any language you drop in, without touching t
 - plugins run inside the application's process (v1.4): a plugin with a broken C extension can take it down — install plugins you trust.
 
 **Roadmap** (tasks, order, acceptance — in ROADMAP.md):
-- **v1.4 line** — the plugin foundation, released at **v1.4** (discovery + the "Plugins" menu and the frozen API (`PLUGINS.md`), commands on selected servers, a plugin status on the card, palette commands, node-menu rows, "Run on selected servers", two working example plugins), **v1.4.1** — import from `~/.ssh/config` (with the TXT import that no longer drops the extra words of a line), **v1.4.2** — the big-picture map level (the minimap, the cached card drop-shadow, the group fold) and **v1.4.3** — the appearance (a light theme and an accent colour on one `Theme` object, switched live).
-- **Next (v1.4.4 → v1.4.7):** motion standards; a denser UI with first-run hints; list mode; syntax highlighting in the SFTP viewer.
+- **v1.4 line** — the plugin foundation, released at **v1.4** (discovery + the "Plugins" menu and the frozen API (`PLUGINS.md`), commands on selected servers, a plugin status on the card, palette commands, node-menu rows, "Run on selected servers", two working example plugins), **v1.4.1** — import from `~/.ssh/config` (with the TXT import that no longer drops the extra words of a line), **v1.4.2** — the big-picture map level (the minimap, the cached card drop-shadow, the group fold), **v1.4.3** — the appearance (a light theme and an accent colour on one `Theme` object, switched live) and **v1.4.4** — motion (smooth camera flights, the node scale-in, the arrow hover focus/dim).
+- **Next (v1.4.5 → v1.4.7):** a denser UI with first-run hints; list mode; syntax highlighting in the SFTP viewer.
 
 ---
 
