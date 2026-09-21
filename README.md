@@ -64,7 +64,8 @@ dialogs/                     # AddServer, SSHConnect (+ external terminal), Conn
 ui/                          # main_window.py — façade over ProjectIOMixin / NodeOpsMixin / SshMixin; sidebar.py; map_search_bar.py (Ctrl+F);
                              # minimap.py (the big-picture panel: the scheme at fit scale + a viewport frame);
                              # command_palette.py (Ctrl+K); hotkey_registry.py (configurable hotkeys); about_dialog.py (Help → About);
-                             # icons.py; mixin_support.py; theme.py (central UI palette, radii, fonts)
+                             # icons.py; mixin_support.py; theme.py (the `Theme` object — DARK/LIGHT, the accent hue; pure data);
+                             # theme_qss.py (the palette + the ONE QSS builder + the live switch)
 i18n/                        # t(key, **kwargs); every *.json is a language (file name = code, root "name" = display name);
                              # en/ru/zh/de with identical translation key sets (parity pinned in tests); en is the default for new users;
                              # ~/.sshmap/languages/*.json is the USER folder — it shadows the built-in file of the same code
@@ -115,6 +116,12 @@ Format invariants:
 - **A card paints its shadow, it does not define it.** `ServerNode.boundingRect()` is the card + the cached shadow halo (`_shadow_pixmap()`, one pixmap per card SIZE — never a `QGraphicsDropShadowEffect`), while every ANCHOR (arrow tips, pinned notes, group membership, the connect-drag band) goes through **`card_rect_scene()`** — the card without the halo. Add a new consumer of a node's edge through that API, not through `sceneBoundingRect()`, or it will sit 9 px off the card. The SVG export hides the halos while it renders (a pixmap would land in the file as base64); PNG/PDF keep them.
 - **Folding a group is a real, undoable change** (`NodeGroup.collapse()/expand()`, `CmdToggleGroupCollapse`): the members become their badges in a grid inside a re-fitted frame, the pre-fold arrangement is snapshotted as LOCAL offsets and restored on unfold, the members are not draggable while folded, and the state persists in the project file as optional group fields (`collapsed`, `expanded_width/height`). A group restored folded from a file unfolds in place (the card layout of a previous session is not stored).
 - **The minimap** (`ui/minimap.py`) is a floating child of `MapView` — never a scene item, so it stays out of every export. It keeps ONE cached layer of `(rect, colour)` in scene coordinates, rebuilt on a debounced `scene.changed`, and asks the window for a camera move with `center_requested` (the window owns `centerOn`).
+
+### Theme (v1.4.3)
+- **One `Theme` object is the whole look.** `ui/theme.py` holds `DARK` (the default) and `LIGHT` — the same field set, colours only — and the accent is a HUE that generates its three shades. The module is pure data (no PySide6); the Qt half (the `QPalette`, the application QSS and the switch) is `ui/theme_qss.py`.
+- **Read the theme at ACCESS time, never capture it.** The module constants resolve live (`theme.NODE_BG` follows a switch), the class-level colours are `theme.ThemeColor`/`ThemeMap` descriptors, and anything built in `__init__` (a `QBrush`, a QSS string) has to be rebuilt by a `refresh_theme()` method — `MainWindow.refresh_theme()` and `MapScene.refresh_theme()` are the two walks that ask every owner. `QApplication.setStyleSheet` re-polishes the standard controls by itself. A new widget with a stylesheet adds one entry to `theme_qss.STYLE_BUILDERS` instead of an f-string.
+- Vector icons follow the switch as well (they are cached per name and re-painted in the new tone).
+- The accent is stored as the colour you picked (`theme.accent` in `config.json`) and read back as a hue; the terminal output palettes are deliberately outside this system.
 
 ### Statuses
 `probe_ssh(host, port)`: TCP open + SSH banner → `online`; port open without a banner → `warn`; otherwise → `offline`.
@@ -169,8 +176,8 @@ Format invariants:
 - Settings — optional `terminal_*` keys in `~/.sshmap/config.json`; full list and defaults below, in "Settings".
 
 ### Settings
-- Dialog (hub, `ui/settings_dialog.py`) — QTabWidget "General / Terminal / Statuses / Autosave / Map / Hotkeys / Language"; entry points: the "Settings" menu between "View" and "Help" + a button at the bottom of the sidebar (vector gear from `ui/icons.py`); the Ctrl+K command palette picks up the item automatically.
-- Storage — a SINGLE `~/.sshmap/config.json` (`i18n.save_config`, atomic merge write): all keys are optional, defaults = behavior. Statuses, autosave, the UI options and the hotkeys apply live; terminal and external terminal read the config on next window creation/launch.
+- Dialog (hub, `ui/settings_dialog.py`) — QTabWidget "General / Appearance / Terminal / Statuses / Autosave / Map / Hotkeys / Language"; entry points: the "Settings" menu between "View" and "Help" + a button at the bottom of the sidebar (vector gear from `ui/icons.py`); the Ctrl+K command palette picks up the item automatically.
+- Storage — a SINGLE `~/.sshmap/config.json` (`i18n.save_config`, atomic merge write): all keys are optional, defaults = behavior. Statuses, autosave, the UI options, the theme and the hotkeys apply live; terminal and external terminal read the config on next window creation/launch.
 - Keys:
   - `external_terminal` (moved from a separate `~/.sshmap_settings.json`, with migration on read — the old file is deleted);
   - `terminal_palette` (`default|nord|dracula|tokyo_night`, unknown → default), `terminal_font` (family; empty → system monospace; live for open windows), `terminal_font_size` (pt 6–72, otherwise 10);
@@ -180,6 +187,7 @@ Format invariants:
   - `status_interval_sec`/`status_probe_timeout_sec`/`status_max_parallel` (defaults 30 s / 3.0 s / 16 parallel probes; live via `StatusChecker.set_interval/set_probe_timeout/set_max_parallel`);
   - `autosave_enabled/autosave_interval_sec/backup_count` (live — the autosave QTimer);
   - `language` (applied immediately, before OK);
+  - `theme` (`{"mode": "dark"|"light", "accent": "#rrggbb"}` — the "Appearance" tab: the dark theme is the default, the accent is one HUE (8 swatches or your own colour) and a broken value falls back to dark + the default sky). Applied live, before OK; Cancel puts the previous theme back;
   - `hotkeys` (a dict action_id → sequence, e.g. `"file.save": "Ctrl+S"`;
     the whole set is edited in the "Hotkeys" tab from the action registry `ui/hotkey_registry.py` —
     every one of the 45 global actions has a row, an empty string means "no hotkey" (the value the actions without a shortcut ship with) and "Reset to defaults" restores the whole map, a missing/broken value falls back to the default;
@@ -295,6 +303,7 @@ en (default) / ru / zh / de — and any language you drop in, without touching t
 - i18n: en (default) / ru / zh / de — plus any language as one dropped-in JSON file, no code changes; the UI follows a switch live
 - your own languages live in `~/.sshmap/languages/` (a file there shadows the built-in one of the same code); `Help → Language` rescans, "Settings → Language" imports and exports
 - settings hub — single `~/.sshmap/config.json`, live application without restart, every user-facing key in one place
+- **dark or light theme and your own accent colour** (v1.4.3) — "Settings → Appearance": the dark theme stays the default, the light one is a slate palette built on the same `Theme` object, and the accent is one hue (eight presets or any colour you pick) that generates its own shades. It applies live, before you press OK — and Cancel puts the previous look back
 - hotkeys + command palette (Ctrl+K) — the full action registry is editable in "Settings → Hotkeys" (reset to defaults, duplicates flagged) and applied without restart
 - Help → About — the version, the license, the `~/.sshmap` paths and a hotkey cheat-sheet built from the registry
 - plugins: an installed package (`pip install sshmap-<name>-plugin`) or one file dropped into `~/.sshmap/plugins/`
@@ -311,8 +320,8 @@ en (default) / ru / zh / de — and any language you drop in, without touching t
 - plugins run inside the application's process (v1.4): a plugin with a broken C extension can take it down — install plugins you trust.
 
 **Roadmap** (tasks, order, acceptance — in ROADMAP.md):
-- **v1.4 line** — the plugin foundation, released at **v1.4** (discovery + the "Plugins" menu and the frozen API (`PLUGINS.md`), commands on selected servers, a plugin status on the card, palette commands, node-menu rows, "Run on selected servers", two working example plugins), **v1.4.1** — import from `~/.ssh/config` (with the TXT import that no longer drops the extra words of a line) and **v1.4.2** — the big-picture map level (the minimap, the cached card drop-shadow, the group fold).
-- **Next (v1.4.3 → v1.4.7):** light theme + accent color; motion standards; a denser UI with first-run hints; list mode; syntax highlighting in the SFTP viewer.
+- **v1.4 line** — the plugin foundation, released at **v1.4** (discovery + the "Plugins" menu and the frozen API (`PLUGINS.md`), commands on selected servers, a plugin status on the card, palette commands, node-menu rows, "Run on selected servers", two working example plugins), **v1.4.1** — import from `~/.ssh/config` (with the TXT import that no longer drops the extra words of a line), **v1.4.2** — the big-picture map level (the minimap, the cached card drop-shadow, the group fold) and **v1.4.3** — the appearance (a light theme and an accent colour on one `Theme` object, switched live).
+- **Next (v1.4.4 → v1.4.7):** motion standards; a denser UI with first-run hints; list mode; syntax highlighting in the SFTP viewer.
 
 ---
 

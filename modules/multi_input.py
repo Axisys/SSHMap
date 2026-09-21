@@ -60,7 +60,24 @@ def get_translator():
 # ── Highlight: the "MULTI" frame/badge color + the frame objectName (QSS selector) ─────
 # v1.2.5: the amber accent — from the central theme (the same one as node/group selection);
 # the MULTI_ACCENT name is kept (used in the MainWindow status-bar badge QSS).
-MULTI_ACCENT = theme.SELECTION_AMBER              # amber — the mode frame/badge
+# v1.4.3 (ROADMAP task 5): MULTI_ACCENT was a module constant captured at import
+# time; it is now a callable so the mode frame/badge follows a theme switch. The
+# old spelling stays available as a live module attribute (module __getattr__ of
+# ui/theme.py does the same for the theme constants).
+
+
+def multi_accent() -> str:
+    """The multi-input accent colour of the ACTIVE theme (amber by default)."""
+    return theme.SELECTION_AMBER
+
+
+def __getattr__(name: str):
+    """PEP-562 hook: ``MULTI_ACCENT`` resolves the ACTIVE theme on every access."""
+    if name == "MULTI_ACCENT":
+        return multi_accent()
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
 MULTI_FRAME_OBJECT_NAME = "sshmap_multi_frame"    # QSS selector for the container only
 # v1.3.3.5: the frame of the terminal SPLIT PANE (the pane has no tab strip of its own,
 # so its HOST carries the frame — a separate objectName so one selector cannot leak into
@@ -345,7 +362,7 @@ def apply_container_highlight(host, on: bool) -> bool:
                 tabs.setObjectName(MULTI_FRAME_OBJECT_NAME)
                 tabs.setStyleSheet(
                     f"QTabWidget#{MULTI_FRAME_OBJECT_NAME} "
-                    f"{{ border: 2px solid {MULTI_ACCENT}; }}")
+                    f"{{ border: 2px solid {multi_accent()}; }}")
             else:
                 tabs.setObjectName("")   # symmetric reset: the frame selector is fully removed
                 tabs.setStyleSheet("")
@@ -387,7 +404,7 @@ def _highlight_split_pane(host, on: bool) -> None:
                 frame_host.setObjectName(MULTI_PANE_FRAME_OBJECT_NAME)
                 frame_host.setStyleSheet(
                     f"QWidget#{MULTI_PANE_FRAME_OBJECT_NAME} "
-                    f"{{ border: 2px solid {MULTI_ACCENT}; }}")
+                    f"{{ border: 2px solid {multi_accent()}; }}")
             else:
                 frame_host.setObjectName("")
                 frame_host.setStyleSheet("")

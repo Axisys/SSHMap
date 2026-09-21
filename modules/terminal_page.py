@@ -60,6 +60,14 @@ try:  # v1.2.5: the central theme (status labels — ui/theme.py)
 except ImportError:
     from ui import theme
 
+try:  # v1.4.3 (ROADMAP task 4): the ONE QSS registry
+    from ..ui import theme_qss
+except ImportError:
+    try:
+        from ui import theme_qss
+    except ImportError:  # flat layout: the ui/ directory itself is on sys.path
+        theme_qss = None
+
 
 def _st_module():
     """The ssh_terminal module at call time (a test seam for attribute substitution).
@@ -227,8 +235,12 @@ class TerminalSessionPage(QWidget):
         layout = QVBoxLayout(self)
 
         self.status_label = QLabel(t("terminal.initializing"))
-        # v1.2.5: the colour — from the central theme (ui/theme.py); the value is unchanged
-        self.status_label.setStyleSheet(f"color: {theme.TEXT_MUTED}; padding: 4px 0;")
+        # v1.4.3 (ROADMAP task 4): the style comes from the ONE registry
+        # (ui/theme_qss.py); refresh_theme() re-applies the same key.
+        if theme_qss is not None:
+            self.status_label.setStyleSheet(theme_qss.style("status.terminal_row"))
+        else:
+            self.status_label.setStyleSheet(f"color: {theme.TEXT_MUTED}; padding: 4px 0;")
         # A hidden member of a QBoxLayout costs no geometry at all (no height, no
         # spacing) — the compact page gives that space back to the canvas. The label
         # object itself is deliberately KEPT (every reader in this module, the window's
@@ -396,6 +408,36 @@ class TerminalSessionPage(QWidget):
                 widget.retranslate()
             except RuntimeError:
                 pass  # Qt teardown — the canvas is already destroyed
+
+    def refresh_theme(self):
+        """v1.4.3 (ROADMAP task 4): re-apply the theme to this session.
+
+        The page's status label, the canvas (the find bar is its child) and the
+        SFTP tab. The terminal's OUTPUT palette is deliberately out of the UI
+        theme's scope (AGENTS.md §4.6) — a session keeps its colours. Never
+        raises: a session may be closing under the switch.
+        """
+        if theme_qss is not None:
+            try:
+                theme_qss.refresh(self.status_label, "status.terminal_row")
+            except RuntimeError:
+                pass  # Qt teardown — the label is already destroyed
+        widget = getattr(self, "widget", None)
+        if widget is not None:
+            hook = getattr(widget, "refresh_theme", None)
+            if callable(hook):
+                try:
+                    hook()
+                except RuntimeError:
+                    pass
+        sftp_tab = getattr(self, "sftp_tab", None)
+        if sftp_tab is not None:
+            hook = getattr(sftp_tab, "refresh_theme", None)
+            if callable(hook):
+                try:
+                    hook()
+                except RuntimeError:
+                    pass
 
     # ── v1.3.3.5 (ROADMAP task 6): the multi-input badge of a SPLIT PANE ─────
 

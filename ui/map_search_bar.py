@@ -29,6 +29,14 @@ except ImportError:
     except ImportError:  # flat layout: the ui/ directory itself is on sys.path
         import theme
 
+try:  # v1.4.3 (ROADMAP task 4): the ONE QSS registry
+    from . import theme_qss
+except ImportError:
+    try:
+        from ui import theme_qss
+    except ImportError:  # flat layout: the ui/ directory itself is on sys.path
+        theme_qss = None
+
 
 def _t(key: str) -> str:
     """Safe i18n hook (consistent with map_view/server_node)."""
@@ -41,33 +49,16 @@ def _t(key: str) -> str:
 
 # Dark panel theme (app palette): a WINDOW_BG card on the CANVAS_BG canvas,
 # ACCENT border — the same one used for MapView matches/selection.
-# v1.2.5: f-string referencing central theme constants (values unchanged).
-_BAR_STYLE = f"""
-QWidget#MapSearchBar {{
-    background-color: {theme.WINDOW_BG};
-    border: 1px solid {theme.ACCENT};
-    border-radius: {theme.RADIUS_SEARCH_BAR}px;
-}}
-QLineEdit {{
-    background-color: transparent;
-    border: none;
-    color: {theme.TEXT_PRIMARY};
-    font-size: 13px;
-    padding: 2px 4px;
-    selection-background-color: {theme.ACCENT};
-}}
-QLabel {{
-    color: {theme.TEXT_MUTED};
-    font-size: 12px;
-}}
-QPushButton {{
-    background-color: transparent;
-    border: none;
-    color: {theme.TEXT_MUTED};
-    font-size: 15px;
-}}
-QPushButton:hover {{ color: {theme.TEXT_PRIMARY}; }}
-"""
+# v1.4.3 (ROADMAP task 4): the QSS moved into the ONE registry
+# (ui/theme_qss.py, the "search_bar" entry) — the widget applies it at
+# construction and re-applies it from refresh_theme() after a theme switch.
+
+
+def _bar_style() -> str:
+    """The card's stylesheet from the registry ("" without the ui package)."""
+    if theme_qss is None:
+        return ""
+    return theme_qss.style("search_bar")
 
 
 class _SearchLineEdit(QLineEdit):
@@ -117,7 +108,7 @@ class MapSearchBar(QWidget):
         super().__init__(parent)
         self.setObjectName("MapSearchBar")
         self.setAttribute(Qt.WA_StyledBackground, True)
-        self.setStyleSheet(_BAR_STYLE)
+        self.setStyleSheet(_bar_style())
 
         layout = QHBoxLayout(self)
         layout.setContentsMargins(8, 5, 8, 5)
@@ -147,6 +138,17 @@ class MapSearchBar(QWidget):
         self.hide()
 
     # ── Public API (MainWindow controls the state) ────────────────
+
+    def refresh_theme(self):
+        """v1.4.3 (ROADMAP task 4): re-read the card's stylesheet.
+
+        A QSS string is a VALUE: the switch has to hand the widget a new one (the
+        registry builder is the one place that knows how). Called by
+        `MainWindow.refresh_theme()`.
+        """
+        if theme_qss is None:
+            return
+        theme_qss.refresh(self, "search_bar")
 
     @property
     def query(self) -> str:

@@ -240,6 +240,18 @@ class MinimapWidget(QWidget):
         """The union of the cached layer, in scene coordinates."""
         return QRectF(self._content)
 
+    def refresh_theme(self):
+        """v1.4.3 (ROADMAP task 5): re-read the theme for the panel.
+
+        The widget paints from the live theme (the panel card, the viewport
+        frame), but the CACHED LAYER holds resolved QColor objects — one per node
+        (`STATUS_COLORS` / `NOTE_BG` / the group frame) — so a theme switch has
+        to rebuild it, exactly like a scene change does (only without the
+        debounce: the switch is one event).
+        """
+        self.refresh()
+        self.update()
+
     def paintEvent(self, event):
         w, h = float(self.width()), float(self.height())
         painter = QPainter(self)

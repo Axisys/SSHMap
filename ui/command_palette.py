@@ -292,6 +292,21 @@ class CommandPalette(QDialog):
         if self.listw.count():
             self.listw.setCurrentRow(0)
 
+    def refresh_theme(self):
+        """v1.4.3-fix: re-apply the theme to the OPEN palette.
+
+        The rows are rebuilt from `get_icon()` on every open, so a palette that is
+        CLOSED follows the theme by itself. An OPEN one holds QListWidgetItems with
+        their QIcons already attached (a QListWidgetItem does not share the QIcon
+        object the registry re-paints), so the list is filtered again here — which
+        rebuilds it with the new glyphs. Never raises.
+        """
+        try:
+            self.listw.clear()
+            self._refilter(self.input.text())
+        except (RuntimeError, AttributeError):
+            pass  # Qt teardown / not fully built yet
+
     def _run_current(self):
         item = self.listw.currentItem()
         if item is None:

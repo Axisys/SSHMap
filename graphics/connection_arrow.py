@@ -71,7 +71,51 @@ def label_display_text(ctype: str, label: str) -> str:
 # old projects without the "type" field load as SSH connections.
 # v1.2.5: colors — the central theme (ui/theme.py); CONNECTION_TYPES — the same
 # dict (declaration order = combobox order in the connection dialog).
-CONNECTION_TYPES = theme.ARROW_TYPE_COLORS
+# v1.4.3 (ROADMAP task 5): a LIVE map — reading it, iterating it or asking for a
+# key resolves the ACTIVE theme, so the arrows follow a theme switch without
+# keeping a stale snapshot (the pre-v1.4.3 module constant was captured at
+# import time and could never move). `==` compares by value; `is` no longer
+# holds (the acceptance test asserts the VALUES, not the identity).
+class _LiveConnectionTypes:
+    """``{type_id: colour}`` of the ACTIVE theme, with the old dict's API."""
+
+    __slots__ = ()
+
+    def _source(self) -> dict:
+        return theme.ARROW_TYPE_COLORS
+
+    def __getitem__(self, key):
+        return self._source()[key]
+
+    def __contains__(self, key) -> bool:
+        return key in self._source()
+
+    def __iter__(self):
+        return iter(self._source())
+
+    def __len__(self) -> int:
+        return len(self._source())
+
+    def get(self, key, default=None):
+        return self._source().get(key, default)
+
+    def keys(self):
+        return self._source().keys()
+
+    def values(self):
+        return self._source().values()
+
+    def items(self):
+        return self._source().items()
+
+    def __eq__(self, other):
+        return self._source() == other
+
+    def __repr__(self):  # pragma: no cover - debugging aid
+        return repr(self._source())
+
+
+CONNECTION_TYPES = _LiveConnectionTypes()
 
 DEFAULT_CONNECTION_TYPE = "ssh"
 
@@ -155,8 +199,13 @@ def curve_midpoint(p0: QPointF, c1: QPointF, c2: QPointF, p3: QPointF) -> QPoint
 class ConnectionArrow(QGraphicsPathItem):
     """A curved arrow (cubic Bezier) from the edge of one node to the edge of another."""
 
-    COLOR_IDLE = QColor(CONNECTION_TYPES[DEFAULT_CONNECTION_TYPE])
-    COLOR_HOVER = QColor(theme.ARROW_HOVER_COMPAT)  # kept for v0.6 compatibility
+    # v1.4.3 (ROADMAP task 5): live colours — a class read resolves the ACTIVE
+    # theme, and `refresh_theme()` re-applies the pens/brushes of the live item.
+    # COLOR_IDLE is the default type's colour (computed lazily, so the descriptor
+    # may sit above `type_color`); COLOR_HOVER keeps the v0.6 compatibility tone.
+    COLOR_IDLE = theme.ThemeValue(
+        lambda: QColor(CONNECTION_TYPES[DEFAULT_CONNECTION_TYPE]))
+    COLOR_HOVER = theme.ThemeColor("arrow_hover_compat")  # kept for v0.6 compatibility
 
     def __init__(self, source: ServerNode, target: ServerNode, label: str = "",
                  ctype: str = DEFAULT_CONNECTION_TYPE, bidirectional: bool = False, parent=None):
@@ -188,9 +237,7 @@ class ConnectionArrow(QGraphicsPathItem):
         # UI polish: rounded label background (a PathItem instead of a RectItem)
         self._label_bg = QGraphicsPathItem(self)
         self._label_bg.setPen(QPen(Qt.PenStyle.NoPen))
-        _label_bg_color = QColor(theme.CANVAS_BG)  # v1.2.5: CANVAS_BG + alpha (the connection label background)
-        _label_bg_color.setAlpha(190)
-        self._label_bg.setBrush(QBrush(_label_bg_color))
+        self._apply_label_bg_color()
 
         # Label text (v1.1.1: taking the "type on the label" option into account — label_display_text)
         self._label = QGraphicsTextItem(label_display_text(ctype, label), self)
@@ -213,6 +260,26 @@ class ConnectionArrow(QGraphicsPathItem):
         self._arrow_head_src.setPen(QPen(color, 1.5))
         self._arrow_head_src.setBrush(QBrush(color))
         self._label.setDefaultTextColor(color)
+
+    def _apply_label_bg_color(self):
+        """v1.4.3: the label plaque — CANVAS_BG at 190 alpha, read from the ACTIVE theme."""
+        color = QColor(theme.CANVAS_BG)
+        color.setAlpha(190)
+        self._label_bg.setBrush(QBrush(color))
+
+    def refresh_theme(self):
+        """v1.4.3 (ROADMAP task 5): re-read the theme for this arrow.
+
+        The type colour of this arrow is a VALUE taken when the type was set, so
+        a theme switch has to hand it the new one; the label plaque and the
+        geometry follow. Called by `MapScene.refresh_theme()` (the window's
+        `apply_theme()` walks the scene), never by the paint code.
+        """
+        self._base_color = type_color(self.connection_type)
+        self._apply_label_bg_color()
+        self._apply_visual_state()
+        self.update_position()
+        self.update()
 
     # ── Geometry (v0.7): Bezier + edge-to-edge ───────────────────
 
@@ -318,6 +385,10 @@ class ConnectionArrow(QGraphicsPathItem):
         bg_path.addRoundedRect(label_x - 6, label_y - 2,
                                label_rect.width() + 12, label_rect.height() + 4, r, r)
         self._label_bg.setPath(bg_path)
+        # v1.4.3: the plaque colour follows the ACTIVE theme on EVERY geometry
+        # recompute (a theme switch moves the colour and then calls this method —
+        # the arrow has no other hook that runs on a switch).
+        self._apply_label_bg_color()
 
     # ── Type and label ─────────────────────────────────────────────
 

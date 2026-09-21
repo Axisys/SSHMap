@@ -53,6 +53,14 @@ try:  # v1.2.5: central theme (status labels — ui/theme.py)
 except ImportError:
     from ui import theme
 
+try:  # v1.4.3 (ROADMAP task 4): the ONE QSS registry
+    from ..ui import theme_qss
+except ImportError:
+    try:
+        from ui import theme_qss
+    except ImportError:  # flat layout: the ui/ directory itself is on sys.path
+        theme_qss = None
+
 
 def _st_module():
     """The ssh_terminal module at call time (a test seam for attribute substitution)."""
@@ -124,8 +132,12 @@ class TerminalDockContent(QWidget):
         # progress on the right (hidden when there are no transfers).
         row = QHBoxLayout()
         self.status_label = QLabel("")
-        # v1.2.5: color — from the central theme (ui/theme.py); value unchanged
-        self.status_label.setStyleSheet(f"color: {theme.TEXT_MUTED}; padding: 2px 0;")
+        # v1.4.3 (ROADMAP task 4): the style comes from the ONE registry
+        # (ui/theme_qss.py) — the constructor and refresh_theme() share it.
+        if theme_qss is not None:
+            self.status_label.setStyleSheet(theme_qss.style("status.sftp_row"))
+        else:
+            self.status_label.setStyleSheet(f"color: {theme.TEXT_MUTED}; padding: 2px 0;")
         self.sftp_progress = QProgressBar()
         self.sftp_progress.setFixedWidth(180)
         self.sftp_progress.setTextVisible(True)
@@ -139,6 +151,32 @@ class TerminalDockContent(QWidget):
         self._status_token = None
 
     # ── v1.3.3.1 (ROADMAP task 1): live i18n — re-text on a language switch ──
+
+    def refresh_theme(self):
+        """v1.4.3 (ROADMAP task 4): re-apply the theme to the dock content.
+
+        The container's own status label plus every session it holds (the pages
+        own their canvases, status lines, SFTP tabs and find bars). Never raises.
+        """
+        if theme_qss is not None:
+            try:
+                theme_qss.refresh(self.status_label, "status.sftp_row")
+            except RuntimeError:
+                pass  # Qt teardown — the label is already destroyed
+        try:
+            pages = [self.session_tabs.widget(i) for i in range(self.session_tabs.count())]
+        except RuntimeError:
+            return  # a close race — the C++ object is gone
+        for page in pages:
+            hook = getattr(page, "refresh_theme", None)
+            if not callable(hook):
+                continue
+            try:
+                hook()
+            except RuntimeError:
+                continue
+            except Exception:  # noqa: BLE001 — one session must not stop the rest
+                continue
 
     def retranslate(self):
         """v1.3.3.1: re-text the content and its sessions in the current language.
@@ -347,5 +385,12 @@ class TerminalsDock(QDockWidget):
             return  # the C++ object was already destroyed (a close race)
         try:
             self.content.retranslate()
+        except RuntimeError:
+            pass  # Qt teardown — the content is already destroyed
+
+    def refresh_theme(self):
+        """v1.4.3 (ROADMAP task 4): pass the theme switch down to the dock content."""
+        try:
+            self.content.refresh_theme()
         except RuntimeError:
             pass  # Qt teardown — the content is already destroyed

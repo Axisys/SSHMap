@@ -36,6 +36,14 @@ try:  # v1.2.5: central theme (palette/radii/fonts — ui/theme.py)
 except ImportError:
     from ui import theme
 
+try:  # v1.4.3 (ROADMAP task 4): the ONE QSS registry
+    from ..ui import theme_qss
+except ImportError:
+    try:
+        from ui import theme_qss
+    except ImportError:  # flat layout: the ui/ directory itself is on sys.path
+        theme_qss = None
+
 
 def _t(key: str) -> str:
     """Safe i18n hook (consistent with map_search_bar/terminal_widget)."""
@@ -46,35 +54,17 @@ def _t(key: str) -> str:
         return key
 
 
-# Dark panel over the terminal canvas: a WINDOW_BG card, ACCENT border — the
-# map_search_bar style with the terminal's own font size (the canvas is a
-# monospace surface, the panel sits right on top of the glyphs).
-_BAR_STYLE = f"""
-QWidget#TerminalFindBar {{
-    background-color: {theme.WINDOW_BG};
-    border: 1px solid {theme.ACCENT};
-    border-radius: {theme.RADIUS_SEARCH_BAR}px;
-}}
-QLineEdit {{
-    background-color: transparent;
-    border: none;
-    color: {theme.TEXT_PRIMARY};
-    font-size: 12px;
-    padding: 2px 4px;
-    selection-background-color: {theme.ACCENT};
-}}
-QLabel {{
-    color: {theme.TEXT_MUTED};
-    font-size: 11px;
-}}
-QPushButton {{
-    background-color: transparent;
-    border: none;
-    color: {theme.TEXT_MUTED};
-    font-size: 14px;
-}}
-QPushButton:hover {{ color: {theme.TEXT_PRIMARY}; }}
-"""
+def _bar_style() -> str:
+    """The card's stylesheet from the registry ("" without the ui package).
+
+    v1.4.3 (ROADMAP task 4): the pre-v1.4.3 inline f-string moved into
+    ui/theme_qss.py ("find_bar") so the initial styling and a theme switch share
+    ONE builder. The panel keeps its own sizes (the canvas is a monospace
+    surface); only the colours follow the theme.
+    """
+    if theme_qss is None:
+        return ""
+    return theme_qss.style("find_bar")
 
 
 class _FindLineEdit(QLineEdit):
@@ -125,7 +115,7 @@ class TerminalFindBar(QWidget):
         super().__init__(parent)
         self.setObjectName("TerminalFindBar")
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
-        self.setStyleSheet(_BAR_STYLE)
+        self.setStyleSheet(_bar_style())
 
         layout = QHBoxLayout(self)
         layout.setContentsMargins(8, 4, 8, 4)
@@ -195,6 +185,12 @@ class TerminalFindBar(QWidget):
         self._prev_btn.setToolTip(_t("terminal.find.prev"))
         self._next_btn.setToolTip(_t("terminal.find.next"))
         self._update_count_label()   # redraw the counter in the new language
+
+    def refresh_theme(self):
+        """v1.4.3 (ROADMAP task 4): re-read the card's stylesheet from the registry."""
+        if theme_qss is None:
+            return
+        theme_qss.refresh(self, "find_bar")
 
     def focus_input(self):
         """Focus the field + select the text (a quick query replacement)."""

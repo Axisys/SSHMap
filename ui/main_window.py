@@ -48,13 +48,27 @@ except ImportError:
         _ext_term = None
 
 try:  # UI polish: vector icons (replacing emoji)
-    from .icons import get_icon
+    from . import icons as _icons_mod
+    from .icons import get_icon, refresh_action_icon, set_action_icon
 except ImportError:
     try:
-        from icons import get_icon
-    except ImportError:  # flat layout without ui/icons — text buttons, as before
-        def get_icon(name):  # noqa: N802 — stub with the same signature
-            return None
+        from ui import icons as _icons_mod
+        from ui.icons import get_icon, refresh_action_icon, set_action_icon
+    except ImportError:
+        try:
+            import icons as _icons_mod
+            from icons import get_icon, refresh_action_icon, set_action_icon
+        except ImportError:  # flat layout without ui/icons — text buttons, as before
+            _icons_mod = None
+
+            def get_icon(name):  # noqa: N802 — stub with the same signature
+                return None
+
+            def set_action_icon(action, name):  # noqa: N802 — stub
+                return False
+
+            def refresh_action_icon(action):  # noqa: N802 — stub
+                return False
 
 try:  # v0.9.9.4: sidebar cluster (tree, tag filter, status markers, context menu)
     from .sidebar import SidebarPanel
@@ -90,6 +104,14 @@ except ImportError:
         from ui import theme
     except ImportError:  # flat layout: the ui/ directory itself is on sys.path
         import theme
+
+try:  # v1.4.3 (ROADMAP task 4): the Qt half of the theme — the QSS/palette + the live switch
+    from . import theme_qss
+except ImportError:
+    try:
+        from ui import theme_qss
+    except ImportError:  # flat layout: the ui/ directory itself is on sys.path
+        theme_qss = None
 
 
 from PySide6.QtCore import Qt, QTimer, Signal
@@ -138,7 +160,10 @@ def _diamond_icon():
     pm.fill(QColor(0, 0, 0, 0))
     p = QPainter(pm)
     p.setRenderHint(QPainter.Antialiasing, True)
-    pen = QPen(QColor(theme.ICON_COLOR), 1.8)  # v1.2.5: central theme
+    # v1.4.3-fix: read at CALL time — the icon is rebuilt by refresh_theme()
+    # (before the fix this read a value captured at import time and the diamond
+    # stayed dark-theme pale after a switch to LIGHT).
+    pen = QPen(QColor(theme.ICON_COLOR), 1.8)
     pen.setCapStyle(Qt.PenCapStyle.RoundCap)
     pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
     p.setPen(pen)
@@ -278,7 +303,29 @@ def _project_drop_candidate(mime_data) -> str:
 class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
     def __init__(self):
         super().__init__()
-        
+
+        # ── v1.4.3 (ROADMAP task 6): the SAVED theme, before anything is built ──
+        # `main.py` applies it too (even earlier, right after QApplication), but the
+        # window does not depend on that: a MainWindow created directly (a test, an
+        # embedder) must still come up in the user's theme — and every widget below
+        # is then CONSTRUCTED with the right palette instead of being repainted
+        # afterwards. A broken config can never leave the app themeless
+        # (`theme_from_settings` never fails, `apply_theme` never raises).
+        if theme_qss is not None:
+            try:
+                from ui.settings_dialog import load_theme_settings, theme_from_settings
+            except ImportError:  # flat launch from the project root
+                try:
+                    from settings_dialog import load_theme_settings, theme_from_settings
+                except ImportError:
+                    load_theme_settings = theme_from_settings = None
+            if load_theme_settings is not None:
+                try:
+                    theme_qss.apply_theme(theme_from_settings(load_theme_settings()),
+                                          refresh_windows=False)
+                except Exception as e:  # noqa: BLE001 — the look must not break startup
+                    print(f"[theme] the saved theme was not applied: {e}", flush=True)
+
         # ── i18n: restore user's last language choice ──
         self._i18n_available = False
         
@@ -676,6 +723,169 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
             if self.log:
                 self.log.warning(f"Apply multi-input hotkey failed: {e}")
 
+    def refresh_theme(self):
+        """v1.4.3 (ROADMAP task 4/5): re-apply the theme to everything this window owns.
+
+        Called by `ui/theme_qss.apply_theme()` (and safe to call directly). The
+        window is the only object that can reach all the pieces, so it walks what
+        it owns and nothing else:
+
+          * the status-bar styles from the registry (they are QSS strings, and a
+            QSS string is a value);
+          * the MAP — `MapScene.refresh_theme()` repaints the grid/background and
+            asks every item that defines the hook (nodes, arrows, notes, groups);
+          * the minimap (a child of the view, but owned by the window) — its
+            cached colour layer has to be rebuilt;
+          * the terminal CONTAINERS and their sessions (status labels, the SFTP
+            tabs, the find bars) through the same registry walk the language
+            switch uses.
+
+        The QPalette and the application-wide QSS are applied by `apply_theme()`
+        BEFORE this method is called, so the standard controls already follow.
+        Every stage is fault-isolated: a theme switch is cosmetic and must never
+        raise out of a half-closed session.
+        """
+        if theme_qss is not None:
+            for widget, key in ((getattr(self, "counts_label", None), "status.bar_counts"),
+                                (getattr(self, "zoom_label", None), "status.bar_zoom")):
+                if widget is not None:
+                    theme_qss.refresh(widget, key)
+        self._refresh_icons()
+        try:
+            self._multi_label.setStyleSheet(
+                f"color: {theme.SELECTION_AMBER}; font-weight: bold;")
+        except (AttributeError, RuntimeError):
+            pass
+        scene = getattr(self, "scene", None)
+        if scene is not None:
+            try:
+                scene.refresh_theme()
+            except Exception as e:  # noqa: BLE001 — the map must not break the switch
+                if self.log:
+                    self.log.warning(f"Theme: the scene refresh failed: {e}")
+        view = getattr(self, "view", None)
+        if view is not None:
+            try:
+                view.refresh_theme()
+            except Exception as e:  # noqa: BLE001
+                if self.log:
+                    self.log.warning(f"Theme: the view refresh failed: {e}")
+        mini = getattr(self, "minimap", None)
+        if mini is not None:
+            try:
+                mini.refresh_theme()
+            except Exception as e:  # noqa: BLE001
+                if self.log:
+                    self.log.warning(f"Theme: the minimap refresh failed: {e}")
+        # The terminal containers (windows mode: the sessions; tabs mode: the dock) —
+        # the SAME walk as _apply_ui_translations, for the same reason (a session may
+        # be torn down under the switch).
+        for session in list(getattr(self, "_terminal_windows", None) or ()):
+            try:
+                host = getattr(session, "_host_window", None) or session
+                hook = getattr(host, "refresh_theme", None)
+                if callable(hook):
+                    hook()
+            except RuntimeError:
+                continue  # Qt teardown — this session is gone
+            except Exception:  # noqa: BLE001 — one container must not stop the rest
+                continue
+        dock = getattr(self, "_terminals_dock", None)
+        if dock is not None:
+            try:
+                hook = getattr(dock, "refresh_theme", None)
+                if callable(hook):
+                    hook()
+            except RuntimeError:
+                pass
+            except Exception:  # noqa: BLE001
+                pass
+        # The floating panels are children of the view but owned here: the map search
+        # bar (v0.9.8) and the minimap (v1.4.2) — both repaint from the live theme.
+        for widget in (getattr(self, "map_search", None),):
+            hook = getattr(widget, "refresh_theme", None)
+            if callable(hook):
+                try:
+                    hook()
+                except RuntimeError:
+                    pass  # Qt teardown — the panel is already destroyed
+                except Exception:  # noqa: BLE001
+                    pass
+
+    # ── v1.4.3 (ROADMAP task 6): the theme of the settings hub ────────────────────
+
+    def apply_theme(self, instance=None):
+        """Make `instance` (or the saved theme) ACTIVE and repaint the application.
+
+        The one entry point of a theme switch: the settings dialog calls it after
+        its OK (through `_apply_settings_from_dialog`) and `main.py` calls it with
+        the theme the config holds, BEFORE the window is built, so nothing is ever
+        constructed with the wrong palette.
+        """
+        if theme_qss is not None:
+            theme_qss.apply_theme(instance if instance is not None else theme.THEME)
+        elif instance is not None:
+            theme.set_theme(instance)
+        return theme.THEME
+
+    def _refresh_icons(self):
+        """v1.4.3-fix: re-paint the vector icons in the ACTIVE theme's colour.
+
+        A QIcon handed to a QAction/QPushButton keeps the pixels it was painted
+        with, and nothing repaints it when the theme changes — the toolbar, the
+        menus, the sidebar buttons and the palette showed dark-theme pale glyphs
+        on LIGHT (reported after v1.4.3 shipped).
+
+        `ui/icons.py` keeps ONE QIcon object per name (implicitly shared), so
+        `refresh_all()` re-paints them IN PLACE and every widget already holding
+        one shows the new pixmap; the QActions are then re-set for the widgets
+        that cache a QIcon per action. The two "◇" diamonds draw a fresh pixmap
+        (they are window-internal, not in the registry) and are re-applied here.
+        Never raises: a broken icon must not break a theme switch.
+        """
+        count = 0
+        try:
+            if _icons_mod is not None:
+                count = _icons_mod.refresh_all()
+            for action in self.findChildren(QAction):
+                if refresh_action_icon(action):
+                    count += 1
+        except RuntimeError:
+            pass  # Qt teardown — an action of a closing window is already destroyed
+        except Exception as e:  # noqa: BLE001 — cosmetic
+            if self.log:
+                self.log.warning(f"Theme: the icon refresh failed: {e}")
+        # The sidebar's six action buttons hold their own copy of the pixmap.
+        sidebar = getattr(self, "sidebar", None)
+        hook = getattr(sidebar, "refresh_theme", None)
+        if callable(hook):
+            try:
+                hook()
+            except RuntimeError:
+                pass  # Qt teardown
+            except Exception as e:  # noqa: BLE001 — cosmetic
+                if self.log:
+                    self.log.warning(f"Theme: the sidebar icon refresh failed: {e}")
+        # The two hand-drawn diamonds (the collapse buttons of both panels).
+        for btn in (getattr(getattr(self, "sidebar", None), "collapse_btn", None),
+                    getattr(self, "_map_collapse_btn", None)):
+            if btn is None:
+                continue
+            try:
+                btn.setIcon(_diamond_icon())
+            except RuntimeError:
+                continue  # Qt teardown
+        # The command palette builds its rows on open — re-theme the OPEN one.
+        palette = getattr(self, "_command_palette", None)
+        if palette is not None:
+            hook = getattr(palette, "refresh_theme", None)
+            if callable(hook):
+                try:
+                    hook()
+                except RuntimeError:
+                    pass
+        return count
+
     def _apply_ui_translations(self):
         """Translate the menus, toolbar, and service labels to the current language.
 
@@ -963,14 +1173,15 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         # UI polish: permanent indicators on the right of the status bar — node/
         # connection/status counters and the zoom percentage (updated from MapView.zoomChanged).
         self.counts_label = QLabel("")
-        # v1.2.5: QSS — an f-string referencing the theme constant (value unchanged)
-        self.counts_label.setStyleSheet(f"color: {theme.TEXT_MUTED}; padding-right: 10px;")
+        # v1.4.3 (ROADMAP task 4): the status-bar styles come from the ONE QSS
+        # registry (ui/theme_qss.py) and are re-applied by apply_theme()
+        theme_qss.refresh(self.counts_label, "status.bar_counts")
         self.statusBar().addPermanentWidget(self.counts_label)
 
         self.zoom_label = QLabel("100%")
         self.zoom_label.setMinimumWidth(44)
         self.zoom_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-        self.zoom_label.setStyleSheet(f"color: {theme.TEXT_PRIMARY}; padding-right: 6px;")
+        theme_qss.refresh(self.zoom_label, "status.bar_zoom")
         self.statusBar().addPermanentWidget(self.zoom_label)
 
         # v1.2.3 (ROADMAP task 3): the multi-input mode plaque "MULTI: N sessions" +
@@ -982,7 +1193,7 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         _multi_row.setSpacing(6)
         self._multi_label = QLabel("")
         self._multi_label.setStyleSheet(
-            f"color: {_multi_input_mod.MULTI_ACCENT}; font-weight: bold;")
+            f"color: {theme.SELECTION_AMBER}; font-weight: bold;")
         self._multi_exit_btn = QToolButton()
         self._multi_exit_btn.setText("✕")
         self._multi_exit_btn.setToolTip(self.t("terminal.multi_exit_button"))
@@ -1381,9 +1592,7 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
                 # same slot (see the note above _apply_hotkeys).
                 self._mark_toolbar_mirror(action)
                 try:
-                    icon = get_icon(icon_name)
-                    if icon is not None and not icon.isNull():
-                        action.setIcon(icon)  # the tooltip will pick up the action text itself
+                    set_action_icon(action, icon_name)  # v1.4.3-fix: remembers the name for the theme walk
                 except Exception:  # noqa: BLE001 — the icon is cosmetic; do not break the toolbar
                     pass
 
@@ -1398,9 +1607,7 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         self._mark_toolbar_mirror(self.act_undo)
         self.act_undo.setEnabled(False)
         try:
-            icon = get_icon("undo")
-            if icon is not None and not icon.isNull():
-                self.act_undo.setIcon(icon)
+            set_action_icon(self.act_undo, "undo")
         except Exception:
             pass
         self.undo_stack.canUndoChanged.connect(self.act_undo.setEnabled)
@@ -1411,9 +1618,7 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         self._mark_toolbar_mirror(self.act_redo)
         self.act_redo.setEnabled(False)
         try:
-            icon = get_icon("redo")
-            if icon is not None and not icon.isNull():
-                self.act_redo.setIcon(icon)
+            set_action_icon(self.act_redo, "redo")
         except Exception:
             pass
         self.undo_stack.canRedoChanged.connect(self.act_redo.setEnabled)
@@ -1455,9 +1660,7 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         self._register_i18n(action, key)
         if icon_name:
             try:
-                icon = get_icon(icon_name)
-                if icon is not None and not icon.isNull():
-                    action.setIcon(icon)
+                set_action_icon(action, icon_name)  # v1.4.3-fix: the theme walk finds it by this name
             except Exception:  # noqa: BLE001 — the icon is cosmetic; do not break the menu
                 pass
         if action_id:
@@ -1579,7 +1782,7 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
             self.t("view.toggle_sidebar") if self._i18n_available else "Sidebar")
         self.act_show_sidebar.setCheckable(True)
         self.act_show_sidebar.setChecked(True)
-        self.act_show_sidebar.setIcon(get_icon("sidebar_panel"))  # v1.2.4.1: the pair's icon
+        set_action_icon(self.act_show_sidebar, "sidebar_panel")  # v1.2.4.1: the pair's icon
         self.act_show_sidebar.toggled.connect(self._on_sidebar_toggled)
         self._register_i18n(self.act_show_sidebar, "view.toggle_sidebar")
         # v1.2.4.1 (task 3): the map — the same pattern (created manually, the pair's icon).
@@ -1587,7 +1790,7 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
             self.t("view.toggle_map") if self._i18n_available else "Map")
         self.act_show_map.setCheckable(True)
         self.act_show_map.setChecked(True)
-        self.act_show_map.setIcon(get_icon("map_panel"))
+        set_action_icon(self.act_show_map, "map_panel")
         self.act_show_map.toggled.connect(self._on_map_toggled)
         self._register_i18n(self.act_show_map, "view.toggle_map")
         # v1.4.2 (ROADMAP task 2): the minimap — a checkable item next to the panel
@@ -1598,7 +1801,7 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
             self.t("view.toggle_minimap") if self._i18n_available else "Minimap")
         self.act_show_minimap.setCheckable(True)
         self.act_show_minimap.setChecked(bool(getattr(self, "_minimap_enabled", True)))
-        self.act_show_minimap.setIcon(get_icon("minimap"))
+        set_action_icon(self.act_show_minimap, "minimap")
         self.act_show_minimap.toggled.connect(self._toggle_minimap)
         self._register_i18n(self.act_show_minimap, "view.toggle_minimap")
         self._register_hotkey_target("view.toggle_minimap", self.act_show_minimap)
@@ -1942,9 +2145,7 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
                     act.setChecked(rec.ok)
                     act.setToolTip(self._plugin_tooltip(rec))
                     try:  # v1.4rc3: the puzzle glyph (a menu of plugins reads as one family)
-                        icon = get_icon("plugin")
-                        if icon is not None and not icon.isNull():
-                            act.setIcon(icon)
+                        set_action_icon(act, "plugin")  # v1.4.3-fix: follows the theme too
                     except Exception:  # noqa: BLE001 — the icon is cosmetic
                         pass
                     if rec.failed:
@@ -2618,6 +2819,11 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         # path as the "Help -> Language" item (set_language + a full UI retranslate).
         dlg.applied.connect(self._apply_settings_from_dialog)
         dlg.language_changed.connect(self._switch_language)
+        # v1.4.3 (ROADMAP task 6): the "Appearance" tab applies the theme LIVE —
+        # the dialog emits the chosen Theme instance and the window owns the switch
+        # (Cancel re-emits the theme the dialog opened with, so a rejected dialog
+        # changes nothing).
+        dlg.theme_changed.connect(self.apply_theme)
         dlg.exec()
 
     def _apply_settings_from_dialog(self):
@@ -2637,7 +2843,27 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         * v1.3.2: the configurable hotkeys — _apply_hotkeys() reinstalls the sequences
           of the registered QActions/QShortcuts (QAction.setShortcut /
           QShortcut.setKey) from the "hotkeys" key; the F12 multi-input rule is kept.
+        * v1.4.3 (ROADMAP task 6): the APPEARANCE — the `theme` key of config.json
+          is read back and applied through `apply_theme()` (the mode + the accent
+          hue). The "Appearance" tab already applied it live while the dialog was
+          open; this is what makes the OK authoritative (and what covers a config
+          edited by hand between the two).
         """
+        # v1.4.3 (ROADMAP task 6): the theme first — every other option below is
+        # applied to widgets whose colours the switch may have just changed.
+        try:
+            from ui.settings_dialog import load_theme_settings, theme_from_settings
+        except ImportError:  # flat launch from the project root
+            try:
+                from settings_dialog import load_theme_settings, theme_from_settings
+            except ImportError:
+                load_theme_settings = theme_from_settings = None
+        if load_theme_settings is not None:
+            try:
+                self.apply_theme(theme_from_settings(load_theme_settings()))
+            except Exception as e:  # noqa: BLE001 — the look must not break applying
+                if self.log:
+                    self.log.warning(f"Apply theme settings failed: {e}")
         try:
             from storage.autosave import get_autosave_settings as _get_as
             _as_cfg = _get_as()

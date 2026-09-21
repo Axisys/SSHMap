@@ -5,10 +5,15 @@ try:
 except ImportError:
     from ui.main_window import MainWindow
 
-try:  # v1.2.5: central theme (palette/radii/fonts — ui/theme.py)
-    from .ui import theme
+# v1.4.3 (ROADMAP task 4): the saved theme is applied through the ONE builder
+# (ui/theme_qss.py) before the window is built — the `theme` module itself is no
+# longer read here, because the palette and the QSS are both the builder's job.
+try:
+    from .ui import theme_qss
+    from .ui.settings_dialog import load_theme_settings, theme_from_settings
 except ImportError:
-    from ui import theme
+    from ui import theme_qss
+    from ui.settings_dialog import load_theme_settings, theme_from_settings
 
 
 def main():
@@ -35,23 +40,18 @@ def main():
 
     try:
         from PySide6.QtWidgets import QApplication
-        from PySide6.QtCore import Qt
-        from PySide6.QtGui import QPalette, QColor
 
         app = QApplication(sys.argv)
         app.setStyle('Fusion')
 
-        # Dark palette (v1.2.5: values come from the central theme ui/theme.py;
-        # light theme/accent color in the future — reassigning the theme constants)
-        pal = app.palette()
-        pal.setColor(QPalette.ColorRole.Window, QColor(theme.WINDOW_BG))
-        pal.setColor(QPalette.ColorRole.WindowText, QColor(theme.TEXT_PRIMARY))
-        pal.setColor(QPalette.ColorRole.Base, QColor(theme.BASE_BG))
-        pal.setColor(QPalette.ColorRole.AlternateBase, QColor(theme.SURFACE_ALT))
-        pal.setColor(QPalette.ColorRole.Text, QColor(theme.TEXT_PRIMARY))
-        pal.setColor(QPalette.ColorRole.Button, QColor(theme.SURFACE_ALT))
-        pal.setColor(QPalette.ColorRole.ButtonText, QColor(theme.TEXT_PRIMARY))
-        app.setPalette(pal)
+        # v1.4.3 (ROADMAP task 4/6): the base palette AND the application QSS are
+        # built from the ACTIVE theme — and the ACTIVE theme is the SAVED one,
+        # applied BEFORE the window exists, so nothing is ever constructed with the
+        # wrong palette. `ui/theme_qss.apply_theme()` is the ONE place that turns a
+        # Theme into the application's look; every later switch is
+        # `MainWindow.apply_theme()`.
+        theme_qss.apply_theme(theme_from_settings(load_theme_settings()), app=app,
+                              refresh_windows=False)
 
         win = MainWindow()
         win.show()

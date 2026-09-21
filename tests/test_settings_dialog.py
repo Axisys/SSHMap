@@ -65,6 +65,7 @@ new_keys = [
     "settings.tab.general", "settings.tab.terminal", "settings.tab.statuses",
     "settings.tab.autosave", "settings.tab.map", "settings.tab.language",
     "settings.tab.hotkeys",   # v1.3.2
+    "settings.tab.appearance",   # v1.4.3
     "settings.open", "menu.settings", "btn.settings", "status.settings_saved",
     "settings.general.external_terminal",
     "settings.terminal.palette", "settings.terminal.palette.default",
@@ -300,13 +301,15 @@ finally:
 print("== settings dialog ==")
 clear_cfg(LEGACY_PATH)
 dlg = SettingsDialog(None)
-check("a QTabWidget with 7 tabs (v1.3.2: + Hotkeys)", dlg.tabs.count() == 7, str(dlg.tabs.count()))
-expected_tabs = [i18n.t(k) for k in ("settings.tab.general", "settings.tab.terminal",
+check("a QTabWidget with 8 tabs (v1.3.2: + Hotkeys; v1.4.3: + Appearance)",
+      dlg.tabs.count() == 8, str(dlg.tabs.count()))
+expected_tabs = [i18n.t(k) for k in ("settings.tab.general", "settings.tab.appearance",
+                                     "settings.tab.terminal",
                                      "settings.tab.statuses", "settings.tab.autosave",
                                      "settings.tab.map", "settings.tab.hotkeys",
                                      "settings.tab.language")]
 got_tabs = [dlg.tabs.tabText(i) for i in range(dlg.tabs.count())]
-check("the tab order: General / Terminal / Status Checks / Autosave / Map / Hotkeys / Language",
+check("the tab order: General / Appearance / Terminal / Status Checks / Autosave / Map / Hotkeys / Language",
       got_tabs == expected_tabs, str(got_tabs))
 
 # v1.3.3.3 (task 3/4): the "Hotkeys" tab grew to the FULL action registry (~40 rows, most
@@ -392,7 +395,7 @@ dlg2.close_behavior_combo.setCurrentIndex(1)  # ask
 dlg2.status_interval_spin.setValue(60)
 dlg2.probe_timeout_spin.setValue(4.5)
 c = dlg2.collect()
-check("collect(): exactly 21 config.json keys (v1.1: 10 + v1.1.1: 7 + the v1.1.2 final: 1 + v1.2.2: 1 + v1.3.2: 1 + v1.3.3.8: 1)",
+check("collect(): exactly 22 config.json keys (21 + theme, v1.4.3)",
       set(c) == {"external_terminal", "terminal_mode", "terminal_palette",
                  "terminal_font_size",
                  "terminal_history_lines", "terminal_close_behavior",
@@ -402,7 +405,7 @@ check("collect(): exactly 21 config.json keys (v1.1: 10 + v1.1.1: 7 + the v1.1.2
                  "ui_font_family", "ui_font_size", "terminal_font",
                  "terminal_max_open", "ui_node_double_click",
                  "ui_show_sidebar_buttons", "ui_show_connection_type",
-                 "hotkeys"}, str(sorted(c)))
+                 "hotkeys", "theme"}, str(sorted(c)))
 check("collect(): the types (int/float/bool/str) and the changed values",
       isinstance(c["terminal_font_size"], int) and isinstance(c["status_interval_sec"], int)
       and isinstance(c["status_probe_timeout_sec"], float)
@@ -415,7 +418,7 @@ applied = []
 dlg2.applied.connect(lambda: applied.append(1))
 dlg2._on_accept()
 cfg = read_cfg()
-check("OK: all the 21 keys are written into config.json",
+check("OK: all the 22 keys are written into config.json",
       cfg is not None and all(k in cfg for k in c), str(cfg))
 check("OK: the merge — the foreign keys are kept (language/terminal_font)",
       cfg.get("language") == "ru" and cfg.get("terminal_font") == "Consolas", str(cfg))

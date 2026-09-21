@@ -143,38 +143,42 @@ class ServerNode(QGraphicsItemGroup):
     SHADOW_DY = SHADOW_DY
     SHADOW_BOTTOM = 2 * SHADOW_BLUR + SHADOW_DY
 
-    # v1.2.5: all colors — from the central theme (ui/theme.py); values unchanged.
-    COLOR_BG = QColor(theme.NODE_BG)
-    COLOR_BORDER = QColor(theme.NODE_BORDER)
-    COLOR_SELECTED = QColor(theme.SELECTION_AMBER)
-    COLOR_HOVER = QColor(theme.NODE_HOVER)
+    # v1.4.3 (ROADMAP task 5): the colours are LIVE descriptors, not values
+    # captured at import time — a class attribute read (`node.COLOR_BG`,
+    # `ServerNode.STATUS_COLORS["online"]`) resolves the ACTIVE theme on every
+    # access, so `set_theme()` + a repaint is all the switch needs. Everything
+    # BELOW in `_build_appearance` is therefore re-applied by `refresh_theme()`.
+    COLOR_BG = theme.ThemeColor("node_bg")
+    COLOR_BORDER = theme.ThemeColor("node_border")
+    COLOR_SELECTED = theme.ThemeColor("selection_amber")
+    COLOR_HOVER = theme.ThemeColor("node_hover")
     # v0.9.6: "Reveal on map" accent (sidebar) — a flash frame. Light blue,
     # distinct from the amber selection (#f59e0b): the node is already selected, and the
     # flash should read as a separate "here it is" signal. Same theme ACCENT as the
     # MapView rectangle-selection frame — one app-wide accent.
-    REVEAL_COLOR = QColor(theme.ACCENT)
+    REVEAL_COLOR = theme.ThemeColor("accent")
     # v0.9.8: map search (Ctrl+F) — a static frame on matching nodes.
     # Same theme ACCENT (one accent): matches are read instantly, while the current
     # search result is additionally highlighted in amber + the reveal_flash.
-    SEARCH_MATCH_COLOR = QColor(theme.ACCENT)
-    COLOR_TEXT = QColor(theme.NODE_TEXT)
-    COLOR_LABEL = QColor(theme.NODE_LABEL)
+    SEARCH_MATCH_COLOR = theme.ThemeColor("accent")
+    COLOR_TEXT = theme.ThemeColor("node_text")
+    COLOR_LABEL = theme.ThemeColor("node_label")
     # UI polish: the gray indicator-dot color until checked.
     # (v1.4.2: the old flat shadow color is gone — the halo is painted by
     #  `_shadow_pixmap()` from a black layer color, see the module constants.)
-    COLOR_DOT_IDLE = QColor(theme.DOT_IDLE)
+    COLOR_DOT_IDLE = theme.ThemeColor("dot_idle")
 
     # v0.7.1: frame colors by availability status (StatusChecker).
     # warn — yellow, distinct from the amber COLOR_SELECTED:
     # at any moment either the selection or the status is shown.
-    # v1.2.5: values — from the central theme (ui/theme.py).
-    STATUS_COLORS = {k: QColor(v) for k, v in theme.STATUS_COLORS.items()}
+    # v1.4.3: a live map of the ACTIVE theme's status colours.
+    STATUS_COLORS = theme.ThemeMap("status_colors")
 
     # v0.9.4: tag/environment-role colors. Known roles — fixed colors;
     # arbitrary tags — a deterministic palette color by name hash.
-    # v1.2.5: values — from the central theme (ui/theme.py).
-    TAG_PALETTE = [QColor(c) for c in theme.TAG_PALETTE]
-    TAG_COLORS = {k: QColor(v) for k, v in theme.TAG_COLORS.items()}
+    # v1.4.3: both are live views of the ACTIVE theme.
+    TAG_PALETTE = theme.ThemeMap("tag_palette", as_list=True)
+    TAG_COLORS = theme.ThemeMap("tag_colors")
     # Tag strip on the card: vertical segments along the left edge.
     TAG_STRIP_WIDTH = 5.0
 
@@ -402,6 +406,42 @@ class ServerNode(QGraphicsItemGroup):
     def refresh_tags(self):
         """v0.9.4: public hook to update the strip after editing data.tags."""
         self._rebuild_tag_strip()
+        self.update()
+
+    def refresh_theme(self):
+        """v1.4.3 (ROADMAP task 5): re-apply every theme-dependent brush/pen.
+
+        The colours this card paints with are read live (`ThemeColor` /
+        `ThemeMap` descriptors), but a QBrush/QPen handed to a child item is a
+        VALUE — it keeps what it was given, and a QGraphicsItem does not repaint
+        itself just because a colour moved. This method is the one place that
+        rebuilds those values; `MainWindow.apply_theme()` reaches every card
+        through the scene. The status/SSH dots return to their current STATE
+        (idle grey, or the status colour that is showing), never to a stale one.
+        """
+        self._bg.setBrush(QBrush(self.COLOR_BG))
+        self._pulse.setPen(QPen(self.STATUS_COLORS.get("offline", self.COLOR_BORDER), 3))
+        self._icon.setPen(QPen(self.COLOR_BORDER, 2))
+        self._icon.setBrush(QBrush(QColor(theme.NODE_ICON_BG)))
+        _glyph_pen = QPen(self.COLOR_TEXT, 1.6)
+        _glyph_pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+        self._glyph.setPen(_glyph_pen)
+        self._alias.setDefaultTextColor(self.COLOR_TEXT)
+        self._info.setDefaultTextColor(self.COLOR_LABEL)
+        self._host_label.setDefaultTextColor(QColor(theme.DOT_IDLE))
+        _info_bg_color = QColor(theme.WINDOW_BG)
+        _info_bg_color.setAlpha(150)
+        self._info_bg.setBrush(QBrush(_info_bg_color))
+        self._chevron.setPen(QPen(self.COLOR_LABEL, 1.8))
+        # The dots keep their STATE: the status dot shows the status colour (the
+        # idle grey when unchecked), the SSH dot the connection state.
+        self._status_dot.setBrush(QBrush(self.STATUS_COLORS.get(self._status, self.COLOR_DOT_IDLE)))
+        self._ssh_status.setBrush(QBrush(self.COLOR_DOT_IDLE))
+        self._apply_visual_state()
+        self._rebuild_tag_strip()
+        # The halo is a pixmap of one size and a neutral black layer — it has no
+        # theme colour, but the cache is dropped with the switch so a caller that
+        # wants a themed shadow later starts from a clean slate.
         self.update()
 
     def _state_pen(self):

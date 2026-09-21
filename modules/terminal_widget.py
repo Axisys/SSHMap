@@ -1479,6 +1479,26 @@ class TerminalWidget(QWidget):
                 pass
 
     # ── v1.3.3.1 (invariant): re-text on a language switch ─────────────────────
+    def refresh_theme(self):
+        """v1.4.3 (ROADMAP task 4): re-apply the theme to the canvas.
+
+        The canvas paints its grid from the terminal's OWN output palette, which
+        the UI theme deliberately does not touch (AGENTS.md §4.6) — so the only
+        thing here is the floating find panel's stylesheet, which does come from
+        the registry. A repaint is requested anyway: a switch changes the widget
+        chrome around the canvas (the page's status line, the tabs), and a stale
+        frame would show it. Never raises.
+        """
+        bar = self._find_bar
+        if bar is not None:
+            hook = getattr(bar, "refresh_theme", None)
+            if callable(hook):
+                try:
+                    hook()
+                except RuntimeError:
+                    self._find_bar = None   # the C++ object is gone — stop touching it
+        self.update()
+
     def retranslate(self):
         """v1.3.3.4: re-text the find panel (the canvas keeps no other strings).
 

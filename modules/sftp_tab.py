@@ -104,6 +104,14 @@ try:  # v1.2.5: central theme (status labels — ui/theme.py)
 except ImportError:
     from ui import theme
 
+try:  # v1.4.3 (ROADMAP task 4): the ONE QSS registry
+    from ..ui import theme_qss
+except ImportError:
+    try:
+        from ui import theme_qss
+    except ImportError:  # flat layout: the ui/ directory itself is on sys.path
+        theme_qss = None
+
 try:  # v1.3.1: the viewer's shared constants (limit + task_error codes)
     from .sftp_worker import (KIND_DELETE, KIND_MKDIR, KIND_READ, KIND_RENAME,
                               MAX_READ_BYTES, OP_KINDS, READ_ERROR_BINARY,
@@ -112,6 +120,19 @@ except ImportError:
     from sftp_worker import (KIND_DELETE, KIND_MKDIR, KIND_READ, KIND_RENAME,
                              MAX_READ_BYTES, OP_KINDS, READ_ERROR_BINARY,
                              READ_ERROR_TOO_LARGE, classify_extension)
+
+
+def _apply_status_style(widget, key: str) -> None:
+    """v1.4.3 (ROADMAP task 4): apply a muted status-label style from the registry.
+
+    Falls back to the pre-v1.4.3 inline string when the Qt theme module is not
+    importable (a flat run outside the project tree), so a status label is styled
+    either way. Never raises: a missing registry key yields an empty stylesheet.
+    """
+    if theme_qss is not None:
+        widget.setStyleSheet(theme_qss.style(key))
+    else:
+        widget.setStyleSheet(f"color: {theme.TEXT_MUTED}; padding: 2px 0;")
 
 
 def format_size(n) -> str:
@@ -320,8 +341,7 @@ class SftpTab(QWidget):
 
         # Path row — the current directory (the "address bar").
         self.path_label = QLabel(t("sftp.waiting_connection"))
-        # v1.2.5: color — from the central theme (ui/theme.py); value unchanged
-        self.path_label.setStyleSheet(f"color: {theme.TEXT_MUTED}; padding: 2px 0;")
+        _apply_status_style(self.path_label, "status.sftp_row")
         outer.addWidget(self.path_label)
 
         # Buttons: navigation | operations.
@@ -377,8 +397,7 @@ class SftpTab(QWidget):
         viewer_head = QHBoxLayout()
         viewer_head.setSpacing(6)
         self.viewer_label = QLabel("")
-        # v1.2.5: color — from the central theme (ui/theme.py)
-        self.viewer_label.setStyleSheet(f"color: {theme.TEXT_MUTED}; padding: 2px 0;")
+        _apply_status_style(self.viewer_label, "status.sftp_row")
         self.viewer_label.setTextInteractionFlags(
             Qt.TextInteractionFlag.TextSelectableByMouse)
         self.viewer_label.setWordWrap(False)
@@ -422,6 +441,21 @@ class SftpTab(QWidget):
         self.installEventFilter(self)
 
     # ── v1.3.3.1 (ROADMAP task 1): live i18n — re-text on a language switch ──
+
+    def refresh_theme(self):
+        """v1.4.3 (ROADMAP task 4): re-apply the theme to this tab's own labels.
+
+        Both label styles come from the ONE registry (`_apply_status_style`), so
+        the switch is the same call the constructor made. Never raises.
+        """
+        for widget in (getattr(self, "path_label", None),
+                       getattr(self, "viewer_label", None)):
+            if widget is None:
+                continue
+            try:
+                _apply_status_style(widget, "status.sftp_row")
+            except RuntimeError:
+                continue  # Qt teardown — this label is already destroyed
 
     def retranslate(self):
         """v1.3.3.1: re-text the tab's own strings in the current language.

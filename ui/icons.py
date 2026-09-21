@@ -16,10 +16,52 @@ except ImportError:
     except ImportError:  # flat layout: the ui/ directory itself is on sys.path
         import theme
 
-# Base icon color (slate-300) — readable on the dark Fusion palette (#1e293b).
-# v1.2.5: the value comes from the central theme; the name is kept (public module constant).
-ICON_COLOR = theme.ICON_COLOR
+# Base icon color — readable on the current theme's surfaces (slate-300 on the dark
+# palette). v1.2.5: the value comes from the central theme; the name is kept (public
+# module constant). **v1.4.3-fix: it is LIVE.**
+#
+# A module `__getattr__` would NOT have been enough here: it only serves `module.NAME`
+# access, while the drawers below read `ICON_COLOR` as a module GLOBAL — a global
+# lookup goes to `__dict__` and never reaches the hook (which is exactly the trap the
+# v1.4.3 release fell into: the constant was captured at import time and the toolbar
+# and sidebar kept their dark-theme pale glyphs on LIGHT). The name therefore holds a
+# small PROXY that resolves the ACTIVE theme's `icon_color` on every read and behaves
+# as its hex string in both places it is consumed (`QColor(ICON_COLOR)` and an f-string).
+class _LiveColor:
+    """A hex-string proxy that follows the ACTIVE theme (v1.4.3-fix)."""
+
+    __slots__ = ("_field",)
+
+    def __init__(self, field_name: str):
+        self._field = field_name
+
+    def value(self) -> str:
+        return getattr(theme, self._field)
+
+    def __str__(self) -> str:
+        return self.value()
+
+    def __repr__(self) -> str:  # pragma: no cover - debugging aid
+        return self.value()
+
+    def __eq__(self, other) -> bool:
+        return self.value() == other
+
+    def __hash__(self) -> int:
+        return hash(self.value())
+
+
+ICON_COLOR = _LiveColor("ICON_COLOR")
 ICON_SIZE = 20
+
+
+# ── The icon cache + the live refresh (v1.4.3-fix) ───────────────────────────
+# A QIcon is a VALUE handed to a QAction/QPushButton: once painted it keeps its
+# pixels, and nothing repaints it when the theme changes. The cache keeps ONE
+# QIcon object per name and `refresh_all()` RE-PAINTS it in place — the QIcon is
+# implicitly shared, so every widget already holding it shows the new pixmap
+# without the window having to walk its menus and toolbars.
+_ICON_CACHE = {}
 
 
 def _canvas(size: int = ICON_SIZE):
@@ -28,18 +70,26 @@ def _canvas(size: int = ICON_SIZE):
     pm.fill(QColor(0, 0, 0, 0))
     p = QPainter(pm)
     p.setRenderHint(QPainter.Antialiasing, True)
-    pen = QPen(QColor(ICON_COLOR), 1.6)
+    pen = QPen(QColor(theme.ICON_COLOR), 1.6)   # live: the ACTIVE theme's outline tone
     pen.setCapStyle(Qt.PenCapStyle.RoundCap)
     pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
     p.setPen(pen)
     p.setBrush(Qt.BrushStyle.NoBrush)
     return pm, p
 
-
-def _icon(pm, painter) -> QIcon:
+def _paint(icon: QIcon, drawer, size: int = ICON_SIZE) -> QIcon:
+    """Draw `drawer` into an existing QIcon (replacing whatever it held)."""
+    pm, painter = _canvas(size)
+    try:
+        drawer(painter)
+    except Exception:  # noqa: BLE001 — an icon must not crash the UI
+        painter.end()
+        return icon
     painter.end()
-    icon = QIcon()
-    icon.addPixmap(pm)
+    try:
+        icon.addPixmap(pm)
+    except RuntimeError:
+        pass  # Qt teardown — the dead C++ object of a closed window's icon
     return icon
 
 
@@ -261,7 +311,9 @@ def _draw_settings(p):
     path.closeSubpath()
     # The gear is slightly bolder than the base outline (1.6): on 20×20
     # a thin stroke rounds the valleys and the teeth stop reading.
-    pen = QPen(QColor(ICON_COLOR), 1.8)
+    # v1.4.3-fix: this drawer used to OVERRIDE the canvas pen with the module
+    # constant — read the live theme directly (a QColor() cannot take the proxy).
+    pen = QPen(QColor(theme.ICON_COLOR), 1.8)
     pen.setCapStyle(Qt.PenCapStyle.RoundCap)
     pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
     p.setPen(pen)
@@ -417,14 +469,117 @@ _DRAWERS = {
 
 
 def get_icon(name: str) -> QIcon:
-    """Icon by name; unknown name — empty QIcon (the button stays text-only)."""
+    """Icon by name; unknown name — empty QIcon (the button stays text-only).
+
+    **v1.4.3-fix:** the icon is CACHED by name and returned as the SAME QIcon
+    object every time (it used to be redrawn per call). That is what makes
+    `refresh_all()` possible: a QAction holds this object, so re-painting it in
+    place updates every menu, toolbar and button at once — no walk of the
+    widgets, no risk of missing one. A caller must therefore NOT mutate the
+    returned QIcon; ask for a fresh one with `draw_icon(name)` if that is ever
+    needed. Never raises: an icon is cosmetic.
+    """
     drawer = _DRAWERS.get(name)
     if drawer is None:
         return QIcon()
-    pm, painter = _canvas()
-    try:
-        drawer(painter)
-    except Exception:  # noqa: BLE001 — an icon must not crash the UI
-        painter.end()
+    icon = _ICON_CACHE.get(name)
+    if icon is None:
+        icon = _paint(QIcon(), drawer)
+        _ICON_CACHE[name] = icon
+    return icon
+
+
+def draw_icon(name: str) -> QIcon:
+    """A NEW QIcon of `name`, outside the cache (the tests' seam + a rare caller)."""
+    drawer = _DRAWERS.get(name)
+    if drawer is None:
         return QIcon()
-    return _icon(pm, painter)
+    return _paint(QIcon(), drawer)
+
+
+def set_action_icon(action, name) -> bool:
+    """Give a QAction the icon of `name` and REMEMBER the name on it (v1.4.3-fix).
+
+    The remembered name (`_sshmap_icon_name`) is how `refresh_all()` / the theme
+    walk find every icon in the UI without a registry to maintain: the name
+    travels with the QAction. An unknown name leaves the action icon-less.
+    Returns True when an icon was set. Never raises.
+    """
+    if action is None or not name:
+        return False
+    try:
+        icon = get_icon(name)
+        if icon.isNull():
+            return False
+        action.setIcon(icon)
+        action._sshmap_icon_name = name
+        return True
+    except (RuntimeError, AttributeError, TypeError):
+        return False
+
+
+def refresh_all() -> int:
+    """Re-paint every CACHED icon in the ACTIVE theme's colour (v1.4.3-fix).
+
+    Returns how many icons were repainted. Every QIcon already handed out is
+    updated in place, so the toolbar, the menus, the sidebar buttons and the
+    command palette follow `set_theme()` without a rebuild. Never raises.
+    """
+    count = 0
+    for name, icon in list(_ICON_CACHE.items()):
+        drawer = _DRAWERS.get(name)
+        if drawer is None:
+            continue
+        try:
+            _paint(icon, drawer)
+            count += 1
+        except RuntimeError:
+            continue  # Qt teardown — the C++ object behind this icon is gone
+    return count
+
+
+def refresh_action_icon(action) -> bool:
+    """Re-paint one QAction's icon from its remembered name (v1.4.3-fix).
+
+    The QIcon is cleared first: a widget that already converted the old pixmap keeps
+    serving it from its own cache otherwise (`QPushButton.icon()` hands out a COPY —
+    measured: the copy and the registry object answered different `cacheKey()`s for
+    the same size), and `setIcon` alone does not evict that cache.
+    """
+    name = getattr(action, "_sshmap_icon_name", None)
+    if not name:
+        return False
+    try:
+        icon = get_icon(name)
+        if icon.isNull():
+            return False
+        action.setIcon(QIcon())        # drop the widget's cached render
+        action.setIcon(icon)
+        return True
+    except RuntimeError:
+        return False
+
+
+def refresh_button_icon(button, name) -> bool:
+    """Re-apply the icon of `name` to a QPushButton/QToolButton (v1.4.3-fix).
+
+    Same clear-then-set dance as `refresh_action_icon`: a widget keeps its OWN copy
+    of the pixmap, so re-setting the registry's QIcon is not enough — the old render
+    has to be evicted first. A null icon (an incomplete ui/icons) is a no-op.
+    """
+    if button is None or not name:
+        return False
+    try:
+        icon = get_icon(name)
+        if icon.isNull():
+            return False
+        button.setIcon(QIcon())
+        button.setIcon(icon)
+        return True
+    except RuntimeError:
+        return False
+
+
+def cached_icon_names() -> list:
+    """The names in the cache (the topical test's seam)."""
+    return sorted(_ICON_CACHE)

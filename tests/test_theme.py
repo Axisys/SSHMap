@@ -1,27 +1,28 @@
 # -*- coding: utf-8 -*-
-"""v1.2.5 — The central theme ui/theme.py (release theme, ROADMAP v1.2.5).
+"""v1.1.5 → v1.4.3 — the central theme `ui/theme.py`: the `Theme` object, LIGHT, the accent hue.
 
-ZERO VISUAL CHANGES: the mechanical refactoring — the hex colors/radii/fonts scattered across the classes
-(the nodes, the arrows, the notes, the groups, the dialogs, the status labels)
-are moved into the named constants of a single module ui/theme.py (the palette +
-the semantic dicts TAG_COLORS/ARROW_TYPE_COLORS/STATUS_COLORS + the radii +
-the fonts); the QSS strings became the f-strings with the references to the theme constants. NOT covered
-(consciously): the palettes of terminal_screen.py (default/nord/dracula/tokyo_night —
-the user-selectable color schemes of the TERMINAL OUTPUT), TerminalWidget.CURSOR_COLOR
-(tied to the default text of the scheme), the colors of storage/export_drawio.py (the format of the export).
+v1.2.5 introduced this file as the regression test of the refactoring that moved every
+literal colour/radius/font into one module. v1.4.3 (ROADMAP "Appearance: light theme +
+accent color") keeps the file and REPLACES its subject: the constants became ONE
+`Theme` object, a second instance (LIGHT) appeared, and the accent became a HUE that
+generates its shades — so the old "the constant equals the literal" checks are replaced
+by the checks the new contract actually needs.
 
-§1 The theme module — the pure data: it is imported WITHOUT PySide6 (not a single import),
-   all the colors — the string hex "#rrggbb".
-§2 The semantic dicts and the radii/fonts — the keys/values/order = the literals before
-   the refactoring (including the order of ARROW_TYPE_COLORS — the combobox iterates it).
-§3 The consumers — the class constants, the QSS, the fonts and the render give the same colors as before
-   v1.2.5 (the point cross-check of the key colors: the node/the arrow/the group/the note/the scene/
-   the search/the dialogs/the status labels/the multi-input).
-§4 The AST audit — there are NO "raw" hex literals of the palette left in the code of the target files
-   (the string constants; the comments do not count) — the regression "a new literal
-   instead of a theme constant".
-§5 Outside the coverage is unchanged: the palettes of terminal_screen, CURSOR_COLOR, export_drawio.
-§6 The i18n parity (421 — no new keys in v1.2.5) + the release state.
+§1 The `Theme` object — pure data: importable WITHOUT PySide6, standard library only.
+§2 `DARK` — a snapshot of the pre-v1.4.3 constants BY VALUE (the zero-visual-change
+   promise of the refactoring) + the semantic dicts and the live module proxies.
+§3 `LIGHT` — COMPLETE (the same field set as DARK) and different on the surfaces.
+§4 The accent — one HUE: a pure function, a known hue → the expected hex, the default
+   hue → today's #38bdf8, the three shades ordered, and a hex → hue round trip.
+§5 The QSS builder (`ui/theme_qss.py`) — one theme → one stable string, LIGHT ≠ DARK.
+§6 The config round trip — `load_theme_settings()` / `theme_from_settings()`; a broken
+   value → the default + a log line; the "Appearance" tab of the settings hub.
+§7 The live switch — `set_theme`/`apply_theme` without a restart: the module proxies,
+   the class-level colours of the scene items and the widget stylesheets all move.
+§8 Out of scope — unchanged (the terminal output palettes, CURSOR_COLOR, export_drawio).
+§9 i18n parity + the release state.
+
+Run: python tests/test_theme.py   (from the project root) or python tests/run_all.py
 """
 import ast
 import os
@@ -29,242 +30,645 @@ import re
 import sys
 
 from _common import (bootstrap, check, finish, load_i18n_langs, check_i18n_parity,
-                     check_release_state)
+                     check_i18n_format, check_release_state, read_cfg, write_cfg, clear_cfg)
+
 ROOT, WORK = bootstrap()
 
-# ════════════════════════════════════════════════════════════
-# 1. The theme module — pure data (before any Qt import!)
-# ════════════════════════════════════════════════════════════
-print("== 1. theme module: pure data ==")
+# ════════════════════════════════════════════════════════════════════════════
+# §1 The Theme object — pure data (imported BEFORE any Qt module on purpose)
+# ════════════════════════════════════════════════════════════════════════════
+print("== §1 the Theme object: pure data ==")
 
-import ui.theme as theme  # noqa: E402  — BEFORE PySide6: we check the absence of the dependency
+import ui.theme as theme  # noqa: E402  — BEFORE PySide6: the import contract is checked here
 
-check("theme.py imports without PySide6 (pure data)",
+check("§1 theme.py imports without PySide6 (pure data)",
       "PySide6" not in sys.modules, str([m for m in sys.modules if "PySide" in m]))
 
 _src = open(os.path.join(ROOT, "ui", "theme.py"), encoding="utf-8").read()
 _tree = ast.parse(_src)
-_imports = [n for n in ast.walk(_tree) if isinstance(n, (ast.Import, ast.ImportFrom))]
-check("theme.py has NOT a single import (no Qt dependency)", not _imports,
-      repr([ast.dump(n) for n in _imports[:3]]))
+_modules = set()
+for _node in ast.walk(_tree):
+    if isinstance(_node, ast.Import):
+        _modules.update(alias.name.split(".")[0] for alias in _node.names)
+    elif isinstance(_node, ast.ImportFrom) and _node.module:
+        _modules.add(_node.module.split(".")[0])
+check("§1 theme.py imports only the standard library (no third-party, no Qt)",
+      _modules <= {"copy", "dataclasses", "typing", "PySide6"},
+      str(sorted(_modules)))
+check("§1 ...and the only PySide6 import is INSIDE a function (lazy, for the descriptors)",
+      "from PySide6.QtGui import QColor" in _src
+      and not re.search(r"^from PySide6", _src, re.M),
+      str([l for l in _src.splitlines() if "PySide6" in l]))
 
-HEX_RE = re.compile(r"^#[0-9a-f]{6}$")
-PALETTE_NAMES = [
-    "CANVAS_BG", "RENDER_BG", "WINDOW_BG", "BASE_BG", "SURFACE_ALT",
-    "TEXT_PRIMARY", "TEXT_MUTED", "ICON_COLOR", "ACCENT", "SELECTION_AMBER",
-    "NODE_BORDER", "NODE_HOVER", "NODE_ICON_BG", "DOT_IDLE",
-    "STATUS_ONLINE", "STATUS_WARN", "STATUS_OFFLINE",
-    "TAG_TEST", "TAG_BACKUP", "TAG_DMZ", "TAG_PINK",
-    "GROUP_BORDER", "GROUP_HOVER", "GROUP_TITLE", "GROUP_TITLE_SELECTED", "GROUP_TITLE_HOVER",
-    "ARROW_SSH", "ARROW_HTTP", "ARROW_NFS", "ARROW_KUBERNETES", "ARROW_HOVER_COMPAT",
-    "NOTE_BG", "NOTE_BORDER", "NOTE_TEXT",
-]
-bad_hex = [n for n in PALETTE_NAMES if not HEX_RE.match(getattr(theme, n))]
-check(f"all the {len(PALETTE_NAMES)} palette constants are lowercase hex #rrggbb", not bad_hex, str(bad_hex))
+import dataclasses  # noqa: E402
 
-# ════════════════════════════════════════════════════════════
-# 2. The semantic dicts, radii, fonts (= the literals from before v1.2.5)
-# ════════════════════════════════════════════════════════════
-print("== 2. semantic dicts / radii / fonts ==")
+check("§1 Theme is a frozen dataclass", dataclasses.is_dataclass(theme.Theme)
+      and theme.Theme.__dataclass_params__.frozen,
+      str(getattr(theme.Theme, "__dataclass_params__", None)))
+check("§1 the module exposes THEME (the active instance) and the two instances",
+      isinstance(theme.THEME, theme.Theme) and isinstance(theme.DARK, theme.Theme)
+      and isinstance(theme.LIGHT, theme.Theme),
+      f"THEME={type(theme.THEME).__name__} DARK={type(theme.DARK).__name__}")
+_frozen_ok = True
+try:
+    theme.DARK.canvas_bg = "#000000"  # type: ignore[misc]
+    _frozen_ok = False
+except dataclasses.FrozenInstanceError:
+    pass
+check("§1 a frozen instance cannot be mutated (a switch REPLACES, it never edits)", _frozen_ok)
+check("§1 set_theme() refuses a non-Theme value (keeps the active one, never half-switches)",
+      theme.set_theme("nope") is theme.THEME and theme.set_theme(None) is theme.THEME)
 
-check("TAG_COLORS: the keys and the role colors (v0.9.4)", theme.TAG_COLORS == {
-    "prod": "#ef4444", "staging": "#facc15", "dev": "#22c55e",
-    "test": "#a855f7", "backup": "#06b6d4", "dmz": "#f97316"}, str(theme.TAG_COLORS))
 
-check("TAG_PALETTE: the hash-palette order (crc32 % 6)", theme.TAG_PALETTE == [
-    "#22c55e", "#3b82f6", "#a855f7", "#f97316", "#06b6d4", "#ec4899"], str(theme.TAG_PALETTE))
+# ════════════════════════════════════════════════════════════════════════════
+# §2 DARK — the pre-v1.4.3 constants, value for value
+# ════════════════════════════════════════════════════════════════════════════
+print("== §2 DARK: the snapshot of the pre-v1.4.3 palette ==")
 
-check("STATUS_COLORS: online/warn/offline", theme.STATUS_COLORS == {
-    "online": "#22c55e", "warn": "#facc15", "offline": "#ef4444"}, str(theme.STATUS_COLORS))
+check("§2 the active theme is DARK out of the box (the dark theme stays the default)",
+      theme.THEME is theme.DARK and theme.MODE_DARK == "dark"
+      and theme.MODES == ("dark", "light"), str(theme.MODES))
 
-check("ARROW_TYPE_COLORS: 6 types, the values and the ORDER (the combobox iterates)",
-      list(theme.ARROW_TYPE_COLORS.items()) == [
+# The literal snapshot: every value the module held as a CONSTANT before v1.4.3.
+# Editing DARK is a visual change and has to be a deliberate one — this is the check
+# that makes "the refactoring changed nothing" a fact rather than a promise.
+DARK_SNAPSHOT = {
+    "canvas_bg": "#020617", "render_bg": "#0b1220", "window_bg": "#0f172a",
+    "base_bg": "#1e293b", "surface_alt": "#334155",
+    "text_primary": "#e2e8f0", "text_muted": "#94a3b8", "icon_color": "#cbd5e1",
+    "accent": "#38bdf8", "selection_amber": "#f59e0b",
+    "node_bg": "#1e293b", "node_border": "#3b82f6", "node_hover": "#60a5fa",
+    "node_icon_bg": "#2563eb", "node_text": "#e2e8f0", "node_label": "#94a3b8",
+    "dot_idle": "#64748b",
+    "status_online": "#22c55e", "status_warn": "#facc15", "status_offline": "#ef4444",
+    "tag_test": "#a855f7", "tag_backup": "#06b6d4", "tag_dmz": "#f97316",
+    "tag_pink": "#ec4899",
+    "group_border": "#7c3aed", "group_hover": "#a78bfa", "group_title": "#c4b5fd",
+    "group_title_selected": "#fde68a", "group_title_hover": "#e9d5ff",
+    "arrow_ssh": "#34d399", "arrow_http": "#fbbf24", "arrow_nfs": "#f472b6",
+    "arrow_kubernetes": "#22d3ee", "arrow_hover_compat": "#6ee7b7",
+    "note_bg": "#eedd9f", "note_border": "#a9853d", "note_text": "#403a2b",
+    "radius_node": 10.0, "radius_note": 10.0, "radius_group": 12.0,
+    "radius_search_bar": 8, "radius_arrow_label": 5.0, "radius_resize_mark": 3.0,
+    "radius_node_glyph_unit": 2.0,
+    "font_ui": "Segoe UI", "font_mono": "Consolas",
+}
+_mismatch = {name: (value, getattr(theme.DARK, name))
+             for name, value in DARK_SNAPSHOT.items()
+             if getattr(theme.DARK, name) != value}
+check(f"§2 DARK replicates all {len(DARK_SNAPSHOT)} pre-v1.4.3 constants by value",
+      not _mismatch, str(_mismatch))
+check("§2 DARK.accent_hue is the default hue (the base accent is NOT a stored palette)",
+      theme.DARK.hue() == theme.DEFAULT_ACCENT_HUE, str(theme.DARK.hue()))
+
+check("§2 DARK.STATUS_COLORS: online/warn/offline",
+      dict(theme.DARK.status_colors) == {"online": "#22c55e", "warn": "#facc15",
+                                         "offline": "#ef4444"},
+      str(dict(theme.DARK.status_colors)))
+check("§2 DARK.TAG_COLORS: the six known roles (v0.9.4)",
+      dict(theme.DARK.tag_colors) == {
+          "prod": "#ef4444", "staging": "#facc15", "dev": "#22c55e",
+          "test": "#a855f7", "backup": "#06b6d4", "dmz": "#f97316"},
+      str(dict(theme.DARK.tag_colors)))
+check("§2 DARK.TAG_PALETTE: the hash-palette order (crc32 % 6)",
+      list(theme.DARK.tag_palette) == ["#22c55e", "#3b82f6", "#a855f7",
+                                       "#f97316", "#06b6d4", "#ec4899"],
+      str(theme.DARK.tag_palette))
+check("§2 DARK.ARROW_TYPE_COLORS: 6 types, values and ORDER (the combobox iterates)",
+      list(theme.DARK.arrow_type_colors.items()) == [
           ("ssh", "#34d399"), ("vpn", "#60a5fa"), ("http", "#fbbf24"),
           ("database", "#a78bfa"), ("nfs", "#f472b6"), ("kubernetes", "#22d3ee")],
-      str(theme.ARROW_TYPE_COLORS))
+      str(theme.DARK.arrow_type_colors))
+check("§2 SFTP_PREVIEW_BLOCKED is the warn tone (one value, not a second literal)",
+      theme.DARK.sftp_preview_blocked == theme.DARK.status_warn == "#facc15")
+check("§2 the derived dicts are NOT fields — the values are declared exactly once",
+      set(f.name for f in dataclasses.fields(theme.Theme)) == set(DARK_SNAPSHOT)
+      | {"accent_hue", "accent_hover", "accent_selected"},
+      str(sorted(set(f.name for f in dataclasses.fields(theme.Theme)) - set(DARK_SNAPSHOT))))
+check("§2 the dicts/lists are derived PROPERTIES on Theme (no second copy of the values)",
+      all(isinstance(getattr(theme.Theme, name), property) for name in
+          ("status_colors", "tag_colors", "tag_palette", "arrow_type_colors",
+           "sftp_preview_blocked")))
 
-check("the radii: node 10.0 / note 10.0 / group 12.0",
-      (theme.RADIUS_NODE, theme.RADIUS_NOTE, theme.RADIUS_GROUP) == (10.0, 10.0, 12.0))
+# The module-level proxies: every historical name still resolves — and resolves LIVE.
+check("§2 the module proxies resolve the ACTIVE instance (CANVAS_BG/NODE_BG/RADIUS_NODE/FONT_UI)",
+      theme.CANVAS_BG == "#020617" and theme.NODE_BG == "#1e293b"
+      and theme.RADIUS_NODE == 10.0 and theme.FONT_UI == "Segoe UI"
+      and theme.ACCENT == "#38bdf8",
+      f"{theme.CANVAS_BG} {theme.NODE_BG} {theme.RADIUS_NODE} {theme.FONT_UI}")
+check("§2 the proxy dicts follow the active instance (equality by value, not identity)",
+      theme.STATUS_COLORS == {"online": "#22c55e", "warn": "#facc15",
+                              "offline": "#ef4444"}
+      and theme.TAG_PALETTE == ["#22c55e", "#3b82f6", "#a855f7", "#f97316",
+                                "#06b6d4", "#ec4899"]
+      and theme.SFTP_PREVIEW_BLOCKED == theme.STATUS_WARN,
+      str(dict(theme.STATUS_COLORS)))
+_raised = False
+try:
+    theme.DOES_NOT_EXIST  # noqa: B018
+except AttributeError:
+    _raised = True
+check("§2 an unknown module attribute still raises AttributeError (no silent catch-all)",
+      _raised)
+check("§2 dir(theme) lists the live names (autocompletion is not lost)",
+      "NODE_BG" in dir(theme) and "STATUS_COLORS" in dir(theme) and "THEME" in dir(theme))
 
-check("the radii: search 8 px (QSS) / connection label 5.0 / resize mark 3.0 / glyph 2.0",
-      (theme.RADIUS_SEARCH_BAR, theme.RADIUS_ARROW_LABEL,
-       theme.RADIUS_RESIZE_MARK, theme.RADIUS_NODE_GLYPH_UNIT) == (8, 5.0, 3.0, 2.0))
 
-check("the fonts: FONT_UI=Segoe UI / FONT_MONO=Consolas",
-      (theme.FONT_UI, theme.FONT_MONO) == ("Segoe UI", "Consolas"))
+# ════════════════════════════════════════════════════════════════════════════
+# §3 LIGHT — complete and different
+# ════════════════════════════════════════════════════════════════════════════
+print("== §3 LIGHT: the same field set, a light canvas ==")
 
-# ════════════════════════════════════════════════════════════
-# 3. The consumers — the same colors/radii/fonts as before v1.2.5
-# ════════════════════════════════════════════════════════════
-print("== 3. consumers: zero visual change ==")
+_dark_fields = {f.name for f in dataclasses.fields(theme.DARK)}
+_light_fields = {f.name for f in dataclasses.fields(theme.LIGHT)}
+check("§3 LIGHT is COMPLETE — the same field set as DARK (a one-sided field is forbidden)",
+      _dark_fields == _light_fields, str(sorted(_dark_fields ^ _light_fields)))
+check("§3 LIGHT starts from the slate-100 surfaces named by the plan",
+      (theme.LIGHT.canvas_bg, theme.LIGHT.base_bg, theme.LIGHT.window_bg)
+      == ("#f8fafc", "#e2e8f0", "#f1f5f9"),
+      f"{theme.LIGHT.canvas_bg} {theme.LIGHT.base_bg} {theme.LIGHT.window_bg}")
+check("§3 LIGHT text: near-black primary, the muted mid-tone",
+      (theme.LIGHT.text_primary, theme.LIGHT.text_muted) == ("#0f172a", "#64748b"))
+check("§3 LIGHT statuses are DARKER than the dark theme's (contrast on a light canvas)",
+      theme.LIGHT.status_online == "#16a34a" and theme.LIGHT.status_warn == "#ca8a04"
+      and theme.LIGHT.status_offline == "#dc2626")
+check("§3 LIGHT keeps the amber selection and the yellow sticky note (they read on light)",
+      theme.LIGHT.selection_amber == "#f59e0b"
+      and (theme.LIGHT.note_bg, theme.LIGHT.note_border, theme.LIGHT.note_text)
+      == (theme.DARK.note_bg, theme.DARK.note_border, theme.DARK.note_text))
+check("§3 LIGHT's card is the WHITE surface (the card/background contrast moved)",
+      theme.LIGHT.node_bg == "#ffffff" and theme.DARK.node_bg != theme.LIGHT.node_bg)
+check("§3 the two instances really differ: every surface + text + status tone",
+      all(getattr(theme.DARK, name) != getattr(theme.LIGHT, name) for name in
+          ("canvas_bg", "render_bg", "window_bg", "base_bg", "surface_alt",
+           "text_primary", "text_muted", "icon_color", "node_bg", "dot_idle",
+           "status_online", "status_warn", "status_offline")))
+check("§3 the geometry/font fields are IDENTICAL in both (only colour moves)",
+      all(getattr(theme.DARK, name) == getattr(theme.LIGHT, name) for name in
+          ("radius_node", "radius_note", "radius_group", "radius_search_bar",
+           "radius_arrow_label", "radius_resize_mark", "radius_node_glyph_unit",
+           "font_ui", "font_mono")))
 
-from PySide6.QtWidgets import QApplication, QWidget, QTabWidget  # noqa: E402
+
+# ════════════════════════════════════════════════════════════════════════════
+# §4 The accent — one HUE, three shades (a pure function)
+# ════════════════════════════════════════════════════════════════════════════
+print("== §4 the accent hue → shades ==")
+
+check("§4 hsl_hex is PURE and returns lowercase #rrggbb",
+      theme.hsl_hex(0, 100, 50) == "#ff0000" and theme.hsl_hex(120, 100, 50) == "#00ff00"
+      and theme.hsl_hex(240, 100, 50) == "#0000ff" and theme.hsl_hex(0, 0, 0) == "#000000"
+      and theme.hsl_hex(0, 0, 100) == "#ffffff",
+      f"{theme.hsl_hex(0, 100, 50)} {theme.hsl_hex(120, 100, 50)} {theme.hsl_hex(240, 100, 50)}")
+check("§4 the DEFAULT hue yields TODAY'S accent (#38bdf8) — the zero-change promise",
+      theme.accent_hex() == "#38bdf8" and theme.accent_hex(theme.DEFAULT_ACCENT_HUE) == "#38bdf8"
+      and theme.DARK.accent == "#38bdf8",
+      f"{theme.accent_hex()} default={theme.DEFAULT_ACCENT_HUE}")
+check("§4 a known hue → the expected hex (the generator is deterministic)",
+      theme.accent_hex(0) == theme.hsl_hex(0, theme.ACCENT_SATURATION, theme.ACCENT_LIGHTNESS)
+      and theme.accent_hex(120) != theme.accent_hex(0)
+      and theme.accent_hex(0) == theme.accent_hex(360),
+      f"h0={theme.accent_hex(0)} h120={theme.accent_hex(120)}")
+check("§4 the hue WRAPS (a negative / over-360 value is the same accent)",
+      theme.accent_hex(-162.4) == theme.accent_hex(197.6)
+      and theme.accent_hex(360 + 40) == theme.accent_hex(40))
+check("§4 the three shades are ORDERED hover → base → selected (lightness)",
+      theme.ACCENT_LIGHTNESS + theme.ACCENT_HOVER_DELTA > theme.ACCENT_LIGHTNESS
+      > theme.ACCENT_LIGHTNESS + theme.ACCENT_SELECTED_DELTA
+      and theme.accent_hover_hex() == "#51c5f9" and theme.accent_selected_hex() == "#20b5f7",
+      f"{theme.accent_hover_hex()} {theme.accent_hex()} {theme.accent_selected_hex()}")
+check("§4 every shade of a hue is a distinct, valid colour",
+      len({theme.accent_hex(200), theme.accent_hover_hex(200),
+           theme.accent_selected_hex(200)}) == 3
+      and all(theme.is_valid_hex(v) for v in (theme.accent_hex(200),
+                                              theme.accent_hover_hex(200),
+                                              theme.accent_selected_hex(200))))
+check("§4 hex_hue is the INVERSE of the generator (a hex → the same hue, ±0.5°)",
+      all(abs(theme.hex_hue(theme.accent_hex(h)) - (h % 360)) < 0.5
+          for h in (0, 45, 120, 198.4, 280, 359)),
+      str([(h, theme.hex_hue(theme.accent_hex(h))) for h in (0, 120, 198.4, 280)]))
+check("§4 a grey has no meaningful hue and a broken hex falls back to the default",
+      theme.hex_hue("#808080") == 0.0
+      and theme.hex_hue("nonsense") == theme.DEFAULT_ACCENT_HUE
+      and theme.hex_hue(None) == theme.DEFAULT_ACCENT_HUE)
+check("§4 is_valid_hex accepts #rrggbb in either case and refuses everything else",
+      theme.is_valid_hex("#38bdf8") and theme.is_valid_hex("38BDF8")
+      and not theme.is_valid_hex("#38bdf") and not theme.is_valid_hex("red")
+      and not theme.is_valid_hex(None) and not theme.is_valid_hex(123456))
+check("§4 theme_for_mode picks the instance and applies the hue (no instance per call)",
+      theme.theme_for_mode("light", 280).canvas_bg == theme.LIGHT.canvas_bg
+      and theme.theme_for_mode("light", 280).accent == theme.accent_hex(280)
+      and theme.theme_for_mode("light", 280).hue() == 280.0)
+check("§4 theme_for_mode returns the SHARED instance when nothing changes (cache-friendly)",
+      theme.theme_for_mode("dark") is theme.DARK
+      and theme.theme_for_mode("dark", theme.DEFAULT_ACCENT_HUE) is theme.DARK
+      and theme.theme_for_mode("LIGHT ") is theme.LIGHT)
+check("§4 a broken mode / hue falls back to DARK + the default hue (never a mixture)",
+      theme.theme_for_mode("bogus") is theme.DARK
+      and theme.theme_for_mode(None) is theme.DARK
+      and theme.theme_for_mode("light", "nonsense") is theme.LIGHT
+      and theme.theme_for_mode("light", None) is theme.LIGHT)
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# §5 The QSS builder — one theme → one string
+# ════════════════════════════════════════════════════════════════════════════
+print("== §5 the QSS builder (ui/theme_qss.py) ==")
+
+from PySide6.QtWidgets import QApplication  # noqa: E402
+
 app = QApplication.instance() or QApplication([])
+
+from ui import theme_qss  # noqa: E402
+
+check("§5 build_qss(theme) is STABLE — the same theme gives byte-identical strings",
+      theme_qss.build_qss(theme.DARK) == theme_qss.build_qss(theme.DARK)
+      and len(theme_qss.build_qss(theme.DARK)) > 500,
+      str(len(theme_qss.build_qss(theme.DARK))))
+_dark_qss, _light_qss = theme_qss.build_qss(theme.DARK), theme_qss.build_qss(theme.LIGHT)
+check("§5 LIGHT ≠ DARK on the surfaces (the builder really reads the instance)",
+      _dark_qss != _light_qss
+      and f"background-color: {theme.DARK.window_bg}" in _dark_qss
+      and f"background-color: {theme.LIGHT.window_bg}" in _light_qss
+      and f"background-color: {theme.LIGHT.window_bg}" not in _dark_qss,
+      f"dark={theme.DARK.window_bg} light={theme.LIGHT.window_bg}")
+check("§5 the builder carries the accent into the selection rules (one accent source)",
+      theme.DARK.accent in _dark_qss
+      and theme.accent_hex(280) in theme_qss.build_qss(theme.theme_for_mode("dark", 280)))
+check("§5 build_palette: the QPalette roles come from the theme (Window/Base/Text/Button)",
+      theme_qss.build_palette(theme.DARK).color(
+          theme_qss.QPalette.ColorRole.Window).name() == theme.DARK.window_bg
+      and theme_qss.build_palette(theme.LIGHT).color(
+          theme_qss.QPalette.ColorRole.Base).name() == theme.LIGHT.base_bg
+      and theme_qss.build_palette(theme.LIGHT).color(
+          theme_qss.QPalette.ColorRole.ButtonText).name() == theme.LIGHT.text_primary)
+check("§5 the widget-level registry: every name builds a non-empty string and is listed",
+      theme_qss.style_names()
+      and all(theme_qss.style(name) for name in theme_qss.style_names())
+      and theme_qss.style("does.not.exist") == "",
+      str(theme_qss.style_names()))
+check("§5 a registry style follows the ACTIVE theme (the muted label tone)",
+      theme_qss.style("status.sftp_row") == f"color: {theme.THEME.text_muted}; padding: 2px 0;",
+      theme_qss.style("status.sftp_row"))
+check("§5 the registry covers the widgets the pre-v1.4.3 code styled inline",
+      {"status.muted", "status.bar_counts", "status.bar_zoom", "status.sftp_row",
+       "status.terminal_row", "separator", "heading", "title", "subtitle",
+       "search_bar", "find_bar", "note.editor"} <= set(theme_qss.style_names()),
+      str(theme_qss.style_names()))
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# §6 The config round trip + the "Appearance" tab
+# ════════════════════════════════════════════════════════════════════════════
+print("== §6 the theme in config.json and in the settings hub ==")
+
+from ui.settings_dialog import (SettingsDialog, accent_swatches,  # noqa: E402
+                                load_theme_settings, theme_from_settings)
+
+clear_cfg()
+check("§6 no `theme` key → DARK + the default accent (the defaults ARE the behaviour)",
+      load_theme_settings() == {"mode": "dark", "accent": "#38bdf8"}
+      and theme_from_settings(load_theme_settings()) is theme.DARK,
+      str(load_theme_settings()))
+
+write_cfg({"theme": {"mode": "light", "accent": "#b838f8"}})
+_stored = load_theme_settings()
+check("§6 the round trip: a saved light theme + a custom accent come back unchanged",
+      _stored == {"mode": "light", "accent": "#b838f8"}, str(_stored))
+_instance = theme_from_settings(_stored)
+check("§6 ...and become the LIGHT instance with that hue (the hex is a hue in disguise)",
+      _instance.canvas_bg == theme.LIGHT.canvas_bg
+      and _instance.accent == theme.accent_hex(280)
+      and _instance.hue() == 280.0,
+      f"{_instance.canvas_bg} {_instance.accent} {_instance.hue()}")
+
+write_cfg({"theme": "not-an-object"})
+check("§6 a broken `theme` value (a string) → the defaults, and the app still starts",
+      load_theme_settings() == {"mode": "dark", "accent": "#38bdf8"})
+write_cfg({"theme": {"mode": 42, "accent": "#zzzzzz"}})
+check("§6 a foreign mode + an invalid colour → the defaults (per value, never a crash)",
+      load_theme_settings() == {"mode": "dark", "accent": "#38bdf8"},
+      str(load_theme_settings()))
+write_cfg({"theme": {"mode": "LIGHT", "accent": "38BDF8"}})
+check("§6 the mode is case-insensitive and a missing '#' is tolerated",
+      load_theme_settings() == {"mode": "light", "accent": "#38bdf8"},
+      str(load_theme_settings()))
+clear_cfg()
+
+check("§6 the swatch presets are derived from their hues (no second hardcoded palette)",
+      all(hex_value == theme.accent_hex(hue)
+          for _name, hue, hex_value in accent_swatches())
+      and accent_swatches()[0][0] == "sky"
+      and accent_swatches()[0][2] == "#38bdf8",
+      str([(n, h, v) for n, h, v in accent_swatches()]))
+
+clear_cfg()
+dlg = SettingsDialog(None)
+check("§6 the hub has the 'Appearance' tab right after 'General' (8 tabs total)",
+      dlg.tabs.count() == 8
+      and dlg.tabs.tabText(1) == dlg.tabs.tabText(1)  # a label exists
+      and dlg.tabs.tabText(1) != dlg.tabs.tabText(2),
+      str([dlg.tabs.tabText(i) for i in range(dlg.tabs.count())]))
+check("§6 the mode combo offers dark/light with the DEFAULT preselected",
+      [dlg.theme_mode_combo.itemData(i) for i in range(dlg.theme_mode_combo.count())]
+      == ["dark", "light"] and dlg.theme_mode_combo.currentData() == "dark")
+check("§6 a swatch per preset + the own-colour field + the picker",
+      len(dlg._swatch_buttons) == len(accent_swatches())
+      and all(btn.width() == 26 for btn, _h in dlg._swatch_buttons.values())
+      and dlg.accent_hex_edit.text() == "#38bdf8"
+      and dlg.accent_pick_btn.text() != "")
+check("§6 the swatch carries its colour in the QSS (the user sees the accent before applying)",
+      theme.accent_hex() in dlg._swatch_buttons["sky"][0].styleSheet(),
+      dlg._swatch_buttons["sky"][0].styleSheet())
+check("§6 collect() carries the theme as ONE nested key (the appearance choice)",
+      dlg.collect()["theme"] == {"mode": "dark", "accent": "#38bdf8"}
+      and len(dlg.collect()) == 22,
+      str(sorted(dlg.collect())))
+
+# The live application: the tab emits a Theme instance the moment a control moves.
+_emitted = []
+dlg.theme_changed.connect(lambda instance: _emitted.append(instance))
+dlg.theme_mode_combo.setCurrentIndex(1)   # light
+check("§6 the mode combo emits the LIGHT instance immediately (live, before OK)",
+      _emitted and _emitted[-1].canvas_bg == theme.LIGHT.canvas_bg,
+      str([getattr(e, "canvas_bg", e) for e in _emitted]))
+dlg._on_accent_hue(280.0)
+check("§6 a swatch emits the same mode with the swatch's hue",
+      _emitted[-1].canvas_bg == theme.LIGHT.canvas_bg
+      and _emitted[-1].hue() == 280.0 and _emitted[-1].accent == theme.accent_hex(280),
+      f"{_emitted[-1].canvas_bg} {_emitted[-1].accent}")
+check("§6 the hex field follows the swatch (one value, two widgets)",
+      dlg.accent_hex_edit.text() == theme.accent_hex(280),
+      dlg.accent_hex_edit.text())
+# Programmatic setText() queues an editingFinished for the NEXT event loop turn
+# (the field is not focused here) — flush it, so the checks below are about the
+# value the user typed and not about the settings the dialog made itself.
+app.processEvents()
+dlg.accent_hex_edit.setText("#12ab34")
+dlg._on_accent_hex_edited()
+check("§6 a typed hex is accepted (the user's own colour)",
+      _emitted[-1].accent == theme.accent_hex(theme.hex_hue("#12ab34")),
+      f"{_emitted[-1].accent} (hue {theme.hex_hue('#12ab34')})")
+_before = _emitted[-1]
+# blockSignals: setText() may fire editingFinished if the field happens to hold
+# focus — this check is about the HANDLER's verdict, not about Qt's focus dance.
+dlg.accent_hex_edit.blockSignals(True)
+dlg.accent_hex_edit.setText("zzz")
+dlg._on_accent_hex_edited()
+dlg.accent_hex_edit.blockSignals(False)
+check("§6 an unusable hex is REFUSED — the field returns to the last valid colour",
+      _emitted[-1] is _before
+      and theme.hex_hue(dlg.accent_hex_edit.text()) == _before.hue()
+      and dlg._accent_hex == dlg.accent_hex_edit.text() == "#12ab34",
+      f"field={dlg.accent_hex_edit.text()!r} stored={dlg._accent_hex!r} "
+      f"accent={_before.accent} hue={_before.hue()}")
+check("§6 collect() now describes the tab's choice (light + the user's own colour)",
+      dlg.collect()["theme"] == {"mode": "light", "accent": dlg._accent_hex}
+      and theme.hex_hue(dlg.collect()["theme"]["accent"]) == _before.hue(),
+      str(dlg.collect()["theme"]))
+dlg.close()
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# §7 The live switch — no restart
+# ════════════════════════════════════════════════════════════════════════════
+print("== §7 the live switch ==")
 
 from models.server import ServerData  # noqa: E402
 from graphics.server_node import ServerNode  # noqa: E402
-
-node = ServerNode(ServerData(id="th1", alias="web-1", host="10.0.0.5", user="root"))
-check("the node: the card bg/border/selected/hover (#1e293b/#3b82f6/#f59e0b/#60a5fa)",
-      [c.name().lower() for c in (ServerNode.COLOR_BG, ServerNode.COLOR_BORDER,
-                                  ServerNode.COLOR_SELECTED, ServerNode.COLOR_HOVER)] ==
-      ["#1e293b", "#3b82f6", "#f59e0b", "#60a5fa"])
-check("the node: the single accent reveal/search #38bdf8 + text/label/dot-idle",
-      ServerNode.REVEAL_COLOR.name().lower() == "#38bdf8"
-      and ServerNode.SEARCH_MATCH_COLOR.name().lower() == "#38bdf8"
-      and ServerNode.COLOR_TEXT.name().lower() == "#e2e8f0"
-      and ServerNode.COLOR_LABEL.name().lower() == "#94a3b8"
-      and ServerNode.COLOR_DOT_IDLE.name().lower() == "#64748b")
-check("the node: CORNER_RADIUS = theme.RADIUS_NODE (10.0)",
-      ServerNode.CORNER_RADIUS == theme.RADIUS_NODE == 10.0)
-check("the node: STATUS_COLORS online/warn/offline",
-      {k: v.name().lower() for k, v in ServerNode.STATUS_COLORS.items()} ==
-      {"online": "#22c55e", "warn": "#facc15", "offline": "#ef4444"})
-check("the node: tag_color('prod') #ef4444 + the TAG_PALETTE order",
-      ServerNode.tag_color("prod").name().lower() == "#ef4444"
-      and [c.name().lower() for c in ServerNode.TAG_PALETTE] ==
-      ["#22c55e", "#3b82f6", "#a855f7", "#f97316", "#06b6d4", "#ec4899"])
-check("the node: the fonts alias=Segoe UI, info/host=Consolas",
-      node._alias.font().family() == "Segoe UI"
-      and node._info.font().family() == "Consolas"
-      and node._host_label.font().family() == "Consolas")
-
-from graphics.connection_arrow import (CONNECTION_TYPES, type_color,  # noqa: E402
-                                       ConnectionArrow)
-check("the arrow: CONNECTION_TYPES — the SAME dict as theme.ARROW_TYPE_COLORS",
-      CONNECTION_TYPES is theme.ARROW_TYPE_COLORS)
-check("the arrow: 6 types + the default for an unknown one (ssh)",
-      [type_color(t).name().lower() for t in
-       ("ssh", "vpn", "http", "database", "nfs", "kubernetes", "bogus")] ==
-      ["#34d399", "#60a5fa", "#fbbf24", "#a78bfa", "#f472b6", "#22d3ee", "#34d399"])
-check("the arrow: COLOR_IDLE #34d399 + COLOR_HOVER #6ee7b7 (the v0.6 compat)",
-      ConnectionArrow.COLOR_IDLE.name().lower() == "#34d399"
-      and ConnectionArrow.COLOR_HOVER.name().lower() == "#6ee7b7")
-
+from graphics.connection_arrow import ConnectionArrow, CONNECTION_TYPES  # noqa: E402
 from graphics.node_group import NodeGroup  # noqa: E402
-grp = NodeGroup(0, 0)
-check("the group: border/hover/selected/title (#7c3aed/#a78bfa/#f59e0b/#c4b5fd)",
-      [c.name().lower() for c in (NodeGroup.COLOR_BORDER, NodeGroup.COLOR_HOVER,
-                                  NodeGroup.COLOR_SELECTED, NodeGroup.COLOR_TITLE)] ==
-      ["#7c3aed", "#a78bfa", "#f59e0b", "#c4b5fd"])
-check("the group: CORNER_RADIUS = theme.RADIUS_GROUP (12.0) + the title in Segoe UI",
-      NodeGroup.CORNER_RADIUS == theme.RADIUS_GROUP == 12.0
-      and grp._title_font().family() == "Segoe UI")
-check("the group: the fills are the theme colors with alpha (#7c3aed 16/28, #f59e0b 20)",
-      [(c.red(), c.green(), c.blue(), c.alpha()) for c in
-       (NodeGroup.COLOR_FILL, NodeGroup.COLOR_FILL_HOVER, NodeGroup.COLOR_FILL_SELECTED)] ==
-      [(0x7C, 0x3A, 0xED, 16), (0x7C, 0x3A, 0xED, 28), (0xF5, 0x9E, 0x0B, 20)])
-
 from graphics.sticky_note import StickyNote  # noqa: E402
-note = StickyNote("hello", 0, 0)
-check("the note: the palette #eedd9f/#a9853d/#403a2b + CORNER_RADIUS 10.0",
-      (StickyNote.BG_COLOR, StickyNote.BORDER_COLOR, StickyNote.TEXT_COLOR) ==
-      ("#eedd9f", "#a9853d", "#403a2b") and StickyNote.CORNER_RADIUS == 10.0)
-check("the note: the editor font is Segoe UI", note.widget().font().family() == "Segoe UI")
-
 from graphics.map_scene import MapScene  # noqa: E402
-scene = MapScene()
-check("the scene: the minor/major grid #0f172a/#1e293b",
-      scene._grid_color.name().lower() == "#0f172a"
-      and scene._grid_major_color.name().lower() == "#1e293b")
-_pm = scene.render_to_pixmap(scale=1.0)
-_img = _pm.toImage()
-# An empty scene → src = itemsBoundingRect().adjusted(±60) = (-60,-60,120,120), 1:1 into the pixmap.
-# QGraphicsScene.render calls drawBackground (the behaviour since v0.9.1, unchanged):
-# the CANVAS_BG background + the grid (lines at device x/y ∈ {0,20,…,120}). Pixels ≥2 px from the lines —
-# a clean background; the pixel at the line intersection — a blend of the grid color (different from the background).
-_bg = [_img.pixelColor(x, y) for x, y in ((5, 5), (10, 10), (30, 30))]
-check("the render: the pixmap background between the grid lines #020617 (CANVAS_BG) — a pixel check",
-      all((c.red(), c.green(), c.blue()) == (0x02, 0x06, 0x17) for c in _bg),
-      str([(c.red(), c.green(), c.blue()) for c in _bg]))
-_line = _img.pixelColor(20, 20)  # the intersection of the minor lines (device 20 = scene -40)
-check("the render: the grid is drawn in the export (the pixel on the line ≠ the background)",
-      (_line.red(), _line.green(), _line.blue()) != (0x02, 0x06, 0x17),
-      f"rgb=({_line.red()}, {_line.green()}, {_line.blue()})")
-
 from graphics.map_view import MapView  # noqa: E402
+
+theme.set_theme(theme.DARK)
+clear_cfg()
+
+node = ServerNode(ServerData(id="th-live", alias="web-1", host="10.0.0.5", user="root",
+                             tags=["prod"]))
+check("§7 (dark) the card's class colours and the tag strip are the dark tones",
+      node.COLOR_BG.name() == "#1e293b" and node.COLOR_BORDER.name() == "#3b82f6"
+      and node.STATUS_COLORS["offline"].name() == "#ef4444"
+      and node._tag_segments[0].brush().color().name() == "#ef4444")
+check("§7 (dark) the arrow/group/note class colours are the dark tones",
+      ConnectionArrow.COLOR_IDLE.name() == "#34d399"
+      and ConnectionArrow.COLOR_HOVER.name() == "#6ee7b7"
+      and NodeGroup.COLOR_BORDER.name() == "#7c3aed"
+      and list(NodeGroup.COLOR_FILL.getRgb()) == [0x7C, 0x3A, 0xED, 16]
+      and StickyNote.BG_COLOR == "#eedd9f")
+check("§7 (dark) the module proxies and the scene grid are the dark tones",
+      theme.CANVAS_BG == "#020617" and theme.STATUS_COLORS["online"] == "#22c55e"
+      and dict(theme.ARROW_TYPE_COLORS)["ssh"] == "#34d399")
+
+scene = MapScene()
 view = MapView(scene)
-check("the view: the canvas background #020617 (CANVAS_BG)",
-      view.backgroundBrush().color().name().lower() == "#020617")
+live_node = scene.add_server(ServerData(id="th-live2", alias="db-1", host="10.0.0.6",
+                                        user="root", tags=["prod"]))
+scene.add_server(ServerData(id="th-live3", alias="db-2", host="10.0.0.7", user="root"))
+live_arrow = scene.add_connection("th-live2", "th-live3", "link", "ssh", False)
+live_group = scene.add_group(name="g", x=-900, y=-900, width=300, height=200)
+live_note = scene.add_note("hello", 2000, 2000)
+check("§7 (dark) the live scene items paint with the dark tones",
+      live_node._bg.brush().color().name() == "#1e293b"
+      and live_arrow.pen().color().name() == "#34d399"
+      and live_note.BG_COLOR == "#eedd9f"
+      and scene._grid_color.name() == "#0f172a"
+      and scene._grid_major_color.name() == "#1e293b"
+      and view.backgroundBrush().color().name() == "#020617")
 
-from ui.map_search_bar import MapSearchBar  # noqa: E402
-_bar = MapSearchBar()
-ss = _bar.styleSheet()
-check("the search: the QSS card #0f172a / the accent #38bdf8 / border-radius 8px",
-      "background-color: #0f172a" in ss and "border: 1px solid #38bdf8" in ss
-      and "border-radius: 8px" in ss, ss)
-check("the search: the QSS text #e2e8f0 / the muted #94a3b8",
-      "color: #e2e8f0" in ss and "color: #94a3b8" in ss)
+light = theme.theme_for_mode("light", 260.0)
+theme_qss.apply_theme(light, app=app, refresh_windows=False)
+check("§7 the module proxies follow immediately (no widget rebuild needed)",
+      theme.CANVAS_BG == theme.LIGHT.canvas_bg and theme.THEME is not theme.DARK
+      and theme.STATUS_COLORS["online"] == theme.LIGHT.status_online
+      and dict(theme.ARROW_TYPE_COLORS)["ssh"] == theme.LIGHT.arrow_ssh
+      and theme.SFTP_PREVIEW_BLOCKED == theme.LIGHT.status_warn
+      and theme.ACCENT == theme.accent_hex(260.0),
+      f"{theme.CANVAS_BG} {theme.ACCENT}")
+check("§7 the CLASS-level colours follow too (a class read resolves the active theme)",
+      node.COLOR_BG.name() == theme.LIGHT.node_bg
+      and node.COLOR_TEXT.name() == theme.LIGHT.node_text
+      and node.TAG_COLORS["prod"].name() == theme.LIGHT.status_offline
+      and ConnectionArrow.COLOR_IDLE.name() == theme.LIGHT.arrow_ssh
+      and NodeGroup.COLOR_TITLE.name() == theme.LIGHT.group_title
+      and list(NodeGroup.COLOR_FILL_HOVER.getRgb()) == [0x7C, 0x3A, 0xED, 28])
+check("§7 a STALE brush is the reason refresh_theme exists (the item keeps what it was given)",
+      live_node._bg.brush().color().name() == "#1e293b")
 
-from ui.main_window import _CollapseStrip, _diamond_icon  # noqa: E402
-_strip = _CollapseStrip()
-_sp = _strip.grab().toImage().pixelColor(2, 2)
-check("the collapse strip: the fill #1e293b (BASE_BG) — a pixel check",
-      (_sp.red(), _sp.green(), _sp.blue()) == (0x1E, 0x29, 0x3B),
-      f"rgb=({_sp.red()}, {_sp.green()}, {_sp.blue()})")
-check("the '◇' rhombus: the icon renders (the outline theme.ICON_COLOR)", not _diamond_icon().isNull())
+scene.refresh_theme()
+check("§7 scene.refresh_theme() repaints the whole map with the new theme",
+      live_node._bg.brush().color().name() == theme.LIGHT.node_bg
+      and live_node._tag_segments[0].brush().color().name() == theme.LIGHT.status_offline
+      and live_arrow.pen().color().name() == theme.LIGHT.arrow_ssh
+      and live_arrow._label_bg.brush().color().name() == theme.LIGHT.canvas_bg
+      and live_arrow._label_bg.brush().color().alpha() == 190
+      and theme_qss.style("note.editor") == live_note.widget().styleSheet(),
+      f"node={live_node._bg.brush().color().name()} arrow={live_arrow.pen().color().name()}")
+view.refresh_theme()
+check("§7 view.refresh_theme() re-reads the canvas background",
+      view.backgroundBrush().color().name() == theme.LIGHT.canvas_bg)
+check("§7 the grid follows at PAINT time (a property, not an __init__ copy)",
+      scene._grid_color.name() == theme.LIGHT.window_bg
+      and scene._grid_major_color.name() == theme.LIGHT.base_bg)
 
-from ui import icons as _icons  # noqa: E402
-check("the icons: ICON_COLOR #cbd5e1 + the render",
-      _icons.ICON_COLOR == "#cbd5e1" and not _icons.get_icon("new").isNull())
-
-from dialogs.add_server_dialog import AddServerDialog  # noqa: E402
-_dlg = AddServerDialog()
-_styles = [w.styleSheet() for w in _dlg.findChildren(QWidget) if w.styleSheet()]
-check("AddServerDialog: the separator #334155 (SURFACE_ALT)", "color: #334155;" in _styles,
-      str(_styles))
-
-from dialogs.ssh_connect_dialog import SSHConnectDialog  # noqa: E402
-_cdlg = SSHConnectDialog(ServerData(id="th2", alias="db-1", host="10.0.0.6", user="root"))
-_styles = [w.styleSheet() for w in _cdlg.findChildren(QWidget) if w.styleSheet()]
-check("SSHConnectDialog: the separator #334155 / the headings #e2e8f0 / the status #94a3b8",
-      "color: #334155;" in _styles and "font-weight: bold; color: #e2e8f0;" in _styles
-      and "color: #94a3b8;" in _styles, str(_styles))
-
-from dialogs.profile_manager_dialog import ProfileManagerDialog  # noqa: E402
-_pdlg = ProfileManagerDialog()
-_styles = [w.styleSheet() for w in _pdlg.findChildren(QWidget) if w.styleSheet()]
-check("ProfileManagerDialog: the title #e2e8f0 / the subtitle #94a3b8",
-      "font-size: 13pt; font-weight: bold; color: #e2e8f0;" in _styles
-      and "color: #94a3b8; font-size: 10pt;" in _styles, str(_styles))
-
+# The widget-level stylesheets of the live containers.
 from modules.terminal_dock import TerminalDockContent  # noqa: E402
-_dc = TerminalDockContent()
-check("the terminals dock: the status label #94a3b8 (TEXT_MUTED)",
-      _dc.status_label.styleSheet() == "color: #94a3b8; padding: 2px 0;",
-      _dc.status_label.styleSheet())
-
 from modules.sftp_tab import SftpTab  # noqa: E402
-_tab = SftpTab()
-check("the SFTP tab: the path row #94a3b8 (TEXT_MUTED)",
-      _tab.path_label.styleSheet() == "color: #94a3b8; padding: 2px 0;",
-      _tab.path_label.styleSheet())
+from modules.terminal_find_bar import TerminalFindBar  # noqa: E402
+from ui.map_search_bar import MapSearchBar  # noqa: E402
 
-from modules.multi_input import MULTI_ACCENT, apply_container_highlight  # noqa: E402
+dock = TerminalDockContent()
+sftp = SftpTab()
+find_bar = TerminalFindBar()
+search_bar = MapSearchBar()
+theme_qss.apply_theme(light, app=app, refresh_windows=False)
+for _w in (dock, sftp, find_bar, search_bar):
+    _w.refresh_theme()
+check("§7 a container's stylesheet follows the switch (muted tones from the registry)",
+      dock.status_label.styleSheet() == theme_qss.style("status.sftp_row")
+      and sftp.path_label.styleSheet() == theme_qss.style("status.sftp_row")
+      and theme.LIGHT.text_muted in dock.status_label.styleSheet(),
+      dock.status_label.styleSheet())
+check("§7 the floating cards rebuild their QSS (card background + accent border)",
+      theme.LIGHT.window_bg in search_bar.styleSheet()
+      and theme.LIGHT.window_bg in find_bar.styleSheet()
+      and theme_qss.style("find_bar") == find_bar.styleSheet()
+      and theme_qss.style("search_bar") == search_bar.styleSheet())
+check("§7 the application stylesheet + palette are swapped in ONE call",
+      app.styleSheet() == theme_qss.build_qss(theme.THEME)
+      and app.palette().color(theme_qss.QPalette.ColorRole.Window).name()
+      == theme.THEME.window_bg,
+      app.palette().color(theme_qss.QPalette.ColorRole.Window).name())
 
 
-class _FakeHost:
-    """A duck-typed host for apply_container_highlight (the tabs + the title)."""
+# ── §7b The vector icons (the v1.4.3-fix: they stayed dark-theme pale on LIGHT) ──
+# Reported after the release: the toolbar and sidebar glyphs kept the OLD colour on
+# the light theme. Root cause — a QIcon is a VALUE like a QBrush: `ICON_COLOR` was a
+# module constant captured at import time, the icons were painted once, and a WIDGET
+# keeps its own copy of the pixmap (measured: `QPushButton.icon()` and a registry
+# QIcon answering DIFFERENT cacheKeys()). The fix makes the colour live, caches ONE
+# QIcon per name and re-applies it (clear-then-set) through the theme walk.
+from ui import icons as icons_mod  # noqa: E402
 
-    def __init__(self):
-        self.session_tabs = QTabWidget()
-        self._multi_base_title = None
+
+def _icon_ink(icon, size=20):
+    """The most frequent strong pixel of an icon — its outline colour."""
+    image = icon.pixmap(size, size).toImage()
+    if image.width() == 0:
+        return None
+    counter = {}
+    for y in range(image.height()):
+        for x in range(image.width()):
+            pixel = image.pixelColor(x, y)
+            if pixel.alpha() > 200:
+                counter[pixel.name()] = counter.get(pixel.name(), 0) + 1
+    if not counter:
+        return None
+    return max(counter.items(), key=lambda kv: kv[1])[0]
 
 
-_fh = _FakeHost()
-check("multi-input: MULTI_ACCENT #f59e0b (SELECTION_AMBER) + the container frame",
-      MULTI_ACCENT == "#f59e0b" and apply_container_highlight(_fh, True)
-      and "border: 2px solid #f59e0b" in _fh.session_tabs.styleSheet(),
-      f"accent={MULTI_ACCENT} qss={_fh.session_tabs.styleSheet()!r}")
+theme.set_theme(theme.DARK)
+check("§7b ICON_COLOR follows the ACTIVE theme (a live proxy, not an import-time copy)",
+      str(icons_mod.ICON_COLOR) == theme.DARK.icon_color
+      and icons_mod.ICON_COLOR == theme.DARK.icon_color,
+      str(icons_mod.ICON_COLOR))
+_glyph = icons_mod.get_icon("settings")
+check("§7b get_icon is CACHED — the same QIcon object per name (the refresh seam)",
+      icons_mod.get_icon("settings") is _glyph
+      and "settings" in icons_mod.cached_icon_names()
+      and icons_mod.get_icon("no-such-icon").isNull())
+check("§7b the glyph is drawn in the dark outline tone",
+      _icon_ink(_glyph) == theme.DARK.icon_color, str(_icon_ink(_glyph)))
+check("§7b ...and the DARK colour is the readable slate-300 (not a leftover literal)",
+      theme.DARK.icon_color == "#cbd5e1")
 
-# ════════════════════════════════════════════════════════════
-# 4. AST audit: no "raw" palette hex literals are left in the code
-# ════════════════════════════════════════════════════════════
-print("== 4. AST audit: no raw palette literals in target files ==")
+theme_qss.apply_theme(light, app=app, refresh_windows=False)
+_refreshed = icons_mod.refresh_all()
+check("§7b refresh_all() repaints the cached glyphs (in place — the object is the same)",
+      _refreshed >= 1 and icons_mod.get_icon("settings") is _glyph)
+check("§7b the glyph now carries the LIGHT outline tone",
+      _icon_ink(_glyph) == theme.LIGHT.icon_color == "#475569",
+      f"{_icon_ink(_glyph)} vs {theme.LIGHT.icon_color}")
+check("§7b every cached glyph is light and none is left dark (the reported defect)",
+      all(_icon_ink(icons_mod.get_icon(n)) == theme.LIGHT.icon_color
+          for n in icons_mod.cached_icon_names()),
+      str({n: _icon_ink(icons_mod.get_icon(n)) for n in icons_mod.cached_icon_names()}))
 
-# The target files of the refactor (ROADMAP v1.2.5 task 2). ui/theme.py is NOT in the list —
-# this is the source of truth of the literals. Out of scope (their own literals are legitimate):
-# modules/terminal_screen.py, modules/terminal_widget.py, storage/export_drawio.py.
+# The window path: a real sidebar button and a real menu QAction.
+import ui.main_window as _mw_mod  # noqa: E402
+
+_win = _mw_mod.MainWindow()
+_win.show()
+app.processEvents()
+_sidebar_btn = _win.sidebar.btn_add
+check("§7b a sidebar button and a menu item are both icon-ful (the probe needs targets)",
+      not _sidebar_btn.icon().isNull() and not _win.act_show_minimap.icon().isNull())
+check("§7b before the switch both carry the dark tone",
+      _icon_ink(_sidebar_btn.icon(), 18) == theme.DARK.icon_color
+      and _icon_ink(_win.act_show_minimap.icon()) == theme.DARK.icon_color,
+      f"{_icon_ink(_sidebar_btn.icon(), 18)} / {_icon_ink(_win.act_show_minimap.icon())}")
+_win.apply_theme(theme.theme_for_mode("light"))
+app.processEvents()
+check("§7b after the switch the sidebar button is re-applied (its own pixmap copy)",
+      _icon_ink(_sidebar_btn.icon(), 18) == theme.LIGHT.icon_color,
+      f"{_icon_ink(_sidebar_btn.icon(), 18)} vs {theme.LIGHT.icon_color}")
+check("§7b ...and so is the menu QAction (the name travels on the action)",
+      _icon_ink(_win.act_show_minimap.icon()) == theme.LIGHT.icon_color
+      and getattr(_win.act_show_minimap, "_sshmap_icon_name", None) == "minimap",
+      f"{_icon_ink(_win.act_show_minimap.icon())} "
+      f"name={getattr(_win.act_show_minimap, '_sshmap_icon_name', None)}")
+check("§7b the hand-drawn collapse diamonds follow too (they are not in the registry)",
+      _icon_ink(_win.sidebar.collapse_btn.icon()) == theme.LIGHT.icon_color
+      and _icon_ink(_win._map_collapse_btn.icon()) == theme.LIGHT.icon_color,
+      f"{_icon_ink(_win.sidebar.collapse_btn.icon())} / "
+      f"{_icon_ink(_win._map_collapse_btn.icon())}")
+check("§7b switching back restores the dark glyphs (no residue in the cache)",
+      _win.apply_theme(theme.DARK) is theme.DARK
+      and _icon_ink(_sidebar_btn.icon(), 18) == theme.DARK.icon_color
+      and _icon_ink(_win.act_show_minimap.icon()) == theme.DARK.icon_color)
+_win._dirty = False
+_win.close()
+app.processEvents()
+
+# The switch is idempotent and reversible.
+theme_qss.apply_theme(theme.DARK, app=app, refresh_windows=False)
+scene.refresh_theme()
+check("§7 the switch back restores the dark values exactly (no residue)",
+      theme.THEME is theme.DARK
+      and live_node._bg.brush().color().name() == "#1e293b"
+      and live_arrow.pen().color().name() == "#34d399"
+      and scene._grid_color.name() == "#0f172a"
+      and app.palette().color(theme_qss.QPalette.ColorRole.Window).name() == "#0f172a",
+      f"node={live_node._bg.brush().color().name()} grid={scene._grid_color.name()}")
+
+from PySide6.QtWidgets import QWidget  # noqa: E402
+_hidden = QWidget()
+theme_qss.refresh(_hidden, "status.muted")
+check("§7 refresh() hides/shows around the swap and never raises on an unknown name",
+      _hidden.styleSheet() == f"color: {theme.DARK.text_muted};"
+      and theme_qss.refresh(_hidden, "nope") is None)
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# §8 Out of scope — unchanged
+# ════════════════════════════════════════════════════════════════════════════
+print("== §8 out-of-scope modules are untouched ==")
+
+from modules import terminal_screen as _ts  # noqa: E402
+check("§8 terminal_screen: the output palettes are in place and outside the UI theme",
+      set(_ts.PALETTES) == {"default", "nord", "dracula", "tokyo_night"}
+      and _ts.PALETTES["default"]["default_fg"] == "#e2e8f0"
+      and _ts.PALETTES["nord"]["default_bg"] == "#2e3440"
+      and _ts.DEFAULT_FG_HEX == "#e2e8f0" and _ts.DEFAULT_BG_HEX == "#0f172a")
+from modules.terminal_widget import TerminalWidget  # noqa: E402
+check("§8 TerminalWidget.CURSOR_COLOR is unchanged (#e2e8f0, the default scheme text)",
+      TerminalWidget.CURSOR_COLOR == "#e2e8f0", TerminalWidget.CURSOR_COLOR)
+from storage.export_drawio import NODE_FILL, NODE_STROKE, NOTE_FILL  # noqa: E402
+check("§8 export_drawio: the export colours are unchanged (the draw.io format)",
+      (NODE_FILL, NODE_STROKE, NOTE_FILL) == ("#0f172a", "#38bdf8", "#facc15"))
+
+# The AST audit (the v1.2.5 rule): a raw palette literal must not come back.
 SCAN_FILES = [
     "main.py",
     "graphics/background_image.py", "graphics/connection_arrow.py",
@@ -279,61 +683,56 @@ SCAN_FILES = [
     "modules/multi_input.py", "modules/sftp_tab.py", "modules/terminal_dock.py",
     "modules/terminal_page.py",
 ]
-
-FORBIDDEN = {v.lower() for v in (
-    list(PALETTE_NAMES) and [getattr(theme, n) for n in PALETTE_NAMES])}
+FORBIDDEN = {getattr(theme.DARK, f.name).lower() for f in dataclasses.fields(theme.Theme)
+             if isinstance(getattr(theme.DARK, f.name), str)
+             and re.match(r"^#[0-9a-f]{6}$", getattr(theme.DARK, f.name))}
 
 
 def _hex_in_strings(path):
-    """All the hex values (#rrggbb, case-insensitive) in the string constants of the file.
-
-    AST: the comments and the docstring notes outside the code are not caught; the f-strings are parsed
-    into the parts (the literal pieces + the expressions), hence "color: {theme.X}" gives no literal.
-    """
+    """The hex values in the STRING constants of a file (AST: the comments do not count)."""
     tree = ast.parse(open(os.path.join(ROOT, path), encoding="utf-8").read())
     found = []
-    for n in ast.walk(tree):
-        if isinstance(n, ast.Constant) and isinstance(n.value, str):
-            for m in re.finditer(r"#[0-9a-fA-F]{6}\b", n.value):
-                found.append((n.lineno, m.group(0).lower()))
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Constant) and isinstance(node.value, str):
+            for match in re.finditer(r"#[0-9a-fA-F]{6}\b", node.value):
+                found.append((node.lineno, match.group(0).lower()))
     return found
 
 
-violations = {}
+_violations = {}
 for rel in SCAN_FILES:
     hits = [h for h in _hex_in_strings(rel) if h[1] in FORBIDDEN]
     if hits:
-        violations[rel] = hits
-check(f"the AST audit of the {len(SCAN_FILES)} files: not a single palette literal in the strings",
-      not violations, str(violations))
+        _violations[rel] = hits
+check(f"§8 the AST audit of the {len(SCAN_FILES)} files: no palette literal back in the strings",
+      not _violations, str(_violations))
 
-# ════════════════════════════════════════════════════════════
-# 5. Out of scope — unchanged (ROADMAP v1.2.5 "NOT in scope")
-# ════════════════════════════════════════════════════════════
-print("== 5. out-of-scope modules untouched ==")
 
-from modules import terminal_screen as _ts  # noqa: E402
-check("terminal_screen: the palettes default/nord/dracula/tokyo_night are in place",
-      set(_ts.PALETTES) == {"default", "nord", "dracula", "tokyo_night"}
-      and _ts.PALETTES["default"]["default_fg"] == "#e2e8f0"
-      and _ts.PALETTES["nord"]["default_bg"] == "#2e3440"
-      and _ts.DEFAULT_FG_HEX == "#e2e8f0" and _ts.DEFAULT_BG_HEX == "#0f172a")
-
-from modules.terminal_widget import TerminalWidget  # noqa: E402
-check("TerminalWidget.CURSOR_COLOR is unchanged (#e2e8f0, the default scheme text)",
-      TerminalWidget.CURSOR_COLOR == "#e2e8f0", TerminalWidget.CURSOR_COLOR)
-
-from storage.export_drawio import NODE_FILL, NODE_STROKE, NOTE_FILL  # noqa: E402
-check("export_drawio: the export colors are unchanged (the draw.io format)",
-      (NODE_FILL, NODE_STROKE, NOTE_FILL) == ("#0f172a", "#38bdf8", "#facc15"))
-
-# ════════════════════════════════════════════════════════════
-# 6. i18n parity + release state
-# ════════════════════════════════════════════════════════════
-print("== 6. i18n parity + release state ==")
+# ════════════════════════════════════════════════════════════════════════════
+# §9 i18n parity + the release state
+# ════════════════════════════════════════════════════════════════════════════
+print("== §9 i18n parity + release state ==")
 
 langs = load_i18n_langs(ROOT)
-check_i18n_parity(langs)  # 421 — v1.2.5 has no new keys (a refactor without UI texts)
+check_i18n_parity(langs)
+check_i18n_format(langs)
+APPEARANCE_KEYS = ["settings.tab.appearance", "settings.appearance.mode",
+                   "settings.appearance.mode.dark", "settings.appearance.mode.light",
+                   "settings.appearance.accent", "settings.appearance.accent.sky",
+                   "settings.appearance.accent.cyan", "settings.appearance.accent.green",
+                   "settings.appearance.accent.amber", "settings.appearance.accent.orange",
+                   "settings.appearance.accent.pink", "settings.appearance.accent.violet",
+                   "settings.appearance.accent.slate", "settings.appearance.own_color",
+                   "settings.appearance.pick_color", "settings.appearance.hint"]
+_missing_keys = [k for k in APPEARANCE_KEYS
+                 if any(not str(langs[c].get(k, "")).strip() for c in sorted(langs))]
+check(f"§9 the {len(APPEARANCE_KEYS)} new appearance keys exist in EVERY language",
+      not _missing_keys, str(_missing_keys))
+check("§9 the appearance keys are actually USED by the UI code (no dead strings)",
+      all(key in _src or key in open(os.path.join(ROOT, "ui", "settings_dialog.py"),
+                                     encoding="utf-8").read()
+          or key.startswith("settings.appearance.accent.")
+          for key in APPEARANCE_KEYS))
 check_release_state(ROOT)
 
 finish()

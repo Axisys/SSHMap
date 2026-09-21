@@ -79,13 +79,18 @@ class NodeGroup(QGraphicsObject):
     CORNER_RADIUS = theme.RADIUS_GROUP   # rounding of the frame (in one style with the node card)
 
     # v1.2.5: colors — from the central theme (ui/theme.py); values unchanged.
-    COLOR_BORDER = QColor(theme.GROUP_BORDER)     # violet-600 — distinct from the nodes' blue
-    COLOR_HOVER = QColor(theme.GROUP_HOVER)       # violet-400
-    COLOR_SELECTED = QColor(theme.SELECTION_AMBER)  # the same amber as the node selection (a single palette)
-    COLOR_FILL = _tint(theme.GROUP_BORDER, 16)        # a nearly transparent fill — the grid shows through
-    COLOR_FILL_HOVER = _tint(theme.GROUP_BORDER, 28)
-    COLOR_FILL_SELECTED = _tint(theme.SELECTION_AMBER, 20)
-    COLOR_TITLE = QColor(theme.GROUP_TITLE)       # violet-300 — reads on the dark map
+    # v1.4.3 (ROADMAP task 5): LIVE descriptors / lazily computed values — a
+    # class read resolves the ACTIVE theme on every access, and the group's own
+    # `refresh_theme()` re-runs `paint()` through `update()`.
+    COLOR_BORDER = theme.ThemeColor("group_border")    # violet-600 — distinct from the nodes' blue
+    COLOR_HOVER = theme.ThemeColor("group_hover")      # violet-400
+    COLOR_SELECTED = theme.ThemeColor("selection_amber")  # the same amber as the node selection (a single palette)
+    # The fills are the frame colours with alpha — computed lazily from the
+    # ACTIVE theme (a nearly transparent fill: the grid shows through).
+    COLOR_FILL = theme.ThemeValue(lambda: _tint(theme.GROUP_BORDER, 16))
+    COLOR_FILL_HOVER = theme.ThemeValue(lambda: _tint(theme.GROUP_BORDER, 28))
+    COLOR_FILL_SELECTED = theme.ThemeValue(lambda: _tint(theme.SELECTION_AMBER, 20))
+    COLOR_TITLE = theme.ThemeColor("group_title")      # violet-300 — reads on the dark map
 
     moved = Signal()               # the group was moved (a dirty reason for MainWindow)
     resized = Signal()             # the size changed (a corner drag or set_group_size)
@@ -701,6 +706,17 @@ class NodeGroup(QGraphicsObject):
             painter.setBrush(QBrush(pen_color))
             r = theme.RADIUS_RESIZE_MARK
             painter.drawRoundedRect(QRectF(w - 16.0, h - 16.0, 10.0, 10.0), r, r)
+
+    # ── Theme (v1.4.3, ROADMAP task 5) ───────────────────────────────────
+
+    def refresh_theme(self):
+        """Re-read the theme and repaint (v1.4.3).
+
+        The group paints everything in `paint()` from live descriptors, so the
+        only thing a switch has to do is ask for a repaint — the method exists so
+        that the window's theme walk treats every scene item the same way.
+        """
+        self.update()
 
     # ── Mouse (manual move/resize — the StickyNote pattern) ──
 

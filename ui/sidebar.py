@@ -37,13 +37,16 @@ except ImportError:
     from graphics.server_node import ServerNode
 
 try:  # UI polish: vector icons (ui/icons.py) — emoji replacement, consistent with the toolbar
-    from .icons import get_icon
+    from .icons import get_icon, refresh_button_icon
 except ImportError:
     try:
-        from icons import get_icon
+        from icons import get_icon, refresh_button_icon
     except ImportError:  # flat layout without ui/icons — text-only buttons, as before
         def get_icon(name):  # noqa: N802 — stub with the same signature
             return None
+
+        def refresh_button_icon(button, name):  # noqa: N802 — stub
+            return False
 
 
 # Context menu action keys (order and separators — ROADMAP v0.9.6, item 1).
@@ -266,14 +269,36 @@ class SidebarPanel(QWidget):
                     pass  # Qt teardown — the widget is already destroyed
 
     def _set_btn_icon(self, btn, name):
-        """UI polish: a vector icon on the button (no-op without ui/icons)."""
+        """UI polish: a vector icon on the button (no-op without ui/icons).
+
+        v1.4.3-fix: the icon NAME is remembered on the button — a QPushButton keeps
+        its own copy of the pixmap, so `refresh_theme()` has to re-apply the icon by
+        name after a theme switch (the registry's in-place repaint does not reach it).
+        """
         try:
             icon = get_icon(name)
             if icon is not None and not icon.isNull():
                 btn.setIcon(icon)
                 btn.setIconSize(QSize(18, 18))
+                btn._sshmap_icon_name = name
         except Exception:  # noqa: BLE001 — the icon is cosmetic, don't break the sidebar
             pass
+
+    def refresh_theme(self):
+        """v1.4.3-fix: re-apply the theme to the panel's own icons.
+
+        The tree's status markers are painted fresh on every `refresh_rows()`, so
+        only the six action buttons carry a cached pixmap. Never raises.
+        """
+        for attr, icon_name, _key, _fallback in _BUTTONS:
+            btn = getattr(self, attr, None)
+            if btn is None:
+                continue
+            name = getattr(btn, "_sshmap_icon_name", icon_name)
+            try:
+                refresh_button_icon(btn, name)
+            except RuntimeError:
+                continue  # Qt teardown — the button is already destroyed
 
     # ── Tree: row construction (refresh from MainWindow) ──────────────────────
 

@@ -259,8 +259,26 @@ def clear_cfg(*extra_paths: str) -> None:
 # in 12 i18n files + the APP_VERSION/requirements pins in 7 release-state sections).
 # The misses of the keys themselves against the code are caught by check_i18n_keys.py.
 # ─────────────────────────────────────────────────────────────────────────────
-EXPECTED_APP_VERSION = "1.4.2"  # the current release (a sentinel: it catches "a bump to the wrong version")
-EXPECTED_I18N_KEYS = 570        # the parity of the TRANSLATION keys (v1.4.2 — the big-picture map
+EXPECTED_APP_VERSION = "1.4.3"  # the current release (a sentinel: it catches "a bump to the wrong version")
+EXPECTED_I18N_KEYS = 586        # the parity of the TRANSLATION keys (v1.4.3 — "Appearance:
+                                # light theme + accent color", the `Theme` object):
+                                # +16 keys × en/ru/zh/de. 15 under `settings.appearance.*`
+                                # — the tab label (`settings.tab.appearance`, the hub grew
+                                # 7 → 8 tabs), the mode row (`settings.appearance.mode` +
+                                # `.mode.dark` / `.mode.light`), the accent row
+                                # (`settings.appearance.accent` + 8 swatch names
+                                # `.accent.sky/.cyan/.green/.amber/.orange/.pink/.violet/.slate`
+                                # — sky is the DEFAULT hue, so "back to the default look" is
+                                # one click), the user's own colour
+                                # (`settings.appearance.own_color`), the picker button
+                                # (`settings.appearance.pick_color`) and the live-apply hint
+                                # (`settings.appearance.hint`) — plus the tab label itself.
+                                # The `Theme` object, `LIGHT`, the accent-hue generator, the
+                                # QSS builder (`ui/theme_qss.py`) and the live descriptors add
+                                # no other string: a theme is not text. The `theme` key of
+                                # config.json is ONE nested object (the `hotkeys` precedent),
+                                # so the hub's collect() goes 21 → 22 keys, not 24.
+                                # (v1.4.2 — the big-picture map
                                 # level: +4 keys × en/ru/zh/de. `view.toggle_minimap` (the checkable
                                 # View item / the registry action with an EMPTY default),
                                 # `minimap.tooltip` (the panel's ONLY text — the minimap draws shapes,

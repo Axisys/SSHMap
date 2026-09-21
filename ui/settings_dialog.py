@@ -205,22 +205,102 @@ def load_ui_settings():
     return defaults
 
 
+# ── v1.4.3 (ROADMAP task 6): the "Appearance" tab — the theme config ──────────
+# The `theme` key of ~/.sshmap/config.json: a NESTED object {"mode", "accent"}
+# (the `hotkeys` precedent — one key, several values). Everything here validates
+# and never raises: a broken value is the DARK theme + the default hue, plus ONE
+# log line, which is what keeps a hand-edited config from leaving the app
+# themeless (exactly like `get_status_settings` and `load_ui_settings`).
+#
+# Note the SHAPE of the choice: the user picks a COLOUR (a swatch or their own
+# hex), while `Theme` stores the HUE. The hue comes back out of the hex through
+# `theme.hex_hue`, so editing "accent": "#38bdf8" by hand and re-opening the tab
+# shows the same swatch as picking sky by hand would.
+
+#: The accent swatches of the tab: (key suffix, hue, representative hex).
+#: The hex is computed, not typed — a swatch cannot drift from its hue.
+def accent_swatches():
+    """[(name, hue, hex)] — the presets the "Appearance" tab offers (v1.4.3).
+
+    Sky is FIRST and equals the default hue, so "reset to the default look" is
+    one click on the leftmost swatch. The middle of the accent's own range is the
+    generator's job: every entry is `theme.accent_hex(hue)`.
+    """
+    presets = [("sky", theme.DEFAULT_ACCENT_HUE),
+               ("cyan", 187.0),
+               ("green", 142.0),
+               ("amber", 38.0),
+               ("orange", 25.0),
+               ("pink", 330.0),
+               ("violet", 262.0),
+               ("slate", 215.0)]
+    return [(name, hue, theme.accent_hex(hue)) for name, hue in presets]
+
+
+def load_theme_settings() -> dict:
+    """The validated `theme` key: {"mode": "dark"|"light", "accent": "<hex>"} (v1.4.3).
+
+    Broken / missing / foreign values fall back to the dark theme and the default
+    accent — the config is hand-editable, so every read is defensive. Never raises.
+    """
+    result = {"mode": theme.MODE_DARK, "accent": theme.accent_hex()}
+    try:
+        from i18n import load_config
+    except Exception:
+        return result
+    raw = load_config().get("theme")
+    if not isinstance(raw, dict):
+        if raw is not None:
+            _log_dialog(f"theme: the config value is not an object ({raw!r}) — using the defaults")
+        return result
+    mode = raw.get("mode")
+    if isinstance(mode, str) and mode.strip().lower() in theme.MODES:
+        result["mode"] = mode.strip().lower()
+    elif mode is not None:
+        _log_dialog(f"theme.mode {mode!r} is not one of {theme.MODES} — using {result['mode']!r}")
+    accent = raw.get("accent")
+    if theme.is_valid_hex(accent):
+        result["accent"] = "#" + accent.strip().lstrip("#").lower()
+    elif accent is not None:
+        _log_dialog(f"theme.accent {accent!r} is not a #rrggbb colour — using the default")
+    return result
+
+
+def theme_from_settings(settings) -> "theme.Theme":
+    """The `Theme` instance of a stored `theme` dict (v1.4.3).
+
+    Never raises and never returns None: the caller gets DARK (or LIGHT) with the
+    requested hue, which is exactly what the settings hub writes into the app.
+    """
+    settings = settings if isinstance(settings, dict) else {}
+    hue = theme.hex_hue(settings.get("accent") or theme.accent_hex())
+    return theme.theme_for_mode(settings.get("mode"), hue)
+
+
 class SettingsDialog(QDialog):
     """Settings dialog (hub): 6 tabs, saved to ~/.sshmap/config.json on OK."""
 
     applied = Signal()           # the config was saved — apply live (MainWindow)
     language_changed = Signal(str)  # the language choice in the "Language" tab (immediately)
+    theme_changed = Signal(object)  # v1.4.3: the "Appearance" tab — a Theme instance (immediately)
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle(_t("settings.title"))
         self.resize(500, 400)
 
+        # v1.4.3 (ROADMAP task 6): the theme the dialog OPENED with. The
+        # "Appearance" tab applies live (that is what makes the choice
+        # meaningful), so Cancel has to put the application back — otherwise a
+        # rejected dialog would still have changed the look of the app.
+        self._initial_theme = theme.THEME
+
         layout = QVBoxLayout(self)
         self.tabs = QTabWidget()
         layout.addWidget(self.tabs)
 
         self._build_general_tab()
+        self._build_appearance_tab()   # v1.4.3 (ROADMAP task 6)
         self._build_terminal_tab()
         self._build_statuses_tab()
         self._build_autosave_tab()
@@ -279,6 +359,172 @@ class SettingsDialog(QDialog):
         form.addRow("", self.sidebar_buttons_chk)
 
         self.tabs.addTab(tab, _t("settings.tab.general"))
+
+    # ── "Appearance" tab (v1.4.3, ROADMAP task 6): the theme — mode + accent ────
+
+    def _build_appearance_tab(self):
+        """The theme of the application: dark/light + the accent hue (v1.4.3).
+
+        LIVE apply without a restart: the hub pattern (the "Language" tab
+        precedent) — every control pushes the choice through ``theme_changed``
+        immediately, so the user SEES the result while the dialog is open, and
+        ``collect()`` writes it to config.json on OK. ``reject()`` restores the
+        theme the dialog opened with (a rejected dialog changes nothing).
+
+        The accent is a HUE, not a palette: the swatches and the hex field both
+        end up as one hue through ``theme.hex_hue``.
+        """
+        current = load_theme_settings()
+        self._accent_hex = current["accent"]
+
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+
+        # ── the mode: dark (default) / light ──────────────────────────────────
+        mode_row = QHBoxLayout()
+        self._lbl_theme_mode = QLabel(_t("settings.appearance.mode"))
+        self.theme_mode_combo = QComboBox()
+        for mode_id, key in ((theme.MODE_DARK, "settings.appearance.mode.dark"),
+                             (theme.MODE_LIGHT, "settings.appearance.mode.light")):
+            self.theme_mode_combo.addItem(_t(key), mode_id)
+        idx = next((i for i in range(self.theme_mode_combo.count())
+                    if self.theme_mode_combo.itemData(i) == current["mode"]), 0)
+        self.theme_mode_combo.setCurrentIndex(idx)
+        mode_row.addWidget(self._lbl_theme_mode)
+        mode_row.addWidget(self.theme_mode_combo, 1)
+        layout.addLayout(mode_row)
+
+        # ── the accent swatches ───────────────────────────────────────────────
+        self._lbl_theme_accent = QLabel(_t("settings.appearance.accent"))
+        layout.addWidget(self._lbl_theme_accent)
+        swatch_row = QHBoxLayout()
+        swatch_row.setSpacing(4)
+        self._swatch_buttons = {}
+        for name, hue, hex_value in accent_swatches():
+            btn = QPushButton()
+            btn.setFixedSize(26, 26)
+            btn.setToolTip(_t(f"settings.appearance.accent.{name}"))
+            btn.setStyleSheet(
+                f"QPushButton {{ background-color: {hex_value};"
+                f" border: 1px solid {theme.SURFACE_ALT}; border-radius: 4px; }}")
+            btn.clicked.connect(lambda _checked=False, h=hue: self._on_accent_hue(h))
+            swatch_row.addWidget(btn)
+            self._swatch_buttons[name] = (btn, hex_value)
+        swatch_row.addStretch(1)
+        layout.addLayout(swatch_row)
+
+        # ── the user's own colour: a hex field + a colour picker ──────────────
+        own_row = QHBoxLayout()
+        self._lbl_theme_own = QLabel(_t("settings.appearance.own_color"))
+        self.accent_hex_edit = QLineEdit(self._accent_hex)
+        self.accent_hex_edit.setMaxLength(7)
+        self.accent_hex_edit.setFixedWidth(90)
+        self.accent_hex_edit.editingFinished.connect(self._on_accent_hex_edited)
+        self.accent_pick_btn = QPushButton(_t("settings.appearance.pick_color"))
+        self.accent_pick_btn.clicked.connect(self._on_pick_accent_color)
+        own_row.addWidget(self._lbl_theme_own)
+        own_row.addWidget(self.accent_hex_edit)
+        own_row.addWidget(self.accent_pick_btn)
+        own_row.addStretch(1)
+        layout.addLayout(own_row)
+
+        self._lbl_theme_hint = QLabel(_t("settings.appearance.hint"))
+        self._lbl_theme_hint.setWordWrap(True)
+        layout.addWidget(self._lbl_theme_hint)
+        layout.addStretch(1)
+
+        # The live application — wired AFTER the initial values are in place
+        # (the "Language" tab precedent: otherwise the construction echo would
+        # apply the theme onto itself).
+        self.theme_mode_combo.currentIndexChanged.connect(self._on_theme_changed)
+        self._mark_current_swatch()
+
+        self.tabs.addTab(tab, _t("settings.tab.appearance"))
+
+    def _mark_current_swatch(self):
+        """Frame the swatch that matches the current accent (a visual prefill)."""
+        try:
+            for _name, (btn, hex_value) in getattr(self, "_swatch_buttons", {}).items():
+                selected = hex_value.lower() == (self._accent_hex or "").lower()
+                btn.setStyleSheet(
+                    f"QPushButton {{ background-color: {hex_value};"
+                    f" border: 2px solid "
+                    f"{theme.TEXT_PRIMARY if selected else theme.SURFACE_ALT};"
+                    f" border-radius: 4px; }}")
+        except RuntimeError:
+            pass  # Qt teardown — a button is already destroyed
+
+    def _current_theme(self):
+        """The Theme the tab currently describes (mode + hue)."""
+        mode = self.theme_mode_combo.currentData() or theme.MODE_DARK
+        return theme.theme_for_mode(mode, theme.hex_hue(self._accent_hex))
+
+    def _on_accent_hue(self, hue):
+        """A swatch was clicked: adopt its colour and apply live."""
+        self._accent_hex = theme.accent_hex(hue)
+        try:
+            self.accent_hex_edit.setText(self._accent_hex)
+        except RuntimeError:
+            return  # Qt teardown
+        self._mark_current_swatch()
+        self._emit_theme()
+
+    def _on_accent_hex_edited(self):
+        """The hex field lost focus: accept a valid colour, otherwise restore."""
+        try:
+            value = (self.accent_hex_edit.text() or "").strip()
+        except RuntimeError:
+            return  # Qt teardown
+        if theme.is_valid_hex(value):
+            self._accent_hex = "#" + value.lstrip("#").lower()
+            try:
+                self.accent_hex_edit.setText(self._accent_hex)
+            except RuntimeError:
+                return
+            self._mark_current_swatch()
+            self._emit_theme()
+            return
+        # An unusable value is not applied and not kept: the field returns to the
+        # last valid colour (a typo must not silently change the theme).
+        _log_dialog(f"appearance: {value!r} is not a #rrggbb colour — keeping {self._accent_hex}")
+        try:
+            self.accent_hex_edit.setText(self._accent_hex)
+        except RuntimeError:
+            pass
+
+    def _on_pick_accent_color(self):
+        """The colour picker — the same value as the hex field, chosen visually."""
+        try:
+            from PySide6.QtWidgets import QColorDialog
+        except Exception:  # noqa: BLE001 — without the dialog the field still works
+            return
+        try:
+            initial = QColor(self._accent_hex)
+            chosen = QColorDialog.getColor(initial, self, _t("settings.appearance.pick_color"))
+        except Exception as e:  # noqa: BLE001 — a broken picker must not break the tab
+            _log_dialog(f"appearance: the colour dialog failed: {e!r}")
+            return
+        if not chosen.isValid():
+            return  # the user cancelled
+        self._accent_hex = chosen.name().lower()
+        try:
+            self.accent_hex_edit.setText(self._accent_hex)
+        except RuntimeError:
+            return
+        self._mark_current_swatch()
+        self._emit_theme()
+
+    def _on_theme_changed(self, *_args):
+        """The mode combo moved (the accent has its own two slots)."""
+        self._mark_current_swatch()
+        self._emit_theme()
+
+    def _emit_theme(self):
+        """Push the current choice to the live window (v1.4.3, the "immediately" rule)."""
+        try:
+            self.theme_changed.emit(self._current_theme())
+        except RuntimeError:
+            pass  # Qt teardown
 
     # ── "Terminal" tab (v1.0 keys + the new close behavior) ─────────────
 
@@ -868,6 +1114,22 @@ class SettingsDialog(QDialog):
         self.applied.emit()
         self.accept()
 
+    def reject(self):
+        """Cancel: put the theme back the way the dialog found it (v1.4.3).
+
+        The "Appearance" tab applies LIVE (the "Language" tab precedent) — that
+        is what makes the choice meaningful — so a rejected dialog must undo the
+        preview. Nothing else in the hub is applied before OK, so nothing else
+        has to be restored. Never raises.
+        """
+        try:
+            initial = getattr(self, "_initial_theme", None)
+            if initial is not None and initial is not theme.THEME:
+                self.theme_changed.emit(initial)
+        except RuntimeError:
+            pass  # Qt teardown
+        super().reject()
+
     # ── Collecting values (config.json keys; language is NOT included — it is immediate) ───────
 
     def collect(self) -> dict:
@@ -893,6 +1155,11 @@ class SettingsDialog(QDialog):
         v1.3.3.8: +1 key — terminal_wheel ("scrollback"|"off", the combo gives
         fixed ids). This closes the LAST config-only key: the hub's 20 UI-facing
         keys become 21 and every setting now lives in the hub.
+        v1.4.3 (ROADMAP task 6): +1 key — theme ({mode, accent} of the
+        "Appearance" tab). The value is NESTED like `hotkeys` — one config key
+        carrying the whole appearance choice — and `i18n.save_config` merges at
+        the TOP level, so `_on_accept` re-merges the stored object (a mode change
+        must not drop the accent of a foreign version).
         """
         return {
             "external_terminal": self.ext_term_combo.currentData() or "auto",
@@ -904,6 +1171,10 @@ class SettingsDialog(QDialog):
             "terminal_close_behavior": self.close_behavior_combo.currentData() or "close",
             # v1.3.3.8 (ROADMAP task 4): the mouse-wheel mode
             "terminal_wheel": self.wheel_combo.currentData() or "scrollback",
+            # v1.4.3 (ROADMAP task 6): the appearance — the mode + the accent hue,
+            # stored as the colour the user actually picked (the hue is derived back)
+            "theme": {"mode": self.theme_mode_combo.currentData() or theme.MODE_DARK,
+                      "accent": self._accent_hex},
             "status_interval_sec": int(self.status_interval_spin.value()),
             "status_probe_timeout_sec": float(self.probe_timeout_spin.value()),
             # v1.1.2 final (task 2): the cap on parallel probes per round
@@ -927,16 +1198,52 @@ class SettingsDialog(QDialog):
 
     # ── i18n: retranslating the dialog's own strings (a language change in the open dialog) ───
 
+    def refresh_theme(self):
+        """v1.4.3 (ROADMAP task 4): re-apply the theme to the dialog's own strings.
+
+        The hub is the ONE dialog that can be on screen WHILE the theme changes (its own
+        "Appearance" tab applies live), so it owns the hook like every other container:
+        the hotkey table's conflict marks are repainted and the table's row colours
+        re-read (`_refresh_hotkey_conflicts` sets them from the theme). The tab's own
+        swatches are painted from their FIXED preset colours — they deliberately do
+        not follow the theme (a swatch shows the accent it would install).
+
+        The other dialogs (AddServer, SSHConnection, …) build their small QSS strings
+        from the live module constants at CONSTRUCTION time and are modal — a theme
+        switch cannot happen while one of them is open — so they are outside this
+        audit list by design (DOCUMENTATION.md §3).
+        """
+        try:
+            self._refresh_hotkey_conflicts()
+        except (RuntimeError, AttributeError):
+            pass  # Qt teardown / a dialog built without the tab
+
     def retranslate(self):
         """Re-apply translations to the dialog's strings (the registry — here)."""
         self.setWindowTitle(_t("settings.title"))
         self.tabs.setTabText(0, _t("settings.tab.general"))
-        self.tabs.setTabText(1, _t("settings.tab.terminal"))
-        self.tabs.setTabText(2, _t("settings.tab.statuses"))
-        self.tabs.setTabText(3, _t("settings.tab.autosave"))
-        self.tabs.setTabText(4, _t("settings.tab.map"))
-        self.tabs.setTabText(5, _t("settings.tab.hotkeys"))   # v1.3.2
-        self.tabs.setTabText(6, _t("settings.tab.language"))
+        self.tabs.setTabText(1, _t("settings.tab.appearance"))   # v1.4.3
+        self.tabs.setTabText(2, _t("settings.tab.terminal"))
+        self.tabs.setTabText(3, _t("settings.tab.statuses"))
+        self.tabs.setTabText(4, _t("settings.tab.autosave"))
+        self.tabs.setTabText(5, _t("settings.tab.map"))
+        self.tabs.setTabText(6, _t("settings.tab.hotkeys"))   # v1.3.2
+        self.tabs.setTabText(7, _t("settings.tab.language"))
+
+        # v1.4.3 (ROADMAP task 6): the "Appearance" tab
+        self._lbl_theme_mode.setText(_t("settings.appearance.mode"))
+        for i in range(self.theme_mode_combo.count()):
+            mid = self.theme_mode_combo.itemData(i)
+            key = {"dark": "settings.appearance.mode.dark",
+                   "light": "settings.appearance.mode.light"}.get(mid)
+            if key:
+                self.theme_mode_combo.setItemText(i, _t(key))
+        self._lbl_theme_accent.setText(_t("settings.appearance.accent"))
+        for name, (btn, _hex) in getattr(self, "_swatch_buttons", {}).items():
+            btn.setToolTip(_t(f"settings.appearance.accent.{name}"))
+        self._lbl_theme_own.setText(_t("settings.appearance.own_color"))
+        self.accent_pick_btn.setText(_t("settings.appearance.pick_color"))
+        self._lbl_theme_hint.setText(_t("settings.appearance.hint"))
 
         self._lbl_ext_term.setText(_t("settings.general.external_terminal"))
         for i in range(self.ext_term_combo.count()):

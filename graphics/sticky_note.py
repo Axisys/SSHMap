@@ -37,6 +37,14 @@ try:  # v1.2.5: central theme (palette/radii/fonts — ui/theme.py)
 except ImportError:
     from ui import theme
 
+try:  # v1.4.3: the ONE QSS registry (the Qt half of the theme)
+    from ..ui import theme_qss
+except ImportError:
+    try:
+        from ui import theme_qss
+    except ImportError:  # flat layout without the ui package: the editor keeps its own default
+        theme_qss = None
+
 
 def _t(key: str) -> str:
     """Safe i18n hook: returns the key itself when i18n is unavailable."""
@@ -60,10 +68,12 @@ class StickyNote(QGraphicsProxyWidget):
 
     # v1.2.4-fix: a muted palette on tester feedback (the classic
     # #fef08a/#ca8a04 is too bright); it reads on the dark map but does not "cut in".
-    # v1.2.5: the values — from the central theme (ui/theme.py), unchanged.
-    BG_COLOR = theme.NOTE_BG
-    BORDER_COLOR = theme.NOTE_BORDER
-    TEXT_COLOR = theme.NOTE_TEXT
+    # v1.4.3 (ROADMAP task 5): LIVE module constants — the note palette is the
+    # same in DARK and LIGHT (a yellow sticky fits both), but the reads go
+    # through the module so a future theme that changes it needs no edit here.
+    BG_COLOR = theme.ThemeValue(lambda: theme.NOTE_BG)
+    BORDER_COLOR = theme.ThemeValue(lambda: theme.NOTE_BORDER)
+    TEXT_COLOR = theme.ThemeValue(lambda: theme.NOTE_TEXT)
     CORNER_RADIUS = theme.RADIUS_NOTE   # rounding of the note window corners (v1.2.4-fix: was 4 px)
 
     textEdited = Signal()  # the text changed (MainWindow marks the project dirty)
@@ -105,11 +115,16 @@ class StickyNote(QGraphicsProxyWidget):
         editor.setAcceptRichText(False)
         editor.setLineWrapMode(QTextEdit.LineWrapMode.WidgetWidth)
         editor.setFont(QFont(theme.FONT_UI, 10))
-        editor.setStyleSheet(
-            "QTextEdit { background: transparent; color: %s;"
-            " border: none; padding: 6px; }"
-            % self.TEXT_COLOR
-        )
+        # v1.4.3 (ROADMAP task 4): the editor's stylesheet comes from the ONE
+        # registry (ui/theme_qss.py) and is re-applied by refresh_theme() — the
+        # object name is what the registry rule targets.
+        editor.setObjectName("StickyNoteEditor")
+        if theme_qss is not None:
+            editor.setStyleSheet(theme_qss.style("note.editor"))
+        else:  # a flat layout without the ui package — the colours of the note itself
+            editor.setStyleSheet(
+                "QTextEdit { background: transparent; color: %s;"
+                " border: none; padding: 6px; }" % self.TEXT_COLOR)
         editor.setPlaceholderText(_t("note.placeholder"))
         # Normal mode: the widget does NOT take focus — the note handles the clicks
         # (move/resize), not the QTextEdit. A double click enters edit mode.
@@ -325,6 +340,28 @@ class StickyNote(QGraphicsProxyWidget):
         painter.setBrush(QBrush(QColor(self.BG_COLOR)))
         painter.drawPath(path)
         super().paint(painter, option, widget)
+
+    def refresh_theme(self):
+        """v1.4.3 (ROADMAP task 5): re-apply the theme to the note.
+
+        `paint()` already reads the live palette; the EDITOR is a real QWidget
+        with a QSS string, so its stylesheet has to be rebuilt from the registry
+        and the font re-applied (the UI font is a theme field too).
+        """
+        try:
+            editor = self.widget()
+        except RuntimeError:
+            return  # Qt teardown
+        if editor is None:
+            return
+        if theme_qss is not None:
+            theme_qss.refresh(editor, "note.editor")
+        else:
+            editor.setStyleSheet(
+                "QTextEdit { background: transparent; color: %s;"
+                " border: none; padding: 6px; }" % self.TEXT_COLOR)
+        editor.setFont(QFont(theme.FONT_UI, 10))
+        self.update()
 
     def mouseDoubleClickEvent(self, event):
         """Double click — enter the editing mode (the caret under the cursor)."""

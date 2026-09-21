@@ -289,8 +289,9 @@ check("retranslate: the label is translated (not the raw key)",
       and dlg2._lbl_max_parallel.text() != "settings.statuses.max_parallel",
       dlg2._lbl_max_parallel.text())
 c = dlg2.collect()
-check("collect(): exactly 21 keys (17 + status_max_parallel v1.1.2 final + terminal_mode v1.2.2 + hotkeys v1.3.2 + terminal_wheel v1.3.3.8)",
-      len(c) == 21 and "status_max_parallel" in c and "terminal_mode" in c and "terminal_wheel" in c,
+check("collect(): exactly 22 keys (21 + theme v1.4.3)",
+      len(c) == 22 and "status_max_parallel" in c and "terminal_mode" in c
+      and "terminal_wheel" in c and "theme" in c,
       str(sorted(c)))
 check("collect(): status_max_parallel = the int from the spinbox",
       isinstance(c["status_max_parallel"], int) and c["status_max_parallel"] == 32, str(c.get("status_max_parallel")))

@@ -64,9 +64,61 @@ class MapScene(QGraphicsScene):
         self._grid_size = 20
         self._grid_min_screen_px = float(self._grid_size) * 0.8   # 16 px
         self._grid_major_every = 5
-        # v1.2.5: colors — from the central theme (ui/theme.py); values unchanged.
-        self._grid_color = QColor(theme.WINDOW_BG)      # minor lines (dark)
-        self._grid_major_color = QColor(theme.BASE_BG)  # major lines (a bit lighter)
+
+    # ── The grid colours (v1.4.3, ROADMAP task 5) ────────────────────────────
+    # Properties, not `__init__` attributes: the pre-v1.4.3 scene cached two
+    # QColor objects at construction time, so a theme switch could never reach
+    # them. `drawBackground` reads them on every repaint, which is exactly the
+    # frequency a theme change needs.
+
+    @property
+    def _grid_color(self) -> QColor:
+        """Minor grid line (WINDOW_BG of the ACTIVE theme)."""
+        return QColor(theme.WINDOW_BG)
+
+    @property
+    def _grid_major_color(self) -> QColor:
+        """Major grid line (BASE_BG of the ACTIVE theme, a bit lighter)."""
+        return QColor(theme.BASE_BG)
+
+    def refresh_theme(self):
+        """v1.4.3: re-read the theme for the whole map.
+
+        The scene is the one object that can reach EVERY theme-aware item it
+        owns (nodes, arrows, notes, groups, the background frame), so the theme
+        walk of `MainWindow.apply_theme()` enters the map here instead of
+        iterating the item lists itself. One `update()` repaints the map with the
+        new grid and background; each item is asked individually, because a
+        QGraphicsItem keeps the QBrush/QPen values it was given.
+        """
+        self._refresh_items_theme()
+        self.update()
+
+    def _refresh_items_theme(self):
+        """Ask every scene item that knows the hook to re-read the theme. Never raises.
+
+        The items are taken from the scene's OWN registries (nodes/arrows/notes/
+        groups/background) rather than from `QGraphicsScene.items()`: the QGraphicsItem
+        children of a card/arrow are never handed a theme directly (their parent
+        repaints them), and a registry walk is immune to the "items() only returns
+        what is inside the scene rect" rule — a map panned far out of the default
+        rect must still follow a theme switch.
+        """
+        candidates = list(self._nodes.values()) + list(self._arrows) + \
+            list(self._notes) + list(self._groups)
+        background = getattr(self, "_background", None)
+        if background is not None:
+            candidates.append(background)
+        for item in candidates:
+            hook = getattr(item, "refresh_theme", None)
+            if not callable(hook):
+                continue
+            try:
+                hook()
+            except RuntimeError:
+                continue  # Qt teardown — the item is already destroyed
+            except Exception:  # noqa: BLE001 — one broken item must not stop the map
+                continue
 
     # ── AUDIT v0.8.3 (#5): public iterators instead of accessing _nodes/_arrows ──
 

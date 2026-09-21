@@ -775,10 +775,10 @@ print("== §9 the release state ==")
 # ════════════════════════════════════════════════════════════════════════════
 
 check("EXPECTED_APP_VERSION is the version this test file describes",
-      EXPECTED_APP_VERSION == "1.4.2", EXPECTED_APP_VERSION)
-check("the pin counts the keys of this release (v1.4.2: +4 — the big-picture map level: "
-      "the minimap item + its tooltip and the group-fold pair)",
-      EXPECTED_I18N_KEYS == 570, str(EXPECTED_I18N_KEYS))
+      EXPECTED_APP_VERSION == "1.4.3", EXPECTED_APP_VERSION)
+check("the pin counts the keys of this release (v1.4.3: +16 — \"Appearance\": the tab, the "
+      "mode pair, the accent row with its 8 swatches, the own colour, the picker and the hint)",
+      EXPECTED_I18N_KEYS == 586, str(EXPECTED_I18N_KEYS))
 check_release_state(ROOT)
 for _code in i18n_lang_codes(ROOT):
     check(f"i18n/{_code}.json carries the new sftp.conflict.title key",

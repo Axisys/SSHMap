@@ -97,6 +97,19 @@ class MapView(QGraphicsView):
         # Group drag: positions of all selected nodes before the gesture
         self._group_drag_olds = []               # [(node, QPointF), ...]
 
+    def refresh_theme(self):
+        """v1.4.3 (ROADMAP task 5): re-read the theme for the view.
+
+        `MapScene.drawBackground` paints over the viewport, but the view's own
+        background brush is what shows before the first `drawBackground` — it
+        cached the canvas colour at construction. The scene, its items and the
+        minimap panel are refreshed by `MainWindow.apply_theme()` (the minimap is
+        a child of the view but is OWNED by the window), so this method handles
+        only what the view itself paints.
+        """
+        self.setBackgroundBrush(QBrush(QColor(theme.CANVAS_BG)))
+        self.viewport().update()
+
     # UI polish: allowed zoom range (shared by wheel, fit, and restore).
     ZOOM_MIN = 0.1
     ZOOM_MAX = 5.0

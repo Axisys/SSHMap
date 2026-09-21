@@ -669,6 +669,44 @@ class SSHTerminalWindow(QMainWindow):
             except RuntimeError:
                 pass  # Qt teardown — the panel is already destroyed
 
+    # ── v1.4.3 (ROADMAP task 4): live theme — the container and its sessions ──
+
+    def refresh_theme(self):
+        """v1.4.3: re-apply the theme to the window and every live session.
+
+        The twin of `retranslate()` (the same registry, the same dead-C++-object
+        discipline): the window owns the container, and each `TerminalSessionPage`
+        re-applies its status line, its canvas's floating find panel and its SFTP
+        tab. The terminal's own OUTPUT palette is deliberately out of scope
+        (AGENTS.md §4.6). Never raises.
+        """
+        try:
+            pages = self._all_pages()
+        except Exception:  # noqa: BLE001 — a broken registry must not break the switch
+            pages = []
+        for page in pages:
+            hook = getattr(page, "refresh_theme", None)
+            if not callable(hook):
+                continue
+            try:
+                hook()
+            except RuntimeError:
+                continue  # Qt teardown — the page is already destroyed
+            except Exception:  # noqa: BLE001 — one session must not stop the rest
+                continue
+        cmdlib = getattr(self, "cmdlib_panel", None)
+        if cmdlib is not None:
+            hook = getattr(cmdlib, "refresh_theme", None)
+            if callable(hook):
+                try:
+                    hook()
+                except RuntimeError:
+                    pass  # Qt teardown — the panel is already destroyed
+        try:
+            self.update()
+        except RuntimeError:
+            pass
+
     # ── v1.2.1: tabs = sessions ──────────────────────────────────────────────
 
     def add_session(self, server_data: ServerData, password: str = None,

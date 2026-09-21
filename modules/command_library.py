@@ -548,6 +548,26 @@ class CommandLibraryPanel(QWidget):
 
     # ── v1.3.3.1 (ROADMAP task 1): live i18n — re-text on a language switch ──
 
+    def refresh_theme(self):
+        """v1.4.3 (ROADMAP task 4): re-apply the theme to the panel.
+
+        The info label's colour is re-read (a QSS string is a value) and the two
+        hand-painted widgets — the collapse strip and the collapse button — are
+        repainted, because their colours are read inside `paintEvent`. Never
+        raises: the container may be closing under the switch.
+        """
+        try:
+            self.info_label.setStyleSheet(f"color: {theme.TEXT_MUTED};")
+        except RuntimeError:
+            return  # Qt teardown — the label is already destroyed
+        for widget in (getattr(self, "_strip", None), getattr(self, "_collapse_btn", None)):
+            if widget is None:
+                continue
+            try:
+                widget.update()
+            except RuntimeError:
+                continue
+
     def retranslate(self):
         """v1.3.3.1: re-text the panel in the current language.
 
