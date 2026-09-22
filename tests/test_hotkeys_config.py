@@ -99,6 +99,8 @@ EMPTY_DEFAULT_IDS = {
     "file.import_ssh_config",
     # v1.4.2: the minimap panel — a checkable View item (the ROADMAP task 2).
     "view.toggle_minimap",
+    # v1.4.5: the legend panel — a checkable View item + its toolbar mirror (task 4).
+    "view.toggle_legend",
 }
 def new_window():
     """A MainWindow with the autosave timer stopped (no event loop in the tests)."""
@@ -137,13 +139,13 @@ ALL_IDS = sorted(set(EXPECTED_DEFAULTS) | EMPTY_DEFAULT_IDS)
 print("== 1. the action registry ==")
 
 ids = HR.action_ids()
-check("registry: the grown v1.3.3.3 action set (22 sequenced + 23 empty-default)",
-      set(ids) == set(ALL_IDS) and len(ids) == 45,
+check("registry: the grown v1.3.3.3 action set (22 sequenced + 24 empty-default)",
+      set(ids) == set(ALL_IDS) and len(ids) == 46,
       str(sorted(set(ids) ^ set(ALL_IDS))))
 check("registry: the sequenced defaults are the v1.3.1.1 set + the v1.3.3.3 additions",
       {a: HR.default_sequence(a) for a in ids if HR.default_sequence(a)} == EXPECTED_DEFAULTS,
       str({a: HR.default_sequence(a) for a in ids if HR.default_sequence(a)}))
-check("registry: exactly the 23 remaining global actions carry an EMPTY default",
+check("registry: exactly the 24 remaining global actions carry an EMPTY default",
       {a for a in ids if not HR.default_sequence(a)} == EMPTY_DEFAULT_IDS
       and set(HR.empty_default_action_ids()) == EMPTY_DEFAULT_IDS,
       str(sorted(EMPTY_DEFAULT_IDS ^ {a for a in ids if not HR.default_sequence(a)})))
@@ -367,8 +369,8 @@ dlg._refresh_hotkey_conflicts()
 check("dialog: two disabled (empty) hotkeys are not a conflict",
       HR.find_conflicts(dlg.hotkey_sequences()) == set()
       and dlg.hotkey_sequences()["file.open"] == "" == dlg.hotkey_sequences()["edit.properties"])
-check("dialog: the 23 empty-default rows are not a conflict among themselves",
-      len([a for a in EMPTY_DEFAULT_IDS if dlg.hotkey_sequences()[a] == ""]) == 23
+check("dialog: the 24 empty-default rows are not a conflict among themselves",
+      len([a for a in EMPTY_DEFAULT_IDS if dlg.hotkey_sequences()[a] == ""]) == 24
       and HR.find_conflicts(dlg.hotkey_sequences()) == set())
 
 # A prefill from the config (a saved value shows up in the table)

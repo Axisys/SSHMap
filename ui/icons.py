@@ -440,6 +440,23 @@ def _draw_plugin(p):
     p.drawPath(notch)
 
 
+def _draw_legend(p):
+    """v1.4.5: three swatch rows — the legend panel (the View item / the toolbar button).
+
+    A list glyph: a short coloured-run proxy (a filled square) + a text line, three
+    times. The square is drawn as an outline like the rest of the set (the icons are
+    monochrome); what reads at 16 px is the "rows of small marks" rhythm.
+    """
+    for y in (5.0, 10.0, 15.0):
+        swatch = QPainterPath()
+        swatch.addRect(QRectF(3.4, float(y) - 1.4, 2.8, 2.8))
+        p.drawPath(swatch)
+        line = QPainterPath()
+        line.moveTo(8.4, float(y))
+        line.lineTo(16.6, float(y))
+        p.drawPath(line)
+
+
 _DRAWERS = {
     "new": _draw_new,
     "open": _draw_open,
@@ -459,6 +476,8 @@ _DRAWERS = {
     "map_panel": _draw_map_panel,
     # v1.4.2 (ROADMAP task 2): the minimap panel (the View menu item)
     "minimap": _draw_minimap,
+    # v1.4.5 (ROADMAP task 4): the legend panel (the View menu item + the toolbar button)
+    "legend": _draw_legend,
     # v1.3.3.3 (task 2): the zoom pair of the View menu (project-drawn, no image files)
     "zoom_in": _draw_zoom_in,
     "zoom_out": _draw_zoom_out,

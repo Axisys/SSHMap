@@ -178,6 +178,7 @@ of the file itself.
 | `test_terminal_split.py` | — | v1.3.3.5 — Terminal split: a second pane under the sessions (ROADMAP v1.3.3.5). |
 | `test_terminal_tabs.py` | — | v1.2.1 — Multiple SSH sessions as tabs in one terminal window (ROADMAP v1.2.1). |
 | `test_theme.py` | — | v1.1.5 → v1.4.3 — the central theme `ui/theme.py`: the `Theme` object, LIGHT, the accent hue. |
+| `test_ui_density.py` | — | v1.4.5 — UI density & first run (ROADMAP v1.4.5): the compact sidebar grid, the first-run |
 | `test_ui_polish.py` | — | UI polish: nodes, grid, fit/zoom, status bar, icons, arrow hit zones (former smoke_test). |
 | `test_undo_redo.py` | — | Regression tests v0.8.3 — Undo/Redo. |
 | `test_view_toggles.py` | — | v1.2.4.1 — Collapsing the sidebar and the map into a thin line (buttons + menu, ROADMAP v1.2.4.1). |

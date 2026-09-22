@@ -251,6 +251,29 @@ STYLE_BUILDERS = {
     "status.muted": lambda t: f"color: {t.text_muted};",
     "status.bar_counts": lambda t: f"color: {t.text_muted}; padding-right: 10px;",
     "status.bar_zoom": lambda t: f"color: {t.text_primary}; padding-right: 6px;",
+    # v1.4.5 (ROADMAP task 3): the CLICKABLE status counters of the status bar. The
+    # clickable ones are tinted like a link (the accent); the ACTIVE one — the filter
+    # that is currently applied to the sidebar — is bold, so the transient state is
+    # visible without a second widget.
+    "status.bar_filter": lambda t: f"color: {t.accent}; padding-right: 10px;",
+    "status.bar_filter_active": lambda t: (
+        f"color: {t.accent_hover}; font-weight: bold; padding-right: 10px;"),
+    # v1.4.5 (ROADMAP task 2): the one button of the first-run empty state — the
+    # primary action of an empty map, so it carries the accent fill instead of the
+    # neutral surface the global QPushButton rule gives every other button.
+    "empty_state.button": lambda t: f"""
+QPushButton#EmptyStateButton {{
+    background-color: {t.accent};
+    color: {t.canvas_bg};
+    border: 1px solid {t.accent_hover};
+    border-radius: 4px;
+    padding: 4px 14px;
+    font-weight: bold;
+}}
+QPushButton#EmptyStateButton:hover {{
+    background-color: {t.accent_hover};
+}}
+""",
     "status.sftp_row": lambda t: f"color: {t.text_muted}; padding: 2px 0;",
     "status.terminal_row": lambda t: f"color: {t.text_muted}; padding: 4px 0;",
     "status.terminal_bold": lambda t: f"font-weight: bold; color: {t.text_primary};",

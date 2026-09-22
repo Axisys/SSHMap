@@ -351,8 +351,16 @@ for attr, _icon_name, _key, _ru in _BUTTONS:
 check("U1: all 6 buttons — text-align: left + padding-left (the offset from the left edge)",
       not _bad_align, str(_bad_align))
 check("U1: every button keeps its vector icon (icon, then text)", not _no_icon, str(_no_icon))
-check("U1: button height unchanged (34 px)", all(getattr(panel, a).minimumHeight() == 34
-                                                 for a, *_r in _BUTTONS))
+# v1.4.5 (ROADMAP task 1): the six buttons moved from full-width rows into a compact
+# 2-column × 3-row grid and the row height shrank with them (34 → the compact height).
+from ui.sidebar import _COMPACT_BUTTON_HEIGHT, _BUTTON_COLUMNS
+check("U1: the buttons carry the compact row height (v1.4.5; was the full-width 34 px)",
+      all(getattr(panel, a).minimumHeight() == _COMPACT_BUTTON_HEIGHT for a, *_r in _BUTTONS)
+      and 0 < _COMPACT_BUTTON_HEIGHT < 34,
+      str({a: getattr(panel, a).minimumHeight() for a, *_r in _BUTTONS}))
+check("U1: the six buttons are placed in the compact grid (2 columns, 3 rows) — v1.4.5",
+      panel.buttons_grid.count() == len(_BUTTONS) and _BUTTON_COLUMNS == 2,
+      f"count={panel.buttons_grid.count()} columns={_BUTTON_COLUMNS}")
 
 # ════════════════════════════════════════════════════════════
 # N10. The i18n key msg.confirm_delete_profile

@@ -259,8 +259,31 @@ def clear_cfg(*extra_paths: str) -> None:
 # in 12 i18n files + the APP_VERSION/requirements pins in 7 release-state sections).
 # The misses of the keys themselves against the code are caught by check_i18n_keys.py.
 # ─────────────────────────────────────────────────────────────────────────────
-EXPECTED_APP_VERSION = "1.4.4"  # the current release (a sentinel: it catches "a bump to the wrong version")
-EXPECTED_I18N_KEYS = 586        # the parity of the TRANSLATION keys (v1.4.4 — "Motion: camera
+EXPECTED_APP_VERSION = "1.4.5"  # the current release (a sentinel: it catches "a bump to the wrong version")
+EXPECTED_I18N_KEYS = 603        # the parity of the TRANSLATION keys (v1.4.5 — "UI density &
+                                # first run": +17 keys × en/ru/zh/de, and ONE existing VALUE
+                                # rewritten. The new keys: 3 `empty.state.*` (the first-run
+                                # hint — the title, the button and the import line whose two
+                                # placeholders are filled with the REAL File-menu labels
+                                # `file.import_servers` / `file.import_ssh_config`, so the hint
+                                # can never name a menu item that no longer exists),
+                                # 5 `statusbar.filter.*` (the three clickable status counters
+                                # `online`/`warn`/`offline` with {count}, their shared tooltip and
+                                # the "sidebar filtered by status" status-bar line with {status}),
+                                # 8 legend keys (`legend.title`, the two section captions
+                                # `legend.connections` / `legend.statuses`, the three status
+                                # NAMES `legend.status.online/.warn/.offline` — reused by the
+                                # filter's status-bar line — the panel tooltip
+                                # `legend.tooltip` and the checkable View/toolbar item
+                                # `view.toggle_legend`) and 1 `view.splitter_handle_tooltip`
+                                # (the v1.4.5 splitter-handle rule: the divider is available
+                                # only while both panels are expanded).
+                                # The VALUE change: `status.counts` lost its three status
+                                # figures — the counters became three CLICKABLE widgets of
+                                # their own (`statusbar.filter.*`), so the single label now
+                                # carries only "Servers: {servers} | Connections: {connections}".
+                                # A value change adds no key, so this is the only line it
+                                # touches here. (v1.4.4 — "Motion: camera
                                 # flights, node scale-in, hover focus/dim on arrows": +0 keys
                                 # × en/ru/zh/de. The release is BEHAVIOUR only — `ui/motion.py`
                                 # holds the durations/easing and the two gestures, and every

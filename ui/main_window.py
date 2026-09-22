@@ -114,7 +114,7 @@ except ImportError:
         theme_qss = None
 
 
-from PySide6.QtCore import Qt, QTimer, Signal
+from PySide6.QtCore import Qt, QTimer, Signal, QPoint  # QPoint — the legend's saved position (v1.4.5)
 from PySide6.QtGui import (
     QFont,      # v1.1.1: UI font from config (QApplication.setFont)
     QAction,    # v1.4rc1: the per-plugin rows of the "Plugins" menu (insertAction)
@@ -239,6 +239,68 @@ class _CollapseStrip(QWidget):
         path.closeSubpath()
         p.drawPath(path)
         p.end()
+
+
+# ── v1.4.5 (ROADMAP task 3): the clickable status counters of the status bar ───
+
+# The order the three status counters appear in (the same order the cards, the dots
+# and the status bar text have always used).
+STATUS_FILTER_ORDER = ("online", "warn", "offline")
+
+# The upper bound of a QWidget's width. QWIDGETSIZE_MAX is a C macro in qwidget.h and
+# is therefore not exposed by PySide6 — the value is the documented one.
+_WIDGET_MAX_WIDTH = 16777215
+
+
+class _StatusCounter(QLabel):
+    """One status counter of the status bar — a CLICKABLE filter (v1.4.5, task 3).
+
+    The counters were passive text ("Online: 3 | Warn: 1 | Offline: 2") next to the
+    server/connection totals. Split out of one label into three widgets they can carry
+    a click: the WINDOW owns what the click means (the sidebar status filter), the
+    widget only reports it — the `_CollapseStrip` pattern.
+
+    Signals:
+        clicked(str) — the status this counter stands for ("online"/"warn"/"offline").
+    """
+
+    clicked = Signal(str)
+
+    def __init__(self, status: str, parent=None):
+        super().__init__("", parent)
+        self.status = str(status)
+        self._active = False
+        self.setObjectName(f"StatusCounter_{self.status}")
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+
+    def is_active(self) -> bool:
+        """Is the sidebar currently filtered by THIS status?"""
+        return bool(self._active)
+
+    def set_active(self, active: bool) -> None:
+        """Mark the counter as the applied filter (bold) or as a plain counter."""
+        active = bool(active)
+        if active == self._active:
+            return
+        self._active = active
+        self.refresh_theme()
+
+    def refresh_theme(self):
+        """Re-apply the counter's stylesheet (a QSS string is a value — v1.4.3)."""
+        if theme_qss is None:
+            return
+        theme_qss.refresh(self, "status.bar_filter_active" if self._active
+                          else "status.bar_filter")
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            try:
+                self.clicked.emit(self.status)
+            except RuntimeError:
+                pass  # Qt teardown — the receiver is gone
+            event.accept()
+            return
+        super().mousePressEvent(event)
 
 
 # ── v1.3.3.6 (ROADMAP task 2): dropping a project onto the window ──────────────
@@ -646,6 +708,14 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
             # Review fix v0.8.0 (#3): the tree row marker is updated in place
             # (node.status — the actual status after set_status; unknowns are ignored)
             self._update_sidebar_status_marker(server_id)
+            # v1.4.5 (ROADMAP task 3): a status change can move a node in or out of an
+            # ACTIVE status filter — the in-place marker update would leave the filtered
+            # tree stale, so the rows are rebuilt (only while a filter is on).
+            if getattr(self, "_status_filter", ""):
+                try:
+                    self.refresh_sidebar()
+                except RuntimeError:
+                    pass  # Qt teardown — the window is closing
 
     def _update_window_title(self):
         """Rebuild the window title: base title + project file + [*] marker."""
@@ -750,6 +820,13 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
                                 (getattr(self, "zoom_label", None), "status.bar_zoom")):
                 if widget is not None:
                     theme_qss.refresh(widget, key)
+        # v1.4.5 (ROADMAP task 3): the clickable status counters (their ACTIVE styling
+        # is the widget's own state — `refresh_theme()` picks the right registry entry).
+        for counter in (getattr(self, "status_filter_labels", {}) or {}).values():
+            try:
+                counter.refresh_theme()
+            except RuntimeError:
+                continue  # Qt teardown — this counter is already destroyed
         self._refresh_icons()
         try:
             self._multi_label.setStyleSheet(
@@ -801,8 +878,10 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
             except Exception:  # noqa: BLE001
                 pass
         # The floating panels are children of the view but owned here: the map search
-        # bar (v0.9.8) and the minimap (v1.4.2) — both repaint from the live theme.
-        for widget in (getattr(self, "map_search", None),):
+        # bar (v0.9.8), the minimap (v1.4.2), the legend (v1.4.5) and the first-run
+        # empty state (v1.4.5) — all repaint from the live theme.
+        for widget in (getattr(self, "map_search", None), getattr(self, "legend", None),
+                       getattr(self, "empty_state", None)):
             hook = getattr(widget, "refresh_theme", None)
             if callable(hook):
                 try:
@@ -977,12 +1056,41 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
                 pass  # Qt teardown / a panel without the button — the tooltip is not critical
         for _widget, _key in ((getattr(self, "_map_collapse_btn", None), "view.toggle_map"),
                               (getattr(self, "_sidebar_strip", None), "view.strip_sidebar_tooltip"),
-                              (getattr(self, "_map_strip", None), "view.strip_map_tooltip")):
+                              (getattr(self, "_map_strip", None), "view.strip_map_tooltip"),
+                              (getattr(self, "legend", None), "legend.tooltip")):
             if _widget is not None:
                 try:
                     _widget.setToolTip(self.t(_key))
                 except RuntimeError:
                     pass  # Qt teardown — the widget is already destroyed
+        # v1.4.5 (ROADMAP task 4): the legend paints its rows from a label cache.
+        _legend = getattr(self, "legend", None)
+        if _legend is not None:
+            try:
+                _legend.retranslate()
+            except RuntimeError:
+                pass  # Qt teardown — the panel is already destroyed
+        # v1.4.5 (ROADMAP task 2): the first-run hint (its button text + the paint).
+        _empty = getattr(self, "empty_state", None)
+        if _empty is not None:
+            try:
+                _empty.retranslate()
+                self._position_empty_state()   # the sentence changed width — re-place it
+            except RuntimeError:
+                pass  # Qt teardown — the hint is already destroyed
+        # v1.4.5 (ROADMAP task 3): the counters (their labels + tooltips) and, with them,
+        # the empty state / the status markers of the composition.
+        try:
+            self._update_counts_label()
+        except RuntimeError:
+            pass  # Qt teardown — the status bar is already gone
+        # v1.4.5 (ROADMAP task 5): the divider's tooltip.
+        try:
+            _handle = self._splitter.handle(0)
+            if _handle is not None:
+                _handle.setToolTip(self.t("view.splitter_handle_tooltip"))
+        except (AttributeError, RuntimeError):
+            pass  # Qt teardown / a splitter without handles
         try:
             self.statusBar().showMessage(self.t("status.ready"))
         except RuntimeError:
@@ -1163,6 +1271,17 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         # v1.4.2 (ROADMAP task 2): the minimap — a floating panel in the top-right corner
         self._setup_minimap()
 
+        # v1.4.5 (ROADMAP task 2): the first-run empty state — a hint over the canvas
+        # while the map has no servers (the card is mouse-transparent; the ONE button is
+        # its own child of the view).
+        self._setup_empty_state()
+
+        # v1.4.5 (ROADMAP task 4): the legend — the 6 connection types + the 3 statuses.
+        # Created BEFORE _setup_menubar (which owns the checkable View item and the
+        # toolbar mirror): the panel is built here, its visibility/config applied here,
+        # and the menu item simply joins the same state.
+        self._setup_legend()
+
         # Status bar
         if self._i18n_available:
             try:
@@ -1180,6 +1299,19 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         # registry (ui/theme_qss.py) and are re-applied by apply_theme()
         theme_qss.refresh(self.counts_label, "status.bar_counts")
         self.statusBar().addPermanentWidget(self.counts_label)
+
+        # v1.4.5 (ROADMAP task 3): the status counters are LIVE — a click filters the
+        # sidebar by that status, a second click resets it. The state is transient UI
+        # (never persisted) and the counters always show the TOTALS: a filter is a view,
+        # not a fact. The servers/connections pair stays in `counts_label` above.
+        self._status_filter = ""            # "" | "online" | "warn" | "offline"
+        self.status_filter_labels = {}      # status -> _StatusCounter
+        for _status in STATUS_FILTER_ORDER:
+            _counter = _StatusCounter(_status, self)
+            _counter.clicked.connect(self._on_status_filter_clicked)
+            _counter.refresh_theme()
+            self.statusBar().addPermanentWidget(_counter)
+            self.status_filter_labels[_status] = _counter
 
         self.zoom_label = QLabel("100%")
         self.zoom_label.setMinimumWidth(44)
@@ -1626,6 +1758,27 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
             pass
         self.undo_stack.canRedoChanged.connect(self.act_redo.setEnabled)
 
+        # ── v1.4.5 (ROADMAP task 4): the legend toggle ────────────────────────
+        # The button MIRRORS the checkable "View → Legend" item (created below in
+        # _setup_menubar, which wires the pair): the menu item owns the hotkey and the
+        # state, the button owns the click — the v1.2.4.1 collapse-button pattern.
+        toolbar.addSeparator()
+        self._legend_toolbar_btn = toolbar.addAction(
+            self.t("view.toggle_legend") if self._i18n_available else "Legend")
+        self._legend_toolbar_btn.setCheckable(True)
+        self._legend_toolbar_btn.setChecked(True)   # synced with the panel/config in _setup_menubar
+        self._legend_toolbar_btn.setToolTip(
+            self.t("view.toggle_legend") if self._i18n_available else "Legend")
+        self._register_i18n(self._legend_toolbar_btn, "view.toggle_legend")
+        # A toolbar button is a MIRROR: it must not own the action's sequence
+        # (two enabled QActions with one sequence fire NEITHER — v1.3.3.3).
+        self._mark_toolbar_mirror(self._legend_toolbar_btn)
+        try:
+            set_action_icon(self._legend_toolbar_btn, "legend")
+        except Exception:  # noqa: BLE001 — the icon is cosmetic; do not break the toolbar
+            pass
+        self._legend_toolbar_btn.toggled.connect(self._on_legend_toolbar_toggled)
+
     def _mark_toolbar_mirror(self, action) -> None:
         """v1.3.3.3: keep a toolbar button that MIRRORS a menu action shortcut-free.
 
@@ -1808,6 +1961,21 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         self.act_show_minimap.toggled.connect(self._toggle_minimap)
         self._register_i18n(self.act_show_minimap, "view.toggle_minimap")
         self._register_hotkey_target("view.toggle_minimap", self.act_show_minimap)
+        # v1.4.5 (ROADMAP task 4): the legend panel — the same "created manually +
+        # toggled(bool)" pattern, the same registry rule (an EMPTY default: assignable,
+        # no key out of the box) and a toolbar MIRROR created in _setup_toolbar (which
+        # runs before this method — the pair is wired here, exactly like the two panel
+        # collapse buttons wired above their own menu items).
+        self.act_show_legend = view_menu.addAction(
+            self.t("view.toggle_legend") if self._i18n_available else "Legend")
+        self.act_show_legend.setCheckable(True)
+        self.act_show_legend.setChecked(bool(getattr(self, "_legend_enabled", True)))
+        set_action_icon(self.act_show_legend, "legend")
+        self.act_show_legend.toggled.connect(self._toggle_legend)
+        self._register_i18n(self.act_show_legend, "view.toggle_legend")
+        self._register_hotkey_target("view.toggle_legend", self.act_show_legend)
+        self.act_show_legend.toggled.connect(self._sync_legend_toolbar)
+        self._sync_legend_toolbar(self.act_show_legend.isChecked())
         # v1.2.4.1 (task 2): corner collapse buttons — the same QAction (toggle()).
         # v1.2.4.1-fix (QA request): the icon — a "◇" diamond on both panels, both
         # at the bottom right (the sidebar's bottom row / the map's right BOTTOM corner — the top is
@@ -2556,6 +2724,13 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         the window is a "shell" of two strips (even with the "Terminals" dock open).
         Collapsing the second panel is forbidden for ALL control paths (button/strip/menu/
         programmatic setChecked — they all converge on toggled). Returns "changed" / "noop" / "forbidden".
+
+        v1.4.5 (ROADMAP task 5): the collapsed container is capped at the strip width
+        (`setMaximumWidth`) and the divider handle is DISABLED while a panel is a strip —
+        the drift fix (a collapsed container used to be pinned only by `minimumWidth`,
+        so the handle could stretch it into empty space). Both invariants are applied by
+        `_sync_splitter_handle()` at the END of this method, so every control path and
+        every resize source (handle, window resize, dock, state restore) agrees.
         """
         if which == "sidebar":
             panel, strip = self.sidebar, self._sidebar_strip
@@ -2572,8 +2747,10 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         else:
             return "noop"
         if getattr(self, flag_attr) == bool(collapsed):
+            self._sync_splitter_handle()
             return "noop"  # already in the target state — a no-op
         if collapsed and getattr(self, other_flag, False):
+            self._sync_splitter_handle()
             return "forbidden"  # the other panel is already a strip — both cannot be collapsed
 
         try:
@@ -2612,15 +2789,61 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
                     else:
                         self._splitter.setSizes([total - x_w, x_w])
         except RuntimeError:
+            self._sync_splitter_handle()
             return "noop"  # Qt teardown — the C++ object is already destroyed
 
         setattr(self, flag_attr, bool(collapsed))
+        # v1.4.5 (ROADMAP task 5): the width caps (the collapsed one is exactly a strip
+        # wide) and the handle's enabled state — ONE place, every control path.
+        self._sync_splitter_handle()
         try:
             from i18n import save_config as _save_cfg
             _save_cfg({key: bool(collapsed)})
         except Exception:  # noqa: BLE001 — persistence must not break the toggle
             pass
         return "changed"
+
+    def _sync_splitter_handle(self) -> None:
+        """v1.4.5 (ROADMAP task 5): the 18px invariant + the divider's affordance.
+
+        The drift this fixes: a collapsed container was pinned only by `minimumWidth`,
+        which is a HINT to the QSplitter — dragging the handle (or an external resize
+        of the window/dock) stretched the strip into empty space while the mechanics
+        (`_sidebar_collapsed`/`_map_collapsed`) kept saying "collapsed", and the panel
+        widths diverged from the saved state.
+
+        Two things are enforced here, for BOTH panels symmetrically:
+
+          * **the width cap** — a collapsed container gets
+            `setMaximumWidth(_CollapseStrip.STRIP_WIDTH)`, an expanded one releases it
+            (`_WIDGET_MAX_WIDTH`). Any resize source then has exactly one possible
+            outcome: the expanded panel takes the whole delta and the strip stays 18 px;
+          * **the affordance** — `splitter.handle(0)` is ENABLED only while BOTH panels
+            are expanded (there is nothing to resize otherwise), with a tooltip that
+            says so. Applied at the end of `_set_panel_collapsed` (all control paths
+            converge there), after the collapse state is applied from the config and
+            after the splitter state is restored.
+        """
+        splitter = getattr(self, "_splitter", None)
+        if splitter is None:
+            return
+        try:
+            both_expanded = (not getattr(self, "_sidebar_collapsed", False)
+                             and not getattr(self, "_map_collapsed", False))
+            handle = splitter.handle(0)
+            if handle is not None:
+                handle.setEnabled(both_expanded)
+                handle.setToolTip(self.t("view.splitter_handle_tooltip"))
+            for flag, container in (("_sidebar_collapsed", getattr(self, "_sidebar_container", None)),
+                                    ("_map_collapsed", getattr(self, "_map_container", None))):
+                if container is None:
+                    continue
+                if getattr(self, flag, False):
+                    container.setMaximumWidth(_CollapseStrip.STRIP_WIDTH)
+                else:
+                    container.setMaximumWidth(_WIDGET_MAX_WIDTH)
+        except RuntimeError:
+            pass  # Qt teardown — the splitter or a container is already destroyed
 
     def _apply_collapsed_strip_sizes(self, which: str) -> None:
         """Force the [strip | expanded panel] sizes of a COLLAPSED panel.
@@ -2630,10 +2853,16 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         can never resurrect the width of a panel the user collapsed before closing the
         window. The caller guarantees the OTHER panel is expanded (collapsing both is
         forbidden — `_set_panel_collapsed` returns "forbidden").
+
+        v1.4.5 (ROADMAP task 5): the collapsed container is ALSO capped at the strip
+        width (`setMaximumWidth`) — with only `minimumWidth` + `setSizes` a later
+        resize (the window, the dock, the handle) could stretch the strip again, which
+        is exactly the drift this release fixes.
         """
         w_strip = _CollapseStrip.STRIP_WIDTH
         container = self._sidebar_container if which == "sidebar" else self._map_container
         container.setMinimumWidth(w_strip)
+        container.setMaximumWidth(w_strip)
         total = max(self._splitter.width(), 2 * w_strip + 10)
         if which == "sidebar":
             self._splitter.setSizes([w_strip, total - w_strip])
@@ -2652,6 +2881,10 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
 
         A missing key / a broken value leaves the 250/950 defaults of `_setup_ui`
         untouched (`restore_splitter_state` returns False and never raises).
+
+        v1.4.5 (ROADMAP task 5): the width caps and the handle's enabled state are
+        re-applied afterwards in EVERY case (a restored layout must not re-enable a
+        divider next to a collapsed panel).
         """
         splitter = getattr(self, "_splitter", None)
         if splitter is None:
@@ -2665,6 +2898,8 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
                     self._apply_collapsed_strip_sizes(which)
         except RuntimeError:
             pass  # Qt teardown — the splitter is already destroyed
+        finally:
+            self._sync_splitter_handle()
 
     def _position_map_collapse_btn(self):
         """v1.2.4.1 (task 2): the map collapse button — the right BOTTOM corner of the MapView.
@@ -2809,6 +3044,11 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         except Exception as e:  # noqa: BLE001 — the state must not break startup/apply
             if self.log:
                 self.log.warning(f"Apply panel collapsed states failed: {e}")
+
+        # v1.4.5 (ROADMAP task 5): the divider's affordance follows the state — with
+        # no panel collapsed this is the plain "both expanded" sync (the tooltip and
+        # the released width caps), with one collapsed the handle is disabled.
+        self._sync_splitter_handle()
 
     def _open_settings_dialog(self):
         """v1.1: open the settings dialog (the QTabWidget hub) — the "Settings" menu and the ⚙ button."""
@@ -3762,6 +4002,220 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         except RuntimeError:
             pass  # Qt teardown — the view is gone
 
+    # ── v1.4.5 (ROADMAP task 2): the first-run empty state ───────────────────────
+
+    def _setup_empty_state(self):
+        """Create the hint card over the canvas + its ONE button (a child of the view).
+
+        The card itself is mouse-transparent (a click reaches the map — panning, the
+        rubber band and the map context menu keep working behind the hint); the button
+        is a SIBLING widget, because Qt's `WA_TransparentForMouseEvents` covers the
+        children of the widget it is set on.
+        """
+        try:
+            from ui.empty_state import EmptyStateOverlay
+        except ImportError:  # flat launch from the project root
+            from empty_state import EmptyStateOverlay
+
+        self.empty_state = EmptyStateOverlay(self.view)
+        self.empty_state.add_server_requested.connect(self._add_server)
+        # Reposition on every view resize / splitter drag (the minimap pattern).
+        self.view.resized.connect(self._position_empty_state)
+        self._empty_state_visible = None   # unknown until the first sync
+        self._position_empty_state()
+        self._sync_empty_state()
+
+    def _sync_empty_state(self):
+        """Show the hint while the map holds NO server; hide it from the first one on.
+
+        Bound to the SCENE's node count (not to the sidebar's filtered rows): the hint
+        explains the map, not a filter. Called from `_update_counts_label()` — the one
+        place every composition change already passes through (add, remove, batch
+        delete, import, project load, undo/redo).
+        """
+        overlay = getattr(self, "empty_state", None)
+        if overlay is None:
+            return
+        try:
+            empty = len(list(self.scene.nodes())) == 0
+        except (AttributeError, RuntimeError):
+            return  # the scene is not created yet / already destroyed
+        if empty == getattr(self, "_empty_state_visible", None):
+            return  # nothing changed — the hint is already in the right state
+        self._empty_state_visible = empty
+        try:
+            overlay.set_state_visible(empty)
+        except RuntimeError:
+            return  # Qt teardown — the widget is already destroyed
+        if empty:
+            self._position_empty_state()
+
+    def _position_empty_state(self):
+        """Place the hint (and its button) in the middle of the view — a child, not a layout."""
+        overlay = getattr(self, "empty_state", None)
+        view = getattr(self, "view", None)
+        if overlay is None or view is None:
+            return
+        try:
+            w, h = view.width(), view.height()
+            if w <= 0 or h <= 0:
+                return
+            overlay.place(w, h)
+        except RuntimeError:
+            pass  # Qt teardown — the widget is already destroyed
+
+    # ── v1.4.5 (ROADMAP task 4): the legend panel ────────────────────────────────
+
+    LEGEND_MARGIN = 12          # the inset of the DEFAULT (bottom-left) position
+
+    def _setup_legend(self):
+        """Create the legend panel, apply the saved state and wire its persistence.
+
+        Visibility, the folded state and the position live in `~/.sshmap/config.json`
+        (`ui_legend`, `ui_legend_collapsed`, `ui_legend_position`) — UI state written by
+        its owner, like `ui_minimap` (a merge write; a broken value falls back to the
+        default). The panel is a child of the view: never a scene item, so it stays out
+        of the exports and out of "fit to content".
+        """
+        try:
+            from ui.legend import LegendWidget
+        except ImportError:  # flat launch from the project root
+            from legend import LegendWidget
+
+        self.legend = LegendWidget(self.view)
+        self.legend.moved.connect(self._on_legend_moved)
+        self.legend.collapsed_changed.connect(self._on_legend_collapsed_changed)
+        self.view.resized.connect(self._position_legend)
+        visible, collapsed, position = self._read_legend_settings()
+        self._legend_enabled = visible
+        self._legend_pos = position
+        self.legend.set_collapsed(collapsed)
+        self.legend.setVisible(visible)
+        self._position_legend()
+
+    @staticmethod
+    def _read_legend_settings():
+        """`ui_legend*` from config.json → (visible, collapsed, position|None).
+
+        Every broken value falls back to its default (visible, unfolded, the
+        bottom-left corner) — a hand-edited config must never cost the panel or put it
+        off-screen (`_position_legend` clamps a saved position into the view anyway).
+        """
+        visible, collapsed, position = True, False, None
+        try:
+            from i18n import load_config
+            cfg = load_config()
+        except Exception:  # noqa: BLE001 — without a config the panel is simply on
+            return visible, collapsed, position
+        if isinstance(cfg.get("ui_legend"), bool):
+            visible = bool(cfg["ui_legend"])
+        if isinstance(cfg.get("ui_legend_collapsed"), bool):
+            collapsed = bool(cfg["ui_legend_collapsed"])
+        raw = cfg.get("ui_legend_position")
+        coords = None
+        if isinstance(raw, dict):
+            coords = (raw.get("x"), raw.get("y"))
+        elif isinstance(raw, (list, tuple)) and len(raw) == 2:
+            coords = (raw[0], raw[1])
+        if coords is not None:
+            x, y = coords
+            if (isinstance(x, (int, float)) and isinstance(y, (int, float))
+                    and not isinstance(x, bool) and not isinstance(y, bool)):
+                position = QPoint(int(x), int(y))
+        return visible, collapsed, position
+
+    def _position_legend(self):
+        """Place the legend: the saved position (clamped into the view) or bottom-left.
+
+        The top-right corner belongs to the minimap, the top-center to the search bar
+        and the bottom-right to the map-collapse diamond — the bottom-left is the free
+        one, and it is the default until the user drags the panel somewhere else.
+        """
+        legend = getattr(self, "legend", None)
+        view = getattr(self, "view", None)
+        if legend is None or view is None:
+            return
+        try:
+            w, h = view.width(), view.height()
+            if w <= 0 or h <= 0:
+                return
+            position = getattr(self, "_legend_pos", None)
+            if position is None:
+                x = self.LEGEND_MARGIN
+                y = max(self.LEGEND_MARGIN, h - legend.height() - self.LEGEND_MARGIN)
+            else:
+                x = min(max(int(position.x()), 0), max(w - legend.width(), 0))
+                y = min(max(int(position.y()), 0), max(h - legend.height(), 0))
+            legend.move(int(x), int(y))
+            if legend.isVisible():
+                legend.raise_()
+        except RuntimeError:
+            pass  # Qt teardown — the widget is already destroyed
+
+    def _toggle_legend(self, checked: bool):
+        """v1.4.5: show/hide the legend + persist `ui_legend` (a merge write)."""
+        legend = getattr(self, "legend", None)
+        if legend is None:
+            return
+        visible = bool(checked)
+        try:
+            legend.setVisible(visible)
+            if visible:
+                self._position_legend()
+        except RuntimeError:
+            return  # Qt teardown — the panel is already destroyed
+        self._legend_enabled = visible
+        self._save_legend_config({"ui_legend": visible})
+
+    def _on_legend_moved(self, position):
+        """The user dragged the panel: remember where (a merge write of the position)."""
+        try:
+            self._legend_pos = QPoint(int(position.x()), int(position.y()))
+        except (TypeError, ValueError, AttributeError):
+            return
+        self._save_legend_config({"ui_legend_position": {"x": self._legend_pos.x(),
+                                                         "y": self._legend_pos.y()}})
+
+    def _on_legend_collapsed_changed(self, collapsed: bool):
+        """The panel was folded/unfolded: persist it and re-place (its height changed)."""
+        self._save_legend_config({"ui_legend_collapsed": bool(collapsed)})
+        self._position_legend()
+
+    def _save_legend_config(self, data: dict) -> None:
+        """Merge-write the legend's own UI state (the `ui_minimap` pattern)."""
+        try:
+            from i18n import save_config
+            save_config(dict(data))
+        except Exception:  # noqa: BLE001 — a cosmetic state must not break the toggle
+            pass
+
+    def _on_legend_toolbar_toggled(self, checked: bool):
+        """The toolbar BUTTON was clicked — drive the checkable menu item (the owner)."""
+        action = getattr(self, "act_show_legend", None)
+        if action is None:
+            return
+        try:
+            if action.isChecked() != bool(checked):
+                action.setChecked(bool(checked))   # emits toggled → _toggle_legend
+        except RuntimeError:
+            pass  # Qt teardown — the action is already destroyed
+
+    def _sync_legend_toolbar(self, checked: bool):
+        """Keep the toolbar mirror's checkmark in step with the menu item (blocked signals)."""
+        button = getattr(self, "_legend_toolbar_btn", None)
+        if button is None:
+            return
+        try:
+            if button.isChecked() == bool(checked):
+                return
+            button.blockSignals(True)
+            try:
+                button.setChecked(bool(checked))
+            finally:
+                button.blockSignals(False)
+        except RuntimeError:
+            pass  # Qt teardown
+
     def _toggle_map_search(self):
         """v0.9.8: Ctrl+F / "View -> Search map..." — open or close the panel."""
         if self.map_search.isVisible():
@@ -3932,7 +4386,14 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
             pass  # Qt teardown — the status bar widget has already been destroyed
 
     def _update_counts_label(self):
-        """UI polish: the permanent "servers · connections · online/warn/offline" counters."""
+        """UI polish: the permanent counters of the status bar.
+
+        v1.4.5 (ROADMAP task 3): the "Servers / Connections" pair and the three STATUS
+        counters live in two kinds of widget — the status ones are CLICKABLE filters of
+        the sidebar. The counters always show the TOTALS: the filter changes the tree,
+        never the numbers (a filter is a view, not a fact). This is also the single
+        composition hook the first-run empty state hangs on (`_sync_empty_state`).
+        """
         try:
             nodes = list(self.scene.nodes())
             conns = self.scene.arrow_count()
@@ -3940,11 +4401,45 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
             return  # the scene is not created yet / already destroyed
         statuses = [getattr(n, "status", "") for n in nodes]
         self.counts_label.setText(
-            self.t("status.counts",
-                   servers=len(nodes), connections=conns,
-                   online=statuses.count("online"),
-                   warn=statuses.count("warn"),
-                   offline=statuses.count("offline")))
+            self.t("status.counts", servers=len(nodes), connections=conns))
+        active = getattr(self, "_status_filter", "")
+        for status, counter in (getattr(self, "status_filter_labels", {}) or {}).items():
+            try:
+                counter.setText(self.t(f"statusbar.filter.{status}",
+                                       count=statuses.count(status)))
+                counter.setToolTip(self.t("statusbar.filter.tooltip"))
+                counter.set_active(status == active)
+            except RuntimeError:
+                continue  # Qt teardown — this counter is already destroyed
+        self._sync_empty_state()
+
+    # ── v1.4.5 (ROADMAP task 3): the status filter of the sidebar ────────────────
+
+    def _on_status_filter_clicked(self, status: str):
+        """A status counter was clicked: filter the sidebar by it, or reset on a repeat.
+
+        The state is TRANSIENT (in memory only, never written to config.json): a
+        restart must not leave a sidebar hiding servers for no visible reason. The
+        signal is the same counter clicked a second time — a plain toggle, so "show me
+        the offline ones" and "show me everything" are the same gesture.
+        """
+        status = str(status or "")
+        if status not in STATUS_FILTER_ORDER:
+            return
+        self._status_filter = "" if getattr(self, "_status_filter", "") == status else status
+        panel = getattr(self, "sidebar", None)
+        if panel is not None:
+            panel.set_status_filter(self._status_filter)
+        self.refresh_sidebar()   # re-filters the tree + re-styles the counters
+        try:
+            if self._status_filter:
+                self.statusBar().showMessage(
+                    self.t("statusbar.filter.active",
+                           status=self.t(f"legend.status.{self._status_filter}")))
+            else:
+                self.statusBar().showMessage(self.t("status.ready"))
+        except Exception:  # noqa: BLE001 — the hint must not break the filter
+            pass
 
     def _reset_zoom(self):
         # AUDIT v0.7.2 (low #19): the public MapView method instead of poking view._zoom

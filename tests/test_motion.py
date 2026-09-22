@@ -740,9 +740,10 @@ print("== §6 i18n parity + the release state ==")
 langs = load_i18n_langs(ROOT)
 check_i18n_parity(langs)
 check_i18n_format(langs)
-check("§6 the release adds NO i18n key — the pin is the shipped one (586 since v1.4.3)",
-      EXPECTED_I18N_KEYS == 586
-      and all(len(translation_keys(langs[c])) == 586 for c in i18n_lang_codes(ROOT)),
+check("§6 the v1.4.4 release added no key of its own (the pin has moved on with v1.4.5: "
+      "+17 — the pin in tests/_common.py is the shipped one)",
+      EXPECTED_I18N_KEYS == 603
+      and all(len(translation_keys(langs[c])) == EXPECTED_I18N_KEYS for c in i18n_lang_codes(ROOT)),
       str({c: len(translation_keys(langs[c])) for c in sorted(langs)}))
 check("§6 no language file carries a motion string (the release is behaviour only)",
       not any("motion" in k for c in langs for k in langs[c]),
@@ -751,6 +752,6 @@ check("§6 ui/motion.py is the module this release documents",
       os.path.exists(os.path.join(ROOT, "ui", "motion.py")))
 check_release_state(ROOT)
 check("§6 the version pin of this test file is the release it describes",
-      EXPECTED_APP_VERSION == "1.4.4", EXPECTED_APP_VERSION)
+      EXPECTED_APP_VERSION == "1.4.5", EXPECTED_APP_VERSION)
 
 finish()

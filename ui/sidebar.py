@@ -27,7 +27,7 @@ from PySide6.QtCore import Qt, QSize, Signal
 # setItemData(..., Qt.DecorationRole) the panel has no remaining uses
 from PySide6.QtGui import QIcon, QPixmap, QPainter, QBrush
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QComboBox,
+    QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QLabel, QLineEdit, QComboBox,
     QTreeWidget, QTreeWidgetItem, QPushButton, QToolButton,
 )
 
@@ -85,6 +85,29 @@ _BUTTONS = (
     ("btn_delete", "delete", "btn.delete", "Delete"),
     ("btn_settings", "settings", "btn.settings", "Settings"),
 )
+
+# ── v1.4.5 (ROADMAP task 1): the compact action grid ─────────────────────────
+# Six full-width rows took roughly a quarter of the sidebar's height and read as
+# "heavy" next to the map. The SAME six buttons (same attributes, same signals,
+# same i18n keys — _BUTTONS is untouched, so `set_buttons_visible`, `retranslate`
+# and MainWindow's public `btn_*` references keep working) now sit in a
+# two-column × three-row grid: three dense rows instead of six. Every cell keeps
+# its icon and its text (the cell elides a long label — the tooltip carries the
+# full one).
+_BUTTON_COLUMNS = 2             # 2 columns × 3 rows = the 6 buttons
+_COMPACT_BUTTON_HEIGHT = 28     # the dense row height (the v1.1.2RC2 34px was a full-width row)
+_COMPACT_BUTTON_ICON = 16       # the icon size of a compact cell
+# **A QPushButton's minimumSizeHint IS its sizeHint** (the full label + icon + padding), so
+# two columns of buttons would have made the SIDEBAR's own minimum ~428 px — wider than its
+# documented 160 px minimum and wider than the 250 px default the splitter starts with.
+# An explicit small minimum overrides that hint: a cell shrinks and Qt elides its text
+# (the tooltip carries the full label).
+_COMPACT_BUTTON_MIN_WIDTH = 40
+_COMPACT_BUTTON_QSS = "QPushButton { text-align: left; padding-left: 6px; padding-right: 2px; }"
+
+# The statuses the status bar can filter the tree by (v1.4.5, ROADMAP task 3) —
+# the same three the cards and the status dots know.
+_STATUS_FILTERS = ("online", "warn", "offline")
 
 
 class SidebarPanel(QWidget):
@@ -151,6 +174,10 @@ class SidebarPanel(QWidget):
         self.tag_filter = QComboBox()
         layout.addWidget(self.tag_filter)
 
+        # v1.4.5 (ROADMAP task 3): the transient status filter — set by MainWindow
+        # from the clickable status-bar counters ("" = no status filter).
+        self._status_filter = ""
+
         # ── Server tree ────────────────────────────────────────────────────────
         self.tree = QTreeWidget()
         self.tree.setHeaderHidden(True)
@@ -170,16 +197,28 @@ class SidebarPanel(QWidget):
         self.tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
 
         # ── Buttons (always created, i18n applied when a callback is present) ──
-        for attr, icon_name, i18n_key, ru_fallback in _BUTTONS:
+        # v1.4.5 (ROADMAP task 1): the compact 2×3 grid — the six full-width rows of
+        # v1.1.2RC2 are three dense rows now; the buttons themselves (attributes,
+        # icons, signals, i18n) are exactly the same objects as before.
+        self.buttons_grid = QGridLayout()
+        self.buttons_grid.setContentsMargins(0, 0, 0, 0)
+        self.buttons_grid.setHorizontalSpacing(4)
+        self.buttons_grid.setVerticalSpacing(4)
+        for _index, (attr, icon_name, i18n_key, ru_fallback) in enumerate(_BUTTONS):
             btn = QPushButton(ru_fallback)
             self._set_btn_icon(btn, icon_name)
-            btn.setMinimumHeight(34)  # UI polish: uniform sidebar buttons
+            btn.setMinimumHeight(_COMPACT_BUTTON_HEIGHT)  # v1.4.5: the dense row height
+            # v1.4.5: and a small WIDTH minimum — see _COMPACT_BUTTON_MIN_WIDTH (without it
+            # the two columns set the panel's minimum width to the sum of two full labels).
+            btn.setMinimumWidth(_COMPACT_BUTTON_MIN_WIDTH)
             # v1.1.2RC2 (U1, user feedback): left alignment — indent from the
             # left edge, icon, text. QPushButton centers its content by
             # default; QStyle does not allow setting alignment without a
             # stylesheet, so — minimal CSS (frame/background stay native,
             # styling is only content positioning).
-            btn.setStyleSheet("QPushButton { text-align: left; padding-left: 12px; }")
+            # v1.4.5: the padding shrinks with the cell (the compact grid), the
+            # alignment rule stays — it is what the U1 regression checks.
+            btn.setStyleSheet(_COMPACT_BUTTON_QSS)
             if translate_fn is not None:
                 try:
                     # Emojis/prefixes are already contained in the translation
@@ -188,8 +227,12 @@ class SidebarPanel(QWidget):
                     btn.setText(self._translate(i18n_key))
                 except Exception:  # noqa: BLE001 — keep the English fallback labels
                     pass
+            # v1.4.5: a narrow cell elides the label — the tooltip carries it whole.
+            btn.setToolTip(self._tr(i18n_key))
             setattr(self, attr, btn)
-            layout.addWidget(btn)
+            self.buttons_grid.addWidget(btn, _index // _BUTTON_COLUMNS,
+                                        _index % _BUTTON_COLUMNS)
+        layout.addLayout(self.buttons_grid)
 
         self.btn_add.clicked.connect(self.add_server_clicked)
         self.btn_connect.clicked.connect(self.add_connection_clicked)
@@ -238,7 +281,10 @@ class SidebarPanel(QWidget):
                 self.title_label.setText(self._tr("server.title"))
             self.search_edit.setPlaceholderText(self._tr("search.placeholder"))
             for attr, _icon, key, _ru in _BUTTONS:
-                getattr(self, attr).setText(self._tr(key))
+                btn = getattr(self, attr)
+                btn.setText(self._tr(key))
+                # v1.4.5: the tooltip carries the label a narrow compact cell elides.
+                btn.setToolTip(self._tr(key))
             # Tag filter: item 0's label ("All tags") — without resetting the selection.
             # setCurrentIndex to the same index does not emit a signal (Qt); a
             # repeated refresh_sidebar is idempotent anyway.
@@ -279,7 +325,7 @@ class SidebarPanel(QWidget):
             icon = get_icon(name)
             if icon is not None and not icon.isNull():
                 btn.setIcon(icon)
-                btn.setIconSize(QSize(18, 18))
+                btn.setIconSize(QSize(_COMPACT_BUTTON_ICON, _COMPACT_BUTTON_ICON))
                 btn._sshmap_icon_name = name
         except Exception:  # noqa: BLE001 — the icon is cosmetic, don't break the sidebar
             pass
@@ -307,14 +353,30 @@ class SidebarPanel(QWidget):
         data = self.tag_filter.currentData()
         return str(data) if data else ""
 
+    # ── v1.4.5 (ROADMAP task 3): the transient status filter ─────────────────
+    # The status bar OWNS this filter (its counters are the control); the panel only
+    # holds the value and applies it while rebuilding the rows. It is combined with
+    # the tag filter with AND — a row must pass BOTH. Deliberately NOT persisted:
+    # a restart must never leave a sidebar hiding servers for no visible reason.
+
+    def set_status_filter(self, status: str) -> None:
+        """Set the active status filter ("" or one of _STATUS_FILTERS)."""
+        value = str(status or "")
+        self._status_filter = value if value in _STATUS_FILTERS else ""
+
+    def active_status_filter(self) -> str:
+        """The status the tree is filtered by, or "" (no status filter)."""
+        return getattr(self, "_status_filter", "")
+
     def refresh_rows(self, nodes, query: str = ""):
-        """Rebuild the tree rows: search (query) + the active tag filter.
+        """Rebuild the tree rows: search (query) + the active tag/status filters.
 
         `nodes` — an iterable of ServerNode (MainWindow passes scene.nodes());
         the panel does not depend on the scene — only on the node data.
         """
         self.tree.clear()
         active_tag = self.active_tag_filter()
+        active_status = self.active_status_filter()
         for node in nodes:
             haystack = " ".join([
                 node.data.alias,
@@ -327,6 +389,9 @@ class SidebarPanel(QWidget):
             if query and query not in haystack:
                 continue
             if active_tag and active_tag not in (getattr(node.data, "tags", None) or []):
+                continue
+            # v1.4.5 (ROADMAP task 3): the status filter — AND with the tag filter.
+            if active_status and (getattr(node, "status", "") or "") != active_status:
                 continue
 
             item = QTreeWidgetItem()

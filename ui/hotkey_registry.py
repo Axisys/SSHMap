@@ -119,6 +119,10 @@ HOTKEY_ACTIONS: Dict[str, dict] = {
     # v1.4.2 (ROADMAP task 2): the minimap panel — a checkable View item, and (like the
     # rest of the overlay family) assignable without stealing a key from anyone.
     "view.toggle_minimap":  {"label": "view.toggle_minimap",  "default": ""},
+    # v1.4.5 (ROADMAP task 4): the legend panel — the same family (a checkable View
+    # item next to the minimap, mirrored by a toolbar button); assignable, no key
+    # out of the box.
+    "view.toggle_legend":   {"label": "view.toggle_legend",   "default": ""},
     "view.set_background":  {"label": "view.set_background",  "default": ""},
     "view.remove_background": {"label": "view.remove_background", "default": ""},
     "profile.manage":       {"label": "profile.manage",       "default": ""},

@@ -21,7 +21,7 @@ pipx install .                    # or pip install . → sshmap command (install
 Tests — plain Python scripts without pytest: topical `test_*.py` files + a single parallel runner; each file is an isolated process (sandbox HOME, offscreen Qt, UTF-8 stdout — nothing extra needed on cp1251 consoles or in CI):
 
 ```bash
-python tests/run_all.py               # everything (86 test files + i18n check); auto workers = cores (cap 16), longest file first; exit 0 ⇔ all green
+python tests/run_all.py               # everything (87 test files + i18n check); auto workers = cores (cap 16), longest file first; exit 0 ⇔ all green
 python tests/run_all.py --fast        # daily profile: skips files tagged slow/network
 python tests/run_all.py --tag network # only network-tagged files — real-network sections run ONLY on explicit opt-in (env SSHMAP_TEST_TAGS)
 python tests/run_all.py --failed-only # re-run only files that failed in the last run (cache test-results/last_run.json)
@@ -63,7 +63,8 @@ dialogs/                     # AddServer, SSHConnect (+ external terminal), Conn
                              # SshConfigImport (the checkbox picker of the ~/.ssh/config import)
 ui/                          # main_window.py — façade over ProjectIOMixin / NodeOpsMixin / SshMixin; sidebar.py; map_search_bar.py (Ctrl+F);
                              # minimap.py (the big-picture panel: the scheme at fit scale + a viewport frame);
-                             # motion.py (the animation standards: camera flights, the node scale-in);
+                             # legend.py (the collapsible legend: the 6 connection types + the 3 statuses);
+                             # empty_state.py (the first-run hint over an empty map); motion.py (the animation standards: camera flights, the node scale-in);
                              # command_palette.py (Ctrl+K); hotkey_registry.py (configurable hotkeys); about_dialog.py (Help → About);
                              # icons.py; mixin_support.py; theme.py (the `Theme` object — DARK/LIGHT, the accent hue; pure data);
                              # theme_qss.py (the palette + the ONE QSS builder + the live switch)
@@ -129,6 +130,13 @@ Format invariants:
 - **Read the theme at ACCESS time, never capture it.** The module constants resolve live (`theme.NODE_BG` follows a switch), the class-level colours are `theme.ThemeColor`/`ThemeMap` descriptors, and anything built in `__init__` (a `QBrush`, a QSS string) has to be rebuilt by a `refresh_theme()` method — `MainWindow.refresh_theme()` and `MapScene.refresh_theme()` are the two walks that ask every owner. `QApplication.setStyleSheet` re-polishes the standard controls by itself. A new widget with a stylesheet adds one entry to `theme_qss.STYLE_BUILDERS` instead of an f-string.
 - Vector icons follow the switch as well (they are cached per name and re-painted in the new tone).
 - The accent is stored as the colour you picked (`theme.accent` in `config.json`) and read back as a hue; the terminal output palettes are deliberately outside this system.
+
+### Density & first run (v1.4.5)
+- **The sidebar is compact**: the six action buttons live in a 2-column × 3-row grid (icon + text, tooltips carry the full label) instead of six full-width rows — the panel's public attributes and signals are unchanged.
+- **An empty map explains itself**: a hint over the canvas ("Add your first server" → the AddServer dialog, plus a line naming the two real import menu items) that appears at 0 servers and disappears with the first one. The card is click-through — only its button takes the mouse — and it is a widget over the scene, never a scene item (so it stays out of the exports).
+- **The status bar is live**: Online / Warn / Offline are clickable — one click filters the sidebar by that status (AND-combined with the tag filter and the search), a second click resets it. The filter is transient (never saved) and the counters keep showing the totals.
+- **A legend names the colours**: a small collapsible panel (View → Legend, a toolbar button too) with the 6 connection types and the 3 statuses; drag it where you like — the position, the folded state and the visibility persist in `config.json`.
+- **The panel divider obeys the collapse state**: it is enabled only while both panels are expanded, and a collapsed panel is capped at its 18 px strip for every resize source (handle, window, dock) — the strip can no longer drift into empty space.
 
 ### Statuses
 `probe_ssh(host, port)`: TCP open + SSH banner → `online`; port open without a banner → `warn`; otherwise → `offline`.
@@ -312,6 +320,7 @@ en (default) / ru / zh / de — and any language you drop in, without touching t
 - settings hub — single `~/.sshmap/config.json`, live application without restart, every user-facing key in one place
 - **dark or light theme and your own accent colour** (v1.4.3) — "Settings → Appearance": the dark theme stays the default, the light one is a slate palette built on the same `Theme` object, and the accent is one hue (eight presets or any colour you pick) that generates its own shades. It applies live, before you press OK — and Cancel puts the previous look back
 - **motion** (v1.4.4) — the map glides instead of jumping (Show on map, Fit map), a new server scales in, and hovering a connection dims everything but its two ends; every animation is interruptible, so the wheel or a drag always wins
+- **a denser interface and a friendly first run** (v1.4.5) — the sidebar buttons became a compact grid, an empty map shows how to start (add a server or import a list), the status counters filter the sidebar with one click, and a small legend explains the arrow colours and the statuses (hide it, fold it or drag it — it remembers where it was)
 - hotkeys + command palette (Ctrl+K) — the full action registry is editable in "Settings → Hotkeys" (reset to defaults, duplicates flagged) and applied without restart
 - Help → About — the version, the license, the `~/.sshmap` paths and a hotkey cheat-sheet built from the registry
 - plugins: an installed package (`pip install sshmap-<name>-plugin`) or one file dropped into `~/.sshmap/plugins/`
@@ -328,8 +337,9 @@ en (default) / ru / zh / de — and any language you drop in, without touching t
 - plugins run inside the application's process (v1.4): a plugin with a broken C extension can take it down — install plugins you trust.
 
 **Roadmap** (tasks, order, acceptance — in ROADMAP.md):
-- **v1.4 line** — the plugin foundation, released at **v1.4** (discovery + the "Plugins" menu and the frozen API (`PLUGINS.md`), commands on selected servers, a plugin status on the card, palette commands, node-menu rows, "Run on selected servers", two working example plugins), **v1.4.1** — import from `~/.ssh/config` (with the TXT import that no longer drops the extra words of a line), **v1.4.2** — the big-picture map level (the minimap, the cached card drop-shadow, the group fold), **v1.4.3** — the appearance (a light theme and an accent colour on one `Theme` object, switched live) and **v1.4.4** — motion (smooth camera flights, the node scale-in, the arrow hover focus/dim).
-- **Next (v1.4.5 → v1.4.7):** a denser UI with first-run hints; list mode; syntax highlighting in the SFTP viewer.
+- **v1.4 line** — the plugin foundation, released at **v1.4** (discovery + the "Plugins" menu and the frozen API (`PLUGINS.md`), commands on selected servers, a plugin status on the card, palette commands, node-menu rows, "Run on selected servers", two working example plugins), **v1.4.1** — import from `~/.ssh/config` (with the TXT import that no longer drops the extra words of a line), **v1.4.2** — the big-picture map level (the minimap, the cached card drop-shadow, the group fold), **v1.4.3** — the appearance (a light theme and an accent colour on one `Theme` object, switched live), **v1.4.4** — motion (smooth camera flights, the node scale-in, the arrow hover focus/dim) and **v1.4.5** — UI density & first run (the compact sidebar grid, the empty state, the live status bar, the legend, the splitter-handle fix).
+- **Next (v1.4.6 → v1.4.7):** list mode; syntax highlighting in the SFTP viewer.
+- **Then the 1.5 line — "Design & confidence"** (planned as `1.5rc1 → 1.5rc4 → v1.5`, the contract frozen in ROADMAP.md before the first rc): the interface stops telling things apart by colour alone and starts saying how fresh its data is — a light-theme palette with real contrast plus a contrast gate in the suite, line styles and status shapes next to the colours, a print-friendly export, an example map and a discoverable undo on the first screen, and a chrome that copes with narrow windows (status-bar/toolbar overflow, a settings search, visible focus, keyboard navigation on the map).
 
 ---
 

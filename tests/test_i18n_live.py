@@ -656,7 +656,11 @@ check("ROADMAP.md: every quoted key-count figure belongs to ONE increasing chain
       all(b >= a for a, b in zip(_figures, _figures[1:])),
       f"quoted={_figures}")
 check("ROADMAP.md: no quoted figure is a stale outlier of the chain",
-      all(EXPECTED_I18N_KEYS - 1 <= f <= 600 for f in _figures), f"quoted={_figures}")
+      # v1.4.5: the bound is RELATIVE to the pin (the absolute "600" of v1.3.3.1 went
+      # stale the moment the shipped key count passed it — the pin is the only number
+      # that may live in this file).
+      all(EXPECTED_I18N_KEYS - 1 <= f <= EXPECTED_I18N_KEYS + 20 for f in _figures),
+      f"quoted={_figures} pin={EXPECTED_I18N_KEYS}")
 check("ROADMAP.md spells the baseline out in the header (a released section is removed from the plan)",
       f"parity baseline (v{EXPECTED_APP_VERSION}): {EXPECTED_I18N_KEYS} keys" in _roadmap,
       [ln for ln in _roadmap.splitlines() if "baseline" in ln][:1])
@@ -775,11 +779,12 @@ print("== §9 the release state ==")
 # ════════════════════════════════════════════════════════════════════════════
 
 check("EXPECTED_APP_VERSION is the version this test file describes",
-      EXPECTED_APP_VERSION == "1.4.4", EXPECTED_APP_VERSION)
-check("the pin counts the keys of the SHIPPED release (v1.4.4 adds none — motion is behaviour "
-      "only, so the v1.4.3 figure stands: \"Appearance\" — the tab, the mode pair, the accent "
-      "row with its 8 swatches, the own colour, the picker and the hint)",
-      EXPECTED_I18N_KEYS == 586, str(EXPECTED_I18N_KEYS))
+      EXPECTED_APP_VERSION == "1.4.5", EXPECTED_APP_VERSION)
+check("the pin counts the keys of the SHIPPED release (v1.4.5 — \"UI density & first run\": "
+      "+17 keys — the empty state, the clickable status counters, the legend and the "
+      "splitter-handle tooltip — on top of the v1.4.4 figure, which moved none: motion is "
+      "behaviour only)",
+      EXPECTED_I18N_KEYS == 603, str(EXPECTED_I18N_KEYS))
 check_release_state(ROOT)
 for _code in i18n_lang_codes(ROOT):
     check(f"i18n/{_code}.json carries the new sftp.conflict.title key",
