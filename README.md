@@ -21,7 +21,7 @@ pipx install .                    # or pip install . → sshmap command (install
 Tests — plain Python scripts without pytest: topical `test_*.py` files + a single parallel runner; each file is an isolated process (sandbox HOME, offscreen Qt, UTF-8 stdout — nothing extra needed on cp1251 consoles or in CI):
 
 ```bash
-python tests/run_all.py               # everything (87 test files + i18n check); auto workers = cores (cap 16), longest file first; exit 0 ⇔ all green
+python tests/run_all.py               # everything (88 test files + i18n check); auto workers = cores (cap 16), longest file first; exit 0 ⇔ all green
 python tests/run_all.py --fast        # daily profile: skips files tagged slow/network
 python tests/run_all.py --tag network # only network-tagged files — real-network sections run ONLY on explicit opt-in (env SSHMAP_TEST_TAGS)
 python tests/run_all.py --failed-only # re-run only files that failed in the last run (cache test-results/last_run.json)
@@ -61,7 +61,7 @@ services/                    # credential_manager.py (keyring); diagnostics.py (
                              # ssh_config_importer.py (~/.ssh/config import); status_checker.py (parallel SSH probes); system_info_collector.py (OS/CPU/RAM/disk)
 dialogs/                     # AddServer, SSHConnect (+ external terminal), Connection/EditConnection, ProfileManager, Backups, QuickLaunch,
                              # SshConfigImport (the checkbox picker of the ~/.ssh/config import)
-ui/                          # main_window.py — façade over ProjectIOMixin / NodeOpsMixin / SshMixin; sidebar.py; map_search_bar.py (Ctrl+F);
+ui/                          # main_window.py — façade over ProjectIOMixin / NodeOpsMixin / SshMixin; sidebar.py (the server list — adaptive columns: the narrow view, or the LIST table when the map is collapsed); map_search_bar.py (Ctrl+F);
                              # minimap.py (the big-picture panel: the scheme at fit scale + a viewport frame);
                              # legend.py (the collapsible legend: the 6 connection types + the 3 statuses);
                              # empty_state.py (the first-run hint over an empty map); motion.py (the animation standards: camera flights, the node scale-in);
@@ -137,6 +137,13 @@ Format invariants:
 - **The status bar is live**: Online / Warn / Offline are clickable — one click filters the sidebar by that status (AND-combined with the tag filter and the search), a second click resets it. The filter is transient (never saved) and the counters keep showing the totals.
 - **A legend names the colours**: a small collapsible panel (View → Legend, a toolbar button too) with the 6 connection types and the 3 statuses; drag it where you like — the position, the folded state and the visibility persist in `config.json`.
 - **The panel divider obeys the collapse state**: it is enabled only while both panels are expanded, and a collapsed panel is capped at its 18 px strip for every resize source (handle, window, dock) — the strip can no longer drift into empty space.
+
+### List mode (v1.4.6)
+- **Collapsing the map turns the sidebar into a server table**: that panel already stretches to the whole window width, so the tree now uses it — alias, host (IP), status, OS, CPU, RAM, disk and tags, taken straight from the server data (an empty field is an empty cell, the columns are draggable). Expand the map and the compact one-column list is back.
+- **It is the same sidebar, only wider**: the search and the tag/status filters narrow the table, the row context menu is unchanged, and a double click on a row does what a double click on a card does (`Settings → Map`: properties or connect).
+- **The two splitter items name their states** — `Map / List` and `Sidebar / Map` (same config keys, same behaviour); the mode IS the ordinary "map collapsed" state, so nothing new is stored and the 18 px strips still work as the way back.
+- **The minimap folds sideways and can be moved**: it is labelled with its own vertical title on the right edge — click that band and the panel folds into a thin strip (click again to bring it back). **Hold the left button on the map area and drag** to detach the panel from the corner and place it anywhere on the map (a plain click or drag still pans the view; the spot is remembered).
+- **All four view toggles sit on the toolbar** next to each other — Sidebar / Map, Minimap and Legend — so a panel can be shown, hidden, folded or collapsed without opening the View menu (the menu items stay the owners: the hotkeys and the state live there).
 
 ### Statuses
 `probe_ssh(host, port)`: TCP open + SSH banner → `online`; port open without a banner → `warn`; otherwise → `offline`.
@@ -300,7 +307,7 @@ en (default) / ru / zh / de — and any language you drop in, without touching t
 - multi-selection: Ctrl+click, rubber band, group drag, "connect/delete selected"; tags with a sidebar filter
 - map search (Ctrl+F): match highlighting, Enter/Shift+Enter navigation, dimming of non-matches
 - quick launch per server: URLs (open in the default browser) and commands (first terminal command)
-- collapsible sidebar and map panels — at most one at a time; the collapse state, the divider and the panel widths persist
+- collapsible sidebar and map panels — at most one at a time; the collapse state, the divider and the panel widths persist (collapsing the map is **list mode** — see below)
 - context menus for all objects, fit/zoom/centering; zoom as actions (Ctrl+0 / Ctrl+= / Ctrl+-) next to the wheel
 - the project always close at hand: File → Recent (the last 10 maps), a `.json`/`.sshmap` dropped onto the window, and an unreadable file offering its autosave or a backup instead of a dead end
 - built-in SSH terminal on pyte (scrollback, full keyboard, mouse selection with word/line clicks, context menu) + external system terminal
@@ -321,6 +328,7 @@ en (default) / ru / zh / de — and any language you drop in, without touching t
 - **dark or light theme and your own accent colour** (v1.4.3) — "Settings → Appearance": the dark theme stays the default, the light one is a slate palette built on the same `Theme` object, and the accent is one hue (eight presets or any colour you pick) that generates its own shades. It applies live, before you press OK — and Cancel puts the previous look back
 - **motion** (v1.4.4) — the map glides instead of jumping (Show on map, Fit map), a new server scales in, and hovering a connection dims everything but its two ends; every animation is interruptible, so the wheel or a drag always wins
 - **a denser interface and a friendly first run** (v1.4.5) — the sidebar buttons became a compact grid, an empty map shows how to start (add a server or import a list), the status counters filter the sidebar with one click, and a small legend explains the arrow colours and the statuses (hide it, fold it or drag it — it remembers where it was)
+- **list mode** (v1.4.6) — collapse the map and the sidebar becomes the server table its width always allowed: alias, host, status, OS, CPU, RAM, disk and tags, with the same search, filters and row menu
 - hotkeys + command palette (Ctrl+K) — the full action registry is editable in "Settings → Hotkeys" (reset to defaults, duplicates flagged) and applied without restart
 - Help → About — the version, the license, the `~/.sshmap` paths and a hotkey cheat-sheet built from the registry
 - plugins: an installed package (`pip install sshmap-<name>-plugin`) or one file dropped into `~/.sshmap/plugins/`
@@ -337,8 +345,8 @@ en (default) / ru / zh / de — and any language you drop in, without touching t
 - plugins run inside the application's process (v1.4): a plugin with a broken C extension can take it down — install plugins you trust.
 
 **Roadmap** (tasks, order, acceptance — in ROADMAP.md):
-- **v1.4 line** — the plugin foundation, released at **v1.4** (discovery + the "Plugins" menu and the frozen API (`PLUGINS.md`), commands on selected servers, a plugin status on the card, palette commands, node-menu rows, "Run on selected servers", two working example plugins), **v1.4.1** — import from `~/.ssh/config` (with the TXT import that no longer drops the extra words of a line), **v1.4.2** — the big-picture map level (the minimap, the cached card drop-shadow, the group fold), **v1.4.3** — the appearance (a light theme and an accent colour on one `Theme` object, switched live), **v1.4.4** — motion (smooth camera flights, the node scale-in, the arrow hover focus/dim) and **v1.4.5** — UI density & first run (the compact sidebar grid, the empty state, the live status bar, the legend, the splitter-handle fix).
-- **Next (v1.4.6 → v1.4.7):** list mode; syntax highlighting in the SFTP viewer.
+- **v1.4 line** — the plugin foundation, released at **v1.4** (discovery + the "Plugins" menu and the frozen API (`PLUGINS.md`), commands on selected servers, a plugin status on the card, palette commands, node-menu rows, "Run on selected servers", two working example plugins), **v1.4.1** — import from `~/.ssh/config` (with the TXT import that no longer drops the extra words of a line), **v1.4.2** — the big-picture map level (the minimap, the cached card drop-shadow, the group fold), **v1.4.3** — the appearance (a light theme and an accent colour on one `Theme` object, switched live), **v1.4.4** — motion (smooth camera flights, the node scale-in, the arrow hover focus/dim), **v1.4.5** — UI density & first run (the compact sidebar grid, the empty state, the live status bar, the legend, the splitter-handle fix) and **v1.4.6** — list mode (collapsing the map turns the sidebar into the table of server parameters).
+- **Next (v1.4.7):** syntax highlighting in the SFTP viewer.
 - **Then the 1.5 line — "Design & confidence"** (planned as `1.5rc1 → 1.5rc4 → v1.5`, the contract frozen in ROADMAP.md before the first rc): the interface stops telling things apart by colour alone and starts saying how fresh its data is — a light-theme palette with real contrast plus a contrast gate in the suite, line styles and status shapes next to the colours, a print-friendly export, an example map and a discoverable undo on the first screen, and a chrome that copes with narrow windows (status-bar/toolbar overflow, a settings search, visible focus, keyboard navigation on the map).
 
 ---

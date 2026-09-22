@@ -251,6 +251,29 @@ STATUS_FILTER_ORDER = ("online", "warn", "offline")
 # is therefore not exposed by PySide6 — the value is the documented one.
 _WIDGET_MAX_WIDTH = 16777215
 
+# ── v1.4.6 (ROADMAP follow-up): the four VIEW toggles of the toolbar ──────────
+# (action id, icon name, i18n key, the literal fallback of the key) — ONE group at the
+# right end of the toolbar, in the order the surfaces sit in the window: the sidebar, the
+# map (whose collapsedness is the LIST mode), the minimap and the legend. Every button is
+# a MIRROR of its checkable "View" item — the menu item owns the hotkey and the state
+# (the v1.3.3.3 "ambiguous shortcut" rule), the button owns the click.
+_VIEW_TOOLBAR_ITEMS = (
+    ("view.toggle_sidebar", "sidebar_panel", "view.toggle_sidebar", "Sidebar"),
+    ("view.toggle_map", "map_panel", "view.toggle_map", "Map"),
+    ("view.toggle_minimap", "minimap", "view.toggle_minimap", "Minimap"),
+    ("view.toggle_legend", "legend", "view.toggle_legend", "Legend"),
+)
+
+# action id → the MainWindow attribute holding the OWNER QAction (the wiring in
+# `_setup_menubar` + the two generic slots below; the buttons themselves live in
+# `self._view_toolbar_buttons`).
+_VIEW_TOOLBAR_ACTIONS = {
+    "view.toggle_sidebar": "act_show_sidebar",
+    "view.toggle_map": "act_show_map",
+    "view.toggle_minimap": "act_show_minimap",
+    "view.toggle_legend": "act_show_legend",
+}
+
 
 class _StatusCounter(QLabel):
     """One status counter of the status bar — a CLICKABLE filter (v1.4.5, task 3).
@@ -1758,26 +1781,38 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
             pass
         self.undo_stack.canRedoChanged.connect(self.act_redo.setEnabled)
 
-        # ── v1.4.5 (ROADMAP task 4): the legend toggle ────────────────────────
-        # The button MIRRORS the checkable "View → Legend" item (created below in
-        # _setup_menubar, which wires the pair): the menu item owns the hotkey and the
-        # state, the button owns the click — the v1.2.4.1 collapse-button pattern.
+        # ── v1.4.5 (ROADMAP task 4) + v1.4.6: the VIEW toggles on the toolbar ──
+        # FOUR checkable buttons in ONE group at the right end: the two splitter panels
+        # ("Sidebar / Map" and "Map / List"), the minimap and the legend. Each MIRRORS its
+        # checkable View item — the menu item owns the hotkey and the state, the button
+        # owns the click (the v1.2.4.1 collapse-button pattern). The pairs are wired in
+        # _setup_menubar, which runs AFTER this method and creates the QActions.
         toolbar.addSeparator()
-        self._legend_toolbar_btn = toolbar.addAction(
-            self.t("view.toggle_legend") if self._i18n_available else "Legend")
-        self._legend_toolbar_btn.setCheckable(True)
-        self._legend_toolbar_btn.setChecked(True)   # synced with the panel/config in _setup_menubar
-        self._legend_toolbar_btn.setToolTip(
-            self.t("view.toggle_legend") if self._i18n_available else "Legend")
-        self._register_i18n(self._legend_toolbar_btn, "view.toggle_legend")
-        # A toolbar button is a MIRROR: it must not own the action's sequence
-        # (two enabled QActions with one sequence fire NEITHER — v1.3.3.3).
-        self._mark_toolbar_mirror(self._legend_toolbar_btn)
-        try:
-            set_action_icon(self._legend_toolbar_btn, "legend")
-        except Exception:  # noqa: BLE001 — the icon is cosmetic; do not break the toolbar
-            pass
-        self._legend_toolbar_btn.toggled.connect(self._on_legend_toolbar_toggled)
+        self._view_toolbar_buttons = {}
+        for action_id, icon_name, key, fallback in _VIEW_TOOLBAR_ITEMS:
+            text = self.t(key) if self._i18n_available else fallback
+            btn = toolbar.addAction(text)
+            btn.setCheckable(True)
+            btn.setChecked(True)   # synced with its action/panel/config in _setup_menubar
+            btn.setToolTip(text)
+            self._register_i18n(btn, key)
+            # A toolbar button is a MIRROR: it must not own the action's sequence
+            # (two enabled QActions with one sequence fire NEITHER — v1.3.3.3).
+            self._mark_toolbar_mirror(btn)
+            try:
+                set_action_icon(btn, icon_name)
+            except Exception:  # noqa: BLE001 — the icon is cosmetic; do not break the toolbar
+                pass
+            self._view_toolbar_buttons[action_id] = btn
+            btn.toggled.connect(
+                lambda checked, aid=action_id: self._on_view_toolbar_toggled(aid, checked))
+        # The v1.4.5 attribute survives the generalisation: it IS the legend's button.
+        self._legend_toolbar_btn = self._view_toolbar_buttons["view.toggle_legend"]
+        # v1.4.6: the minimap button (next to the legend) — the user asked for a switch
+        # of the panel without opening the View menu.
+        self._minimap_toolbar_btn = self._view_toolbar_buttons["view.toggle_minimap"]
+        self._sidebar_toolbar_btn = self._view_toolbar_buttons["view.toggle_sidebar"]
+        self._map_toolbar_btn = self._view_toolbar_buttons["view.toggle_map"]
 
     def _mark_toolbar_mirror(self, action) -> None:
         """v1.3.3.3: keep a toolbar button that MIRRORS a menu action shortcut-free.
@@ -1941,6 +1976,9 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         set_action_icon(self.act_show_sidebar, "sidebar_panel")  # v1.2.4.1: the pair's icon
         self.act_show_sidebar.toggled.connect(self._on_sidebar_toggled)
         self._register_i18n(self.act_show_sidebar, "view.toggle_sidebar")
+        # v1.4.6: the toolbar MIRROR of the same toggle (created in _setup_toolbar, which
+        # runs BEFORE this method — the pair is wired here, like the v1.4.5 legend one).
+        self._wire_view_toolbar_button("view.toggle_sidebar", self.act_show_sidebar)
         # v1.2.4.1 (task 3): the map — the same pattern (created manually, the pair's icon).
         self.act_show_map = view_menu.addAction(
             self.t("view.toggle_map") if self._i18n_available else "Map")
@@ -1949,6 +1987,7 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         set_action_icon(self.act_show_map, "map_panel")
         self.act_show_map.toggled.connect(self._on_map_toggled)
         self._register_i18n(self.act_show_map, "view.toggle_map")
+        self._wire_view_toolbar_button("view.toggle_map", self.act_show_map)   # v1.4.6
         # v1.4.2 (ROADMAP task 2): the minimap — a checkable item next to the panel
         # toggles with the same "created manually + toggled(bool)" pattern. It is a
         # REGISTRY action with an EMPTY default (no hotkey out of the box, assignable in
@@ -1961,6 +2000,9 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         self.act_show_minimap.toggled.connect(self._toggle_minimap)
         self._register_i18n(self.act_show_minimap, "view.toggle_minimap")
         self._register_hotkey_target("view.toggle_minimap", self.act_show_minimap)
+        # v1.4.6: the minimap's own toolbar button (the user asked for a switch of the
+        # panel next to the legend's — the View menu is not the only way any more).
+        self._wire_view_toolbar_button("view.toggle_minimap", self.act_show_minimap)
         # v1.4.5 (ROADMAP task 4): the legend panel — the same "created manually +
         # toggled(bool)" pattern, the same registry rule (an EMPTY default: assignable,
         # no key out of the box) and a toolbar MIRROR created in _setup_toolbar (which
@@ -1974,8 +2016,7 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         self.act_show_legend.toggled.connect(self._toggle_legend)
         self._register_i18n(self.act_show_legend, "view.toggle_legend")
         self._register_hotkey_target("view.toggle_legend", self.act_show_legend)
-        self.act_show_legend.toggled.connect(self._sync_legend_toolbar)
-        self._sync_legend_toolbar(self.act_show_legend.isChecked())
+        self._wire_view_toolbar_button("view.toggle_legend", self.act_show_legend)
         # v1.2.4.1 (task 2): corner collapse buttons — the same QAction (toggle()).
         # v1.2.4.1-fix (QA request): the icon — a "◇" diamond on both panels, both
         # at the bottom right (the sidebar's bottom row / the map's right BOTTOM corner — the top is
@@ -2700,6 +2741,11 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
                 act.setChecked(True)  # the panel stays expanded
             finally:
                 act.blockSignals(False)
+        # v1.4.6: the toolbar mirror was told by `toggled` — and that signal is blocked
+        # on this path, so it has to be told explicitly (a refused collapse must not
+        # leave the toolbar button showing a state the window is not in).
+        self._sync_view_toolbar(
+            "view.toggle_sidebar" if which == "sidebar" else "view.toggle_map", True)
         try:
             self.statusBar().showMessage(self.t("status.collapse_both_forbidden"))
         except Exception:  # noqa: BLE001 — the hint must not break the refusal
@@ -2731,6 +2777,14 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         so the handle could stretch it into empty space). Both invariants are applied by
         `_sync_splitter_handle()` at the END of this method, so every control path and
         every resize source (handle, window resize, dock, state restore) agrees.
+
+        v1.4.6 (ROADMAP task 2): the MAP's collapsedness is also the LIST MODE — the
+        sidebar container is the full window width in that state, and the tree fills it
+        with the server parameters (`sidebar.list.*`, see `_sync_list_mode()`). The
+        trigger is deliberately this method and not the QAction: the diamond, the strip,
+        the menu item, the startup config, the settings dialog and the splitter restore
+        all converge here. The state stays `ui_map_collapsed` in config.json — the mode
+        IS the collapsedness, so nothing new has to be persisted.
         """
         if which == "sidebar":
             panel, strip = self.sidebar, self._sidebar_strip
@@ -2748,9 +2802,11 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
             return "noop"
         if getattr(self, flag_attr) == bool(collapsed):
             self._sync_splitter_handle()
+            self._sync_list_mode()
             return "noop"  # already in the target state — a no-op
         if collapsed and getattr(self, other_flag, False):
             self._sync_splitter_handle()
+            self._sync_list_mode()
             return "forbidden"  # the other panel is already a strip — both cannot be collapsed
 
         try:
@@ -2790,12 +2846,16 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
                         self._splitter.setSizes([total - x_w, x_w])
         except RuntimeError:
             self._sync_splitter_handle()
+            self._sync_list_mode()
             return "noop"  # Qt teardown — the C++ object is already destroyed
 
         setattr(self, flag_attr, bool(collapsed))
         # v1.4.5 (ROADMAP task 5): the width caps (the collapsed one is exactly a strip
         # wide) and the handle's enabled state — ONE place, every control path.
         self._sync_splitter_handle()
+        # v1.4.6 (ROADMAP task 2): the map's collapsedness IS the list mode — the
+        # sidebar switches to the wide table (and back) from this one place.
+        self._sync_list_mode()
         try:
             from i18n import save_config as _save_cfg
             _save_cfg({key: bool(collapsed)})
@@ -2845,6 +2905,30 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         except RuntimeError:
             pass  # Qt teardown — the splitter or a container is already destroyed
 
+    def _sync_list_mode(self) -> None:
+        """v1.4.6 (ROADMAP task 2): the map's collapsedness IS the sidebar's LIST mode.
+
+        With the map collapsed the sidebar container takes the whole window width
+        (QSplitter redistributes), so `SidebarPanel.set_list_mode(True)` turns the tree
+        into the table of server parameters — and back on expansion. This is the ONE
+        reader of the collapse flag for the layout: the panel owns WHAT the list looks
+        like, this method only reports the state (never the reverse).
+
+        Idempotent and cheap by construction: `set_list_mode()` answers False when the
+        layout already matches, so the repeated calls from the collapse control paths,
+        the startup config and the settings dialog never rebuild the tree twice. Only a
+        REAL switch refreshes the rows (`refresh_sidebar()` — the one composition hook
+        every add/remove/import/load/undo already passes through).
+        """
+        panel = getattr(self, "sidebar", None)
+        if panel is None:
+            return
+        try:
+            if panel.set_list_mode(bool(getattr(self, "_map_collapsed", False))):
+                self.refresh_sidebar()
+        except RuntimeError:
+            pass  # Qt teardown — the panel or its tree is already destroyed
+
     def _apply_collapsed_strip_sizes(self, which: str) -> None:
         """Force the [strip | expanded panel] sizes of a COLLAPSED panel.
 
@@ -2885,6 +2969,10 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         v1.4.5 (ROADMAP task 5): the width caps and the handle's enabled state are
         re-applied afterwards in EVERY case (a restored layout must not re-enable a
         divider next to a collapsed panel).
+
+        v1.4.6 (ROADMAP task 2): the LIST mode is re-applied here too — the collapsed
+        map may have come from the config (a restored layout never carries the mode),
+        and the column set must already be the wide one when the first rows are built.
         """
         splitter = getattr(self, "_splitter", None)
         if splitter is None:
@@ -2900,6 +2988,7 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
             pass  # Qt teardown — the splitter is already destroyed
         finally:
             self._sync_splitter_handle()
+            self._sync_list_mode()
 
     def _position_map_collapse_btn(self):
         """v1.2.4.1 (task 2): the map collapse button — the right BOTTOM corner of the MapView.
@@ -3048,7 +3137,10 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         # v1.4.5 (ROADMAP task 5): the divider's affordance follows the state — with
         # no panel collapsed this is the plain "both expanded" sync (the tooltip and
         # the released width caps), with one collapsed the handle is disabled.
+        # v1.4.6 (ROADMAP task 2): and the sidebar follows the map — a map collapsed
+        # by the saved state (or by the settings dialog) opens in LIST mode.
         self._sync_splitter_handle()
+        self._sync_list_mode()
 
     def _open_settings_dialog(self):
         """v1.1: open the settings dialog (the QTabWidget hub) — the "Settings" menu and the ⚙ button."""
@@ -3719,9 +3811,24 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
             self._select_node(self.scene.get_node(node_id), center=False)
 
     def _on_tree_item_double_click(self, item: QTreeWidgetItem, column: int):
+        """v0.9.9.4: select the row's node and reveal it on the map.
+
+        v1.4.6 (ROADMAP task 3, the decision pinned with the release): in LIST mode
+        (the map is collapsed) a row carries the server parameters and there is nothing
+        to reveal — the double click therefore does what a double click on the node CARD
+        does, the `ui_node_double_click` mode: "properties" opens the AddServer dialog
+        prefilled (the only editor of server data — an inline edit of the table is out
+        of scope by design) and "connect" opens the SSH connect dialog. The NARROW mode
+        keeps the v0.9.9.4 semantics byte for byte (select + center on the map).
+        """
         node_id = item.data(0, Qt.UserRole)
         if node_id and self.scene.has_node(node_id):
-            self._select_node(self.scene.get_node(node_id), center=True)
+            node = self.scene.get_node(node_id)
+            if getattr(self, "_map_collapsed", False):
+                self._select_node(node, center=False)
+                self._on_node_double_click_direct(node)
+                return
+            self._select_node(node, center=True)
 
     # ── v0.9.6: the server tree context menu (sidebar) ───────────────
     # v0.9.9.4: the item set, separators, and i18n labels — in the panel
@@ -3917,21 +4024,74 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
 
         self.minimap = MinimapWidget(self.view)
         self.minimap.center_requested.connect(self._on_minimap_center)
+        # v1.4.6: the title band folds the panel sideways; the WINDOW persists it and
+        # re-places the panel (its width changed — it is anchored to the right edge).
+        self.minimap.collapsed_changed.connect(self._on_minimap_collapsed_changed)
+        # v1.4.6: the MOVE gesture (a long press, then a drag) — the panel reports where
+        # it landed, the WINDOW remembers it (`ui_minimap_position`, the legend pattern).
+        self.minimap.moved.connect(self._on_minimap_moved)
         # Reposition on every view resize / splitter drag (the map_search pattern).
         self.view.resized.connect(self._position_minimap)
-        self._minimap_enabled = self._read_minimap_enabled()
+        (self._minimap_enabled, self._minimap_collapsed,
+         self._minimap_pos) = self._read_minimap_settings()
+        self.minimap.set_collapsed(bool(self._minimap_collapsed))
         self.minimap.setVisible(bool(self._minimap_enabled))
         self._position_minimap()
 
     @staticmethod
-    def _read_minimap_enabled() -> bool:
-        """`ui_minimap` from the config: a bool wins, anything else (missing/broken) → True."""
+    def _read_minimap_settings():
+        """`ui_minimap*` from the config → (visible, collapsed, position|None).
+
+        v1.4.6: the panel's own UI state grew to the legend's trio — the visibility, the
+        side fold (`ui_minimap_collapsed`) and the position (`ui_minimap_position`,
+        `{x, y}`). A bool wins, anything else (missing/broken) → the default: the panel
+        is visible, unfolded, in the top-right corner.
+        """
+        visible, collapsed, position = True, False, None
         try:
             from i18n import load_config
-            value = load_config().get("ui_minimap")
+            cfg = load_config()
         except Exception:  # noqa: BLE001 — without a config the feature is simply on
-            return True
-        return bool(value) if isinstance(value, bool) else True
+            return visible, collapsed, position
+        if isinstance(cfg.get("ui_minimap"), bool):
+            visible = bool(cfg["ui_minimap"])
+        if isinstance(cfg.get("ui_minimap_collapsed"), bool):
+            collapsed = bool(cfg["ui_minimap_collapsed"])
+        position = MainWindow._saved_position(cfg.get("ui_minimap_position"))
+        return visible, collapsed, position
+
+    def _on_minimap_collapsed_changed(self, collapsed: bool):
+        """The minimap was folded/unfolded through its title band (v1.4.6).
+
+        The state is written by the WINDOW (the widget owns no config) and the panel is
+        re-placed: it is anchored to the RIGHT edge, so its x changed with its width.
+        """
+        self._minimap_collapsed = bool(collapsed)
+        self._save_minimap_config({"ui_minimap_collapsed": bool(collapsed)})
+        self._position_minimap()
+
+    def _on_minimap_moved(self, position):
+        """The user MOVED the panel (a long press, then a drag): remember where (v1.4.6).
+
+        The widget has already moved itself; this only persists the spot — the
+        `_on_legend_moved` pattern, which is what makes the panel stay detached from the
+        corner across restarts (and what switches `_position_minimap()` from the default
+        corner to the saved spot).
+        """
+        try:
+            self._minimap_pos = QPoint(int(position.x()), int(position.y()))
+        except (TypeError, ValueError, AttributeError):
+            return
+        self._save_minimap_config({"ui_minimap_position": {"x": self._minimap_pos.x(),
+                                                          "y": self._minimap_pos.y()}})
+
+    def _save_minimap_config(self, data: dict) -> None:
+        """Merge-write the minimap's own UI state (the `ui_legend*` pattern)."""
+        try:
+            from i18n import save_config
+            save_config(dict(data))
+        except Exception:  # noqa: BLE001 — a cosmetic state must not break the gesture
+            pass
 
     def _toggle_minimap(self, checked: bool):
         """v1.4.2: show/hide the minimap + persist `ui_minimap` (a merge write)."""
@@ -3946,11 +4106,7 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
                 mini.refresh()   # the panel may have been hidden while the map changed
         except RuntimeError:
             return  # Qt teardown — the panel is already destroyed
-        try:
-            from i18n import save_config
-            save_config({"ui_minimap": visible})
-        except Exception:  # noqa: BLE001 — the state is cosmetic; a failed write must not break the toggle
-            pass
+        self._save_minimap_config({"ui_minimap": visible})
 
     def _position_minimap(self):
         """v1.4.2: the panel in the TOP-RIGHT corner of the map (12 px inset).
@@ -3959,6 +4115,11 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         comment (the map-collapse diamond sits in the BOTTOM-right corner). While the
         search bar is OPEN the panel moves BELOW it, so the two floating panels cannot
         overlap on a narrow window.
+
+        v1.4.6: a SAVED position (`ui_minimap_position`, written by the move gesture)
+        wins over the corner — and then the search-bar rule no longer applies: the user
+        put the panel where they want it, and it is only CLAMPED into the view, so a
+        hand-edited config or a shrunken window can never push it off-screen.
         """
         mini = getattr(self, "minimap", None)
         view = getattr(self, "view", None)
@@ -3968,11 +4129,16 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
             w, h = view.width(), view.height()
             if w <= 0 or h <= 0:
                 return
-            y = 12
-            bar = getattr(self, "map_search", None)
-            if bar is not None and bar.isVisible():
-                y = max(int(bar.geometry().bottom()) + 8, y)
-            x = max(4, w - mini.width() - 12)
+            position = getattr(self, "_minimap_pos", None)
+            if position is not None:
+                x = min(max(int(position.x()), 0), max(w - mini.width(), 0))
+                y = min(max(int(position.y()), 0), max(h - mini.height(), 0))
+            else:
+                y = 12
+                bar = getattr(self, "map_search", None)
+                if bar is not None and bar.isVisible():
+                    y = max(int(bar.geometry().bottom()) + 8, y)
+                x = max(4, w - mini.width() - 12)
             mini.move(int(x), int(y))
             if mini.isVisible():
                 mini.raise_()
@@ -4094,6 +4260,28 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         self._position_legend()
 
     @staticmethod
+    def _saved_position(raw):
+        """A saved `{x, y}` (or `[x, y]`) UI position → QPoint, or None when unusable.
+
+        Shared by the two movable floating panels — the legend (`ui_legend_position`)
+        and the minimap (`ui_minimap_position`, v1.4.6). A broken value costs neither
+        panel its default spot (both callers fall back to their own corner), and a
+        `bool` is rejected although Python says `isinstance(True, int)` is true.
+        """
+        coords = None
+        if isinstance(raw, dict):
+            coords = (raw.get("x"), raw.get("y"))
+        elif isinstance(raw, (list, tuple)) and len(raw) == 2:
+            coords = (raw[0], raw[1])
+        if coords is None:
+            return None
+        x, y = coords
+        if (isinstance(x, (int, float)) and isinstance(y, (int, float))
+                and not isinstance(x, bool) and not isinstance(y, bool)):
+            return QPoint(int(x), int(y))
+        return None
+
+    @staticmethod
     def _read_legend_settings():
         """`ui_legend*` from config.json → (visible, collapsed, position|None).
 
@@ -4111,17 +4299,7 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
             visible = bool(cfg["ui_legend"])
         if isinstance(cfg.get("ui_legend_collapsed"), bool):
             collapsed = bool(cfg["ui_legend_collapsed"])
-        raw = cfg.get("ui_legend_position")
-        coords = None
-        if isinstance(raw, dict):
-            coords = (raw.get("x"), raw.get("y"))
-        elif isinstance(raw, (list, tuple)) and len(raw) == 2:
-            coords = (raw[0], raw[1])
-        if coords is not None:
-            x, y = coords
-            if (isinstance(x, (int, float)) and isinstance(y, (int, float))
-                    and not isinstance(x, bool) and not isinstance(y, bool)):
-                position = QPoint(int(x), int(y))
+        position = MainWindow._saved_position(cfg.get("ui_legend_position"))
         return visible, collapsed, position
 
     def _position_legend(self):
@@ -4189,20 +4367,53 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         except Exception:  # noqa: BLE001 — a cosmetic state must not break the toggle
             pass
 
-    def _on_legend_toolbar_toggled(self, checked: bool):
-        """The toolbar BUTTON was clicked — drive the checkable menu item (the owner)."""
-        action = getattr(self, "act_show_legend", None)
+    def _wire_view_toolbar_button(self, action_id: str, action) -> None:
+        """v1.4.6: keep a toolbar VIEW toggle in step with its checkable menu item.
+
+        The menu item is the OWNER of the state (and of the hotkey); the button mirrors
+        it — the v1.4.5 legend rule, now for all four toggles (the sidebar, the map, the
+        minimap, the legend). Called from `_setup_menubar` right after each QAction
+        exists; the initial sync uses BLOCKED signals, so wiring cannot drive the owner.
+        """
+        if action is None:
+            return
+        try:
+            action.toggled.connect(
+                lambda checked, aid=action_id: self._sync_view_toolbar(aid, checked))
+        except (RuntimeError, AttributeError):
+            return
+        self._sync_view_toolbar(action_id, action.isChecked())
+
+    def _on_view_toolbar_toggled(self, action_id: str, checked: bool) -> None:
+        """A toolbar VIEW button was clicked — drive the checkable menu item (the owner)."""
+        action = getattr(self, _VIEW_TOOLBAR_ACTIONS.get(action_id, ""), None)
         if action is None:
             return
         try:
             if action.isChecked() != bool(checked):
-                action.setChecked(bool(checked))   # emits toggled → _toggle_legend
+                action.setChecked(bool(checked))   # emits toggled → the owner slot
         except RuntimeError:
             pass  # Qt teardown — the action is already destroyed
 
-    def _sync_legend_toolbar(self, checked: bool):
-        """Keep the toolbar mirror's checkmark in step with the menu item (blocked signals)."""
-        button = getattr(self, "_legend_toolbar_btn", None)
+    def _sync_view_toolbar(self, action_id: str, checked: bool) -> None:
+        """Follow the owner: set the mirror's checkmark with blocked signals (no loop).
+
+        The guard `action.isChecked() != checked` drops a STALE emission: the collapse
+        rule refuses a second strip by restoring the owner's checkmark with BLOCKED
+        signals (`_reject_collapse_both`), and the `toggled(False)` that caused the
+        refusal is still being delivered to the other slots — without the guard the
+        mirror would end up showing the state the window is NOT in. The owner's LIVE
+        value is the truth, so this is the same "follow the owner" rule, not a special
+        case (the refusal also resyncs explicitly, which this guard then confirms).
+        """
+        action = getattr(self, _VIEW_TOOLBAR_ACTIONS.get(action_id, ""), None)
+        if action is not None:
+            try:
+                if action.isChecked() != bool(checked):
+                    return  # a stale emission — the owner already moved on
+            except RuntimeError:
+                pass  # Qt teardown — fall through and try the button
+        button = (getattr(self, "_view_toolbar_buttons", None) or {}).get(action_id)
         if button is None:
             return
         try:

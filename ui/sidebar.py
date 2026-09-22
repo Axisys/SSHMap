@@ -109,6 +109,67 @@ _COMPACT_BUTTON_QSS = "QPushButton { text-align: left; padding-left: 6px; paddin
 # the same three the cards and the status dots know.
 _STATUS_FILTERS = ("online", "warn", "offline")
 
+# ── v1.4.6 (ROADMAP v1.4.6, task 1): the LIST layout of the sidebar tree ─────
+# Collapsing the map used to leave a dead ~18 px strip, while the sidebar CONTAINER
+# stretched to the whole window width with a single-column tree inside it — the "wide
+# window" for the server parameters already existed, only the tree ignored it. In that
+# mode the tree becomes the table the width deserves: one column per ServerData field,
+# headers shown, every column draggable (QTreeWidget's own section behaviour).
+# (field key, i18n header key) — the cells are built by `list_cell_values()`.
+LIST_COLUMNS = (
+    ("alias", "sidebar.list.alias"),
+    ("host", "sidebar.list.host"),
+    ("status", "sidebar.list.status"),
+    ("os", "sidebar.list.os"),
+    ("cpu", "sidebar.list.cpu"),
+    ("ram", "sidebar.list.ram"),
+    ("disk", "sidebar.list.disk"),
+    ("tags", "sidebar.list.tags"),
+)
+# The `status` column of the table: a probe result must refresh its TEXT in place
+# (`update_status_marker` — a full rebuild of the rows would lose the scroll position).
+_LIST_STATUS_COLUMN = 2
+# The opening widths of the columns — a starting point, not a constraint: the sections
+# stay interactive (the QTreeWidget default), so the user drags them.
+_LIST_COLUMN_WIDTHS = (190, 190, 80, 170, 170, 80, 80, 150)
+
+
+def list_cell_values(data, status_text: str = "") -> list:
+    """v1.4.6 (ROADMAP task 1): the LIST-mode cells of ONE row, one per `LIST_COLUMNS`.
+
+    Pure (a `ServerData` in, strings out — no Qt, no scene, no scene item), so the
+    topical test can pin the mapping headlessly. The rules:
+
+      * an empty field is an EMPTY cell — never the string "None" (the v0.9.4 tag
+        caption and the card formatting are the only places allowed to invent text);
+      * the host cell carries the IP in parentheses when the model has one and it
+        differs (`host (ip)`) — this is the "host (IP)" column of the plan, one column
+        instead of two near-identical ones;
+      * the CPU cell falls back to `cpu_model`: the auto-collected data of
+        SystemInfoCollector fills `cpu_model` while a manually typed one fills `cpu`;
+      * the status cell is the caller's already TRANSLATED text (`""` = not checked yet
+        — a status is a fact of the probe round, not of the project file);
+      * the tags cell is the same comma-joined list the map cards show.
+    """
+    def _s(value) -> str:
+        return str(value or "").strip()
+
+    host, ip = _s(getattr(data, "host", "")), _s(getattr(data, "ip", ""))
+    if ip and ip != host:
+        host = f"{host} ({ip})" if host else ip
+    cpu = _s(getattr(data, "cpu", "")) or _s(getattr(data, "cpu_model", ""))
+    tags = getattr(data, "tags", None) or []
+    return [
+        _s(getattr(data, "alias", "")),
+        host,
+        str(status_text or ""),
+        _s(getattr(data, "os_name", "")),
+        cpu,
+        _s(getattr(data, "ram", "")),
+        _s(getattr(data, "disk", "")),
+        ", ".join(str(t).strip() for t in tags if str(t).strip()),
+    ]
+
 
 class SidebarPanel(QWidget):
     """Sidebar: buttons, title, search, tag filter, server tree (v0.9.9.4).
@@ -177,6 +238,12 @@ class SidebarPanel(QWidget):
         # v1.4.5 (ROADMAP task 3): the transient status filter — set by MainWindow
         # from the clickable status-bar counters ("" = no status filter).
         self._status_filter = ""
+
+        # v1.4.6 (ROADMAP task 1): the LIST layout (the map is collapsed — the panel
+        # stretches to the full window width and the tree carries the whole parameter
+        # set). A LAYOUT flag, not data: the rows are rebuilt by `refresh_rows`, so the
+        # mode switch never touches the model, the filters or the selection.
+        self._list_mode = False
 
         # ── Server tree ────────────────────────────────────────────────────────
         self.tree = QTreeWidget()
@@ -292,6 +359,10 @@ class SidebarPanel(QWidget):
             self.tag_filter.setItemText(0, self._tr("filter.all_tags"))
             if idx > 0:
                 self.tag_filter.setCurrentIndex(idx)
+            # v1.4.6 (ROADMAP task 1): the LIST headers are i18n too — re-apply them
+            # (the column WIDTHS are kept: `_apply_list_columns` resets them only when
+            # the column count changes, i.e. on a real mode switch).
+            self._apply_list_columns()
         except RuntimeError:
             pass  # Qt teardown — the widgets are already destroyed
 
@@ -368,15 +439,94 @@ class SidebarPanel(QWidget):
         """The status the tree is filtered by, or "" (no status filter)."""
         return getattr(self, "_status_filter", "")
 
+    # ── v1.4.6 (ROADMAP task 1): the adaptive columns — narrow vs LIST ────────
+    # The panel OWNS what "list mode" looks like (its column set, its headers, its
+    # cells); what CAUSES it — the map's collapsedness — belongs to MainWindow, which
+    # only calls `set_list_mode()` (the "module + callbacks" pattern of this module:
+    # the panel knows neither the window nor the splitter).
+
+    def is_list_mode(self) -> bool:
+        """True while the tree carries the wide LIST layout (v1.4.6)."""
+        return bool(getattr(self, "_list_mode", False))
+
+    def set_list_mode(self, enabled: bool) -> bool:
+        """Switch the tree between the narrow view and the LIST layout; True if changed.
+
+        `enabled` — the map is collapsed, so the sidebar container is the full window
+        width and the tree becomes the table of server parameters (`LIST_COLUMNS`).
+        Disabled — the v0.9.9.4 look: ONE column, no header, a status dot and the
+        `[tags]` caption inside the row.
+
+        Idempotent: the same mode twice changes nothing and returns False, so every
+        control path of the collapse mechanism (the diamond, the strip, the menu item,
+        the startup state, the settings dialog) may call it freely. The ROWS are not
+        rebuilt here — the caller refreshes them with the ordinary `refresh_sidebar()`.
+        """
+        enabled = bool(enabled)
+        if enabled == self.is_list_mode():
+            return False
+        self._list_mode = enabled
+        try:
+            self._apply_list_columns()
+        except RuntimeError:
+            pass  # Qt teardown — the tree is already destroyed
+        return True
+
+    def _apply_list_columns(self) -> None:
+        """Apply the column set, the headers and the opening widths of the ACTIVE mode.
+
+        Called by `set_list_mode()` (the mode changed) and by `retranslate()` (the
+        headers are i18n). The opening widths are set only when the column COUNT
+        changes: a language switch must not throw away widths the user dragged.
+        """
+        tree = self.tree
+        if self.is_list_mode():
+            wanted = len(LIST_COLUMNS)
+            is_new_layout = tree.columnCount() != wanted
+            tree.setColumnCount(wanted)
+            tree.setHeaderLabels([self._tr(key) for _field, key in LIST_COLUMNS])
+            tree.setHeaderHidden(False)
+            if is_new_layout:
+                for index, width in enumerate(_LIST_COLUMN_WIDTHS):
+                    tree.setColumnWidth(index, width)
+        else:
+            # Back to the narrow view: ONE column, no header, no residual section.
+            # `setHeaderLabels` only writes the columns it is given — the labels of the
+            # dropped ones survive it (Qt), so they are cleared explicitly (a stale
+            # "Host (IP)" must never sit behind the one-column view).
+            header = tree.headerItem()
+            for index in range(tree.columnCount()):
+                header.setText(index, "")
+            tree.setColumnCount(1)
+            tree.setHeaderLabels([""])
+            tree.setHeaderHidden(True)
+
+    def _status_text(self, status: str) -> str:
+        """The translated status of the LIST "Status" column ("" — never probed).
+
+        The `legend.status.*` keys are reused on purpose: the same three words the
+        legend and the status-filter hint already use — no fourth spelling of
+        online/warn/offline in the translation files.
+        """
+        value = str(status or "")
+        if value not in _STATUS_FILTERS:
+            return ""
+        return self._tr(f"legend.status.{value}")
+
     def refresh_rows(self, nodes, query: str = ""):
         """Rebuild the tree rows: search (query) + the active tag/status filters.
 
         `nodes` — an iterable of ServerNode (MainWindow passes scene.nodes());
         the panel does not depend on the scene — only on the node data.
+
+        v1.4.6 (ROADMAP task 1): the row SHAPE follows the active mode — the narrow
+        `alias (host) [tags]` caption, or one cell per `LIST_COLUMNS` entry. The
+        filtering, the search and the public API are identical in both modes.
         """
         self.tree.clear()
         active_tag = self.active_tag_filter()
         active_status = self.active_status_filter()
+        list_mode = self.is_list_mode()
         for node in nodes:
             haystack = " ".join([
                 node.data.alias,
@@ -395,16 +545,26 @@ class SidebarPanel(QWidget):
                 continue
 
             item = QTreeWidgetItem()
-            item.setText(0, f"{node.data.alias}  ({node.data.host})")
+            # Column 0 carries the node id in BOTH modes — the click/double-click slots
+            # and _sync_selection_state read it from there (never from another column).
+            if list_mode:
+                cells = list_cell_values(node.data, self._status_text(node.status))
+                item.setText(0, cells[0])
+                for column, value in enumerate(cells[1:], start=1):
+                    if value:
+                        item.setText(column, value)   # an empty field stays an empty cell
+            else:
+                item.setText(0, f"{node.data.alias}  ({node.data.host})")
             item.setData(0, Qt.UserRole, node.data.id)
             # Review fix v0.8.0 (#3): colored status marker for the node (online/warn/offline/not checked)
             self.apply_status_marker(item, node.status, node.data.host or "")
             # v0.9.4: the tag caption at the end of the row ("[tag1, tag2]", up to 3 tags).
+            # v1.4.6: only in the NARROW mode — the LIST layout has a column of its own.
             # v1.1.2RC2 (N8): setForeground(0, palette().windowText()) REMOVED — under
             # the "gray" comment it painted the WHOLE row with the standard text
             # color (visual no-op: the color was indistinguishable from the default).
             tags = getattr(node.data, "tags", None) or []
-            if tags:
+            if tags and not list_mode:
                 item.setText(0, item.text(0) + f"  [{', '.join(tags[:3])}]")
             self.tree.addTopLevelItem(item)
 
@@ -466,7 +626,12 @@ class SidebarPanel(QWidget):
         return icon
 
     def apply_status_marker(self, item: QTreeWidgetItem, status: str, host: str = "") -> None:
-        """Put the status dot + tooltip (i18n node.status.*) on a tree row."""
+        """Put the status dot + tooltip (i18n node.status.*) on a tree row.
+
+        v1.4.6 (ROADMAP task 3): in the LIST layout the row also carries the status as
+        TEXT (the `sidebar.list.status` column) — a probe result must refresh it in
+        place, without a full rebuild of the rows (the scroll position survives).
+        """
         item.setIcon(0, self._status_dot_icon(status))
         if status and status in ServerNode.STATUS_COLORS:
             tip = self._tr(f"node.status.{status}", host=host or "")
@@ -474,6 +639,8 @@ class SidebarPanel(QWidget):
             item.setToolTip(0, tip if not tip.startswith("[") else f"{status}: {host}")
         else:
             item.setToolTip(0, "")  # not checked — no tooltip
+        if self.is_list_mode() and self.tree.columnCount() > _LIST_STATUS_COLUMN:
+            item.setText(_LIST_STATUS_COLUMN, self._status_text(status))
 
     def update_status_marker(self, server_id: str, status: str, host: str = "") -> None:
         """Update the row's marker in place (without a full tree rebuild)."""

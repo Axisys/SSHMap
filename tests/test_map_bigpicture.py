@@ -43,6 +43,7 @@ app = QApplication.instance() or QApplication(sys.argv)
 import ui.main_window as MW
 import ui.hotkey_registry as HR
 from i18n import set_language
+import i18n as _i18n_mod   # v1.4.6: t() at call time (the minimap band title, the legend.title pattern)
 from models.server import ServerData
 from graphics.map_scene import MapScene
 from graphics.node_group import NodeGroup
@@ -117,6 +118,7 @@ check("§1 the empty map draws the empty panel (no content, no crash)",
 check("§1 the panel sits in the top-right corner of the map",
       abs(mini.x() - (view.width() - mini.width() - 12)) <= 2 and mini.y() == 12,
       f"mini=({mini.x()},{mini.y()}) view={view.width()}x{view.height()}")
+_mini_home = QPoint(mini.x(), mini.y())   # v1.4.6: the corner it starts in (the move tests compare with it)
 
 # The layer: nodes (coloured by status), a note, a group frame
 n1 = add_node(win.scene, "mm-a", 0, 0)
@@ -139,17 +141,19 @@ check("§1 node blocks are coloured by STATUS (online green / offline red)",
 check("§1 the note and the group frame are in the layer too (note fill + violet outline)",
       "#eedd9f" in colors and "#7c3aed" in colors, str(colors))
 
-# The fit transform: KeepAspectRatio, the margin, centered
+# The fit transform: KeepAspectRatio, the margin, centered INSIDE THE MAP AREA
+# (v1.4.6: the panel is [map area | vertical title band], so the fit works on body_rect())
 fit = mini.fit()
-check("§1 the fit transform is KeepAspectRatio inside the panel margin",
+body = mini.body_rect()
+check("§1 the fit transform is KeepAspectRatio inside the map area margin",
       fit is not None and fit[0] > 0
-      and mini.content_rect().width() * fit[0] <= mini.width() - 2 * mini.MARGIN + 0.5
-      and mini.content_rect().height() * fit[0] <= mini.height() - 2 * mini.MARGIN + 0.5,
+      and mini.content_rect().width() * fit[0] <= body.width() - 2 * mini.MARGIN + 0.5
+      and mini.content_rect().height() * fit[0] <= body.height() - 2 * mini.MARGIN + 0.5,
       str(fit))
 mapped = mini._transform().map(mini.content_rect().center())
-check("§1 the content is centered inside the panel",
-      abs(mapped.x() - mini.width() / 2.0) < 1.0 and abs(mapped.y() - mini.height() / 2.0) < 1.0,
-      f"({mapped.x():.1f},{mapped.y():.1f})")
+check("§1 the content is centered inside the map area (the band excluded)",
+      abs(mapped.x() - body.center().x()) < 1.0 and abs(mapped.y() - body.center().y()) < 1.0,
+      f"({mapped.x():.1f},{mapped.y():.1f}) body_center=({body.center().x():.1f},{body.center().y():.1f})")
 
 # The viewport frame = the visible scene rect through the same transform
 frame = mini.viewport_frame()
@@ -166,7 +170,7 @@ check("§1 the frame follows a ZOOM change",
 # Two-way synchronization: a click asks for the scene point under the cursor
 requested = []
 mini.center_requested.connect(lambda p: requested.append(QPointF(p)))
-click_point = QPoint(mini.width() // 2 + 20, mini.height() // 2)
+click_point = QPoint(int(body.width()) // 2 + 20, mini.height() // 2)
 expected_scene = mini.scene_point_at(click_point)
 QTest.mouseClick(mini, Qt.MouseButton.LeftButton, pos=click_point)
 app.processEvents()
@@ -179,20 +183,27 @@ check("§1 the window centers the view on the asked point",
       abs(after_click.x() - expected_scene.x()) < 3.0 and abs(after_click.y() - expected_scene.y()) < 3.0,
       f"center={after_click} asked={expected_scene}")
 
-# A drag: every step asks again (the last point wins)
+# A drag that MOVES is a camera pan at once (v1.4.6: a real movement settles the
+# press — the hold never gets the chance to turn it into a panel move).
 drag_from = QPoint(20, 20)
-drag_to = QPoint(mini.width() - 20, mini.height() - 20)
+drag_mid = QPoint(int(body.width()) // 2, mini.height() // 2)
+drag_to = QPoint(int(body.width()) - 20, mini.height() - 20)
+_pan_requests = len(requested)
 QTest.mousePress(mini, Qt.MouseButton.LeftButton, pos=drag_from)
+app.processEvents()
+QTest.mouseMove(mini, pos=drag_mid)
 app.processEvents()
 QTest.mouseMove(mini, pos=drag_to)
 app.processEvents()
 QTest.mouseRelease(mini, Qt.MouseButton.LeftButton, pos=drag_to)
 app.processEvents()
 check("§1 a drag moves the view step by step (the last point wins)",
-      len(requested) >= 3
+      len(requested) == _pan_requests + 2
       and abs(view.mapToScene(view.viewport().rect().center()).x()
               - mini.scene_point_at(drag_to).x()) < 3.0,
-      f"requests={len(requested)}")
+      f"requests={len(requested)} (was {_pan_requests})")
+check("§1 a camera drag does NOT move the panel (that is the HOLD gesture)",
+      mini.pos() == _mini_home, f"{mini.pos()} vs {_mini_home}")
 
 # The layer rebuild is debounced (a scene change schedules ONE walk)
 add_node(win.scene, "mm-d", 900, 500)
@@ -262,7 +273,212 @@ set_language("en")
 mini.retranslate()
 clear_cfg()
 
+# ── v1.4.6: the vertical title band + the side fold + the toolbar switch ──────
+print("== §1b the minimap title band, the side fold and the toolbar switch ==")
+
+check("§1b the panel is [map area | title band]: the band is the RIGHT edge, the full height",
+      abs(mini.header_rect().left() - (mini.width() - mini.HEADER_W)) < 0.5
+      and abs(mini.header_rect().width() - mini.HEADER_W) < 0.5
+      and abs(mini.header_rect().height() - mini.height()) < 0.5,
+      f"header={mini.header_rect()} w={mini.width()}")
+check("§1b the map area is what is left of the band (the v1.4.2 size is kept)",
+      abs(mini.body_rect().width() - mini.BODY_WIDTH) < 0.5
+      and mini.BODY_WIDTH + mini.HEADER_W == mini.DEFAULT_WIDTH,
+      f"body={mini.body_rect()} width={mini.width()}")
+check("§1b the band carries the translated title (minimap.title — the legend.title precedent)",
+      mini._title == _i18n_mod.t("minimap.title") == "Minimap", mini._title)
+set_language("ru")
+mini.retranslate()
+check("§1b the title follows a language switch (retranslate re-reads it)",
+      mini._title == "Миникарта" and mini._title == _i18n_mod.t("minimap.title"), mini._title)
+set_language("en")
+mini.retranslate()
+
+# A click on the BAND folds the panel sideways to the RIGHT (the map area disappears).
+_asked = len(requested)
+QTest.mouseClick(mini, Qt.MouseButton.LeftButton,
+                 pos=QPoint(mini.width() - mini.HEADER_W // 2, 40))
+app.processEvents()
+check("§1b a click on the title band folds the panel to the side",
+      mini.is_collapsed() and mini.width() == mini.HEADER_W
+      and mini.height() == mini.DEFAULT_HEIGHT,
+      f"collapsed={mini.is_collapsed()} size={mini.width()}x{mini.height()}")
+check("§1b a folded panel has no map area — the fit is None, like an empty map",
+      mini.body_rect().isEmpty() and mini.fit() is None and mini.viewport_frame() is None)
+check("§1b the fold did NOT move the camera (a band click is not a pan)",
+      len(requested) == _asked, f"requests={len(requested)}")
+check("§1b the window persisted ui_minimap_collapsed=True",
+      read_cfg({}).get("ui_minimap_collapsed") is True, str(read_cfg({})))
+check("§1b the folded strip stays on the RIGHT edge of the map",
+      abs(mini.x() - (view.width() - mini.width() - 12)) <= 2 and mini.y() == 12,
+      f"mini=({mini.x()},{mini.y()}) view={view.width()}")
+
+# A second click unfolds it back.
+QTest.mouseClick(mini, Qt.MouseButton.LeftButton,
+                 pos=QPoint(mini.width() - mini.HEADER_W // 2, 40))
+app.processEvents()
+check("§1b a second click on the band unfolds the panel (the map area is back)",
+      not mini.is_collapsed() and mini.width() == mini.DEFAULT_WIDTH
+      and mini.fit() is not None and read_cfg({}).get("ui_minimap_collapsed") is False,
+      f"collapsed={mini.is_collapsed()} w={mini.width()} fit={mini.fit()}")
+
+# A click INSIDE the map area keeps the v1.4.2 gesture (a camera move, not a fold).
+QTest.mouseClick(mini, Qt.MouseButton.LeftButton, pos=QPoint(30, 40))
+app.processEvents()
+check("§1b a click in the map area still pans (it does not fold the panel)",
+      not mini.is_collapsed() and len(requested) > _asked,
+      f"collapsed={mini.is_collapsed()} requests={len(requested)}")
+
+# The toolbar switch (next to the legend's).
+check("§1b the toolbar carries the minimap switch next to the legend one",
+      win._minimap_toolbar_btn is not None
+      and win._minimap_toolbar_btn is win._view_toolbar_buttons["view.toggle_minimap"]
+      and win._view_toolbar_buttons["view.toggle_legend"] is win._legend_toolbar_btn)
+check("§1b the minimap button mirrors the View item and owns no sequence",
+      win._minimap_toolbar_btn.isCheckable()
+      and win._minimap_toolbar_btn.isChecked() == win.act_show_minimap.isChecked()
+      and win._minimap_toolbar_btn.shortcut().isEmpty(),
+      str(win._minimap_toolbar_btn.shortcut().toString()))
+win._minimap_toolbar_btn.setChecked(False)
+app.processEvents()
+check("§1b unchecking the toolbar button hides the panel and unchecks the menu item",
+      not mini.isVisible() and not win.act_show_minimap.isChecked()
+      and read_cfg({}).get("ui_minimap") is False)
+win.act_show_minimap.setChecked(True)
+app.processEvents()
+check("§1b the menu item drives the button back (blocked signals, no loop)",
+      mini.isVisible() and win._minimap_toolbar_btn.isChecked())
+check("§1b the toolbar group holds the FOUR view toggles in the panel order",
+      list(win._view_toolbar_buttons) == ["view.toggle_sidebar", "view.toggle_map",
+                                          "view.toggle_minimap", "view.toggle_legend"]
+      and win._sidebar_toolbar_btn.shortcut().isEmpty()
+      and win._map_toolbar_btn.shortcut().isEmpty(),
+      str(list(win._view_toolbar_buttons)))
+check("§1b the sidebar/map buttons mirror their View items (checked = expanded)",
+      win._sidebar_toolbar_btn.isChecked() == win.act_show_sidebar.isChecked()
+      and win._map_toolbar_btn.isChecked() == win.act_show_map.isChecked())
+
+# ── v1.4.6: the MOVE gesture — a long press turns the press into "move the panel" ──
+print("== §1c the minimap MOVE gesture (hold the left button, then drag) ==")
+
+check("§1c the panel reports moves (moved(QPoint)) and knows when it is being moved",
+      hasattr(mini, "moved") and mini.is_moving() is False)
+_mini_before = QPoint(mini.x(), mini.y())
+_requests_before = len(requested)
+
+# A SHORT press must stay the v1.4.2 click: the view jumps, the panel does not move.
+QTest.mouseClick(mini, Qt.MouseButton.LeftButton,
+                 pos=QPoint(int(body.width()) // 2, mini.height() // 2))
+app.processEvents()
+check("§1c a short press is still the click (the view jumps, the panel stays put)",
+      len(requested) == _requests_before + 1 and mini.pos() == _mini_before
+      and not mini.is_moving() and mini._hold_timer.isActive() is False,
+      f"requests={len(requested)} pos={mini.pos()}")
+
+# A HOLD (longer than MOVE_HOLD_MS) switches to MOVE mode — and does NOT pan.
+QTest.mousePress(mini, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier,
+                 QPoint(60, 60))
+app.processEvents()
+check("§1c the hold timer is armed by the press, while nothing is decided yet",
+      mini._press_pending and mini._hold_timer.isActive() and not mini.is_moving())
+check("§1c no camera request is emitted by the press itself (a hold must not pan)",
+      len(requested) == _requests_before + 1, f"requests={len(requested)}")
+check("§1c the hold fires and the panel enters MOVE mode",
+      wait_for(lambda: mini.is_moving(), timeout_ms=2000), "the hold timer never fired")
+check("§1c the camera was not asked to move by the hold either",
+      len(requested) == _requests_before + 1, f"requests={len(requested)}")
+check("§1c the move mode announces itself (the SizeAll cursor)",
+      mini.cursor().shape() == Qt.CursorShape.SizeAllCursor, str(mini.cursor().shape()))
+
+# …and a drag now moves the PANEL (clamped inside the view) and persists the spot.
+mi = win.minimap
+QTest.mouseMove(mi, QPoint(60 - 70, 60 + 45))
+app.processEvents()
+check("§1c dragging in MOVE mode moves the panel, not the view",
+      mi.pos() != _mini_before and len(requested) == _requests_before + 1,
+      f"pos={mi.pos()} was={_mini_before} requests={len(requested)}")
+_saved_pos = read_cfg({}).get("ui_minimap_position")
+QTest.mouseRelease(mi, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier,
+                   QPoint(60 - 70, 60 + 45))
+app.processEvents()
+check("§1c the release leaves MOVE mode and restores the pointer cursor",
+      not mi.is_moving() and mi.cursor().shape() == Qt.CursorShape.PointingHandCursor)
+check("§1c the release persists the panel's spot in ui_minimap_position",
+      read_cfg({}).get("ui_minimap_position") == {"x": mi.x(), "y": mi.y()}
+      and win._minimap_pos == QPoint(mi.x(), mi.y()),
+      f"saved={read_cfg({}).get('ui_minimap_position')} in-memory={win._minimap_pos} "
+      f"pos={mi.pos()} (before the release: {_saved_pos})")
+check("§1c the panel stays inside the view (the drag is clamped)",
+      0 <= mi.x() and mi.x() + mi.width() <= view.width()
+      and 0 <= mi.y() and mi.y() + mi.height() <= view.height(),
+      f"pos={mi.pos()} view={view.width()}x{view.height()}")
+
+# A drag far outside is clamped, not obeyed.
+QTest.mousePress(mi, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, QPoint(30, 30))
+wait_for(lambda: mi.is_moving(), timeout_ms=2000)
+QTest.mouseMove(mi, QPoint(10 ** 5, 10 ** 5))
+app.processEvents()
+QTest.mouseRelease(mi, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier,
+                   QPoint(10 ** 5, 10 ** 5))
+app.processEvents()
+check("§1c a drag far outside the view is clamped into it",
+      mi.x() + mi.width() <= view.width() and mi.y() + mi.height() <= view.height()
+      and mi.x() >= 0 and mi.y() >= 0,
+      f"pos={mi.pos()} view={view.width()}x{view.height()}")
+
+# The detached spot wins over the corner rule — including the "below the search bar" one.
+win._open_map_search()
+app.processEvents()
+check("§1c an OPEN search bar no longer re-places a panel the user moved",
+      mi.pos() == QPoint(win._minimap_pos.x(), win._minimap_pos.y()),
+      f"pos={mi.pos()} saved={win._minimap_pos}")
+win._close_map_search()
+app.processEvents()
+
 close_window(win)
+
+# The position survives a restart, and a broken value falls back to the corner.
+write_cfg({"ui_minimap_position": {"x": 40, "y": 60}})
+win_pos = new_window()
+check("§1c a saved ui_minimap_position places the panel there (detached from the corner)",
+      win_pos.minimap.pos() == QPoint(40, 60)
+      and win_pos._minimap_pos == QPoint(40, 60),
+      f"pos={win_pos.minimap.pos()} saved={win_pos._minimap_pos}")
+write_cfg({"ui_minimap_position": [10 ** 5, 10 ** 5]})
+win_far = new_window()
+check("§1c a saved position outside the view is clamped, not obeyed",
+      win_far.minimap.x() + win_far.minimap.width() <= win_far.view.width()
+      and win_far.minimap.y() + win_far.minimap.height() <= win_far.view.height(),
+      f"pos={win_far.minimap.pos()} view={win_far.view.width()}x{win_far.view.height()}")
+close_window(win_far)
+write_cfg({"ui_minimap_position": ["a", "b"]})   # a broken value
+win_bad_pos = new_window()
+check("§1c a broken ui_minimap_position falls back to the top-right corner",
+      win_bad_pos._minimap_pos is None
+      and abs(win_bad_pos.minimap.x()
+              - (win_bad_pos.view.width() - win_bad_pos.minimap.width() - 12)) <= 2
+      and win_bad_pos.minimap.y() == 12,
+      f"pos={win_bad_pos.minimap.pos()}")
+close_window(win_bad_pos)
+close_window(win_pos)
+clear_cfg()
+
+# The fold survives a restart (the ui_minimap_collapsed round-trip).
+write_cfg({"ui_minimap_collapsed": True})
+win_fold = new_window()
+check("§1b a saved ui_minimap_collapsed=True builds the window with a FOLDED strip",
+      win_fold.minimap.is_collapsed() and win_fold.minimap.width() == win_fold.minimap.HEADER_W
+      and win_fold.minimap.isVisible(),
+      f"collapsed={win_fold.minimap.is_collapsed()} w={win_fold.minimap.width()}")
+write_cfg({"ui_minimap_collapsed": "yes"})   # a broken value: not a bool
+win_bad_fold = new_window()
+check("§1b a broken ui_minimap_collapsed value falls back to the default (unfolded)",
+      win_bad_fold.minimap.is_collapsed() is False
+      and win_bad_fold.minimap.width() == win_bad_fold.minimap.DEFAULT_WIDTH,
+      f"collapsed={win_bad_fold.minimap.is_collapsed()}")
+close_window(win_bad_fold)
+close_window(win_fold)
+clear_cfg()
 
 # ════════════════════════════════════════════════════════════════════════════
 print("== §2 the cached card drop-shadow ==")

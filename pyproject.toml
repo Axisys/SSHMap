@@ -12,7 +12,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "sshmap"                  # normalized APP_NAME from version.py ("SSH Map") — verified by tests/test_pyproject.py
-version = "1.4.5"                # MUST match APP_VERSION in version.py — verified by tests/test_pyproject.py
+version = "1.4.6"                # MUST match APP_VERSION in version.py — verified by tests/test_pyproject.py
 description = "SSH Map: visual infrastructure map with direct SSH connections to nodes"
 readme = "README.md"
 requires-python = ">=3.10"

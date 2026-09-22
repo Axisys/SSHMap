@@ -779,12 +779,15 @@ print("== §9 the release state ==")
 # ════════════════════════════════════════════════════════════════════════════
 
 check("EXPECTED_APP_VERSION is the version this test file describes",
-      EXPECTED_APP_VERSION == "1.4.5", EXPECTED_APP_VERSION)
-check("the pin counts the keys of the SHIPPED release (v1.4.5 — \"UI density & first run\": "
-      "+17 keys — the empty state, the clickable status counters, the legend and the "
-      "splitter-handle tooltip — on top of the v1.4.4 figure, which moved none: motion is "
-      "behaviour only)",
-      EXPECTED_I18N_KEYS == 603, str(EXPECTED_I18N_KEYS))
+      EXPECTED_APP_VERSION == "1.4.6", EXPECTED_APP_VERSION)
+check("the pin counts the keys of the SHIPPED release (v1.4.6 — \"List mode: collapsing "
+      "the map = server parameters\": +9 keys — the `sidebar.list.*` column headers of the "
+      "wide table (`alias` / `host` / `status` / `os` / `cpu` / `ram` / `disk` / `tags`) and "
+      "`minimap.title` (the minimap's vertical title band / fold affordance) — on "
+      "top of the v1.4.5 figure; the two REWRITTEN values (`view.toggle_map` = \"Map / List\", "
+      "`view.toggle_sidebar` = \"Sidebar / Map\") add no key, the status words reuse "
+      "`legend.status.*`)",
+      EXPECTED_I18N_KEYS == 612, str(EXPECTED_I18N_KEYS))
 check_release_state(ROOT)
 for _code in i18n_lang_codes(ROOT):
     check(f"i18n/{_code}.json carries the new sftp.conflict.title key",
@@ -829,6 +832,16 @@ for _code in i18n_lang_codes(ROOT):
           "sshconfig.col_key" in translation_keys(read_lang(_code)))
     check(f"i18n/{_code}.json carries the v1.4.1 msg.import_ssh_config_result key",
           "msg.import_ssh_config_result" in translation_keys(read_lang(_code)))
+    check(f"i18n/{_code}.json carries the v1.4.6 sidebar.list.* column headers",
+          all(f"sidebar.list.{_col}" in translation_keys(read_lang(_code))
+              for _col in ("alias", "host", "status", "os", "cpu", "ram", "disk", "tags"))
+          and all(str(read_lang(_code).get(f"sidebar.list.{_col}", "")).strip()
+                  for _col in ("alias", "host", "status", "os", "cpu", "ram", "disk", "tags")))
+    check(f"i18n/{_code}.json carries the v1.4.6 minimap.title (the vertical band)",
+          str(read_lang(_code).get("minimap.title", "")).strip() != "")
+    check(f"i18n/{_code}.json renames the two splitter items to their state pair (v1.4.6)",
+          "/" in str(read_lang(_code).get("view.toggle_map", ""))
+          and "/" in str(read_lang(_code).get("view.toggle_sidebar", "")))
 
 # cleanup: back to en + the original config, then close the windows
 i18n.set_language("en")

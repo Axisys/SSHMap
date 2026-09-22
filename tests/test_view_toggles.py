@@ -233,6 +233,59 @@ check("the overlay button after a resize: the bottom right corner of view",
       f"btn=({btn.x()},{btn.y()}) view={win.view.width()}x{win.view.height()}")
 
 # ════════════════════════════════════════════════════════════
+# 3b. v1.4.6: the Sidebar / Map toggles on the toolbar
+# ════════════════════════════════════════════════════════════
+print("== 3b. the toolbar mirrors of the two panel toggles (v1.4.6) ==")
+
+check("the toolbar carries a button for each panel toggle (the View items are the owners)",
+      win._sidebar_toolbar_btn is win._view_toolbar_buttons["view.toggle_sidebar"]
+      and win._map_toolbar_btn is win._view_toolbar_buttons["view.toggle_map"]
+      and win._sidebar_toolbar_btn.isCheckable() and win._map_toolbar_btn.isCheckable())
+check("both buttons mirror the item's state and own NO sequence (the v1.3.3.3 rule)",
+      win._sidebar_toolbar_btn.isChecked() == win.act_show_sidebar.isChecked()
+      and win._map_toolbar_btn.isChecked() == win.act_show_map.isChecked()
+      and win._sidebar_toolbar_btn.shortcut().isEmpty()
+      and win._map_toolbar_btn.shortcut().isEmpty(),
+      f"{win._sidebar_toolbar_btn.shortcut().toString()!r} / "
+      f"{win._map_toolbar_btn.shortcut().toString()!r}")
+
+# The button owns the click, the item owns the state (the legend pattern).
+win._sidebar_toolbar_btn.setChecked(False)
+app.processEvents()
+check("unchecking the toolbar button collapses the sidebar and unchecks the View item",
+      win.sidebar.isHidden() and win._sidebar_strip.isVisible()
+      and not win.act_show_sidebar.isChecked()
+      and i18n.load_config().get("ui_sidebar_collapsed") is True)
+win.act_show_sidebar.setChecked(True)
+app.processEvents()
+check("the View item drives the button back (blocked signals, no loop)",
+      not win.sidebar.isHidden() and win._sidebar_toolbar_btn.isChecked())
+
+# The REFUSED collapse must leave the mirror honest: _reject_collapse_both restores the
+# item's checkmark with BLOCKED signals, so the button needs an explicit resync.
+win._map_toolbar_btn.setChecked(False)          # the map collapses -> the list mode
+app.processEvents()
+check("the map button collapses the map (and switches the sidebar to LIST mode)",
+      win.view.isHidden() and not win.act_show_map.isChecked()
+      and win.sidebar.is_list_mode())
+win._sidebar_toolbar_btn.setChecked(False)      # forbidden: both panels as strips
+app.processEvents()
+check("the refused collapse is reported and the sidebar stays expanded",
+      not win._sidebar_collapsed and win.act_show_sidebar.isChecked()
+      and win.statusBar().currentMessage() == i18n.t("status.collapse_both_forbidden"))
+check("the refused collapse leaves the sidebar's toolbar button CHECKED (no lying mirror)",
+      win._sidebar_toolbar_btn.isChecked(),
+      f"btn={win._sidebar_toolbar_btn.isChecked()}")
+win._map_toolbar_btn.setChecked(True)
+app.processEvents()
+check("expanding the map from the toolbar restores both panels and the narrow tree",
+      not win.view.isHidden() and win._map_toolbar_btn.isChecked()
+      and win.act_show_map.isChecked() and not win.sidebar.is_list_mode())
+check("both mirrors agree with their items again",
+      win._sidebar_toolbar_btn.isChecked() == win.act_show_sidebar.isChecked() is True
+      and win._map_toolbar_btn.isChecked() == win.act_show_map.isChecked() is True)
+
+# ════════════════════════════════════════════════════════════
 # 4. Forbidding double collapsing (v1.2.4.1-fix, a QA request)
 # ════════════════════════════════════════════════════════════
 print("== 4. both collapsed is forbidden ==")

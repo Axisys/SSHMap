@@ -259,8 +259,28 @@ def clear_cfg(*extra_paths: str) -> None:
 # in 12 i18n files + the APP_VERSION/requirements pins in 7 release-state sections).
 # The misses of the keys themselves against the code are caught by check_i18n_keys.py.
 # ─────────────────────────────────────────────────────────────────────────────
-EXPECTED_APP_VERSION = "1.4.5"  # the current release (a sentinel: it catches "a bump to the wrong version")
-EXPECTED_I18N_KEYS = 603        # the parity of the TRANSLATION keys (v1.4.5 — "UI density &
+EXPECTED_APP_VERSION = "1.4.6"  # the current release (a sentinel: it catches "a bump to the wrong version")
+EXPECTED_I18N_KEYS = 612        # the parity of the TRANSLATION keys (v1.4.6 — "List mode:
+                                # collapsing the map = server parameters": +9 keys × en/ru/zh/de
+                                # (`sidebar.list.alias/.host/.status/.os/.cpu/.ram/.disk/.tags` —
+                                # the column headers of the wide LIST layout the sidebar tree
+                                # switches to when the map is collapsed; the header set is the
+                                # plan's own "alias | host (IP) | status | OS | CPU | RAM | DISK |
+                                # tags") and `minimap.title` (the vertical title band of the
+                                # minimap — the fold affordance the panel gained in the same
+                                # release, the `legend.title` precedent). TWO existing VALUES
+                                # changed and no key was added by them:
+                                # `view.toggle_map` "Map" → "Map / List" and `view.toggle_sidebar`
+                                # "Sidebar" → "Sidebar / Map" — the two splitter panels are named
+                                # by their pair of states ("to list / to map") because collapsing
+                                # the map now switches the sidebar to the list and collapsing the
+                                # sidebar gives the whole width to the map; `minimap.tooltip` was
+                                # EXTENDED with the fold gesture (a value change, not a key).
+                                # The STATUS words of the table reuse `legend.status.*` (no fourth
+                                # spelling of online/warn/offline) and the cell mapping is a pure
+                                # function (`ui/sidebar.list_cell_values`) — nothing else became
+                                # text.
+                                # (v1.4.5 — "UI density &
                                 # first run": +17 keys × en/ru/zh/de, and ONE existing VALUE
                                 # rewritten. The new keys: 3 `empty.state.*` (the first-run
                                 # hint — the title, the button and the import line whose two
