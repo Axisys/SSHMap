@@ -277,6 +277,7 @@
   "sftp.viewer.too_large": "File is larger than {limit} — preview is not available",
   "sftp.viewer.encoding_note": "encoding: {encoding}",
   "sftp.viewer.read_failed": "Failed to read {name}: {error}",
+  "sftp.viewer.syntax_heuristic": "highlighting: {language} (heuristic)",
   "sftp.op.new_folder": "New Folder",
   "sftp.op.rename": "Rename",
   "sftp.op.delete": "Delete",

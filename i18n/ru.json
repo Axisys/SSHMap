@@ -268,6 +268,7 @@
   "sftp.viewer.too_large": "Файл больше {limit} — просмотр недоступен",
   "sftp.viewer.encoding_note": "кодировка: {encoding}",
   "sftp.viewer.read_failed": "Не удалось прочитать {name}: {error}",
+  "sftp.viewer.syntax_heuristic": "подсветка: {language} (эвристика)",
   "sftp.op.new_folder": "Новая папка",
   "sftp.op.rename": "Переименовать",
   "sftp.op.delete": "Удалить",

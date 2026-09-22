@@ -29,7 +29,9 @@ Structure of this module:
     every old name (CANVAS_BG, ACCENT, RADIUS_NODE, FONT_UI, …) — a live proxy
                that resolves against the ACTIVE instance on EVERY access;
     STATUS_COLORS / TAG_COLORS / TAG_PALETTE / ARROW_TYPE_COLORS — live dict
-               views of the same instance (they are DERIVED, not stored twice).
+               views of the same instance (they are DERIVED, not stored twice);
+    SYNTAX_COLORS — the v1.4.7 syntax palette by ROLE (the SFTP viewer's
+               modules/syntax_highlight.py vocabulary), derived the same way.
 
 The module stays pure data: NO PySide6 import, importable without QApplication
 (convenient for tests). Colours are "#rrggbb" hex strings (QSS-compatible);
@@ -251,6 +253,21 @@ class Theme:
     note_border: str
     note_text: str
 
+    # ── Syntax highlighting of the SFTP viewer (v1.4.7) ──────────────────────
+    # A palette of its OWN, like the terminal output palettes of
+    # modules/terminal_screen.py — these tones colour the READ-ONLY preview of
+    # modules/sftp_tab.py and nothing else. The names are the ROLE names of
+    # modules/syntax_highlight.py (`syntax_<role>`), and the reader is the
+    # `syntax_colors` property below (declared once, like every other dict).
+    syntax_number: str
+    syntax_string: str
+    syntax_key: str
+    syntax_keyword: str
+    syntax_comment: str
+    syntax_tag: str
+    syntax_attribute: str
+    syntax_punctuation: str
+
     # ── Corner radii (px) ────────────────────────────────────────────────────
     radius_node: float
     radius_note: float
@@ -303,6 +320,25 @@ class Theme:
     def sftp_preview_blocked(self) -> str:
         """A row the SFTP viewer refuses to preview (a binary / an over-limit file)."""
         return self.status_warn
+
+    @property
+    def syntax_colors(self) -> Dict[str, str]:
+        """The SFTP viewer's syntax palette by ROLE (v1.4.7).
+
+        The role vocabulary is ``modules/syntax_highlight.py``'s
+        (``number | string | key | keyword | comment | tag | attribute |
+        punctuation``); the field of a role is ``syntax_<role>``, which is what
+        ``syntax_highlight.syntax_field()`` answers and what the topical test
+        pins against this dict — the two halves of the contract can not drift.
+        """
+        return {"number": self.syntax_number,
+                "string": self.syntax_string,
+                "key": self.syntax_key,
+                "keyword": self.syntax_keyword,
+                "comment": self.syntax_comment,
+                "tag": self.syntax_tag,
+                "attribute": self.syntax_attribute,
+                "punctuation": self.syntax_punctuation}
 
     def hue(self) -> float:
         """The resolved accent hue (``accent_hue`` or the default 198.4).
@@ -388,6 +424,20 @@ DARK = Theme(
     note_border="#a9853d",
     note_text="#403a2b",
 
+    # Syntax highlighting of the SFTP viewer (v1.4.7). Every tone is one the DARK
+    # palette already ships (the amber of the HTTP arrow, the green of the SSH
+    # arrow, …) — the palette is a SECOND ROLE SET over familiar values, not a
+    # second look. All eight are distinct and none is the "no preview" tone
+    # (`status_warn`), which is what the topical test pins.
+    syntax_number="#fbbf24",        # the HTTP-arrow amber
+    syntax_string="#34d399",        # the SSH-arrow green
+    syntax_key="#22d3ee",           # the Kubernetes turquoise
+    syntax_keyword="#a78bfa",       # the group-hover violet
+    syntax_comment="#94a3b8",       # the muted text tone
+    syntax_tag="#f472b6",           # the NFS-arrow pink
+    syntax_attribute="#60a5fa",     # the node-hover blue
+    syntax_punctuation="#cbd5e1",   # the icon outline tone
+
     # Corner radii
     radius_node=10.0,
     radius_note=10.0,
@@ -470,6 +520,19 @@ LIGHT = Theme(
     note_bg="#eedd9f",
     note_border="#a9853d",
     note_text="#403a2b",
+
+    # Syntax highlighting of the SFTP viewer (v1.4.7): the SAME role set, tuned
+    # for the light viewer background — the darker LIGHT arrow/group tones, the
+    # muted text tone and the icon outline. Again: eight distinct values, none of
+    # them the light "no preview" tone (#ca8a04).
+    syntax_number="#d97706",
+    syntax_string="#059669",
+    syntax_key="#0891b2",
+    syntax_keyword="#7c3aed",
+    syntax_comment="#64748b",
+    syntax_tag="#db2777",
+    syntax_attribute="#2563eb",
+    syntax_punctuation="#475569",
 
     # Corner radii — geometry, identical in both instances
     radius_node=10.0,
@@ -700,6 +763,15 @@ _LIVE_FIELDS: Dict[str, str] = {
     "NOTE_BG": "note_bg",
     "NOTE_BORDER": "note_border",
     "NOTE_TEXT": "note_text",
+    # syntax highlighting of the SFTP viewer (v1.4.7)
+    "SYNTAX_NUMBER": "syntax_number",
+    "SYNTAX_STRING": "syntax_string",
+    "SYNTAX_KEY": "syntax_key",
+    "SYNTAX_KEYWORD": "syntax_keyword",
+    "SYNTAX_COMMENT": "syntax_comment",
+    "SYNTAX_TAG": "syntax_tag",
+    "SYNTAX_ATTRIBUTE": "syntax_attribute",
+    "SYNTAX_PUNCTUATION": "syntax_punctuation",
     # corner radii
     "RADIUS_NODE": "radius_node",
     "RADIUS_NOTE": "radius_note",
@@ -724,6 +796,7 @@ _LIVE_DERIVED: Dict[str, str] = {
     "TAG_COLORS": "tag_colors",
     "TAG_PALETTE": "tag_palette",
     "ARROW_TYPE_COLORS": "arrow_type_colors",
+    "SYNTAX_COLORS": "syntax_colors",
 }
 
 

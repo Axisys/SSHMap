@@ -21,7 +21,7 @@ pipx install .                    # or pip install . → sshmap command (install
 Tests — plain Python scripts without pytest: topical `test_*.py` files + a single parallel runner; each file is an isolated process (sandbox HOME, offscreen Qt, UTF-8 stdout — nothing extra needed on cp1251 consoles or in CI):
 
 ```bash
-python tests/run_all.py               # everything (88 test files + i18n check); auto workers = cores (cap 16), longest file first; exit 0 ⇔ all green
+python tests/run_all.py               # everything (89 test files + i18n check); auto workers = cores (cap 16), longest file first; exit 0 ⇔ all green
 python tests/run_all.py --fast        # daily profile: skips files tagged slow/network
 python tests/run_all.py --tag network # only network-tagged files — real-network sections run ONLY on explicit opt-in (env SSHMAP_TEST_TAGS)
 python tests/run_all.py --failed-only # re-run only files that failed in the last run (cache test-results/last_run.json)
@@ -53,7 +53,8 @@ modules/                     # ssh_worker.py — one-shot SSH worker + registry;
                              # context; plugin_runner.py — "run a command on these nodes" over SSH;
                              # terminal_page.py — session as a reusable widget (single idempotent shutdown()); terminal_dock.py — "tabs" mode dock;
                              # command_library.py — terminal macros: user command/script library panel (~/.sshmap/commands.json);
-                             # multi_input.py — multi-input broadcast hub; sftp_worker.py / sftp_tab.py — SFTP over the live transport (listing, upload/download, a file manager: new folder/rename/delete, an overwrite prompt, atomic transfers, drag-out of a path, read-only preview with "no preview" row marks);
+                             # multi_input.py — multi-input broadcast hub; sftp_worker.py / sftp_tab.py — SFTP over the live transport (listing, upload/download, a file manager: new folder/rename/delete, an overwrite prompt, atomic transfers, drag-out of a path, read-only preview with "no preview" row marks and syntax highlighting);
+                             # syntax_highlight.py — the viewer's grammars (number-only, verified JSON/XML, heuristic YAML) and its one highlighter;
                              # terminal_widget.py — cell-based canvas (full keyboard, selection, scrollback); terminal_screen.py — pyte screen + palettes;
                              # window_geometry.py; host_key_policy.py; external_terminal.py; undo_commands.py (15 QUndoCommands); logger.py
 storage/                     # project.py — JSON save/load; autosave.py — autosave + backup ring buffer; export_drawio.py — .drawio export (tags + comment included)
@@ -145,6 +146,11 @@ Format invariants:
 - **The minimap folds sideways and can be moved**: it is labelled with its own vertical title on the right edge — click that band and the panel folds into a thin strip (click again to bring it back). **Hold the left button on the map area and drag** to detach the panel from the corner and place it anywhere on the map (a plain click or drag still pans the view; the spot is remembered).
 - **All four view toggles sit on the toolbar** next to each other — Sidebar / Map, Minimap and Legend — so a panel can be shown, hidden, folded or collapsed without opening the View menu (the menu items stay the owners: the hotkeys and the state live there).
 
+### SFTP viewer (v1.4.7)
+- **The preview is no longer monochrome**: numbers everywhere, and a real grammar for JSON, XML and YAML — the same read-only panel, the same 1 MB limit, no new dependency.
+- **A hint must not lie**: the extension only proposes, the content decides — a `.json`/`.xml` is coloured as such only after it really parses, otherwise it falls back to the number-only mode. YAML has no standard-library parser, so its highlighting is a heuristic and the header says so.
+- **Colours, never bold** — and only the lines you can see are painted, so even a 1 MB file opens as fast as its first screen (a minified one is capped instead of freezing).
+
 ### Statuses
 `probe_ssh(host, port)`: TCP open + SSH banner → `online`; port open without a banner → `warn`; otherwise → `offline`.
 
@@ -153,7 +159,8 @@ Format invariants:
 - `start_status_checks()` is called once from `main.py` after `show()`.
 
 ### Terminal
-- **Architecture** — session = `TerminalSessionPage` (modules/terminal_page.py): thread + pyte screen + canvas + status line + SFTP tab; ALL cleanup logic lives on the page side — every teardown path (tab/window close, session error, MainWindow shutdown, limit reached) goes through the single idempotent `page.shutdown()`, and the "ask" gate is `page.confirm_close()`.
+- **Architecture** — session = `TerminalSessionPage` (modules/terminal_page.py): thread + pyte screen + canvas + SFTP tab; ALL cleanup logic lives on the page side — every teardown path (tab/window close, session error, MainWindow shutdown, limit reached) goes through the single idempotent `page.shutdown()`, and the "ask" gate is `page.confirm_close()`.
+- **The status lives in the status bar** — a session does not draw a status line of its own (it repeated, one row above the tabs, the text the window's status bar was already showing). Every state — connecting, opened, closed, an error — goes to that one bar, and the split pane adds its own second text there (`Split Terminal  SSH session opened`), which disappears with it; the pane itself is just the canvas in its frame.
 - **Language** — the containers follow a language switch live: the window/dock titles, the tab titles and tooltips, the SFTP buttons and column headers, the command-library panel and its row tooltips are re-texted by a `retranslate()` on every container (MainWindow walks the session registry, exactly like it already did for the terminal font) — no restart.
 - **Containers** —
   `SSHTerminalWindow` (WA_DeleteOnClose) holds a QTabWidget of pages: re-connecting to the same node reuses its live window —
@@ -164,7 +171,7 @@ Format invariants:
 - **Split (v1.3.3.5)** —
   the "Split Terminal" button at the right end of the session tab bar (or the window's right-click menu) puts a SECOND shell of the same node in a pane below the tabs (25% of the height by default, the divider is draggable): watch `htop` above and type below, in one window. Both panes are full sessions —
   their own channel, their own screen, so a TUI in each is fine;
-  the small pane is a command line (no SFTP tab there), its state (on/off + ratio) is remembered, it does not count towards `terminal_max_open`, and multi-input reaches it like any other session. Off by default —
+  the small pane is a command line (no SFTP tab, no tab strip and no status line there — it is the canvas in its frame), its state (on/off + ratio) is remembered, it does not count towards `terminal_max_open`, and multi-input reaches it like any other session (the amber frame is the mark). Its state goes to the window's status bar as a second text, `Split Terminal  SSH session opened`, which disappears when the pane does. Off by default —
   nothing changes until you ask for it.
 - **Display mode** — `terminal_mode`: `"windows"` (default) | `"tabs"` — sessions as tabs in a detachable QDockWidget "Terminals" on the map (`modules/terminal_dock.py`;
   the map remains the central widget): the dock detaches into a window and returns;
@@ -329,6 +336,7 @@ en (default) / ru / zh / de — and any language you drop in, without touching t
 - **motion** (v1.4.4) — the map glides instead of jumping (Show on map, Fit map), a new server scales in, and hovering a connection dims everything but its two ends; every animation is interruptible, so the wheel or a drag always wins
 - **a denser interface and a friendly first run** (v1.4.5) — the sidebar buttons became a compact grid, an empty map shows how to start (add a server or import a list), the status counters filter the sidebar with one click, and a small legend explains the arrow colours and the statuses (hide it, fold it or drag it — it remembers where it was)
 - **list mode** (v1.4.6) — collapse the map and the sidebar becomes the server table its width always allowed: alias, host, status, OS, CPU, RAM, disk and tags, with the same search, filters and row menu
+- **syntax highlighting in the SFTP viewer** (v1.4.7) — numbers in any text file, JSON and XML coloured only when they really parse, YAML marked as the heuristic it is, and only the visible lines painted so a 1 MB file opens immediately
 - hotkeys + command palette (Ctrl+K) — the full action registry is editable in "Settings → Hotkeys" (reset to defaults, duplicates flagged) and applied without restart
 - Help → About — the version, the license, the `~/.sshmap` paths and a hotkey cheat-sheet built from the registry
 - plugins: an installed package (`pip install sshmap-<name>-plugin`) or one file dropped into `~/.sshmap/plugins/`
@@ -345,9 +353,8 @@ en (default) / ru / zh / de — and any language you drop in, without touching t
 - plugins run inside the application's process (v1.4): a plugin with a broken C extension can take it down — install plugins you trust.
 
 **Roadmap** (tasks, order, acceptance — in ROADMAP.md):
-- **v1.4 line** — the plugin foundation, released at **v1.4** (discovery + the "Plugins" menu and the frozen API (`PLUGINS.md`), commands on selected servers, a plugin status on the card, palette commands, node-menu rows, "Run on selected servers", two working example plugins), **v1.4.1** — import from `~/.ssh/config` (with the TXT import that no longer drops the extra words of a line), **v1.4.2** — the big-picture map level (the minimap, the cached card drop-shadow, the group fold), **v1.4.3** — the appearance (a light theme and an accent colour on one `Theme` object, switched live), **v1.4.4** — motion (smooth camera flights, the node scale-in, the arrow hover focus/dim), **v1.4.5** — UI density & first run (the compact sidebar grid, the empty state, the live status bar, the legend, the splitter-handle fix) and **v1.4.6** — list mode (collapsing the map turns the sidebar into the table of server parameters).
-- **Next (v1.4.7):** syntax highlighting in the SFTP viewer.
-- **Then the 1.5 line — "Design & confidence"** (planned as `1.5rc1 → 1.5rc4 → v1.5`, the contract frozen in ROADMAP.md before the first rc): the interface stops telling things apart by colour alone and starts saying how fresh its data is — a light-theme palette with real contrast plus a contrast gate in the suite, line styles and status shapes next to the colours, a print-friendly export, an example map and a discoverable undo on the first screen, and a chrome that copes with narrow windows (status-bar/toolbar overflow, a settings search, visible focus, keyboard navigation on the map).
+- **v1.4 line (closed)** — the plugin foundation, released at **v1.4** (discovery + the "Plugins" menu and the frozen API (`PLUGINS.md`), commands on selected servers, a plugin status on the card, palette commands, node-menu rows, "Run on selected servers", two working example plugins), **v1.4.1** — import from `~/.ssh/config` (with the TXT import that no longer drops the extra words of a line), **v1.4.2** — the big-picture map level (the minimap, the cached card drop-shadow, the group fold), **v1.4.3** — the appearance (a light theme and an accent colour on one `Theme` object, switched live), **v1.4.4** — motion (smooth camera flights, the node scale-in, the arrow hover focus/dim), **v1.4.5** — UI density & first run (the compact sidebar grid, the empty state, the live status bar, the legend, the splitter-handle fix), **v1.4.6** — list mode (collapsing the map turns the sidebar into the table of server parameters) and **v1.4.7** — syntax highlighting in the SFTP viewer.
+- **Next — the 1.5 line — "Design & confidence"** (planned as `1.5rc1 → 1.5rc4 → v1.5`, the contract frozen in ROADMAP.md before the first rc): the interface stops telling things apart by colour alone and starts saying how fresh its data is — a light-theme palette with real contrast plus a contrast gate in the suite, line styles and status shapes next to the colours, a print-friendly export, an example map and a discoverable undo on the first screen, and a chrome that copes with narrow windows (status-bar/toolbar overflow, a settings search, visible focus, keyboard navigation on the map).
 
 ---
 

@@ -268,6 +268,7 @@
   "sftp.viewer.too_large": "Datei ist größer als {limit} — Vorschau ist nicht verfügbar",
   "sftp.viewer.encoding_note": "Kodierung: {encoding}",
   "sftp.viewer.read_failed": "{name} konnte nicht gelesen werden: {error}",
+  "sftp.viewer.syntax_heuristic": "Hervorhebung: {language} (heuristisch)",
   "sftp.op.new_folder": "Neuer Ordner",
   "sftp.op.rename": "Umbenennen",
   "sftp.op.delete": "Löschen",

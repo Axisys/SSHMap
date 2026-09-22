@@ -24,6 +24,11 @@ goes through it. The deliberate v1.1.x guards are kept:
 Bridge to the host (window/dock): the Qt signals `status_message`/`progress_*` —
 the page does NOT know where they go. In `windows` mode SSHTerminalWindow attaches
 them to its status bar and QProgressBar — the display is identical to v1.1.x.
+**v1.4.7 follow-up (the maintainer's request): the page stopped drawing its own
+status line** — it duplicated in a row of the session the text the host's status
+bar was already showing. Every status write goes through ONE method
+(`_set_status_text`) into `session_status` + the bridge, so the host is the single
+status surface and the split pane's state becomes a SECOND text of the same bar.
 
 Test seams (the v1.1.4 host_attr pattern): the thread class and QMessageBox are
 fetched from the ssh_terminal module at call time — monkeypatching
@@ -163,14 +168,15 @@ class TerminalSessionPage(QWidget):
     """v1.2: an SSH session as a reusable widget.
 
     Composition: terminal_thread (SSHTerminalThread) + tscreen (TerminalScreen) +
-    widget (TerminalWidget, the canvas) + the status line (status_label) + a
-    QTabWidget [Terminal | Files] (SftpTab, a lazy worker). The terminal_* config
-    is read from config.json at creation time (load_terminal_settings — defaults
-    = the v1.0 behaviour).
+    widget (TerminalWidget, the canvas) + a QTabWidget [Terminal | Files] (SftpTab,
+    a lazy worker). The terminal_* config is read from config.json at creation time
+    (load_terminal_settings — defaults = the v1.0 behaviour).
 
     The host (SSHTerminalWindow / a future dock) creates the page with a parent
     and may:
-      * attach the bridge signals status_message/progress_* to its own UI;
+      * attach the bridge signals status_message/progress_* to its own UI — **the
+        HOST's status surface is the ONE place a session state is rendered**
+        (the v1.4.7 follow-up: the page's own status line is a hidden label now);
       * call set_host_window(w) — close_terminal() will close this session's tab
         on the host (v1.2.1: the last tab closes the window);
       * run the teardown through shutdown() (a single method, idempotent).
@@ -178,7 +184,10 @@ class TerminalSessionPage(QWidget):
     v1.3.3.5 (the terminal SPLIT): `with_sftp=False` builds a page WITHOUT the SFTP
     tab — the split pane is a command line (see __init__): `tabs` then holds the
     canvas alone and `sftp_tab` is None. The default (True) is every other caller —
-    tabs and the dock are untouched.
+    tabs and the dock are untouched. v1.4.7 follow-up: such a page ALSO hides its tab
+    strip (one tab — nothing to switch) and has no status line, so a pane is its
+    canvas + the QTabWidget frame; `with_status_line` is kept as the public ctor
+    argument it has always been, no longer selecting a layout.
     """
 
     # v1.0RC3: resize PTY — a grid-change guard + a ~150 ms debounce before
@@ -224,31 +233,33 @@ class TerminalSessionPage(QWidget):
         # so the highlight marks its inner `Terminal` tab instead (set_session_badge).
         self._session_badge = None
 
-        # v1.3.3.5: the LIVE status text of the session — the status LINE when the page
-        # has one, and the inner `Terminal` tab title when it does not (the split pane,
-        # `with_status_line=False`: a whole line under a ~140 px pane costs ~40 px of it
-        # — measured — so the pane puts the same text on its tab instead).
+        # v1.3.3.5: the LIVE status text of the session (read by the host through the
+        # `session_status` property and by `_apply_session_tab_title`).
+        # v1.4.7 follow-up: it no longer owns a status LINE — the text lives in the
+        # HOST's status surface alone (the `status_message` bridge below).
         self._session_status = ""
         self._with_status_line = bool(with_status_line)
 
         t = get_translator()
         layout = QVBoxLayout(self)
 
-        self.status_label = QLabel(t("terminal.initializing"))
+        # v1.4.7 follow-up (the maintainer's request): the session state stops taking a
+        # row of the session. The old status line repeated, one row above the
+        # `[Terminal | Files]` tabs, the very text the HOST's status bar already showed
+        # through the `status_message` bridge — a duplicate that cost a row in every
+        # tab and ~40 px of a ~140 px split pane. The label OBJECT is deliberately kept
+        # (the compatibility readers `page.status_label.text()`, the window's compat
+        # property, `_split_min_height`) but it is a HIDDEN child that is never added to
+        # the layout, so it costs no height at all.
+        self._session_status = t("terminal.initializing")
+        self.status_label = QLabel(self._session_status, self)
         # v1.4.3 (ROADMAP task 4): the style comes from the ONE registry
         # (ui/theme_qss.py); refresh_theme() re-applies the same key.
         if theme_qss is not None:
             self.status_label.setStyleSheet(theme_qss.style("status.terminal_row"))
         else:
             self.status_label.setStyleSheet(f"color: {theme.TEXT_MUTED}; padding: 4px 0;")
-        # A hidden member of a QBoxLayout costs no geometry at all (no height, no
-        # spacing) — the compact page gives that space back to the canvas. The label
-        # object itself is deliberately KEPT (every reader in this module, the window's
-        # compat property and the tests keep working — it is simply not shown).
-        if not self._with_status_line:
-            self.status_label.hide()
-            self._session_status = t("terminal.initializing")
-        layout.addWidget(self.status_label)
+        self.status_label.hide()
 
         # AUDIT v0.7.2 (medium #7): an explicit password takes priority over node.data.password —
         # the model is not polluted with plaintext before the keyring write/project save.
@@ -315,12 +326,15 @@ class TerminalSessionPage(QWidget):
         self.sftp_tab = SftpTab() if self._with_sftp else None
         if self.sftp_tab is not None:
             self.tabs.addTab(self.sftp_tab, t("sftp.tab_files"))
+        # v1.4.7 follow-up (the maintainer's request): a page with a SINGLE tab does not
+        # show a tab STRIP at all — the split pane is a command line, and the strip spent
+        # a row of a ~140 px pane on one redundant title. The QTabWidget keeps its frame
+        # (the pane still has its border) and the multi-input state of a pane is carried
+        # by the amber FRAME on `split_host` (`multi_input.apply_container_highlight`);
+        # the badge kept on the hidden title is state, not a plaque.
+        if self.tabs.count() == 1:
+            self.tabs.tabBar().hide()
         layout.addWidget(self.tabs)
-        # v1.3.3.5: a page WITHOUT a status line shows its initial state on the inner
-        # `Terminal` tab at once ("Terminal  Initializing SSH session...") — the tab
-        # title is the only status surface it has.
-        if not self._with_status_line:
-            self._apply_session_tab_title()
 
         # v1.1.3: the SFTP state (the worker is lazy; a task registry for the progress text).
         # Visualisation — the bridge signals progress_* (in windows mode the window
@@ -459,10 +473,12 @@ class TerminalSessionPage(QWidget):
         """Compose the inner `Terminal` tab title of THIS session (v1.3.3.5).
 
         Base — `sftp.tab_terminal`; plus the multi-input badge if the container set one
-        (a split pane); plus the LIVE status text when the page has no status line (the
-        compact split pane — "Terminal  SSH session opened"). The status is LIVE session
-        state and is deliberately not re-translated (§4.5); the badge is a KEY and is
-        rendered with the current language. Never raises.
+        (a split pane). **The LIVE status text is deliberately NOT part of it any more**
+        (the v1.4.7 follow-up): the state of a session lives in the host's status
+        surface alone, and the pane of a split — the only page whose tab strip is hidden
+        (`__init__`) — keeps the badge as state while the amber frame carries it
+        visibly. The badge is a KEY and is rendered with the current language. Never
+        raises.
         """
         try:
             t = get_translator()
@@ -470,8 +486,6 @@ class TerminalSessionPage(QWidget):
             if self._session_badge is not None:
                 key, kwargs = self._session_badge
                 title = t(key, **kwargs) if kwargs else t(key)
-            if not self._with_status_line and self._session_status:
-                title = f"{title}  {self._session_status}"
             self.tabs.setTabText(0, title)
         except RuntimeError:
             pass  # the C++ object was already destroyed (a close race)
@@ -741,24 +755,38 @@ class TerminalSessionPage(QWidget):
 
     def _set_status(self, text: str):
         self._set_status_text(text)
-        self.status_message.emit(text, 0)   # v1.1.x: statusBar().showMessage(text) (sticky)
 
     def _set_status_text(self, text: str):
-        """The SINGLE status write of the page (v1.3.3.5).
+        """The SINGLE status write of the page (v1.3.3.5, completed in the v1.4.7 follow-up).
 
-        The text goes to the status line AND — when the page has no status line (the
-        compact split pane, `with_status_line=False`) — onto the inner `Terminal` tab
-        title, so the live state ("SSH session opened", "SSH session closed", an error)
-        is never lost and never costs a row of the pane. Never raises: a dying C++ object
-        must not break the status path.
+        The page owns NO status surface of its own any more (`__init__`: the old status
+        line is a hidden, un-laid-out label), so the text goes exactly one way: into
+        `_session_status` (the `session_status` property — what a host reads to render
+        its own strip) and through the `status_message` bridge into the HOST's status
+        bar / status strip. Routing EVERY status write through here is what makes the
+        ERROR path readable too: `_show_error` used to write the line nobody but the
+        modal dialog saw while the status bar kept the previous text. Never raises: a
+        dying C++ object must not break the status path.
         """
         self._session_status = text or ""
         try:
             self.status_label.setText(self._session_status)
         except RuntimeError:
             pass  # the C++ object was already destroyed (a close race)
-        if not self._with_status_line:
-            self._apply_session_tab_title()
+        try:
+            self.status_message.emit(self._session_status, 0)
+        except RuntimeError:
+            pass  # Qt teardown — no host left to tell
+
+    @property
+    def session_status(self) -> str:
+        """The LIVE status text of this session ("" before the first write).
+
+        The status of a session is DATA of the session and the display belongs to the
+        host (a status bar with room for more than one session — the v1.4.7 follow-up
+        renders the split pane's state next to the active session's).
+        """
+        return self._session_status
 
     def _show_error(self, error: str):
         t = get_translator()
@@ -772,9 +800,9 @@ class TerminalSessionPage(QWidget):
         self.close_terminal()
 
     def _on_closed(self):
-        t = get_translator()
-        self._set_status_text(t("terminal.session_closed"))
-        self.status_message.emit(t("terminal.session_closed"), 0)
+        # v1.4.7 follow-up: one write — `_set_status_text` IS the bridge now (the line
+        # and the host's status surface were two writes of the same text before).
+        self._set_status_text(get_translator()("terminal.session_closed"))
 
     # ── v1.0RC4: Quick Launch ───────────────────────────────────────────────
 

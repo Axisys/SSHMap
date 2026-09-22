@@ -62,6 +62,14 @@ check("§1 ...and the only PySide6 import is INSIDE a function (lazy, for the de
 
 import dataclasses  # noqa: E402
 
+# v1.4.7: the SFTP viewer's syntax palette — 8 fields per instance, NOT part of the
+# frozen pre-v1.4.3 snapshot above (they are new to the theme, not a re-tune of it).
+# The ROLE vocabulary and the deep palette checks live in the topical file
+# (tests/test_sftp_syntax.py §1); here only the `Theme` contract is pinned.
+SYNTAX_FIELDS = {"syntax_number", "syntax_string", "syntax_key", "syntax_keyword",
+                 "syntax_comment", "syntax_tag", "syntax_attribute",
+                 "syntax_punctuation"}
+
 check("§1 Theme is a frozen dataclass", dataclasses.is_dataclass(theme.Theme)
       and theme.Theme.__dataclass_params__.frozen,
       str(getattr(theme.Theme, "__dataclass_params__", None)))
@@ -143,12 +151,12 @@ check("§2 SFTP_PREVIEW_BLOCKED is the warn tone (one value, not a second litera
       theme.DARK.sftp_preview_blocked == theme.DARK.status_warn == "#facc15")
 check("§2 the derived dicts are NOT fields — the values are declared exactly once",
       set(f.name for f in dataclasses.fields(theme.Theme)) == set(DARK_SNAPSHOT)
-      | {"accent_hue", "accent_hover", "accent_selected"},
+      | {"accent_hue", "accent_hover", "accent_selected"} | set(SYNTAX_FIELDS),
       str(sorted(set(f.name for f in dataclasses.fields(theme.Theme)) - set(DARK_SNAPSHOT))))
 check("§2 the dicts/lists are derived PROPERTIES on Theme (no second copy of the values)",
       all(isinstance(getattr(theme.Theme, name), property) for name in
           ("status_colors", "tag_colors", "tag_palette", "arrow_type_colors",
-           "sftp_preview_blocked")))
+           "sftp_preview_blocked", "syntax_colors")))
 
 # The module-level proxies: every historical name still resolves — and resolves LIVE.
 check("§2 the module proxies resolve the ACTIVE instance (CANVAS_BG/NODE_BG/RADIUS_NODE/FONT_UI)",
@@ -172,6 +180,26 @@ check("§2 an unknown module attribute still raises AttributeError (no silent ca
       _raised)
 check("§2 dir(theme) lists the live names (autocompletion is not lost)",
       "NODE_BG" in dir(theme) and "STATUS_COLORS" in dir(theme) and "THEME" in dir(theme))
+
+# ── §2b v1.4.7: the syntax palette is a PER-INSTANCE pair (the plan's task 1) ──
+check("§2b both instances carry all 8 syntax fields (a one-sided palette is forbidden)",
+      SYNTAX_FIELDS <= {f.name for f in dataclasses.fields(theme.DARK)}
+      and SYNTAX_FIELDS <= {f.name for f in dataclasses.fields(theme.LIGHT)}
+      and set(theme.DARK.syntax_colors) == set(theme.LIGHT.syntax_colors))
+check("§2b the palette is DERIVED from the fields — one declaration, no second table",
+      theme.DARK.syntax_colors == {name[len("syntax_"):]: getattr(theme.DARK, name)
+                                   for name in sorted(SYNTAX_FIELDS)}
+      and theme.LIGHT.syntax_colors == {name[len("syntax_"):]: getattr(theme.LIGHT, name)
+                                        for name in sorted(SYNTAX_FIELDS)})
+check("§2b the live proxies resolve the ACTIVE instance (SYNTAX_NUMBER / SYNTAX_COLORS)",
+      theme.SYNTAX_NUMBER == theme.THEME.syntax_number
+      and theme.SYNTAX_COLORS == theme.THEME.syntax_colors
+      and "SYNTAX_NUMBER" in dir(theme))
+check("§2b LIGHT re-tunes the palette (its own tones, not the dark ones on a light canvas)",
+      theme.DARK.syntax_colors != theme.LIGHT.syntax_colors
+      and all(theme.is_valid_hex(v)
+              for v in list(theme.DARK.syntax_colors.values())
+              + list(theme.LIGHT.syntax_colors.values())))
 
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -682,6 +710,9 @@ SCAN_FILES = [
     "dialogs/quick_launch_dialog.py", "dialogs/ssh_connect_dialog.py",
     "modules/multi_input.py", "modules/sftp_tab.py", "modules/terminal_dock.py",
     "modules/terminal_page.py",
+    # v1.4.7: the viewer's grammar layer — it has no literal either (a role's colour
+    # comes from `syntax_field()`), and the audit keeps it that way
+    "modules/syntax_highlight.py",
 ]
 FORBIDDEN = {getattr(theme.DARK, f.name).lower() for f in dataclasses.fields(theme.Theme)
              if isinstance(getattr(theme.DARK, f.name), str)

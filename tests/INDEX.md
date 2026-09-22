@@ -155,6 +155,7 @@ of the file itself.
 | `test_settings_options.py` | — | v1.1.1 — Small options around the hub: the release's themed test (ROADMAP v1.1.1). |
 | `test_sftp_dnd.py` | — | v1.2.8 — D&D of files from Windows Explorer into the SFTP tab (ROADMAP v1.2.8). |
 | `test_sftp_ops.py` | — | v1.3.3.2 — SFTP as a file manager: the operations + a transfer that does not lose data. |
+| `test_sftp_syntax.py` | — | v1.4.7 — Syntax highlighting in the SFTP viewer (numbers, JSON/XML/YAML, ROADMAP v1.4.7). |
 | `test_sftp_tab.py` | — | v1.1.3 — SFTP tab in the terminal window (ROADMAP v1.1.3, tasks 1–5). |
 | `test_sftp_viewer.py` | — | v1.3.1 — File viewer in the SFTP tab (text ≤ 1 MB over SFTP, ROADMAP v1.3.1). |
 | `test_sidebar_context_menu.py` | — | Regression v0.9.6 — the context menu in the sidebar (server list). |

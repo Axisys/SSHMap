@@ -647,8 +647,14 @@ for _doc in ("README.md", "ROADMAP.md"):
 # header said 458" drift form: an out-of-chain figure).
 _roadmap = _read_doc("ROADMAP.md")
 _figures = sorted({int(m.group(1)) for m in I18N_PARITY_FIGURE_RE.finditer(_roadmap)})
-check("ROADMAP.md quotes the baseline and the planned key counts",
-      len(_figures) >= 2, f"quoted={_figures}")
+# v1.4.7: the 1.4 line is CLOSED (v1.4.7 is its last planned version), and the frozen
+# contract of the 1.5 line deliberately pins no per-rc key counts — so the baseline in the
+# header is the only parity figure the plan owns today. The guard therefore drops the
+# "at least two figures" half (it was satisfied by the planned v1.4.7 section, which the
+# release removed) and keeps EVERY other property: the figure is the pin, the chain is
+# non-decreasing and no figure is a stale outlier.
+check("ROADMAP.md quotes the key-count baseline (a released section is removed from the plan)",
+      len(_figures) >= 1, f"quoted={_figures}")
 check(f"ROADMAP.md: the header baseline is the pin ({EXPECTED_I18N_KEYS})",
       _figures and _figures[0] in (EXPECTED_I18N_KEYS - 1, EXPECTED_I18N_KEYS),
       f"quoted={_figures} pin={EXPECTED_I18N_KEYS}")
@@ -779,15 +785,15 @@ print("== §9 the release state ==")
 # ════════════════════════════════════════════════════════════════════════════
 
 check("EXPECTED_APP_VERSION is the version this test file describes",
-      EXPECTED_APP_VERSION == "1.4.6", EXPECTED_APP_VERSION)
-check("the pin counts the keys of the SHIPPED release (v1.4.6 — \"List mode: collapsing "
-      "the map = server parameters\": +9 keys — the `sidebar.list.*` column headers of the "
-      "wide table (`alias` / `host` / `status` / `os` / `cpu` / `ram` / `disk` / `tags`) and "
-      "`minimap.title` (the minimap's vertical title band / fold affordance) — on "
-      "top of the v1.4.5 figure; the two REWRITTEN values (`view.toggle_map` = \"Map / List\", "
-      "`view.toggle_sidebar` = \"Sidebar / Map\") add no key, the status words reuse "
-      "`legend.status.*`)",
-      EXPECTED_I18N_KEYS == 612, str(EXPECTED_I18N_KEYS))
+      EXPECTED_APP_VERSION == "1.4.7", EXPECTED_APP_VERSION)
+check("the pin counts the keys of the SHIPPED release (v1.4.7 — \"Syntax highlighting in "
+      "the SFTP viewer\": +1 key — `sftp.viewer.syntax_heuristic`, the note the read-only "
+      "preview appends to its header for the modes NO parser verified (YAML: the standard "
+      "library has no YAML parser, so that highlighting is a heuristic and says so). The "
+      "verified modes (JSON/XML — accepted only after a real parse) and the always-truthful "
+      "`numbers` fallback carry no note, and the 8 `Theme.syntax_*` palette fields are not "
+      "text — the v1.4.6 figure plus one)",
+      EXPECTED_I18N_KEYS == 613, str(EXPECTED_I18N_KEYS))
 check_release_state(ROOT)
 for _code in i18n_lang_codes(ROOT):
     check(f"i18n/{_code}.json carries the new sftp.conflict.title key",
@@ -842,6 +848,9 @@ for _code in i18n_lang_codes(ROOT):
     check(f"i18n/{_code}.json renames the two splitter items to their state pair (v1.4.6)",
           "/" in str(read_lang(_code).get("view.toggle_map", ""))
           and "/" in str(read_lang(_code).get("view.toggle_sidebar", "")))
+    check(f"i18n/{_code}.json carries the v1.4.7 heuristic-highlighting note",
+          "{language}" in str(read_lang(_code).get("sftp.viewer.syntax_heuristic", ""))
+          and str(read_lang(_code).get("sftp.viewer.syntax_heuristic", "")).strip() != "")
 
 # cleanup: back to en + the original config, then close the windows
 i18n.set_language("en")

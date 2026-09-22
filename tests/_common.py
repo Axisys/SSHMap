@@ -259,8 +259,21 @@ def clear_cfg(*extra_paths: str) -> None:
 # in 12 i18n files + the APP_VERSION/requirements pins in 7 release-state sections).
 # The misses of the keys themselves against the code are caught by check_i18n_keys.py.
 # ─────────────────────────────────────────────────────────────────────────────
-EXPECTED_APP_VERSION = "1.4.6"  # the current release (a sentinel: it catches "a bump to the wrong version")
-EXPECTED_I18N_KEYS = 612        # the parity of the TRANSLATION keys (v1.4.6 — "List mode:
+EXPECTED_APP_VERSION = "1.4.7"  # the current release (a sentinel: it catches "a bump to the wrong version")
+EXPECTED_I18N_KEYS = 613        # the parity of the TRANSLATION keys (v1.4.7 — "Syntax
+                                # highlighting in the SFTP viewer": +1 key × en/ru/zh/de,
+                                # `sftp.viewer.syntax_heuristic` = "highlighting: {language}
+                                # (heuristic)" — the note the read-only preview appends to
+                                # its header for the modes NO parser verified (YAML: the
+                                # standard library has no YAML parser, so the highlighting
+                                # there is a heuristic and says so, the
+                                # `sftp.viewer.encoding_note` pattern). The verified modes
+                                # (JSON/XML — accepted only after `json.loads` /
+                                # `ElementTree.fromstring` really parsed the text) and the
+                                # always-truthful `numbers` fallback carry NO note, and the
+                                # palette is not text (`ui/theme.py` gained the 8
+                                # `Theme.syntax_*` fields, no key).
+                                # (v1.4.6 — "List mode:
                                 # collapsing the map = server parameters": +9 keys × en/ru/zh/de
                                 # (`sidebar.list.alias/.host/.status/.os/.cpu/.ram/.disk/.tags` —
                                 # the column headers of the wide LIST layout the sidebar tree

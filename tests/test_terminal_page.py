@@ -4,8 +4,9 @@
 The thematic test of the release v1.2 (ROADMAP v1.2, the "new thematic file" convention):
 
 §1 The page construction: TerminalSessionPage — the session as a reusable
-   widget (thread + screen + the terminal canvas + the status line + the SFTP tab),
-   the terminal_* config from config.json, the test seam of the thread class (ST.SSHTerminalThread).
+   widget (thread + screen + the terminal canvas + the SFTP tab; the status is data,
+   not a row — the v1.4.7 follow-up), the terminal_* config from config.json, the test
+   seam of the thread class (ST.SSHTerminalThread).
 
 §2 ALL the teardown paths — through the single method page.shutdown() (idempotent):
    a) the regular path: the PTY timer is stopped, the signals of the thread/worker are detached
@@ -15,7 +16,8 @@ The thematic test of the release v1.2 (ROADMAP v1.2, the "new thematic file" con
       the late finished() self-cleans the registry;
    c) the SFTP worker: the lazy start on the live transport, shutdown() — the stop in the budget,
       the signals are detached (the pattern test_sftp_tab §6);
-   d) the error path: error_signal → QMessageBox.critical + the status line + close_terminal
+   d) the error path: error_signal → QMessageBox.critical + the status (state AND the
+      status-bar bridge — the v1.4.7 follow-up) + close_terminal
       (without the host — the teardown directly);
    e) close_terminal() with the host window — the window is closed by the regular path.
 
@@ -196,8 +198,25 @@ check("the pyte screen is 120×32 (the invoke_shell geometry)",
 check("the terminal canvas is a TerminalWidget", isinstance(p1d.widget, TerminalWidget))
 check("QTabWidget [Terminal | Files] (v1.1.3)", p1d.tabs.count() == 2
       and p1d.tabs.widget(0) is p1d.widget and p1d.tabs.widget(1) is p1d.sftp_tab)
-check("the status line: terminal.initializing",
-      p1d.status_label.text() != "" , p1d.status_label.text())
+# ── v1.4.7 follow-up: the page draws NO status line — the HOST's bar is the surface ──
+check("the page draws no status line: the label is state, not a row (terminal.initializing)",
+      p1d.status_label.text() != "" and p1d.status_label.isHidden() is True
+      and p1d.layout().indexOf(p1d.status_label) == -1,
+      p1d.status_label.text())
+check("the state is readable as DATA (the `session_status` property)",
+      p1d.session_status == p1d.status_label.text()
+      == TP.get_translator()("terminal.initializing"),
+      p1d.session_status)
+_status_msgs = []
+p1d.status_message.connect(lambda text, ms: _status_msgs.append((text, ms)))
+p1d.terminal_thread.status_signal.emit("SSH session opened")
+app.processEvents()
+check("EVERY status write goes to the bridge (the single status path of the page)",
+      _status_msgs == [("SSH session opened", 0)]
+      and p1d.session_status == "SSH session opened",
+      f"{_status_msgs}/{p1d.session_status}")
+check("a two-tab page KEEPS its tab strip (the strip is only dropped for a single tab)",
+      p1d.tabs.tabBar().isHidden() is False)
 
 # The terminal_* config — read on page creation (load_terminal_settings)
 write_cfg({"terminal_wheel": "off", "terminal_palette": "nord",
@@ -293,12 +312,18 @@ _orig_critical = ST.QMessageBox.critical
 ST.QMessageBox.critical = staticmethod(lambda *a, **k: crit_calls.append(a))
 try:
     pd = make_page("td-d")
+    _err_msgs = []
+    pd.status_message.connect(lambda text, ms: _err_msgs.append((text, ms)))
     pd.terminal_thread.error_signal.emit("boom")
     app.processEvents()
     check("d: error_signal → QMessageBox.critical (the parent — the host window / None)",
           len(crit_calls) == 1 and crit_calls[0][0] is None, str(crit_calls)[:120])
-    check("d: the status line got the error text", "boom" in pd.status_label.text(),
+    check("d: the error text is the session state", "boom" in pd.status_label.text(),
           pd.status_label.text())
+    check("d: ...and it reaches the STATUS BAR too (the v1.4.7 follow-up fixed the "
+          "error path that only the modal dialog used to show)",
+          "boom" in pd.session_status and _err_msgs[-1][0] == pd.session_status,
+          f"{pd.session_status!r}/{_err_msgs[-1:]!r}")
     check("d: error → close_terminal (no host — the teardown runs directly)",
           pd._shut_down is True and pd.terminal_thread.stop_calls >= 1)
 finally:

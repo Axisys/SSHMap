@@ -19,7 +19,10 @@ ALL without the network — the fake threads with the same API as SSHTerminalThr
    pane's PTY resize goes through the debounce exactly once per settled geometry.
 §5 Focus and the bridges: `win.page` and the status bar follow the FOCUSED pane, the
    command library sends to the focused pane, and multi-input marks the pane (frame on
-   the host + badge on its inner Terminal tab) and broadcasts into it.
+   the host + badge on its inner Terminal tab) and broadcasts into it. **v1.4.7
+   follow-up:** no session draws a status line and a single-tab page hides its tab
+   strip, so the pane's live state is the SECOND text of the window's status bar
+   (`Split Terminal  <state>`), shown with the pane and dropped when it closes.
 §6 The registry rules (ROADMAP task 2): the terminal_max_open limit and
    `_find_terminal_window_for` ignore the pane, while the green dot and the multi-input
    provider count it.
@@ -187,21 +190,33 @@ check("the PANE has NO SFTP tab: one tab (the canvas) and sftp_tab is None",
 check("the pane never opens an SFTP channel, not even on demand",
       pane_a._ensure_sftp() is False and pane_a._sftp_worker is None)
 check("the pane's layout minimum is driven by the CANVAS, not by the SFTP tree",
-      win_a.split_host.minimumSizeHint().height() < top_a.minimumSizeHint().height() - 60,
+      win_a.split_host.minimumSizeHint().height() < top_a.minimumSizeHint().height() - 40,
       f"pane={win_a.split_host.minimumSizeHint().height()} "
       f"tab={top_a.minimumSizeHint().height()}")
-# ── v1.3.3.5-fix: the pane has NO status LINE — its state lives on the inner tab ──
-check("the pane hides its status line (a TAB keeps its own)",
-      pane_a.status_label.isHidden() is True and top_a.status_label.isHidden() is False)
-check("the pane's live status goes onto its inner `Terminal` tab, in ONE line",
-      pane_a.tabs.tabText(0) == f"{i18n.t('sftp.tab_terminal')}  {pane_a._session_status}",
-      repr(pane_a.tabs.tabText(0)))
+# ── v1.4.7 follow-up: NO session draws a status line — the status bar is the surface ──
+check("NEITHER surface draws a status line (the page keeps the label as hidden state)",
+      pane_a.status_label.isHidden() is True and top_a.status_label.isHidden() is True
+      and pane_a.status_label.parent() is pane_a
+      and top_a.status_label.parent() is top_a
+      and top_a.layout().indexOf(top_a.status_label) == -1
+      and pane_a.layout().indexOf(pane_a.status_label) == -1)
+check("the pane's tab strip is GONE (one tab — nothing to switch; the frame stays)",
+      pane_a.tabs.tabBar().isHidden() is True and top_a.tabs.tabBar().isHidden() is False)
+check("the pane's inner title is the plain `Terminal` (no live status on it)",
+      pane_a.tabs.tabText(0) == i18n.t("sftp.tab_terminal"), repr(pane_a.tabs.tabText(0)))
 pane_a.terminal_thread.status_signal.emit("SSH session opened")
 app.processEvents()
-check("a status from the pane's thread reaches the tab title (the status label follows too)",
-      "SSH session opened" in pane_a.tabs.tabText(0)
-      and pane_a.status_label.text() == "SSH session opened",
-      repr(pane_a.tabs.tabText(0)))
+check("a status from the pane's thread reaches the WINDOW's status bar, after the main line",
+      win_a.split_status_text == "SSH session opened"
+      and win_a._split_status_label.text()
+      == f"{i18n.t('terminal.split')}  SSH session opened"
+      and win_a._split_status_label.isHidden() is False,
+      f"{win_a.split_status_text!r}/{win_a._split_status_label.text()!r}")
+check("the pane's label follows as hidden STATE (the compatibility reader)",
+      pane_a.status_label.text() == "SSH session opened"
+      and pane_a.session_status == "SSH session opened")
+check("the pane's status never lands on the tab title any more",
+      pane_a.tabs.tabText(0) == i18n.t("sftp.tab_terminal"))
 check("the space the missing status line gives back goes to the CANVAS (more rows)",
       pane_a.widget.height() >= pane_a.height() - win_a._v_splitter.handleWidth() - 50
       and pane_a._visible_grid()[1] >= ST.SPLIT_MIN_ROWS + 1,
@@ -357,10 +372,8 @@ check("... and to the FOCUSED PANE once the user is in it (ROADMAP task 6)",
 # ── multi-input: the badge/frame reach the pane, the bytes reach the pane ────
 mw._toggle_multi_input(True)
 app.processEvents()
-check("multi-input marks the pane: the badge on its inner Terminal tab (plus its live status)",
-      pane_a.tabs.tabText(0).startswith(
-          i18n.t("terminal.multi_tab_badge", alias="alpha") + "  ")
-      and i18n.t("terminal.multi_tab_badge", alias="alpha") in pane_a.tabs.tabText(0),
+check("multi-input marks the pane: the badge is its inner title (hidden strip — the frame speaks)",
+      pane_a.tabs.tabText(0) == i18n.t("terminal.multi_tab_badge", alias="alpha"),
       repr(pane_a.tabs.tabText(0)))
 check("multi-input marks the pane: the frame on the pane's own host",
       win_a.split_host.objectName() == MI.MULTI_PANE_FRAME_OBJECT_NAME,
@@ -376,9 +389,8 @@ check("the pane counts as a multi-input participant",
       mw._multi_participant_count() == len(mw._terminal_windows))
 mw._toggle_multi_input(False)
 app.processEvents()
-check("the mode off restores the pane's inner title (badge dropped, live status kept) "
-      "and drops the host frame",
-      pane_a.tabs.tabText(0) == f"{i18n.t('sftp.tab_terminal')}  {pane_a._session_status}"
+check("the mode off restores the pane's inner title (badge dropped) and drops the host frame",
+      pane_a.tabs.tabText(0) == i18n.t("sftp.tab_terminal")
       and win_a.split_host.objectName() == "",
       f"{pane_a.tabs.tabText(0)!r}/{win_a.split_host.objectName()!r}")
 
@@ -711,11 +723,11 @@ finally:
 check("switching back re-texts it to English",
       win_l.act_split.text() == i18n.t("terminal.split"), repr(win_l.act_split.text()))
 
-# ── the split pane survives a language switch (the badge/title of the inner tab) ──
+# ── the split pane survives a language switch (the badge of the inner tab + the status) ──
 win_l.act_split.trigger()
 app.processEvents()
 pane_l = win_l.split_pane
-_live = pane_l._session_status          # live session state — deliberately not re-translated
+_live = pane_l.session_status             # live session state — deliberately not re-translated
 mw._toggle_multi_input(True)
 app.processEvents()
 _badge = pane_l.tabs.tabText(0)
@@ -724,16 +736,32 @@ try:
     mw._apply_ui_translations()
     app.processEvents()
     check("the pane's multi-input badge survives a language switch (the live status is not re-texted)",
-          pane_l.tabs.tabText(0) == f"{langs['ru']['terminal.multi_tab_badge'].format(alias='lima')}  {_live}",
+          pane_l.tabs.tabText(0)
+          == langs['ru']['terminal.multi_tab_badge'].format(alias='lima'),
           f"{_badge!r} -> {pane_l.tabs.tabText(0)!r}")
+    check("the split status line re-renders its PREFIX in the new language (the state stays RAW)",
+          win_l.split_status_text == _live
+          and win_l._split_status_label.text()
+          == f"{langs['ru']['terminal.split']}  {_live}",
+          f"{win_l.split_status_text!r}/{win_l._split_status_label.text()!r}")
 finally:
     mw._toggle_multi_input(False)
     i18n.set_language("en")
     mw._apply_ui_translations()
     app.processEvents()
-check("the mode off restored the inner title in English (with its live status)",
-      pane_l.tabs.tabText(0) == f"{i18n.t('sftp.tab_terminal')}  {_live}",
+check("the mode off restored the inner title in English",
+      pane_l.tabs.tabText(0) == i18n.t("sftp.tab_terminal"),
       repr(pane_l.tabs.tabText(0)))
+check("the split status line is back to the English prefix",
+      win_l._split_status_label.text() == f"{i18n.t('terminal.split')}  {_live}",
+      repr(win_l._split_status_label.text()))
+win_l.act_split.trigger()          # close the pane — its status line goes with it
+app.processEvents()
+check("closing the Split Terminal REMOVES the second status text",
+      win_l.split_pane is None and win_l.split_status_text == ""
+      and win_l._split_status_label.isHidden() is True
+      and win_l._split_status_label.text() == "",
+      f"{win_l.split_status_text!r}/{win_l._split_status_label.text()!r}")
 win_l.close()
 wait_until(lambda: len(mw._terminal_windows) == 0, timeout_ms=4000)
 app.processEvents()

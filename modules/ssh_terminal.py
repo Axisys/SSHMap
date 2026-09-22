@@ -69,8 +69,16 @@ from PySide6.QtCore import Qt, QThread, Signal, QEvent, QTimer
 from PySide6.QtGui import QAction
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QMessageBox, QTabWidget, QProgressBar, QSplitter,
-    QPushButton, QWidget, QVBoxLayout, QMenu,
+    QPushButton, QWidget, QVBoxLayout, QMenu, QLabel,
 )
+
+try:  # v1.4.3 (ROADMAP task 4): the ONE QSS registry (the status texts below)
+    from ..ui import theme_qss
+except ImportError:
+    try:
+        from ui import theme_qss
+    except ImportError:  # flat layout: the ui/ directory itself is on sys.path
+        theme_qss = None
 
 
 # Pre-warmed translator for this module (loaded once on first call)
@@ -564,6 +572,21 @@ class SSHTerminalWindow(QMainWindow):
         # ACTIVE tab is bridged (_set_bridged_page); v1.3.3.5: the FOCUSED pane wins.
         # The page does not know about QMainWindow: in dock mode (v1.2.2) the bridge
         # will attach to the dock.
+        # v1.4.7 follow-up (the maintainer's request): this bar is now the ONE status
+        # surface of the window — the page stopped drawing a status line above its
+        # `[Terminal | Files]` tabs, which repeated this very text one row lower on
+        # every session. The SPLIT pane adds a SECOND text right next to it
+        # ("Split Terminal  SSH session opened" — `terminal.split` names the pane, the
+        # way the empty state names the real menu items), shown while the pane is open
+        # and hidden the moment it closes. Both are PERMANENT widgets, so a transient
+        # SFTP line in the message area cannot wipe the pane's state.
+        self._split_status_text = ""
+        self._split_status_label = QLabel("")
+        if theme_qss is not None:
+            self._split_status_label.setStyleSheet(
+                theme_qss.style("status.terminal_row"))
+        self._split_status_label.hide()
+        self.statusBar().addPermanentWidget(self._split_status_label)
         self._sftp_progress = QProgressBar()
         self._sftp_progress.setFixedWidth(180)
         self._sftp_progress.setTextVisible(True)
@@ -668,6 +691,10 @@ class SSHTerminalWindow(QMainWindow):
                 cmdlib.retranslate()
             except RuntimeError:
                 pass  # Qt teardown — the panel is already destroyed
+        # v1.4.7 follow-up: the split text carries the `terminal.split` PREFIX — the
+        # raw pane state is LIVE session data (never re-translated, §4.5), the prefix
+        # around it is a string of the ACTIVE language.
+        self._render_split_status()
 
     # ── v1.4.3 (ROADMAP task 4): live theme — the container and its sessions ──
 
@@ -702,6 +729,13 @@ class SSHTerminalWindow(QMainWindow):
                     hook()
                 except RuntimeError:
                     pass  # Qt teardown — the panel is already destroyed
+        # v1.4.7 follow-up: the split text is a widget-level stylesheet of this window
+        # (the page's status labels went away with its status line).
+        if theme_qss is not None:
+            try:
+                theme_qss.refresh(self._split_status_label, "status.terminal_row")
+            except RuntimeError:
+                pass  # Qt teardown — the label is already destroyed
         try:
             self.update()
         except RuntimeError:
@@ -917,6 +951,14 @@ class SSHTerminalWindow(QMainWindow):
         except RuntimeError:
             pass  # teardown race — the immediate pass above already ran
         self._register_split_session(pane)
+        # v1.4.7 follow-up: the pane has NO status surface of its own (no status line,
+        # no tab strip), so its live state is rendered as the SECOND text of this
+        # window's status bar — connected here, dropped with the pane below.
+        try:
+            pane.status_message.connect(self._on_split_status_message)
+        except (RuntimeError, AttributeError):
+            pass  # a test double / a teardown race — the pane simply has no line
+        self._on_split_status_message(pane.session_status, 0)
         # v1.3.3.5: the new pane's canvas takes the focus (TerminalSessionPage.__init__)
         # — the bridge follows it right away (no FocusIn event is guaranteed).
         self._refresh_bridge()
@@ -933,6 +975,8 @@ class SSHTerminalWindow(QMainWindow):
                 return False
         except RuntimeError:
             pass  # C++ teardown — close without asking (as everywhere else)
+        # v1.4.7 follow-up: the pane's line leaves the status bar together with the pane.
+        self._hide_split_status(pane)
         try:
             pane.shutdown()
         except Exception:  # noqa: BLE001 — teardown robustness
@@ -1119,14 +1163,15 @@ class SSHTerminalWindow(QMainWindow):
         The floor is BUILT, not guessed: the canvas of the pane gets a minimum height of
         `SPLIT_MIN_ROWS` rows measured from the live cell metrics (`widget.cell_size`,
         never a magic pixel number) and the pane's own CHROME is measured from the live
-        geometry (`pane.height() - pane.widget.height()` — the status line, the
-        `[Terminal | Files]` tab bar and the layout margins; before the first layout the
-        hints of those two widgets are the fallback). The SFTP tab's own size hint is
-        deliberately NOT the reference: it is a property of a tab the user may never
-        open, and the ROADMAP fixes the floor at a few ROWS. The result is returned AND
-        installed as an explicit `minimumHeight` on both panes by `_apply_split_sizes`
-        (an explicit minimum overrides `minimumSizeHint` — that is what turns the floor
-        into the splitter's own limit). Never raises.
+        geometry (`pane.height() - pane.widget.height()` — the layout margins and the
+        QTabWidget frame; before the first layout the frame and the margins are the
+        fallback). **v1.4.7 follow-up:** the pane no longer pays for a status line or a
+        tab strip, so the chrome is what is left of the frame. The SFTP tab's own size
+        hint is deliberately NOT the reference: it is a property of a tab the user may
+        never open, and the ROADMAP fixes the floor at a few ROWS. The result is
+        returned AND installed as an explicit `minimumHeight` on both panes by
+        `_apply_split_sizes` (an explicit minimum overrides `minimumSizeHint` — that is
+        what turns the floor into the splitter's own limit). Never raises.
         """
         pane = getattr(self, "_split_pane", None)
         if pane is None:
@@ -1148,8 +1193,9 @@ class SSHTerminalWindow(QMainWindow):
             chrome = 0
         if chrome <= 0:
             try:
-                chrome = int(pane.status_label.sizeHint().height()
-                             + pane.tabs.tabBar().sizeHint().height()) + 24
+                bar = pane.tabs.tabBar()
+                bar_h = 0 if bar.isHidden() else int(bar.sizeHint().height())
+                chrome = bar_h + 16   # + the layout margins and the QTabWidget frame
             except (RuntimeError, AttributeError, TypeError):
                 chrome = 0
         return canvas_floor + max(0, chrome)
@@ -1352,6 +1398,52 @@ class SSHTerminalWindow(QMainWindow):
                 self.statusBar().showMessage(text)
         except RuntimeError:
             pass  # the C++ object was already destroyed (a close race)
+
+    # ── v1.4.7 follow-up: the SECOND status text — the split pane ────────────
+
+    def _on_split_status_message(self, text: str, _timeout_ms: int = 0):
+        """The split pane's LIVE status → its own text in the status bar.
+
+        The pane is a command line: it has no status line and no tab strip (it is a
+        single-tab page), so its state is rendered HERE, right after the active
+        session's message — `terminal.split` names the pane ("Split Terminal"), the
+        same "name the real label" rule the empty state follows, which keeps this free
+        of new i18n keys. An empty text hides the line. Never raises.
+        """
+        self._split_status_text = text or ""
+        self._render_split_status()
+
+    def _render_split_status(self):
+        """Render (or hide) the split pane's status text in the current language.
+
+        Split out of the handler so `retranslate()` can re-render the SAME text with
+        the new `terminal.split` prefix while the line stays live. Never raises.
+        """
+        try:
+            text = getattr(self, "_split_status_text", "")
+            if not text:
+                self._split_status_label.clear()
+                self._split_status_label.hide()
+                return
+            self._split_status_label.setText(
+                f"{get_translator()('terminal.split')}  {text}")
+            self._split_status_label.show()
+        except RuntimeError:
+            pass  # the C++ object was already destroyed (a close race)
+
+    def _hide_split_status(self, pane=None):
+        """Drop the pane's status text (the pane is closing) — idempotent, never raises."""
+        if pane is not None:
+            try:
+                pane.status_message.disconnect(self._on_split_status_message)
+            except (TypeError, RuntimeError):
+                pass  # not connected / the C++ object was destroyed — nothing to drop
+        self._on_split_status_message("", 0)
+
+    @property
+    def split_status_text(self) -> str:
+        """The RAW state of the split pane as rendered in the status bar ("" — closed)."""
+        return getattr(self, "_split_status_text", "")
 
     def _on_page_progress_busy(self):
         try:

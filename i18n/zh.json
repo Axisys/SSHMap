@@ -268,6 +268,7 @@
   "sftp.viewer.too_large": "文件大于 {limit} — 无法预览",
   "sftp.viewer.encoding_note": "编码: {encoding}",
   "sftp.viewer.read_failed": "读取 {name} 失败: {error}",
+  "sftp.viewer.syntax_heuristic": "高亮: {language}（启发式）",
   "sftp.op.new_folder": "新建文件夹",
   "sftp.op.rename": "重命名",
   "sftp.op.delete": "删除",

@@ -70,6 +70,27 @@ certain size from the listing, then the extension guess. A `.txt` with a null
 byte therefore gets its mark after the first attempt, and the mark stays for
 the session (set_worker clears the facts together with the transport).
 
+v1.4.7 (ROADMAP v1.4.7): SYNTAX HIGHLIGHTING of the preview. The panel gains
+ONE `QSyntaxHighlighter` per tab (modules/syntax_highlight.py) and the visible
+content stops being monochrome: numbers everywhere, and a real grammar for
+JSON/XML/YAML. The release rules, unchanged from the plan:
+
+  * the viewer stays READ-ONLY and the read path (worker queue, 1 MB limit,
+    encodings) is untouched — the highlighter only paints what is already in
+    the widget;
+  * **the honesty rule**: the extension is a HINT, the content is the VERDICT.
+    `detect_syntax(path, text)` accepts `.json`/`.xml` only after `json.loads` /
+    `ElementTree.fromstring` really parsed the text; a file that does not parse
+    degrades to the language-agnostic `"numbers"` mode instead of wearing a
+    grammar that does not describe it. YAML has no stdlib parser, so it is a
+    HEURISTIC — the header says so (`sftp.viewer.syntax_heuristic`), exactly the
+    way the `encoding` note works;
+  * **colours only** (no bold/italic), which is what lets the formatting be
+    applied LAZILY to the blocks around the viewport
+    (`QPlainTextEdit.updateRequest` → `_highlight_visible()`): a 1 MB file costs
+    roughly what its first screen costs, and a minified 1 MB single line trips
+    the per-block TOKEN cap of the tokenizer instead of freezing the GUI.
+
 Stale responses (navigation/Refresh while an old listing is in flight) are
 dropped by matching task_id → requested path: only the response for the
 CURRENT directory is rendered. If the SSH connection is not ready yet, the
@@ -120,6 +141,11 @@ except ImportError:
     from sftp_worker import (KIND_DELETE, KIND_MKDIR, KIND_READ, KIND_RENAME,
                              MAX_READ_BYTES, OP_KINDS, READ_ERROR_BINARY,
                              READ_ERROR_TOO_LARGE, classify_extension)
+
+try:  # v1.4.7 (ROADMAP task 4): detection + tokenizers + the ONE highlighter
+    from . import syntax_highlight as syntax
+except ImportError:
+    import syntax_highlight as syntax
 
 
 def _apply_status_style(widget, key: str) -> None:
@@ -305,6 +331,11 @@ class SftpTab(QWidget):
     # v1.3.1: the preview panel — the tree's share of the splitter on the first open.
     VIEWER_TREE_SHARE = 0.45
 
+    # v1.4.7: the blocks formatted AROUND the viewport on either side (the lazy
+    # window of the highlighter — a small scroll costs nothing because the
+    # neighbours are already done).
+    VIEWER_LAZY_MARGIN = syntax.VIEWER_LAZY_MARGIN
+
     # Local hints in the window's status bar (waiting for connection, no selection).
     # Worker errors/progress are shown by the window itself via its signals.
     message = Signal(str)
@@ -322,6 +353,12 @@ class SftpTab(QWidget):
         self._read_tasks = {}
         self._last_read = None
         self._viewer_encoding = "utf-8"
+        # v1.4.7: ONE highlighter per tab (created on the first preview), the
+        # language of what is on the screen, and the block window the last
+        # formatting pass covered (so a repeated scroll is free).
+        self._highlighter = None
+        self._viewer_language = syntax.LANG_NUMBERS
+        self._highlight_range = None
         # v1.3.1.1: the FACTS about previewability — path → READ_ERROR_* of a read
         # that the worker really refused (see preview_block_reason); per session.
         self._blocked = {}
@@ -412,6 +449,9 @@ class SftpTab(QWidget):
         self.viewer_text.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap)
         self.viewer_text.setFont(
             QFontDatabase.systemFont(QFontDatabase.SystemFont.FixedFont))
+        # v1.4.7: the lazy hook — updateRequest fires on a scroll AND on a
+        # resize, which is exactly the two moments new blocks become visible.
+        self.viewer_text.updateRequest.connect(self._on_viewer_update_request)
         viewer_box.addWidget(self.viewer_text, 1)
         self.viewer.hide()
 
@@ -447,6 +487,11 @@ class SftpTab(QWidget):
 
         Both label styles come from the ONE registry (`_apply_status_style`), so
         the switch is the same call the constructor made. Never raises.
+
+        v1.4.7: the syntax colours are read LIVE from the active `Theme` by the
+        highlighter (its format cache is keyed by the instance), but the formats
+        already APPLIED to the visible blocks are values — so the highlighter is
+        asked to drop them and repaint the window.
         """
         for widget in (getattr(self, "path_label", None),
                        getattr(self, "viewer_label", None)):
@@ -456,6 +501,11 @@ class SftpTab(QWidget):
                 _apply_status_style(widget, "status.sftp_row")
             except RuntimeError:
                 continue  # Qt teardown — this label is already destroyed
+        if self._highlighter is not None:
+            try:
+                self._highlighter.refresh_theme()
+            except RuntimeError:
+                pass  # Qt teardown — the document is already gone
 
     def retranslate(self):
         """v1.3.3.1: re-text the tab's own strings in the current language.
@@ -467,6 +517,11 @@ class SftpTab(QWidget):
 
         v1.3.3.2: the drag-out hint of the tree (the context menu is rebuilt on
         every right click and needs nothing here).
+
+        v1.4.7: the heuristic-highlighting note of the viewer header
+        (`sftp.viewer.syntax_heuristic`) is deliberately NOT re-texted here — like
+        the path and the size it describes the file ON THE SCREEN; the next
+        preview renders it in the active language.
 
         Deliberately NOT touched: the path label and the viewer header — they carry
         the CURRENT directory / file (data, not UI text); the "waiting connection"
@@ -795,13 +850,32 @@ class SftpTab(QWidget):
                   error=code or "unknown error")
 
     def _show_viewer(self, path: str, size: int, text: str, encoding: str = "utf-8"):
-        """Fill the panel with the file and show it (an unshown panel gets sizes)."""
+        """Fill the panel with the file and show it (an unshown panel gets sizes).
+
+        v1.4.7: the language is decided from the path AND the content
+        (`syntax.detect_syntax` — the honesty rule: a `.json`/`.xml` hint is
+        accepted only after a real parse) and the tab's ONE highlighter colours
+        the blocks around the viewport. The header carries the heuristic note
+        for the modes no parser verified (YAML), exactly like the encoding note.
+        """
+        language = syntax.detect_syntax(path, text)
         head = _t("sftp.viewer.header", path=path, size=format_size(size))
         if encoding != "utf-8":
             head = f"{head} · {_t('sftp.viewer.encoding_note', encoding=encoding)}"
+        if syntax.is_heuristic(language):
+            head = f"{head} · {_t('sftp.viewer.syntax_heuristic', language=language)}"
         self.viewer_label.setText(head)
         self.viewer_label.setToolTip(path)
         self._viewer_encoding = encoding
+        self._viewer_language = language
+        highlighter = self._ensure_highlighter()
+        if highlighter is not None:
+            highlighter.set_language(language)
+            # BEFORE setPlainText: Qt reformats the WHOLE changed range, and with
+            # an EMPTY window that pass applies no format at all — which is what
+            # keeps the previous file from bleeding into this one.
+            highlighter.reset_for_document()
+        self._highlight_range = None
         self.viewer_text.setPlainText(text)   # the cursor lands at the start by itself
         if self.viewer.isHidden():
             self.viewer.show()
@@ -809,6 +883,94 @@ class SftpTab(QWidget):
             total = max(self.splitter.width(), 640)
             left = int(total * self.VIEWER_TREE_SHARE)
             self.splitter.setSizes([left, total - left])
+        self._highlight_visible(force=True)
+
+    # ── v1.4.7 (ROADMAP task 3/4): the lazy syntax highlighting ─────────────
+
+    def _ensure_highlighter(self):
+        """The tab's ONE highlighter (built on the first preview, reused after).
+
+        A viewer must keep working when the highlighter cannot be built (an
+        exotic Qt build): the preview then stays monochrome, which is exactly
+        the v1.3.1 behaviour.
+        """
+        if self._highlighter is None:
+            try:
+                self._highlighter = syntax.create_highlighter(
+                    self.viewer_text.document())
+            except Exception:   # noqa: BLE001 — highlighting is never critical
+                self._highlighter = None
+        return self._highlighter
+
+    def _viewer_block_range(self):
+        """The block numbers on the screen → `(first, last)`, or None.
+
+        Measured from the LAYOUT (`blockBoundingGeometry` + `contentOffset`), so
+        it answers correctly for a hidden panel too (it degrades to block 0).
+        """
+        edit = self.viewer_text
+        try:
+            block = edit.firstVisibleBlock()
+            if not block.isValid():
+                return None
+            height = edit.viewport().height()
+            offset = edit.contentOffset()
+            first = last = block.blockNumber()
+            while block.isValid():
+                if edit.blockBoundingGeometry(block).translated(offset).top() > height:
+                    break
+                last = block.blockNumber()
+                block = block.next()
+            return first, last
+        except RuntimeError:
+            return None   # the C++ object was already destroyed (a close race)
+
+    def _highlight_visible(self, force: bool = False) -> int:
+        """Format the blocks around the viewport (v1.4.7 task 4 — the lazy half).
+
+        A 1 MB file is ~20 000 blocks and `setPlainText()` marks every one of
+        them dirty, so the EXPENSIVE half (turning spans into text formats) is
+        applied only to the visible window ± `VIEWER_LAZY_MARGIN`; the block
+        STATE is still computed for every line, because the state of a line
+        depends on the line before it. A repeated call whose window is already
+        done costs one comparison.
+
+        Returns the number of blocks really rehighlighted.
+        """
+        highlighter = self._highlighter
+        if highlighter is None:
+            return 0
+        window = self._viewer_block_range()
+        if window is None:
+            return 0
+        first = max(0, window[0] - self.VIEWER_LAZY_MARGIN)
+        last = window[1] + self.VIEWER_LAZY_MARGIN
+        if not force and (first, last) == self._highlight_range:
+            return 0
+        self._highlight_range = (first, last)
+        highlighter.set_window(first, last)
+        return highlighter.highlight_window(force=force)
+
+    def _on_viewer_update_request(self, _rect, dy):
+        """`QPlainTextEdit.updateRequest`: a scroll (`dy != 0`) or a resize.
+
+        A hidden panel is skipped: the content of a closed viewer is gone, and
+        `clear()` fires the signal while it empties the document — formatting a
+        block nobody can see would only leave a mark behind.
+        """
+        if self.viewer.isHidden():
+            return
+        self._highlight_visible()
+
+    @property
+    def viewer_highlighter(self):
+        """The tab's highlighter (None until the first preview — the test seam)."""
+        return self._highlighter
+
+    @property
+    def viewer_language(self) -> str:
+        """The language the shown content was detected as (v1.4.7)."""
+        return self._viewer_language
 
     @property
     def viewer_encoding(self) -> str:
@@ -824,6 +986,10 @@ class SftpTab(QWidget):
         """
         self._read_tasks.clear()
         self._last_read = None
+        # v1.4.7: the panel is empty → the formatting pass has nothing to cover.
+        self._highlight_range = None
+        if self._highlighter is not None:
+            self._highlighter.reset_for_document()
         try:
             self.viewer.hide()
             self.viewer_text.clear()
