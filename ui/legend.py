@@ -27,7 +27,7 @@ owns visibility, the config round-trip and the clamping on a view resize — the
 split as the minimap (`center_requested`) and the search bar.
 """
 
-from PySide6.QtCore import Qt, QPoint, QRectF, Signal
+from PySide6.QtCore import Qt, QPoint, QPointF, QRectF, Signal
 from PySide6.QtGui import QBrush, QColor, QFont, QFontMetrics, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import QWidget
 
@@ -38,6 +38,14 @@ except ImportError:
         from ui import theme
     except ImportError:  # flat layout: the ui/ directory itself is on sys.path
         import theme
+
+try:  # v1.5rc2 (ROADMAP task 4): the declared status shapes — the row's shape sample
+    from . import status_shape
+except ImportError:
+    try:
+        from ui import status_shape
+    except ImportError:  # flat layout without ui/status_shape — the v1.4.5 colour swatch
+        status_shape = None
 
 
 def _t(key: str, **kw) -> str:
@@ -66,9 +74,14 @@ class LegendWidget(QWidget):
     ROW_H = 16               # one legend row
     SECTION_H = 16           # a section caption ("Connections" / "Statuses")
     PADDING = 6              # the inner inset of the card
-    SWATCH = 9               # the colour square of a row
+    SWATCH = 9               # the colour square of a row (the fallback sample)
     SWATCH_GAP = 8           # the gap between the swatch and its label
     SECTION_GAP = 3          # the extra space above a section caption
+    # v1.5rc2 (ROADMAP task 4): the row's SAMPLE — the panel explains the second
+    # channel too. The sample box is a fixed slot (a 26 px line / a mark inside it),
+    # so the labels of both sections stay aligned.
+    SAMPLE_W = 26
+    SAMPLE_MARK = 11
     RADIUS = float(theme.RADIUS_SEARCH_BAR)   # one style with the search bar / minimap
 
     def __init__(self, view, parent=None):
@@ -123,6 +136,32 @@ class LegendWidget(QWidget):
         self._labels = {}
         for kind, key, _color in self.rows():
             self._labels[key] = _t(key)
+
+    def row_sample(self, kind: str, key: str, color):
+        """The SAMPLE a row draws beside its label (v1.5rc2, ROADMAP task 4).
+
+        Read from the SAME declaration the map paints from — `theme.ARROW_TYPE_STYLES`
+        for a connection type, `theme.STATUS_SHAPES` for a status — so the panel
+        explains the second channel (the dash pattern / the width / the double rail,
+        the shape) and can never drift from the map. A section caption and an unknown
+        row answer None. The colour is the row's own colour, never a second lookup.
+
+        Returns a dict: ``{"kind": "line", "color", "style"}`` or
+        ``{"kind": "shape", "color", "status", "shape"}``.
+        """
+        if kind != "item":
+            return None
+        prefix = "connection.type."
+        if key.startswith(prefix):
+            ctype = key[len(prefix):]
+            return {"kind": "line", "color": color,
+                    "style": theme.arrow_type_style(ctype)}
+        prefix = "legend.status."
+        if key.startswith(prefix):
+            status = key[len(prefix):]
+            return {"kind": "shape", "color": color, "status": status,
+                    "shape": theme.status_shape(status)}
+        return None
 
     def retranslate(self):
         """Re-read the panel's strings (language switch)."""
@@ -266,17 +305,12 @@ class LegendWidget(QWidget):
                                      self._labels.get(key, key))
                     y += self.SECTION_H
                     continue
-                # A swatch + its label.
-                swatch = QPainterPath()
-                swatch.addRoundedRect(
-                    QRectF(self.PADDING, y + (self.ROW_H - self.SWATCH) / 2.0,
-                           float(self.SWATCH), float(self.SWATCH)), 2.0, 2.0)
-                painter.setPen(Qt.PenStyle.NoPen)
-                painter.setBrush(QBrush(QColor(color)))
-                painter.drawPath(swatch)
+                # v1.5rc2: the SAMPLE of the row (the declared line style or the
+                # declared shape) + its label.
+                self._paint_sample(painter, kind, key, color, y)
                 painter.setFont(self._font)
                 painter.setPen(QPen(QColor(theme.TEXT_PRIMARY)))
-                text_x = self.PADDING + self.SWATCH + self.SWATCH_GAP
+                text_x = self.PADDING + self.SAMPLE_W + self.SWATCH_GAP
                 painter.drawText(
                     QRectF(text_x, y, max(w - text_x - self.PADDING, 1.0), float(self.ROW_H)),
                     int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter),
@@ -286,6 +320,53 @@ class LegendWidget(QWidget):
                 y += self.ROW_H
         finally:
             painter.end()
+
+    def _paint_sample(self, painter, kind: str, key: str, color, y: float):
+        """Draw the sample of one row (v1.5rc2, ROADMAP task 4) — never a copy of the map.
+
+        A connection type draws its DECLARED stroke (the dash pattern, the width and
+        the double rail — the casing uses the panel's own card colour, exactly as the
+        arrow uses the canvas), a status draws its DECLARED shape in the status colour
+        (`ui/status_shape.py`, the same module the card and the sidebar call). The
+        v1.4.5 colour square survives as the fallback for an unknown row and for a
+        layout without `ui/status_shape.py`.
+        """
+        sample = self.row_sample(kind, key, color)
+        box = QRectF(self.PADDING, y, float(self.SAMPLE_W), float(self.ROW_H))
+        if sample is None or (sample.get("kind") == "shape" and status_shape is None):
+            # The v1.4.5 colour swatch (a rounded square).
+            swatch = QPainterPath()
+            swatch.addRoundedRect(
+                QRectF(self.PADDING, y + (self.ROW_H - self.SWATCH) / 2.0,
+                       float(self.SWATCH), float(self.SWATCH)), 2.0, 2.0)
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(QBrush(QColor(color)))
+            painter.drawPath(swatch)
+            return
+
+        if sample["kind"] == "shape":
+            size = float(self.SAMPLE_MARK)
+            mark = QRectF(box.center().x() - size / 2.0, box.center().y() - size / 2.0,
+                          size, size)
+            status_shape.paint_shape(painter, mark, sample.get("status"), sample["color"])
+            return
+
+        style = sample["style"]
+        width = min(max(float(getattr(style, "width", 2.2)), 1.0), 4.0)
+        cy = box.center().y()
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        pen = QPen(QColor(sample["color"]), width)
+        if getattr(style, "dash", ()):
+            pen.setCapStyle(Qt.PenCapStyle.FlatCap)
+            pen.setDashPattern([float(v) for v in style.dash])
+        painter.setPen(pen)
+        painter.drawLine(QPointF(box.left(), cy), QPointF(box.right(), cy))
+        if getattr(style, "double", False):
+            # The same two-rail trick the arrow uses: a narrower stroke in the surface
+            # colour over the middle of the wide one (here the surface is the CARD).
+            painter.setPen(QPen(QColor(theme.WINDOW_BG),
+                                max(width * theme.ARROW_CASING_RATIO, 0.8)))
+            painter.drawLine(QPointF(box.left(), cy), QPointF(box.right(), cy))
 
     def _paint_chevron(self, painter, w: float):
         """The fold marker of the title band: down (expanded) or right (folded)."""

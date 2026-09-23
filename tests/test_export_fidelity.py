@@ -162,7 +162,10 @@ print("== §3 the SVG export ==")
 # ════════════════════════════════════════════════════════════════════════════
 
 svg_path = os.path.join(WORK, "test_export_fidelity.svg")
-svg_size = scene.render_to_svg(svg_path)
+# v1.5rc2: the export path is PRINT-friendly by default (a light page), so a check
+# about the ACTIVE theme's canvas asks for PALETTE_THEME explicitly; the print
+# default + the opt-out are pinned by tests/test_encoding.py §5.
+svg_size = scene.render_to_svg(svg_path, palette=theme.PALETTE_THEME)
 
 check("the SVG file exists", os.path.isfile(svg_path), repr(svg_path))
 check("the returned size == the size on disk",
@@ -195,7 +198,7 @@ if _vb is not None:
           f"{_vb.groups()} vs {int(src.width())}x{int(src.height())}")
 
 scaled_path = os.path.join(WORK, "test_export_fidelity_scaled.svg")
-scaled_size = scene.render_to_svg(scaled_path, scale=2.0)
+scaled_size = scene.render_to_svg(scaled_path, scale=2.0, palette=theme.PALETTE_THEME)
 scaled_text = open(scaled_path, encoding="utf-8").read()
 _vb2 = re.search(r'viewBox="0 0 (\d+) (\d+)"', scaled_text)
 check("the scale parameter doubles the declared pixel size",
@@ -206,7 +209,7 @@ check("the scaled export is a real file with the same return contract",
 
 empty_path = os.path.join(WORK, "test_export_fidelity_empty.svg")
 try:
-    empty_size = MapScene().render_to_svg(empty_path)
+    empty_size = MapScene().render_to_svg(empty_path, palette=theme.PALETTE_THEME)
     empty_error = None
 except Exception as e:  # noqa: BLE001 — the acceptance requires "no exception"
     empty_size, empty_error = 0, repr(e)
@@ -218,7 +221,7 @@ check("the empty export still writes a valid SVG",
       str(empty_size))
 
 # The composition identity with render_to_pixmap: the SVG area is the pixmap area at scale 1.
-pixmap = scene.render_to_pixmap(scale=2.0)
+pixmap = scene.render_to_pixmap(scale=2.0, palette=theme.PALETTE_THEME)
 check("the pixmap of the same scene is non-empty (the composition baseline)",
       not pixmap.isNull() and pixmap.width() > 0)
 if _vb is not None:
@@ -249,11 +252,17 @@ targets = win._hotkey_targets.get("file.export_svg") or []
 check("the action has exactly one registered target (no ambiguity)",
       len(targets) == 1, str(len(targets)))
 
-# A real call: the dialog is stubbed, the rest is the production path.
+# A real call: the dialogs are stubbed, the rest is the production path.
+# v1.5rc2: the export commands ask ONE question first — the print-friendly palette or
+# the current theme (`MainWindow._ask_export_palette`). This section checks the File
+# menu wiring, so the question is answered here; the dialog and the palette decision
+# themselves are pinned by tests/test_encoding.py §6.
 ui_path = os.path.join(WORK, "test_export_fidelity_menu.svg")
 _saved_dialog = MW.QFileDialog.getSaveFileName
+_saved_palette = win._ask_export_palette
 MW.QFileDialog.getSaveFileName = staticmethod(
     lambda *a, **k: (ui_path, "SVG Images (*.svg)"))
+win._ask_export_palette = lambda: theme.PALETTE_THEME
 try:
     win._export_map_svg()
     menu_error = None
@@ -261,6 +270,7 @@ except Exception as e:  # noqa: BLE001
     menu_error = repr(e)
 finally:
     MW.QFileDialog.getSaveFileName = _saved_dialog
+    win._ask_export_palette = _saved_palette
 check("the File-menu handler writes the file through render_to_svg",
       menu_error is None and os.path.isfile(ui_path), str(menu_error))
 check("the handler reports success in the status bar",

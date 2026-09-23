@@ -26,7 +26,8 @@ Sections:
   1. The worker: mkdir / rename / delete — the fake FS and the listing.
   2. A failing operation → task_error and the NEXT task still runs.
   3. Atomic upload: a cancelled one leaves the old remote file intact, the commit works
-     with and without posix-rename.
+     with and without posix-rename; v1.5rc5 (N2): a failed RETRY after the cleared
+     destination KEEPS the `.part` file (the only surviving copy) and names it.
   4. Atomic download: no `.part` after a success, a cancelled one leaves the destination
      byte-identical.
   5. The context menu (the `_build_context_menu(item)` seam) — the four operations.
@@ -391,6 +392,53 @@ check("a new name lands on the 'server' with the fallback path",
       fs3.files.get("/home/brand_new.bin") == b"z" * 100)
 
 worker3.shutdown(wait_ms=2000)
+
+# ── v1.5rc5 (N2): a failing RETRY after the cleared destination keeps the .part ──
+# The v3 fallback clears the destination and renames again; when THAT rename fails
+# too, both the old file and the upload used to disappear. "Litter beats loss": the
+# provisional file must survive, and the error must name it.
+
+fs3b = FakeSftpFS()
+fs3b.add_dir("/srv")
+fs3b.add_file("/srv/target.bin", b"OLD DATA")
+client3b = FakeSftpClient(fs3b)
+client3b.posix_rename_ok = False     # force the v3 remove+rename fallback
+client3b.rename_fail_after = 2       # the FIRST rename clears, the RETRY dies
+worker3b = SftpWorker(client3b)
+log3b = EventLog()
+wire_worker(worker3b, log3b)
+worker3b.start()
+
+tid_n2 = worker3b.queue_upload(small_local, "/srv", remote_name="target.bin")
+wait_until(lambda: log3b.of_kind("error", tid_n2), timeout_ms=5000)
+err_n2 = log3b.of_kind("error", tid_n2)
+check("N2: the failed commit is reported as task_error", bool(err_n2))
+check("N2: the destination WAS cleared (the old copy is gone)",
+      "/srv/target.bin" not in fs3b.files, f"files={sorted(fs3b.files)}")
+check("N2: the provisional file SURVIVED with the new bytes",
+      fs3b.files.get("/srv/target.bin" + PART_SUFFIX) == b"z" * 100,
+      f"files={sorted(fs3b.files)}")
+check("N2: the error names the kept provisional path",
+      bool(err_n2) and "/srv/target.bin" + PART_SUFFIX in err_n2[0][3],
+      f"message={err_n2[0][3] if err_n2 else '<none>'}")
+worker3b.shutdown(wait_ms=2000)
+
+# ...while a failure that cleared NOTHING still cleans the .part up (no new litter).
+fs3c = FakeSftpFS()
+fs3c.add_dir("/srv")
+client3c = FakeSftpClient(fs3c)
+client3c.posix_rename_ok = False
+client3c.rename_fail_after = 1       # the very first rename dies; nothing was cleared
+worker3c = SftpWorker(client3c)
+log3c = EventLog()
+wire_worker(worker3c, log3c)
+worker3c.start()
+
+tid_n2b = worker3c.queue_upload(small_local, "/srv", remote_name="fresh.bin")
+wait_until(lambda: log3c.of_kind("error", tid_n2b), timeout_ms=5000)
+check("N2: a failure with an untouched destination still drops the .part",
+      no_part_files(fs3c) == [], f"files={sorted(fs3c.files)}")
+worker3c.shutdown(wait_ms=2000)
 
 
 # ════════════════════════════════════════════════════════════

@@ -785,17 +785,17 @@ print("== §9 the release state ==")
 # ════════════════════════════════════════════════════════════════════════════
 
 check("EXPECTED_APP_VERSION is the version this test file describes",
-      EXPECTED_APP_VERSION == "1.4.7", EXPECTED_APP_VERSION)
-check("the pin counts the keys of the SHIPPED release (v1.4.7 — \"Syntax highlighting in "
-      "the SFTP viewer\": +1 key — `sftp.viewer.syntax_heuristic`, the note the read-only "
-      "preview appends to its header for the modes NO parser verified (YAML: the standard "
-      "library has no YAML parser, so that highlighting is a heuristic and says so). The "
-      "verified modes (JSON/XML — accepted only after a real parse) and the always-truthful "
-      "`numbers` fallback carry no note, and the 8 `Theme.syntax_*` palette fields are not "
-      "text — the v1.4.6 figure plus one)",
-      EXPECTED_I18N_KEYS == 613, str(EXPECTED_I18N_KEYS))
+      EXPECTED_APP_VERSION == "1.5", EXPECTED_APP_VERSION)
+check("the pin counts the keys of the SHIPPED release (v1.5 — the closing release adds "
+      "ONE key, `node.status.emulated`: the emulation marker a demo status always carries, "
+      "so 643 + 1 = 644; the panel snap and the environment badge are geometry and the "
+      "user's own tag text)",
+      EXPECTED_I18N_KEYS == 644, str(EXPECTED_I18N_KEYS))
 check_release_state(ROOT)
 for _code in i18n_lang_codes(ROOT):
+    check(f"i18n/{_code}.json carries the v1.5 node.status.emulated marker",
+          str(read_lang(_code).get("node.status.emulated", "")).strip() != ""
+          and "node.status.emulated" in translation_keys(read_lang(_code)))
     check(f"i18n/{_code}.json carries the new sftp.conflict.title key",
           "sftp.conflict.title" in translation_keys(read_lang(_code)))
     check(f"i18n/{_code}.json carries the new sftp.op.new_folder key",

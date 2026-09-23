@@ -54,7 +54,9 @@ extension that exists exactly for the atomic overwrite) and, on a server that do
 know it, with a v3 rename that clears an existing destination first (a small
 non-atomic window — DOCUMENTATION.md §14f). A cancelled or failed transfer therefore
 never truncates the destination: the old file stays byte-identical, the provisional
-file is dropped.
+file is dropped — EXCEPT in the one case where the commit already cleared the
+destination and the retry failed as well (v1.5rc5, N2): the provisional file is then
+the only copy of the new bytes and is KEPT, with its path named in the error.
 
 The queue_mkdir / queue_rename / queue_delete kinds (v1.3.3.2, ROADMAP task 1) share
 the same queue and the same rule: the client stays single-threaded, a failing
@@ -151,6 +153,21 @@ def classify_extension(name: str) -> str:
 
 class _SftpCancelled(Exception):
     """Internal: cancel/stop was requested during a transfer (not an error)."""
+
+
+class _UploadCommitError(Exception):
+    """Internal: the upload could not be PUBLISHED (the commit step failed).
+
+    `temp_kept` is True when the destination had ALREADY been removed before the
+    failure — the provisional file is then the ONLY copy of the new bytes and must
+    survive ("litter beats loss", v1.5rc5 / AUDIT_PENDING N2). It is False when the
+    destination never existed or is still intact, where dropping the provisional
+    file is correct.
+    """
+
+    def __init__(self, message: str, temp_kept: bool = False):
+        super().__init__(message)
+        self.temp_kept = temp_kept
 
 
 class _SftpReadError(Exception):
@@ -478,7 +495,9 @@ class SftpWorker(QThread):
 
         An interrupted upload (cancel, a dead network, a full disk) therefore never
         truncates the EXISTING remote file: the destination is untouched until the
-        very last operation, and the provisional file is dropped on any failure.
+        very last operation. The provisional file is dropped on any failure EXCEPT
+        the one where the commit already cleared the destination (v1.5rc5, N2): then
+        it is the only copy of the new bytes and is KEPT — see `_commit_upload()`.
         """
         total = os.path.getsize(task.local_path)  # FileNotFoundError → task_error
         temp = task.remote_path + PART_SUFFIX
@@ -486,6 +505,7 @@ class SftpWorker(QThread):
         # was created, nothing has to be cleaned up).
         remote_fh = self._sftp.open(temp, "wb")
         committed = False
+        keep_temp = False
         try:
             with open(task.local_path, "rb") as local:
                 done = 0
@@ -501,13 +521,18 @@ class SftpWorker(QThread):
             remote_fh = None
             self._commit_upload(temp, task.remote_path)
             committed = True
+        except _UploadCommitError as e:
+            # The commit failed AFTER the destination was cleared: the .part file
+            # is the only surviving copy, so it must not be cleaned up.
+            keep_temp = e.temp_kept
+            raise
         finally:
             if remote_fh is not None:
                 try:
                     remote_fh.close()
                 except Exception:
                     pass
-            if not committed:
+            if not committed and not keep_temp:
                 self._remote_remove_quiet(temp)   # cancel/failure: no litter, no loss
 
     def _commit_upload(self, temp: str, target: str):
@@ -517,6 +542,11 @@ class SftpWorker(QThread):
         exactly for it. A server that refuses it (not OpenSSH / no extension) gets
         the SFTP v3 rename with an existing destination cleared first: a small
         non-atomic window, documented in DOCUMENTATION.md §14f.
+
+        v1.5rc5 (N2): when the retry after that clear fails as well, the old content
+        is already gone — so the provisional file is the ONLY copy of the new bytes
+        and is KEPT (the caller is told through `_UploadCommitError.temp_kept`),
+        with its path named in the message.
         """
         posix_rename = getattr(self._sftp, "posix_rename", None)
         if posix_rename is not None:
@@ -528,8 +558,17 @@ class SftpWorker(QThread):
         try:
             self._sftp.rename(temp, target)
         except Exception:
-            self._remote_remove_quiet(target)   # the overwrite case only
-            self._sftp.rename(temp, target)
+            cleared = self._remote_remove_quiet(target)   # the overwrite case only
+            try:
+                self._sftp.rename(temp, target)
+            except Exception as e:
+                if cleared:
+                    raise _UploadCommitError(
+                        "%s (the destination was already replaced; the uploaded "
+                        "data is kept at %s)" % (e, temp),
+                        temp_kept=True,
+                    ) from e
+                raise
 
     def _do_download(self, task: _SftpTask):
         """v1.3.3.2 (task 3): download to `<dest>.part`, commit with os.replace.
@@ -580,13 +619,19 @@ class SftpWorker(QThread):
         else:
             self._sftp.remove(task.remote_path)
 
-    def _remote_remove_quiet(self, path: str):
+    def _remote_remove_quiet(self, path: str) -> bool:
         """Best-effort cleanup of a provisional remote path (never masks the real
-        error of the task that is already on its way to task_error)."""
+        error of the task that is already on its way to task_error).
+
+        v1.5rc5 (N2): returns whether the path was actually REMOVED — the commit
+        step has to know that the destination is gone (an existing caller simply
+        ignores the value).
+        """
         try:
             self._sftp.remove(path)
+            return True
         except Exception:
-            pass
+            return False
 
     def _do_read(self, task: _SftpTask):
         """v1.3.1 (ROADMAP task 2): read a text file into memory (the viewer).

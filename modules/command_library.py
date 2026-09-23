@@ -38,12 +38,13 @@ import json
 import os
 import uuid
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import QEvent, Qt, Signal
 from PySide6.QtGui import QColor, QIcon, QPainter, QPainterPath, QPen, QPixmap
 from PySide6.QtWidgets import (
     QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFormLayout,
     QHBoxLayout, QLabel, QLineEdit, QMenu, QMessageBox, QPlainTextEdit,
-    QPushButton, QToolButton, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget,
+    QPushButton, QSplitter, QToolButton, QTreeWidget, QTreeWidgetItem, QVBoxLayout,
+    QWidget,
 )
 
 try:  # v1.2.5: the central theme (the terminal_page/terminal_dock pattern)
@@ -273,6 +274,13 @@ def _diamond_icon(size: int = 20):
     return icon
 
 
+# The upper bound of a QWidget's width. QWIDGETSIZE_MAX is a C macro in qwidget.h and is
+# therefore not exposed by PySide6 — the documented value (`ui/main_window._WIDGET_MAX_WIDTH`,
+# duplicated here because `modules/*` must not import `ui/main_window`; the same reason the
+# "◇" diamond and the collapse strip are local).
+_WIDGET_MAX_WIDTH = 16777215
+
+
 class _CollapseStrip(QWidget):
     """The thin clickable strip of the collapsed panel (v1.3; the v1.2.4.1 technique).
 
@@ -451,6 +459,9 @@ class CommandLibraryPanel(QWidget):
     at creation without a re-save; not in SettingsDialog.collect() —
     the terminal_wheel pattern). The file is re-read in showEvent and after local
     changes (two containers over one file; live synchronization — backlog).
+    v1.5rc5 (N8): the collapse also applies the §36 WIDTH CAP to this splitter member and
+    hands the freed space to the other one — visibility alone left the panel wide, so the
+    terminal never received it (see `_apply_splitter_width`).
 
     Test seams: store= (an explicit path), session_tabs duck-typed, QMessageBox/QMenu —
     module attributes (monkeypatch CL.QMessageBox), _build_context_menu(item) — the menu
@@ -471,6 +482,7 @@ class CommandLibraryPanel(QWidget):
         self._entries = []                 # the current state (from the file)
         self._by_id = {}                   # id → the live entry (item.data stores ONLY the id — see _rebuild_tree)
         self._collapsed = False
+        self._expanded_width = 0           # v1.5rc5 (N8): the width to come back to on expand
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -645,6 +657,22 @@ class CommandLibraryPanel(QWidget):
         self._entries = self._store.load()
         self._rebuild_tree()
 
+    def event(self, event):
+        """v1.5rc5 (N8): (re-)apply the collapsed width when the panel joins its splitter.
+
+        The panel is CONSTRUCTED before the container puts it into the QSplitter, so the
+        state applied from the config at construction cannot touch the splitter — the
+        ParentChange event is the moment the host exists, and it arrives before the
+        splitter is shown, i.e. before the first layout pass.
+        """
+        if event.type() == QEvent.Type.ParentChange:
+            try:
+                if self._collapsed:
+                    self._apply_splitter_width(True)
+            except RuntimeError:
+                pass  # Qt teardown
+        return super().event(event)
+
     def showEvent(self, event):
         super().showEvent(event)
         # Two containers may live over one file (window + dock): on show
@@ -653,6 +681,9 @@ class CommandLibraryPanel(QWidget):
             self.reload()
         except Exception:   # noqa: BLE001 — show must not crash
             pass
+        # v1.5rc5 (N8): the splitter is laid out by now — hand the freed space over
+        # explicitly, so a panel restored from the config as collapsed is already 24 px.
+        self._apply_splitter_width(self._collapsed)
 
     def _rebuild_tree(self):
         t = get_translator()
@@ -910,7 +941,15 @@ class CommandLibraryPanel(QWidget):
         """Collapse/expand the panel. The state — ONE config key
         ui_cmdlib_collapsed for both containers (an i18n.save_config merge write;
         the terminal_wheel pattern: the config only, not in SettingsDialog.collect()).
-        persist=False — a change without a write (the initial application from the config)."""
+        persist=False — a change without a write (the initial application from the config).
+
+        v1.5rc5 (N8): the collapse also HANDS THE FREED SPACE OVER. Visibility alone left
+        the splitter member at its old width, so the terminal never received the freed area
+        (measured: 365 px dead in the dock). The §36 idiom is applied here — the width cap
+        while collapsed, released on expand — which both containers inherit from this ONE
+        class. The cap lives ONLY while collapsed (Qt gotcha #13: a permanent maximum on a
+        splitter member breaks the size accounting after a hide/show cycle).
+        """
         self._collapsed = bool(on)
         try:
             t = get_translator()
@@ -924,5 +963,53 @@ class CommandLibraryPanel(QWidget):
                 self._collapse_btn.setToolTip(t("terminal.cmdlib.collapse_tooltip"))
         except RuntimeError:
             return  # the C++ object is already deleted (a close race)
+        self._apply_splitter_width(bool(on))
         if persist:
             _save_config({"ui_cmdlib_collapsed": on})
+
+    def _host_splitter(self):
+        """The QSplitter this panel is a member of (its parent after `addWidget`)."""
+        try:
+            parent = self.parentWidget()
+        except RuntimeError:
+            return None
+        return parent if isinstance(parent, QSplitter) else None
+
+    def _apply_splitter_width(self, collapsed: bool):
+        """v1.5rc5 (N8): the §36 width cap + the explicit hand-over of the freed space.
+
+        Collapsed — the panel is capped to the strip and the OTHER member receives the
+        delta; expanded — the cap is released and the width remembered before the collapse
+        is restored. A splitter without exactly two members is left alone (both containers
+        build a two-member one), and every Qt call is guarded: the panel may already be
+        under teardown.
+        """
+        splitter = self._host_splitter()
+        if splitter is None:
+            return
+        try:
+            sizes = list(splitter.sizes())
+            laid_out = len(sizes) >= 2 and sum(sizes) > 0
+            if collapsed:
+                # Remember the width to come back to, then hand it over. The hidden body's
+                # own 86 px minimum would fight the cap, so it is capped too.
+                if sizes and sizes[0] > _CollapseStrip.STRIP_WIDTH:
+                    self._expanded_width = sizes[0]
+                self._body.setMinimumWidth(0)
+                self.setMaximumWidth(_CollapseStrip.STRIP_WIDTH)
+                self.setMinimumWidth(_CollapseStrip.STRIP_WIDTH)
+                if laid_out:
+                    rest = max(sum(sizes) - _CollapseStrip.STRIP_WIDTH, 0)
+                    splitter.setSizes([_CollapseStrip.STRIP_WIDTH, rest])
+            else:
+                self.setMaximumWidth(_WIDGET_MAX_WIDTH)
+                self.setMinimumWidth(0)
+                self._body.setMinimumWidth(86)   # the documented lower bound of the divider
+                if laid_out:
+                    want = int(getattr(self, "_expanded_width", 0) or 0)
+                    if want <= 0:
+                        want = max(self.sizeHint().width(), 86)
+                    want = min(want, max(sum(sizes) - 1, _CollapseStrip.STRIP_WIDTH))
+                    splitter.setSizes([want, max(sum(sizes) - want, 0)])
+        except RuntimeError:
+            pass  # Qt teardown — the splitter is already destroyed

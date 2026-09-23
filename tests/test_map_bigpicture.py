@@ -426,7 +426,47 @@ check("§1c a drag far outside the view is clamped into it",
       and mi.x() >= 0 and mi.y() >= 0,
       f"pos={mi.pos()} view={view.width()}x{view.height()}")
 
-# The detached spot wins over the corner rule — including the "below the search bar" one.
+# ── v1.5 (ROADMAP): the SNAP — a drop at an anchored edge re-attaches the panel ──────
+# The clamped drop above landed flush against the anchored RIGHT edge, so it counted as
+# "put me back": the saved position was CLEARED and the corner rule came back.
+check("§1c v1.5 SNAP: a drop flush at the anchored RIGHT edge re-anchors the panel",
+      win._minimap_pos is None
+      and read_cfg({}).get("ui_minimap_position") == {"x": None, "y": None}
+      and mi.pos() == QPoint(view.width() - mi.width() - 12, 12),
+      f"pos={mi.pos()} saved={read_cfg({}).get('ui_minimap_position')} in-memory={win._minimap_pos}")
+
+# The threshold is the DECLARED one (twice the 12 px default margin), and it is a
+# threshold, not a magnet: a drop one pixel further out keeps the detached spot.
+check("§1c v1.5 the threshold is declared and is twice the default margin",
+      win.SNAP_PX == 24 and win.SNAP_PX == 2 * win.LEGEND_MARGIN, str(win.SNAP_PX))
+mi.move(view.width() - mi.width() - (win.SNAP_PX + 1), 150)
+win._on_minimap_moved(QPoint(mi.x(), mi.y()))
+check("§1c v1.5 a drop just OUTSIDE the threshold keeps the detached spot",
+      win._minimap_pos == QPoint(mi.x(), mi.y()) and win._minimap_pos is not None
+      and read_cfg({}).get("ui_minimap_position") == {"x": mi.x(), "y": mi.y()},
+      f"pos={mi.pos()} saved={read_cfg({}).get('ui_minimap_position')}")
+
+# A drop within the threshold of the anchored TOP edge re-anchors too…
+mi.move(300, win.SNAP_PX)
+win._on_minimap_moved(QPoint(mi.x(), mi.y()))
+check("§1c v1.5 a drop at the anchored TOP edge re-anchors as well (either edge counts)",
+      win._minimap_pos is None and mi.y() == 12,
+      f"pos={mi.pos()} y={mi.y()} in-memory={win._minimap_pos}")
+
+# …and every anchored RULE comes back by itself: the minimap yields to an open search bar
+# again, which it never does while a saved position exists.
+win._open_map_search()
+app.processEvents()
+check("§1c v1.5 the re-anchored panel yields to the open search bar again (the rule is back)",
+      mi.y() >= win.map_search.geometry().bottom()
+      and mi.pos() == QPoint(max(4, view.width() - mi.width() - 12), mi.y()),
+      f"pos={mi.pos()} bar_bottom={win.map_search.geometry().bottom()}")
+win._close_map_search()
+app.processEvents()
+
+# A detached spot still wins over the corner rule.
+mi.move(300, 200)
+win._on_minimap_moved(QPoint(300, 200))
 win._open_map_search()
 app.processEvents()
 check("§1c an OPEN search bar no longer re-places a panel the user moved",
@@ -434,6 +474,28 @@ check("§1c an OPEN search bar no longer re-places a panel the user moved",
       f"pos={mi.pos()} saved={win._minimap_pos}")
 win._close_map_search()
 app.processEvents()
+
+# v1.5rc5 (N6): a MOVED panel that is FOLDED keeps the RIGHT edge it hangs from. Before,
+# the saved top-left was used verbatim, so the title band — the collapse affordance itself —
+# jumped BODY_WIDTH = 200 px to the left, away from the cursor that had just clicked it.
+win._minimap_pos = QPoint(400, 200)
+win._minimap_width = mi.DEFAULT_WIDTH
+win._position_minimap()
+app.processEvents()
+_expanded_right = mi.x() + mi.width()
+check("§1c N6: a moved panel with a saved position sits at its spot",
+      mi.pos() == QPoint(400, 200), f"pos={mi.pos()}")
+mi.set_collapsed(True)
+app.processEvents()
+check("§1c N6: the folded BAND keeps the RIGHT edge (it does not jump 200 px left)",
+      mi.width() == mi.HEADER_W and abs((mi.x() + mi.width()) - _expanded_right) <= 1,
+      f"pos={mi.pos()} right={mi.x() + mi.width()} was={_expanded_right}")
+_folded_x = mi.x()
+mi.set_collapsed(False)
+app.processEvents()
+check("§1c N6: the unfold round trip is lossless (the saved x comes back)",
+      mi.x() == 400 and mi.width() == mi.DEFAULT_WIDTH and _folded_x == 600,
+      f"pos={mi.pos()} folded_x={_folded_x}")
 
 close_window(win)
 
@@ -478,6 +540,18 @@ check("§1b a broken ui_minimap_collapsed value falls back to the default (unfol
       f"collapsed={win_bad_fold.minimap.is_collapsed()}")
 close_window(win_bad_fold)
 close_window(win_fold)
+clear_cfg()
+
+# v1.5rc5 (N6): the same right-edge rule on a window RESTORED folded — the saved position
+# describes the EXPANDED panel, so the width delta is applied at the first placement too.
+write_cfg({"ui_minimap_collapsed": True,
+           "ui_minimap_position": {"x": 400, "y": 200}})
+win_fold_pos = new_window()
+check("§1b N6: a window restored FOLDED with a saved position keeps the band's right edge",
+      win_fold_pos.minimap.x() == 600
+      and win_fold_pos.minimap.x() + win_fold_pos.minimap.width() == 620,
+      f"pos={win_fold_pos.minimap.pos()} w={win_fold_pos.minimap.width()}")
+close_window(win_fold_pos)
 clear_cfg()
 
 # ════════════════════════════════════════════════════════════════════════════

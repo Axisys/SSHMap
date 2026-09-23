@@ -363,6 +363,22 @@ check("yaml: the folded indicator `>-` opens a block as well",
       _folded == [("b", SH.ROLE_KEY), (":", SH.ROLE_PUNCTUATION),
                   (">-", SH.ROLE_PUNCTUATION)]
       and _folded_state == SH.STATE_YAML_BLOCK_BASE)
+# v1.5rc5 (N3): a `|`/`>` that is not a REAL indicator must not open a block — otherwise
+# every deeper line after `cmd: echo a | grep b` was painted as a block body.
+_pipe_mid, _pipe_mid_state = tokens(SH.LANG_YAML, "cmd: echo a | grep b")
+check("N3: a `|` in the MIDDLE of a plain scalar does NOT open a block",
+      _pipe_mid_state == SH.STATE_NORMAL, f"state={_pipe_mid_state}")
+check("N3: ...and the following indented line is not painted as a block body",
+      tokens(SH.LANG_YAML, "  indented: 1", _pipe_mid_state)[1] == SH.STATE_NORMAL)
+_pipe_end, _pipe_end_state = tokens(SH.LANG_YAML, "cmd: echo a |")
+check("N3: a `|` that ENDS a plain scalar does NOT open a block either",
+      _pipe_end_state == SH.STATE_NORMAL, f"state={_pipe_end_state}")
+_text_after, _text_after_state = tokens(SH.LANG_YAML, "a: | not-a-block")
+check("N3: text AFTER the indicator keeps the block state closed",
+      _text_after_state == SH.STATE_NORMAL, f"state={_text_after_state}")
+_comment_after, _comment_after_state = tokens(SH.LANG_YAML, "a: |  # note")
+check("N3: a comment after the indicator is still a legal block opening",
+      _comment_after_state == SH.STATE_YAML_BLOCK_BASE, f"state={_comment_after_state}")
 
 # ── the shared numbers-only rule ──
 _numbers, _ = tokens(SH.LANG_NUMBERS, "abc123 and 1.2.3 and 2026-09-28 and 10GB and 42")

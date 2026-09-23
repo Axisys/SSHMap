@@ -30,9 +30,29 @@ from PySide6.QtGui import QUndoCommand
 class _MapCommand(QUndoCommand):
     """Base: holds a reference to the window (for the refresh hook and i18n)."""
 
+    # v1.5rc3 (ROADMAP task 2): the modes in which this command DESTROYS work the user
+    # may want back. A command that ships no mode (a move, an edit, the group fold)
+    # inherits the empty tuple and is never offered as an "Undo" in the status bar.
+    DESTRUCTIVE_MODES: Tuple[str, ...] = ()
+
     def __init__(self, win, text: str = ""):
         super().__init__(text)
         self._win = win
+
+    def offers_undo(self) -> bool:
+        """v1.5rc3 (ROADMAP task 2): may the status bar offer "Undo" for this change?
+
+        True only for a change that LOSES something the user can get back with one
+        Ctrl+Z: a removed node / connection / note, a detached note, and a bulk import
+        (one command, many cards). An edit, a move or a view toggle answers False — the
+        affordance exists to make a loss discoverable, not to announce every push.
+        `MainWindow._push_command()` is the only caller: the single place that knows a
+        command really landed, and therefore the single place that can offer the way
+        back. Nothing outside the stack is ever offered (the terminal, the SFTP tab and
+        the view state have no command here).
+        """
+        mode = str(getattr(self, "_mode", "") or "")
+        return bool(mode) and mode in self.DESTRUCTIVE_MODES
 
     def _refresh(self):
         """Synchronize the window UI with the scene state after application."""
@@ -266,6 +286,9 @@ class CmdAddRemoveNode(_MapCommand):
     references from other commands (arrows created after the addition) valid.
     """
 
+    # v1.5rc3 (ROADMAP task 2): deleting a card is a LOSS — the status bar offers the way back.
+    DESTRUCTIVE_MODES = ("remove",)
+
     def __init__(self, win, scene, data, mode: str = "add",
                  arrows: Optional[List[Tuple]] = None):
         super().__init__(win, "Add server" if mode == "add" else "Delete server")
@@ -347,6 +370,10 @@ class CmdAddRemoveNodeBatch(_MapCommand):
     Ctrl+Z rolls back the entire imported batch at once.
     """
 
+    # v1.5rc3 (ROADMAP task 2): a bulk import is many cards in one gesture (and its
+    # removal the same) — the clearest case for "one click back".
+    DESTRUCTIVE_MODES = ("add", "remove")
+
     def __init__(self, win, scene, data_list, mode: str = "add"):
         super().__init__(win, f"Import {len(data_list)} servers" if mode == "add"
                          else f"Delete {len(data_list)} servers")
@@ -416,6 +443,9 @@ class CmdAddRemoveNodeBatch(_MapCommand):
 # ── AddRemoveConnection: connection create/remove ────────────────
 
 class CmdAddRemoveConnection(_MapCommand):
+    # v1.5rc3 (ROADMAP task 2): disconnecting loses the typed relation — offer the way back.
+    DESTRUCTIVE_MODES = ("remove",)
+
     def __init__(self, win, scene, source_id: str, target_id: str,
                  label: str, ctype: str, mode: str = "add",
                  bidirectional: bool = False):
@@ -492,6 +522,9 @@ class CmdConnectSelected(_MapCommand):
 # ── AddRemoveNote: note create/remove ────────────────────────────
 
 class CmdAddRemoveNote(_MapCommand):
+    # v1.5rc3 (ROADMAP task 2): a deleted note is text the user wrote — offer the way back.
+    DESTRUCTIVE_MODES = ("remove",)
+
     def __init__(self, win, scene, raw: dict, mode: str = "add"):
         super().__init__(win, "Add note" if mode == "add" else "Delete note")
         self._scene = scene
@@ -611,6 +644,10 @@ class CmdAttachNote(_MapCommand):
     No merging (id() not overridden → 0): each attach/detach is a separate
     undo step; the LIFO chain "detach + server removal" rolls back completely.
     """
+
+    # v1.5rc3 (ROADMAP task 2): UNPINNING a note is a loss too (the note stops
+    # following its server) — attaching it is not (it can be undone from the menu).
+    DESTRUCTIVE_MODES = ("detach",)
 
     def __init__(self, win, note, node_id: str, mode: str = "attach"):
         super().__init__(win, "Attach note" if mode == "attach" else "Detach note")

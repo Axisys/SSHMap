@@ -41,6 +41,11 @@ the block state), booleans/nulls and numbers. They do NOT parse anchors/aliases,
 tags (`!!str`), multi-line flow collections (`[a,` / `b]` spread over lines) or
 the full block-scalar indentation rules: a block scalar simply ends at the first
 non-blank line that is not indented deeper than the line the `|` stood on.
+Since v1.5rc5 (N3) the block state opens only for a REAL indicator — one that
+begins the value and is followed by nothing but whitespace (and the optional
+chomping/indentation indicators) — so the two residual cases are plain scalars
+that CONTAIN the character: a `|`/`>` in value position with other text
+(`cmd: echo a | grep b`) and a `|`/`>` that ENDS a plain scalar (`cmd: echo a |`).
 """
 
 import json
@@ -472,6 +477,7 @@ def _tokenize_yaml(line, state, max_tokens):
 
     next_state = state
     j = i
+    value_started = False   # v1.5rc5 (N3): has a non-space value token been consumed?
     while j < content_end and len(spans) < max_tokens:
         ch = line[j]
         if ch in " \t":
@@ -482,37 +488,61 @@ def _tokenize_yaml(line, state, max_tokens):
             end = match.end() if match is not None else content_end
             spans.append((j, end - j, ROLE_STRING))
             j = end
+            value_started = True
             continue
         if ch in "|>":
             end = j + 1
             while end < content_end and line[end] in "+-0123456789":
                 end += 1
             spans.append((j, end - j, ROLE_PUNCTUATION))
-            next_state = STATE_YAML_BLOCK_BASE + indent
+            # v1.5rc5 (N3): a block-scalar indicator must BEGIN the value and be the LAST
+            # thing on the line (only the chomping/indentation indicators, just consumed,
+            # and whitespace may follow). Without both conditions a plain scalar that merely
+            # CONTAINS a `|`/`>` — `cmd: echo a | grep b` — opened a block and painted every
+            # deeper line as its body.
+            if not value_started and _yaml_block_body_allowed(line, end, content_end):
+                next_state = STATE_YAML_BLOCK_BASE + indent
             j = end
             continue
         if ch in "[{":
             spans.append((j, 1, ROLE_PUNCTUATION))
             j += 1
+            value_started = True
             continue
         if ch in "]},":
             spans.append((j, 1, ROLE_PUNCTUATION))
             j += 1
+            value_started = True
             continue
         match = _NUMBER_RE.match(line, j)
         if match is not None:
             spans.append((j, match.end() - j, ROLE_NUMBER))
             j = match.end()
+            value_started = True
             continue
         word = _YAML_WORD_RE.match(line, j)
         if word is not None:
             if word.group(0) in _YAML_KEYWORDS:
                 spans.append((j, len(word.group(0)), ROLE_KEYWORD))
             j = word.end()
+            value_started = True
             continue
         j += 1
     spans.sort(key=lambda span: span[0])   # the language layer appends the comment first
     return spans, next_state
+
+
+def _yaml_block_body_allowed(line, start, content_end) -> bool:
+    """v1.5rc5 (N3): whether only whitespace follows a block-scalar indicator.
+
+    The chomping/indentation indicators (`+`, `-`, a digit) are already consumed by the
+    caller; anything else before the comment/end of the line means the `|`/`>` is part of
+    a PLAIN scalar (`cmd: echo a | grep b`) and must not open a block.
+    """
+    for k in range(start, content_end):
+        if line[k] not in " \t":
+            return False
+    return True
 
 
 def _yaml_comment_start(line):

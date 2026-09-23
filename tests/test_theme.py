@@ -95,7 +95,7 @@ print("== §2 DARK: the snapshot of the pre-v1.4.3 palette ==")
 
 check("§2 the active theme is DARK out of the box (the dark theme stays the default)",
       theme.THEME is theme.DARK and theme.MODE_DARK == "dark"
-      and theme.MODES == ("dark", "light"), str(theme.MODES))
+      and theme.MODES == ("dark", "light", "auto"), str(theme.MODES))
 
 # The literal snapshot: every value the module held as a CONSTANT before v1.4.3.
 # Editing DARK is a visual change and has to be a deliberate one — this is the check
@@ -151,7 +151,11 @@ check("§2 SFTP_PREVIEW_BLOCKED is the warn tone (one value, not a second litera
       theme.DARK.sftp_preview_blocked == theme.DARK.status_warn == "#facc15")
 check("§2 the derived dicts are NOT fields — the values are declared exactly once",
       set(f.name for f in dataclasses.fields(theme.Theme)) == set(DARK_SNAPSHOT)
-      | {"accent_hue", "accent_hover", "accent_selected"} | set(SYNTAX_FIELDS),
+      | {"accent_hue", "accent_hover", "accent_selected",
+         # v1.5rc1: the STRONG accent family — three NEW fields that resolve to the
+         # DARK values this snapshot already pins (the role is new, the bytes are not)
+         "accent_strong", "accent_strong_hover", "accent_strong_selected"}
+      | set(SYNTAX_FIELDS),
       str(sorted(set(f.name for f in dataclasses.fields(theme.Theme)) - set(DARK_SNAPSHOT))))
 check("§2 the dicts/lists are derived PROPERTIES on Theme (no second copy of the values)",
       all(isinstance(getattr(theme.Theme, name), property) for name in
@@ -215,15 +219,27 @@ check("§3 LIGHT starts from the slate-100 surfaces named by the plan",
       (theme.LIGHT.canvas_bg, theme.LIGHT.base_bg, theme.LIGHT.window_bg)
       == ("#f8fafc", "#e2e8f0", "#f1f5f9"),
       f"{theme.LIGHT.canvas_bg} {theme.LIGHT.base_bg} {theme.LIGHT.window_bg}")
-check("§3 LIGHT text: near-black primary, the muted mid-tone",
-      (theme.LIGHT.text_primary, theme.LIGHT.text_muted) == ("#0f172a", "#64748b"))
+check("§3 LIGHT text: near-black primary, the muted tone deepened to AA in v1.5rc1",
+      (theme.LIGHT.text_primary, theme.DARK.text_muted) == ("#0f172a", "#94a3b8")
+      and theme.LIGHT.text_muted == "#556070"
+      and theme.LIGHT.text_muted != theme.DARK.text_muted,
+      theme.LIGHT.text_muted)
 check("§3 LIGHT statuses are DARKER than the dark theme's (contrast on a light canvas)",
-      theme.LIGHT.status_online == "#16a34a" and theme.LIGHT.status_warn == "#ca8a04"
+      theme.LIGHT.status_online == "#16a34a" and theme.LIGHT.status_warn == "#a16207"
       and theme.LIGHT.status_offline == "#dc2626")
-check("§3 LIGHT keeps the amber selection and the yellow sticky note (they read on light)",
-      theme.LIGHT.selection_amber == "#f59e0b"
-      and (theme.LIGHT.note_bg, theme.LIGHT.note_border, theme.LIGHT.note_text)
-      == (theme.DARK.note_bg, theme.DARK.note_border, theme.DARK.note_text))
+# v1.5rc1 renamed the claim of this check: the two tones are no longer "kept because
+# they read on light" (the review measured the amber at 2.05:1 as INK and the sticky
+# note at 1.30:1 against the canvas). LIGHT now carries its OWN values, and the gate
+# (tests/test_theme_contrast.py) is what proves they hold.
+check("§3 v1.5rc1: LIGHT carries its own amber selection and its own sticky tone",
+      theme.LIGHT.selection_amber == "#b45309"
+      and theme.DARK.selection_amber == "#f59e0b"
+      and (theme.LIGHT.note_bg, theme.LIGHT.note_border)
+      != (theme.DARK.note_bg, theme.DARK.note_border)
+      and theme.LIGHT.note_text == theme.DARK.note_text)
+check("§3 v1.5rc1: the five dark-tuned LIGHT fields were re-tuned (the review's list)",
+      all(getattr(theme.DARK, name) != getattr(theme.LIGHT, name) for name in
+          ("node_hover", "group_hover", "node_border", "note_bg", "selection_amber")))
 check("§3 LIGHT's card is the WHITE surface (the card/background contrast moved)",
       theme.LIGHT.node_bg == "#ffffff" and theme.DARK.node_bg != theme.LIGHT.node_bg)
 check("§3 the two instances really differ: every surface + text + status tone",
@@ -354,15 +370,15 @@ from ui.settings_dialog import (SettingsDialog, accent_swatches,  # noqa: E402
                                 load_theme_settings, theme_from_settings)
 
 clear_cfg()
-check("§6 no `theme` key → DARK + the default accent (the defaults ARE the behaviour)",
-      load_theme_settings() == {"mode": "dark", "accent": "#38bdf8"}
+check("§6 no `theme` key → DARK + the default accent + the motion ON (the defaults ARE the behaviour)",
+      load_theme_settings() == {"mode": "dark", "accent": "#38bdf8", "motion": True}
       and theme_from_settings(load_theme_settings()) is theme.DARK,
       str(load_theme_settings()))
 
 write_cfg({"theme": {"mode": "light", "accent": "#b838f8"}})
 _stored = load_theme_settings()
 check("§6 the round trip: a saved light theme + a custom accent come back unchanged",
-      _stored == {"mode": "light", "accent": "#b838f8"}, str(_stored))
+      _stored == {"mode": "light", "accent": "#b838f8", "motion": True}, str(_stored))
 _instance = theme_from_settings(_stored)
 check("§6 ...and become the LIGHT instance with that hue (the hex is a hue in disguise)",
       _instance.canvas_bg == theme.LIGHT.canvas_bg
@@ -372,14 +388,23 @@ check("§6 ...and become the LIGHT instance with that hue (the hex is a hue in d
 
 write_cfg({"theme": "not-an-object"})
 check("§6 a broken `theme` value (a string) → the defaults, and the app still starts",
-      load_theme_settings() == {"mode": "dark", "accent": "#38bdf8"})
+      load_theme_settings() == {"mode": "dark", "accent": "#38bdf8", "motion": True})
 write_cfg({"theme": {"mode": 42, "accent": "#zzzzzz"}})
 check("§6 a foreign mode + an invalid colour → the defaults (per value, never a crash)",
-      load_theme_settings() == {"mode": "dark", "accent": "#38bdf8"},
+      load_theme_settings() == {"mode": "dark", "accent": "#38bdf8", "motion": True},
       str(load_theme_settings()))
 write_cfg({"theme": {"mode": "LIGHT", "accent": "38BDF8"}})
 check("§6 the mode is case-insensitive and a missing '#' is tolerated",
-      load_theme_settings() == {"mode": "light", "accent": "#38bdf8"},
+      load_theme_settings() == {"mode": "light", "accent": "#38bdf8", "motion": True},
+      str(load_theme_settings()))
+# v1.5rc1: the third mode + the motion flag of the same nested key.
+write_cfg({"theme": {"mode": "auto", "accent": "#38bdf8", "motion": False}})
+check("§6 v1.5rc1: 'auto' is a valid mode and a real `motion` boolean round-trips",
+      load_theme_settings() == {"mode": "auto", "accent": "#38bdf8", "motion": False},
+      str(load_theme_settings()))
+write_cfg({"theme": {"mode": "dark", "accent": "#38bdf8", "motion": "yes"}})
+check("§6 v1.5rc1: a broken motion value → the motion ON (today's behaviour)",
+      load_theme_settings() == {"mode": "dark", "accent": "#38bdf8", "motion": True},
       str(load_theme_settings()))
 clear_cfg()
 
@@ -397,9 +422,9 @@ check("§6 the hub has the 'Appearance' tab right after 'General' (8 tabs total)
       and dlg.tabs.tabText(1) == dlg.tabs.tabText(1)  # a label exists
       and dlg.tabs.tabText(1) != dlg.tabs.tabText(2),
       str([dlg.tabs.tabText(i) for i in range(dlg.tabs.count())]))
-check("§6 the mode combo offers dark/light with the DEFAULT preselected",
+check("§6 the mode combo offers dark/light/auto with the DEFAULT preselected",
       [dlg.theme_mode_combo.itemData(i) for i in range(dlg.theme_mode_combo.count())]
-      == ["dark", "light"] and dlg.theme_mode_combo.currentData() == "dark")
+      == ["dark", "light", "auto"] and dlg.theme_mode_combo.currentData() == "dark")
 check("§6 a swatch per preset + the own-colour field + the picker",
       len(dlg._swatch_buttons) == len(accent_swatches())
       and all(btn.width() == 26 for btn, _h in dlg._swatch_buttons.values())
@@ -409,7 +434,7 @@ check("§6 the swatch carries its colour in the QSS (the user sees the accent be
       theme.accent_hex() in dlg._swatch_buttons["sky"][0].styleSheet(),
       dlg._swatch_buttons["sky"][0].styleSheet())
 check("§6 collect() carries the theme as ONE nested key (the appearance choice)",
-      dlg.collect()["theme"] == {"mode": "dark", "accent": "#38bdf8"}
+      dlg.collect()["theme"] == {"mode": "dark", "accent": "#38bdf8", "motion": True}
       and len(dlg.collect()) == 22,
       str(sorted(dlg.collect())))
 
@@ -451,7 +476,7 @@ check("§6 an unusable hex is REFUSED — the field returns to the last valid co
       f"field={dlg.accent_hex_edit.text()!r} stored={dlg._accent_hex!r} "
       f"accent={_before.accent} hue={_before.hue()}")
 check("§6 collect() now describes the tab's choice (light + the user's own colour)",
-      dlg.collect()["theme"] == {"mode": "light", "accent": dlg._accent_hex}
+      dlg.collect()["theme"] == {"mode": "light", "accent": dlg._accent_hex, "motion": True}
       and theme.hex_hue(dlg.collect()["theme"]["accent"]) == _before.hue(),
       str(dlg.collect()["theme"]))
 dlg.close()
@@ -749,6 +774,9 @@ check_i18n_parity(langs)
 check_i18n_format(langs)
 APPEARANCE_KEYS = ["settings.tab.appearance", "settings.appearance.mode",
                    "settings.appearance.mode.dark", "settings.appearance.mode.light",
+                   # v1.5rc1: the third mode + the motion switch of the same tab
+                   "settings.appearance.mode.auto", "settings.appearance.motion",
+                   "settings.appearance.motion.tooltip",
                    "settings.appearance.accent", "settings.appearance.accent.sky",
                    "settings.appearance.accent.cyan", "settings.appearance.accent.green",
                    "settings.appearance.accent.amber", "settings.appearance.accent.orange",

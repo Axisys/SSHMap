@@ -10,10 +10,12 @@ except ImportError:
 # longer read here, because the palette and the QSS are both the builder's job.
 try:
     from .ui import theme_qss
-    from .ui.settings_dialog import load_theme_settings, theme_from_settings
+    from .ui.settings_dialog import (load_theme_settings, theme_from_settings,
+                                     apply_motion_setting)
 except ImportError:
     from ui import theme_qss
-    from ui.settings_dialog import load_theme_settings, theme_from_settings
+    from ui.settings_dialog import (load_theme_settings, theme_from_settings,
+                                    apply_motion_setting)
 
 
 def main():
@@ -50,8 +52,14 @@ def main():
         # wrong palette. `ui/theme_qss.apply_theme()` is the ONE place that turns a
         # Theme into the application's look; every later switch is
         # `MainWindow.apply_theme()`.
-        theme_qss.apply_theme(theme_from_settings(load_theme_settings()), app=app,
+        # v1.5rc1: an `auto` mode is resolved here too — the platform's colour
+        # scheme decides, and `MainWindow` keeps following it live.
+        _saved_theme = load_theme_settings()
+        theme_qss.apply_theme(theme_from_settings(_saved_theme), app=app,
                               refresh_windows=False)
+        # v1.5rc1 (ROADMAP task 6): the "Reduce motion" flag of the same key,
+        # installed BEFORE the window exists so no gesture can start un-flagged.
+        apply_motion_setting(_saved_theme)
 
         win = MainWindow()
         win.show()

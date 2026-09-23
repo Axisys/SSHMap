@@ -87,6 +87,9 @@ EMPTY_DEFAULT_ACTIONS = {
     "view.toggle_minimap",
     # v1.4.5: the legend panel — a checkable View item + its toolbar mirror (task 4).
     "view.toggle_legend",
+    # v1.5rc3: "Open the example map" (the Help item of the demo map — the empty state's
+    # second button calls the same window method). No key out of the box.
+    "help.example",
 }
 
 # v1.3.3.3 i18n additions (13 keys: 477 → 490).
@@ -139,11 +142,12 @@ class _FakeChecker:
 print("== 1. the registry is complete ==")
 
 ids = HR.action_ids()
-check("registry: 46 actions — the v1.3.2 set + Save As + the zoom family + the empty defaults "
+check("registry: 49 actions — the v1.3.2 set + Save As + the zoom family + the empty defaults "
       "(v1.3.3.7: +file.export_svg; v1.4rc1: +plugins.reload; v1.4rc3: +plugins.run_on_nodes; "
       "v1.4.1: +file.import_ssh_config; v1.4.2: +view.toggle_minimap; "
-      "v1.4.5: +view.toggle_legend)",
-      len(ids) == 46 and len(set(ids)) == 46, str(len(ids)))
+      "v1.4.5: +view.toggle_legend; v1.5rc3: +help.cheatsheet (F1) and +help.example; "
+      "v1.5rc4: +view.focus_map — the ONE new action of that release)",
+      len(ids) == 49 and len(set(ids)) == 49, str(len(ids)))
 check("registry: the 4 new SEQUENCED actions carry exactly the promised defaults",
       {a: HR.default_sequence(a) for a in NEW_DEFAULT_ACTIONS} == NEW_DEFAULT_ACTIONS,
       str({a: HR.default_sequence(a) for a in NEW_DEFAULT_ACTIONS}))
@@ -367,7 +371,7 @@ check("empty default: the object is still a registered hotkey target (a sequence
 
 dlg = SettingsDialog(None)
 check("empty default: the action appears as a row in the Hotkeys tab with an EMPTY field",
-      dlg.hotkeys_table.rowCount() == len(ids)
+      dlg.hotkeys_table.rowCount() == len(ids) + len(dlg.hotkey_family_rows())
       and dlg.hotkey_edits["file.export_png"].keySequence().toString() == ""
       and dlg.hotkey_edits["help.about"].keySequence().toString() == ""
       and dlg.hotkey_edits["view.center_map"].keySequence().toString() == "")
@@ -631,6 +635,32 @@ check("about: open_config_folder() targets ~/.sshmap and creates it on demand",
       AD.app_config_dir() == os.path.join(os.path.expanduser("~"), ".sshmap")
       and AD.app_config_path().endswith(os.path.join(".sshmap", "config.json"))
       and AD.app_logs_dir().endswith(os.path.join(".sshmap", "logs")))
+
+# v1.5rc5 (N1): the POSIX branches pass an ARGUMENT LIST to subprocess.call — the path is
+# expanduser("~")-derived, so the historical `os.system(f'xdg-open "{path}"')` form was
+# command injection through a `"` or a `;` in the home directory.
+_n1_calls = []
+_orig_subprocess_call = AD.subprocess.call
+_orig_platform = AD.sys.platform
+AD.subprocess.call = lambda argv, *a, **kw: (_n1_calls.append(argv), 0)[1]
+try:
+    for _plat in ("darwin", "linux"):
+        AD.sys.platform = _plat
+        _n1_calls.clear()
+        AD.open_config_folder()
+        _argv = _n1_calls[0] if _n1_calls else None
+        check(f"N1: the {_plat} opener passes a LIST argv (no shell, no interpolation)",
+              isinstance(_argv, list) and len(_argv) == 2
+              and _argv[1] == AD.app_config_dir()
+              and _argv[0] == ("open" if _plat == "darwin" else "xdg-open"),
+              f"argv={_argv!r}")
+finally:
+    AD.subprocess.call = _orig_subprocess_call
+    AD.sys.platform = _orig_platform
+with open(AD.__file__, encoding="utf-8") as _ad_src:
+    _ad_text = _ad_src.read()
+check("N1: no os.system(...) / shell=True call is left in the module (the argv form only)",
+      "os.system(" not in _ad_text and "shell=True" not in _ad_text)
 
 # A failure of the OS call must not take the window down
 def _boom():

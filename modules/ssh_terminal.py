@@ -381,6 +381,25 @@ class SSHTerminalThread(QThread):
             # without receivers is not needed.
             if self.running:
                 self.error_signal.emit(msg if not msg.startswith("[") else f"Host key changed for {self.host}: {e}")
+        except paramiko.AuthenticationException:
+            # v1.5rc5 (N4b): the interactive terminal — the PRIMARY "Connect" path — had no
+            # localized branch at all, so an auth failure showed paramiko's English sentence
+            # in every language and the keys existed but were referenced by the one-shot
+            # worker alone. Same class → key mapping as modules/ssh_worker.py.
+            if self.running:
+                msg = t("ssh.auth_failed")
+                self.error_signal.emit(msg if not msg.startswith("[") else "Authentication failed")
+        except paramiko.SSHException as e:
+            if self.running:
+                msg = t("ssh.ssh_error", message=str(e))
+                self.error_signal.emit(msg if not msg.startswith("[") else f"SSH error: {e}")
+        except OSError as e:
+            # v1.5rc5 (N4b): socket.gaierror / socket.timeout / NoValidConnectionsError are
+            # OSError, not SSHException — see N4. LAST, so the paramiko branches win.
+            if self.running:
+                msg = t("ssh.connection_failed", host=self.host, port=self.port)
+                self.error_signal.emit(msg if not msg.startswith("[")
+                                       else f"Connection failed for {self.host}:{self.port}: {e}")
         except Exception as e:
             # v1.1.2RC1 (N4): guard like in the recv loop — see above.
             if self.running:

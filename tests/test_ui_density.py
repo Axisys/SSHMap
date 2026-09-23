@@ -412,6 +412,11 @@ print("== 4. the legend panel ==")
 
 clear_cfg()
 win = make_main()
+# v1.5rc4: the overlay-priority rule makes the legend YIELD to the first-run hint while
+# the map is empty, so this section (which tests the legend's OWN state machine) works on
+# a map that has a server — the suppression itself is pinned by tests/test_chrome.py §7.
+add_node(win, "uidlegend1", "Legend", "10.95.0.1")
+app.processEvents()
 legend = win.legend
 
 _rows = legend.rows()
@@ -481,16 +486,66 @@ check("a second click unfolds it (and persists the open state)",
 _start = legend.pos()
 QTest.mousePress(legend, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier,
                  QPoint(20, legend.height() - 6))
-QTest.mouseMove(legend, QPoint(20 + 90, legend.height() - 6 + 40))
+QTest.mouseMove(legend, QPoint(20 + 90, legend.height() - 6 - 40))
 app.processEvents()
 QTest.mouseRelease(legend, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier,
-                   QPoint(20 + 90, legend.height() - 6 + 40))
+                   QPoint(20 + 90, legend.height() - 6 - 40))
 app.processEvents()
 _saved = i18n.load_config().get("ui_legend_position")
 check("dragging the panel moves it and persists {x, y}",
       legend.pos() != _start and isinstance(_saved, dict) and _saved.get("x") == legend.x()
       and _saved.get("y") == legend.y(),
       f"start={_start} now={legend.pos()} saved={_saved}")
+
+# ── v1.5 (ROADMAP): the SNAP — dropping the panel at an anchored edge re-attaches it ──
+# The legend hangs from LEFT|BOTTOM; the drag above went UP and right, i.e. away from both
+# (the threshold is 24 px = twice the 12 px default margin), so it stayed detached.
+check("v1.5 the drag really landed away from both anchored edges (a threshold is not a magnet)",
+      legend.x() > win.SNAP_PX
+      and win.view.height() - (legend.y() + legend.height()) > win.SNAP_PX,
+      f"pos={legend.pos()} view={win.view.width()}x{win.view.height()} snap={win.SNAP_PX}")
+
+# A drop INSIDE the threshold of the anchored LEFT edge re-anchors: the saved position is
+# cleared (the null sentinel — `save_config()` merges and cannot delete a key) and the
+# documented bottom-left corner comes back by itself.
+legend.move(win.SNAP_PX - 4, 200)
+win._on_legend_moved(legend.pos())
+app.processEvents()
+check("v1.5 SNAP: a drop at the anchored LEFT edge re-anchors the legend",
+      win._legend_pos is None
+      and i18n.load_config().get("ui_legend_position") == {"x": None, "y": None}
+      and legend.x() == win.LEGEND_MARGIN
+      and legend.y() + legend.height()
+      == win.view.height() - win.LEGEND_MARGIN,
+      f"pos={legend.pos()} saved={i18n.load_config().get('ui_legend_position')} "
+      f"in-memory={win._legend_pos}")
+check("v1.5 the null sentinel reads as 'no saved position' for the NEXT start too",
+      MW.MainWindow._saved_position({"x": None, "y": None}) is None
+      and MW.MainWindow._saved_position(["a", "b"]) is None)
+
+# …and a drop just outside the threshold keeps the detached spot.
+legend.move(win.SNAP_PX + 1, 200)
+win._on_legend_moved(legend.pos())
+check("v1.5 a drop just OUTSIDE the threshold keeps the detached spot",
+      win._legend_pos == QPoint(legend.x(), legend.y())
+      and i18n.load_config().get("ui_legend_position") == {"x": legend.x(), "y": legend.y()},
+      f"pos={legend.pos()} saved={i18n.load_config().get('ui_legend_position')}")
+
+# A drop at the anchored BOTTOM edge (where the panel starts) re-anchors as well — either
+# anchored edge counts, and the panel returns to the corner it is documented to hang from.
+legend.move(120, win.view.height() - legend.height() - 2)
+win._on_legend_moved(legend.pos())
+app.processEvents()
+check("v1.5 a drop at the anchored BOTTOM edge re-anchors it to the corner",
+      win._legend_pos is None and legend.x() == win.LEGEND_MARGIN
+      and legend.y() + legend.height() == win.view.height() - win.LEGEND_MARGIN,
+      f"pos={legend.pos()} saved={i18n.load_config().get('ui_legend_position')}")
+
+# The two panels keep their OWN anchored edges (the legend is not the minimap).
+check("v1.5 each panel declares its own anchored edges (ONE resolver, two calls)",
+      "lb" in open(os.path.join(ROOT, "ui", "main_window.py"), encoding="utf-8").read()
+      and "rt" in open(os.path.join(ROOT, "ui", "main_window.py"), encoding="utf-8").read()
+      and win.SNAP_PX == 24)
 
 win._dirty = False
 win.close()
@@ -501,6 +556,8 @@ merge_position = {"x": 60, "y": 120}
 write_cfg({"ui_legend": False, "ui_legend_collapsed": True, "ui_legend_position": merge_position,
            "language": "en"})
 win2 = make_main()
+add_node(win2, "uidlegend2", "Legend2", "10.95.0.2")   # v1.5rc4: no first-run hint in the way
+app.processEvents()
 check("a new window applies the saved state (hidden + folded + the saved spot)",
       not win2.act_show_legend.isChecked() and not win2.legend.isVisible()
       and win2.legend.is_collapsed() and win2.legend.pos() == QPoint(60, 120),
@@ -511,6 +568,8 @@ close_window(win2)
 # a broken value -> the default (visible, unfolded, the bottom-left corner)
 write_cfg({"ui_legend": "yes", "ui_legend_collapsed": 1, "ui_legend_position": ["a", "b"]})
 win3 = make_main()
+add_node(win3, "uidlegend3", "Legend3", "10.95.0.3")   # v1.5rc4: no first-run hint in the way
+app.processEvents()
 check("a broken ui_legend* value falls back to the default (visible, unfolded)",
       win3.legend.isVisible() and not win3.legend.is_collapsed()
       and win3._legend_pos is None)

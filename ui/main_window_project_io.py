@@ -54,13 +54,112 @@ class ProjectIOMixin:
         self.scene.clear_all()
         self._project_file = None
         self._dirty = False
+        # v1.5rc3: a fresh document is nobody's example
+        self._example_project = False
         self._reset_undo_stack()  # v0.8.3: new project — a clean undo stack
+        self._set_emulated_statuses({})  # v1.5: a fresh document emulates nothing
         self.refresh_sidebar()
         self._close_map_search_if_open()  # v0.9.8: context change — close the search
         self._sync_status_targets()  # v0.7.1: the scene is empty — the check plan is empty
         self._update_window_title()
         if self.log:
             self.log.info("New project created")
+
+    # ── v1.5rc3 (ROADMAP task 1): the example map ───────────────────────────────
+
+    def _open_example_map(self) -> bool:
+        """Load the DEMO project (`storage/example_project.py`) through the ordinary path.
+
+        The ONE entry point of both surfaces (the empty state's second button and
+        `Help → Open the example map`). It never touches the disk: the factory builds the
+        same dict a project file would hold and hands it to `_load_project_at()` — the
+        very method File → Open, a drop, the MRU and the recovery path use. So the demo
+        gets the whole ordinary treatment (the groups/notes/arrows are rebuilt by the
+        format's own code, the view state is applied, the undo stack is rebased, the
+        keyring is consulted, a status round starts) and cannot drift from the format.
+
+        Two consequences of loading a project that is NOT a file, both deliberate:
+
+          * `_project_file` stays empty, so File → Save asks for a name — the demo
+            becomes the user's own project the moment they save it (nothing is ever
+            written to `~/.sshmap/` behind their back, and the map is NOT added to the
+            Recent list: a demo is not "yesterday's work");
+          * `_example_project` marks the window (the title says so) until a new/open/save
+            clears it — the map is never confused with a user file.
+
+        v1.5 (ROADMAP): the demo carries EMULATED statuses. `DEMO_STATUSES` is declared in
+        the factory and applied HERE, after the load, through the ordinary
+        `ServerNode.set_status(..., emulated=True)` — and the skip set is installed BEFORE
+        the load, so the round that a project load always starts cannot probe them (it
+        would repaint them `offline` within seconds). Both halves are undone by every
+        other load and by a save: the emulation never leaves the demo map, and nothing is
+        ever serialized (a status is a measurement, not data).
+        """
+        try:
+            from storage.example_project import build_example_project, DEMO_STATUSES
+        except ImportError:  # flat layout without the package
+            from example_project import build_example_project, DEMO_STATUSES
+        try:
+            raw = build_example_project()
+        except Exception as e:  # noqa: BLE001 — a broken factory must not kill the window
+            if self.log:
+                self.log.exception("Could not build the example project")
+            QMessageBox.critical(self, self.t("msg.error_title"),
+                                 self.t("msg.load_failed", error=str(e)))
+            return False
+        # BEFORE the load: `_load_project_at()` starts a probe round, and a target list
+        # that still holds the demo's ids would overwrite the emulation it is about to get.
+        self._set_emulated_statuses(DEMO_STATUSES)
+        ok = bool(self._load_project_at("", skip_autosave_prompt=True, raw=raw, example=True))
+        if ok:
+            self._apply_emulated_statuses()
+        else:
+            self._set_emulated_statuses({})
+        return ok
+
+    # ── v1.5 (ROADMAP): the EMULATED statuses of the demo map ───────────────────
+
+    def _set_emulated_statuses(self, statuses: dict) -> None:
+        """Remember which node ids carry an EMULATED status and keep the checker in step.
+
+        v1.5 (ROADMAP): ONE place owns the emulation state. `statuses` is the demo's
+        declaration (`storage/example_project.DEMO_STATUSES`) while the example map is the
+        open project, and an EMPTY mapping for every other project — so the skip set of
+        `StatusChecker` (`set_skip_ids`, filtered in its `_subset()`) can never outlive the
+        demo. The checker may be absent (a headless test, a stripped build): the state is
+        kept either way, because it is what `_apply_emulated_statuses()` reads.
+        """
+        self._emulated_statuses = dict(statuses or {})
+        checker = getattr(self, "_status_checker", None)
+        if checker is None:
+            return
+        try:
+            checker.set_skip_ids(self._emulated_statuses)
+        except (AttributeError, RuntimeError):
+            pass  # a stripped checker / Qt teardown — the emulation is a label, not a crash
+
+    def _apply_emulated_statuses(self) -> int:
+        """Paint the declared EMULATED statuses on the loaded cards (v1.5).
+
+        Through the ORDINARY `set_status(..., emulated=True)` path: the card does
+        everything else (the colour, the declared shape, the "demo" marker, the suppressed
+        age) and this method owns nothing but the declaration. Called by
+        `_open_example_map()` right after the load, when the map already holds the demo's
+        nodes; returns how many cards were painted (the topical test's seam).
+        """
+        painted = 0
+        for sid, status in dict(getattr(self, "_emulated_statuses", None) or {}).items():
+            node = self.scene.get_node(sid)
+            if node is None:
+                continue  # a declaration for a node this project does not hold
+            try:
+                node.set_status(status, emulated=True)
+            except (RuntimeError, AttributeError):
+                continue  # Qt teardown — a repaint is cosmetic
+            painted += 1
+        if painted:
+            self._update_counts_label()   # the counters tell the truth of the MAP
+        return painted
 
     def _import_project_raw(self, raw: dict):
         """Import an already-loaded JSON project into the scene.
@@ -333,7 +432,8 @@ class ProjectIOMixin:
             return False
         return self._load_project_at(path)
 
-    def _load_project_at(self, path: str, skip_autosave_prompt: bool = False) -> bool:
+    def _load_project_at(self, path: str, skip_autosave_prompt: bool = False,
+                         raw: dict = None, example: bool = False) -> bool:
         """v0.9.7: the common load path (File→Open and restore from a backup/autosave).
 
         ROADMAP v0.9.7 #3: if the autosave is NEWER than the file on disk —
@@ -350,36 +450,55 @@ class ProjectIOMixin:
         unreadable, not on any later failure: an error thrown while APPLYING an
         already-parsed project (the keyring, the sidebar, the view) must not offer to
         overwrite a perfectly good file — that keeps the historic dialog.
+
+        v1.5rc3 (ROADMAP task 1): `raw` is an ALREADY-PARSED project and `example`
+        marks the DEMO one (`_open_example_map`). A dict supplied by the caller skips
+        the file reading, the autosave prompt and the recovery path — there is no file
+        to read, no autosave to be newer and nothing to recover — and joins the SAME
+        tail every other load uses. A demo has no path, so it enters neither the MRU
+        nor `_project_file`; `_update_window_title()` is what tells the user that the
+        map on screen is an example.
+
+        v1.5 (ROADMAP): every load that is NOT the demo ends the emulation — the demo's
+        `DEMO_STATUSES` may never survive into a user's project (it is installed by
+        `_open_example_map()` before it calls this method).
         """
-        try:
-            from storage.project import load_project as _load_project
-            raw = _load_project(path)
-        except Exception as e:  # noqa: BLE001 — the file cannot be read: recover, do not dead-end
-            # v1.3.3.6 (task 3): the ring buffer and the autosave are consulted BEFORE
-            # the critical dialog (which stays for the "nothing to restore" case).
-            return self._recover_unreadable_project(path, e)
+        if not example:
+            self._set_emulated_statuses({})
+        if raw is None:
+            try:
+                from storage.project import load_project as _load_project
+                raw = _load_project(path)
+            except Exception as e:  # noqa: BLE001 — the file cannot be read: recover, do not dead-end
+                # v1.3.3.6 (task 3): the ring buffer and the autosave are consulted BEFORE
+                # the critical dialog (which stays for the "nothing to restore" case).
+                return self._recover_unreadable_project(path, e)
+
+            try:
+                # v0.9.7 #3: the autosave is newer than the file → offer a restore
+                if not skip_autosave_prompt:
+                    try:
+                        from storage import autosave as _as_mod
+                        if _as_mod.autosave_is_newer(path):
+                            auto_raw = _as_mod.read_autosave(path)
+                            if auto_raw is not None:
+                                from datetime import datetime as _dt
+                                ts = _dt.fromtimestamp(_as_mod.autosave_mtime(path)).strftime(
+                                    "%Y-%m-%d %H:%M:%S")
+                                reply = QMessageBox.question(
+                                    self, self.t("dialog.autosave_found"),
+                                    self.t("msg.autosave_newer", time=ts),
+                                    QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes)
+                                if reply == QMessageBox.Yes:
+                                    raw = auto_raw  # load the autosave instead of the file
+                    except Exception as e:  # noqa: BLE001 — the check is optional, do not break opening
+                        if self.log:
+                            self.log.warning(f"Autosave check failed: {e}")
+            except Exception as e:  # noqa: BLE001 — the prompt must not block a good file
+                if self.log:
+                    self.log.warning(f"Autosave prompt failed: {e}")
 
         try:
-            # v0.9.7 #3: the autosave is newer than the file → offer a restore
-            if not skip_autosave_prompt:
-                try:
-                    from storage import autosave as _as_mod
-                    if _as_mod.autosave_is_newer(path):
-                        auto_raw = _as_mod.read_autosave(path)
-                        if auto_raw is not None:
-                            from datetime import datetime as _dt
-                            ts = _dt.fromtimestamp(_as_mod.autosave_mtime(path)).strftime(
-                                "%Y-%m-%d %H:%M:%S")
-                            reply = QMessageBox.question(
-                                self, self.t("dialog.autosave_found"),
-                                self.t("msg.autosave_newer", time=ts),
-                                QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes)
-                            if reply == QMessageBox.Yes:
-                                raw = auto_raw  # load the autosave instead of the file
-                except Exception as e:  # noqa: BLE001 — the check is optional, do not break opening
-                    if self.log:
-                        self.log.warning(f"Autosave check failed: {e}")
-
             server_count = len(raw.get('servers', []))
             conn_count = len(raw.get('connections', []))
 
@@ -422,16 +541,26 @@ class ProjectIOMixin:
 
             self.refresh_sidebar()
             self._close_map_search_if_open()  # v0.9.8: a new project — close the search
-            self._project_file = path
+            # v1.5rc3 (ROADMAP task 1): a demo project carries no path — `_project_file`
+            # stays empty (File → Save therefore asks for a name, and the demo is never
+            # written anywhere behind the user's back), and the window says out loud that
+            # it is an example (the title marker; cleared by the next new/open/save).
+            self._project_file = path or None
+            self._example_project = bool(example)
             self._dirty = False
             self._reset_undo_stack()  # v0.8.3: a load — a new undo reference point
             self._update_window_title()
-            self.statusBar().showMessage(self.t("status.project_loaded"))
-            # v1.3.3.6 (task 1): a load IS the definition of "recent"
-            self._remember_recent_project(path)
+            self.statusBar().showMessage(
+                self.t("status.example_loaded") if example
+                else self.t("status.project_loaded"))
+            # v1.3.3.6 (task 1): a load IS the definition of "recent" — but only a FILE
+            # is. An example is not "yesterday's work" and never joins the MRU.
+            if path:
+                self._remember_recent_project(path)
 
             if self.log:
-                self.log.info("Project loaded", extra={"file": path, "servers": server_count})
+                self.log.info("Project loaded", extra={"file": path, "servers": server_count,
+                                                       "example": bool(example)})
             return True
         except Exception as e:
             # The file PARSED — something later failed (the keyring, the scene, the
@@ -675,6 +804,14 @@ class ProjectIOMixin:
 
             # Reset the unsaved-changes marker (former AUDIT.md, medium #7 — see CHANGELOG.md)
             self._dirty = False
+            # v1.5rc3 (ROADMAP task 1): the demo map became the user's OWN project the
+            # moment it was written to a file — the title marker goes away with it.
+            self._example_project = False
+            # v1.5 (ROADMAP): and so does the EMULATION. Nothing was ever serialized (a
+            # status is a measurement, not data), the file carries no status field and the
+            # copy probes for real from here on; the cards keep what they show until the
+            # first real result replaces it — always still marked as the demo's.
+            self._set_emulated_statuses({})
             self._reset_undo_stack()  # v0.8.3: a save — a new undo reference point
             self._update_window_title()
 

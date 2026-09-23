@@ -2,6 +2,13 @@
 
 Bezier curves from the edge of a node to the edge of a node + typed connections
 with a color code: SSH / VPN / HTTP / Database / NFS / Kubernetes.
+
+**v1.5rc2 (ROADMAP task 1): a type is no longer a colour alone.** Every type also
+carries a declared PEN style (`theme.ARROW_TYPE_STYLES`: a dash pattern, a width and
+a "double rail" flag), and this item paints from that declaration — so the six types
+stay apart in greyscale, in print and for a colour-vision deficiency. The style is
+read through `type_style()` (the ACTIVE theme, on every switch) and `arrow_style()`
+is the public read for the topical gate.
 """
 import math
 
@@ -120,6 +127,16 @@ CONNECTION_TYPES = _LiveConnectionTypes()
 DEFAULT_CONNECTION_TYPE = "ssh"
 
 
+def type_style(ctype: str):
+    """The DECLARED pen style of a connection type (v1.5rc2, ROADMAP task 1).
+
+    Read from the ACTIVE theme on every call (`theme.ARROW_TYPE_STYLES` — the
+    declaration next to `arrow_type_colors`), with the default type's style for an
+    unknown id, so a consumer never has to know the table's keys.
+    """
+    return theme.arrow_type_style(ctype)
+
+
 def type_color(ctype: str) -> QColor:
     """Base color of the connection type; unknown type → the default color."""
     return QColor(CONNECTION_TYPES.get(ctype, CONNECTION_TYPES[DEFAULT_CONNECTION_TYPE]))
@@ -218,6 +235,10 @@ class ConnectionArrow(QGraphicsPathItem):
             ctype = DEFAULT_CONNECTION_TYPE
         self.connection_type = ctype
         self._base_color = type_color(ctype)
+        # v1.5rc2 (ROADMAP task 1): the DECLARED pen style of this type — the dash
+        # pattern, the stroke width and the "double rail" flag, re-read by
+        # refresh_theme() like every other theme-derived value of this item.
+        self._style = type_style(ctype)
         # v1.2.6: bidirectional connection — arrowheads on BOTH ends of the curve
         # (two-way data exchange); standard mode — the target end only.
         self.bidirectional = bool(bidirectional)
@@ -228,6 +249,14 @@ class ConnectionArrow(QGraphicsPathItem):
         self.setAcceptHoverEvents(True)
         self.setZValue(-2)
         self.setToolTip(_t(f"connection.type.{self.connection_type}"))
+
+        # v1.5rc2: the CASING of a double line — a narrower stroke in the surface
+        # colour laid over the middle of the main stroke, so the type reads as two
+        # rails. It is a child item (painted after the parent's own path) with a
+        # negative z, i.e. under the arrowheads and the label plaque.
+        self._casing = QGraphicsPathItem(self)
+        self._casing.setZValue(-1)
+        self._casing.setPen(QPen(Qt.PenStyle.NoPen))
 
         self._arrow_head = QGraphicsPathItem(self)
         # v1.2.6: the arrowhead at the SOURCE node (bidirectional mode); in standard
@@ -247,19 +276,50 @@ class ConnectionArrow(QGraphicsPathItem):
         self.update_position()
 
     def _apply_visual_state(self):
+        """v1.5rc2 (ROADMAP task 1): the stroke is built from the DECLARED style.
+
+        The COLOUR comes from the type (the hover lightens it, as since v0.7); the
+        GEOMETRY — the dash pattern, the width and the double rail — comes from
+        `theme.ARROW_TYPE_STYLES`, so the six types are told apart by a second
+        channel and not by hue alone. The hover adds `ARROW_HOVER_WIDTH_DELTA` to
+        the declared width (instead of replacing it), so a wide type stays the
+        widest one while it is hovered.
+        """
+        style = self._style
         if self._hover:
             color = QColor(self._base_color).lighter(145)
-            width = 2.4
+            width = style.width + theme.ARROW_HOVER_WIDTH_DELTA
         else:
             color = QColor(self._base_color)
-            width = 1.8
-        self.setPen(QPen(color, width))
+            width = style.width
+        pen = QPen(color, width)
+        if style.dash:
+            # Flat caps make the declared rhythm literal — with Qt's default square
+            # cap every dash would grow by half the stroke width.
+            pen.setCapStyle(Qt.PenCapStyle.FlatCap)
+            pen.setDashPattern([float(v) for v in style.dash])
+        self.setPen(pen)
         self._arrow_head.setPen(QPen(color, 1.5))
         self._arrow_head.setBrush(QBrush(color))
         # v1.2.6: the second arrowhead keeps the same styling (in standard mode the path is empty)
         self._arrow_head_src.setPen(QPen(color, 1.5))
         self._arrow_head_src.setBrush(QBrush(color))
         self._label.setDefaultTextColor(color)
+        self._apply_casing(width)
+
+    def _apply_casing(self, width: float):
+        """v1.5rc2: the inner stroke that turns the line into TWO rails.
+
+        `double` is drawn as the main stroke PLUS a narrower stroke in the SURFACE
+        colour over its middle — the same convention as the label plaque
+        (`CANVAS_BG`), so a double line costs one extra path and no geometry. Any
+        other style clears the pen (the casing path is empty for it anyway).
+        """
+        if not self._style.double:
+            self._casing.setPen(QPen(Qt.PenStyle.NoPen))
+            return
+        self._casing.setPen(QPen(QColor(theme.CANVAS_BG),
+                                 max(float(width) * theme.ARROW_CASING_RATIO, 0.8)))
 
     def _apply_label_bg_color(self):
         """v1.4.3: the label plaque — CANVAS_BG at 190 alpha, read from the ACTIVE theme."""
@@ -271,15 +331,22 @@ class ConnectionArrow(QGraphicsPathItem):
         """v1.4.3 (ROADMAP task 5): re-read the theme for this arrow.
 
         The type colour of this arrow is a VALUE taken when the type was set, so
-        a theme switch has to hand it the new one; the label plaque and the
-        geometry follow. Called by `MapScene.refresh_theme()` (the window's
-        `apply_theme()` walks the scene), never by the paint code.
+        a theme switch has to hand it the new one; the label plaque, the DECLARED
+        pen style (v1.5rc2 — the table is theme data too) and the geometry follow.
+        Called by `MapScene.refresh_theme()` (the window's `apply_theme()` walks the
+        scene) and by the print-friendly export of v1.5rc2, which swaps the active
+        instance for the duration of a render — never by the paint code.
         """
         self._base_color = type_color(self.connection_type)
+        self._style = type_style(self.connection_type)
         self._apply_label_bg_color()
         self._apply_visual_state()
         self.update_position()
         self.update()
+
+    def arrow_style(self):
+        """The declared style this arrow paints with (v1.5rc2 — the topical test's seam)."""
+        return self._style
 
     # ── Geometry (v0.7): Bezier + edge-to-edge ───────────────────
 
@@ -312,6 +379,9 @@ class ConnectionArrow(QGraphicsPathItem):
             return  # degenerate case — keep the previous path
         path, p0, p3, c1, c2 = geom
         self.setPath(path)
+        # v1.5rc2: the casing of a double line follows the SAME path (empty for every
+        # other style, so the item is invisible without being removed).
+        self._casing.setPath(path if self._style.double else QPainterPath())
         # UI polish: remember the control points for contains() — the hit-testing zone
         self._curve_pts = (p0, c1, c2, p3)
 
@@ -429,13 +499,18 @@ class ConnectionArrow(QGraphicsPathItem):
         return False
 
     def set_type(self, ctype: str):
-        """Change the connection type (color + tooltip). Unknown types are ignored."""
+        """Change the connection type (color + DECLARED style + tooltip). Unknown types are ignored."""
         if ctype not in CONNECTION_TYPES or ctype == self.connection_type:
             return
         self.connection_type = ctype
         self._base_color = type_color(ctype)
+        self._style = type_style(ctype)   # v1.5rc2: the dash pattern / width / double rail
         self.setToolTip(_t(f"connection.type.{ctype}"))
         self._apply_visual_state()
+        # `_apply_visual_state` builds the pens, but the PATHS of the casing follow the
+        # style (a double line needs the curve, a single one an empty path) — and the
+        # geometry is also how the label plaque is repositioned.
+        self.update_position()
         # v1.1.1: the type on the label may have appeared/changed — rebuild the label text
         self.refresh_label()
 

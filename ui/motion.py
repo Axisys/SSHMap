@@ -31,6 +31,14 @@ uses the item's OWN `setScale()`/`setOpacity()`, and the completion restores bot
 (the transform origin set for the gesture is restored too, so `boundingRect()`,
 `card_rect_scene()` and every `edge_point()` are bit-for-bit what they were).
 
+**The motion switch (v1.5rc1, ROADMAP task 6).** `set_motion_enabled(False)` ("Reduce
+motion" in the Appearance tab / the `theme.motion` key of config.json) makes every gesture
+apply its FINAL state at once: `fly_camera()` builds a zero-length flight (the camera
+lands on the target, `is_flying()` is False) and `scale_in()` settles the item instead of
+growing it. Nothing else changes — the destinations, the clamps and the geometry are the
+same code path, which is why the v1.4.4 acceptance stays green with the flag off. The
+module owns ONE flag (`_motion_enabled`, default ON = every release before this one).
+
 The module is Qt-light on purpose: the pure geometry helpers stay free functions, and the
 only Qt classes used are `QObject`/`QVariantAnimation`/`QPointF`/`QTransform`.
 """
@@ -50,6 +58,37 @@ EASING = QEasingCurve.Type.OutQuad
 # The node scale-in (v1.4.4, ROADMAP task 3): 200 ms, scale 0.9 -> 1.0 plus a fade-in.
 SCALE_IN_MS = 200
 SCALE_IN_FROM = 0.9
+
+# ── The motion switch (v1.5rc1, ROADMAP task 6) ───────────────────────────────────
+# "Reduce motion": with it OFF a gesture applies its FINAL state at once. The default
+# is ON — the behaviour of every release before this one — and a broken config value
+# falls back to it (`set_motion_enabled` accepts nothing but a real False as "off").
+_motion_enabled = True
+
+
+def set_motion_enabled(enabled) -> bool:
+    """Turn the animations on/off (v1.5rc1). Returns the resulting flag.
+
+    Anything but a literal ``False`` reads as ON, so a missing/broken config value
+    can never silently disable the motion of a user who never asked for it.
+    """
+    global _motion_enabled
+    _motion_enabled = enabled is not False
+    return _motion_enabled
+
+
+def motion_enabled() -> bool:
+    """Is the motion on (the default) or reduced?"""
+    return _motion_enabled
+
+
+def _duration(ms) -> int:
+    """The duration a gesture may use: its own, or 0 when the motion is reduced.
+
+    Used by BOTH public gestures — the "final state at once" rule lives here, so a
+    new gesture inherits it by asking for its duration through this function.
+    """
+    return max(0, int(ms)) if _motion_enabled else 0
 
 # The attributes used to keep the live animations referenced. A QGraphicsItem is NOT a
 # QObject, so a QVariantAnimation cannot be parented to it; remembering it on the item
@@ -257,6 +296,10 @@ def fly_camera(view, target_scale, target_center, ms: int = DURATION_NORMAL):
     Returns the `CameraFlight` (or None when the view/target is unusable). The start state
     is the CURRENT one, and an already running flight is stopped — never fast-forwarded —
     so chaining two flights cannot produce a jump.
+
+    v1.5rc1: with the motion reduced (`set_motion_enabled(False)`) the duration becomes 0,
+    which lands the camera on the target inside this call — the same clamps, the same
+    "from where we are" start, no frames.
     """
     if view is None:
         return None
@@ -265,7 +308,7 @@ def fly_camera(view, target_scale, target_center, ms: int = DURATION_NORMAL):
     except (TypeError, ValueError):
         return None
     stop_camera(view)
-    flight = CameraFlight(view, target_scale, center, ms)
+    flight = CameraFlight(view, target_scale, center, _duration(ms))
     try:
         setattr(view, _FLIGHT_ATTR, flight)
     except (AttributeError, RuntimeError):
@@ -343,8 +386,10 @@ def scale_in(item, ms: int = SCALE_IN_MS, from_scale: float = SCALE_IN_FROM):
     v1.2.10 audit). The completion restores the transform origin, so nothing downstream
     (arrows, pinned notes, group membership, `boundingRect()`) is shifted by the gesture.
 
-    Returns the driving `QVariantAnimation` (or None when the item is unusable). The
-    animation is remembered ON the item, because a QGraphicsItem cannot parent a QObject.
+    Returns the driving `QVariantAnimation` (or None when the item is unusable, or when
+    the motion is reduced — v1.5rc1: the item is then settled at once and there is no
+    animation to return). The animation is remembered ON the item, because a
+    QGraphicsItem cannot parent a QObject.
     """
     if item is None:
         return None
@@ -382,7 +427,7 @@ def scale_in(item, ms: int = SCALE_IN_MS, from_scale: float = SCALE_IN_FROM):
             except (AttributeError, RuntimeError):
                 pass
 
-    duration = max(0, int(ms))
+    duration = _duration(ms)
     if duration <= 0:
         _finish()
         return None

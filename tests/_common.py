@@ -259,8 +259,91 @@ def clear_cfg(*extra_paths: str) -> None:
 # in 12 i18n files + the APP_VERSION/requirements pins in 7 release-state sections).
 # The misses of the keys themselves against the code are caught by check_i18n_keys.py.
 # ─────────────────────────────────────────────────────────────────────────────
-EXPECTED_APP_VERSION = "1.4.7"  # the current release (a sentinel: it catches "a bump to the wrong version")
-EXPECTED_I18N_KEYS = 613        # the parity of the TRANSLATION keys (v1.4.7 — "Syntax
+EXPECTED_APP_VERSION = "1.5"     # the current release (a sentinel: it catches "a bump to the wrong version")
+EXPECTED_I18N_KEYS = 644        # the parity of the TRANSLATION keys (v1.5 — "the release
+                                # that closes the 1.5 line": the three features the
+                                # interface review left for the closing release — the
+                                # floating-panel SNAP, the EMULATED demo statuses and the
+                                # environment badge on the card). +1 key × en/ru/zh/de:
+                                # `node.status.emulated` ("demo") — the marker a
+                                # status the demo DECLARED (instead of measuring) always
+                                # carries; the badge, the tooltip line and the suppressed age
+                                # all read it, so ONE key is enough for a second channel,
+                                # and its value is SHORT enough for a MIN card's band. The other
+                                # two features add NO string: the snap is geometry (a
+                                # dropped panel re-anchors, the saved position is cleared
+                                # with the null sentinel and no new menu entry, key or
+                                # config key exists) and the environment badge shows the
+                                # USER'S OWN TAG (`graphics/server_node.ENV_TAGS` is a
+                                # declared vocabulary, not a translation). `example.note_text`
+                                # and `status.example_loaded` were REWORDED (the reversed
+                                # "no status is faked" rule) — a value change adds no key.
+                                # The hub's `collect()` stays 22 keys.
+                                # (v1.5rc5 — the review batch, a HARDENING slot: no new key,
+                                # so the v1.5rc4 figure of 643 stood.)
+                                # (v1.5rc4 — "Density, focus &
+                                # findability: the chrome answers the same questions as the
+                                # map": +13 keys × en/ru/zh/de → 643: `settings.search.*`
+                                # (the placeholder and the "no hits" line of the new
+                                # settings search), the three `settings.hotkeys.filter` /
+                                # `.counts` ({with_key} + {assignable}) / `.assign_hint`
+                                # keys of the navigable Hotkeys tab, the SIX `settings.
+                                # hotkeys.family.*` captions (`FAMILY_ORDER` = File / Edit /
+                                # View / Node / Plugins / Help, derived from the action id)
+                                # and `toolbar.more` (the "»" overflow menu of the toolbar).
+                                # The focus ring is a PAINT (`ui/focus_ring.py` + two
+                                # `STYLE_BUILDERS` entries, no string), the keyboard walk and
+                                # the panel priority are behaviour, and both overflow
+                                # thresholds are measured numbers — none of them is text.
+                                # The hub's `collect()` stays 22 keys.)
+                                # (v1.5rc3 — "First run &
+                                # confidence: how to start, and how old the data is": the
+                                # third release of the 1.5 line). +11 keys × en/ru/zh/de:
+                                # the two new Help entries and the cheat-sheet window
+                                # (`help.cheatsheet`, `hotkeys.sheet_hint`), the two
+                                # first-screen pieces (`empty.state.example` — the demo-map
+                                # button, reused by the Help item — and
+                                # `empty.state.palette_hint` with its {hotkey}) and the
+                                # demo map's own text (`example.note_text`; the aliases,
+                                # hosts and the group name are infrastructure DATA, not UI
+                                # strings), the example marker (`title.example`) and its
+                                # load report (`status.example_loaded`), the Undo
+                                # affordance's tooltip (`status.undo_hint`; the BUTTON
+                                # reuses `edit.undo`), the freshness line
+                                # (`node.status.checked_now` / `node.status.checked_ago`
+                                # with {minutes}) and the palette's new caption
+                                # (`palette.start_here`). The freshness THRESHOLD and the
+                                # timestamps are numbers, the stale mark is the existing
+                                # idle tone (no new colour) and the undo offer is a widget
+                                # — none of them is text. The hub's `collect()` stays 22
+                                # keys (nothing was added to config.json). (v1.5rc2 — "Beyond
+                                # colour:
+                                # patterns, shapes, print": the SECOND channel of the two
+                                # encodings + the print-friendly export). +3 keys ×
+                                # en/ru/zh/de, all in the new export-options dialog:
+                                # `dialog.export_options` (its title), `export.palette_hint`
+                                # (what "print-friendly" means: a white page and
+                                # high-contrast lines that stay apart in greyscale) and
+                                # `export.use_current_theme` (the opt-out checkbox). The two
+                                # ENCODINGS are not text: `Theme.arrow_type_styles` (the six
+                                # pen styles) and `Theme.status_shapes` (dot/ring/triangle)
+                                # are declared data, and the shapes keep the status WORDS in
+                                # the tooltips the card already carried. The export palette is
+                                # not a config key either — the hub's `collect()` stays 22.
+                                # (v1.5rc1 — "Colour: the LIGHT
+                                # theme gets its own palette, and a gate that keeps it honest":
+                                # +3 keys × en/ru/zh/de, all on the "Appearance" tab —
+                                # `settings.appearance.mode.auto` (the third mode: the platform's
+                                # own colour scheme decides, and the window follows it live),
+                                # `settings.appearance.motion` (the "Reduce motion" switch label)
+                                # and `settings.appearance.motion.tooltip` (what it does: every
+                                # gesture applies its FINAL state at once). The accent's second
+                                # ROLE (`accent_strong` + its hover/selected pair), the retuned
+                                # LIGHT palette, the contrast gate and the motion flag of
+                                # `config.json` add no other string: a colour and a boolean are not
+                                # text, and the gate lives in the suite. The `theme` key stays ONE
+                                # nested object, so collect() stays 22 keys.
+                                # (v1.4.7 — "Syntax
                                 # highlighting in the SFTP viewer": +1 key × en/ru/zh/de,
                                 # `sftp.viewer.syntax_heuristic` = "highlighting: {language}
                                 # (heuristic)" — the note the read-only preview appends to

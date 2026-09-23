@@ -28,7 +28,11 @@ The pinned constraints (decision 2026-09-11):
 so the two floating panels are collapsed the same way: by clicking their title). The
 state is the `ui_minimap_collapsed` key, written by the WINDOW (the widget only reports
 the change on `collapsed_changed`, and the window re-places the panel because its width
-changed — it is anchored to the right edge).
+changed — it is anchored to the right edge). v1.5rc5 (N6): the anchor holds with a SAVED
+position too — `MainWindow._position_minimap()` shifts that x by the width delta, so a
+fold of a MOVED panel keeps the band on the right edge and the unfold round trip is
+lossless (before, the saved top-left was used verbatim and the band jumped
+`BODY_WIDTH` = 200 px to the left).
 
 **v1.4.6, part two — the panel is MOVABLE (the legend's drag, disambiguated by a HOLD).**
 The body of the minimap already owns two gestures the mouse cannot tell apart at press

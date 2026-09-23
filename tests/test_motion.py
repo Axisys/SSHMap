@@ -22,7 +22,12 @@ Checks (ROADMAP v1.4.4; offscreen, no network, isolated HOME):
      the dim (the hover, the tag filter and the search merge and never stack), the two ends
      light up while the rest recedes, a fast hover/un-hover leaves no residue, and a dying
      arrow/node restores everything;
-  §6 i18n parity + the release state (v1.4.4 adds NO key — the pin stays 586).
+  §6 the MOTION SWITCH (v1.5rc1) — the flag defaults to ON, only a real False turns it off,
+     and with it OFF every gesture applies its FINAL state at once: `fly_camera()` lands on
+     the target inside the call (clamps included), a new card is settled at unit scale, and
+     `fly_to_content()` still returns True and lands on the instant fit target;
+  §7 i18n parity + the release state (v1.5rc1 adds the three "Appearance" keys — the pin is
+     the shipped one, 619).
 
 Run: python tests/test_motion.py   (from the project root) or python tests/run_all.py
 """
@@ -734,24 +739,121 @@ check("§5 clear_all() drops the focus (a replaced project cannot keep a dim)",
 close_window(win5)
 
 # ════════════════════════════════════════════════════════════════════════════
-print("== §6 i18n parity + the release state ==")
+print("== §6 the motion switch (v1.5rc1) ==")
+# ════════════════════════════════════════════════════════════════════════════
+
+check("§6 the flag defaults to ON — the behaviour of every release before v1.5rc1",
+      motion.motion_enabled() is True and motion.set_motion_enabled(True) is True)
+check("§6 set_motion_enabled reads nothing but a REAL False as 'off'",
+      motion.set_motion_enabled(0) is True and motion.set_motion_enabled("no") is True
+      and motion.set_motion_enabled(None) is True
+      and motion.set_motion_enabled(False) is False
+      and motion.set_motion_enabled(True) is True)
+check("§6 the module still carries no user-facing string (the label lives in the hub)",
+      "from i18n" not in MOTION_SRC and "import i18n" not in MOTION_SRC)
+
+win6 = new_window()
+view6 = win6.view
+view6.resize(600, 400)
+app.processEvents()
+motion.set_motion_enabled(True)
+
+# ── the camera: the SAME destination, reached inside the call ────────────────
+motion.set_motion_enabled(False)
+flight_off = motion.fly_camera(view6, 2.5, QPointF(300.0, 200.0), ms=600)
+landed_off = motion.camera_center(view6)
+check("§6 with the motion reduced fly_camera() lands on the target INSIDE the call",
+      flight_off is not None and not motion.is_flying(view6)
+      and abs(motion.camera_scale(view6) - 2.5) < 1e-9
+      and abs(landed_off.x() - 300.0) < 1.0 and abs(landed_off.y() - 200.0) < 1.0,
+      f"scale={motion.camera_scale(view6)} center={landed_off}")
+check("§6 …and it is a zero-length flight, not a skipped one (the animation object exists)",
+      flight_off.duration_ms == 0 and flight_off.animation is None
+      and flight_off.active is False)
+check("§6 the CLAMP is the same code path (an out-of-range target still clamps)",
+      abs(motion.camera_scale(view6) - 2.5) < 1e-9
+      and motion.fly_camera(view6, 99.0, QPointF(0.0, 0.0), ms=600) is not None
+      and abs(motion.camera_scale(view6) - 5.0) < 1e-9,
+      str(motion.camera_scale(view6)))
+check("§6 the zoom of the view stays honest (the status-bar % follows the instant move)",
+      abs(view6.zoom - 5.0) < 1e-9, str(view6.zoom))
+check("§6 a user gesture still wins (stop_camera_flight after an instant landing)",
+      view6.stop_camera_flight() in (True, False) and not motion.is_flying(view6))
+
+# ── the node scale-in: the same end state, no frames ────────────────────────
+win6._dirty = False
+win6._undo_baseline_dirty = False
+data_off = ServerData(id="motion-off", alias="quiet", host="10.0.0.31", user="u",
+                      x=-400.0, y=-300.0)
+win6._push_command(CmdAddRemoveNode(win6, win6.scene, data_off, "add"))
+node_off = win6.scene.get_node("motion-off")
+check("§6 a new card is SETTLED at once with the flag off (no gesture to wait for)",
+      node_off is not None and not motion.is_scaling_in(node_off)
+      and abs(node_off.scale() - 1.0) < 1e-9 and node_off.opacity() == 1.0,
+      f"scale={getattr(node_off, 'scale', lambda: '?')()} "
+      f"opacity={getattr(node_off, 'opacity', lambda: '?')()}")
+check("§6 scale_in() returns no animation and leaves the item at unit scale",
+      motion.scale_in(node_off) is None and node_off.scale() == 1.0
+      and node_off.opacity() == 1.0 and node_off.transformOriginPoint() == QPointF(0.0, 0.0))
+check("§6 stop_scale_in() is a safe no-op (there is nothing running)",
+      motion.stop_scale_in(node_off) is False)
+
+# ── turning it back ON restores the full gesture ────────────────────────────
+motion.set_motion_enabled(True)
+data_on = ServerData(id="motion-on", alias="loud", host="10.0.0.32", user="u",
+                     x=400.0, y=-300.0)
+win6._push_command(CmdAddRemoveNode(win6, win6.scene, data_on, "add"))
+node_on = win6.scene.get_node("motion-on")
+check("§6 with the flag back ON the card animates again (the switch is reversible)",
+      node_on is not None and motion.is_scaling_in(node_on)
+      and node_on.scale() < 1.0)
+check("§6 …and it completes to the same unit scale as the instant one",
+      wait_for(lambda: not motion.is_scaling_in(node_on), timeout_ms=2500)
+      and node_on.scale() == 1.0 and node_on.opacity() == 1.0,
+      f"scale={node_on.scale()}")
+check("§6 the instant card and the animated one end on the same rect",
+      abs(node_off.card_rect_scene().width() - node_on.card_rect_scene().width()) < 1e-6,
+      f"{node_off.card_rect_scene()} vs {node_on.card_rect_scene()}")
+
+# ── the action path: "Fit map" also applies its FINAL state instantly ──────
+motion.set_motion_enabled(False)
+win6.scene.add_server(ServerData(id="fit-off", alias="fit", host="10.0.0.33", user="u",
+                                 x=900.0, y=900.0))
+_before_fit = motion.camera_scale(view6)
+check("§6 the Fit map ACTION still returns True with the flag off (nothing is skipped)",
+      view6.fly_to_content() is True and not motion.is_flying(view6)
+      and abs(motion.camera_scale(view6) - _before_fit) > 1e-9,
+      f"{_before_fit} -> {motion.camera_scale(view6)}")
+check("§6 …and it lands exactly on the INSTANT fit target (the two agree)",
+      abs(motion.camera_scale(view6) - view6.fit_view_target()[0]) < 1e-6,
+      f"{motion.camera_scale(view6)} vs {view6.fit_view_target()[0]}")
+motion.set_motion_enabled(True)
+check("§6 the module ends this file with the standard behaviour installed",
+      motion.motion_enabled() is True)
+close_window(win6)
+
+
+# ════════════════════════════════════════════════════════════════════════════
+print("== §7 i18n parity + the release state ==")
 # ════════════════════════════════════════════════════════════════════════════
 
 langs = load_i18n_langs(ROOT)
 check_i18n_parity(langs)
 check_i18n_format(langs)
-check("§6 the v1.4.4 release added no key of its own (the pin has moved on with v1.4.5, "
-      "v1.4.6 and v1.4.7 — the pin in tests/_common.py is the shipped one)",
-      EXPECTED_I18N_KEYS == 613
+check("§7 the v1.4.4 release added no key of its own (the pin has moved on with "
+      "v1.4.5 … v1.5 — the pin in tests/_common.py is the shipped one)",
+      EXPECTED_I18N_KEYS == 644
       and all(len(translation_keys(langs[c])) == EXPECTED_I18N_KEYS for c in i18n_lang_codes(ROOT)),
       str({c: len(translation_keys(langs[c])) for c in sorted(langs)}))
-check("§6 no language file carries a motion string (the release is behaviour only)",
-      not any("motion" in k for c in langs for k in langs[c]),
-      str([k for c in langs for k in langs[c] if "motion" in k][:3]))
-check("§6 ui/motion.py is the module this release documents",
+check("§7 v1.5rc1 named the switch in EVERY language (the one string this release adds)",
+      all(str(langs[c].get("settings.appearance.motion", "")).strip()
+          for c in sorted(langs)),
+      str([c for c in sorted(langs)
+           if not str(langs[c].get("settings.appearance.motion", "")).strip()]))
+check("§7 ui/motion.py is the module this release documents",
       os.path.exists(os.path.join(ROOT, "ui", "motion.py")))
 check_release_state(ROOT)
-check("§6 the version pin of this test file is the release it describes",
-      EXPECTED_APP_VERSION == "1.4.7", EXPECTED_APP_VERSION)
+check("§7 the version pin of this test file is the release it describes",
+      EXPECTED_APP_VERSION == "1.5", EXPECTED_APP_VERSION)
 
 finish()

@@ -21,11 +21,14 @@ try:
     from ..dialogs.ssh_connect_dialog import SSHConnectDialog
     # v1.4.1: the SSH-config import picker (used by NodeOpsMixin via host_attr — the test seam)
     from ..dialogs.ssh_config_import_dialog import SshConfigImportDialog
+    # v1.5rc2: the export palette question (the print-friendly default + its opt-out)
+    from ..dialogs.export_options_dialog import ExportOptionsDialog
 except ImportError:
     from dialogs.add_server_dialog import AddServerDialog
     from dialogs.connection_dialog import ConnectionDialog
     from dialogs.ssh_connect_dialog import SSHConnectDialog
     from dialogs.ssh_config_import_dialog import SshConfigImportDialog
+    from dialogs.export_options_dialog import ExportOptionsDialog
 
 # v1.1.4: AddServerDialog/ConnectionDialog/SSHConnectDialog/SSHTerminalWindow/_ext_term —
 # TEST SUBSTITUTION POINTS (MW.<name> = Fake): methods moved to mixins
@@ -75,6 +78,22 @@ try:  # v0.9.9.4: sidebar cluster (tree, tag filter, status markers, context men
 except ImportError:
     from sidebar import SidebarPanel
 
+try:  # v1.5rc3 (ROADMAP task 2): the status bar that can offer an Undo
+    from .status_bar import UndoStatusBar
+    # v1.5rc4 (ROADMAP task 1): the status-bar overflow policy — the ONE pure decision
+    # plus the measured width the bar asks for
+    from .status_bar import is_compact as status_bar_is_compact
+    from .status_bar import status_bar_needed_width
+except ImportError:  # flat layout: the ui/ directory itself is on sys.path
+    try:
+        from status_bar import UndoStatusBar
+        from status_bar import is_compact as status_bar_is_compact
+        from status_bar import status_bar_needed_width
+    except ImportError:  # a stripped build — the plain QStatusBar (no affordance)
+        UndoStatusBar = None
+        status_bar_is_compact = None
+        status_bar_needed_width = None
+
 try:  # v1.1.2RC3 (AUDIT U2): window sizes — saveGeometry()/saveState() into config.json
     from ..modules.window_geometry import (
         save_window_geometry, restore_window_geometry,
@@ -114,7 +133,7 @@ except ImportError:
         theme_qss = None
 
 
-from PySide6.QtCore import Qt, QTimer, Signal, QPoint  # QPoint — the legend's saved position (v1.4.5)
+from PySide6.QtCore import Qt, QTimer, Signal, QPoint, QRect  # QPoint/QRect — the floating-panel geometry (v1.4.5/v1.5rc4)
 from PySide6.QtGui import (
     QFont,      # v1.1.1: UI font from config (QApplication.setFont)
     QAction,    # v1.4rc1: the per-plugin rows of the "Plugins" menu (insertAction)
@@ -386,6 +405,12 @@ def _project_drop_candidate(mime_data) -> str:
 
 
 class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
+    # v1.5rc2 (ROADMAP task 3): the LAST export palette choice ("use the current
+    # theme"), remembered for the SESSION only — the export palette is deliberately
+    # NOT a config key (the hub's collect() contract stays 22 keys) — and read/written
+    # by `_ask_export_palette()`. False = the print-friendly default.
+    _export_use_current_theme = False
+
     def __init__(self):
         super().__init__()
 
@@ -398,18 +423,29 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         # (`theme_from_settings` never fails, `apply_theme` never raises).
         if theme_qss is not None:
             try:
-                from ui.settings_dialog import load_theme_settings, theme_from_settings
+                from ui.settings_dialog import (load_theme_settings, theme_from_settings,
+                                                apply_motion_setting)
             except ImportError:  # flat launch from the project root
                 try:
-                    from settings_dialog import load_theme_settings, theme_from_settings
+                    from settings_dialog import (load_theme_settings, theme_from_settings,
+                                                 apply_motion_setting)
                 except ImportError:
-                    load_theme_settings = theme_from_settings = None
+                    load_theme_settings = theme_from_settings = apply_motion_setting = None
             if load_theme_settings is not None:
                 try:
-                    theme_qss.apply_theme(theme_from_settings(load_theme_settings()),
+                    _saved_theme = load_theme_settings()
+                    theme_qss.apply_theme(theme_from_settings(_saved_theme),
                                           refresh_windows=False)
+                    # v1.5rc1 (ROADMAP task 6): the motion flag of the SAME key —
+                    # installed here as well, because a MainWindow built directly
+                    # (a test, an embedder) never goes through main.py.
+                    apply_motion_setting(_saved_theme)
                 except Exception as e:  # noqa: BLE001 — the look must not break startup
                     print(f"[theme] the saved theme was not applied: {e}", flush=True)
+        # v1.5rc1 (ROADMAP task 6): in the "Auto (system)" mode the window follows
+        # the platform's colour scheme live. Installed once, guarded — a platform
+        # without `QStyleHints.colorScheme` simply never emits.
+        self._install_color_scheme_watch()
 
         # ── i18n: restore user's last language choice ──
         self._i18n_available = False
@@ -444,6 +480,15 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
             pass
 
         self._project_file: Optional[str] = None
+        # v1.5rc3 (ROADMAP task 1): is the map on screen the DEMO project? Set by
+        # `_load_project_at(..., example=True)`, cleared by a new project, a file load
+        # and the first save; it is what the title marker reads (`_update_window_title`).
+        self._example_project: bool = False
+        # v1.5 (ROADMAP): the node ids whose status is EMULATED by the demo map
+        # (`storage/example_project.DEMO_STATUSES`), i.e. the set `StatusChecker` must
+        # never probe. Empty for every ordinary project — the demo's emulation never
+        # outlives it (`_set_emulated_statuses()` is the ONE writer).
+        self._emulated_statuses: dict = {}
         self._dirty = False  # Unsaved-changes flag (the " [*]" marker in the title)
         # v1.2 (ROADMAP task 4): registry of open terminal SESSIONS
         # (modules/terminal_page.TerminalSessionPage), not windows — the node's green dot
@@ -605,8 +650,11 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
                 if self.log:
                     self.log.warning(f"Plugin status provider not installed: {e}")
             # On window destruction — stop the timer and wait for the current round
-            # so a probe thread is not killed in flight with its parent.
-            self.destroyed.connect(lambda *_a: self._status_checker.shutdown())
+            # so a probe thread is not killed in flight with its parent. The slot is a
+            # METHOD (v1.5rc3): the checker may be absent (the constructor above has a
+            # "StatusChecker unavailable" path, and a test/embedder may drop it), and the
+            # previous inline lambda dereferenced it unconditionally.
+            self.destroyed.connect(self._shutdown_status_checker)
             # Targets are synced immediately; starting the periodic checks happens once,
             # from main.py after window.show() (see start_status_checks()). In headless
             # tests without an event loop this guarantees no background threads.
@@ -614,6 +662,18 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         except Exception as e:
             if self.log:
                 self.log.warning(f"StatusChecker unavailable: {e}")
+
+        # ── v1.5rc3 (ROADMAP task 3): the freshness tick ──────────
+        # A status is a fact with a timestamp, so the map re-reads the age of every
+        # shown status a few times per minute. This timer starts NO probe round and
+        # changes NO status (the v1.4rc2 plugin/status discipline is untouched): it
+        # only moves a card to the stale mark once its datum has really aged past
+        # `StatusChecker.stale_threshold_s()`. In a headless test without an event
+        # loop it never fires — the module stays smoke-test safe.
+        self._freshness_timer = QTimer(self)
+        self._freshness_timer.setInterval(self.FRESHNESS_TICK_MS)
+        self._freshness_timer.timeout.connect(self._freshness_tick)
+        self._freshness_timer.start()
 
         # ── v0.9.7: autosave (ROADMAP #1) ────────────────────────
         # QTimer at the interval from ~/.sshmap/config.json (autosave_interval_sec,
@@ -632,6 +692,23 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         self._autosave_timer.timeout.connect(self._autosave_tick)
         if self._autosave_enabled:
             self._autosave_timer.start()
+
+    def _shutdown_status_checker(self, *_args):
+        """v1.5rc3: the `destroyed` slot — stop the probe timer and the current round.
+
+        Written as a method rather than an inline lambda because the checker can be
+        ABSENT: `__init__` leaves `_status_checker = None` when the module is
+        unavailable, and an embedder (or a test) may replace it. The old lambda assumed
+        a live checker and raised on teardown — exactly the moment nothing may raise.
+        """
+        checker = getattr(self, "_status_checker", None)
+        if checker is None:
+            return
+        try:
+            checker.shutdown()
+        except Exception as e:  # noqa: BLE001 — a teardown path never raises
+            if self.log:
+                self.log.warning(f"StatusChecker shutdown failed: {e}")
 
     def start_status_checks(self):
         """v0.7.1: start periodic status checks (called once)."""
@@ -666,6 +743,12 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
                 (n.data.id, n.data.host, n.data.ssh_port or 22)
                 for n in _nodes
             ]))
+            # v1.5 (ROADMAP): the SAME pass keeps the emulation in step — the demo's
+            # declared ids are never probed, and any other project clears the set (it is
+            # installed by `_open_example_map()` before the load and cleared by every
+            # ordinary load / new project / save). `_set_emulated_statuses` owns the write;
+            # this call repeats it so a checker built AFTER the state cannot miss it.
+            checker.set_skip_ids(getattr(self, "_emulated_statuses", None) or ())
             # v1.4rc2 (plugin foundation, rc2): the SAME pass feeds the plugin registry —
             # a `status_probe` / `run_on_nodes` hook sees exactly the nodes the map holds
             # (narrowed to {id, alias, host, port, user} by the manager, PLUGINS.md §5).
@@ -711,7 +794,9 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         if node is None:
             return  # node already removed — it needs no tooltip
         try:
-            node.set_status(node.status, detail)
+            # v1.5: the detail refines the CURRENT status, so it must not un-mark an
+            # EMULATED one (the flag belongs to the status, not to this call).
+            node.set_status(node.status, detail, emulated=node.status_emulated)
         except Exception as e:  # noqa: BLE001
             if self.log:
                 self.log.warning(f"status detail failed for {server_id}: {e}")
@@ -723,6 +808,11 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
             return  # node already removed — it needs no status
         try:
             node.set_status(status)
+            # v1.5rc3 (ROADMAP task 3): the result is dated. The checker owns WHEN the
+            # probe answered and how old a result may get (`stale_threshold_s()`); the
+            # card owns how it is painted and worded. Nothing here derives a STATUS
+            # from the age — freshness is a label on the existing fact.
+            self._apply_node_freshness(node)
         except Exception as e:
             if self.log:
                 self.log.warning(f"set_status failed for {server_id}: {e}")
@@ -740,6 +830,57 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
                 except RuntimeError:
                     pass  # Qt teardown — the window is closing
 
+    # ── v1.5rc3 (ROADMAP task 3): status freshness ──────────────────────────────
+
+    #: How often the age of every shown status is re-evaluated (ms). Purely a repaint
+    #: tick: it never starts a probe round (`StatusChecker` owns rounds) and never
+    #: changes a status — it only moves a card from "fresh" to "stale" once the datum
+    #: has really aged past `stale_threshold_s()`. The walk is bounded by the map size
+    #: and does nothing at all while a node was never checked.
+    FRESHNESS_TICK_MS = 30_000
+
+    def _apply_node_freshness(self, node) -> bool:
+        """Give ONE card the age of its status (the checker is the source of truth).
+
+        Called right after a result arrives and by the freshness tick. Returns True when
+        the card's stale state changed. A missing/never-checked datum leaves the card
+        untouched: it has nothing to age (`set_checked_at(0.0)` clears the mark).
+        """
+        checker = getattr(self, "_status_checker", None)
+        if checker is None:
+            return False
+        try:
+            checked_at = checker.last_checked_at(node.data.id)
+            return bool(node.set_checked_at(checked_at, checker.stale_threshold_s()))
+        except (RuntimeError, AttributeError):
+            return False  # Qt teardown / a test double without the method
+
+    def _refresh_status_freshness(self):
+        """Re-evaluate the age of every shown status (the freshness tick).
+
+        Refresh NEVER changes a status and NEVER starts a round: it re-reads the
+        timestamps the checker already recorded and repaints what has grown old. A
+        status that cannot be refreshed (no checker, a headless test) is simply left as
+        it is — the map is honest either way, it just says less.
+        """
+        checker = getattr(self, "_status_checker", None)
+        if checker is None:
+            return
+        try:
+            nodes = list(self.scene.nodes())
+        except (AttributeError, RuntimeError):
+            return  # the scene is not created yet / already destroyed
+        for node in nodes:
+            self._apply_node_freshness(node)
+
+    def _freshness_tick(self):
+        """The QTimer slot — never raises (a repaint is cosmetic)."""
+        try:
+            self._refresh_status_freshness()
+        except Exception as e:  # noqa: BLE001
+            if self.log:
+                self.log.warning(f"Status freshness tick failed: {e}")
+
     def _update_window_title(self):
         """Rebuild the window title: base title + project file + [*] marker."""
         # AUDIT v0.8.3 (#1): base — APP_NAME/APP_VERSION from version.py (the single
@@ -753,6 +894,12 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         title = f"{base} [{lang_code}]" if lang_code else base
         if self._project_file:
             title += f" — {os.path.basename(self._project_file)}"
+        # v1.5rc3 (ROADMAP task 1): the demo map says so. It has no file name, so the
+        # marker is what keeps it from being mistaken for a document of the user's; it
+        # disappears with the first save (which makes the project their own) or with the
+        # next new/open.
+        if getattr(self, "_example_project", False):
+            title += f" — {self.t('title.example')}"
         if self._dirty:
             title += " [*]"
         self.setWindowTitle(title)
@@ -843,6 +990,15 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
                                 (getattr(self, "zoom_label", None), "status.bar_zoom")):
                 if widget is not None:
                     theme_qss.refresh(widget, key)
+        # v1.5rc3 (ROADMAP task 2): the status bar owns the Undo affordance — a QSS
+        # string and a text are VALUES, so its own refresh re-applies both.
+        try:
+            _bar = self.statusBar()
+            hook = getattr(_bar, "refresh_theme", None)
+            if callable(hook):
+                hook()
+        except RuntimeError:
+            pass  # Qt teardown — the status bar is already destroyed
         # v1.4.5 (ROADMAP task 3): the clickable status counters (their ACTIVE styling
         # is the widget's own state — `refresh_theme()` picks the right registry entry).
         for counter in (getattr(self, "status_filter_labels", {}) or {}).values():
@@ -930,6 +1086,68 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
             theme.set_theme(instance)
         return theme.THEME
 
+    # ── v1.5rc1 (ROADMAP task 6): "Auto (system)" follows the platform live ──────
+
+    def _install_color_scheme_watch(self) -> bool:
+        """Listen to the platform's colour scheme (v1.5rc1) — True when installed.
+
+        The "Auto" mode is not a snapshot: Qt reports a change of the OS theme
+        through `QStyleHints.colorSchemeChanged`, and a window in `auto` must
+        follow it without a restart. Installed once per window (the flag makes it
+        idempotent) and never fatal — a platform without the hint keeps the mode
+        the config resolved at startup, which is the pre-v1.5rc1 behaviour.
+        """
+        if getattr(self, "_color_scheme_hints", None) is not None:
+            return False
+        try:
+            from PySide6.QtGui import QGuiApplication
+            hints = QGuiApplication.styleHints() if QGuiApplication.instance() else None
+            if hints is None:
+                return False
+            hints.colorSchemeChanged.connect(self._on_system_color_scheme_changed)
+            self._color_scheme_hints = hints
+            return True
+        except Exception as e:  # noqa: BLE001 — the hint is optional
+            if getattr(self, "log", None):
+                self.log.debug(f"Auto theme: no colorScheme hint ({e})")
+            return False
+
+    def _theme_mode_from_config(self) -> str:
+        """The stored `theme.mode` (v1.5rc1) — DARK when the config cannot be read."""
+        try:
+            from ui.settings_dialog import load_theme_settings
+        except ImportError:  # flat launch from the project root
+            try:
+                from settings_dialog import load_theme_settings
+            except ImportError:
+                return theme.MODE_DARK
+        try:
+            return load_theme_settings().get("mode") or theme.MODE_DARK
+        except Exception:  # noqa: BLE001 — a broken config must not break the window
+            return theme.MODE_DARK
+
+    def _on_system_color_scheme_changed(self, *_args):
+        """The OS flipped dark↔light: only an `auto` window follows it (v1.5rc1).
+
+        Deliberately narrow: it re-reads the theme key and re-applies the THEME
+        (not `_apply_settings_from_dialog`, which would re-apply every setting for
+        a change that is about one colour).
+        """
+        if self._theme_mode_from_config() != theme.MODE_AUTO:
+            return  # an explicit dark/light choice is the user's, not the platform's
+        try:
+            from ui.settings_dialog import load_theme_settings, theme_from_settings
+        except ImportError:  # flat launch from the project root
+            try:
+                from settings_dialog import load_theme_settings, theme_from_settings
+            except ImportError:
+                return
+        try:
+            self.apply_theme(theme_from_settings(load_theme_settings()))
+        except Exception as e:  # noqa: BLE001 — a cosmetic follow must never break
+            if getattr(self, "log", None):
+                self.log.warning(f"Auto theme: the follow-up apply failed: {e}")
+
     def _refresh_icons(self):
         """v1.4.3-fix: re-paint the vector icons in the ACTIVE theme's colour.
 
@@ -1007,6 +1225,17 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
                     widget.setText(self.t(key))
             except RuntimeError:
                 pass  # Qt teardown — one menu/action is already destroyed
+        # v1.5rc4 (ROADMAP task 2): the toolbar's "»" overflow button keeps its glyph and
+        # only its TOOLTIP is translated (it is not in `_menu_i18n`, which re-texts).
+        if self._i18n_available:
+            for _widget in (getattr(self, "_toolbar_overflow_action", None),
+                            getattr(self, "_toolbar_overflow_btn", None)):
+                if _widget is None:
+                    continue
+                try:
+                    _widget.setToolTip(self.t("toolbar.more"))
+                except RuntimeError:
+                    pass  # Qt teardown — the action/button is already destroyed
         # v0.9.9.4: sidebar strings (buttons, title, placeholder, "All tags") —
         # the panel registry; retranslate via the i18n callback (regression on the v0.9.2 bug:
         # these strings were not updated on language switch before).
@@ -1086,6 +1315,15 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
                     _widget.setToolTip(self.t(_key))
                 except RuntimeError:
                     pass  # Qt teardown — the widget is already destroyed
+        # v1.5rc3 (ROADMAP task 2): the Undo button of the status bar is re-texted by its
+        # own refresh (it also re-applies the registry QSS — the v1.4.3 rule).
+        try:
+            _bar = self.statusBar()
+            _hook = getattr(_bar, "refresh_theme", None)
+            if callable(_hook):
+                _hook()
+        except RuntimeError:
+            pass  # Qt teardown — the status bar is already destroyed
         # v1.4.5 (ROADMAP task 4): the legend paints its rows from a label cache.
         _legend = getattr(self, "legend", None)
         if _legend is not None:
@@ -1135,6 +1373,20 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         self.setCentralWidget(central)
         layout = QHBoxLayout(central)
         layout.setContentsMargins(0, 0, 0, 0)
+
+        # v1.5rc3 (ROADMAP task 2): the window's status bar is installed BEFORE anything
+        # can post a message to it — the Undo affordance is a property of that bar (it
+        # consumes the first message after `_push_command()` armed it), so every later
+        # `self.statusBar()` call reaches the subclass. The callback is the window's own
+        # undo; the bar itself knows nothing about the stack.
+        if UndoStatusBar is not None:
+            try:
+                _bar = UndoStatusBar(self)
+                _bar.set_undo_callback(self._undo)
+                self.setStatusBar(_bar)
+            except Exception as e:  # noqa: BLE001 — a status bar must not break startup
+                if self.log:
+                    self.log.warning(f"Undo status bar unavailable: {e}")
 
         # v1.3.3.6 (ROADMAP task 2): the window accepts a dropped project file
         # (dragEnterEvent/dragMoveEvent/dropEvent below). Until now only the SFTP tab
@@ -1274,6 +1526,14 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         splitter.setCollapsible(1, False)
         self.SIDEBAR_MIN_WIDTH = 160
         self.MAP_MIN_WIDTH = 240
+        # v1.5rc4 (ROADMAP tasks 1/2): the WINDOW's own floor. The status bar's totals
+        # sentence made the layout ask for ~818 px, i.e. the CHROME dictated how narrow the
+        # window could be — and an overflow policy for a bar that can never get narrow is
+        # decoration. The explicit floor is what the policies work against: below
+        # `MIN_WINDOW_WIDTH` nothing is squeezed any further (the chrome has already given
+        # up its passive half by then), and the sidebar/map minimums still hold.
+        self.MIN_WINDOW_WIDTH = 480
+        self.setMinimumWidth(self.MIN_WINDOW_WIDTH)
         self._sidebar_container.setMinimumWidth(self.SIDEBAR_MIN_WIDTH)
         self._map_container.setMinimumWidth(self.MAP_MIN_WIDTH)
 
@@ -1318,6 +1578,12 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         # UI polish: permanent indicators on the right of the status bar — node/
         # connection/status counters and the zoom percentage (updated from MapView.zoomChanged).
         self.counts_label = QLabel("")
+        # v1.5rc4 (ROADMAP task 1): the totals sentence is ~346 px and a QLabel's
+        # `minimumSizeHint()` IS its size hint, so on its own it asks the bar for a very
+        # wide window. An explicit 0 minimum lets the BAR shrink (the appended text is
+        # then clipped rather than the bar refusing the size) — and the overflow policy
+        # hides the label in exactly that band, so the clipped state is never on screen.
+        self.counts_label.setMinimumWidth(0)
         # v1.4.3 (ROADMAP task 4): the status-bar styles come from the ONE QSS
         # registry (ui/theme_qss.py) and are re-applied by apply_theme()
         theme_qss.refresh(self.counts_label, "status.bar_counts")
@@ -1368,6 +1634,14 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
             pass
         self._update_counts_label()
 
+        # v1.5rc4 (ROADMAP tasks 1/2/7): the chrome policies get their first pass HERE —
+        # the widgets exist, the panels are placed and the saved visibility is applied, so
+        # a window opened at a narrow width already shows the compact toolbar and status
+        # bar and resolves the floating panels (every resize does the same from now on).
+        self._sync_toolbar_overflow()
+        self._sync_status_bar_overflow()
+        self._sync_overlay_priority()
+
         if self.log:
             self.log.info("MainWindow UI initialized")
 
@@ -1381,12 +1655,31 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
     # ── v0.8.3: Undo/Redo ─────────────────────────────────────────
 
     def _push_command(self, command):
-        """Single entry point: push a command onto the stack (redo runs itself)."""
+        """Single entry point: push a command onto the stack (redo runs itself).
+
+        v1.5rc3 (ROADMAP task 2): this is ALSO the one place that offers an "Undo"
+        back. The stack is the only thing that knows a command really landed, so the
+        decision lives here and nowhere else: a DESTRUCTIVE change (a command whose
+        `offers_undo()` is true — a removed node/connection/note, a detached note, a
+        bulk import) arms the status-bar affordance, and the action's own message —
+        which its caller shows a moment later — carries the button. Work that is NOT
+        on the stack (the terminal, the SFTP tab, a view state, the background image)
+        can never offer an Undo, because no command is pushed for it at all.
+        """
         try:
             self.undo_stack.push(command)
         except Exception as e:
             if self.log:
                 self.log.warning(f"undo push failed: {e}")
+            return
+        try:
+            offers = getattr(command, "offers_undo", None)
+            if callable(offers) and offers():
+                arm = getattr(self.statusBar(), "arm_undo", None)
+                if callable(arm):
+                    arm()
+        except (RuntimeError, AttributeError):
+            pass  # Qt teardown / a plain QStatusBar — the offer is a convenience
 
     def _commit_node_move(self, node, old_pos, new_pos):
         """v0.8.3: a node drag gesture finished -> a CmdMoveNode command."""
@@ -1453,6 +1746,14 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         for note in self.scene.notes():
             self._note_committed[note.note_id] = note.text()
         self._undo_baseline_dirty = False
+        # v1.5rc3 (ROADMAP task 2): the stack this offer pointed at is gone (a save, a
+        # load, a new project) — a visible "Undo" button must not survive it.
+        try:
+            drop = getattr(self.statusBar(), "clear_offer", None)
+            if callable(drop):
+                drop()
+        except (RuntimeError, AttributeError):
+            pass  # Qt teardown / a plain QStatusBar
 
     def _attach_note(self, note):
         """Wire the note's signals (undo text + dirty) — the creation and undo/redo paths."""
@@ -1713,6 +2014,7 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         # without it Qt writes "'objectName' not set for QToolBar" to stderr.
         toolbar.setObjectName("main_toolbar")
         self.addToolBar(toolbar)
+        self._toolbar = toolbar
 
         # UI polish: all actions get vector icons (ui/icons.py, replacing emoji);
         # text-only actions in the toolbar would look out of place.
@@ -1720,27 +2022,41 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         # toolbar buttons of global actions join the "no orphans" audit and follow a
         # hotkey assigned to their action (before, Ctrl+Shift+A worked in the menu
         # and silently not on the toolbar button of the same action).
-        groups = (
-            ((("file.new_project"), self._new_project, "new", "file.new"),
-             ("file.open", self._open_project, "open", "file.open"),
-             ("file.save", self._save_project, "save", "file.save"),
-             ("file.save_as", self._save_project_as, "save", "file.save_as")),
-            (("btn.add_server", self._add_server, "add_server", "edit.add_server"),
-             ("btn.add_connection", self._add_connection, "connection", "edit.add_connection"),
-             ("view.center_map", self._center_view, "center", "view.center_map"),
-             ("view.fit_map", self._fit_to_content, "fit", "view.fit_map")),
-        )
-        # Text without i18n (as in the old else branch) — UI polish: icons now exist
+        #
+        # ── v1.5rc4 (ROADMAP task 2): the PINNED set of the toolbar ────────────
+        # The toolbar stopped repeating what the SIDEBAR and the PALETTE already own
+        # (the pinned decision of the release — "the kept set is pinned at the start"):
+        #
+        #   * `edit.add_server` / `edit.add_connection` are GONE — the sidebar's own
+        #     first two buttons (and every menu/palette entry) do the same job from a
+        #     surface that is always on screen;
+        #   * `file.save_as` is GONE — a rare variant of "Save" that stays in the File
+        #     menu and in the palette.
+        #
+        # What remains is the pinned keep-set: the three file verbs, "Center" / "Fit",
+        # undo/redo and the FOUR view toggles (the panel switches have no other
+        # one-click surface). The first five are OVERFLOWABLE — on a narrow window they
+        # move into the "»" menu instead of being squeezed (the second pinned decision:
+        # overflow, not wrapping); undo/redo and the toggles never move.
         _fallback = {
             "file.new_project": "New Project", "file.open": "Open...", "file.save": "Save",
-            "file.save_as": "Save as...", "btn.add_server": "Add Server",
-            "btn.add_connection": "Add Connection", "view.center_map": "Center map",
-            "view.fit_map": "Fit Map to Content",
+            "view.center_map": "Center map", "view.fit_map": "Fit Map to Content",
         }
-
+        groups = (
+            (("file.new_project", self._new_project, "new", "file.new"),
+             ("file.open", self._open_project, "open", "file.open"),
+             ("file.save", self._save_project, "save", "file.save")),
+            (("view.center_map", self._center_view, "center", "view.center_map"),
+             ("view.fit_map", self._fit_to_content, "fit", "view.fit_map")),
+        )
+        self._toolbar_overflow_actions = []
+        # The objects the overflow policy hides: a QToolButton for an action (the QAction
+        # itself stays VISIBLE — it is also inside the "»" menu) and the separator's own
+        # QAction (no other widget carries it). Both answer setVisible().
+        self._toolbar_overflow_items = []
         for gi, group in enumerate(groups):
             if gi:
-                toolbar.addSeparator()
+                self._toolbar_overflow_items.append(toolbar.addSeparator())
             for key, slot, icon_name, action_id in group:
                 text = self.t(key) if self._i18n_available else _fallback[key]
                 action = toolbar.addAction(text, slot)
@@ -1753,11 +2069,17 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
                     set_action_icon(action, icon_name)  # v1.4.3-fix: remembers the name for the theme walk
                 except Exception:  # noqa: BLE001 — the icon is cosmetic; do not break the toolbar
                     pass
+                self._toolbar_overflow_actions.append(action)
+                widget = toolbar.widgetForAction(action)
+                if widget is not None:
+                    self._toolbar_overflow_items.append(widget)
 
         # v0.8.3: undo/redo in the toolbar (icons + text; enabled state driven by QUndoStack)
         # v1.3.2: the sequences come from the action registry — "edit.undo"/"edit.redo"
         # are registered as hotkey targets on their EDIT-MENU items; the toolbar buttons
         # are mirrors (a second target would make Ctrl+Z an "Ambiguous shortcut overload").
+        # v1.5rc4: these two are NOT overflowable — undo is the one control a user reaches
+        # for without looking, so it must never move into a menu.
         toolbar.addSeparator()
         self.act_undo = toolbar.addAction(
             self.t("edit.undo") if self._i18n_available else "Undo",
@@ -1787,6 +2109,8 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         # checkable View item — the menu item owns the hotkey and the state, the button
         # owns the click (the v1.2.4.1 collapse-button pattern). The pairs are wired in
         # _setup_menubar, which runs AFTER this method and creates the QActions.
+        # v1.5rc4: never overflowable — they are the only one-click surface of the four
+        # panels, and a hidden panel is exactly what a user cannot find in a menu.
         toolbar.addSeparator()
         self._view_toolbar_buttons = {}
         for action_id, icon_name, key, fallback in _VIEW_TOOLBAR_ITEMS:
@@ -1813,6 +2137,345 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         self._minimap_toolbar_btn = self._view_toolbar_buttons["view.toggle_minimap"]
         self._sidebar_toolbar_btn = self._view_toolbar_buttons["view.toggle_sidebar"]
         self._map_toolbar_btn = self._view_toolbar_buttons["view.toggle_map"]
+
+        # ── v1.5rc4 (ROADMAP task 2): the "»" OVERFLOW menu ────────────────────
+        # Not Qt's own toolbar extension: that one is a popup of ICONS with no labels,
+        # and this application's actions are named by words. The menu holds the very
+        # SAME QActions the toolbar carries (an action may live in two widgets), so the
+        # enablement, the icons and the menu/palette behaviour cannot diverge.
+        #
+        # The button is reached through an ACTION, not through `addWidget()`: a QToolBar
+        # re-shows a widget item at layout time (measured — `hide()` on a widget item does
+        # not survive the next layout pass), while `QAction.setVisible()` is the toolbar's
+        # own visibility contract.
+        overflow_action = toolbar.addAction("\u00bb")
+        overflow_btn = toolbar.widgetForAction(overflow_action)
+        if overflow_btn is None:   # a stripped style without a button — no overflow menu
+            overflow_btn = QToolButton(toolbar)
+            toolbar.addWidget(overflow_btn)
+        self._toolbar_overflow_action = overflow_action
+        self._toolbar_overflow_btn = overflow_btn
+        overflow_btn.setObjectName("ToolbarOverflowButton")
+        overflow_btn.setText("\u00bb")
+        overflow_btn.setAutoRaise(True)
+        # The TOOLTIP lives on the ACTION: Qt copies an action's tooltip onto its toolbar
+        # button (measured — a tooltip set on the button alone is overwritten by that
+        # sync), and the action is also what the language switch re-texts.
+        overflow_action.setToolTip(
+            self.t("toolbar.more") if self._i18n_available else "More actions")
+        overflow_btn.setToolTip(overflow_action.toolTip())
+        overflow_btn.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        overflow_menu = QMenu(overflow_btn)
+        for action in self._toolbar_overflow_actions:
+            overflow_menu.addAction(action)
+        overflow_menu.addSeparator()
+        overflow_btn.setMenu(overflow_menu)
+        self._toolbar_overflow_menu = overflow_menu
+        overflow_action.setVisible(False)
+        # `None` — "not computed yet", so the FIRST sync always applies (a window whose
+        # width is still 0 must not be treated as "already wide").
+        self._toolbar_compact = None
+        # v1.5rc4: the "»" glyph is the button's TEXT, so the translated sentence can only
+        # be a TOOLTIP — `_register_i18n` would replace the glyph itself. The re-text is
+        # therefore done by hand in `_apply_ui_translations()` (the ACTION carries it).
+        self._sync_toolbar_overflow(self.width())
+
+    # ── v1.5rc4 (ROADMAP task 2): the toolbar overflow policy ──────────────────
+    # Pinned: OVERFLOW, never wrapping; the keep-set is the five overflowable buttons plus
+    # the core ones that never move (undo/redo and the four view toggles). ONE method
+    # decides, and the threshold is MEASURED: the sum of what the toolbar's own widgets ask
+    # for. A typed number would be wrong the moment a translation or the UI font grows.
+
+    #: The room the toolbar keeps between its buttons and the window edge.
+    TOOLBAR_OVERFLOW_SLACK = 32
+    #: How much air the full set must have before the bar keeps it: the measured width
+    #: times this factor. A pinned set that only fits edge-to-edge reads as "squeezed" —
+    #: exactly what the release's second decision forbids — so the secondary buttons move
+    #: into the "»" menu while the window is merely comfortable-narrow rather than only
+    #: when it is physically impossible.
+    TOOLBAR_OVERFLOW_COMFORT = 1.5
+
+    def _toolbar_full_width(self) -> int:
+        """The width the toolbar needs for the FULL pinned set (0 — no toolbar yet).
+
+        The "»" button itself is NOT counted: it is the alternative to the set, not a
+        member of it — counting it would make the measurement depend on the state it is
+        supposed to decide.
+        """
+        toolbar = getattr(self, "_toolbar", None)
+        if toolbar is None:
+            return 0
+        overflow_btn = getattr(self, "_toolbar_overflow_btn", None)
+        total = 0
+        try:
+            actions = list(toolbar.actions())
+        except RuntimeError:
+            return 0
+        for action in actions:
+            widget = toolbar.widgetForAction(action)
+            if widget is None or widget is overflow_btn:
+                continue
+            try:
+                total += max(int(widget.sizeHint().width()), 8)
+            except RuntimeError:
+                continue  # Qt teardown — that widget is already destroyed
+        return total + (self.TOOLBAR_OVERFLOW_SLACK if total else 0)
+
+    def _sync_toolbar_overflow(self, width=None) -> bool:
+        """Apply the toolbar overflow policy for ``width`` (the window's, by default).
+
+        Returns True while the COMPACT state is in effect. Idempotent and never raises:
+        every widget of the overflowable part is hidden or shown together with its
+        separators, so the toolbar never shows a dangling divider.
+        """
+        try:
+            value = int(self.width() if width is None else width)
+        except (TypeError, ValueError):
+            return bool(getattr(self, "_toolbar_compact", False))
+        needed = self._toolbar_full_width()
+        compact = 0 < value < max(int(needed * self.TOOLBAR_OVERFLOW_COMFORT), 1)
+        if compact == getattr(self, "_toolbar_compact", None):
+            return compact
+        self._toolbar_compact = compact
+        for item in getattr(self, "_toolbar_overflow_items", []):
+            try:
+                item.setVisible(not compact)
+            except (RuntimeError, AttributeError):
+                continue  # Qt teardown / an unexpected handle — the rest still applies
+        # The "»" itself is the toolbar's own ACTION visibility (a widget item would be
+        # re-shown by the next layout pass — see `_setup_toolbar`).
+        overflow_action = getattr(self, "_toolbar_overflow_action", None)
+        if overflow_action is not None:
+            try:
+                overflow_action.setVisible(compact)
+            except RuntimeError:
+                pass  # Qt teardown — the action is already destroyed
+        return bool(compact)
+
+    def toolbar_overflow_active(self) -> bool:
+        """True while the toolbar is in its compact state (the topical test's seam)."""
+        return bool(getattr(self, "_toolbar_compact", False))
+
+    # ── v1.5rc4 (ROADMAP task 1): the status-bar overflow policy ───────────────
+    # The pinned priority of the status bar (see `ui/status_bar.py`): the multi-input
+    # plaque, then the three CLICKABLE status counters and the zoom percentage — and only
+    # then the "Servers / Connections" totals. In this release the totals are the ONE
+    # thing that leaves the bar, which is exactly the promise of the plan ("the v1.4.5
+    # counters must not become the first thing to disappear — they are the interactive
+    # part"). The policy is ONE method, the threshold is ONE number and the widgets are
+    # only ever HIDDEN, never rebuilt — so a wide window gets the pair back untouched.
+
+    def _sync_status_bar_overflow(self, width=None) -> bool:
+        """Hide the totals on a window too narrow for the whole bar (True — compact).
+
+        ``width=None`` asks the live window. The counters, the zoom label and the
+        multi-input plaque are deliberately NOT touched: their visibility belongs to the
+        filter state and to the multi-input mode, never to a resize. The bar's own
+        `sizeHint()` sum is the threshold (`_status_bar_overflow_needed`), so the policy
+        follows the live font and language.
+        """
+        compact = False
+        if status_bar_is_compact is not None:
+            try:
+                needed = self._status_bar_overflow_needed()
+                compact = bool(status_bar_is_compact(
+                    self.width() if width is None else width, needed))
+            except (TypeError, ValueError, RuntimeError):
+                compact = bool(getattr(self, "_status_bar_compact", False))
+        if compact == getattr(self, "_status_bar_compact", None):
+            return compact
+        self._status_bar_compact = compact
+        counts = getattr(self, "counts_label", None)
+        if counts is not None:
+            try:
+                counts.setVisible(not compact)
+            except RuntimeError:
+                pass  # Qt teardown — the label is already destroyed
+        return compact
+
+    def _status_bar_permanent_widgets(self) -> list:
+        """The permanent widgets of the status bar, in the priority order of the policy.
+
+        The multi-input plaque is counted ONLY while the mode shows it: it is the highest
+        priority of the rule, so an ACTIVE plaque must make the bar ask for more room (and
+        push the totals out earlier) — while an absent one must cost nothing.
+        """
+        widgets = [getattr(self, "counts_label", None)]
+        for status in STATUS_FILTER_ORDER:
+            widgets.append((getattr(self, "status_filter_labels", None) or {}).get(status))
+        widgets.append(getattr(self, "zoom_label", None))
+        plaque = getattr(self, "_multi_plaque", None)
+        if plaque is not None:
+            try:
+                if plaque.isVisible():
+                    widgets.append(plaque)
+            except RuntimeError:
+                pass  # Qt teardown — the plaque is already destroyed
+        return widgets
+
+    def _status_bar_overflow_needed(self) -> int:
+        """How wide the bar must be to show everything (the measured threshold)."""
+        if status_bar_needed_width is None:
+            return 0
+        return int(status_bar_needed_width(self._status_bar_permanent_widgets()))
+
+    def status_bar_compact(self) -> bool:
+        """True while the totals pair is hidden (the topical test's seam)."""
+        return bool(getattr(self, "_status_bar_compact", False))
+    # ── v1.5rc4 (ROADMAP task 7): the floating-panel priority rule ──────────────
+    # Four panels float over the canvas (the search bar, the minimap, the legend and the
+    # first-run hint) plus the map-collapse diamond, which is a child of the view too.
+    # Where they sit is decided in ONE place, from the LIVE geometry:
+    #
+    #   1. the first-run hint WINS over the legend — while an empty map explains itself,
+    #      the legend is suppressed (it explains a map that has nothing to explain yet);
+    #   2. the minimap yields to the OPEN search bar (the v1.4.2 rule, kept: the panel
+    #      steps below the bar);
+    #   3. the collapse diamond is never covered by a panel — it is moved out of the way.
+    #
+    # The suppression is TEMPORARY and never touches the saved state: the legend's own
+    # `ui_legend` key and `_legend_enabled` are the user's, and `_legend_suppressed` is
+    # the window's. That separation is the point of the rule — a hint appearing on an
+    # empty map must not silently turn the legend off for good.
+
+    def _sync_overlay_priority(self):
+        """Resolve the floating panels from the live geometry (v1.5rc4, task 7)."""
+        self._sync_legend_suppression()
+        # The minimap's own rule lives with its placement (`_position_minimap`), and the
+        # diamond is placed by `_position_map_collapse_btn` — both are re-run here so ONE
+        # call site keeps the four panels consistent after any geometry change.
+        self._position_minimap()
+        self._position_map_collapse_btn()
+
+    def _sync_legend_suppression(self) -> bool:
+        """Temporarily hide the legend while the first-run hint is on screen.
+
+        Returns True while the legend is suppressed. The panel is hidden but its state
+        (`_legend_enabled`, the config) is untouched; as soon as the hint goes away — the
+        first server arrives, or a project is opened — the legend comes back exactly as
+        the user left it.
+        """
+        legend = getattr(self, "legend", None)
+        if legend is None:
+            return False
+        overlay = getattr(self, "empty_state", None)
+        hint_up = bool(overlay is not None and overlay.is_state_visible())
+        suppressed = bool(getattr(self, "_legend_suppressed", False))
+        try:
+            if hint_up and not suppressed and bool(getattr(self, "_legend_enabled", True)):
+                legend.hide()
+                self._legend_suppressed = True
+                return True
+            if not hint_up and suppressed:
+                self._legend_suppressed = False
+                if bool(getattr(self, "_legend_enabled", True)):
+                    legend.setVisible(True)
+                    self._position_legend()
+        except RuntimeError:
+            pass  # Qt teardown — the panel is already destroyed
+        return bool(getattr(self, "_legend_suppressed", False))
+
+    def legend_suppressed(self) -> bool:
+        """True while the legend is hidden BY the priority rule (not by the user)."""
+        return bool(getattr(self, "_legend_suppressed", False))
+
+    # ── v1.5rc4 (ROADMAP task 5/6): the keyboard domains ───────────────────────
+    # The window has three of them — the map, the sidebar and (in `terminal_mode =
+    # "tabs"`) the terminal dock — and each shows the SAME focus ring. "Focus the map"
+    # (the ONE new registry action of the release) hands the keyboard to the canvas, and
+    # `_focus_domain_step()` is what Ctrl+Tab calls to walk between the domains.
+
+    def _focus_map(self):
+        """View → Focus the map: hand the keyboard to the canvas (v1.5rc4, task 6)."""
+        view = getattr(self, "view", None)
+        if view is None:
+            return
+        if getattr(self, "_map_collapsed", False):
+            return  # a collapsed map has no surface to focus (the View-action rule)
+        try:
+            view.setFocus(Qt.FocusReason.ShortcutFocusReason)
+        except (RuntimeError, TypeError):
+            pass  # Qt teardown — nothing to focus
+
+    def _focus_domain_step(self, step: int = 1):
+        """Move the keyboard to the next/previous keyboard domain (Ctrl+Tab).
+
+        The domains are the sidebar's tree, the map canvas and the terminal canvas of the
+        ACTIVE session (when the dock mode is on) — the three surfaces that show a focus
+        ring. A domain that is not reachable (a collapsed map, no session, no sidebar) is
+        skipped; an unknown widget loses to the first reachable one.
+        """
+        candidates = []
+        tree = getattr(getattr(self, "sidebar", None), "tree", None)
+        if tree is not None and tree.isVisible():
+            candidates.append(tree)
+        view = getattr(self, "view", None)
+        if view is not None and view.isVisible() and not getattr(self, "_map_collapsed", False):
+            candidates.append(view)
+        session = self._active_terminal_canvas()
+        if session is not None:
+            candidates.append(session)
+        if not candidates:
+            return None
+        current = QApplication.focusWidget()
+        index = -1
+        for position, widget in enumerate(candidates):
+            if widget is current or (current is not None and widget.isAncestorOf(current)):
+                index = position
+                break
+        target = candidates[(index + int(step)) % len(candidates)]
+        try:
+            target.setFocus(Qt.FocusReason.OtherFocusReason)
+        except (RuntimeError, TypeError):
+            return None
+        return target
+
+    def _active_terminal_canvas(self):
+        """The canvas of the VISIBLE terminal session, or None (v1.5rc4).
+
+        Windows mode and dock mode both keep their pages in `_terminal_windows` and both
+        hold them in a `session_tabs` QTabWidget; the first live page that is the CURRENT
+        tab of a visible container (a split pane counts — it is visible under the tabs) is
+        "where the keys would go". Used by `_focus_domain_step` only — never by the
+        session logic.
+        """
+        for page in list(getattr(self, "_terminal_windows", None) or []):
+            try:
+                canvas = getattr(page, "widget", None)
+                if canvas is None or not canvas.isVisible():
+                    continue
+                window = getattr(page, "_host_window", None)
+                container = window if window is not None else page.window()
+                if container is None or not container.isVisible():
+                    continue
+                tabs = getattr(window, "session_tabs", None) if window is not None else None
+                if tabs is None:
+                    tabs = getattr(container, "session_tabs", None)
+                if (tabs is not None and tabs.currentWidget() is not page
+                        and not getattr(page, "_is_split_pane", False)):
+                    continue   # a background tab — its canvas is not what the user sees
+                return canvas
+            except (RuntimeError, AttributeError):
+                continue
+        return None
+
+    def resizeEvent(self, event):
+        """v1.5rc4 (ROADMAP tasks 1/2/7): a resize drives the THREE chrome policies.
+
+        One entry point for the window's own geometry: the toolbar overflow (task 2), the
+        status-bar overflow (task 1) and the floating-panel priority (task 7). Each of them
+        is idempotent and decides from the live width, so a resize storm costs three
+        comparisons and no rebuild. A resize that arrives before the widgets exist (the
+        constructor applies the saved geometry early) is a no-op for each of them.
+        """
+        super().resizeEvent(event)
+        try:
+            width = int(event.size().width())
+        except (AttributeError, TypeError, ValueError):
+            width = None
+        self._sync_toolbar_overflow(width)
+        self._sync_status_bar_overflow(width)
+        self._sync_overlay_priority()
 
     def _mark_toolbar_mirror(self, action) -> None:
         """v1.3.3.3: keep a toolbar button that MIRRORS a menu action shortcut-free.
@@ -1949,6 +2612,11 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         view_menu = menubar.addMenu(self.t("menu.view") if self._i18n_available else "View")
         self._register_i18n(view_menu, "menu.view")
         self._add_menu_action(view_menu, "view.center_map", self._center_view, "view.center_map")
+        # v1.5rc4 (ROADMAP task 6): "Focus the map" — the ONE new registry action of the
+        # release ("at most ONE"): it hands the keyboard to the canvas, which then walks
+        # its cards with Tab/arrows/Enter/Esc and shows the visible focus ring (task 5).
+        # An EMPTY registry default: assignable, no key taken from anyone.
+        self._add_menu_action(view_menu, "view.focus_map", self._focus_map, "view.focus_map")
         # v1.3.3.3 (task 2): the whole zoom family — a menu item + a vector icon + a
         # registry entry each (Reset zoom Ctrl+0 has NO use for an icon: reset is a
         # state, not a direction). The step API lives on MapView.
@@ -2122,6 +2790,16 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         # Help menu
         help_menu = menubar.addMenu(self.t("menu.help") if self._i18n_available else "Help")
         self._register_i18n(help_menu, "menu.help")
+        # v1.5rc3 (ROADMAP task 1): the demo map. The SECOND entry point of the same
+        # project — the empty state's button is the first — and both call ONE method
+        # (`_open_example_map`), which loads it through the ordinary project load path.
+        self.act_example_map = self._add_menu_action(
+            help_menu, "example.open", self._open_example_map, "help.example")
+        # v1.5rc3 (ROADMAP task 4): the keyboard cheat-sheet — the SAME registry-derived
+        # text Help → About renders (`ui/hotkey_sheet_dialog.py` reuses
+        # `about_dialog.cheatsheet()`), reachable by F1 and, on the map, by `?`.
+        self.act_cheatsheet = self._add_menu_action(
+            help_menu, "help.cheatsheet", self._open_hotkey_sheet, "help.cheatsheet")
         self._add_menu_action(help_menu, "help.open_logs", self._open_log_file, "help.open_logs")
         # v1.3.3.3 (task 6): the About window — the version, the license, the paths and
         # the hotkey cheat-sheet generated FROM the registry. Registered in the action
@@ -2998,6 +3676,13 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         reserved for the minimap per the new discussions. Repositioned on resizeEvent
         (the MapView.resized signal: a window resize, a splitter-handle drag,
         a "Terminals" dock size change).
+
+        v1.5rc4 (ROADMAP task 7): the third rule of the floating-panel priority — the
+        diamond is NEVER covered by a panel. The corner is where the legend (bottom-left,
+        draggable) and the minimap (right, draggable, free position) can land on a narrow
+        window; the button therefore probes a few candidate spots around the panel that
+        covers the corner and takes the first one that is free. Nothing else moves: the
+        USER's panel position always wins over the window's own button.
         """
         btn = getattr(self, "_map_collapse_btn", None)
         view = getattr(self, "view", None)
@@ -3009,9 +3694,57 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
                 return
             bw = max(btn.sizeHint().width(), 24)
             bh = max(btn.sizeHint().height(), 24)
-            btn.move(max(4, w - bw - 8), max(4, h - bh - 8))
+            x = max(4, w - bw - 8)
+            y = max(4, h - bh - 8)
+            panels = self._overlay_panel_rects(view)
+            if panels:
+                for candidate in self._collapse_btn_candidates(x, y, bw, bh, w, h, panels):
+                    if not any(candidate.intersects(rect) for rect in panels):
+                        x, y = candidate.x(), candidate.y()
+                        break
+            btn.move(int(x), int(y))
         except RuntimeError:
             pass  # Qt teardown — the widget is already destroyed
+
+    def _overlay_panel_rects(self, view) -> list:
+        """The live rectangles of the VISIBLE floating panels (v1.5rc4, task 7).
+
+        The view's own coordinates (every panel is a child of `MapView`), in the order the
+        priority rule cares about: the first-run hint first (it is the temporary one), then
+        the search bar, the minimap and the legend. A panel that is hidden — including the
+        legend suppressed by the priority rule itself — contributes nothing.
+        """
+        rects = []
+        for name in ("empty_state", "map_search", "minimap", "legend"):
+            panel = getattr(self, name, None)
+            if panel is None:
+                continue
+            try:
+                if panel.isVisible() and panel.width() > 0 and panel.height() > 0:
+                    rects.append(QRect(panel.geometry()))
+            except (RuntimeError, AttributeError):
+                continue
+        return rects
+
+    @staticmethod
+    def _collapse_btn_candidates(x, y, bw, bh, view_w, view_h, panels) -> list:
+        """The candidate spots for the collapse diamond, nearest-to-the-corner first.
+
+        The default corner, then the free space LEFT of the panel covering it, then ABOVE
+        it, then above-left. Bounded on purpose: a button that chases the panels around a
+        tiny window is worse than a button that stays in its corner.
+        """
+        candidates = [QRect(int(x), int(y), int(bw), int(bh))]
+        for rect in panels:
+            if not rect.intersects(candidates[0]):
+                continue
+            candidates.append(QRect(int(rect.left() - bw - 8), int(y), int(bw), int(bh)))
+            candidates.append(QRect(int(x), int(rect.top() - bh - 8), int(bw), int(bh)))
+            candidates.append(QRect(int(rect.left() - bw - 8), int(rect.top() - bh - 8),
+                                    int(bw), int(bh)))
+        return [c for c in candidates
+                if c.left() >= 0 and c.top() >= 0
+                and c.right() <= max(int(view_w), 1) and c.bottom() <= max(int(view_h), 1)]
 
     def _switch_language(self, language_code: str):
         """Switch application language and re-apply to all UI elements."""
@@ -3186,16 +3919,22 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         """
         # v1.4.3 (ROADMAP task 6): the theme first — every other option below is
         # applied to widgets whose colours the switch may have just changed.
+        # v1.5rc1: the motion flag travels in the SAME nested key, so it is
+        # installed here as well (`apply_motion_setting` reads `theme.motion`).
         try:
-            from ui.settings_dialog import load_theme_settings, theme_from_settings
+            from ui.settings_dialog import (load_theme_settings, theme_from_settings,
+                                            apply_motion_setting)
         except ImportError:  # flat launch from the project root
             try:
-                from settings_dialog import load_theme_settings, theme_from_settings
+                from settings_dialog import (load_theme_settings, theme_from_settings,
+                                             apply_motion_setting)
             except ImportError:
-                load_theme_settings = theme_from_settings = None
+                load_theme_settings = theme_from_settings = apply_motion_setting = None
         if load_theme_settings is not None:
             try:
-                self.apply_theme(theme_from_settings(load_theme_settings()))
+                _saved_theme = load_theme_settings()
+                self.apply_theme(theme_from_settings(_saved_theme))
+                apply_motion_setting(_saved_theme)
             except Exception as e:  # noqa: BLE001 — the look must not break applying
                 if self.log:
                     self.log.warning(f"Apply theme settings failed: {e}")
@@ -3608,8 +4347,40 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         except Exception:  # noqa: BLE001
             pass
 
+    # ── v1.5rc2 (ROADMAP task 3): the PRINT-FRIENDLY export palette ───────────────
+
+    def _ask_export_palette(self):
+        """Ask which palette the export renders with — the ONE question all four exports share.
+
+        v1.5rc2: an export must not print a dark page, so the DEFAULT is the
+        print-friendly one (`theme.PALETTE_PRINT` — the LIGHT page with the
+        high-contrast lines, `MapScene.export_palette()`); the dialog's checkbox is
+        the opt-out that keeps the CURRENT look. Returns the palette id of the active
+        theme, or None when the user cancelled (the export then writes nothing).
+
+        The answer of the previous export is remembered on the instance for the rest
+        of the session (never persisted), and the dialog is a module-level facade
+        (`MW.ExportOptionsDialog`), i.e. the same test seam as `QFileDialog`.
+        """
+        try:
+            dialog = ExportOptionsDialog(
+                self, use_current_theme=bool(self._export_use_current_theme))
+        except Exception:  # noqa: BLE001 — a dialog that cannot be built must not block the export
+            return theme.PALETTE_PRINT
+        try:
+            if dialog.exec() != QDialog.DialogCode.Accepted:
+                return None
+            self._export_use_current_theme = dialog.use_current_theme()
+            return dialog.chosen_palette()
+        finally:
+            getattr(dialog, "deleteLater", lambda: None)()
+
     def _export_map_image(self):
-        """Export the map to PNG/JPEG (v0.9.1 #1): render the whole scene to a file."""
+        """Export the map to PNG/JPEG (v0.9.1 #1): render the whole scene to a file.
+
+        v1.5rc2: the render goes through `self._ask_export_palette()` — print-friendly
+        (a light page) unless the user asked for the current theme.
+        """
         path, selected_filter = QFileDialog.getSaveFileName(
             self, self.t("file.export_png"), "",
             "PNG Images (*.png);;JPEG Images (*.jpg)")
@@ -3619,20 +4390,28 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         if not path.lower().endswith((".png", ".jpg", ".jpeg")):
             ext = ".jpg" if "JPEG" in (selected_filter or "") else ".png"
             path += ext
+        palette = self._ask_export_palette()
+        if palette is None:
+            return
         try:
-            pixmap = self.scene.render_to_pixmap(scale=2.0)
+            pixmap = self.scene.render_to_pixmap(scale=2.0, palette=palette)
             if not pixmap.save(path):
                 raise OSError("QPixmap.save returned False")
             self.statusBar().showMessage(self.t("status.export_ok"))
             if self.log:
-                self.log.info("Map exported", extra={"file": path})
+                self.log.info("Map exported", extra={"file": path, "palette": palette})
         except Exception as e:  # noqa: BLE001
             QMessageBox.critical(
                 self, self.t("msg.error_title"),
                 self.t("msg.export_failed", error=str(e)))
 
     def _export_map_drawio(self):
-        """Export the map to draw.io (.drawio) — v0.9.5 #1–#4."""
+        """Export the map to draw.io (.drawio) — v0.9.5 #1–#4.
+
+        v1.5rc2: the same palette question as the raster exports — the writer paints
+        the print-friendly (light, high-contrast) palette by default and carries the
+        DECLARED dash pattern of every connection type.
+        """
         from storage.export_drawio import export_scene_to_drawio
         path, _ = QFileDialog.getSaveFileName(
             self, self.t("file.export_drawio"), "",
@@ -3641,31 +4420,43 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
             return
         if not path.lower().endswith(".drawio"):
             path += ".drawio"
+        palette = self._ask_export_palette()
+        if palette is None:
+            return
         try:
-            cells = export_scene_to_drawio(self.scene, path)
+            cells = export_scene_to_drawio(self.scene, path, palette=palette)
             self.statusBar().showMessage(self.t("status.export_drawio_ok"))
             if self.log:
                 self.log.info(
-                    "Map exported to drawio", extra={"file": path, "cells": cells})
+                    "Map exported to drawio",
+                    extra={"file": path, "cells": cells, "palette": palette})
         except Exception as e:  # noqa: BLE001
             QMessageBox.critical(
                 self, self.t("msg.error_title"),
                 self.t("msg.export_failed", error=str(e)))
 
     def _export_map_pdf(self):
-        """Export the map to PDF (v0.9.9.7): the open scene -> a file in one action."""
+        """Export the map to PDF (v0.9.9.7): the open scene -> a file in one action.
+
+        v1.5rc2: the print-friendly palette by default — a PDF is the format most
+        likely to be printed.
+        """
         path, _ = QFileDialog.getSaveFileName(
             self, self.t("file.export_pdf"), "", "PDF Documents (*.pdf)")
         if not path:
             return
         if not path.lower().endswith(".pdf"):
             path += ".pdf"
+        palette = self._ask_export_palette()
+        if palette is None:
+            return
         try:
-            size = self.scene.render_to_pdf(path)
+            size = self.scene.render_to_pdf(path, palette=palette)
             self.statusBar().showMessage(self.t("status.export_pdf_ok"))
             if self.log:
                 self.log.info(
-                    "Map exported to PDF", extra={"file": path, "bytes": size})
+                    "Map exported to PDF", extra={"file": path, "bytes": size,
+                                                  "palette": palette})
         except Exception as e:  # noqa: BLE001
             QMessageBox.critical(
                 self, self.t("msg.error_title"),
@@ -3677,6 +4468,8 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         The same shape as the PDF/PNG paths (QFileDialog + the extension + the status
         bar/log + `msg.export_failed`), but the render itself is `render_to_svg`
         (`QSvgGenerator`) — the map leaves as VECTOR data, background and grid included.
+        v1.5rc2: the palette question comes first, so an SVG of a DARK window is a
+        light page by default too (the halos stay hidden — the vector contract).
         """
         path, _ = QFileDialog.getSaveFileName(
             self, self.t("file.export_svg"), "", "SVG Images (*.svg)")
@@ -3684,12 +4477,16 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
             return
         if not path.lower().endswith(".svg"):
             path += ".svg"
+        palette = self._ask_export_palette()
+        if palette is None:
+            return
         try:
-            size = self.scene.render_to_svg(path)
+            size = self.scene.render_to_svg(path, palette=palette)
             self.statusBar().showMessage(self.t("status.export_svg_ok"))
             if self.log:
                 self.log.info(
-                    "Map exported to SVG", extra={"file": path, "bytes": size})
+                    "Map exported to SVG", extra={"file": path, "bytes": size,
+                                                  "palette": palette})
         except Exception as e:  # noqa: BLE001
             QMessageBox.critical(
                 self, self.t("msg.error_title"),
@@ -4034,6 +4831,9 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         self.view.resized.connect(self._position_minimap)
         (self._minimap_enabled, self._minimap_collapsed,
          self._minimap_pos) = self._read_minimap_settings()
+        # v1.5rc5 (N6): a saved position describes the EXPANDED panel — start from that width
+        # so a window restored FOLDED still keeps the band on the right edge it hangs from.
+        self._minimap_width = int(MinimapWidget.DEFAULT_WIDTH)
         self.minimap.set_collapsed(bool(self._minimap_collapsed))
         self.minimap.setVisible(bool(self._minimap_enabled))
         self._position_minimap()
@@ -4077,11 +4877,21 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         `_on_legend_moved` pattern, which is what makes the panel stay detached from the
         corner across restarts (and what switches `_position_minimap()` from the default
         corner to the saved spot).
+
+        v1.5 (ROADMAP): a drop within `SNAP_PX` of an anchored edge (RIGHT|TOP) instead
+        RE-ANCHORS the panel — the saved position is cleared and the ordinary rules (the
+        corner, the fold and the "below an open search bar" step) come back by themselves.
         """
         try:
-            self._minimap_pos = QPoint(int(position.x()), int(position.y()))
+            pos = QPoint(int(position.x()), int(position.y()))
         except (TypeError, ValueError, AttributeError):
             return
+        if self._snap_panel(getattr(self, "minimap", None), pos, "rt"):
+            self._minimap_pos = None
+            self._save_minimap_config({"ui_minimap_position": {"x": None, "y": None}})
+            self._position_minimap()   # the anchor it was dropped on, applied at once
+            return
+        self._minimap_pos = pos
         self._save_minimap_config({"ui_minimap_position": {"x": self._minimap_pos.x(),
                                                           "y": self._minimap_pos.y()}})
 
@@ -4120,6 +4930,11 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         wins over the corner — and then the search-bar rule no longer applies: the user
         put the panel where they want it, and it is only CLAMPED into the view, so a
         hand-edited config or a shrunken window can never push it off-screen.
+
+        v1.5rc5 (N6): with a saved position the RIGHT edge is preserved across a fold —
+        the saved x is shifted by the width delta, so the band stays where the cursor
+        clicked. `_minimap_width` is the last placed width and starts at the EXPANDED one
+        (that is what a saved position describes, including a start with a folded panel).
         """
         mini = getattr(self, "minimap", None)
         view = getattr(self, "view", None)
@@ -4131,7 +4946,20 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
                 return
             position = getattr(self, "_minimap_pos", None)
             if position is not None:
-                x = min(max(int(position.x()), 0), max(w - mini.width(), 0))
+                width = int(mini.width())
+                last_width = int(getattr(self, "_minimap_width", 0) or 0)
+                # v1.5rc5 (N6): a saved position is the top-left of the EXPANDED panel, so a
+                # fold used to keep that left corner while the width shrank by BODY_WIDTH and
+                # threw the title band — the collapse affordance itself — 200 px off the RIGHT
+                # edge it hangs from. The right edge is what the panel is anchored to, so it is
+                # kept in BOTH states by shifting the remembered x by the width delta (ONE
+                # attribute; the saved `{x, y}` keeps its meaning — no config-schema change).
+                if last_width > 0 and last_width != width:
+                    self._minimap_pos = QPoint(int(position.x()) + (last_width - width),
+                                               int(position.y()))
+                    position = self._minimap_pos
+                self._minimap_width = width
+                x = min(max(int(position.x()), 0), max(w - width, 0))
                 y = min(max(int(position.y()), 0), max(h - mini.height(), 0))
             else:
                 y = 12
@@ -4139,6 +4967,7 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
                 if bar is not None and bar.isVisible():
                     y = max(int(bar.geometry().bottom()) + 8, y)
                 x = max(4, w - mini.width() - 12)
+                self._minimap_width = int(mini.width())
             mini.move(int(x), int(y))
             if mini.isVisible():
                 mini.raise_()
@@ -4185,6 +5014,13 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
 
         self.empty_state = EmptyStateOverlay(self.view)
         self.empty_state.add_server_requested.connect(self._add_server)
+        # v1.5rc3 (ROADMAP task 1): the second button — the demo map. The SAME method the
+        # Help item calls, so the two entry points cannot diverge (and both go through
+        # the ordinary project load path).
+        try:
+            self.empty_state.example_requested.connect(self._open_example_map)
+        except (RuntimeError, AttributeError):
+            pass  # a stripped build without the signal — the title/import line still work
         # Reposition on every view resize / splitter drag (the minimap pattern).
         self.view.resized.connect(self._position_empty_state)
         self._empty_state_visible = None   # unknown until the first sync
@@ -4215,6 +5051,9 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
             return  # Qt teardown — the widget is already destroyed
         if empty:
             self._position_empty_state()
+        # v1.5rc4 (ROADMAP task 7): the first-run hint is the reason the legend yields —
+        # its appearance/disappearance is exactly where the priority must be re-resolved.
+        self._sync_overlay_priority()
 
     def _position_empty_state(self):
         """Place the hint (and its button) in the middle of the view — a child, not a layout."""
@@ -4233,6 +5072,46 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
     # ── v1.4.5 (ROADMAP task 4): the legend panel ────────────────────────────────
 
     LEGEND_MARGIN = 12          # the inset of the DEFAULT (bottom-left) position
+
+    # ── v1.5 (ROADMAP): the floating panels re-attach by dropping on an edge ──────
+
+    #: How close a dropped panel's edge must land to the VIEW edge it is anchored to
+    #: before the drop counts as "put me back": twice the 12 px default margin. A drag is
+    #: otherwise PERMANENT — the saved position wins over the corner for good, hiding and
+    #: showing a panel does not clear it — so this threshold is the ONE way back to the
+    #: documented corner that needs no hand-edited `config.json`. An explicit "Reset panel
+    #: positions" action was considered and REJECTED: the snap is the way back, and the
+    #: step therefore costs no new i18n key, no new menu entry and no new hotkey.
+    SNAP_PX = 24
+
+    def _snap_panel(self, panel, position, edges: str) -> bool:
+        """Re-anchor a dropped panel that landed at an edge it hangs from (v1.5).
+
+        `edges` names the anchored edges of the panel: "lb" = LEFT|BOTTOM (the legend),
+        "rt" = RIGHT|TOP (the minimap). A drop within `SNAP_PX` of ANY of them re-anchors
+        the panel: the saved position is CLEARED with the `{"x": null, "y": null}`
+        sentinel (`_saved_position()` already reads it as "no saved position", and
+        `save_config()` is a merge and therefore cannot DELETE a key) and the ordinary
+        placement of the panel runs, so every anchored rule comes back by itself — the
+        documented corner, the fold that hangs off the edge, the minimap's step below an
+        open search bar and the placement a resize recomputes.
+
+        Pure geometry over the live widgets; returns True when the panel was re-anchored
+        (the caller then skips the save and lets its own `_position_*` place it).
+        """
+        view = getattr(self, "view", None)
+        if panel is None or view is None:
+            return False
+        try:
+            w, h = view.width(), view.height()
+            pw, ph = panel.width(), panel.height()
+        except RuntimeError:
+            return False  # Qt teardown — the widget is already destroyed
+        if w <= 0 or h <= 0:
+            return False
+        x, y = int(position.x()), int(position.y())
+        distance = {"l": x, "r": w - (x + pw), "t": y, "b": h - (y + ph)}
+        return any(distance[edge] <= self.SNAP_PX for edge in edges if edge in distance)
 
     def _setup_legend(self):
         """Create the legend panel, apply the saved state and wire its persistence.
@@ -4331,7 +5210,13 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
             pass  # Qt teardown — the widget is already destroyed
 
     def _toggle_legend(self, checked: bool):
-        """v1.4.5: show/hide the legend + persist `ui_legend` (a merge write)."""
+        """v1.4.5: show/hide the legend + persist `ui_legend` (a merge write).
+
+        v1.5rc4 (ROADMAP task 7): while the first-run hint is on screen the legend yields
+        to it — the user's choice is REMEMBERED (`_legend_enabled` + `ui_legend`) but the
+        panel stays hidden until the hint goes away. A temporary suppression never
+        overwrites a saved visibility.
+        """
         legend = getattr(self, "legend", None)
         if legend is None:
             return
@@ -4344,13 +5229,25 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
             return  # Qt teardown — the panel is already destroyed
         self._legend_enabled = visible
         self._save_legend_config({"ui_legend": visible})
+        self._sync_legend_suppression()
 
     def _on_legend_moved(self, position):
-        """The user dragged the panel: remember where (a merge write of the position)."""
+        """The user dragged the panel: remember where (a merge write of the position).
+
+        v1.5 (ROADMAP): a drop within `SNAP_PX` of an anchored edge (LEFT|BOTTOM) instead
+        RE-ANCHORS the panel — the saved position is cleared and the documented
+        bottom-left corner (plus every rule that hangs off it) comes back by itself.
+        """
         try:
-            self._legend_pos = QPoint(int(position.x()), int(position.y()))
+            pos = QPoint(int(position.x()), int(position.y()))
         except (TypeError, ValueError, AttributeError):
             return
+        if self._snap_panel(getattr(self, "legend", None), pos, "lb"):
+            self._legend_pos = None
+            self._save_legend_config({"ui_legend_position": {"x": None, "y": None}})
+            self._position_legend()
+            return
+        self._legend_pos = pos
         self._save_legend_config({"ui_legend_position": {"x": self._legend_pos.x(),
                                                          "y": self._legend_pos.y()}})
 
@@ -4445,7 +5342,9 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         self.map_search.show()
         self.map_search.raise_()
         self._position_map_search_bar()
-        self._position_minimap()   # v1.4.2: the minimap steps BELOW the search bar
+        # v1.4.2: the minimap steps BELOW the search bar; v1.5rc4 (task 7): the ONE place
+        # that resolves the floating panels also moves the collapse diamond out of the way.
+        self._sync_overlay_priority()
         if self.map_search.query.strip():
             self._on_map_search_query(self.map_search.query)
         self.map_search.focus_input()
@@ -4459,7 +5358,9 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         """
         if getattr(self, "map_search", None) is not None:
             self.map_search.hide()
-        self._position_minimap()   # v1.4.2: the minimap returns to the top-right corner
+        # v1.4.2: the minimap returns to the top-right corner; v1.5rc4 (task 7): the same
+        # ONE resolver re-places the diamond now that the bar is gone.
+        self._sync_overlay_priority()
         self._map_search_query = ""
         self._map_search_matches = []
         self._map_search_index = -1
@@ -4672,6 +5573,51 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         if self._map_collapsed:
             return
         self.view.zoom_out()
+
+    def _open_hotkey_sheet(self):
+        """v1.5rc3 (ROADMAP task 4): the keyboard cheat-sheet window.
+
+        Help → Keyboard shortcuts (F1) and the `?` key of the map both land here. The
+        text is NOT built here: `ui/hotkey_sheet_dialog.py` renders the registry through
+        `about_dialog.cheatsheet()` — the same function Help → About uses, so the two
+        surfaces cannot drift (no second source of truth for the hotkeys). Never raises:
+        a broken dialog must not take the window down.
+        """
+        try:
+            from ui.hotkey_sheet_dialog import HotkeySheetDialog
+        except ImportError:  # flat launch from the project root
+            try:
+                from hotkey_sheet_dialog import HotkeySheetDialog
+            except ImportError as e:
+                if self.log:
+                    self.log.warning(f"Hotkey sheet unavailable: {e}")
+                return
+        try:
+            dlg = HotkeySheetDialog(self)
+            dlg.exec()
+        except Exception as e:  # noqa: BLE001 — a UI error must not break the window
+            if self.log:
+                self.log.warning(f"Hotkey sheet failed: {e}")
+
+    def keyPressEvent(self, event):
+        """v1.5rc3 (ROADMAP task 4): `?` opens the cheat-sheet.
+
+        A bare printable key must NOT be a window QShortcut: it would steal "?" from
+        every text field of the application (the map search, a note, the filter).
+        Handled at the WINDOW instead, it arrives only when no focused widget wanted
+        the key — Qt propagates an ignored key event up the parent chain, so a field
+        that inserts text never reaches this method. `Esc`-style control keys and the
+        configurable actions stay with the registry (`help.cheatsheet` ships F1).
+        """
+        try:
+            if (event.key() == Qt.Key_Question
+                    and not (event.modifiers() & ~Qt.KeyboardModifier.ShiftModifier)):
+                self._open_hotkey_sheet()
+                event.accept()
+                return
+        except (RuntimeError, AttributeError):
+            pass  # a degenerate event — fall through to the default handling
+        super().keyPressEvent(event)
 
     def _open_about_dialog(self):
         """v1.3.3.3 (task 6): Help → About — the version, the license, the paths, the

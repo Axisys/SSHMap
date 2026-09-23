@@ -317,14 +317,18 @@ check("the tab order: General / Appearance / Terminal / Status Checks / Autosave
 import ui.hotkey_registry as _HR
 
 _expected_rows = len(_HR.action_ids())
-check("'Hotkeys': one row per registry action, prefilled from the registry defaults",
-      dlg.hotkeys_table.rowCount() == _expected_rows
-      and len(dlg.hotkey_edits) == _expected_rows
-      and _expected_rows == 46,   # v1.4.5: +view.toggle_legend
+check("'Hotkeys': one ACTION row per registry action (49 in v1.5rc4: +view.focus_map), "
+      "grouped by family",
+      len(dlg.hotkey_edits) == _expected_rows
+      and _expected_rows == 49
+      and dlg.hotkeys_table.rowCount() == _expected_rows + len(dlg.hotkey_family_rows())
+      and [dlg._hotkey_rows[r][1] for r in dlg.hotkey_action_rows()]
+      == [aid for fam in _HR.family_order() for aid in _HR.actions_by_family()[fam]],
       f"rows={dlg.hotkeys_table.rowCount()} registry={_expected_rows}")
 check("'Hotkeys': the row names come from the registry label keys",
-      [dlg.hotkeys_table.item(r, 0).text() for r in range(_expected_rows)]
-      == [i18n.t(_HR.action_label_key(a)) for a in _HR.action_ids()])
+      [dlg.hotkeys_table.item(r, 0).text() for r in dlg.hotkey_action_rows()]
+      == [i18n.t(_HR.action_label_key(a))
+          for fam in _HR.family_order() for a in _HR.actions_by_family()[fam]])
 check("'Hotkeys': the v1.3.3.3 defaults are prefilled (Save As / Reset zoom / Zoom In / Zoom Out)",
       dlg.hotkey_edits["file.save_as"].keySequence().toString() == "Ctrl+Shift+S"
       and dlg.hotkey_edits["view.reset_zoom"].keySequence().toString() == "Ctrl+0"

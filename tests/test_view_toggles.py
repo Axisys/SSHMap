@@ -30,7 +30,8 @@ The thematic test of the release (the "new thematic file" convention): offscreen
    the statuses work in the background (scene-based), the dots appear on the expansion.
 
 §6 The PNG/PDF/drawio export on the collapsed map: the files are created (the scene renders,
-   the view is not needed).
+   the view is not needed). v1.5rc2: the print-palette question of the export commands is
+   stubbed here (the dialog and the palette decision are the subject of tests/test_encoding.py).
 
 §7 terminal_mode="tabs": the map is collapsed → the dock "Terminals" lives, the session types,
    the tear-off of the dock into a window and back work (the QDockWidget is independent of the splitter).
@@ -401,6 +402,14 @@ print("== 6. exports with map collapsed ==")
 win.act_show_map.setChecked(False)
 app.processEvents()
 
+# v1.5rc2: the four export commands ask ONE question (the print-friendly palette) and
+# answer it through a modal dialog. This section is about the RENDER on a collapsed
+# map, so the question is stubbed exactly as the file dialog is — the dialog itself and
+# the palette decision are pinned by tests/test_encoding.py §6.
+from ui import theme  # noqa: E402
+_ask_palette = win._ask_export_palette
+win._ask_export_palette = lambda: theme.PALETTE_PRINT
+
 _export_path = {"p": None}
 
 
@@ -427,6 +436,8 @@ _export_path["p"] = os.path.join(WORK, "vt_map.drawio")
 win._export_map_drawio()
 check("the drawio export with the map collapsed: the file is created",
       os.path.isfile(_export_path["p"]) and os.path.getsize(_export_path["p"]) > 0)
+
+win._ask_export_palette = _ask_palette   # v1.5rc2: hand the real question back
 
 # ════════════════════════════════════════════════════════════
 # 7. terminal_mode="tabs": the map collapsed → the dock is alive, the sessions print

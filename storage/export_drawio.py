@@ -37,6 +37,17 @@ DECISIONS pinned here so the next reader does not "fix" them (v1.3.3.7):
   * `status` (online/warn/offline) is deliberately NOT exported. It is a RUNTIME fact —
     the result of the last SSH probe — not project data, so writing it would make two
     exports of one unchanged project differ. Same decision in DOCUMENTATION.md §28.
+
+v1.5rc2 (ROADMAP task 3) — the EXPORT PALETTE and the second channel:
+  * `export_scene_to_drawio(scene, path, palette=…)` renders PRINT-FRIENDLY by
+    default (`ui/theme.py PALETTE_PRINT`): a white card, the LIGHT instance's STRONG
+    accent as the outline and the six LIGHT arrow colours — the same decision and the
+    same source as the PNG/PDF/SVG exports, so the formats agree. `PALETTE_THEME`
+    keeps the current look (the format's own dark palette, deliberately outside the
+    UI theme — see DOCUMENTATION.md §3, "out of theme scope").
+  * Every EDGE carries the DECLARED dash pattern of its type
+    (`theme.ARROW_TYPE_STYLES` through `edge_dash_attributes()`), so the six types
+    stay apart in the file without relying on their colour.
 """
 
 from __future__ import annotations
@@ -45,6 +56,11 @@ import os
 import xml.etree.ElementTree as ET
 from typing import Optional
 from urllib.parse import quote
+
+try:  # v1.5rc2: the export palette + the declared pen styles (pure data — no PySide6 there)
+    from ..ui import theme
+except ImportError:
+    from ui import theme
 
 # The application's dark palette (an approximation of the map canvas)
 NODE_FILL = "#0f172a"       # dark blue node background
@@ -55,9 +71,54 @@ NOTE_TEXT = "#1e293b"
 GROUP_FILL = "none"
 GROUP_STROKE = "#64748b"
 
+# The palette ids (the ONE vocabulary of the export path — `ui/theme.py`).
+PALETTE_PRINT = theme.PALETTE_PRINT
+PALETTE_THEME = theme.PALETTE_THEME
+
 LAYER_BACKGROUND = "layer-background"
 LAYER_GROUPS = "layer-groups"
 LAYER_MAP = "layer-map"
+
+
+def export_palette_colors(palette=PALETTE_PRINT) -> dict:
+    """The colours the drawio writer paints with (v1.5rc2, ROADMAP task 3).
+
+    `print` (the default) FOLLOWS THE LIGHT THEME: the white card (`node_bg`), the
+    STRONG accent as the outline (`accent_strong` — the tone the v1.5rc1 contrast gate
+    measured at 4.83 on the light canvas, where the decorative sky sits at 2.05) and
+    the six arrow colours of the same instance, so the file agrees with the raster
+    export instead of repeating a second palette. `theme` keeps the format's own dark
+    palette (the module constants above), which is what the pre-v1.5rc2 exporter
+    wrote; an unknown id resolves to the print one.
+    """
+    instance = theme.export_theme(palette)
+    if theme.resolve_export_palette(palette) != PALETTE_PRINT:
+        return {"node_fill": NODE_FILL, "node_stroke": NODE_STROKE,
+                "node_text": NODE_TEXT, "group_stroke": GROUP_STROKE,
+                "arrow_colors": dict(instance.arrow_type_colors)}
+    return {"node_fill": instance.node_bg,
+            "node_stroke": instance.accent_strong,
+            "node_text": instance.text_primary,
+            "group_stroke": instance.icon_color,
+            "arrow_colors": dict(instance.arrow_type_colors)}
+
+
+def edge_dash_attributes(style) -> str:
+    """The drawio attributes of a DECLARED pen style (v1.5rc2) — the second channel.
+
+    The pattern is written in PIXELS (`dashPattern`), i.e. one declared rhythm, not
+    the pen's own unit: the map's dots (1.2 pen widths) would be sub-pixel here. A
+    double line has no drawio equivalent (an edge carries ONE stroke), so the DOUBLE
+    type is expressed by a rhythm of its own — the six types stay apart in the FILE
+    too, which is what "no meaning in a colour alone" means for an export.
+    """
+    if getattr(style, "double", False):
+        return "dashed=1;dashPattern=10 3 2 3;"
+    dash = getattr(style, "dash", ())
+    if not dash:
+        return "dashed=0;"
+    return "dashed=1;dashPattern=" + " ".join(f"{float(v):g}" for v in dash) + ";"
+
 
 
 def _uri_for_style(path: str) -> str:
@@ -149,11 +210,18 @@ def _vertex(root_el, cell_id, value, x, y, w, h, style, parent_id="1"):
 class DrawioExporter:
     """Assembling an mxGraph model from a MapScene and serializing it into .drawio XML."""
 
-    def __init__(self, scene, dark: bool = True):
+    def __init__(self, scene, palette=PALETTE_PRINT):
         self.scene = scene
-        self.dark = dark
+        # v1.5rc2: the palette id (unknown → print) + the colours it resolves to.
+        self.palette = theme.resolve_export_palette(palette)
+        self._colors = export_palette_colors(self.palette)
         self._cell_seq = 0
         self._member_cell_ids: dict = {}  # ServerNode (in a group) → cell id
+
+    @property
+    def dark(self) -> bool:
+        """True while the export keeps the CURRENT theme (the pre-v1.5rc2 `dark` flag)."""
+        return self.palette == PALETTE_THEME
 
     # ── id generation ─────────────────────────────────────────────────
     def _next_id(self, prefix: str) -> str:
@@ -220,8 +288,8 @@ class DrawioExporter:
                 continue
             style = (
                 f"rounded=1;container=1;collapsible=0;childLayout=none;"
-                f"fillColor={GROUP_FILL};strokeColor={GROUP_STROKE};"
-                f"fontColor={NODE_TEXT if self.dark else '#0f172a'};"
+                f"fillColor={GROUP_FILL};strokeColor={self._colors['group_stroke']};"
+                f"fontColor={self._colors['node_text']};"
                 "verticalAlign=top;align=left;spacingLeft=8;"
                 "html=1;whiteSpace=wrap;pointerEvents=0;")
             cell_id = self._next_id("group")
@@ -242,12 +310,11 @@ class DrawioExporter:
         return ids
 
     def _node_style(self) -> str:
-        text = NODE_TEXT if self.dark else "#0f172a"
-        fill = NODE_FILL if self.dark else "#ffffff"
-        stroke = NODE_STROKE if self.dark else "#0284c7"
+        """The vertex style of the ACTIVE export palette (v1.5rc2)."""
         return (
-            f"rounded=1;whiteSpace=wrap;html=1;fillColor={fill};"
-            f"strokeColor={stroke};fontColor={text};align=left;"
+            f"rounded=1;whiteSpace=wrap;html=1;fillColor={self._colors['node_fill']};"
+            f"strokeColor={self._colors['node_stroke']};"
+            f"fontColor={self._colors['node_text']};align=left;"
             "spacingLeft=8;verticalAlign=middle;fontFamily=Consolas;")
 
     # ── map ────────────────────────────────────────────────────────
@@ -274,8 +341,12 @@ class DrawioExporter:
             if not src or not dst:
                 continue
             ctype = getattr(arrow, "connection_type", "ssh")
-            color = type_color_safe(ctype)
+            color = type_color_safe(ctype, self._colors["arrow_colors"])
             label = getattr(arrow, "label_text", "") or ""
+            # v1.5rc2 (ROADMAP task 1/3): the DECLARED pen style of the type travels into
+            # the file as the edge's width + dash pattern — the six types stay apart
+            # without their colour.
+            style = theme.arrow_type_style(ctype)
             # v1.2.6: bidirectional connection — an arrowhead at the start end too (startArrow)
             bidir = bool(getattr(arrow, "bidirectional", False))
             edge = ET.SubElement(root_el, "mxCell", {
@@ -283,9 +354,10 @@ class DrawioExporter:
                 "value": label,
                 "style": (
                     "edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;"
-                    f"strokeColor={color};endArrow=classic;"
+                    f"strokeColor={color};strokeWidth={float(style.width):g};"
+                    f"endArrow=classic;{edge_dash_attributes(style)}"
                     + ("startArrow=classic;" if bidir else "")
-                    + f"fontColor={NODE_TEXT if self.dark else '#0f172a'};"
+                    + f"fontColor={self._colors['node_text']};"
                       "fontSize=10;"),
                 "edge": "1",
                 "parent": LAYER_MAP,
@@ -324,26 +396,29 @@ class DrawioExporter:
         return b'<?xml version="1.0" encoding="UTF-8"?>\n' + xml.encode("utf-8")
 
 
-def type_color_safe(ctype: str) -> str:
-    """HEX color of a connection type without a Qt dependency (duplicates the v0.7 palette)."""
-    return {
-        "ssh": "#34d399",
-        "vpn": "#60a5fa",
-        "http": "#fbbf24",
-        "database": "#a78bfa",
-        "nfs": "#f472b6",
-        "kubernetes": "#22d3ee",
-    }.get(ctype, "#34d399")
+def type_color_safe(ctype: str, colors: Optional[dict] = None) -> str:
+    """HEX color of a connection type without a Qt dependency (v0.9.5, palette-aware in v1.5rc2).
+
+    Without ``colors`` the DARK palette of the format (`ui/theme.py`'s DARK instance,
+    the values this helper carried since v0.9.5) is used; an export passes the arrow
+    colours of ITS palette (``export_palette_colors()``), so the file and the map agree.
+    """
+    table = colors if colors is not None else theme.DARK.arrow_type_colors
+    return table.get(ctype, table.get("ssh", "#34d399"))
 
 
-def export_scene_to_drawio(scene, path: str, dark: bool = True) -> int:
+def export_scene_to_drawio(scene, path: str, palette=PALETTE_PRINT) -> int:
     """Export the scene to a .drawio file. Returns the number of cells (diagnostics).
 
     v1.0-fix (audit #7): earlier _cell_seq was returned — it was incremented only
     for groups and nodes without data.id, i.e. the "cells" log actually counted groups. Now —
     the real number of mxCell in the file (including structural ones: the root "0"/"1" and the 3 layers).
+
+    v1.5rc2 (ROADMAP task 3): ``palette`` decides the colours — PRINT-FRIENDLY by
+    default (the light page + the high-contrast outlines, the same decision as the
+    PNG/PDF/SVG exports), ``PALETTE_THEME`` for the current look.
     """
-    exporter = DrawioExporter(scene, dark=dark)
+    exporter = DrawioExporter(scene, palette=palette)
     root = exporter.build()
     cells = sum(1 for _ in root.iter("mxCell"))
     data = exporter.to_xml_bytes(root)

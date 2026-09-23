@@ -15,6 +15,12 @@ Design:
   the rank.
 - Enter runs the first/selected command; Esc closes the palette.
 
+v1.5rc3 (ROADMAP task 4): an EMPTY query is the first screen, so it opens with a
+bounded **"Start here"** block — the actions this session already ran (newest first),
+then the declared frequent set (`START_HERE_ACTION_IDS`) — and only then the ordinary
+alphabetical list. The block is a caption row plus at most `START_HERE_MAX` commands;
+the commands it offers are not repeated below it.
+
 i18n: keys palette.* × en/ru/zh; action names are taken from the
 already-translated QAction texts (no duplicate translations).
 """
@@ -50,6 +56,21 @@ def _t(key: str) -> str:
 # v1.4rc3: the glyph of each palette section (a plugin command is not a core action).
 _ICON_BY_KIND = {"server": "add_server", "plugin": "plugin"}
 
+# ── v1.5rc3 (ROADMAP task 4): the "Start here" block ───────────────────────────────
+# On an EMPTY query the palette used to be a plain alphabetical list of everything.
+# The first screen now offers the handful of actions a user actually starts with —
+# the ones they ran in this session first (recent), then the declared frequent set —
+# under one header, before the alphabetical rest. Both lists are bounded, so the block
+# answers "where do I begin" instead of "here are 60 rows".
+START_HERE_ACTION_IDS = (
+    "file.new", "file.open", "file.save",
+    "edit.add_server", "edit.add_connection",
+    "file.import_servers", "file.import_ssh_config",
+    "view.fit_map", "view.find_on_map",
+)
+START_HERE_MAX = 8        # rows of the block (recent + frequent together)
+PALETTE_RECENT_MAX = 5    # how many recently RUN actions the block remembers
+
 
 def fuzzy_score(pattern: str, text: str):
     """Subsequence fuzzy: return (score, matched) or None.
@@ -83,6 +104,14 @@ class CommandPalette(QDialog):
         super().__init__(parent or main_window)
         self.mw = main_window
         self._commands = []      # [(label, kind, callable)]
+        # v1.5rc3 (ROADMAP task 4): the "start here" machinery. `_action_ids` maps the
+        # identity of a collected command's callable to its registry action id (the
+        # palette walks QActions, which carry their id in `_hotkey_targets`), and
+        # `_recent` is the session's list of recently RUN action ids, newest first.
+        self._action_ids = {}    # id(callable) -> action_id
+        self._recent = []        # [action_id, …] — bounded by PALETTE_RECENT_MAX
+        self._start_here = []    # [(label, kind, callable)] — the block, built per open
+        self._header_rows = 0    # 1 while the "Start here" header row is on screen
         self._build_ui()
 
     # ── UI ───────────────────────────────────────────────────────
@@ -140,6 +169,8 @@ class CommandPalette(QDialog):
 
     def _collect_commands(self):
         cmds = []
+        self._action_ids = {}
+        by_action = {}          # action_id -> (label, kind, callable)
 
         # 1) Main window menu actions (already translated via i18n).
         seen = set()
@@ -160,7 +191,15 @@ class CommandPalette(QDialog):
                 if ident in seen:
                     continue
                 seen.add(ident)
-                cmds.append((text, "action", lambda a=act: a.trigger()))
+                runner = (lambda a=act: a.trigger())
+                entry = (text, "action", runner)
+                cmds.append(entry)
+                # v1.5rc3: the registry id of this QAction (for the "start here" block);
+                # the window's `_hotkey_targets` IS the action_id → QAction map.
+                action_id = self._action_id_of(act)
+                if action_id:
+                    self._action_ids[id(runner)] = action_id
+                    by_action.setdefault(action_id, entry)
 
         bar = self.mw.menuBar()
         # v0.9.8 bugfix (PySide6 6.11): keep the top-level QAction wrappers
@@ -207,6 +246,41 @@ class CommandPalette(QDialog):
                              lambda pid=plugin_id, c=cmd: self._run_plugin_command(pid, c)))
 
         self._commands = cmds
+        self._build_start_here(by_action)
+
+    def _action_id_of(self, act) -> str:
+        """The registry id of a collected QAction ("" — not a registry action).
+
+        `MainWindow._hotkey_targets` is the action_id → targets mapping the registry
+        installs into, so it answers this without a second table. A toolbar MIRROR is
+        not in it (v1.3.3.3: mirrors carry no sequence) — and a mirror is a duplicate
+        of the menu item anyway, which the walk already collected.
+        """
+        targets = getattr(self.mw, "_hotkey_targets", None) or {}
+        for action_id, objects in targets.items():
+            for obj in objects:
+                if obj is act:
+                    return action_id
+        return ""
+
+    def _build_start_here(self, by_action: dict) -> None:
+        """The bounded "Start here" block: the session's recent actions, then the frequent ones.
+
+        Only actions the palette can really run (a menu QAction with a registry id)
+        enter the block, so it can never offer a row that is missing from the menus of
+        this build. An empty block is fine — the alphabetical list follows anyway.
+        """
+        ordered = [aid for aid in self._recent if aid in by_action]
+        ordered += [aid for aid in START_HERE_ACTION_IDS
+                    if aid in by_action and aid not in ordered]
+        self._start_here = [by_action[aid] for aid in ordered[:START_HERE_MAX]]
+
+    def _remember_action(self, action_id: str) -> None:
+        """Remember a RUN action for the next "Start here" block (newest first, bounded)."""
+        if not action_id:
+            return
+        self._recent = [action_id] + [a for a in self._recent if a != action_id]
+        del self._recent[PALETTE_RECENT_MAX:]
 
     def _run_plugin_command(self, plugin_id, cmd):
         """v1.4rc3: run ONE command a plugin contributed (through the manager's wrapper).
@@ -273,30 +347,57 @@ class CommandPalette(QDialog):
     def _refilter(self, text=""):
         text = self.input.text().strip()
         self.listw.clear()
+        self._header_rows = 0
+        # v1.5rc3 (ROADMAP task 4): an EMPTY query is the first screen — it opens with
+        # the bounded "Start here" block (a header row + up to START_HERE_MAX commands)
+        # instead of dropping the user into the alphabetical middle of everything. A
+        # typed query is a search and behaves exactly as it always did.
+        skip = set()
+        if not text and self._start_here:
+            header = QListWidgetItem(_t("palette.start_here"))
+            header.setFlags(Qt.ItemFlag.NoItemFlags)   # a caption, not a command
+            self.listw.addItem(header)
+            self._header_rows = 1
+            for entry in self._start_here:
+                self._add_row(entry)
+                skip.add(id(entry[2]))
         scored = []
         for label, kind, fn in self._commands:
+            if id(fn) in skip:
+                continue     # already offered above — never list a command twice
             res = fuzzy_score(text, label)
             if res is None:
                 continue
             scored.append((res[0], kind, label, fn))
         scored.sort(key=lambda x: (x[0], x[2].lower()))
         for _, kind, label, fn in scored[:50]:
-            item = QListWidgetItem(label)
-            item.setData(Qt.UserRole, fn)
-            # v0.9.3 fix: the "🖥/⚡" emojis were removed — the project
-            # deliberately moved to vector icons (ui/icons.py,
-            # Segoe UI Emoji renders poorly).
-            # v1.4rc3: the plugin commands get the puzzle glyph of the "Plugins" menu.
-            try:
-                from ui.icons import get_icon
-                icon = get_icon(_ICON_BY_KIND.get(kind, "connection"))
-                if icon is not None and not icon.isNull():
-                    item.setIcon(icon)
-            except Exception:  # noqa: BLE001 — icons are cosmetic, don't break the palette
-                pass
-            self.listw.addItem(item)
+            self._add_row((label, kind, fn))
         if self.listw.count():
-            self.listw.setCurrentRow(0)
+            # Never land the cursor on the caption row (a NoItemFlags item is not a
+            # command: Enter on it would close the palette without running anything).
+            self.listw.setCurrentRow(min(self._header_rows, self.listw.count() - 1))
+
+    def _add_row(self, entry):
+        """Add one row of the list (the icon follows the kind; the action id rides along)."""
+        label, kind, fn = entry
+        item = QListWidgetItem(label)
+        item.setData(Qt.UserRole, fn)
+        # v1.5rc3: the registry id of this row ("" for a server/plugin row) — what
+        # `_run_current()` feeds into the "recently used" list of the start-here block.
+        item.setData(Qt.UserRole + 1, self._action_ids.get(id(fn), ""))
+        # v0.9.3 fix: the "🖥/⚡" emojis were removed — the project
+        # deliberately moved to vector icons (ui/icons.py,
+        # Segoe UI Emoji renders poorly).
+        # v1.4rc3: the plugin commands get the puzzle glyph of the "Plugins" menu.
+        try:
+            from ui.icons import get_icon
+            icon = get_icon(_ICON_BY_KIND.get(kind, "connection"))
+            if icon is not None and not icon.isNull():
+                item.setIcon(icon)
+        except Exception:  # noqa: BLE001 — icons are cosmetic, don't break the palette
+            pass
+        self.listw.addItem(item)
+        return item
 
     def refresh_theme(self):
         """v1.4.3-fix: re-apply the theme to the OPEN palette.
@@ -319,7 +420,11 @@ class CommandPalette(QDialog):
             self.accept()
             return
         fn = item.data(Qt.UserRole)
+        action_id = item.data(Qt.UserRole + 1)
         self.accept()
+        # v1.5rc3 (ROADMAP task 4): a command that was really RUN is what the next
+        # "Start here" block offers first (the caption row has no command — no record).
+        self._remember_action(str(action_id or ""))
         if callable(fn):
             fn()
 

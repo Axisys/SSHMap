@@ -102,20 +102,25 @@ of the file itself.
 | `test_audit_rc1_threads.py` | slow | v1.2.10rc1 — Audit: threads and teardown (AUDIT.md auto #2 + manual #1 + a verification finding). |
 | `test_audit_rc2_robustness.py` | — | v1.2.10rc2 — Audit: robustness and code hygiene (AUDIT.md manual #5, auto #7, manual #6). |
 | `test_audit_v1210.py` | — | v1.2.10 — Audit: confirmed bugs and data (AUDIT.md): the release's themed test. |
+| `test_audit_v15rc5.py` | — | v1.5rc5 — the review batch (hardening): the batch-level checks of the nine defects. |
 | `test_autosave_backups.py` | — | Regression v0.9.7 — autosave + the project backup ring buffer. |
 | `test_bidirectional_arrows.py` | — | Bidirectional arrows (v1.2.6, ROADMAP task 1). |
+| `test_chrome.py` | — | v1.5rc4 — Density, focus & findability: the chrome answers the same questions as the map. |
 | `test_collapse.py` | — | Server card collapsing v0.8.4 (former DESIGN.md §D) (former tests/smoke_collapse.py). |
 | `test_command_library.py` | — | v1.3 — "Terminal macros": a command/script library in the terminal panel (ROADMAP v1.3). |
 | `test_connections.py` | — | Connections: Bézier arrows, types, edge-to-edge, drag mode (former smoke_test.py §6b "v0.7"). |
 | `test_context_menus.py` | — | Node and arrow context menus v0.7.3 (former smoke_test.py "v0.7.3 context menus"). |
 | `test_core.py` | — | Suite core (former smoke_test.py §1–5): compile, i18n, models, ANSI, profiles/keyring. |
 | `test_diagnostics.py` | network | services/diagnostics.py: PingThread + ReverseDnsThread (v0.9.9.3). |
+| `test_docs.py` | — | The documentation-consistency guards (the changelog family, ROADMAP, the quoted counters, INDEX freshness). |
 | `test_drawio_export.py` | — | Map export to drawio (.drawio) v0.9.5 (former tests/smoke_v095_drawio.py). |
 | `test_duplicate_multiselect.py` | — | Regression v0.9.3: node duplication + multi-select + group drag. |
+| `test_encoding.py` | — | v1.5rc2 — the ENCODING gate: "no meaning in a colour alone" + the print-friendly export. |
 | `test_export_background.py` | — | Regression v0.9.1: map export to image + background image. |
 | `test_export_fidelity.py` | — | v1.3.3.7 — Export fidelity: the drawio vertex keeps the map's data, SVG joins the formats. |
 | `test_ext_terminal_dialog.py` | — | Regression v0.9.9.2 — the external terminal UI (presets + reset to defaults). |
 | `test_external_terminal.py` | — | External (system) terminal v0.8.2: modules/external_terminal.py (former smoke_test). |
+| `test_first_run.py` | — | v1.5rc3 — First run & confidence: the demo map, the undo affordance and the age of a status. |
 | `test_groups.py` | — | Node groups on the map v0.8.1 (former smoke_test.py "v0.8.1 groups"). |
 | `test_hotkeys_config.py` | — | v1.3.2 — Configurable hotkeys (QKeySequenceEdit, action registry): the release's test. |
 | `test_hotkeys_palette.py` | — | Hotkeys + command palette v0.9.2 (former smoke_test "v0.9.2 hotkeys + command palette"). |
@@ -147,6 +152,7 @@ of the file itself.
 | `test_quick_launch.py` | — | v1.0RC4 — Quick launch (server links/commands): the release's themed test. |
 | `test_rc2_map_import_sidebar.py` | — | v1.1.2RC2 — Map, import, sidebar (release theme). |
 | `test_rc3_terminal_window.py` | — | v1.1.2RC3 — Terminal windows (ROADMAP v1.1.2RC3, AUDIT §4/§5). |
+| `test_release_v15.py` | — | v1.5 — the release that closes the 1.5 line: the environment badge, the panel snap, |
 | `test_rubber_band_perf.py` | — | v1.2.10rc3 — rubber-band selection performance on large maps (AUDIT auto #9). |
 | `test_save_load.py` | — | Headless project save/load + keyring passwords (former smoke_test.py §6 "main window"). |
 | `test_scrollback_batching.py` | — | v1.2.14 — Scrollback: batching of the auto-return to the live line (PYTE82_AUDIT.md batch D2). |
@@ -180,6 +186,7 @@ of the file itself.
 | `test_terminal_split.py` | — | v1.3.3.5 — Terminal split: a second pane under the sessions (ROADMAP v1.3.3.5). |
 | `test_terminal_tabs.py` | — | v1.2.1 — Multiple SSH sessions as tabs in one terminal window (ROADMAP v1.2.1). |
 | `test_theme.py` | — | v1.1.5 → v1.4.3 — the central theme `ui/theme.py`: the `Theme` object, LIGHT, the accent hue. |
+| `test_theme_contrast.py` | — | v1.5rc1 — the CONTRAST GATE: the LIGHT palette, the two accent roles and the numbers that pin them. |
 | `test_ui_density.py` | — | v1.4.5 — UI density & first run (ROADMAP v1.4.5): the compact sidebar grid, the first-run |
 | `test_ui_polish.py` | — | UI polish: nodes, grid, fit/zoom, status bar, icons, arrow hit zones (former smoke_test). |
 | `test_undo_redo.py` | — | Regression tests v0.8.3 — Undo/Redo. |

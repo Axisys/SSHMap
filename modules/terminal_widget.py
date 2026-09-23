@@ -147,6 +147,18 @@ try:
 except ImportError:
     from modules.terminal_find_bar import TerminalFindBar
 
+# v1.5rc4 (ROADMAP task 5): the ONE visible-focus indicator of the three keyboard
+# domains — the terminal canvas shows the same ring as the map and the sidebar, in the
+# STRONG accent role of v1.5rc1 (never a new colour). The module imports only
+# ui/theme + ui/theme_qss — no cycle with terminal_widget.
+try:
+    from ui import focus_ring as _focus_ring_mod
+except ImportError:
+    try:
+        from ..ui import focus_ring as _focus_ring_mod
+    except ImportError:  # a stripped build — the canvas simply has no ring
+        _focus_ring_mod = None
+
 # v1.2.4-fix (multi-input diagnostics): the app logger (lazy, the get_translator
 # pattern) — a DEBUG line per broadcast in _send. Without setup_logging
 # no records are emitted (the 'sshmap' namespace has no handlers) — safe for tests.
@@ -491,6 +503,12 @@ class TerminalWidget(QWidget):
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         # the test hook: the stats of the last paint (runs vs per-character drawText)
         self.last_paint_stats = {"rows": 0, "runs": 0, "draw_text_calls": 0}
+        # v1.5rc4 (ROADMAP task 5): the terminal is one of the three keyboard domains and
+        # says so with the SAME ring the map and the sidebar show. In `terminal_mode =
+        # "tabs"` the session shares the window with the map, so the ring is also the
+        # answer to "where do my keys go?".
+        self._focus_ring = (_focus_ring_mod.FocusRing(owner=self)
+                            if _focus_ring_mod is not None else None)
 
     # ── metrics/palette/font ──────────────────────────────
     def _update_metrics(self):
@@ -673,6 +691,33 @@ class TerminalWidget(QWidget):
                 painter.drawText(cell_x, cell_y + self._ascent, ch.data)
 
         self.last_paint_stats = stats
+
+        # v1.5rc4 (ROADMAP task 5): the visible focus of the terminal domain. Painted
+        # LAST (over the grid, the selection, the find marks and the cursor) with the ONE
+        # shared painter, so the frame is identical to the map's and the sidebar's.
+        if self._focus_ring is not None and self._focus_ring.is_active():
+            self._focus_ring.paint(painter, self.rect())
+
+    # ── v1.5rc4 (ROADMAP task 5): the VISIBLE FOCUS of the terminal ───────────
+    # The canvas is a keyboard domain of its own (the xterm protocol of §14a): the ring
+    # tells the user that the shell — not the map behind it in `terminal_mode = "tabs"` —
+    # owns the keys. Drawn over the grid with the ONE shared painter (ui/focus_ring.py).
+
+    def focus_ring_active(self) -> bool:
+        """True while the canvas owns the keyboard (the topical test's seam)."""
+        return bool(self._focus_ring is not None and self._focus_ring.is_active())
+
+    def focusInEvent(self, event):
+        """v1.5rc4: the canvas took the keyboard — show the focus ring."""
+        if self._focus_ring is not None:
+            self._focus_ring.set_active(True)
+        super().focusInEvent(event)
+
+    def focusOutEvent(self, event):
+        """v1.5rc4: the keyboard went elsewhere — drop the focus ring."""
+        if self._focus_ring is not None:
+            self._focus_ring.set_active(False)
+        super().focusOutEvent(event)
 
     def visible_text(self):
         """The text of the visible grid (for tests/debugging); the placeholders give ''."""
@@ -1478,7 +1523,7 @@ class TerminalWidget(QWidget):
             except Exception:  # noqa: BLE001 — a UI refresh must not break the toggle
                 pass
 
-    # ── v1.3.3.1 (invariant): re-text on a language switch ─────────────────────
+    # ── v1.3.3.1 (invariant): the theme / language hooks of the canvas ─────────
     def refresh_theme(self):
         """v1.4.3 (ROADMAP task 4): re-apply the theme to the canvas.
 
@@ -1488,7 +1533,13 @@ class TerminalWidget(QWidget):
         the registry. A repaint is requested anyway: a switch changes the widget
         chrome around the canvas (the page's status line, the tabs), and a stale
         frame would show it. Never raises.
+
+        v1.5rc4 (ROADMAP task 5): the VISIBLE-FOCUS ring repaints here too — its
+        colour is read live from the ACTIVE theme (`theme.ACCENT_STRONG`), so a
+        switch has to redraw it.
         """
+        if self._focus_ring is not None:
+            self._focus_ring.refresh_theme()
         bar = self._find_bar
         if bar is not None:
             hook = getattr(bar, "refresh_theme", None)

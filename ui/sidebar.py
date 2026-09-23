@@ -22,7 +22,7 @@ etc. — window methods. The context menu object is CREATED by MainWindow
 (QMenu — module-level global, the test seam for monkeypatching); the panel
 only fills it with items (fill_context_menu).
 """
-from PySide6.QtCore import Qt, QSize, Signal
+from PySide6.QtCore import Qt, QEvent, QSize, Signal
 # v1.1.2RC2 (N9): QColor removed from imports — after deleting the dead
 # setItemData(..., Qt.DecorationRole) the panel has no remaining uses
 from PySide6.QtGui import QIcon, QPixmap, QPainter, QBrush
@@ -47,6 +47,22 @@ except ImportError:
 
         def refresh_button_icon(button, name):  # noqa: N802 — stub
             return False
+
+try:  # v1.5rc2 (ROADMAP task 2): the DECLARED status shapes — the row marker's mark
+    from . import status_shape
+except ImportError:
+    try:
+        from ui import status_shape
+    except ImportError:  # flat layout without ui/status_shape — the v1.4.x round dot
+        status_shape = None
+
+try:  # v1.5rc4 (ROADMAP task 5): the ONE visible-focus indicator of the keyboard domains
+    from . import focus_ring
+except ImportError:
+    try:
+        from ui import focus_ring
+    except ImportError:  # flat layout without ui/focus_ring — the panel simply has no frame
+        focus_ring = None
 
 
 # Context menu action keys (order and separators — ROADMAP v0.9.6, item 1).
@@ -255,6 +271,17 @@ class SidebarPanel(QWidget):
         # Icon cache for the status dots ("", "online", "warn", "offline")
         self._status_dot_icons = {}
 
+        # ── v1.5rc4 (ROADMAP task 5): the sidebar is a keyboard domain ─────────
+        # The tree is where the keyboard lands when it is in the sidebar, so the tree
+        # carries the visible focus frame — the SAME indicator the map and the terminal
+        # canvas show (ui/focus_ring.py: one state, one colour, `theme.ACCENT_STRONG`).
+        # The frame is applied DIRECTLY (not through `theme_qss.refresh()`, which hides
+        # and re-shows the widget — re-showing a widget drops the focus we react to).
+        self._focus_ring = (focus_ring.FocusRing(styled_widget=self.tree)
+                            if focus_ring is not None else None)
+        if self._focus_ring is not None:
+            self.tree.installEventFilter(self)
+
         # v0.9.6: server tree context menu (right-click on a sidebar row).
         # CustomContextMenu policy + customContextMenuRequested signal — Qt's
         # standard path for QTreeWidget (the widget has no overridable
@@ -320,8 +347,31 @@ class SidebarPanel(QWidget):
         layout.addLayout(_row)
         self.collapse_btn.clicked.connect(self.collapse_clicked)
 
-    # ── i18n (callback + retranslate — regression for the v0.9.2 bug) ─────────────────
+    # ── v1.5rc4 (ROADMAP task 5): the VISIBLE FOCUS of the sidebar ────────────
+    # The panel is one of the three keyboard domains; the TREE is the widget the keyboard
+    # lands in, so the tree carries the frame. The state follows the tree's own
+    # FocusIn/FocusOut through an event filter (the panel owns the filter, the widget owns
+    # nothing) — and it is deliberately a plain bool + one stylesheet swap, never a
+    # hide/show (that would move the focus away the moment we react to it).
 
+    def eventFilter(self, obj, event):
+        """Follow the tree's focus (v1.5rc4, ROADMAP task 5) — everything else passes."""
+        if obj is getattr(self, "tree", None) and self._focus_ring is not None:
+            try:
+                kind = event.type()
+            except (RuntimeError, AttributeError):
+                kind = None
+            if kind == QEvent.Type.FocusIn:
+                self._focus_ring.set_active(True)
+            elif kind == QEvent.Type.FocusOut:
+                self._focus_ring.set_active(False)
+        return super().eventFilter(obj, event)
+
+    def focus_indicator_active(self) -> bool:
+        """True while the sidebar owns the keyboard (the topical test's seam)."""
+        return bool(self._focus_ring is not None and self._focus_ring.is_active())
+
+    # ── i18n (callback + retranslate — regression for the v0.9.2 bug) ─────────────────
     def _tr(self, key: str, **kw) -> str:
         """Translate via the passed callback; without one — the key itself."""
         if self._translate is not None:
@@ -406,7 +456,17 @@ class SidebarPanel(QWidget):
 
         The tree's status markers are painted fresh on every `refresh_rows()`, so
         only the six action buttons carry a cached pixmap. Never raises.
+        v1.5rc2: the STATUS MARKER cache is dropped here as well — it is keyed by
+        status only, while the colour it bakes in moves with the theme (the row is
+        repainted on the next `refresh_rows()`/`apply_status_marker`).
+        v1.5rc4: the focus FRAME is a stylesheet VALUE of the same kind — its colour is
+        read live from the theme, so it is re-applied here too.
         """
+        self._status_dot_icons.clear()
+        # v1.5rc4 (ROADMAP task 5): the focus frame is a stylesheet VALUE too (its colour
+        # is read live from the theme) — re-apply it with the panel's other styles.
+        if getattr(self, "_focus_ring", None) is not None:
+            self._focus_ring.refresh_theme()
         for attr, icon_name, _key, _fallback in _BUTTONS:
             btn = getattr(self, attr, None)
             if btn is None:
@@ -608,20 +668,28 @@ class SidebarPanel(QWidget):
     # ── Status markers (review fix v0.8.0, #3) ──────────────────────────────
 
     def _status_dot_icon(self, status: str) -> QIcon:
-        """Colored dot for a tree row — the same palette as the dots on the cards."""
+        """The status mark of a tree row — the SHAPE and the colour of the cards (v1.5rc2).
+
+        The shape comes from the declaration (`theme.STATUS_SHAPES` through
+        `ui/status_shape.py`), the colour from the same palette the cards paint with,
+        so a status is readable in greyscale here exactly as it is on the map.
+        """
         icon = self._status_dot_icons.get(status)
         if icon is not None:
             return icon
         color = ServerNode.STATUS_COLORS.get(status, ServerNode.COLOR_DOT_IDLE)
-        pm = QPixmap(16, 16)
-        pm.fill(Qt.GlobalColor.transparent)
-        painter = QPainter(pm)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(QBrush(color))
-        painter.drawEllipse(3, 3, 10, 10)
-        painter.end()
-        icon = QIcon(pm)
+        if status_shape is not None:
+            icon = status_shape.shape_icon(status, color, 16)
+        else:  # the flat-layout fallback: the round dot of v1.4.x
+            pm = QPixmap(16, 16)
+            pm.fill(Qt.GlobalColor.transparent)
+            painter = QPainter(pm)
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(QBrush(color))
+            painter.drawEllipse(3, 3, 10, 10)
+            painter.end()
+            icon = QIcon(pm)
         self._status_dot_icons[status] = icon
         return icon
 

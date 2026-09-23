@@ -72,7 +72,10 @@ group = scene.add_group("prod", x=50, y=50, width=400, height=300)
 group.add_member(n3)
 
 path = os.path.join(WORK, "test_drawio_export.drawio")
-cells_n = export_scene_to_drawio(scene, path)
+# v1.5rc2: the exporter is PRINT-friendly by default (the LIGHT palette); this file
+# pins the FORMAT of the file including the type COLOURS of the current theme, so it
+# asks for that palette explicitly (the print default is tests/test_encoding.py §5).
+cells_n = export_scene_to_drawio(scene, path, palette="theme")
 check("the export returns the cell count", isinstance(cells_n, int) and cells_n > 0, f"got {cells_n!r}")
 
 # ── 1. A valid XML ───────────────────────────────────────────────────────────

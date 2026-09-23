@@ -497,10 +497,11 @@ check("§8 the action is in the registry with an EMPTY default",
       HR.default_sequence("file.import_ssh_config") == ""
       and "file.import_ssh_config" in HR.HOTKEY_ACTIONS)
 check("§8 the registry grew 43 → 44 (v1.4.2 added view.toggle_minimap → 45; "
-      "v1.4.5 added view.toggle_legend → 46)",
-      len(HR.HOTKEY_ACTIONS) == 46, str(len(HR.HOTKEY_ACTIONS)))
-check("§8 …and the empty defaults 21 → 22 (v1.4.2: 23; v1.4.5: 24)",
-      len(HR.empty_default_action_ids()) == 24, str(len(HR.empty_default_action_ids())))
+      "v1.4.5 added view.toggle_legend → 46; v1.5rc3 added help.cheatsheet + help.example → 48; "
+      "v1.5rc4 added view.focus_map → 49)",
+      len(HR.HOTKEY_ACTIONS) == 49, str(len(HR.HOTKEY_ACTIONS)))
+check("§8 …and the empty defaults 21 → 22 (v1.4.2: 23; v1.4.5: 24; v1.5rc3: 25; v1.5rc4: 26)",
+      len(HR.empty_default_action_ids()) == 26, str(len(HR.empty_default_action_ids())))
 
 
 def menu_action(win, action_id):
@@ -662,12 +663,14 @@ print("== §9 the release state ==")
 from _common import EXPECTED_APP_VERSION, EXPECTED_I18N_KEYS  # noqa: E402
 
 check("§9 the version pin is the version this test file describes",
-      EXPECTED_APP_VERSION == "1.4.7", EXPECTED_APP_VERSION)
+      EXPECTED_APP_VERSION == "1.5", EXPECTED_APP_VERSION)
 check("§9 the key pin counts the SHIPPED release (545 + 21 of v1.4.1 + 4 of v1.4.2 + 16 of v1.4.3"
       " — v1.4.4 adds none: motion is behaviour only; v1.4.5 adds 17: the panel/grid UI;"
       " v1.4.6 adds 9: the sidebar.list.* column headers + the minimap title band;"
-      " v1.4.7 adds 1: the SFTP viewer's heuristic-highlighting note)",
-      EXPECTED_I18N_KEYS == 613, str(EXPECTED_I18N_KEYS))
+      " v1.4.7 adds 1: the SFTP viewer's heuristic-highlighting note;"
+      " v1.5rc1 adds 3: the Auto mode and the Reduce-motion switch of the Appearance tab;"
+      " v1.5rc2 adds 3: the export-options dialog and its two strings; v1.5rc3 adds 11: the demo map, the undo affordance, the freshness line and the first screen; v1.5rc4 adds 13: the settings search, the hotkey filter/counts/families and the toolbar overflow; v1.5rc5 adds NONE: the review batch reuses the existing ssh.* messages; v1.5 adds 1: node.status.emulated, the marker of the demo's emulated statuses)",
+      EXPECTED_I18N_KEYS == 644, str(EXPECTED_I18N_KEYS))
 check_i18n_parity(load_i18n_langs(ROOT))
 check_release_state(ROOT)
 for _code in i18n_lang_codes(ROOT):
@@ -685,15 +688,10 @@ check("§9 the hint and the result carry their placeholders",
       and "{detail}" in json.load(open(os.path.join(ROOT, "i18n", "en.json"),
                                        encoding="utf-8-sig"))["sshconfig.reason.include_missing"])
 
-_roadmap = open(os.path.join(ROOT, "ROADMAP.md"), encoding="utf-8").read()
-check("§9 the ROADMAP baseline is the pin",
-      f"parity baseline (v{EXPECTED_APP_VERSION}): {EXPECTED_I18N_KEYS} keys" in _roadmap,
-      [ln for ln in _roadmap.splitlines() if "baseline" in ln][:1])
-check("§9 the released v1.4.1 section is gone from the plan (the changelog owns it)",
-      "## v1.4.1 " not in _roadmap)
-_changelog = open(os.path.join(ROOT, "CHANGELOG.md"), encoding="utf-8").read()
-check("§9 the changelog carries the v1.4.1 entry",
-      "## v1.4.1 " in _changelog and "~/.ssh/config" in _changelog)
+# The documentation guards that used to sit here (the ROADMAP baseline, the released-section
+# rule, the changelog entry) are about the DOCUMENTS, not about this importer: they moved to
+# tests/test_docs.py §1/§2. A topical test must not read the gitignored docs at all — a fresh
+# clone has none of them, so such a check is a crash waiting for the first person without them.
 
 # the window is dirty after the imports — clean it before close, or closeEvent asks
 mw._dirty = False

@@ -315,6 +315,11 @@ class FakeSftpClient:
         self._chunk_delay = chunk_delay
         self._closed = False
         self.posix_rename_ok = True
+        # v1.5rc5 (N2): the N-th and every later `rename()` raises (the network died
+        # mid-commit). 1 = the very first rename; 2 = the retry AFTER the destination
+        # was already cleared — the case where the `.part` file is the only copy.
+        self.rename_fail_after = None
+        self._rename_calls = 0
 
     def _pause(self):
         if self._chunk_delay:
@@ -386,6 +391,9 @@ class FakeSftpClient:
     def rename(self, oldpath, newpath):
         """The SFTP v3 rename — like OpenSSH's sftp-server it refuses an existing target."""
         self._pause()
+        self._rename_calls += 1
+        if self.rename_fail_after is not None and self._rename_calls >= self.rename_fail_after:
+            raise IOError("network died")   # v1.5rc5 (N2): the seam of the lost-commit case
         if self._fs.exists(newpath):
             raise IOError("Failure")
         self._move(oldpath, newpath)

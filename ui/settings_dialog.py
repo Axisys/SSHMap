@@ -63,7 +63,7 @@ i18n: keys settings.* × en/ru/zh; the string registry — in retranslate()
 
 import sys
 
-from PySide6.QtCore import Signal
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QColor, QKeySequence
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QFormLayout, QTabWidget, QWidget,
@@ -238,12 +238,18 @@ def accent_swatches():
 
 
 def load_theme_settings() -> dict:
-    """The validated `theme` key: {"mode": "dark"|"light", "accent": "<hex>"} (v1.4.3).
+    """The validated `theme` key: {"mode", "accent", "motion"} (v1.4.3; +motion in v1.5rc1).
 
-    Broken / missing / foreign values fall back to the dark theme and the default
-    accent — the config is hand-editable, so every read is defensive. Never raises.
+    ``mode`` is one of ``theme.MODES`` — ``dark`` (the default), ``light`` or
+    ``auto`` (v1.5rc1: the platform's own colour scheme decides, and the window
+    follows a live ``colorSchemeChanged``). ``motion`` is the "Reduce motion"
+    switch of the same tab.
+
+    Broken / missing / foreign values fall back to the dark theme, the default
+    accent and the motion ON — the config is hand-editable, so every read is
+    defensive. Never raises.
     """
-    result = {"mode": theme.MODE_DARK, "accent": theme.accent_hex()}
+    result = {"mode": theme.MODE_DARK, "accent": theme.accent_hex(), "motion": True}
     try:
         from i18n import load_config
     except Exception:
@@ -263,7 +269,46 @@ def load_theme_settings() -> dict:
         result["accent"] = "#" + accent.strip().lstrip("#").lower()
     elif accent is not None:
         _log_dialog(f"theme.accent {accent!r} is not a #rrggbb colour — using the default")
+    # v1.5rc1: the motion switch. Only a real boolean counts — a string "false"
+    # or a 0 is a broken value, and a broken value means TODAY'S behaviour (on).
+    motion = raw.get("motion")
+    if isinstance(motion, bool):
+        result["motion"] = motion
+    elif motion is not None:
+        _log_dialog(f"theme.motion {motion!r} is not a boolean — keeping the motion on")
     return result
+
+
+def motion_from_settings(settings) -> bool:
+    """The motion flag of a stored `theme` dict (v1.5rc1) — a broken value is True.
+
+    The ONE reader of the flag for the callers that already hold the dict
+    (`main.py`, `MainWindow`, the settings hub); it never raises and never
+    returns None.
+    """
+    if isinstance(settings, dict) and isinstance(settings.get("motion"), bool):
+        return settings["motion"]
+    return True
+
+
+def apply_motion_setting(settings) -> bool:
+    """Install the motion flag of a `theme` dict into `ui/motion.py` (v1.5rc1).
+
+    Returns the flag that is now active. A missing `ui.motion` (a partial install)
+    is not an error: the gestures simply keep their standard behaviour.
+    """
+    enabled = motion_from_settings(settings)
+    try:
+        from . import motion
+    except ImportError:  # flat launch from the project root
+        try:
+            import motion  # type: ignore
+        except ImportError:
+            return enabled
+    try:
+        return bool(motion.set_motion_enabled(enabled))
+    except AttributeError:
+        return enabled
 
 
 def theme_from_settings(settings) -> "theme.Theme":
@@ -294,8 +339,37 @@ class SettingsDialog(QDialog):
         # meaningful), so Cancel has to put the application back — otherwise a
         # rejected dialog would still have changed the look of the app.
         self._initial_theme = theme.THEME
+        # v1.5rc1: the motion flag the dialog OPENED with — the "Reduce motion"
+        # box is live too, so Cancel has to restore it (the theme's own rule).
+        self._initial_motion = load_theme_settings()["motion"]
+
+        # ── v1.5rc4 (ROADMAP task 3): the settings search ─────────────────────
+        # ONE field above the tabs filters the ROWS and the PAGES by their TRANSLATED
+        # labels (the command palette's matching — a plain case-insensitive substring,
+        # no new dependency). The index behind it is filled by the tab builders through
+        # `_register_search_entry()` / `_register_form_rows()`; a hit switches to its tab
+        # and highlights the row, and Enter walks the hits.
+        self._search_entries = []     # [{"page", "label", "widgets", "text"}, …]
+        self._search_hits = []
+        self._search_index = -1
 
         layout = QVBoxLayout(self)
+        self.search_edit = QLineEdit()
+        self.search_edit.setPlaceholderText(_t("settings.search.placeholder"))
+        self.search_edit.setObjectName("SettingsSearchEdit")
+        try:  # Qt >= 6.4 — one click to clear the query
+            self.search_edit.setClearButtonEnabled(True)
+        except AttributeError:
+            pass
+        self.search_edit.textChanged.connect(self._on_search_changed)
+        self.search_edit.returnPressed.connect(lambda: self._search_step(+1))
+        layout.addWidget(self.search_edit)
+        self.search_status_lbl = QLabel("")
+        self.search_status_lbl.setObjectName("SettingsSearchStatus")
+        self.search_status_lbl.setWordWrap(True)
+        self.search_status_lbl.hide()
+        layout.addWidget(self.search_status_lbl)
+
         self.tabs = QTabWidget()
         layout.addWidget(self.tabs)
 
@@ -318,6 +392,229 @@ class SettingsDialog(QDialog):
         btn_layout.addWidget(self.ok_btn)
         btn_layout.addWidget(self.cancel_btn)
         layout.addLayout(btn_layout)
+
+    # ── v1.5rc4 (ROADMAP task 3): the settings search ──────────────────────────
+    # The hub is eight tabs deep and the thing a user wants is a WORD they read in a
+    # dialog once. The search therefore indexes the rows the tabs already built (their
+    # TRANSLATED labels — the same strings on screen, so a re-worded setting is found by
+    # its new name) plus the tab titles, which makes "the whole page" a searchable item
+    # of its own. Matching is the command palette's: a case-insensitive substring.
+    #
+    # The index is built by REGISTRATION while the tabs are constructed
+    # (`_register_form_rows()` for a form layout, `_register_search_entry()` for a row
+    # that is a layout of its own) — the builders know their rows, so nothing has to be
+    # guessed from the widget tree at search time.
+
+    def _register_search_entry(self, page, label_widget, widgets=None, text=None) -> None:
+        """Add ONE searchable row of ``page`` to the index.
+
+        ``widgets`` are the pieces that hide/show together (the label and its field).
+        A row whose text is empty (a separator line, a button row of its own) is NOT
+        indexed: it cannot be searched for, and hiding it would leave a hole the user
+        cannot explain.
+        """
+        if page is None:
+            return
+        if text is None:
+            try:
+                text = label_widget.text() if label_widget is not None else ""
+            except (RuntimeError, AttributeError):
+                text = ""
+        text = str(text or "").strip()
+        if not text:
+            return
+        if widgets is None:
+            widgets = [label_widget]
+        self._search_entries.append({
+            "page": page,
+            "label": label_widget,
+            "widgets": [w for w in widgets if w is not None],
+            "text": text,
+        })
+
+    def _register_form_rows(self, page, form) -> None:
+        """Index every row of a QFormLayout (v1.5rc4, ROADMAP task 3).
+
+        A row is its label + its field; a row whose field is a LAYOUT (the language
+        manager's two buttons) contributes all of that layout's widgets. A row added with
+        an empty label (the checkbox rows) is named by the CHECKBOX's own text — that is
+        the sentence the user reads.
+        """
+        for index in range(form.rowCount()):
+            label_item = form.itemAt(index, QFormLayout.ItemRole.LabelRole)
+            field_item = form.itemAt(index, QFormLayout.ItemRole.FieldRole)
+            label = label_item.widget() if label_item is not None else None
+            widgets = []
+            if label is not None:
+                widgets.append(label)
+            field_widget = None
+            if field_item is not None:
+                field_widget = field_item.widget()
+                if field_widget is None and field_item.layout() is not None:
+                    for position in range(field_item.layout().count()):
+                        child = field_item.layout().itemAt(position)
+                        if child is not None and child.widget() is not None:
+                            widgets.append(child.widget())
+                elif field_widget is not None:
+                    widgets.append(field_widget)
+            text = ""
+            try:
+                text = label.text() if label is not None else ""
+            except (RuntimeError, AttributeError):
+                text = ""
+            if not str(text or "").strip() and field_widget is not None:
+                try:
+                    text = field_widget.text()   # the checkbox rows: addRow("", box)
+                except (RuntimeError, AttributeError):
+                    text = ""
+            # The field widgets of a layout row are already in `widgets`
+            self._register_search_entry(page, label, widgets, text)
+
+    def _on_search_changed(self, text: str):
+        """The field changed (v1.5rc4, task 3) — re-filter and jump to the first hit."""
+        self._apply_settings_search(text)
+
+    def _apply_settings_search(self, query: str) -> list:
+        """Filter the rows/pages by ``query``; returns the hits (the test seam).
+
+        A row matches when its label contains the query; a PAGE matches when its TITLE
+        does, and then every row of that page matches (asking for "Terminal" must show the
+        whole tab, not nothing). Every hit is highlighted; the first one switches the tab.
+        """
+        text = str(query or "").strip().lower()
+        pages = []
+        page_ids = set()
+        if text:
+            for index in range(self.tabs.count()):
+                if text in str(self.tabs.tabText(index) or "").lower():
+                    page = self.tabs.widget(index)
+                    if page is not None and id(page) not in page_ids:
+                        pages.append((page, str(self.tabs.tabText(index))))
+                        page_ids.add(id(page))
+        # 1. a PAGE that matched by its title is a hit of its own, and it comes FIRST: the
+        #    user asking for "Terminal" means the tab, not the one row elsewhere that
+        #    happens to contain the word (the v1.5rc4 ordering rule).
+        hits = [{"page": page, "label": None, "widgets": [], "text": title, "hit": True}
+                for page, title in pages]
+        for entry in getattr(self, "_search_entries", []):
+            page = entry.get("page")
+            if not text:
+                match = True
+            elif page is not None and id(page) in page_ids:
+                match = True
+            else:
+                match = text in str(entry.get("text") or "").lower()
+            for widget in entry.get("widgets") or []:
+                try:
+                    widget.setVisible(match)
+                except RuntimeError:
+                    continue  # Qt teardown — this widget is already destroyed
+            entry["hit"] = bool(text) and match
+            self._set_search_highlight(entry, entry["hit"])
+            # 2. the ROW hits of a page that already matched as a whole are not repeated:
+            #    the page hit carries the switch, and a duplicate would inflate "k / N".
+            if match and text and (page is None or id(page) not in page_ids):
+                hits.append(entry)
+        self._search_hits = hits
+        self._search_index = -1
+        self._update_search_status()
+        if hits:
+            self._search_step(0)   # switch to the first hit's tab
+        return hits
+
+    def _set_search_highlight(self, entry, highlighted: bool) -> None:
+        """Mark a matching row (bold + the STRONG accent — the v1.5rc1 ink role)."""
+        label = entry.get("label") if isinstance(entry, dict) else None
+        if label is None:
+            return
+        try:
+            label.setStyleSheet(
+                f"color: {theme.ACCENT_STRONG}; font-weight: bold;" if highlighted else "")
+        except RuntimeError:
+            pass  # Qt teardown — the label is already destroyed
+
+    def _clear_search_highlight(self) -> None:
+        """Drop every highlight (the empty query / the release of the dialog)."""
+        for entry in getattr(self, "_search_entries", []):
+            entry["hit"] = False
+            self._set_search_highlight(entry, False)
+
+    def _reapply_search_highlights(self) -> None:
+        """Re-colour the CURRENT hits — the theme switch path (no re-filter, no tab jump)."""
+        for entry in getattr(self, "_search_entries", []):
+            self._set_search_highlight(entry, bool(entry.get("hit")))
+
+    def _search_step(self, step: int):
+        """Walk the hits: switch to the next/previous one's tab (wrapping)."""
+        hits = getattr(self, "_search_hits", None) or []
+        if not hits:
+            return None
+        if step:
+            self._search_index = (self._search_index + int(step)) % len(hits)
+        elif self._search_index < 0:
+            self._search_index = 0
+        entry = hits[self._search_index]
+        page = entry.get("page")
+        try:
+            index = self.tabs.indexOf(page) if page is not None else -1
+            if index >= 0:
+                self.tabs.setCurrentIndex(index)
+        except RuntimeError:
+            return None
+        self._update_search_status()
+        return entry
+
+    def _update_search_status(self):
+        """The one-line report under the field: nothing / "k of N" / "no match"."""
+        try:
+            label = self.search_status_lbl
+        except AttributeError:
+            return
+        query = ""
+        try:
+            query = self.search_edit.text().strip()
+        except RuntimeError:
+            return
+        if not query:
+            label.setText("")
+            label.hide()
+            return
+        hits = getattr(self, "_search_hits", None) or []
+        if not hits:
+            label.setText(_t("settings.search.none"))
+        else:
+            # A count, not a sentence: no new key per language for "3 of 5".
+            label.setText(f"{self._search_index + 1} / {len(hits)}")
+        label.show()
+
+    def search_settings(self, query: str) -> list:
+        """Set the query and return the hits as ``[(tab index, label text), …]``.
+
+        The topical test's seam (and what a caller inside the app would use): it drives
+        the REAL field, so the filtering, the highlighting and the tab switch are the ones
+        a user gets.
+        """
+        try:
+            if self.search_edit.text() != str(query or ""):
+                self.search_edit.setText(str(query or ""))
+                # setText emits textChanged → the search is already applied
+                return self.search_hits()
+        except RuntimeError:
+            return []
+        self._apply_settings_search(query)
+        return self.search_hits()
+
+    def search_hits(self) -> list:
+        """The current hits as ``[(tab index, label text), …]`` (never raises)."""
+        out = []
+        for entry in getattr(self, "_search_hits", None) or []:
+            page = entry.get("page")
+            try:
+                index = self.tabs.indexOf(page) if page is not None else -1
+            except RuntimeError:
+                continue
+            out.append((index, str(entry.get("text") or "")))
+        return out
 
     # ── "General" tab (v1.1: external_terminal — a single config.json) ─────────
 
@@ -358,6 +655,7 @@ class SettingsDialog(QDialog):
         self.sidebar_buttons_chk.setChecked(ui_cfg["show_sidebar_buttons"])
         form.addRow("", self.sidebar_buttons_chk)
 
+        self._register_form_rows(tab, form)   # v1.5rc4: the searchable rows of this tab
         self.tabs.addTab(tab, _t("settings.tab.general"))
 
     # ── "Appearance" tab (v1.4.3, ROADMAP task 6): the theme — mode + accent ────
@@ -380,12 +678,16 @@ class SettingsDialog(QDialog):
         tab = QWidget()
         layout = QVBoxLayout(tab)
 
-        # ── the mode: dark (default) / light ──────────────────────────────────
+        # ── the mode: dark (default) / light / auto (system) ──────────────────
+        # v1.5rc1: the third entry follows the PLATFORM's colour scheme
+        # (`theme.resolve_mode`); the live change is the window's half
+        # (`MainWindow` listens to `QStyleHints.colorSchemeChanged`).
         mode_row = QHBoxLayout()
         self._lbl_theme_mode = QLabel(_t("settings.appearance.mode"))
         self.theme_mode_combo = QComboBox()
         for mode_id, key in ((theme.MODE_DARK, "settings.appearance.mode.dark"),
-                             (theme.MODE_LIGHT, "settings.appearance.mode.light")):
+                             (theme.MODE_LIGHT, "settings.appearance.mode.light"),
+                             (theme.MODE_AUTO, "settings.appearance.mode.auto")):
             self.theme_mode_combo.addItem(_t(key), mode_id)
         idx = next((i for i in range(self.theme_mode_combo.count())
                     if self.theme_mode_combo.itemData(i) == current["mode"]), 0)
@@ -393,6 +695,16 @@ class SettingsDialog(QDialog):
         mode_row.addWidget(self._lbl_theme_mode)
         mode_row.addWidget(self.theme_mode_combo, 1)
         layout.addLayout(mode_row)
+
+        # ── v1.5rc1: the motion switch ("Reduce motion") ──────────────────────
+        # Read by `ui/motion.py`: with it off every gesture applies its FINAL
+        # state at once. LIVE like the rest of the tab.
+        self._motion_enabled = current["motion"]
+        self.motion_chk = QCheckBox(_t("settings.appearance.motion"))
+        self.motion_chk.setChecked(not self._motion_enabled)
+        self.motion_chk.setToolTip(_t("settings.appearance.motion.tooltip"))
+        self.motion_chk.toggled.connect(self._on_motion_toggled)
+        layout.addWidget(self.motion_chk)
 
         # ── the accent swatches ───────────────────────────────────────────────
         self._lbl_theme_accent = QLabel(_t("settings.appearance.accent"))
@@ -438,6 +750,21 @@ class SettingsDialog(QDialog):
         # apply the theme onto itself).
         self.theme_mode_combo.currentIndexChanged.connect(self._on_theme_changed)
         self._mark_current_swatch()
+
+        # ── v1.5rc4 (ROADMAP task 3): the searchable rows of this tab ─────────
+        # The tab is a QVBoxLayout (not a form), so its rows are registered by hand —
+        # the mode row, the motion box, the accent label + its swatches, the user's own
+        # colour row and the hint. Each entry names the pieces that hide together.
+        self._register_search_entry(tab, self._lbl_theme_mode,
+                                    [self._lbl_theme_mode, self.theme_mode_combo])
+        self._register_search_entry(tab, self.motion_chk, [self.motion_chk])
+        self._register_search_entry(
+            tab, self._lbl_theme_accent,
+            [self._lbl_theme_accent] + [btn for btn, _hex in self._swatch_buttons.values()])
+        self._register_search_entry(tab, self._lbl_theme_own,
+                                    [self._lbl_theme_own, self.accent_hex_edit,
+                                     self.accent_pick_btn])
+        self._register_search_entry(tab, self._lbl_theme_hint, [self._lbl_theme_hint])
 
         self.tabs.addTab(tab, _t("settings.tab.appearance"))
 
@@ -518,6 +845,26 @@ class SettingsDialog(QDialog):
         """The mode combo moved (the accent has its own two slots)."""
         self._mark_current_swatch()
         self._emit_theme()
+
+    def _on_motion_toggled(self, checked):
+        """The "Reduce motion" box moved (v1.5rc1) — applied to `ui/motion.py` live.
+
+        The checkbox reads "Reduce motion", so CHECKED means the animations are
+        OFF (`motion.set_motion_enabled(not checked)`). Never raises: the switch is
+        cosmetic and a missing module must not break the dialog.
+        """
+        self._motion_enabled = not bool(checked)
+        try:
+            from . import motion
+        except ImportError:  # flat launch from the project root
+            try:
+                import motion  # type: ignore
+            except ImportError:
+                return
+        try:
+            motion.set_motion_enabled(self._motion_enabled)
+        except AttributeError:
+            pass
 
     def _emit_theme(self):
         """Push the current choice to the live window (v1.4.3, the "immediately" rule)."""
@@ -626,6 +973,7 @@ class SettingsDialog(QDialog):
         self._lbl_wheel = QLabel(_t("settings.terminal.wheel"))
         form.addRow(self._lbl_wheel, self.wheel_combo)
 
+        self._register_form_rows(tab, form)   # v1.5rc4: the searchable rows of this tab
         self.tabs.addTab(tab, _t("settings.tab.terminal"))
 
     # ── "Statuses" tab (the StatusChecker probe interval + timeout) ─────────────
@@ -663,6 +1011,7 @@ class SettingsDialog(QDialog):
         self._lbl_max_parallel = QLabel(_t("settings.statuses.max_parallel"))
         form.addRow(self._lbl_max_parallel, self.max_parallel_spin)
 
+        self._register_form_rows(tab, form)   # v1.5rc4: the searchable rows of this tab
         self.tabs.addTab(tab, _t("settings.tab.statuses"))
 
     # ── "Autosave" tab (v0.9.7 keys) ────────────────────────────────
@@ -693,6 +1042,7 @@ class SettingsDialog(QDialog):
         self._lbl_backup_count = QLabel(_t("settings.autosave.backups"))
         form.addRow(self._lbl_backup_count, self.backup_count_spin)
 
+        self._register_form_rows(tab, form)   # v1.5rc4: the searchable rows of this tab
         self.tabs.addTab(tab, _t("settings.tab.autosave"))
 
     # ── "Map" tab (v1.1.1: map options — node double click, connection plaque) ─
@@ -724,6 +1074,7 @@ class SettingsDialog(QDialog):
         self.show_conn_type_chk.setChecked(ui_cfg["show_connection_type"])
         form.addRow("", self.show_conn_type_chk)
 
+        self._register_form_rows(tab, form)   # v1.5rc4: the searchable rows of this tab
         self.tabs.addTab(tab, _t("settings.tab.map"))
 
     # ── "Hotkeys" tab (v1.3.2: the configurable hotkeys — the action registry) ──────
@@ -731,36 +1082,82 @@ class SettingsDialog(QDialog):
     def _build_hotkeys_tab(self):
         """v1.3.2 (ROADMAP task 2): a table [action | hotkey] over the action registry.
 
-        One row per ``ui/hotkey_registry.py`` action (declaration order) with a
-        QKeySequenceEdit; the action's NAME reuses the existing menu i18n key (no new
-        strings for the list itself). An EMPTY sequence = the hotkey is disabled, the
-        action stays available from the menu. Two actions with the same sequence are
-        BOTH marked + the warning label appears — saving is still possible (Qt
-        resolves the ambiguity at runtime, and the user may be mid-edit).
+        The action's NAME reuses the existing menu i18n key (no new strings for the list
+        itself). An EMPTY sequence = the hotkey is disabled, the action stays available
+        from the menu. Two actions with the same sequence are BOTH marked + the warning
+        label appears — saving is still possible (Qt resolves the ambiguity at runtime,
+        and the user may be mid-edit).
 
-        v1.3.3.3 (ROADMAP task 3/4): the registry grew to ~30 rows, most of them with an
+        v1.3.3.3 (ROADMAP task 3/4): the registry grew, most of its actions with an
         EMPTY default (assignable, no hotkey out of the box), so "clearing a field is the
         documented way" stops being a reasonable answer to "I want the defaults back" —
         the "Reset to defaults" button (`_on_reset_hotkeys`) restores every registry
         default through the same merge-write.
+
+        v1.5rc4 (ROADMAP task 4): the tab became NAVIGABLE — the plan's own words:
+          * a **filter field** above the table (by the action's name OR its current
+            sequence, so "ctrl+s" finds "Save" too);
+          * **grouping by family** — a caption row per family (File / Edit / View / Node /
+            Plugins / Help) and the registry's declaration order INSIDE it. The spine is
+            `hotkey_registry.actions_by_family()`, so the registry stays the only source of
+            the list and a new action joins its family by being named `<family>.*`;
+          * a **header with the counts** ("with a key" vs "assignable") that follows every
+            edit, and a **hint on assigning a key** next to the older "clear it to disable"
+            one.
+        The table still owns ONE QKeySequenceEdit per action (`self.hotkey_edits`), and
+        `hotkey_row()` / `hotkey_action_rows()` are the public way to find a row — the
+        caption rows shifted the arithmetic, so no caller should count rows by hand.
         """
         try:
             from ui.hotkey_registry import (
                 action_ids, action_label_key, configured_hotkeys,
+                actions_by_family, family_order, family_label_key,
             )
         except ImportError:  # flat launch from the project root
             from hotkey_registry import (
                 action_ids, action_label_key, configured_hotkeys,
+                actions_by_family, family_order, family_label_key,
             )
         # The registry/worker import path is fixed by the module, not by the dialog:
         # _apply_settings_from_dialog() in MainWindow does the actual installation.
         self._hotkey_ids = list(action_ids())
         current = configured_hotkeys()
+        self._hotkeys_by_family = actions_by_family(self._hotkey_ids)
 
         tab = QWidget()
         layout = QVBoxLayout(tab)
 
-        self.hotkeys_table = QTableWidget(len(self._hotkey_ids), 2, tab)
+        # v1.5rc4 (task 4): the filter field — the settings search of the hub (task 3) is
+        # a search over the SETTINGS, this one narrows one long table.
+        self.hotkeys_filter = QLineEdit()
+        self.hotkeys_filter.setObjectName("HotkeysFilterEdit")
+        self.hotkeys_filter.setPlaceholderText(_t("settings.hotkeys.filter"))
+        try:  # Qt >= 6.4 — one click to clear the query
+            self.hotkeys_filter.setClearButtonEnabled(True)
+        except AttributeError:
+            pass
+        self.hotkeys_filter.textChanged.connect(self._on_hotkeys_filter_changed)
+        layout.addWidget(self.hotkeys_filter)
+
+        # v1.5rc4 (task 4): the counts header — how many actions have a key right now and
+        # how many are still assignable. Read from the LIVE table (not from the registry),
+        # so it answers the same question the user is looking at.
+        self._lbl_hotkeys_counts = QLabel("")
+        self._lbl_hotkeys_counts.setObjectName("HotkeysCountsLabel")
+        self._lbl_hotkeys_counts.setWordWrap(True)
+        layout.addWidget(self._lbl_hotkeys_counts)
+
+        # v1.5rc4 (task 4): the row plan — a caption per family, its actions under it.
+        self._hotkey_rows = []
+        for family in family_order():
+            ids = list(self._hotkeys_by_family.get(family) or [])
+            if not ids:
+                continue
+            self._hotkey_rows.append(("family", family))
+            for action_id in ids:
+                self._hotkey_rows.append(("action", action_id))
+
+        self.hotkeys_table = QTableWidget(len(self._hotkey_rows), 2, tab)
         self.hotkeys_table.setHorizontalHeaderLabels(
             [_t("settings.hotkeys.action"), _t("settings.hotkeys.sequence")])
         self.hotkeys_table.verticalHeader().setVisible(False)
@@ -772,10 +1169,23 @@ class SettingsDialog(QDialog):
         header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
 
         self.hotkey_edits = {}
-        for row, action_id in enumerate(self._hotkey_ids):
-            item = QTableWidgetItem(_t(action_label_key(action_id)))
+        self._hotkey_row_of = {}
+        for row, (kind, value) in enumerate(self._hotkey_rows):
+            if kind == "family":
+                item = QTableWidgetItem(_t(family_label_key(value)))
+                font = item.font()
+                font.setBold(True)
+                item.setFont(font)
+                item.setForeground(QColor(theme.TEXT_MUTED))
+                # A caption is not an action: it cannot be selected and its two columns
+                # are ONE cell (no half-empty "hotkey" column behind the caption).
+                item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsSelectable)
+                self.hotkeys_table.setItem(row, 0, item)
+                self.hotkeys_table.setSpan(row, 0, 1, 2)
+                continue
+            item = QTableWidgetItem(_t(action_label_key(value)))
             self.hotkeys_table.setItem(row, 0, item)
-            edit = QKeySequenceEdit(QKeySequence(current.get(action_id, "")), self.hotkeys_table)
+            edit = QKeySequenceEdit(QKeySequence(current.get(value, "")), self.hotkeys_table)
             try:  # Qt >= 6.4: the built-in "clear" button — one click to disable a hotkey
                 edit.setClearButtonEnabled(True)
             except AttributeError:
@@ -784,15 +1194,20 @@ class SettingsDialog(QDialog):
             # re-reads every editor (the conflict set is global, one edit can clear it).
             edit.keySequenceChanged.connect(self._on_hotkey_changed)
             self.hotkeys_table.setCellWidget(row, 1, edit)
-            self.hotkey_edits[action_id] = edit
+            self.hotkey_edits[value] = edit
+            self._hotkey_row_of[value] = row
 
         self._lbl_hotkeys_disabled_hint = QLabel(_t("settings.hotkeys.disabled_hint"))
         self._lbl_hotkeys_disabled_hint.setWordWrap(True)
+        # v1.5rc4 (task 4): "what do I do with a row?" — the assignment itself.
+        self._lbl_hotkeys_assign_hint = QLabel(_t("settings.hotkeys.assign_hint"))
+        self._lbl_hotkeys_assign_hint.setWordWrap(True)
         self._lbl_hotkeys_conflict = QLabel("")
         self._lbl_hotkeys_conflict.setWordWrap(True)
 
         layout.addWidget(self.hotkeys_table, 1)
         layout.addWidget(self._lbl_hotkeys_disabled_hint)
+        layout.addWidget(self._lbl_hotkeys_assign_hint)
         # v1.3.3.3 (task 4): "Reset to defaults" — right-aligned under the hint; the
         # action is idempotent (a second click writes the very same mapping).
         _reset_row = QHBoxLayout()
@@ -803,8 +1218,150 @@ class SettingsDialog(QDialog):
         layout.addLayout(_reset_row)
         layout.addWidget(self._lbl_hotkeys_conflict)
 
+        # v1.5rc4 (task 3): the page is searchable by the settings search too — the hint
+        # row is its searchable label (the family captions and the table are the content
+        # the hit reveals, not rows of their own). Without it a search for the TAB TITLE
+        # would find "somewhere else" and this page would look like a dead end.
+        self._register_search_entry(tab, self._lbl_hotkeys_assign_hint,
+                                    [self.hotkeys_filter, self._lbl_hotkeys_counts,
+                                     self.hotkeys_table, self._lbl_hotkeys_disabled_hint,
+                                     self._lbl_hotkeys_assign_hint])
+
         self.tabs.addTab(tab, _t("settings.tab.hotkeys"))
         self._refresh_hotkey_conflicts()   # the saved config itself may already conflict
+
+    # ── v1.5rc4 (ROADMAP task 4): querying and filtering the hotkey table ───────
+
+    def hotkey_row(self, action_id: str) -> int:
+        """The table row of an action (-1 — unknown) — the caption rows shifted them."""
+        return int(getattr(self, "_hotkey_row_of", {}).get(action_id, -1))
+
+    def hotkey_action_rows(self) -> list:
+        """The rows that hold an ACTION, in table order (the caption rows excluded)."""
+        return [row for row, (kind, _value) in enumerate(getattr(self, "_hotkey_rows", []))
+                if kind == "action"]
+
+    def hotkey_family_rows(self) -> list:
+        """The rows that hold a FAMILY caption, in table order."""
+        return [row for row, (kind, _value) in enumerate(getattr(self, "_hotkey_rows", []))
+                if kind == "family"]
+
+    def hotkeys_visible_ids(self) -> list:
+        """The action ids the filter currently shows (table order)."""
+        out = []
+        for row, (kind, value) in enumerate(getattr(self, "_hotkey_rows", [])):
+            if kind != "action":
+                continue
+            try:
+                if not self.hotkeys_table.isRowHidden(row):
+                    out.append(value)
+            except RuntimeError:
+                continue  # Qt teardown — the table is already destroyed
+        return out
+
+    def _on_hotkeys_filter_changed(self, text: str):
+        """The filter field changed — narrow the table (v1.5rc4, task 4)."""
+        self._apply_hotkeys_filter(text)
+
+    def _apply_hotkeys_filter(self, query: str) -> list:
+        """Hide the rows that do not match; hide a family caption with no visible action.
+
+        The query is matched against the action's TRANSLATED name and against its CURRENT
+        sequence (the QKeySequenceEdit's text), so both "save" and "ctrl+s" find the row.
+        An empty query shows everything — the grouping, not the filter, is the default.
+        Returns the visible action ids.
+        """
+        text = str(query or "").strip().lower()
+        visible_by_family = {}
+        for row, (kind, value) in enumerate(getattr(self, "_hotkey_rows", [])):
+            if kind == "family":
+                continue
+            match = True
+            if text:
+                edit = getattr(self, "hotkey_edits", {}).get(value)
+                sequence = ""
+                if edit is not None:
+                    try:
+                        sequence = edit.keySequence().toString()
+                    except RuntimeError:
+                        sequence = ""
+                match = text in self._hotkey_label(value).lower() or text in sequence.lower()
+            try:
+                self.hotkeys_table.setRowHidden(row, not match)
+            except RuntimeError:
+                continue  # Qt teardown — the table is already destroyed
+            if match:
+                visible_by_family[value] = True
+        for row, (kind, value) in enumerate(getattr(self, "_hotkey_rows", [])):
+            if kind != "family":
+                continue
+            ids = list(self._hotkeys_by_family.get(value) or [])
+            shown = any(visible_by_family.get(aid) for aid in ids)
+            try:
+                self.hotkeys_table.setRowHidden(row, not shown)
+            except RuntimeError:
+                continue
+        self._update_hotkey_counts()
+        return self.hotkeys_visible_ids()
+
+    def filter_hotkeys(self, query: str) -> list:
+        """Set the filter through the REAL field and return the visible action ids."""
+        try:
+            if self.hotkeys_filter.text() != str(query or ""):
+                self.hotkeys_filter.setText(str(query or ""))
+                return self.hotkeys_visible_ids()
+        except RuntimeError:
+            return []
+        return self._apply_hotkeys_filter(query)
+
+    @staticmethod
+    def _hotkey_label(action_id: str) -> str:
+        """The translated name of an action ("" — a stripped build without the registry)."""
+        try:
+            try:
+                from ui.hotkey_registry import action_label_key
+            except ImportError:
+                from hotkey_registry import action_label_key
+            key = action_label_key(action_id)
+        except Exception:  # noqa: BLE001 — a broken registry must not break the tab
+            return str(action_id)
+        return _t(key) if key else str(action_id)
+
+    def _retranslate_hotkey_families(self):
+        """Re-text the family captions of the hotkey table (v1.5rc4, task 4)."""
+        try:
+            try:
+                from ui.hotkey_registry import family_label_key
+            except ImportError:
+                from hotkey_registry import family_label_key
+        except Exception:  # noqa: BLE001 — a broken registry leaves the captions as they are
+            return
+        for row in self.hotkey_family_rows():
+            try:
+                item = self.hotkeys_table.item(row, 0)
+            except RuntimeError:
+                return  # Qt teardown — the table is already destroyed
+            if item is None:
+                continue
+            family = self._hotkey_rows[row][1]
+            item.setText(_t(family_label_key(family)))
+            # The caption's tone is a VALUE (a QColor handed to the item) — read live so a
+            # theme switch repaints it through `refresh_theme()`.
+            item.setForeground(QColor(theme.TEXT_MUTED))
+
+    def _update_hotkey_counts(self):
+        """Re-read the counts header from the live table (v1.5rc4, task 4)."""
+        label = getattr(self, "_lbl_hotkeys_counts", None)
+        if label is None:
+            return
+        sequences = self.hotkey_sequences()
+        with_key = sum(1 for value in sequences.values() if str(value or "").strip())
+        assignable = max(len(sequences) - with_key, 0)
+        try:
+            label.setText(_t("settings.hotkeys.counts",
+                             with_key=with_key, assignable=assignable))
+        except RuntimeError:
+            pass  # Qt teardown — the label is already destroyed
 
     def hotkey_sequences(self) -> dict:
         """The table's current values: {action_id: sequence string} ("" = disabled)."""
@@ -859,7 +1416,13 @@ class SettingsDialog(QDialog):
         self._refresh_hotkey_conflicts()
 
     def _refresh_hotkey_conflicts(self):
-        """Mark the conflicting rows + show/hide the warning. Never raises."""
+        """Mark the conflicting rows + show/hide the warning. Never raises.
+
+        v1.5rc4 (ROADMAP task 4): the walk follows the ROW PLAN (`_hotkey_rows`) — a family
+        caption is re-texted from the registry and never marked with "⚠", and the counts
+        header is refreshed in the same pass (it reads the live editors, so every edit
+        that reaches this method also updates "with a key" vs "assignable").
+        """
         try:
             try:
                 from ui.hotkey_registry import action_label_key, find_conflicts
@@ -868,13 +1431,16 @@ class SettingsDialog(QDialog):
             conflicts = find_conflicts(self.hotkey_sequences())
         except Exception:  # noqa: BLE001 — the marking is cosmetic
             return
+        self._update_hotkey_counts()
         try:
-            for row, action_id in enumerate(self._hotkey_ids):
+            for row, (kind, value) in enumerate(getattr(self, "_hotkey_rows", [])):
                 item = self.hotkeys_table.item(row, 0)
                 if item is None:
                     continue
-                marked = action_id in conflicts
-                label = _t(action_label_key(action_id))
+                if kind == "family":
+                    continue   # a caption carries no sequence and can never conflict
+                marked = value in conflicts
+                label = _t(action_label_key(value))
                 item.setText(("\u26a0 " if marked else "") + label)
                 item.setForeground(QColor(theme.STATUS_WARN if marked else theme.TEXT_PRIMARY))
             self._lbl_hotkeys_conflict.setText(
@@ -923,6 +1489,7 @@ class SettingsDialog(QDialog):
         self.lang_status_lbl.setWordWrap(True)
         form.addRow("", self.lang_status_lbl)
 
+        self._register_form_rows(tab, form)   # v1.5rc4: the searchable rows of this tab
         self.tabs.addTab(tab, _t("settings.tab.language"))
 
     def _set_language_status(self, text: str):
@@ -1128,6 +1695,16 @@ class SettingsDialog(QDialog):
                 self.theme_changed.emit(initial)
         except RuntimeError:
             pass  # Qt teardown
+        # v1.5rc1: the motion switch is live as well — put the flag back too.
+        try:
+            if bool(getattr(self, "_motion_enabled", True)) != bool(self._initial_motion):
+                self.motion_chk.blockSignals(True)
+                self.motion_chk.setChecked(not bool(self._initial_motion))
+                self.motion_chk.blockSignals(False)
+                apply_motion_setting({"motion": self._initial_motion})
+                self._motion_enabled = bool(self._initial_motion)
+        except (AttributeError, RuntimeError):
+            pass  # Qt teardown / a dialog built without the tab
         super().reject()
 
     # ── Collecting values (config.json keys; language is NOT included — it is immediate) ───────
@@ -1172,9 +1749,13 @@ class SettingsDialog(QDialog):
             # v1.3.3.8 (ROADMAP task 4): the mouse-wheel mode
             "terminal_wheel": self.wheel_combo.currentData() or "scrollback",
             # v1.4.3 (ROADMAP task 6): the appearance — the mode + the accent hue,
-            # stored as the colour the user actually picked (the hue is derived back)
+            # stored as the colour the user actually picked (the hue is derived
+            # back). v1.5rc1: +`motion` — the "Reduce motion" switch of the same
+            # tab, so the appearance choice stays ONE nested key (the hub's
+            # collect() key count is unchanged).
             "theme": {"mode": self.theme_mode_combo.currentData() or theme.MODE_DARK,
-                      "accent": self._accent_hex},
+                      "accent": self._accent_hex,
+                      "motion": bool(self._motion_enabled)},
             "status_interval_sec": int(self.status_interval_spin.value()),
             "status_probe_timeout_sec": float(self.probe_timeout_spin.value()),
             # v1.1.2 final (task 2): the cap on parallel probes per round
@@ -1217,6 +1798,13 @@ class SettingsDialog(QDialog):
             self._refresh_hotkey_conflicts()
         except (RuntimeError, AttributeError):
             pass  # Qt teardown / a dialog built without the tab
+        # v1.5rc4 (ROADMAP task 3/4): the family captions and the search highlight are
+        # VALUES of the same kind — re-read them from the live theme.
+        try:
+            self._retranslate_hotkey_families()
+            self._reapply_search_highlights()
+        except (RuntimeError, AttributeError):
+            pass  # Qt teardown / a dialog built without the search field
 
     def retranslate(self):
         """Re-apply translations to the dialog's strings (the registry — here)."""
@@ -1235,9 +1823,13 @@ class SettingsDialog(QDialog):
         for i in range(self.theme_mode_combo.count()):
             mid = self.theme_mode_combo.itemData(i)
             key = {"dark": "settings.appearance.mode.dark",
-                   "light": "settings.appearance.mode.light"}.get(mid)
+                   "light": "settings.appearance.mode.light",
+                   "auto": "settings.appearance.mode.auto"}.get(mid)
             if key:
                 self.theme_mode_combo.setItemText(i, _t(key))
+        # v1.5rc1: the motion switch of the same tab
+        self.motion_chk.setText(_t("settings.appearance.motion"))
+        self.motion_chk.setToolTip(_t("settings.appearance.motion.tooltip"))
         self._lbl_theme_accent.setText(_t("settings.appearance.accent"))
         for name, (btn, _hex) in getattr(self, "_swatch_buttons", {}).items():
             btn.setToolTip(_t(f"settings.appearance.accent.{name}"))
@@ -1326,11 +1918,20 @@ class SettingsDialog(QDialog):
 
         # v1.3.2: the "Hotkeys" tab — the headers, the hint, the warning and the
         # per-row action names (they reuse the existing menu i18n keys).
+        # v1.5rc4 (task 4): + the filter placeholder, the counts header, the "how to
+        # assign" hint and the FAMILY captions of the grouped table.
         self.hotkeys_table.setHorizontalHeaderLabels(
             [_t("settings.hotkeys.action"), _t("settings.hotkeys.sequence")])
+        self.hotkeys_filter.setPlaceholderText(_t("settings.hotkeys.filter"))
         self._lbl_hotkeys_disabled_hint.setText(_t("settings.hotkeys.disabled_hint"))
+        self._lbl_hotkeys_assign_hint.setText(_t("settings.hotkeys.assign_hint"))
         self.reset_hotkeys_btn.setText(_t("settings.hotkeys.reset"))   # v1.3.3.3
+        self._retranslate_hotkey_families()
         self._refresh_hotkey_conflicts()   # re-marks the rows + re-texts the warning
+
+        # v1.5rc4 (ROADMAP task 3): the settings search's own strings
+        self.search_edit.setPlaceholderText(_t("settings.search.placeholder"))
+        self._update_search_status()
 
         self._lbl_language.setText(_t("settings.language.label"))
         # v1.3.3.8: the language manager's own two buttons (the status line carries a

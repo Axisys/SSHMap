@@ -195,5 +195,15 @@ class SSHWorker(QThread):
         except paramiko.SSHException as e:
             msg = t("ssh.ssh_error", message=str(e))
             self.error.emit(msg if not msg.startswith("[") else f"SSH error: {e}")
+        except OSError as e:
+            # v1.5rc5 (N4): socket.gaierror, socket.timeout and
+            # paramiko.ssh_exception.NoValidConnectionsError are OSError, NOT SSHException —
+            # they used to fall through to the generic handler of run() and were displayed
+            # VERBATIM in English while the sibling "Test connection" button answered in the
+            # user's language. The branch is deliberately LAST so it cannot shadow the
+            # paramiko ones above.
+            msg = t("ssh.connection_failed", host=self.host, port=self.port)
+            self.error.emit(msg if not msg.startswith("[")
+                            else f"Connection failed for {self.host}:{self.port}: {e}")
         finally:
             client.close()

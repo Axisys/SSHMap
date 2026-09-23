@@ -1,4 +1,5 @@
 import functools
+import time
 from typing import Optional
 
 try:
@@ -16,22 +17,75 @@ try:  # v1.2.5: central theme (palette/radii/fonts — ui/theme.py)
 except ImportError:
     from ui import theme
 
+try:  # v1.5rc2 (ROADMAP task 2): the DECLARED status shapes — the mark beside the colour
+    from ..ui import status_shape
+except ImportError:
+    try:
+        from ui import status_shape
+    except ImportError:  # flat layout: the ui/ directory itself is on sys.path
+        status_shape = None
+
 from PySide6.QtCore import Qt, QPointF, QRectF, QVariantAnimation
 from PySide6.QtGui import (QBrush, QColor, QFont, QPainter, QPainterPath, QPen,
                            QFontMetrics, QPixmap, QTransform)
 from PySide6.QtWidgets import (
     QGraphicsEllipseItem, QGraphicsItemGroup, QGraphicsItem,
-    QGraphicsPathItem, QGraphicsPixmapItem, QGraphicsTextItem,
+    QGraphicsPathItem, QGraphicsPixmapItem, QGraphicsSimpleTextItem,
+    QGraphicsTextItem,
 )
 
 
-def _t(key: str) -> str:
+def _t(key: str, **kw) -> str:
     """Safe i18n hook: returns the key itself if i18n is unavailable."""
     try:
         from i18n import t as _translate
-        return _translate(key)
+        return _translate(key, **kw) if kw else _translate(key)
     except Exception:
         return key
+
+
+# ── v1.5 (ROADMAP): the ENVIRONMENT badge — the declared vocabulary ────────────────
+# The card carries its tags as a 5 px colour strip on the left edge, so the environment
+# is read from a colour the SAME card already uses for availability (`Theme.tag_colors`:
+# `prod` → `status_offline`, `staging` → `status_warn`, `dev` → `status_online`) and an
+# arbitrary tag gets a `crc32` colour from `tag_palette`. That is meaning in a colour
+# alone — rule 2 of the 1.5 line — so v1.5 adds the second channel: the tag as TEXT in
+# the free band above the alias, with the colour kept as a redundant tint.
+#
+# The vocabulary is DECLARED here and its ORDER IS THE PRECEDENCE: a card tagged
+# `["dev", "prod"]` is production, whatever order the user typed the tags in. `staging`
+# is the name `Theme.tag_colors` uses; `stage` is accepted as its short form. A card whose
+# tags carry none of these words still gets a header — `env_tag()` then falls back to the
+# first tag the user wrote, and `tag_color()` gives it the `crc32` palette colour.
+ENV_TAGS = ("prod", "staging", "stage", "dev", "test")
+
+
+def env_tag(tags) -> str:
+    """The card's PRIMARY tag — the environment it belongs to (v1.5).
+
+    The DECLARED vocabulary WINS the pick and its order IS the precedence, so
+    `["dev", "prod"]` is production and `["web", "prod"]` is too (a user's tag order must
+    not decide what an environment is). A card whose tags carry none of the declared words
+    falls back to the FIRST tag the user wrote — the header names the card's primary label,
+    which is what makes the badge useful on maps that never used the vocabulary.
+
+    Returns the tag AS THE USER WROTE IT (the colour lookup is case-insensitive, but a
+    badge must not rename the user's own data), or "" for a card without tags — and such a
+    card paints exactly like a pre-v1.5 card. Pure, so `tests/test_tags.py` pins the
+    precedence without a window.
+    """
+    by_name = {}
+    first = ""
+    for tag in (tags or ()):
+        text = str(tag or "").strip()
+        if text:
+            by_name.setdefault(text.lower(), text)
+            if not first:
+                first = text
+    for known in ENV_TAGS:
+        if known in by_name:
+            return by_name[known]
+    return first
 
 
 # ── v1.4.2 (ROADMAP task 3): the card drop-shadow — ONE cached pixmap per SIZE ──────
@@ -129,6 +183,10 @@ class ServerNode(QGraphicsItemGroup):
     COLLAPSED_DOT_DX = -21.0  # leftward shift of the dots relative to the expanded position
     # Collapsed line: the icon is raised to visually center with the text.
     COLLAPSED_ICON_DY = -8.0
+    # v1.5rc2 (ROADMAP task 2): the box of the availability MARK — the shape is
+    # `theme.STATUS_SHAPES[status]` (a filled dot / a ring / a triangle), drawn in the
+    # status colour, and this box is the size the v1.4.x round dot already had.
+    STATUS_DOT_SIZE = 14
 
     # UI polish: card corner radius and the drop-shadow.
     # v1.4.2 (ROADMAP task 3): the shadow is a CACHED PIXMAP HALO (see _shadow_pixmap):
@@ -181,6 +239,38 @@ class ServerNode(QGraphicsItemGroup):
     TAG_COLORS = theme.ThemeMap("tag_colors")
     # Tag strip on the card: vertical segments along the left edge.
     TAG_STRIP_WIDTH = 5.0
+    # v1.5rc5 (N5): the strip is INSET from the card's outline and corners. It used to be a
+    # square bar at x = 0..5 over the rounded outline, so it painted over the 2 px status
+    # frame (the primary availability channel) and poked out of the 10 px corner. The gap
+    # between the segments makes the boundary between two tags visible — they used to merge
+    # into ONE continuous bar.
+    TAG_STRIP_INSET_X = 3.0
+    TAG_STRIP_GAP = 1.0
+
+    # ── v1.5 (ROADMAP): the two optional badges of the card ────────────────────────
+    # THE FREE BAND. Measured on `update_appearance()`: the alias sits at (55, 18), the
+    # host at (55, 36), the info plaque at (10, 58), the status/SSH marks at
+    # (W-46, 23) / (W-24, 23) and the chevron's centre at (W-16, 23) — so the band
+    # `y ≈ 2..17 × x = 55..W-10` is empty in BOTH layouts, and neither the height
+    # formula (`58 + info + 12`) nor `MIN_NODE_HEIGHT` changes because of a badge.
+    ENV_BADGE_Y = 2.0              # the top of the band (above the alias)
+    ENV_BADGE_FONT_SIZE = 7
+    # The EMULATED marker shares the SAME band, right-aligned — the measured geometry left no
+    # other home: the status/SSH marks really sit at y = 46..60 (the item's `y = 23` PLUS the
+    # path's own +23) over the info plaque's top-right corner, so the band is the one place
+    # where a marker cannot cover another channel (and it works in the collapsed layout too,
+    # whose marks are raised to y = 16..30). `_apply_badges()` places this badge FIRST and the
+    # environment badge elides into the room that is left, so the two can never collide.
+    DEMO_BADGE_FONT_SIZE = 6
+    #: The chips of a badge: the inner padding, the corner radius and the gap between the two
+    #: badges of the band.
+    BADGE_PAD_X = 3.0
+    BADGE_PAD_Y = 1.0
+    BADGE_RADIUS = 3.0
+    BADGE_RIGHT_INSET = 10.0       # the right edge of the band (clear of the chevron)
+    BADGE_GAP = 4.0                # the gap between the emulated marker and the tag badge
+    BADGE_MIN_SPAN = 18.0          # less room than this — the tag badge is hidden, not "…"
+
 
     @staticmethod
     def tag_color(tag: str) -> QColor:
@@ -210,6 +300,23 @@ class ServerNode(QGraphicsItemGroup):
         # v1.4rc2 (plugin foundation, rc2): the plugin detail merged into the status
         # tooltip ("" — the status-only tooltip of v0.7.1)
         self._status_detail = ""
+        # v1.5rc3 (ROADMAP task 3): WHEN the status was determined (epoch seconds; 0.0
+        # — never) and how old it may get before the mark is painted as stale. The
+        # window feeds both (StatusChecker.last_checked_at / stale_threshold_s); the
+        # card only ever reads them — freshness is a LABEL, never a status change.
+        self._checked_at = 0.0
+        self._stale_after = 0.0
+        self._stale = False
+        # v1.5 (ROADMAP): is the shown status EMULATED (the demo map)? An emulated status
+        # is always MARKED as emulated, never carries a freshness line (it is not the
+        # result of a probe) and can only be produced by the demo's own declaration.
+        self._status_emulated = False
+        # v1.5: the two OPTIONAL badges (the environment tag, the emulated marker) are
+        # built ON FIRST USE — a card that needs neither carries no extra item at all.
+        self._env_chip = None
+        self._env_badge = None
+        self._demo_chip = None
+        self._demo_badge = None
         # v0.9.8: map search (Ctrl+F) — True if the node matches the active query
         self._search_matched = False
 
@@ -290,10 +397,14 @@ class ServerNode(QGraphicsItemGroup):
 
         # Availability status dot (UI polish): left of the SSH dot — in the collapsed view
         # and at a small zoom it reads faster than the 2px frame. Gray — until checked.
-        self._status_dot = QGraphicsEllipseItem(0, 23, 14, 14, self)
+        # v1.5rc2 (ROADMAP task 2): the mark is a QGraphicsPathItem, because a status is
+        # a SHAPE now (filled dot / ring / triangle — `theme.STATUS_SHAPES`); the brush
+        # still carries the status COLOUR, so every consumer of `.brush()` is unchanged.
+        self._status_dot = QGraphicsPathItem(self)
         self._status_dot.setPen(QPen(Qt.PenStyle.NoPen))
         self._status_dot.setBrush(QBrush(self.COLOR_DOT_IDLE))
         self._status_dot.setZValue(5)
+        self._apply_status_dot()
 
         # SSH status indicator (green dot - connected)
         self._ssh_status = QGraphicsEllipseItem(0, 23, 14, 14, self)
@@ -382,8 +493,14 @@ class ServerNode(QGraphicsItemGroup):
     def _rebuild_tag_strip(self):
         """v0.9.4: a vertical strip of colored segments from data.tags.
 
-        The segments split the card height evenly (max 4 visible tags — beyond that
+        The segments split the card's INNER height evenly (max 4 visible tags — beyond that
         the strip loses readability); drawn over the background (z=-0.8), under the content.
+
+        v1.5rc5 (N5): the strip belongs to the CARD, not to its edge. It is inset from the
+        outline (`TAG_STRIP_INSET_X` — clear of the 2/3 px frame pen) and from the rounded
+        corners (the band starts below the corner radius and ends the same distance above the
+        bottom one), so it neither overpaints the status frame nor leaves the silhouette.
+        A card too short for the insets falls back to a 2 px margin.
         """
         tags = (getattr(self.data, "tags", None) or [])[:4]
         n_needed = len(tags)
@@ -394,10 +511,15 @@ class ServerNode(QGraphicsItemGroup):
             item.setZValue(-0.8)
             self._tag_segments.append(item)
         h_total = max(float(self._current_height), 1.0)
-        seg_h = h_total / n_needed if n_needed else 0.0
+        corner = float(self.CORNER_RADIUS)
+        y0 = corner if h_total - 2.0 * corner >= float(n_needed) else 2.0
+        band = max(h_total - 2.0 * y0, 1.0)
+        seg_h = band / n_needed if n_needed else 0.0
+        gap = min(self.TAG_STRIP_GAP, max(seg_h - 1.0, 0.0)) if n_needed else 0.0
         for i, item in enumerate(self._tag_segments):
             if i < n_needed:
-                item.setRect(0.0, i * seg_h, self.TAG_STRIP_WIDTH, seg_h + 0.01)
+                item.setRect(self.TAG_STRIP_INSET_X, y0 + i * seg_h,
+                             self.TAG_STRIP_WIDTH, max(seg_h - gap, 0.5))
                 item.setBrush(QBrush(ServerNode.tag_color(tags[i])))
                 item.show()
             else:
@@ -406,7 +528,146 @@ class ServerNode(QGraphicsItemGroup):
     def refresh_tags(self):
         """v0.9.4: public hook to update the strip after editing data.tags."""
         self._rebuild_tag_strip()
+        self._apply_badges()
         self.update()
+
+    # ── v1.5 (ROADMAP): the ENVIRONMENT badge and the EMULATED marker ──────────────
+
+    def _ensure_badge_items(self):
+        """Build the four optional badge items the first time a card needs one.
+
+        A card that carries neither an environment tag nor an emulated status therefore
+        carries NO extra item at all — the "a card without an env tag is byte-identical
+        to today" rule holds literally, and a 500-card map pays for the badges it shows,
+        not for the ones it could show (the lazy `_tag_segments` precedent).
+        """
+        if self._env_badge is not None:
+            return
+        self._env_chip = QGraphicsPathItem(self)
+        self._env_chip.setPen(QPen(Qt.PenStyle.NoPen))
+        self._env_chip.setZValue(4.8)
+        self._env_chip.hide()
+        self._env_badge = QGraphicsSimpleTextItem(self)
+        self._env_badge.setFont(QFont(theme.FONT_MONO, self.ENV_BADGE_FONT_SIZE))
+        self._env_badge.setZValue(4.9)
+        self._env_badge.hide()
+        self._demo_chip = QGraphicsPathItem(self)
+        self._demo_chip.setPen(QPen(Qt.PenStyle.NoPen))
+        self._demo_chip.setZValue(4.8)
+        self._demo_chip.hide()
+        self._demo_badge = QGraphicsSimpleTextItem(self)
+        self._demo_badge.setFont(QFont(theme.FONT_MONO, self.DEMO_BADGE_FONT_SIZE))
+        self._demo_badge.setZValue(4.9)
+        self._demo_badge.hide()
+
+    def _place_badge(self, chip, text_item, label: str, ink: str, tint, y: float,
+                     x_right: float, x_left: float = None) -> float:
+        """Draw one badge: a tinted chip behind the text — the text carries the meaning.
+
+        The chip is the REDUNDANT channel (a light fill of the tag colour plus its
+        1 px outline, exactly how the left-edge strip shows the same tag), the label is
+        painted in `ink` — a theme tone the contrast gate holds at AA on the card, so no
+        badge can ever create an ungated colour pair (rule 3 of the 1.5 line).
+
+        `x_right` is the right edge of the badge; `x_left` (optional) is a left edge it
+        starts from (the environment band). A label too wide for the room it has is
+        elided — the full text goes to the item's tooltip. Returns the badge's width.
+        """
+        font = text_item.font()
+        fm = QFontMetrics(font)
+        right = float(x_right)
+        left = float(x_left) if x_left is not None else None
+        if left is not None:
+            limit = max(int(right - left - 2.0 * self.BADGE_PAD_X), 1)
+        else:
+            limit = max(int(fm.horizontalAdvance(label)), 1)
+        shown = label if fm.horizontalAdvance(label) <= limit else \
+            fm.elidedText(label, Qt.TextElideMode.ElideRight, limit)
+        text_item.setText(shown)
+        text_item.setBrush(QBrush(QColor(ink)))
+        text_item.setToolTip(label if shown != label else "")
+        w = float(fm.horizontalAdvance(shown)) + 2.0 * self.BADGE_PAD_X
+        rect = QRectF(0.0, 0.0, w, float(fm.height()) + 2.0 * self.BADGE_PAD_Y)
+        x = (left if left is not None else right - w)
+        chip.setPath(self._rounded(x, y, rect.width(), rect.height(), self.BADGE_RADIUS))
+        color = QColor(tint)
+        fill = QColor(color)
+        fill.setAlpha(64)
+        chip.setBrush(QBrush(fill))
+        outline = QColor(color)
+        outline.setAlpha(200)
+        chip.setPen(QPen(outline, 1.0))
+        chip.show()
+        text_item.setPos(x + self.BADGE_PAD_X, y + self.BADGE_PAD_Y)
+        text_item.show()
+        return w
+
+    def _apply_env_badge(self, width: float, reserved: float = 0.0):
+        """The primary tag as TEXT in the free band above the alias (v1.5, ROADMAP).
+
+        The pick and its precedence are `ENV_TAGS` / `env_tag()`; the colour is the SAME
+        `tag_color()` the left-edge strip paints with, used as a redundant tint (the text
+        carries the meaning, the tint repeats it — rule 2 of the 1.5 line). A card without
+        tags — and every COLLAPSED card, whose single line has no second row — hides the
+        badge and paints exactly like a pre-v1.5 card.
+
+        `reserved` is the width the EMULATED marker already took from the right end of the
+        band: the tag badge elides into what is left, and it is HIDDEN (never reduced to
+        "…") when that is less than `BADGE_MIN_SPAN`.
+        """
+        text = "" if getattr(self.data, "collapsed", False) \
+            else env_tag(getattr(self.data, "tags", None))
+        right = float(width) - self.BADGE_RIGHT_INSET - float(reserved or 0.0)
+        if reserved:
+            right -= self.BADGE_GAP
+        if not text or right - self.LABEL_X < self.BADGE_MIN_SPAN:
+            if self._env_badge is not None:
+                self._env_badge.hide()
+                self._env_chip.hide()
+            return
+        self._ensure_badge_items()
+        self._place_badge(self._env_chip, self._env_badge, text, self.COLOR_LABEL,
+                          self.tag_color(text), self.ENV_BADGE_Y,
+                          right, self.LABEL_X)
+
+    def _apply_demo_badge(self, collapsed: bool) -> float:
+        """The EMULATED marker — a status the demo map declares is always MARKED (v1.5).
+
+        The honesty rule of the closing release: `node.status.emulated` sits in the card's
+        free band, right-aligned, in the card's own label tone on a neutral `dot_idle` frame
+        (the "this is not a fresh measurement" tone the stale mark already uses), so a
+        colour-blind reader, a greyscale print and a screenshot all say the same thing.
+        Returns the width it occupies (0.0 when it is hidden) — the tag badge yields to it.
+        """
+        if not self._status_emulated:
+            if self._demo_badge is not None:
+                self._demo_badge.hide()
+                self._demo_chip.hide()
+            return 0.0
+        self._ensure_badge_items()
+        return self._place_badge(self._demo_chip, self._demo_badge,
+                                 _t("node.status.emulated"), self.COLOR_LABEL,
+                                 theme.DOT_IDLE, self.ENV_BADGE_Y,
+                                 float(self._current_width) - self.BADGE_RIGHT_INSET)
+
+    def _apply_badges(self):
+        """Re-place both optional badges for the CURRENT layout and width.
+
+        The EMULATED marker goes first and reports the room it took: it may never be pushed
+        aside (it is what keeps an emulated status honest), so the tag badge is the one that
+        elides — or disappears, when the band has no room left for it.
+        """
+        collapsed = bool(getattr(self.data, "collapsed", False))
+        try:
+            reserved = self._apply_demo_badge(collapsed)
+            self._apply_env_badge(self._current_width, reserved)
+        except RuntimeError:
+            pass  # Qt teardown — the items are already destroyed
+
+    @property
+    def status_emulated(self) -> bool:
+        """v1.5: is the shown status an EMULATED (demo) one? Never true for a probe."""
+        return bool(self._status_emulated)
 
     def refresh_theme(self):
         """v1.4.3 (ROADMAP task 5): re-apply every theme-dependent brush/pen.
@@ -434,11 +695,16 @@ class ServerNode(QGraphicsItemGroup):
         self._info_bg.setBrush(QBrush(_info_bg_color))
         self._chevron.setPen(QPen(self.COLOR_LABEL, 1.8))
         # The dots keep their STATE: the status dot shows the status colour (the
-        # idle grey when unchecked), the SSH dot the connection state.
-        self._status_dot.setBrush(QBrush(self.STATUS_COLORS.get(self._status, self.COLOR_DOT_IDLE)))
+        # idle grey when unchecked) and its DECLARED shape (v1.5rc2), the SSH dot
+        # the connection state.
+        self._apply_status_dot()
         self._ssh_status.setBrush(QBrush(self.COLOR_DOT_IDLE))
         self._apply_visual_state()
         self._rebuild_tag_strip()
+        # v1.5: the two badges are VALUES too (a chip brush/pen and an ink brush) — a
+        # theme switch re-resolves both, including the tag colour of the environment chip
+        # (`ServerNode.tag_color` reads the ACTIVE theme's tag maps).
+        self._apply_badges()
         # The halo is a pixmap of one size and a neutral black layer — it has no
         # theme colour, but the cache is dropped with the switch so a caller that
         # wants a themed shadow later starts from a clean slate.
@@ -463,6 +729,120 @@ class ServerNode(QGraphicsItemGroup):
 
     def _apply_visual_state(self):
         self._bg.setPen(self._state_pen())
+
+    # ── v1.5rc2 (ROADMAP task 2): the availability mark is a SHAPE ────────────────
+
+    def _status_dot_path(self) -> QPainterPath:
+        """The path of the availability mark for the CURRENT status.
+
+        The shape comes from the declaration (`theme.STATUS_SHAPES` through
+        `ui/status_shape.py`); an unchecked/unknown status gets the plain dot in the
+        idle grey. The box keeps the local anchor of the v1.4.x `QGraphicsEllipseItem`
+        (`rect = (0, 23, 14, 14)` + the two `setPos` calls of the expanded/collapsed
+        layouts), so both layouts are untouched by the change of the item type.
+        """
+        size = float(self.STATUS_DOT_SIZE)
+        if status_shape is not None:
+            path = status_shape.shape_path(self._status, size)
+        else:  # the flat-layout fallback: the round dot of v1.4.x
+            path = QPainterPath()
+            path.addEllipse(QRectF(0.0, 0.0, size, size))
+        path.translate(0.0, 23.0)
+        return path
+
+    def _apply_status_dot(self):
+        """Rebuild the mark: its SHAPE follows the status, its brush keeps the status colour.
+
+        v1.5rc3 (ROADMAP task 3): a STALE datum keeps the DECLARED SHAPE of its status but
+        is painted in the idle tone — the mark that means "no fresh information" (the same
+        tone an unchecked card carries). The status itself is untouched, so the frame of
+        the card keeps the online/warn/offline colour: the user sees WHAT was measured and
+        that the measurement is old, in two channels, exactly as v1.5rc2 arranged them.
+        """
+        try:
+            self._status_dot.setPath(self._status_dot_path())
+        except RuntimeError:
+            return  # Qt teardown — the item is already destroyed
+        if self._stale and self._status:
+            self._status_dot.setBrush(QBrush(self.COLOR_DOT_IDLE))
+        else:
+            self._status_dot.setBrush(
+                QBrush(self.STATUS_COLORS.get(self._status, self.COLOR_DOT_IDLE)))
+
+    # ── v1.5rc3 (ROADMAP task 3): how old the datum is ───────────────────────────
+
+    def set_checked_at(self, timestamp: float, stale_after: float = 0.0) -> None:
+        """Record WHEN this card's status was determined (epoch seconds) + the threshold.
+
+        The window calls this with `StatusChecker.last_checked_at()` /
+        `stale_threshold_s()` right after the status arrives, and `refresh_freshness()`
+        again from its freshness tick. `timestamp <= 0` means "never checked" (the idle
+        card). Never raises — a repaint is cosmetic.
+
+        v1.5 (ROADMAP): an EMULATED status is not the result of a probe, so it can never
+        carry an age — the timestamp is refused here (ONE place) and the freshness line
+        stays empty, which is what keeps the demo from claiming a measurement.
+        """
+        if self._status_emulated:
+            timestamp = 0.0
+        try:
+            self._checked_at = float(timestamp or 0.0)
+        except (TypeError, ValueError):
+            self._checked_at = 0.0
+        try:
+            self._stale_after = max(float(stale_after or 0.0), 0.0)
+        except (TypeError, ValueError):
+            self._stale_after = 0.0
+        self.refresh_freshness()
+
+    def refresh_freshness(self, now: float = None) -> bool:
+        """Recompute the stale mark and the tooltip from the stored timestamp.
+
+        Returns True when the STALE state changed (the topical test's seam). The
+        threshold is the window's decision (`StatusChecker.stale_threshold_s()`), not a
+        number invented here; a card that was never checked is never stale — it has no
+        datum to be old. Called by the window's freshness tick and by `set_status`.
+
+        v1.5: an EMULATED status is never stale either — there is no datum to age.
+        """
+        moment = time.time() if now is None else float(now)
+        stale = bool(self._status) and not self._status_emulated \
+            and self._checked_at > 0.0 \
+            and self._stale_after > 0.0 and (moment - self._checked_at) > self._stale_after
+        changed = (stale != self._stale)
+        self._stale = stale
+        if self._status:
+            self._apply_status_dot()
+            self._apply_status_tooltip(self._status)
+        return changed
+
+    @property
+    def is_stale(self) -> bool:
+        """v1.5rc3: the shown status is older than the threshold ("" status — False)."""
+        return bool(self._stale)
+
+    @property
+    def status_checked_at(self) -> float:
+        """v1.5rc3: epoch seconds of the shown status (0.0 — never checked)."""
+        return float(self._checked_at)
+
+    def freshness_text(self, now: float = None) -> str:
+        """The "checked N min ago" line ("" when the card was never checked).
+
+        Built here — not by the window — because it describes THIS card's datum; the
+        i18n keys are `node.status.checked_now` / `node.status.checked_ago` ({minutes}).
+
+        v1.5 (ROADMAP): an EMULATED status answers "" — an age would be a lie about a
+        probe that never happened (the demo map's RFC 5737 addresses are never probed).
+        """
+        if self._checked_at <= 0.0 or self._status_emulated:
+            return ""
+        moment = time.time() if now is None else float(now)
+        age = max(0.0, moment - self._checked_at)
+        minutes = int(age // 60.0)
+        if minutes < 1:
+            return _t("node.status.checked_now")
+        return _t("node.status.checked_ago", minutes=minutes)
 
     def update_appearance(self):
         """Rebuild the text elements when the data changes.
@@ -601,6 +981,9 @@ class ServerNode(QGraphicsItemGroup):
         self._ssh_status.setPos(self._current_width - 24, 23)
         # Chevron — from the CURRENT width (the geometry may have changed above)
         self._chevron.setPath(self._chevron_path(down=False))
+        # v1.5: the environment badge sits in the free band of THIS width (never in the
+        # width formula — it elides to the band instead of stretching the card)
+        self._apply_badges()
         self._apply_visual_state()
 
         # Sync the connection arrows with the node's new geometry
@@ -701,6 +1084,9 @@ class ServerNode(QGraphicsItemGroup):
         icon_dy = self.COLLAPSED_ICON_DY
         self._icon.setPos(0, icon_dy)
         self._glyph.setPos(0, icon_dy)
+        # v1.5: the ENVIRONMENT badge is hidden in the single-line layout (there is no
+        # second row), the EMULATED marker follows the raised marks of that line
+        self._apply_badges()
         self._apply_visual_state()
         if self.scene():
             self.scene().update_connections_for_node(self)
@@ -835,7 +1221,7 @@ class ServerNode(QGraphicsItemGroup):
         color = QColor(theme.STATUS_ONLINE) if connected else QColor(theme.DOT_IDLE)
         self._ssh_status.setBrush(QBrush(color))
 
-    def set_status(self, status: str, detail: str = ""):
+    def set_status(self, status: str, detail: str = "", emulated: bool = False):
         """v0.7.1: set the availability status (online/warn/offline).
 
         Updates the frame color (via _state_pen) and starts a short
@@ -848,32 +1234,60 @@ class ServerNode(QGraphicsItemGroup):
         the node's tooltip"). It travels on its own signal and can arrive after the
         status, so a changed detail updates the tooltip without restarting the pulse;
         an empty detail keeps the status-only tooltip of v0.7.1.
+
+        v1.5 (ROADMAP): `emulated` marks a status the DEMO MAP declared instead of
+        measuring (`storage/example_project.DEMO_STATUSES`). An emulated status is drawn
+        exactly like a real one — the same colour, the same declared shape — and is
+        MARKED as emulated (the badge, the tooltip) and stripped of any age. ANY ordinary
+        `set_status()` call clears the flag, so a probe result replaces an emulation and
+        the marker goes with it; the project format still carries no status field at all.
         """
         if status not in self.STATUS_COLORS:
             return
         detail = str(detail or "")
+        emulated = bool(emulated)
         if status == self._status:
-            if detail != self._status_detail:
+            if detail != self._status_detail or emulated != self._status_emulated:
                 self._status_detail = detail
+                self._status_emulated = emulated
                 self._apply_status_tooltip(status)
+                self._apply_badges()
             return
         color = self.STATUS_COLORS[status]
         self._status = status
         self._status_detail = detail
+        self._status_emulated = emulated
+        # v1.5rc3: a NEW result is fresh by definition — the window refines this with
+        # `set_checked_at()` immediately after (the timestamp of the round that produced
+        # it); clearing it here keeps the mark honest for a caller that pushes a status
+        # without one (a test, a plugin-driven path). v1.5: an emulated status refuses the
+        # timestamp altogether (`set_checked_at`).
+        self._checked_at = 0.0
+        self._stale = False
 
         self._apply_status_tooltip(status)
 
         # UI polish: the availability dot (reads faster than the frame at a small zoom)
-        # + dimming the card content for offline nodes
-        self._status_dot.setBrush(QBrush(color))
+        # + dimming the card content for offline nodes.
+        # v1.5rc2: the mark is the DECLARED shape of this status (dot / ring / triangle).
+        self._apply_status_dot()
         self._apply_content_opacity()
+        # v1.5: the emulated marker belongs to the status that just arrived
+        self._apply_badges()
 
         # Static frame + pulse (overlay fade-out: opacity 1 -> 0)
         self._apply_visual_state()
         self._start_pulse(color)
 
     def _apply_status_tooltip(self, status: str):
-        """v0.7.1/v1.4rc2: the status tooltip, with a plugin's detail appended when present."""
+        """v0.7.1/v1.4rc2/v1.5rc3/v1.5: the status tooltip — the plugin detail and the AGE.
+
+        Lines, in order: the status sentence (`node.status.*` with the host), the plugin
+        detail of a merged probe result (v1.4rc2) and the freshness line (v1.5rc3 —
+        "checked 3 min ago"), so the tooltip answers "what is it" AND "how old is that".
+        v1.5: an EMULATED status replaces the age line with the marker that NAMES the
+        emulation — there is no probe behind it to date.
+        """
         try:
             from i18n import t as _translate
             tip = _translate(f"node.status.{status}", host=self.data.host or "")
@@ -881,9 +1295,18 @@ class ServerNode(QGraphicsItemGroup):
             tip = f"{status}: {self.data.host}"
         if tip.startswith("["):  # i18n unavailable — the English literal of en.json
             tip = f"{status} — {self.data.host}"
+        lines = [tip]
         if self._status_detail:
-            tip = f"{tip}\n{self._status_detail}"
-        self.setToolTip(tip)
+            lines.append(self._status_detail)
+        if self._status_emulated:
+            # The marker alone would be terse in a tooltip; the window's own title names the
+            # map it belongs to, so the line composes the two EXISTING keys (no extra string).
+            lines.append(_t("node.status.emulated") + " — " + _t("title.example"))
+        else:
+            age = self.freshness_text()
+            if age:
+                lines.append(age)
+        self.setToolTip("\n".join(lines))
 
     def _start_pulse(self, color: QColor):
         """v0.7.1/v0.9.6: start the fade-out overlay of a frame in the given color.
@@ -947,10 +1370,17 @@ class ServerNode(QGraphicsItemGroup):
             return
         self._status = ""
         self._status_detail = ""   # v1.4rc2: the plugin detail goes with the status
+        # v1.5rc3: so does the AGE — a new host/port has never been probed
+        self._checked_at = 0.0
+        self._stale = False
+        # v1.5: and the EMULATED marker — the emulation is a property of the status
+        self._status_emulated = False
         self.setToolTip("")
         # UI polish: the dot — gray (not checked), the content — full brightness
-        self._status_dot.setBrush(QBrush(self.COLOR_DOT_IDLE))
+        # (v1.5rc2: the mark returns to the plain dot of an unchecked status)
+        self._apply_status_dot()
         self._apply_content_opacity()
+        self._apply_badges()
         self._apply_visual_state()
 
     def itemChange(self, change, value):

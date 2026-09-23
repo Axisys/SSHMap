@@ -40,6 +40,8 @@ from PySide6.QtCore import Qt, QRectF, Signal
 from PySide6.QtGui import QBrush, QColor, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import QGraphicsScene
 
+from contextlib import contextmanager
+
 
 class MapScene(QGraphicsScene):
     """The main map scene."""
@@ -717,7 +719,8 @@ class MapScene(QGraphicsScene):
             self._background = None
 
     def render_to_pixmap(self, scale: float = 2.0, padding: float = 60.0,
-                         use_view_rect=None) -> "QPixmap":
+                         use_view_rect=None,
+                         palette=theme.PALETTE_PRINT) -> "QPixmap":
         """Render the map into a QPixmap (v0.9.1 #1).
 
         The area — itemsBoundingRect (+padding), i.e. the whole map,
@@ -725,24 +728,63 @@ class MapScene(QGraphicsScene):
         is included in the result (it is part of the map); the background and the grid
         are drawn via drawBackground (CANVAS_BG + the lines) — QGraphicsScene.render calls it,
         so the export looks like the interactive view (behavior since v0.9.1).
+
+        **v1.5rc2 (ROADMAP task 3): `palette` decides the LOOK of the export and
+        defaults to `theme.PALETTE_PRINT`** — an export must not print a dark page, so
+        a DARK window exports the LIGHT page with the high-contrast lines by default;
+        `theme.PALETTE_THEME` keeps the current look (the opt-out of the export
+        dialog). `self.export_palette()` swaps the active instance for the duration of
+        the render and restores it, so nothing about the window changes.
         """
         from PySide6.QtGui import QPixmap, QColor
 
-        src = self.itemsBoundingRect().adjusted(
-            -float(padding), -float(padding), float(padding), float(padding))
-        if src.isEmpty():
-            src = QRectF(-400, -300, 800, 600)
+        with self.export_palette(palette):
+            src = self.itemsBoundingRect().adjusted(
+                -float(padding), -float(padding), float(padding), float(padding))
+            if src.isEmpty():
+                src = QRectF(-400, -300, 800, 600)
 
-        w = max(int(src.width() * scale), 1)
-        h = max(int(src.height() * scale), 1)
-        pixmap = QPixmap(w, h)
-        pixmap.fill(QColor(theme.RENDER_BG))  # the same dark-theme tone (the scene background)
+            w = max(int(src.width() * scale), 1)
+            h = max(int(src.height() * scale), 1)
+            pixmap = QPixmap(w, h)
+            pixmap.fill(QColor(theme.RENDER_BG))  # the surface of the EXPORT palette
 
-        painter = QPainter(pixmap)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
-        self.render(painter, target=QRectF(pixmap.rect()), source=src)
-        painter.end()
-        return pixmap
+            painter = QPainter(pixmap)
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+            self.render(painter, target=QRectF(pixmap.rect()), source=src)
+            painter.end()
+            return pixmap
+
+    # ── v1.5rc2 (ROADMAP task 3): the PRINT-FRIENDLY export palette ──────────────
+
+    @contextmanager
+    def export_palette(self, palette=theme.PALETTE_PRINT):
+        """Render the map under an EXPORT palette (v1.5rc2) — a scoped theme switch.
+
+        `theme.export_theme(palette)` answers the instance (`print` = LIGHT with the
+        user's hue, `theme` = the active one). When it differs from the active
+        instance the scene swaps it and asks every item to re-read the theme — the
+        SAME walk a theme switch uses (`_refresh_items_theme`), because a QBrush/QPen
+        handed to an item is a VALUE. The restore is unconditional (`finally`), so an
+        export can neither leak its palette into the window nor leave the map
+        half-repainted; a `theme` export takes the cheap branch (no swap at all).
+
+        Yields the instance, so a caller (the topical gate) can assert what was
+        rendered. One place decides — the three render methods and the `.drawio`
+        writer all go through `theme.export_theme()`.
+        """
+        instance = theme.export_theme(palette)
+        previous = theme.current_theme()
+        if instance is previous:
+            yield instance
+            return
+        theme.set_theme(instance)
+        try:
+            self._refresh_items_theme()
+            yield instance
+        finally:
+            theme.set_theme(previous)
+            self._refresh_items_theme()
 
     # ── v1.4.2 (ROADMAP task 3): the shadow halos of the cards ────────────────────
 
@@ -765,7 +807,8 @@ class MapScene(QGraphicsScene):
     # ── v1.3.3.7: SVG export of the map (the vector member of the format set) ──────
 
     def render_to_svg(self, path: str, scale: float = 1.0,
-                      padding: float = 60.0) -> int:
+                      padding: float = 60.0,
+                      palette=theme.PALETTE_PRINT) -> int:
         """Render the whole map into an SVG file (v1.3.3.7) — the VECTOR export.
 
         Same composition as `render_to_pixmap`/`render_to_pdf`: the area is
@@ -785,12 +828,22 @@ class MapScene(QGraphicsScene):
         rendered — they are cached pixmaps, and `QSvgGenerator` would embed them as
         base64 PNGs, i.e. the "vector" member of the format set would stop being vector.
         PNG/PDF keep the halo (raster formats).
+
+        v1.5rc2 (ROADMAP task 3): `palette` decides the look and defaults to the
+        PRINT-FRIENDLY one (the LIGHT page with the high-contrast lines); a PNG/PDF/SVG
+        export of a DARK window therefore leaves a light page, and `PALETTE_THEME` is
+        the opt-out the export dialog offers. The swap is scoped (`export_palette`).
         """
+        with self.export_palette(palette):
+            return self._render_svg_file(path, scale, padding)
+
+    def _render_svg_file(self, path: str, scale: float, padding: float) -> int:
+        """The SVG render itself — the body of `render_to_svg` inside the palette scope."""
         import os
 
         from PySide6.QtCore import QRect, QSize
         from PySide6.QtGui import QPainter
-        from PySide6.QtSvg import QSvgGenerator  # QtSvg ships with PySide6 (no new dependency)
+        from PySide6.QtSvg import QSvgGenerator
 
         src = self.itemsBoundingRect().adjusted(
             -float(padding), -float(padding), float(padding), float(padding))
@@ -833,13 +886,18 @@ class MapScene(QGraphicsScene):
     PDF_RESOLUTION_DPI = 300           # the PAINT DEVICE unit (QPdfWriter defaults to 1200 dpi!)
     PDF_RASTER_DPI = 150               # the floor density of the embedded map image
 
-    def render_to_pdf(self, path: str, scale: float = 2.0, padding: float = 60.0) -> int:
+    def render_to_pdf(self, path: str, scale: float = 2.0, padding: float = 60.0,
+                      palette=theme.PALETTE_PRINT) -> int:
         """Render the whole map into a PDF file (v0.9.9.7): one page for the entire map.
 
         On top of the ready `render_to_pixmap`: the whole map (itemsBoundingRect + the
         same `padding` as the pixmap/SVG exports) is stretched to ONE custom-sized page
         whose long side is `PDF_PAGE_LONG_SIDE_PT` (1200 pt ≈ 42 cm) and whose short side
         follows the map's proportions — so the map fills the page, without A4 "stripes".
+
+        **v1.5rc2 (ROADMAP task 3):** `palette` is handed straight to `render_to_pixmap`,
+        so the page is PRINT-FRIENDLY by default (a DARK window prints the LIGHT page
+        with the high-contrast lines) and `theme.PALETTE_THEME` keeps the current look.
 
         **v1.3.3.7-fix — the two geometry defects of the v0.9.9.7 implementation** (found
         while verifying the export set; the old code produced a ~72 pt thumbnail in the
@@ -895,7 +953,8 @@ class MapScene(QGraphicsScene):
                     effective_scale,
                     (self.PDF_PAGE_LONG_SIDE_PT / 72.0 * self.PDF_RASTER_DPI) / long_side)
 
-        pixmap = self.render_to_pixmap(scale=effective_scale, padding=padding)
+        pixmap = self.render_to_pixmap(scale=effective_scale, padding=padding,
+                                       palette=palette)
         if pixmap.isNull():
             raise ValueError("render_to_pixmap returned a null pixmap")
 

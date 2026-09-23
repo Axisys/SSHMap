@@ -38,11 +38,24 @@ of the two by severity and the plugin's detail travels on its own `status_detail
 (a tooltip line on the card); a hung plugin is abandoned by the manager's hook budget, so
 it cannot hang a round. With no provider installed the round is exactly the pre-rc2 probe.
 
+v1.5rc3 (ROADMAP task 3): every result is TIMESTAMPED. `_on_probed` records
+`time.time()` per server and `_on_done` records the end of the round, so the window can
+ask "how old is this datum" (`last_checked_at` / `last_round_at`) and paint the stale mark
+once `stale_threshold_s()` — `max(2 × the effective interval, STALE_MIN_SEC)` — has
+passed. The timestamps are FACTS about the round; the checker itself never repaints
+anything (the GUI half lives in `graphics/server_node.py` + `ui/main_window.py`).
+
+v1.5 (ROADMAP): the checker can be told to never probe a set of ids (`set_skip_ids`) —
+the DEMO map's nodes, whose status is EMULATED by `storage/example_project.py`. The
+filter lives in `_subset()`, so every round obeys it; the checker still knows nothing
+about emulation, and with no skip set it behaves exactly as before.
+
 In a headless environment without a running event loop the timers never fire —
 child threads do not start, which makes the module safe for smoke tests.
 """
 import socket
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from PySide6.QtCore import QObject, QThread, QTimer, Signal
@@ -64,6 +77,15 @@ PROBE_TIMEOUT_S = 3.0          # timeout of a single probe (connect + banner)
 DEFAULT_MAX_PARALLEL = 16      # default for the status_max_parallel key (ROADMAP: "default 16")
 MAX_PARALLEL_LIMIT = 64        # clamp ceiling (dialog spinbox and validator — one range)
 LARGE_MAP_THRESHOLD = 50       # N > 50 nodes → round interval doubles ("N > ~50")
+
+# v1.5rc3 (ROADMAP task 3): status FRESHNESS. A status is a fact with a timestamp, and
+# the map must not present an old fact as a current one. The threshold is a FLOOR as
+# well as a multiple: `max(2 × the effective interval, STALE_MIN_SEC)` — with the 30 s
+# default that is 90 s, and a user who shortens the interval to 5 s still gets a
+# meaningful "this is old" (10 s would be noise, not a signal). Freshness NEVER changes
+# a status and never starts a round: it only repaints the mark and the tooltip line
+# (see ServerNode.refresh_freshness).
+STALE_MIN_SEC = 90.0
 
 
 def get_status_settings() -> dict:
@@ -285,7 +307,18 @@ class StatusChecker(QObject):
         self._busy = False                # is a round already running?
         self._last_results: dict = {}     # id -> last status
         self._last_details: dict = {}     # id -> last plugin detail (v1.4rc2)
+        # v1.5rc3 (ROADMAP task 3): id -> epoch seconds of the last result, plus the end
+        # of the last completed round. The window reads them to answer "checked N min ago"
+        # and to paint the stale mark; a status itself is never derived from them.
+        self._last_times: dict = {}
+        self._last_round_at: float = 0.0
         self._status_provider = None      # v1.4rc2: provider(sid, ssh_status) -> (kind, detail)
+        # v1.5 (ROADMAP): the ids the checker must NEVER probe while the DEMO map is the
+        # open project — their status is EMULATED by `storage/example_project.py`, and a
+        # round would repaint them `offline` within 30 s and turn the demo into a lie.
+        # A skipped id is not a target at all (`_subset`), so no probe, no result, no
+        # timestamp and no `status_changed` — the card keeps what the demo declared.
+        self._skip_ids: set = set()
         self._thread: _ProbeThread | None = None
         self._cancel = threading.Event()  # AUDIT v0.7.2 #5: cancel the current round
 
@@ -377,9 +410,58 @@ class StatusChecker(QObject):
         """v1.4rc2: the last plugin detail of the server ("" — none was ever reported)."""
         return self._last_details.get(server_id, "")
 
+    # ── v1.5rc3 (ROADMAP task 3): the age of a result ───────────────────────────
+
+    def stale_threshold_s(self) -> float:
+        """How old a result may be before it is presented as stale (seconds).
+
+        `max(2 × the EFFECTIVE round interval, STALE_MIN_SEC)` — the effective one, so
+        a large map (whose interval the soft doubling already stretched) gets the same
+        "two missed rounds" rule as a small one. The single place that decides it; the
+        card only paints what it is told.
+        """
+        return max(2.0 * float(self.effective_interval_ms()) / 1000.0, STALE_MIN_SEC)
+
+    def last_checked_at(self, server_id: str) -> float:
+        """Epoch seconds of the server's last result (0.0 — never probed in this run)."""
+        try:
+            return float(self._last_times.get(server_id, 0.0) or 0.0)
+        except (TypeError, ValueError):
+            return 0.0
+
+    def is_stale(self, server_id: str, now: float = None) -> bool:
+        """Is the server's last result older than `stale_threshold_s()`?
+
+        A server that was never probed is NOT stale — it has no datum to be old (the
+        card shows its idle mark instead). Purely a question about TIME: the status
+        itself is untouched, here and everywhere else.
+        """
+        checked = self.last_checked_at(server_id)
+        if checked <= 0.0:
+            return False
+        moment = time.time() if now is None else float(now)
+        return (moment - checked) > self.stale_threshold_s()
+
+    def last_round_at(self) -> float:
+        """Epoch seconds of the end of the last COMPLETED round (0.0 — none yet)."""
+        return float(self._last_round_at or 0.0)
+
     def set_servers(self, servers):
         """Update the target list. `servers` — an iterable of (id, host, port)."""
         self._targets = _build_targets(servers)
+
+    def set_skip_ids(self, server_ids) -> None:
+        """v1.5 (ROADMAP): ids this checker must NEVER probe (the demo's emulated nodes).
+
+        Called by the window with `storage.example_project.demo_status_ids()` while the
+        example map is the open project and with NOTHING for every other project, so the
+        emulation can never outlive the demo. The filter lives in `_subset()` — the ONE
+        place that decides what a round holds — so the periodic timer, the round of a
+        project load and the on-demand "Check statuses now" of the selection all obey it
+        without a second rule. Purely a target filter: the checker still knows nothing
+        about emulation, and a skipped node simply never produces a result.
+        """
+        self._skip_ids = {str(sid) for sid in (server_ids or ()) if sid}
 
     def _subset(self, server_ids=None) -> list:
         """The targets of a round: all of them, or only the given server ids.
@@ -389,7 +471,15 @@ class StatusChecker(QObject):
         (every target), a list restricts it (an unknown id is skipped). The order
         follows the stored target list, so a manual round of the whole selection behaves
         exactly like a periodic one.
+
+        v1.5 (ROADMAP): the SKIPPED ids (`set_skip_ids`) are dropped here, whatever the
+        caller asked for — the demo's emulated nodes are never probed.
         """
+        if self._skip_ids:
+            if server_ids is None:
+                return [t for t in self._targets if t[0] not in self._skip_ids]
+            wanted = {str(sid) for sid in server_ids if sid}
+            return [t for t in self._targets if t[0] in wanted and t[0] not in self._skip_ids]
         if server_ids is None:
             return list(self._targets)
         wanted = {str(sid) for sid in server_ids if sid}
@@ -424,6 +514,8 @@ class StatusChecker(QObject):
         def _on_probed(sid: str, status: str):
             results.append((sid, status))
             self._last_results[sid] = status
+            # v1.5rc3: the result is a fact WITH A TIME — the staleness clock starts here
+            self._last_times[sid] = time.time()
             self.status_changed.emit(sid, status)
 
         def _on_detail(sid: str, detail: str):
@@ -437,6 +529,8 @@ class StatusChecker(QObject):
             if self._thread is thread:
                 self._thread = None
             thread.deleteLater()
+            # v1.5rc3 (ROADMAP task 3): the round is closed — its age is measurable
+            self._last_round_at = time.time()
             # v1.1.2 final (task 3): the interval of the NEXT tick — for the current size
             # of the map (targets may have changed during the round: nodes added/removed).
             try:

@@ -76,6 +76,8 @@ EXPECTED_DEFAULTS = {
     "view.fit_map": "Ctrl+Shift+F", "view.find_on_map": "Ctrl+F",
     "view.reset_zoom": "Ctrl+0", "view.zoom_in": "Ctrl+=", "view.zoom_out": "Ctrl+-",
     "palette.open": "Ctrl+K", "view.multi_input": "F12",
+    # v1.5rc3 (ROADMAP task 4): the cheat-sheet — the ONE new key of the release.
+    "help.cheatsheet": "F1",
 }
 
 # v1.3.3.3 (task 3): the global actions that ship with NO hotkey (`default: ""`).
@@ -101,6 +103,11 @@ EMPTY_DEFAULT_IDS = {
     "view.toggle_minimap",
     # v1.4.5: the legend panel — a checkable View item + its toolbar mirror (task 4).
     "view.toggle_legend",
+    # v1.5rc3: "Open the example map" — the Help item of the demo map (no key out of the box).
+    "help.example",
+    # v1.5rc4: "Focus the map" — the keyboard handover to the canvas (task 6); the ONE
+    # new registry action of the release, an EMPTY default like its neighbours.
+    "view.focus_map",
 }
 def new_window():
     """A MainWindow with the autosave timer stopped (no event loop in the tests)."""
@@ -139,13 +146,15 @@ ALL_IDS = sorted(set(EXPECTED_DEFAULTS) | EMPTY_DEFAULT_IDS)
 print("== 1. the action registry ==")
 
 ids = HR.action_ids()
-check("registry: the grown v1.3.3.3 action set (22 sequenced + 24 empty-default)",
-      set(ids) == set(ALL_IDS) and len(ids) == 46,
+check("registry: the grown action set (23 sequenced + 26 empty-default; v1.5rc3 adds F1, "
+      "v1.5rc4 adds view.focus_map)",
+      set(ids) == set(ALL_IDS) and len(ids) == 49,
       str(sorted(set(ids) ^ set(ALL_IDS))))
-check("registry: the sequenced defaults are the v1.3.1.1 set + the v1.3.3.3 additions",
+check("registry: the sequenced defaults are the v1.3.1.1 set + the v1.3.3.3 additions "
+      "+ help.cheatsheet (F1, v1.5rc3)",
       {a: HR.default_sequence(a) for a in ids if HR.default_sequence(a)} == EXPECTED_DEFAULTS,
       str({a: HR.default_sequence(a) for a in ids if HR.default_sequence(a)}))
-check("registry: exactly the 24 remaining global actions carry an EMPTY default",
+check("registry: exactly the 26 remaining global actions carry an EMPTY default",
       {a for a in ids if not HR.default_sequence(a)} == EMPTY_DEFAULT_IDS
       and set(HR.empty_default_action_ids()) == EMPTY_DEFAULT_IDS,
       str(sorted(EMPTY_DEFAULT_IDS ^ {a for a in ids if not HR.default_sequence(a)})))
@@ -311,16 +320,28 @@ check("dialog: 8 tabs (v1.4.3: + Appearance) with 'Hotkeys' between 'Map' and 'L
       and dlg.tabs.tabText(6) == t("settings.tab.hotkeys")
       and dlg.tabs.tabText(7) == t("settings.tab.language"),
       str([dlg.tabs.tabText(i) for i in range(dlg.tabs.count())]))
-check("dialog: one row per registry action (40), in the declaration order",
-      dlg.hotkeys_table.rowCount() == len(ids)
-      and [dlg.hotkeys_table.item(r, 0).text() for r in range(len(ids))]
-      == [t(HR.action_label_key(a)) for a in ids])
+def hotkey_row_ids(dlg):
+    """The action ids in TABLE order (v1.5rc4: the table is grouped by family, so the
+    row index of an action is `dlg.hotkey_row(action_id)`, never its registry index)."""
+    return [dlg._hotkey_rows[row][1] for row in dlg.hotkey_action_rows()]
+
+
+def grouped_ids():
+    """The registry's ids in the grouped order the tab shows (family, then declaration)."""
+    grouped = HR.actions_by_family()
+    return [aid for family in HR.family_order() for aid in grouped[family]]
+
+
+check("dialog: one ACTION row per registry action, grouped by family (v1.5rc4)",
+      dlg.hotkeys_table.rowCount() == len(ids) + len(dlg.hotkey_family_rows())
+      and hotkey_row_ids(dlg) == grouped_ids()
+      and all(dlg.hotkey_row(a) >= 0 for a in ids))
 check("dialog: the column headers [action | hotkey]",
       [dlg.hotkeys_table.horizontalHeaderItem(i).text() for i in (0, 1)]
       == [t("settings.hotkeys.action"), t("settings.hotkeys.sequence")])
-check("dialog: a QKeySequenceEdit per row, prefilled with the effective sequence",
+check("dialog: a QKeySequenceEdit per ACTION row, prefilled with the effective sequence",
       all(isinstance(dlg.hotkeys_table.cellWidget(r, 1), QKeySequenceEdit)
-          for r in range(len(ids)))
+          for r in dlg.hotkey_action_rows())
       and dlg.hotkey_edits["file.save"].keySequence().toString() == "Ctrl+S"
       and dlg.hotkey_edits["file.save_as"].keySequence().toString() == "Ctrl+Shift+S"
       and dlg.hotkey_edits["view.zoom_in"].keySequence().toString() == "Ctrl+="
@@ -331,7 +352,8 @@ check("dialog: the 'disable' hint is shown",
       and bool(dlg._lbl_hotkeys_disabled_hint.text()))
 check("dialog: no conflict on the defaults (no warning, no mark)",
       dlg._lbl_hotkeys_conflict.text() == ""
-      and not any("\u26a0" in dlg.hotkeys_table.item(r, 0).text() for r in range(len(ids))))
+      and not any("\u26a0" in dlg.hotkeys_table.item(r, 0).text()
+                  for r in dlg.hotkey_action_rows()))
 
 # A conflict: the same sequence on two rows → BOTH marked + the warning; saving still possible
 dlg.hotkey_edits["edit.duplicate"].setKeySequence(QKeySequence("Ctrl+N"))
@@ -340,9 +362,9 @@ conflict_ids = HR.find_conflicts(dlg.hotkey_sequences())
 check("dialog: two actions with the same sequence are both detected as a conflict",
       conflict_ids == {"file.new", "edit.duplicate"}, str(conflict_ids))
 check("dialog: both conflicting rows are marked, the others are not",
-      "\u26a0" in dlg.hotkeys_table.item(ids.index("file.new"), 0).text()
-      and "\u26a0" in dlg.hotkeys_table.item(ids.index("edit.duplicate"), 0).text()
-      and not any("\u26a0" in dlg.hotkeys_table.item(ids.index(a), 0).text()
+      "\u26a0" in dlg.hotkeys_table.item(dlg.hotkey_row("file.new"), 0).text()
+      and "\u26a0" in dlg.hotkeys_table.item(dlg.hotkey_row("edit.duplicate"), 0).text()
+      and not any("\u26a0" in dlg.hotkeys_table.item(dlg.hotkey_row(a), 0).text()
                   for a in ("file.save", "file.open")))
 check("dialog: the conflict warning appears",
       dlg._lbl_hotkeys_conflict.text() == t("settings.hotkeys.conflict"))
@@ -369,8 +391,8 @@ dlg._refresh_hotkey_conflicts()
 check("dialog: two disabled (empty) hotkeys are not a conflict",
       HR.find_conflicts(dlg.hotkey_sequences()) == set()
       and dlg.hotkey_sequences()["file.open"] == "" == dlg.hotkey_sequences()["edit.properties"])
-check("dialog: the 24 empty-default rows are not a conflict among themselves",
-      len([a for a in EMPTY_DEFAULT_IDS if dlg.hotkey_sequences()[a] == ""]) == 24
+check("dialog: the 26 empty-default rows are not a conflict among themselves",
+      len([a for a in EMPTY_DEFAULT_IDS if dlg.hotkey_sequences()[a] == ""]) == 26
       and HR.find_conflicts(dlg.hotkey_sequences()) == set())
 
 # A prefill from the config (a saved value shows up in the table)
@@ -389,7 +411,8 @@ check("dialog: retranslate() updates the tab, the headers, the reset button and 
       and dlg2.tabs.tabText(6) != tab_titles[6]
       and dlg2.hotkeys_table.horizontalHeaderItem(0).text() == i18n.t("settings.hotkeys.action")
       and dlg2.reset_hotkeys_btn.text() == i18n.t("settings.hotkeys.reset")
-      and dlg2.hotkeys_table.item(0, 0).text() == i18n.t("file.new_project"))
+      and dlg2.hotkeys_table.item(dlg2.hotkey_row("file.new"), 0).text()
+      == i18n.t("file.new_project"))
 i18n.set_language("en")
 
 # ════════════════════════════════════════════════════════════

@@ -45,6 +45,14 @@ except ImportError:
     except ImportError:  # flat layout: the ui/ directory itself is on sys.path
         motion = None
 
+try:  # v1.5rc4 (ROADMAP task 5): the ONE visible-focus indicator of the three domains
+    from ..ui import focus_ring
+except ImportError:
+    try:
+        from ui import focus_ring
+    except ImportError:  # flat layout: the ui/ directory itself is on sys.path
+        focus_ring = None
+
 
 if TYPE_CHECKING:
     from ..graphics.map_scene import MapScene
@@ -105,6 +113,15 @@ class MapView(QGraphicsView):
         # Group drag: positions of all selected nodes before the gesture
         self._group_drag_olds = []               # [(node, QPointF), ...]
 
+        # ── v1.5rc4 (ROADMAP tasks 5/6): the keyboard domain of the map ────────
+        # The map is one of the three keyboard domains (map / sidebar / terminal) and
+        # the ONLY one that navigates its objects: Tab walks the cards, the arrows move
+        # the selection geometrically, Enter opens per `ui_node_double_click` and Esc
+        # clears. The focus ring is the visible half (ui/focus_ring.py — ONE indicator,
+        # the STRONG accent, never a new colour).
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        self._focus_ring = focus_ring.FocusRing(owner=self) if focus_ring is not None else None
+
     def refresh_theme(self):
         """v1.4.3 (ROADMAP task 5): re-read the theme for the view.
 
@@ -114,9 +131,51 @@ class MapView(QGraphicsView):
         minimap panel are refreshed by `MainWindow.apply_theme()` (the minimap is
         a child of the view but is OWNED by the window), so this method handles
         only what the view itself paints.
+
+        v1.5rc4: the focus ring is read live at paint time, but the ring owns a
+        stylesheet nowhere — `refresh_theme()` on it only repaints.
         """
         self.setBackgroundBrush(QBrush(QColor(theme.CANVAS_BG)))
+        if self._focus_ring is not None:
+            self._focus_ring.refresh_theme()
         self.viewport().update()
+
+    # ── v1.5rc4 (ROADMAP task 5): the VISIBLE FOCUS of the map ────────────────
+    # The map is the domain whose keys are not obvious (in `terminal_mode = "tabs"` it
+    # shares the window with a live shell): the ring says "the map owns the keyboard",
+    # the same indicator the sidebar and the terminal canvas show.
+
+    def focus_ring_active(self) -> bool:
+        """True while the map owns the keyboard (the topical test's seam)."""
+        return bool(self._focus_ring is not None and self._focus_ring.is_active())
+
+    def drawForeground(self, painter, rect):
+        """Paint the focus frame of the map (v1.5rc4, ROADMAP task 5).
+
+        Drawn in the VIEW's foreground layer with a COSMETIC pen: the frame is the
+        viewport's edge in DEVICE pixels, so it stays a 2 px line at any zoom (a scene
+        rectangle would be scaled by the transform). Never drawn while the map does not
+        own the keyboard.
+        """
+        super().drawForeground(painter, rect)
+        if self._focus_ring is None or not self._focus_ring.is_active():
+            return
+        try:
+            viewport = self.viewport()
+            if viewport is None or viewport.width() <= 0 or viewport.height() <= 0:
+                return
+            pen = focus_ring.ring_pen()
+            pen.setCosmetic(True)
+            area = self.mapToScene(viewport.rect()).boundingRect()
+            painter.save()
+            try:
+                painter.setPen(pen)
+                painter.setBrush(Qt.BrushStyle.NoBrush)
+                painter.drawRect(area)
+            finally:
+                painter.restore()
+        except RuntimeError:
+            pass  # Qt teardown — the viewport is already destroyed
 
     # UI polish: allowed zoom range (shared by wheel, fit, and restore).
     ZOOM_MIN = 0.1
@@ -584,9 +643,21 @@ class MapView(QGraphicsView):
             self._group_drag_olds = []
             self.setDragMode(QGraphicsView.ScrollHandDrag)
 
+    def focusInEvent(self, event: QFocusEvent):
+        """v1.5rc4 (ROADMAP task 5): the map took the keyboard — show the focus ring."""
+        if self._focus_ring is not None:
+            self._focus_ring.set_active(True)
+        super().focusInEvent(event)
+
     def focusOutEvent(self, event: QFocusEvent):
-        """v1.1.2RC2 (N3): focus loss ("blur") — the capture may have been lost, the release won't come."""
+        """v1.1.2RC2 (N3): focus loss ("blur") — the capture may have been lost, the release won't come.
+
+        v1.5rc4 (ROADMAP task 5): the same event drops the focus ring — the map no longer
+        owns the keyboard.
+        """
         self._reset_stuck_drag_state()
+        if self._focus_ring is not None:
+            self._focus_ring.set_active(False)
         super().focusOutEvent(event)
 
     def changeEvent(self, event: QEvent):
@@ -605,6 +676,11 @@ class MapView(QGraphicsView):
             # we intentionally do NOT delete nodes here.
             self._cancel_connect_drag()
             self.connect_drag_finished.emit()
+            return
+        # v1.5rc4 (ROADMAP task 6): the keyboard walk is handled BEFORE Delete, because
+        # Tab/arrows/Enter/Esc must not fall through to Qt's focus chain or to the
+        # view's own scrolling while a card is selected (see _handle_navigation_key).
+        if self._handle_navigation_key(event):
             return
         if event.key() == Qt.Key_Delete:
             # Delete the selected node (patch v0.6.x / v0.7.3: single guarded path —
@@ -647,6 +723,285 @@ class MapView(QGraphicsView):
                 elif scene is not None and hasattr(scene, "remove_group"):
                     scene.remove_group(group)
         super().keyPressEvent(event)
+
+    def event(self, e):
+        """v1.5rc4 (ROADMAP task 6): Tab/Shift+Tab must reach the keyboard walk.
+
+        The v1.2.9-fix lesson, applied to the map: Qt 6 handles bare Tab/Shift+Tab as
+        FOCUS NAVIGATION inside `QWidget::event()` — the keys never reach
+        `keyPressEvent`, so a walk implemented there would only work when a test calls
+        the method directly and would silently do nothing for a real user. The
+        interception is deliberately narrow: only the Tab family, and only when
+        `_handle_navigation_key()` really consumed it (an empty map, or a key the map
+        does not serve, still falls through to Qt's own handling).
+        """
+        try:
+            if e.type() == QEvent.Type.KeyPress and e.key() in (
+                    Qt.Key.Key_Tab, Qt.Key.Key_Backtab):
+                if self._handle_navigation_key(e):
+                    return True
+        except (RuntimeError, AttributeError):
+            pass  # a degenerate event — the default handling below decides
+        return super().event(e)
+
+    # ── v1.5rc4 (ROADMAP task 6): the keyboard navigation of the map ──────────
+    # The map is the one surface whose objects can be REACHED by the keyboard: Tab walks
+    # the cards, the arrows move the selection to the geometrically nearest card in that
+    # direction, Enter (or Space) opens the selected card exactly as a double click does
+    # and Esc clears the selection. Everything is implemented HERE, on MapView, and reuses
+    # the existing selection/centering path (`MainWindow._select_node`, the same one the
+    # sidebar, the search navigation and the palette use) — no second selection model.
+    #
+    # The pinned boundaries:
+    #   * the arrows are claimed ONLY while a card is selected: with nothing selected they
+    #     keep Qt's own behaviour (scrolling the canvas), so keyboard panning is not lost;
+    #   * Tab is claimed only while the map HAS cards — an empty map lets Qt move the focus
+    #     to the next widget (keyboard accessibility of the window is untouched);
+    #   * Ctrl+Tab (and Ctrl+Shift+Tab) LEAVES the map for the next keyboard domain
+    #     (`MainWindow._focus_domain_step`) — the same "Tab is the widget's, Ctrl+Tab is
+    #     the window's" convention the terminal canvas has had since v1.2.9-fix.
+
+    #: The height band, in scene units, inside which two cards count as ONE row of the
+    #: reading order Tab follows (cards a few pixels apart still read left-to-right).
+    WALK_ROW_BAND = 40.0
+    #: A candidate must lie at least this far along the direction (scene units) to count.
+    DIRECTION_MIN_DELTA = 1.0
+    #: How much a sideways offset costs when picking "the nearest card that way": the
+    #: perpendicular distance is weighted, so the arrow picks the card IN FRONT of the
+    #: selection rather than a closer one far off the axis.
+    DIRECTION_PERP_WEIGHT = 2.0
+
+    def _scene_nodes(self) -> list:
+        """The map's cards (never raises — the scene may be mid-teardown)."""
+        scene = self.scene()
+        if scene is None or not hasattr(scene, "nodes"):
+            return []
+        try:
+            return [n for n in scene.nodes() if n.scene() is not None]
+        except RuntimeError:
+            return []
+
+    @staticmethod
+    def _node_center(node):
+        """The scene centre of a card — the v1.4.2 rule (`card_rect_scene`, no halo)."""
+        try:
+            getter = getattr(node, "card_rect_scene", None)
+            rect = getter() if callable(getter) else node.sceneBoundingRect()
+            return rect.center()
+        except (RuntimeError, AttributeError):
+            return None
+
+    def keyboard_walk_order(self) -> list:
+        """The card order Tab/Shift+Tab follow: the reading order of the map.
+
+        Rows come first (the `WALK_ROW_BAND` tolerance keeps cards of one visual row
+        together) and left-to-right inside a row. Deterministic for a given map — the
+        order the user sees, not the insertion order of the scene.
+        """
+        entries = []
+        for node in self._scene_nodes():
+            center = self._node_center(node)
+            if center is None:
+                continue
+            entries.append((round(center.y() / self.WALK_ROW_BAND), center.x(), node))
+        entries.sort(key=lambda item: (item[0], item[1]))
+        return [node for _row, _x, node in entries]
+
+    def keyboard_current_node(self):
+        """The card the keyboard is standing on: the single selected one (or the first)."""
+        scene = self.scene()
+        if scene is None:
+            return None
+        try:
+            selected = [i for i in scene.selectedItems() if isinstance(i, ServerNode)]
+        except RuntimeError:
+            return None
+        if not selected:
+            return None
+        if len(selected) == 1:
+            return selected[0]
+        order = self.keyboard_walk_order()
+        for node in order:
+            if node in selected:
+                return node
+        return selected[0]
+
+    def nearest_node_in_direction(self, node, dx: float, dy: float):
+        """The card nearest to ``node`` in the direction (dx, dy) — None when none is.
+
+        The candidate must lie FORWARD along the direction (`DIRECTION_MIN_DELTA`); the
+        score is the forward distance plus the weighted sideways offset, which is the
+        classic "arrow key in a grid" rule: an arrow never jumps backwards and never
+        picks a card that is barely in front but far off the axis.
+        """
+        base = self._node_center(node) if node is not None else None
+        if base is None:
+            return None
+        best, best_score = None, None
+        for other in self._scene_nodes():
+            if other is node:
+                continue
+            center = self._node_center(other)
+            if center is None:
+                continue
+            along = (center.x() - base.x()) * dx + (center.y() - base.y()) * dy
+            if along <= self.DIRECTION_MIN_DELTA:
+                continue
+            across = abs((center.x() - base.x()) * (-dy)) + abs((center.y() - base.y()) * dx)
+            score = along + self.DIRECTION_PERP_WEIGHT * across
+            if best_score is None or score < best_score:
+                best, best_score = other, score
+        return best
+
+    def select_keyboard_node(self, node) -> bool:
+        """Select a card through the ORDINARY path (the window's `_select_node`).
+
+        The window owns what a selection means (the sidebar follows it, the map centres
+        on it) — the view only asks. Without a window (a bare scene in a tool) the
+        selection is applied directly, so the walk works everywhere.
+        """
+        if node is None:
+            return False
+        win = self.window()
+        select = getattr(win, "_select_node", None)
+        if callable(select):
+            try:
+                select(node, center=True)
+                return True
+            except (RuntimeError, TypeError):
+                pass  # an unexpected host — fall through to the direct selection
+        try:
+            scene = self.scene()
+            if scene is not None:
+                scene.clearSelection()
+            node.setSelected(True)
+            return True
+        except RuntimeError:
+            return False
+
+    def walk_nodes(self, step: int = 1):
+        """Move the keyboard selection ``step`` cards along the walk order (wrapping)."""
+        order = self.keyboard_walk_order()
+        if not order:
+            return None
+        current = self.keyboard_current_node()
+        if current in order:
+            index = (order.index(current) + int(step)) % len(order)
+        else:
+            index = 0 if int(step) >= 0 else len(order) - 1
+        node = order[index]
+        return node if self.select_keyboard_node(node) else None
+
+    def move_selection_direction(self, dx: float, dy: float):
+        """Move the selection to the nearest card in (dx, dy) (None — nothing that way)."""
+        current = self.keyboard_current_node()
+        if current is None:
+            return None
+        target = self.nearest_node_in_direction(current, dx, dy)
+        if target is None:
+            return None
+        return target if self.select_keyboard_node(target) else None
+
+    def activate_selection(self) -> bool:
+        """Enter/Space: open the selected card per the `ui_node_double_click` semantics.
+
+        Not a second implementation: the WINDOW's `_on_node_double_click_direct()` is the
+        one entry point a real double click uses, so "properties" vs "connect" cannot
+        drift between the mouse and the keyboard.
+        """
+        node = self.keyboard_current_node()
+        if node is None:
+            return False
+        win = self.window()
+        activate = getattr(win, "_on_node_double_click_direct", None)
+        if not callable(activate):
+            return False
+        try:
+            activate(node)
+        except RuntimeError:
+            return False
+        return True
+
+    def clear_keyboard_selection(self) -> bool:
+        """Esc: drop the selection (True — there was one to drop)."""
+        scene = self.scene()
+        if scene is None:
+            return False
+        try:
+            if not scene.selectedItems():
+                return False
+            scene.clearSelection()
+        except RuntimeError:
+            return False
+        win = self.window()
+        sync = getattr(win, "_sync_selection_state", None)
+        if callable(sync):
+            try:
+                sync()
+            except (RuntimeError, TypeError):
+                pass  # a host without the sync hook — the scene is already cleared
+        return True
+
+    def _focus_domain_step(self, step: int) -> bool:
+        """Ask the window to move the keyboard to the next domain (Ctrl+Tab)."""
+        win = self.window()
+        handler = getattr(win, "_focus_domain_step", None)
+        if not callable(handler):
+            return False
+        try:
+            handler(int(step))
+        except (RuntimeError, TypeError):
+            return False
+        return True
+
+    def _handle_navigation_key(self, event: QKeyEvent) -> bool:
+        """The v1.5rc4 keyboard keys of the map; True — the event was consumed."""
+        try:
+            key = event.key()
+            mods = event.modifiers()
+        except (RuntimeError, AttributeError):
+            return False
+        plain = mods & ~Qt.KeyboardModifier.KeypadModifier
+        # ── Ctrl+Tab / Ctrl+Shift+Tab: leave the map for the next keyboard domain ──
+        if key in (Qt.Key.Key_Tab, Qt.Key.Key_Backtab) \
+                and plain & Qt.KeyboardModifier.ControlModifier:
+            back = key == Qt.Key.Key_Backtab or bool(mods & Qt.KeyboardModifier.ShiftModifier)
+            if self._focus_domain_step(-1 if back else 1):
+                event.accept()
+                return True
+            return False
+        # ── Tab / Shift+Tab: walk the cards (only while the map HAS cards) ─────────
+        if key in (Qt.Key.Key_Tab, Qt.Key.Key_Backtab) and plain in (
+                Qt.KeyboardModifier.NoModifier, Qt.KeyboardModifier.ShiftModifier):
+            if not self.keyboard_walk_order():
+                return False  # an empty map — leave the focus chain to Qt
+            back = key == Qt.Key.Key_Backtab or bool(mods & Qt.KeyboardModifier.ShiftModifier)
+            self.walk_nodes(-1 if back else 1)
+            event.accept()
+            return True
+        # ── the arrows: move the selection (only while something IS selected) ──────
+        if key in (Qt.Key.Key_Left, Qt.Key.Key_Right, Qt.Key.Key_Up, Qt.Key.Key_Down) \
+                and not plain:
+            if self.keyboard_current_node() is None:
+                return False  # no selection — the arrows keep scrolling the canvas
+            dx, dy = {Qt.Key.Key_Left: (-1.0, 0.0), Qt.Key.Key_Right: (1.0, 0.0),
+                      Qt.Key.Key_Up: (0.0, -1.0), Qt.Key.Key_Down: (0.0, 1.0)}[key]
+            self.move_selection_direction(dx, dy)
+            event.accept()
+            return True
+        # ── Enter / Space: open the selected card ──────────────────────────────────
+        if key in (Qt.Key.Key_Return, Qt.Key.Key_Enter, Qt.Key.Key_Space) and not plain:
+            if self.activate_selection():
+                event.accept()
+                return True
+            return False
+        # ── Esc: clear the selection ───────────────────────────────────────────────
+        if key == Qt.Key.Key_Escape and not plain:
+            if self.clear_keyboard_selection():
+                event.accept()
+                return True
+            return False
+        return False
 
     # ── v0.7.2/v0.7.3: context menu on the map (RMB) ─────────────
 

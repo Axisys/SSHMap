@@ -66,7 +66,10 @@ def build_palette(theme=None) -> QPalette:
     # Roles the v1.2.5 palette left to the platform but which a LIGHT theme
     # cannot inherit from a dark Fusion default: the disabled/highlight tones
     # follow the theme explicitly, or a disabled label would stay pale-on-pale.
-    palette.setColor(role.Highlight, QColor(t.accent))
+    # v1.5rc1: the HIGHLIGHT is a FILL THAT CARRIES TEXT (HighlightedText), so it
+    # is the STRONG accent — the decorative sky of LIGHT leaves selected text at
+    # 2.05:1. In DARK the two are the same value, so nothing moves.
+    palette.setColor(role.Highlight, QColor(t.accent_strong))
     palette.setColor(role.HighlightedText, QColor(t.canvas_bg))
     palette.setColor(role.ToolTipBase, QColor(t.window_bg))
     palette.setColor(role.ToolTipText, QColor(t.text_primary))
@@ -90,6 +93,13 @@ def build_qss(theme=None) -> str:
     the floating cards' shared frame. A widget that needs its OWN stylesheet
     takes it from ``STYLE_BUILDERS`` below — the two halves together are "all
     QSS strings in one place".
+
+    **v1.5rc1 — the accent has TWO roles here.** A rule that uses the accent as
+    INK (`color:`) or as a FILL THAT CARRIES TEXT (a selection row) uses
+    ``accent_strong``; a rule that uses it as DECORATION (a frame, a border, a
+    focus outline) keeps ``accent``. In DARK both resolve to the same value, so
+    the DARK stylesheet is byte-identical to the v1.4.7 one; in LIGHT the strong
+    tone is the one that clears AA (`tests/test_theme_contrast.py`).
     """
     t = theme if theme is not None else theme_module.THEME
     return f"""
@@ -130,7 +140,7 @@ QMenu::item {{
     border-radius: 4px;
 }}
 QMenu::item:selected {{
-    background-color: {t.accent};
+    background-color: {t.accent_strong};
     color: {t.canvas_bg};
 }}
 QMenu::item:disabled {{
@@ -190,7 +200,7 @@ QTreeWidget, QTreeView, QTableWidget, QTableView, QListWidget, QListView {{
     alternate-background-color: {t.window_bg};
     color: {t.text_primary};
     border: 1px solid {t.surface_alt};
-    selection-background-color: {t.accent};
+    selection-background-color: {t.accent_strong};
     selection-color: {t.canvas_bg};
 }}
 QTreeWidget::item:hover, QTableWidget::item:hover {{
@@ -204,7 +214,7 @@ QLineEdit, QPlainTextEdit, QTextEdit, QSpinBox, QDoubleSpinBox, QComboBox {{
     border: 1px solid {t.surface_alt};
     border-radius: 4px;
     padding: 3px 6px;
-    selection-background-color: {t.accent};
+    selection-background-color: {t.accent_strong};
     selection-color: {t.canvas_bg};
 }}
 QLineEdit:focus, QPlainTextEdit:focus, QSpinBox:focus, QDoubleSpinBox:focus, QComboBox:focus {{
@@ -246,6 +256,12 @@ QScrollBar::handle:vertical, QScrollBar::handle:horizontal {{
 # stable names; a widget calls `theme_qss.style("<key>")` at construction and
 # `theme_qss.refresh(self, "<key>")` from its `refresh_theme()`.
 
+#: v1.5rc4 (ROADMAP task 5): the thickness of the visible focus frame, in pixels —
+#: declared HERE because the frame is a stylesheet for a standard widget and a pen
+#: width for a custom canvas, and the two must be the same number. `ui/focus_ring.py`
+#: reads this constant instead of carrying a second copy.
+FOCUS_RING_WIDTH = 2
+
 STYLE_BUILDERS = {
     # status / hint labels (TEXT_MUTED, with the padding of their own layout)
     "status.muted": lambda t: f"color: {t.text_muted};",
@@ -254,28 +270,48 @@ STYLE_BUILDERS = {
     # v1.4.5 (ROADMAP task 3): the CLICKABLE status counters of the status bar. The
     # clickable ones are tinted like a link (the accent); the ACTIVE one — the filter
     # that is currently applied to the sidebar — is bold, so the transient state is
-    # visible without a second widget.
-    "status.bar_filter": lambda t: f"color: {t.accent}; padding-right: 10px;",
+    # visible without a second widget. v1.5rc1: this is INK on the window surface, so
+    # it is the STRONG accent (and its strong hover shade) — the decorative sky of
+    # LIGHT measured 1.96:1 here.
+    "status.bar_filter": lambda t: f"color: {t.accent_strong}; padding-right: 10px;",
     "status.bar_filter_active": lambda t: (
-        f"color: {t.accent_hover}; font-weight: bold; padding-right: 10px;"),
+        f"color: {t.accent_strong_hover}; font-weight: bold; padding-right: 10px;"),
     # v1.4.5 (ROADMAP task 2): the one button of the first-run empty state — the
     # primary action of an empty map, so it carries the accent fill instead of the
     # neutral surface the global QPushButton rule gives every other button.
+    # v1.5rc1: an accent FILL THAT CARRIES TEXT — the strong tone, with the strong
+    # hover shade as its border and its hover fill.
     "empty_state.button": lambda t: f"""
 QPushButton#EmptyStateButton {{
-    background-color: {t.accent};
+    background-color: {t.accent_strong};
     color: {t.canvas_bg};
-    border: 1px solid {t.accent_hover};
+    border: 1px solid {t.accent_strong_hover};
     border-radius: 4px;
     padding: 4px 14px;
     font-weight: bold;
 }}
 QPushButton#EmptyStateButton:hover {{
-    background-color: {t.accent_hover};
+    background-color: {t.accent_strong_hover};
 }}
 """,
-    "status.sftp_row": lambda t: f"color: {t.text_muted}; padding: 2px 0;",
-    "status.terminal_row": lambda t: f"color: {t.text_muted}; padding: 4px 0;",
+    # v1.5rc3 (ROADMAP task 2): the Undo affordance next to a destructive action's
+    # status message (ui/status_bar.py). It is a LINK-like button (ink, no frame) and
+    # it is INK on the window surface — the STRONG accent, exactly like the status
+    # counters above (the decorative sky measured 1.96:1 in LIGHT).
+    "status.undo_button": lambda t: f"""
+QToolButton#UndoOfferButton {{
+    color: {t.accent_strong};
+    border: none;
+    background-color: transparent;
+    padding: 0px 4px;
+    font-weight: bold;
+}}
+QToolButton#UndoOfferButton:hover {{
+    color: {t.accent_strong_hover};
+    text-decoration: underline;
+}}
+""",
+    "status.sftp_row": lambda t: f"color: {t.text_muted}; padding: 2px 0;",    "status.terminal_row": lambda t: f"color: {t.text_muted}; padding: 4px 0;",
     "status.terminal_bold": lambda t: f"font-weight: bold; color: {t.text_primary};",
     # dialog separators and headings
     "separator": lambda t: f"color: {t.surface_alt};",
@@ -296,7 +332,7 @@ QLineEdit {{
     color: {t.text_primary};
     font-size: 13px;
     padding: 2px 4px;
-    selection-background-color: {t.accent};
+    selection-background-color: {t.accent_strong};
 }}
 QLabel {{
     color: {t.text_muted};
@@ -323,7 +359,7 @@ QLineEdit {{
     color: {t.text_primary};
     font-size: 12px;
     padding: 2px 4px;
-    selection-background-color: {t.accent};
+    selection-background-color: {t.accent_strong};
 }}
 QLabel {{
     color: {t.text_muted};
@@ -347,6 +383,13 @@ QTextEdit#StickyNoteEditor {{
     padding: 6px;
 }}
 """,
+    # v1.5rc4 (ROADMAP task 5): the VISIBLE FOCUS of a keyboard domain that is a
+    # standard widget (the sidebar's tree — ui/focus_ring.py owns the state). The
+    # INACTIVE entry keeps the very same 2 px so a focus change never reflows the
+    # layout; the ACTIVE one is the STRONG accent (ink-level contrast, v1.5rc1 role),
+    # never the decorative tone and never a new colour.
+    "focus.widget": lambda t: f"border: {FOCUS_RING_WIDTH}px solid {t.accent_strong};",
+    "focus.widget_off": lambda t: f"border: {FOCUS_RING_WIDTH}px solid transparent;",
 }
 
 

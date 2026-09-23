@@ -23,6 +23,7 @@ teardown races.
 """
 
 import os
+import subprocess
 import sys
 
 from PySide6.QtCore import Qt
@@ -99,6 +100,13 @@ def open_config_folder() -> bool:
     worse than a directory that appears on demand (``~/.sshmap`` is created by the
     first settings write anyway). ``os.startfile`` on Windows, ``open`` on macOS and
     ``xdg-open`` elsewhere — the same three branches as the log-file opener.
+
+    v1.5rc5 (N1): the POSIX branches pass an ARGUMENT LIST to ``subprocess.call``
+    (exactly like ``MainWindow._open_log_file()``), never a shell string. ``path`` is
+    ``expanduser("~")``-derived, i.e. NOT a constant: the historical f-string +
+    ``os.system`` form interpolated it into a shell command, so a ``"`` or a ``;`` in
+    the home path was command injection (and the old ``# noqa: S605`` justification —
+    "fixed literal prefix" — was factually wrong: the prefix is fixed, the path is not).
     """
     path = app_config_dir()
     try:
@@ -108,9 +116,9 @@ def open_config_folder() -> bool:
     if sys.platform == "win32":
         os.startfile(path)          # noqa: S606 — a directory, not an executable
     elif sys.platform == "darwin":
-        os.system(f'open "{path}"')  # noqa: S605 — fixed literal prefix
+        subprocess.call(["open", path])
     else:
-        os.system(f'xdg-open "{path}"')  # noqa: S605 — fixed literal prefix
+        subprocess.call(["xdg-open", path])
     return True
 
 

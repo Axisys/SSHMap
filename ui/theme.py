@@ -24,12 +24,28 @@ Structure of this module:
                  default; the values are pinned by tests/test_theme.py);
     LIGHT      — the slate-100 counterpart (a light canvas, darker statuses);
     accent_hex / accent_hover_hex / accent_selected_hex
-               — PURE functions: one hue → the three accent shades;
+               — PURE functions: one hue → the three DECORATIVE accent shades;
+    accent_strong_hex / accent_strong_hover_hex / accent_strong_selected_hex
+               — PURE functions: the same hue → the three STRONG accent shades
+                 (v1.5rc1 — the tone for text on a surface and for a fill that
+                 carries text);
+    resolve_mode / system_color_scheme
+               — a mode id → "dark"/"light" ("auto" asks the PLATFORM);
+    ArrowStyle / ARROW_TYPE_STYLES / STATUS_SHAPES
+               — the DECLARED ENCODINGS (v1.5rc2): the six pen styles and the three
+                 status shapes — the second channel next to the colours, so the
+                 interface never encodes a meaning in a colour alone;
+    resolve_export_palette / export_theme
+               — an export palette id → the instance an export renders with
+                 (`print` = the LIGHT page by default, `theme` = the current look);
     THEME      — the ACTIVE instance; ``set_theme()`` swaps it;
     every old name (CANVAS_BG, ACCENT, RADIUS_NODE, FONT_UI, …) — a live proxy
                that resolves against the ACTIVE instance on EVERY access;
     STATUS_COLORS / TAG_COLORS / TAG_PALETTE / ARROW_TYPE_COLORS — live dict
                views of the same instance (they are DERIVED, not stored twice);
+    ARROW_TYPE_STYLES / STATUS_SHAPES — the same live rule for the two ENCODINGS
+               (v1.5rc2: a dash pattern and a shape are geometry, declared once and
+               shared by the map, the sidebar, the legend and the exports);
     SYNTAX_COLORS — the v1.4.7 syntax palette by ROLE (the SFTP viewer's
                modules/syntax_highlight.py vocabulary), derived the same way.
 
@@ -49,8 +65,19 @@ Out of scope (deliberately — see AGENTS.md §4.6):
     scheme's default text ("classic look"), part of the output appearance.
 
 Adding a colour: one field on ``Theme``, one line in ``DARK``, one line in
-``LIGHT``, one proxy line at the bottom of this module — and NOTHING else (a
-new field that exists in only one instance is refused by the completeness test).
+``LIGHT``, one proxy line at the bottom of this module, and **a row in the gate**
+(``tests/test_theme_contrast.py`` — either a ``(foreground, background,
+threshold)`` pair or an exemption with a written reason) — and NOTHING else. A
+new field that exists in only one instance is refused by the completeness test,
+and so is a colour that enters the registry without a threshold: the gate is what
+keeps "readable in both themes" a fact instead of a claim (v1.5rc1).
+
+Adding an ENCODING (v1.5rc2) is the sibling rule: a new connection type joins
+``ARROW_TYPE_STYLES`` with a style **pairwise distinct** from the other five, and
+a new availability status joins ``STATUS_SHAPES`` with one of the pinned shapes —
+``tests/test_encoding.py`` is the gate there ("a meaning that lives in a colour
+alone is a defect"), and it also measures the greyscale separation of every type
+in both instances.
 
 Dependency policy (unchanged in spirit, adjusted in v1.4.3): the module imports
 NOTHING outside the standard library (``dataclasses`` / ``copy`` / ``typing``) —
@@ -80,10 +107,43 @@ ACCENT_LIGHTNESS = 59.6
 ACCENT_HOVER_DELTA = 5      # the brighter/hover shade   (59.6 → 64.6)
 ACCENT_SELECTED_DELTA = -5  # the darker/selection shade (59.6 → 54.6)
 
-# The theme-mode ids of the "Appearance" tab / of the ``theme.mode`` key.
+# The theme-mode ids of the "Appearance" tab / of the ``theme.mode`` key
+# (v1.5rc1: `MODE_AUTO` joins them — the platform's own colour scheme decides).
 MODE_DARK = "dark"
 MODE_LIGHT = "light"
-MODES = (MODE_DARK, MODE_LIGHT)
+MODE_AUTO = "auto"
+MODES = (MODE_DARK, MODE_LIGHT, MODE_AUTO)
+
+# The EXPORT palettes (v1.5rc2, ROADMAP task 3). An export is a different medium
+# from the screen: it must not print a dark page, so the DEFAULT is `print` — the
+# LIGHT instance (a white page with the high-contrast lines) — and `theme` is the
+# opt-out that keeps the current look. The two ids are the vocabulary of
+# `MapScene.render_to_*` / `export_scene_to_drawio` and of the export dialog.
+PALETTE_PRINT = "print"
+PALETTE_THEME = "theme"
+EXPORT_PALETTES = (PALETTE_PRINT, PALETTE_THEME)
+
+# ── The STRONG accent (v1.5rc1, ROADMAP task 1) ───────────────────────────────
+# The DECORATIVE accent above is drawn on the theme's own surfaces: a border, a
+# glow, a frame. The STRONG accent is the second role of the same hue — the tone
+# for TEXT on a surface and for a FILL that carries text — so it has to clear the
+# AA threshold on the surfaces of its mode, which the decorative tone cannot do on
+# a light one (`#38bdf8` on `#f8fafc` measures 2.05).
+#
+#   * DARK  — the strong tone IS the decorative one (lightness 59.6 + the same ±5
+#             pair), so every call site that moves to `accent_strong` renders
+#             byte-identically to the pre-v1.5rc1 build. The DARK look does not
+#             move a pixel; that is what the literal snapshot test proves.
+#   * LIGHT — lightness 34.0, the deepest value the design review's arithmetic
+#             allows while a near-white text still clears AC against the fill
+#             (`#0676a7`: 4.83 on the canvas, 4.61 on the window surface), and the
+#             hover/selected pair goes DARKER (never brighter): the strong family
+#             exists to be readable, so "more contrast" is the only direction it
+#             may move. `tests/test_theme_contrast.py` is the gate that pins it.
+ACCENT_STRONG_LIGHTNESS = {MODE_DARK: ACCENT_LIGHTNESS, MODE_LIGHT: 34.0}
+ACCENT_STRONG_HOVER_DELTA = {MODE_DARK: ACCENT_HOVER_DELTA, MODE_LIGHT: -4.0}
+ACCENT_STRONG_SELECTED_DELTA = {MODE_DARK: ACCENT_SELECTED_DELTA, MODE_LIGHT: -8.0}
+
 
 
 # ── The accent generator (pure: no Qt, no state) ──────────────────────────────
@@ -165,6 +225,175 @@ def accent_selected_hex(hue=None) -> str:
                    ACCENT_SATURATION, ACCENT_LIGHTNESS + ACCENT_SELECTED_DELTA)
 
 
+# ── The STRONG accent generator (v1.5rc1) ─────────────────────────────────────
+# Same hue, same saturation — a different LIGHTNESS per mode, because the job of
+# this tone is contrast rather than decoration (see the constants at the top).
+# The mode argument is the RESOLVED mode ("dark"/"light"), never "auto".
+
+def _strong_lightness(mode: str, delta: float = 0.0) -> float:
+    """The lightness of a strong shade for a resolved mode (an unknown mode → DARK)."""
+    base = ACCENT_STRONG_LIGHTNESS.get(mode, ACCENT_STRONG_LIGHTNESS[MODE_DARK])
+    return base + delta
+
+
+def accent_strong_hex(hue=None, mode: str = MODE_DARK) -> str:
+    """The STRONG accent of a hue (v1.5rc1) — text on a surface, a fill under text.
+
+    DARK: the value equals ``accent_hex()`` (#38bdf8) — moving a call site onto
+    the strong tone does not move a pixel. LIGHT: the lightness drops to
+    ``ACCENT_STRONG_LIGHTNESS["light"]`` so the pair clears AA.
+    """
+    return hsl_hex(DEFAULT_ACCENT_HUE if hue is None else hue,
+                   ACCENT_SATURATION, _strong_lightness(mode))
+
+
+def accent_strong_hover_hex(hue=None, mode: str = MODE_DARK) -> str:
+    """The HOVER shade of the strong accent (+5 lightness in DARK, −4 in LIGHT)."""
+    return hsl_hex(DEFAULT_ACCENT_HUE if hue is None else hue, ACCENT_SATURATION,
+                   _strong_lightness(mode, ACCENT_STRONG_HOVER_DELTA.get(
+                       mode, ACCENT_STRONG_HOVER_DELTA[MODE_DARK])))
+
+
+def accent_strong_selected_hex(hue=None, mode: str = MODE_DARK) -> str:
+    """The SELECTED shade of the strong accent (−5 lightness in DARK, −8 in LIGHT)."""
+    return hsl_hex(DEFAULT_ACCENT_HUE if hue is None else hue, ACCENT_SATURATION,
+                   _strong_lightness(mode, ACCENT_STRONG_SELECTED_DELTA.get(
+                       mode, ACCENT_STRONG_SELECTED_DELTA[MODE_DARK])))
+
+
+# ── The second channel: per-type pen styles + status shapes (v1.5rc2) ─────────
+# ROADMAP v1.5rc2, tasks 1/2 — "the interface stops encoding meaning in colour
+# alone". Both declarations live HERE, next to the palettes they accompany, for the
+# reason every other declaration lives here: a consumer (the arrow, the card dot,
+# the sidebar row, the legend, the exports, the topical test) reads ONE source, so
+# a mark can never drift from the map. Unlike a COLOUR these are not per-instance:
+# a dash pattern and a shape are geometry, identical in DARK and LIGHT (like the
+# radii) — but they are still reached through the ACTIVE theme (live properties
+# below), so the reading rule of §4.6 holds without an exception.
+
+@dataclass(frozen=True)
+class ArrowStyle:
+    """How ONE connection type is DRAWN (v1.5rc2) — the channel next to its colour.
+
+    ``dash``  — a QPen dash pattern (a tuple of floats, in units of the pen width;
+                empty = a solid line);
+    ``width`` — the stroke width at rest (the hover adds ``ARROW_HOVER_WIDTH_DELTA``);
+    ``double``— draw the line as TWO rails: the stroke is laid down and a narrower
+                stroke in the surface colour is painted over its centre
+                (``ARROW_CASING_RATIO`` is the share the casing takes).
+    """
+
+    dash: tuple = ()
+    width: float = 2.2
+    double: bool = False
+
+    def is_solid(self) -> bool:
+        """True for a plain unbroken stroke (the "no second channel here" case)."""
+        return not self.dash and not self.double
+
+
+# The hover widens the stroke instead of replacing its width, so a wide type stays
+# the widest one while it is hovered (v1.5rc2).
+ARROW_HOVER_WIDTH_DELTA = 0.6
+# The share of the outer width the surface-coloured casing takes on a double line.
+# 0.45 leaves two rails of ~1.1 px on the declared 4.0 width — measured on the
+# topical render probe (two ink runs in every column of the stroke window) and
+# checked by eye at 100 % zoom, where a thinner casing reads as a single line.
+ARROW_CASING_RATIO = 0.45
+
+# The SIX declared styles — pairwise distinct (the topical gate proves it) and
+# readable at 100 % zoom: a solid line, three dash rhythms, a dense dot line and a
+# double rail. The keys ARE the connection type ids of `arrow_type_colors`.
+ARROW_TYPE_STYLES: Dict[str, ArrowStyle] = {
+    "ssh": ArrowStyle(),                                   # solid — the default type
+    "vpn": ArrowStyle(dash=(7.0, 4.0)),                    # dash
+    "http": ArrowStyle(dash=(1.2, 3.0)),                   # dots
+    "database": ArrowStyle(dash=(9.0, 3.0, 1.5, 3.0)),     # dash-dot
+    "nfs": ArrowStyle(width=4.0, double=True),             # double rail
+    "kubernetes": ArrowStyle(dash=(14.0, 5.0), width=2.4),  # long dash
+}
+
+DEFAULT_ARROW_STYLE = ARROW_TYPE_STYLES.get("ssh") or ArrowStyle()
+
+
+def arrow_type_style(ctype: str) -> ArrowStyle:
+    """The declared style of a connection type — an unknown type gets the default's."""
+    return ARROW_TYPE_STYLES.get(ctype, DEFAULT_ARROW_STYLE)
+
+
+# ── The declared STATUS SHAPES (v1.5rc2, ROADMAP task 2) ──────────────────────
+# The pinned set: a filled dot / a ring / a triangle. One shape per availability
+# status, drawn by the card's status dot, the sidebar row's marker and the legend —
+# so a status is readable in greyscale and for colour-vision deficiencies. The
+# WORDS stay in the tooltips (`node.status.*`), which is what makes the shape a
+# second channel rather than a replacement.
+STATUS_SHAPE_DOT = "dot"
+STATUS_SHAPE_RING = "ring"
+STATUS_SHAPE_TRIANGLE = "triangle"
+STATUS_SHAPE_IDS = (STATUS_SHAPE_DOT, STATUS_SHAPE_RING, STATUS_SHAPE_TRIANGLE)
+
+STATUS_SHAPES: Dict[str, str] = {
+    "online": STATUS_SHAPE_DOT,       # a full dot: the machine answers
+    "warn": STATUS_SHAPE_RING,        # hollow: something is off, but it is alive
+    "offline": STATUS_SHAPE_TRIANGLE,  # a warning sign: unreachable
+}
+# The shape of an UNCHECKED status (the idle grey marker).
+DEFAULT_STATUS_SHAPE = STATUS_SHAPE_DOT
+
+
+def status_shape(status) -> str:
+    """The declared shape of an availability status — an unknown/empty one gets the dot."""
+    return STATUS_SHAPES.get(status, DEFAULT_STATUS_SHAPE)
+
+
+# ── "Auto (system)" (v1.5rc1, ROADMAP task 6) ─────────────────────────────────
+# The third mode reads the PLATFORM's colour scheme. Qt exposes it as
+# `QStyleHints.colorScheme()`; the import is LAZY (inside the function), which is
+# how this module keeps its "no PySide6 at import time" contract — the same trick
+# the class-level descriptors below use. A platform without the hint (or a
+# PySide6 that does not know the enum) behaves exactly like the releases before
+# this one: the dark theme.
+
+def system_color_scheme() -> str:
+    """The platform's colour scheme as a mode id (v1.5rc1) — DARK when unknown.
+
+    Never raises: without a QApplication, without ``QStyleHints.colorScheme`` or
+    with an unknown enum value the answer is the dark default, which keeps
+    "Auto" a strictly additive choice.
+    """
+    try:
+        from PySide6.QtCore import Qt
+        from PySide6.QtGui import QGuiApplication
+    except Exception:  # noqa: BLE001 — the module stays usable without Qt
+        return MODE_DARK
+    try:
+        app = QGuiApplication.instance()
+        if app is None:
+            return MODE_DARK
+        scheme = app.styleHints().colorScheme()
+    except Exception:  # noqa: BLE001 — an old/limited platform has no hint
+        return MODE_DARK
+    try:
+        if scheme == Qt.ColorScheme.Light:
+            return MODE_LIGHT
+    except Exception:  # noqa: BLE001
+        return MODE_DARK
+    return MODE_DARK
+
+
+def resolve_mode(mode) -> str:
+    """A mode id → a RESOLVED mode id ("dark"/"light") — v1.5rc1.
+
+    "auto" asks the platform (``system_color_scheme()``); an unknown / missing /
+    non-string value falls back to DARK (a broken config must never leave the app
+    themeless). The result is always one of the two INSTANCES' ids, never "auto".
+    """
+    key = mode.strip().lower() if isinstance(mode, str) else MODE_DARK
+    if key == MODE_AUTO:
+        return system_color_scheme()
+    return key if key in _MODES else MODE_DARK
+
+
 def is_valid_hex(value) -> bool:
     """Is ``value`` a usable "#rrggbb" colour (the config.json validator)?"""
     if not isinstance(value, str):
@@ -209,9 +438,12 @@ class Theme:
 
     # ── Accent and selection ─────────────────────────────────────────────────
     accent_hue: Optional[float]  # the ONE accent source (None = DEFAULT_ACCENT_HUE)
-    accent: str                 # the base accent (reveal flash, search frame, rubber band)
-    accent_hover: str           # the brighter accent shade
-    accent_selected: str        # the darker accent shade
+    accent: str                 # the DECORATIVE accent (reveal flash, search frame, rubber band, borders)
+    accent_hover: str           # the brighter decorative accent shade
+    accent_selected: str        # the darker decorative accent shade
+    accent_strong: str          # THE accent for text on a surface / a fill under text (v1.5rc1)
+    accent_strong_hover: str    # the hover shade of the strong accent (v1.5rc1)
+    accent_strong_selected: str  # the selected shade of the strong accent (v1.5rc1)
     selection_amber: str        # amber selection: selected node/group, multi-select badge/frame
 
     # ── Server node (card) ───────────────────────────────────────────────────
@@ -317,6 +549,29 @@ class Theme:
                 "kubernetes": self.arrow_kubernetes}  # turquoise (Kubernetes)
 
     @property
+    def arrow_type_styles(self) -> Dict[str, "ArrowStyle"]:
+        """id → the declared PEN style of the connection type (v1.5rc2).
+
+        The second channel next to :attr:`arrow_type_colors`: same keys, same
+        declaration order, and the ONLY place a dash pattern / stroke width /
+        "double line" is written down. Identical in DARK and LIGHT (geometry, not
+        a colour), returned as a fresh dict so a consumer cannot mutate the map.
+        """
+        return dict(ARROW_TYPE_STYLES)
+
+    @property
+    def status_shapes(self) -> Dict[str, str]:
+        """status → the declared SHAPE beside its colour (v1.5rc2).
+
+        The second channel of the three availability statuses: the card's status
+        dot, the sidebar row marker and the legend all draw the shape of this map,
+        so a status survives greyscale / colour-vision deficiencies. The side
+        effect is deliberate: the shape is drawn in the SAME colour the status has
+        always had (`status_colors`), never in a new tone.
+        """
+        return dict(STATUS_SHAPES)
+
+    @property
     def sftp_preview_blocked(self) -> str:
         """A row the SFTP viewer refuses to preview (a binary / an over-limit file)."""
         return self.status_warn
@@ -377,11 +632,16 @@ DARK = Theme(
 
     # Accent (the generated sky pair is unused by DARK's own consumers — the
     # base accent IS today's #38bdf8; the other two shades exist for the
-    # widgets that want a hover/selected variant of the accent)
+    # widgets that want a hover/selected variant of the accent).
+    # v1.5rc1: the STRONG family resolves to these same three values in DARK —
+    # the role is new, the bytes are not (the literal snapshot test proves it).
     accent_hue=DEFAULT_ACCENT_HUE,
     accent=accent_hex(DEFAULT_ACCENT_HUE),
     accent_hover=accent_hover_hex(DEFAULT_ACCENT_HUE),
     accent_selected=accent_selected_hex(DEFAULT_ACCENT_HUE),
+    accent_strong=accent_strong_hex(DEFAULT_ACCENT_HUE, MODE_DARK),
+    accent_strong_hover=accent_strong_hover_hex(DEFAULT_ACCENT_HUE, MODE_DARK),
+    accent_strong_selected=accent_strong_selected_hex(DEFAULT_ACCENT_HUE, MODE_DARK),
     selection_amber="#f59e0b",
 
     # Server node (card)
@@ -453,13 +713,22 @@ DARK = Theme(
 )
 
 
-# ── LIGHT — the slate-100 counterpart (v1.4.3, ROADMAP task 2) ────────────────
-# The SAME field set as DARK (a field existing in only one instance is refused
-# by the completeness test). Only what a light background really changes moves:
-# the surfaces, the two text tones, the icon outline, the three statuses
-# (darkened for contrast on white), the arrow colours that are too pale on a
-# light canvas, and the group title tones. The node border/icon, the tag roles,
-# the amber selection and the sticky note stay — they already read on light.
+# ── LIGHT — the slate-100 counterpart (v1.4.3, retuned in v1.5rc1) ─────────────
+# The SAME field set as DARK (a field existing in only one instance is refused by
+# the completeness test). Only what a light background really changes moves.
+#
+# **v1.5rc1 (ROADMAP tasks 1/3/4/5) re-tuned this instance against MEASURED
+# thresholds.** The design review of 2026-09-27 measured the as-shipped palette
+# and found the light half below the readability line: the accent used as text
+# 2.05 (the decorative sky is a BORDER tone, not an ink), the `vpn` and `database`
+# arrows 2.43/2.60 — a dark-tuned value (`node_hover`, `group_hover`) propagated
+# onto a light surface by the ("declared once") derivation — the warn status 2.94
+# on the white card, `text_muted` 4.34 (AA wants 4.5) and the amber selection
+# 2.05. Every number below is a DECISION pinned by `tests/test_theme_contrast.py`,
+# which is the gate: a tone that stops clearing its threshold fails the suite.
+# What deliberately did NOT move: the surfaces, `text_primary`, `icon_color`, the
+# tag roles (`tag_test`/`tag_backup`/`tag_dmz`/`tag_pink`) and `status_online`/
+# `status_offline` — they already cleared their thresholds.
 
 LIGHT = Theme(
     # Surfaces (slate-100 scale)
@@ -469,31 +738,48 @@ LIGHT = Theme(
     base_bg="#e2e8f0",
     surface_alt="#cbd5e1",
 
-    # Text and icons
+    # Text and icons — `text_muted` reaches AA on EVERY surface it is drawn on
+    # (the status-bar counters, the zoom label, the hints, the item views; it was
+    # 4.34 on the window and 3.86 on `base_bg`, now 5.57 and 5.17)
     text_primary="#0f172a",
-    text_muted="#64748b",
+    text_muted="#556070",
     icon_color="#475569",
 
-    # Accent — the same hue generator as DARK (the user's hue survives a mode switch)
+    # Accent — the same hue generator as DARK (the user's hue survives a mode
+    # switch). The DECORATIVE tone is the sky of v1.4.3 (borders, glows, frames);
+    # the STRONG one is the ink/fill tone and is generated at the light-mode
+    # lightness (34.0 → #0676a7: 4.83 on the canvas, 4.61 on the window).
     accent_hue=DEFAULT_ACCENT_HUE,
     accent=accent_hex(DEFAULT_ACCENT_HUE),
     accent_hover=accent_hover_hex(DEFAULT_ACCENT_HUE),
     accent_selected=accent_selected_hex(DEFAULT_ACCENT_HUE),
-    selection_amber="#f59e0b",
+    accent_strong=accent_strong_hex(DEFAULT_ACCENT_HUE, MODE_LIGHT),
+    accent_strong_hover=accent_strong_hover_hex(DEFAULT_ACCENT_HUE, MODE_LIGHT),
+    accent_strong_selected=accent_strong_selected_hex(DEFAULT_ACCENT_HUE, MODE_LIGHT),
+    # The selection amber is TEXT too (the status-bar selection lines) and a mark
+    # on the canvas: amber-700 clears AA on the window (4.58) and 3:1 as a mark.
+    selection_amber="#b45309",
 
     # Server node (card): the card is WHITE on the light canvas — that is what
-    # separates a node from the background now (the halo shadow still works)
+    # separates a node from the background now (the halo shadow still works).
+    # The blues are ordered by strength: the resting outline, the hover outline
+    # (also the `vpn` arrow) and the icon PLATE — which inverts with the theme
+    # (a pale plate under the near-black glyph; the deep one of v1.4.3 left the
+    # glyph at 2.05:1), keeping the round icon's own `node_border` outline.
     node_bg="#ffffff",
-    node_border="#3b82f6",
-    node_hover="#60a5fa",
-    node_icon_bg="#2563eb",
+    node_border="#2563eb",
+    node_hover="#1d4ed8",
+    node_icon_bg="#93c5fd",
     node_text="#0f172a",
-    node_label="#64748b",
-    dot_idle="#94a3b8",
+    node_label="#556070",
+    # the "not checked yet" dot: LIGHT's own pale slate (3.46:1 on the white card,
+    # where the v1.4.3 value measured 2.56 — and it is not DARK's own grey)
+    dot_idle="#7c8ba1",
 
-    # Availability statuses — slightly darker for contrast on a light background
+    # Availability statuses — deeper than the dark theme's (a dot sits on the
+    # WHITE card, so the card is the surface that decides, not the canvas)
     status_online="#16a34a",
-    status_warn="#ca8a04",
+    status_warn="#a16207",
     status_offline="#dc2626",
 
     # Tags / environment roles (the two hash tones darkened a step as well)
@@ -502,37 +788,46 @@ LIGHT = Theme(
     tag_dmz="#ea580c",
     tag_pink="#db2777",
 
-    # Groups
+    # Groups — the violet family keeps its declaration order; the hover tone is
+    # deepened so the `database` arrow (derived from it) clears 4.5 on the canvas
     group_border="#7c3aed",
-    group_hover="#a78bfa",
+    group_hover="#5b21b6",
     group_title="#6d28d9",
-    group_title_selected="#b45309",
+    group_title_selected="#92400e",
     group_title_hover="#7c3aed",
 
-    # Connection arrows — the four pale tones darkened one step
-    arrow_ssh="#059669",
-    arrow_http="#d97706",
-    arrow_nfs="#db2777",
-    arrow_kubernetes="#0891b2",
-    arrow_hover_compat="#34d399",
+    # Connection arrows — re-tuned to the AA target of a 2 px stroke on the light
+    # canvas (the review measured 3.04 … 4.39); `vpn` and `database` ARE
+    # `node_hover` and `group_hover` — the derivation is kept, the two fields it
+    # reads were re-tuned instead of being bypassed with a second table.
+    arrow_ssh="#047857",
+    arrow_http="#b45309",
+    arrow_nfs="#be185d",
+    arrow_kubernetes="#155e75",
+    arrow_hover_compat="#065f46",
 
-    # Notes — unchanged by design (the yellow sticky fits a light background)
-    note_bg="#eedd9f",
-    note_border="#a9853d",
+    # Notes — LIGHT's OWN sticky tone (v1.5rc1): the dark-tuned `#eedd9f` sat
+    # 1.30:1 on the light canvas. The fill stays a paper colour by design — the
+    # note's separation channel is its BORDER (4.66:1 on the canvas) and the
+    # cached halo shadow, which is what the gate pins.
+    note_bg="#ecd284",
+    note_border="#8a6d2f",
     note_text="#403a2b",
 
     # Syntax highlighting of the SFTP viewer (v1.4.7): the SAME role set, tuned
-    # for the light viewer background — the darker LIGHT arrow/group tones, the
-    # muted text tone and the icon outline. Again: eight distinct values, none of
-    # them the light "no preview" tone (#ca8a04).
-    syntax_number="#d97706",
-    syntax_string="#059669",
-    syntax_key="#0891b2",
-    syntax_keyword="#7c3aed",
-    syntax_comment="#64748b",
-    syntax_tag="#db2777",
-    syntax_attribute="#2563eb",
-    syntax_punctuation="#475569",
+    # for the light viewer background (`base_bg` — the QPlainTextEdit surface the
+    # global QSS gives it). v1.5rc1 re-tuned them to AA on THAT surface: the
+    # v1.4.7 set measured 2.58 … 4.48 there. Again: eight distinct values, none
+    # of them the light "no preview" tone (#a16207), and every one of them a
+    # value this instance already ships elsewhere (the SFTP topical test's rule).
+    syntax_number="#92400e",        # the group-title-selected amber
+    syntax_string="#065f46",        # the arrow-hover green
+    syntax_key="#155e75",           # the Kubernetes deep cyan
+    syntax_keyword="#6d28d9",       # the group-title violet
+    syntax_comment="#556070",       # the muted text tone
+    syntax_tag="#be185d",           # the NFS-arrow pink
+    syntax_attribute="#1d4ed8",     # the node-hover blue
+    syntax_punctuation="#475569",   # the icon outline tone
 
     # Corner radii — geometry, identical in both instances
     radius_node=10.0,
@@ -558,14 +853,16 @@ _MODES: Dict[str, Theme] = {MODE_DARK: DARK, MODE_LIGHT: LIGHT}
 
 
 def theme_for_mode(mode, accent_hue=None) -> Theme:
-    """The instance of a mode id, with the accent hue applied (v1.4.3).
+    """The instance of a mode id, with the accent hue applied (v1.4.3; auto in v1.5rc1).
 
-    An unknown / missing / non-string mode → DARK (the default; a broken config
-    value must never leave the app themeless). A hue equal to the instance's own
-    default returns the SHARED instance untouched (so ``theme_for_mode("dark")``
-    is ``DARK`` itself — the identity the tests and the caches rely on).
+    The mode is RESOLVED first (``resolve_mode``): ``"auto"`` asks the platform's
+    colour scheme and lands on DARK or LIGHT, and an unknown / missing /
+    non-string mode falls back to DARK (a broken config value must never leave
+    the app themeless). A hue equal to the instance's own default returns the
+    SHARED instance untouched (so ``theme_for_mode("dark")`` is ``DARK`` itself —
+    the identity the tests and the caches rely on).
     """
-    key = mode.strip().lower() if isinstance(mode, str) else MODE_DARK
+    key = resolve_mode(mode)
     base = _MODES.get(key) or DARK
     if accent_hue is None:
         return base
@@ -581,6 +878,9 @@ def theme_for_mode(mode, accent_hue=None) -> Theme:
         accent=accent_hex(hue),
         accent_hover=accent_hover_hex(hue),
         accent_selected=accent_selected_hex(hue),
+        accent_strong=accent_strong_hex(hue, key),
+        accent_strong_hover=accent_strong_hover_hex(hue, key),
+        accent_strong_selected=accent_strong_selected_hex(hue, key),
     )
 
 
@@ -604,6 +904,36 @@ def set_theme(instance: Theme) -> Theme:
 def current_theme() -> Theme:
     """The ACTIVE instance (the explicit form of ``THEME``)."""
     return THEME
+
+
+# ── The export palette (v1.5rc2, ROADMAP task 3) ──────────────────────────────
+# The decision the ROADMAP asked to pin at the START of the rc: an export renders
+# PRINT-FRIENDLY by default. "Print-friendly" is not a third palette to maintain —
+# it IS `LIGHT` (the white page and the strokes the 1.5rc1 gate already measured at
+# AA), asked for with the ACTIVE theme's accent hue so the user's accent survives
+# the switch. `theme` keeps the current look, and both are addressed by the two
+# ids above, so the scene, the `.drawio` writer and the export dialog speak ONE
+# vocabulary.
+
+def resolve_export_palette(palette) -> str:
+    """An export palette id → a KNOWN id (an unknown / missing value → `print`)."""
+    key = palette.strip().lower() if isinstance(palette, str) else PALETTE_PRINT
+    return key if key in EXPORT_PALETTES else PALETTE_PRINT
+
+
+def export_theme(palette=PALETTE_PRINT, accent_hue=None) -> Theme:
+    """The instance an EXPORT renders with (v1.5rc2).
+
+    ``print``  → the LIGHT instance with the ACTIVE theme's hue (the same instance
+                 object whenever the hue is the default one, so the common case
+                 costs nothing and the identity the tests rely on holds);
+    ``theme``  → the ACTIVE instance, i.e. exactly what is on screen now.
+    An unknown palette id resolves to ``print`` (``resolve_export_palette``).
+    """
+    if resolve_export_palette(palette) == PALETTE_THEME:
+        return THEME
+    hue = THEME.hue() if accent_hue is None else accent_hue
+    return theme_for_mode(MODE_LIGHT, hue)
 
 
 def theme_snapshot() -> dict:
@@ -729,6 +1059,9 @@ _LIVE_FIELDS: Dict[str, str] = {
     "ACCENT": "accent",
     "ACCENT_HOVER": "accent_hover",
     "ACCENT_SELECTED": "accent_selected",
+    "ACCENT_STRONG": "accent_strong",
+    "ACCENT_STRONG_HOVER": "accent_strong_hover",
+    "ACCENT_STRONG_SELECTED": "accent_strong_selected",
     "SELECTION_AMBER": "selection_amber",
     # server node (card)
     "NODE_BG": "node_bg",
@@ -797,6 +1130,9 @@ _LIVE_DERIVED: Dict[str, str] = {
     "TAG_PALETTE": "tag_palette",
     "ARROW_TYPE_COLORS": "arrow_type_colors",
     "SYNTAX_COLORS": "syntax_colors",
+    # v1.5rc2: the two declared ENCODINGS (the pen styles and the status shapes)
+    "ARROW_TYPE_STYLES": "arrow_type_styles",
+    "STATUS_SHAPES": "status_shapes",
 }
 
 

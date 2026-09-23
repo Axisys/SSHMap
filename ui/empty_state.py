@@ -10,14 +10,22 @@ not copies: they are the translated File-menu strings themselves
 (`file.import_servers` / `file.import_ssh_config`), so a re-worded menu item can never
 leave a stale hint behind.
 
-The pinned decisions (ROADMAP v1.4.5, task 2):
+v1.5rc3 (ROADMAP tasks 1 and 4) adds the two halves of "and then what?":
+
+  * a SECOND button, **"Open the example map"** — the in-code demo project
+    (`storage/example_project.py`), loaded through the ordinary project load path;
+  * a SECOND hint line naming the **command palette** by its live hotkey
+    (`palette_hotkey()` reads the action registry) and the `?` key of the cheat-sheet
+    — the first screen stops being a dead end for a user who has no servers yet.
+
+The pinned decisions (ROADMAP v1.4.5, task 2 — unchanged by the new pieces):
 
   * **it never blocks the canvas.** The hint card is `WA_TransparentForMouseEvents`
     (a click on it reaches the map: panning, the rubber band and the map context menu
     keep working behind the hint). Qt's attribute disables the delivery to the widget
-    AND its children, so the button cannot live inside the card — it is created as a
-    SIBLING child of the view and placed under the card by `place()`. It is the only
-    piece of the empty state that takes the mouse;
+    AND its children, so a button cannot live inside the card — the buttons are created
+    as SIBLINGS children of the view and placed under the card by `place()`. They are
+    the only pieces of the empty state that take the mouse;
   * **it is bound to the SERVER COUNT of the scene** (0 servers → visible): the window
     shows/hides it from `_sync_empty_state()`, so it appears again when a batch delete
     or a fresh project empties the map and disappears with the first server;
@@ -67,22 +75,52 @@ def _t(key: str, **kw) -> str:
         return key
 
 
+def palette_hotkey() -> str:
+    """The effective Ctrl+K sequence of the command palette (v1.5rc3, ROADMAP task 4).
+
+    Read LIVE from the action registry, so the hint on the first screen names the key
+    the user would really press (a rebound palette is named by its new key).
+
+    A deliberately DISABLED palette hotkey ("" in `config.json`) falls back to the
+    registry default: this text is the FIRST-RUN hint, and a first run has no saved
+    customization at all. A user who later clears the key has already met the palette
+    and does not need the sentence to be re-phrased for them.
+    """
+    try:
+        from ui.hotkey_registry import configured_hotkeys, default_sequence
+    except ImportError:
+        try:
+            from hotkey_registry import configured_hotkeys, default_sequence
+        except ImportError:
+            return "Ctrl+K"
+    try:
+        configured = str(configured_hotkeys().get("palette.open", "") or "").strip()
+    except Exception:  # noqa: BLE001 — a broken config must not break the hint
+        configured = ""
+    return configured or default_sequence("palette.open") or "Ctrl+K"
+
+
 class EmptyStateOverlay(QWidget):
     """The first-run hint card (a transparent child of `MapView`).
 
     Signals:
         add_server_requested — the "Add your first server" button was clicked (the
-        window opens the AddServer dialog through its ordinary path).
+        window opens the AddServer dialog through its ordinary path);
+        example_requested — v1.5rc3: "Open the example map" was clicked (the window
+        loads the in-code demo project through the ORDINARY project load path).
     """
 
     add_server_requested = Signal()
+    #: v1.5rc3 (ROADMAP task 1): the second way out of an empty map — the demo project.
+    example_requested = Signal()
 
     ICON = 44                # the hint glyph
     PADDING_X = 20           # the card's horizontal inset
     PADDING_Y = 16           # the card's vertical inset
-    GAP = 8                  # the gap between the icon, the title, the hint and the button
-    BUTTON_H = 30            # the height of the ONE interactive piece
-    MIN_WIDTH = 260          # below this the sentence stops reading
+    GAP = 8                  # the gap between the icon, the title, the hints and the buttons
+    BUTTON_H = 30            # the height of the interactive pieces
+    BUTTON_MIN_W = 140       # below this a button label stops reading
+    MIN_WIDTH = 300          # below this the sentences stop reading
     RADIUS = float(theme.RADIUS_SEARCH_BAR)   # one style with the search bar / minimap / legend
 
     def __init__(self, view, parent=None):
@@ -96,7 +134,7 @@ class EmptyStateOverlay(QWidget):
         self._title_font = self._make_font(+1.0, bold=True)
         self._hint_font = self._make_font(-1.0)
 
-        # The ONE interactive piece. It is a SIBLING (a child of the VIEW, not of this
+        # The interactive pieces. They are SIBLINGS (children of the VIEW, not of this
         # card): WA_TransparentForMouseEvents above covers the children of the widget
         # it is set on, so a button inside the card would never receive a click.
         self.btn_add_first = QPushButton(_t("empty.state.add_first"), self._view)
@@ -107,6 +145,16 @@ class EmptyStateOverlay(QWidget):
         if theme_qss is not None:
             theme_qss.refresh(self.btn_add_first, "empty_state.button")
         self.btn_add_first.hide()
+
+        # v1.5rc3 (ROADMAP task 1): "Open the example map" — the neutral secondary
+        # action (the accent fill belongs to the ONE primary action above), and the
+        # second entry point of the same project as Help → Open the example map.
+        self.btn_example = QPushButton(_t("example.open"), self._view)
+        self.btn_example.setObjectName("EmptyStateExampleButton")
+        self.btn_example.setMinimumHeight(self.BUTTON_H)
+        self.btn_example.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_example.clicked.connect(self.example_requested)
+        self.btn_example.hide()
 
         self._visible = False
         self.hide()
@@ -132,9 +180,19 @@ class EmptyStateOverlay(QWidget):
                   import_txt=_t("file.import_servers"),
                   import_ssh=_t("file.import_ssh_config"))
 
+    def palette_text(self) -> str:
+        """v1.5rc3 (ROADMAP task 4): the SECOND line — the palette and the cheat-sheet.
+
+        The key is read from the action registry at call time (`palette_hotkey()`), so
+        a rebound palette is named by its real sequence; the `?` half is the map's own
+        key (see `MainWindow.keyPressEvent`), not a registry action.
+        """
+        return _t("empty.state.palette_hint", hotkey=palette_hotkey())
+
     def retranslate(self):
         """Re-read the strings (language switch)."""
         self.btn_add_first.setText(_t("empty.state.add_first"))
+        self.btn_example.setText(_t("example.open"))
         self.update()
 
     # ── Visibility ───────────────────────────────────────────────────────────
@@ -143,47 +201,69 @@ class EmptyStateOverlay(QWidget):
         return bool(self._visible)
 
     def set_state_visible(self, visible: bool) -> None:
-        """Show/hide the hint (the card AND its button — they are two widgets)."""
+        """Show/hide the hint (the card AND its buttons — they are separate widgets).
+
+        v1.5rc5 (N7): the buttons are RAISED above the card. They are siblings that sit
+        inside the card's own rectangle, and the card paints an opaque fill — so a card
+        raised last hid both actions completely (Qt's `isVisible()`/`visibleRegion()`
+        cannot see it, because the card sets WA_NoSystemBackground rather than
+        WA_OpaquePaintEvent). One place raises, in this order: card first, buttons last.
+        """
         visible = bool(visible)
         self._visible = visible
-        for widget in (self, self.btn_add_first):
+        for widget in (self, self.btn_add_first, self.btn_example):
             try:
                 widget.setVisible(visible)
             except RuntimeError:
                 continue  # Qt teardown — the widget is already destroyed
         if visible:
             self.raise_()
+            for button in (self.btn_add_first, self.btn_example):
+                try:
+                    button.raise_()
+                except RuntimeError:
+                    continue  # Qt teardown
 
     # ── Geometry ─────────────────────────────────────────────────────────────
 
     def place(self, view_w: int, view_h: int) -> None:
-        """Center the card (a bit above the middle) and put the button under it.
+        """Center the card (a bit above the middle) and put the two buttons under it.
 
         Called by the window on every view resize — the same split as the minimap
         and the legend: the window owns the placement, the widget owns its painting.
+        The buttons share the row: the primary one first, the example second, both
+        squeezed into the card when the view is narrow (their labels elide).
         """
         title_fm = QFontMetrics(self._title_font)
         hint_fm = QFontMetrics(self._hint_font)
-        title = title_fm.elidedText(self.title_text(), Qt.TextElideMode.ElideRight,
-                                    max(int(view_w) - 2 * self.PADDING_X - 24, 80))
-        hint = hint_fm.elidedText(self.hint_text(), Qt.TextElideMode.ElideRight,
-                                  max(int(view_w) - 2 * self.PADDING_X - 24, 80))
-        width = max(title_fm.horizontalAdvance(title), hint_fm.horizontalAdvance(hint),
-                    self.btn_add_first.sizeHint().width(), self.MIN_WIDTH) + 2 * self.PADDING_X
+        lines = (self.title_text(), self.hint_text(), self.palette_text())
+        max_text_w = max(fm.horizontalAdvance(line) for fm, line in
+                         ((title_fm, lines[0]), (hint_fm, lines[1]), (hint_fm, lines[2])))
+        btn_add_w = max(self.btn_add_first.sizeHint().width(), self.BUTTON_MIN_W)
+        btn_ex_w = max(self.btn_example.sizeHint().width(), self.BUTTON_MIN_W)
+        width = max(max_text_w, self.btn_add_first.sizeHint().width(),
+                    self.btn_example.sizeHint().width(), self.MIN_WIDTH) + 2 * self.PADDING_X
         # The card must stay INSIDE the view (the map can be as narrow as 240 px): the
         # sentences then elide rather than the card overflowing the canvas.
         width = min(width, max(int(view_w) - 16, 160))
         height = (self.PADDING_Y + self.ICON + self.GAP + title_fm.height() + 4
-                  + hint_fm.height() + self.GAP + self.BUTTON_H + self.PADDING_Y)
+                  + hint_fm.height() + 2 + hint_fm.height() + self.GAP
+                  + self.BUTTON_H + self.PADDING_Y)
         x = max(0, (int(view_w) - width) // 2)
         y = max(0, int(int(view_h) * 0.42) - height // 2)
         self.setGeometry(int(x), int(y), int(width), int(height))
 
-        btn_w = max(self.btn_add_first.sizeHint().width(), 150)
-        btn_w = min(btn_w, width - 2 * self.PADDING_X)
-        self.btn_add_first.setGeometry(int(x + (width - btn_w) // 2),
-                                       int(y + height - self.PADDING_Y - self.BUTTON_H),
-                                       int(btn_w), int(self.BUTTON_H))
+        avail = max(int(width) - 2 * self.PADDING_X, 2 * self.BUTTON_MIN_W)
+        if btn_add_w + self.GAP + btn_ex_w > avail:   # narrow view — share what there is
+            half = max((avail - self.GAP) // 2, 60)
+            btn_add_w = min(btn_add_w, half)
+            btn_ex_w = min(btn_ex_w, half)
+        row_w = btn_add_w + self.GAP + btn_ex_w
+        btn_y = int(y + height - self.PADDING_Y - self.BUTTON_H)
+        btn_x = int(x + (width - row_w) // 2)
+        self.btn_add_first.setGeometry(btn_x, btn_y, int(btn_add_w), self.BUTTON_H)
+        self.btn_example.setGeometry(btn_x + int(btn_add_w) + self.GAP, btn_y,
+                                     int(btn_ex_w), self.BUTTON_H)
 
     # ── Rendering ────────────────────────────────────────────────────────────
 
@@ -231,10 +311,12 @@ class EmptyStateOverlay(QWidget):
             hint_fm = QFontMetrics(self._hint_font)
             painter.setFont(self._hint_font)
             painter.setPen(QPen(QColor(theme.TEXT_MUTED)))
-            painter.drawText(QRectF(self.PADDING_X, float(y),
-                                    max(w - 2.0 * self.PADDING_X, 1.0), float(hint_fm.height())),
-                             int(Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignVCenter),
-                             hint_fm.elidedText(self.hint_text(), Qt.TextElideMode.ElideRight,
-                                                int(max(w - 2.0 * self.PADDING_X, 1.0))))
+            text_w = max(w - 2.0 * self.PADDING_X, 1.0)
+            for line in (self.hint_text(), self.palette_text()):
+                painter.drawText(QRectF(self.PADDING_X, float(y), text_w, float(hint_fm.height())),
+                                 int(Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignVCenter),
+                                 hint_fm.elidedText(line, Qt.TextElideMode.ElideRight,
+                                                    int(text_w)))
+                y += hint_fm.height() + 2
         finally:
             painter.end()

@@ -114,6 +114,11 @@ HOTKEY_ACTIONS: Dict[str, dict] = {
     "edit.connect_selected": {"label": "edit.connect_selected", "default": ""},
     "edit.delete_selected": {"label": "edit.delete_selected", "default": ""},
     "view.center_map":      {"label": "view.center_map",      "default": ""},
+    # v1.5rc4 (ROADMAP task 6): "Focus the map" — the ONE new registry action of the
+    # release ("at most ONE"): it hands the keyboard to the map canvas, which then walks
+    # its cards with Tab (MapView's keyboard navigation) and shows it with the visible
+    # focus ring (§4.17/task 5). No hotkey out of the box — assignable like the rest.
+    "view.focus_map":       {"label": "view.focus_map",       "default": ""},
     "view.collapse_all":    {"label": "view.collapse_all",    "default": ""},
     "view.expand_all":      {"label": "view.expand_all",      "default": ""},
     # v1.4.2 (ROADMAP task 2): the minimap panel — a checkable View item, and (like the
@@ -128,6 +133,15 @@ HOTKEY_ACTIONS: Dict[str, dict] = {
     "profile.manage":       {"label": "profile.manage",       "default": ""},
     "help.open_logs":       {"label": "help.open_logs",       "default": ""},
     "help.about":           {"label": "about.open",           "default": ""},
+    # v1.5rc3 (ROADMAP tasks 1/4): the two new Help entries. "Keyboard shortcuts" — the
+    # registry-derived cheat-sheet Help → About already renders — is the ONE action of
+    # this release that ships with a key: F1 is the platform's own "help" key and it is
+    # free (the terminal canvas owns F1–F12 only while IT has the focus, which is the
+    # xterm-protocol boundary of §4.9, not a conflict). The `?` key that opens the same
+    # window lives on the MAP (`MainWindow.keyPressEvent`) — a bare printable key must
+    # never become a window shortcut, or it would steal "?" from every text field.
+    "help.cheatsheet":      {"label": "help.cheatsheet",      "default": "F1"},
+    "help.example":         {"label": "example.open",         "default": ""},
     # v1.4rc1 (plugin foundation): "Reload plugins" — a re-discovery of the plugin
     # sources (entry points + ~/.sshmap/plugins/*.py) without a restart. No hotkey out
     # of the box; assignable like every other action.
@@ -141,6 +155,32 @@ HOTKEY_ACTIONS: Dict[str, dict] = {
 # v1.3.3.3: the actions that ship WITHOUT a hotkey (an empty registry default).
 EMPTY_DEFAULT_ACTIONS = tuple(aid for aid, spec in HOTKEY_ACTIONS.items()
                               if not str(spec.get("default", "")).strip())
+
+# ── v1.5rc4 (ROADMAP task 4): the FAMILIES of the actions ─────────────────────
+# The "Hotkeys" tab groups its rows by family so a 49-row table stops being one long
+# wall. The families are the application's OWN areas (the same six the plan pins) and
+# they are derived from the action ID — NOT declared a second time per action, so a new
+# action joins its family by being named `<family>.<something>` and cannot be forgotten.
+# The two prefixes that do not spell a family are mapped deliberately:
+#   * `palette.` — the command palette is a global overlay over the map (the View family);
+#   * `profile.` — a profile is edited server data (the Edit family).
+# `actions_by_family()` is the SINGLE source of the tab's row order (and of its counts).
+FAMILY_ORDER = ("file", "edit", "view", "node", "plugins", "help")
+
+_FAMILY_PREFIXES = (
+    ("file.", "file"),
+    ("edit.", "edit"),
+    ("view.", "view"),
+    ("node.", "node"),
+    ("plugins.", "plugins"),
+    ("help.", "help"),
+    ("palette.", "view"),
+    ("profile.", "edit"),
+)
+
+#: An action ID that matches no declared prefix lands here rather than disappearing: the
+#: family grouping must never be able to hide an action from the table.
+FAMILY_FALLBACK = "edit"
 
 CONFIG_KEY = "hotkeys"   # the ~/.sshmap/config.json key (merge-write)
 
@@ -188,6 +228,48 @@ def default_hotkeys() -> Dict[str, str]:
 def empty_default_action_ids() -> List[str]:
     """The ids whose registry default is empty = "no hotkey" (v1.3.3.3, task 3)."""
     return list(EMPTY_DEFAULT_ACTIONS)
+
+
+# ── v1.5rc4 (ROADMAP task 4): the families (the grouping of the "Hotkeys" tab) ──────
+
+def action_family(action_id: str) -> str:
+    """The family of an action (v1.5rc4) — derived from its id, never declared twice.
+
+    One of ``FAMILY_ORDER``; an id with no matching prefix falls back to
+    ``FAMILY_FALLBACK`` (a future action must never vanish from the grouped table).
+    """
+    text = str(action_id or "")
+    for prefix, family in _FAMILY_PREFIXES:
+        if text.startswith(prefix):
+            return family
+    return FAMILY_FALLBACK
+
+
+def family_order() -> List[str]:
+    """The families in the order the "Hotkeys" tab shows them."""
+    return list(FAMILY_ORDER)
+
+
+def family_label_key(family: str) -> str:
+    """The i18n key of a family's display name (the ``settings.hotkeys.family.*`` set)."""
+    return f"settings.hotkeys.family.{family}"
+
+
+def actions_by_family(ids: Optional[Sequence[str]] = None) -> Dict[str, List[str]]:
+    """``{family: [action_id, …]}`` — every action exactly once, families in order.
+
+    The row order of the "Hotkeys" tab: the FAMILY list is the spine and the registry's
+    declaration order is kept INSIDE a family, so the table reads like the areas of the
+    application while the registry stays the single source of the list. A family with no
+    actions is present with an EMPTY list (the caller decides whether to show it), and
+    an unknown id (a `ids` argument from a test) still lands somewhere.
+    """
+    source = list(action_ids() if ids is None else ids)
+    grouped: Dict[str, List[str]] = {family: [] for family in FAMILY_ORDER}
+    for action_id in source:
+        family = action_family(action_id)
+        grouped.setdefault(family, []).append(action_id)
+    return grouped
 
 
 def alt_sequences(action_id: str) -> tuple:
