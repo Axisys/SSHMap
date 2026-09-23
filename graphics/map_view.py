@@ -1363,6 +1363,21 @@ class MapView(QGraphicsView):
                             fn()
                 act_grp.triggered.connect(_add_group)
 
+            # ── v1.5.1 (ROADMAP task 1): "Copy Map as Image" on the empty map ──────
+            # The empty-space branch is where a user reaches for it ("give me a picture of
+            # this"), and the window owns the action: the item calls the same method the
+            # File menu calls (a context menu is rebuilt on every right click, so it cannot
+            # carry the configurable sequence — the v1.3.3.3 rule).
+            if hasattr(win, "_copy_map_image"):
+                menu.addSeparator()
+                act_copy_map = menu.addAction(_t("file.copy_map"))
+                def _copy_map(checked=False):  # checked — a bool from QAction.triggered
+                    w = self.window()
+                    fn = getattr(w, "_copy_map_image", None)
+                    if callable(fn):
+                        fn()
+                act_copy_map.triggered.connect(_copy_map)
+
             # ── v0.8.1: group context menu (click on its background/title) ──
             grp = None
             scene_obj = self.scene()

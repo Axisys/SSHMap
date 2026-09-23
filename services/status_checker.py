@@ -52,6 +52,13 @@ about emulation, and with no skip set it behaves exactly as before.
 
 In a headless environment without a running event loop the timers never fire —
 child threads do not start, which makes the module safe for smoke tests.
+
+v1.5.2 (ROADMAP task 2): the round had NO logging call at all — a probe result reached
+the card and the status bar and left nothing behind (the "history the interface never
+kept"). `start_round()`'s `_on_done` now writes ONE summary record per round into
+`~/.sshmap/logs/sshmap.log` AND into the activity ring the panel renders. It is a
+SUMMARY on purpose: the per-node answers are already on the cards, and a hundred-node
+map must not turn one round into a hundred log lines.
 """
 import socket
 import threading
@@ -59,6 +66,13 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from PySide6.QtCore import QObject, QThread, QTimer, Signal
+
+try:  # v1.5.2: the round summary (the activity history, ROADMAP task 2)
+    from modules.logger import get_logger
+except ImportError:  # pragma: no cover — the package layout (sshmap.services.*)
+    from ..modules.logger import get_logger
+
+log = get_logger(__name__)
 
 
 STATUS_ONLINE = "online"    # green: TCP + SSH banner
@@ -86,6 +100,35 @@ LARGE_MAP_THRESHOLD = 50       # N > 50 nodes → round interval doubles ("N > ~
 # a status and never starts a round: it only repaints the mark and the tooltip line
 # (see ServerNode.refresh_freshness).
 STALE_MIN_SEC = 90.0
+
+
+def round_summary(results) -> str:
+    """The ONE line a finished round leaves in the log (v1.5.2, ROADMAP task 2).
+
+    PURE, so the topical test pins the sentence without a probe: the counts by status in
+    the fixed order online → warn → offline, plus `?` for an answer that is none of the
+    three (a plugin's merged kind is validated elsewhere — a summary must never lose a
+    probed node silently). Example:
+
+        "Status round: 5 probed — online 3, warn 1, offline 1"
+    """
+    counts = {STATUS_ONLINE: 0, STATUS_WARN: 0, STATUS_OFFLINE: 0}
+    other = 0
+    total = 0
+    for item in results or ():
+        try:
+            _sid, status = item
+        except (TypeError, ValueError):
+            continue
+        total += 1
+        if status in counts:
+            counts[status] += 1
+        else:
+            other += 1
+    parts = [f"{name} {counts[name]}" for name in (STATUS_ONLINE, STATUS_WARN, STATUS_OFFLINE)]
+    if other:
+        parts.append(f"other {other}")
+    return f"Status round: {total} probed — " + ", ".join(parts)
 
 
 def get_status_settings() -> dict:
@@ -537,6 +580,13 @@ class StatusChecker(QObject):
                 self._timer.setInterval(self.effective_interval_ms())
             except RuntimeError:
                 pass  # Qt teardown — the timer's C++ object is already destroyed
+            # v1.5.2 (ROADMAP task 2): the round summary — ONE record per round for the
+            # log file AND the activity panel (the per-node answers live on the cards).
+            # Guarded: a broken logging setup must never break a round's completion.
+            try:
+                log.info(round_summary(results))
+            except Exception:  # noqa: BLE001 — the summary is a side channel
+                pass
             self.round_finished.emit(results)
 
         self._thread = thread

@@ -47,6 +47,13 @@ and any pattern matching at connection time.
 The module is HEADLESS: no Qt, no i18n, no network. Every user-visible string is
 a reason CODE (``REASON_*`` / ``NOTE_*``) plus a ``detail``; the dialog owns the
 translation (`dialogs/ssh_config_import_dialog.py`).
+
+v1.5.2 (ROADMAP task 2): the loader logged nothing — an import that found no host, or
+that could not read the file at all, left no trace. `load_ssh_config()` now writes ONE
+record per call (the result summary, or the reason the entry file was unusable), which
+reaches `sshmap.log` AND the activity panel. The parser stays silent: it runs once per
+included FILE and would flood the history with intermediate lines — the loader is the
+ONE place that knows the whole answer.
 """
 
 import getpass
@@ -54,6 +61,13 @@ import glob
 import os
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
+
+try:  # v1.5.2: the import record of the activity history (ROADMAP task 2)
+    from modules.logger import get_logger
+except ImportError:  # pragma: no cover — the package layout (sshmap.services.*)
+    from ..modules.logger import get_logger
+
+log = get_logger(__name__)
 
 DEFAULT_CONFIG_RELPATH = os.path.join(".ssh", "config")
 SSH_DIR_NAME = ".ssh"
@@ -450,6 +464,11 @@ def load_ssh_config(path: Optional[str] = None, *, home: Optional[str] = None,
     Raises ``SshConfigError`` when the ENTRY file is missing or unreadable —
     there is nothing to show in that case. A broken ``Include`` is a skip
     record inside the result, never an exception.
+
+    v1.5.2 (ROADMAP task 2): the ONE record of this import reaches the log (and the
+    activity panel) — the summary on success, the reason on the two failure paths. The
+    detail carries the PATH (never a credential: the config holds none of the app's
+    secrets).
     """
     home = home or os.path.expanduser("~")
     config_path = path or default_config_path(home)
@@ -457,10 +476,15 @@ def load_ssh_config(path: Optional[str] = None, *, home: Optional[str] = None,
         with open(config_path, "r", encoding="utf-8", errors="replace") as f:
             text = f.read()
     except FileNotFoundError:
+        log.warning(f"SSH config import: no file at {config_path} ({ERROR_MISSING})")
         raise SshConfigError(ERROR_MISSING, config_path)
     except OSError as e:
+        log.error(f"SSH config import failed: {config_path} is unreadable — {e}")
         raise SshConfigError(ERROR_UNREADABLE, str(e))
-    return parse_ssh_config(text, config_path, home=home, local_user=local_user)
+    result = parse_ssh_config(text, config_path, home=home, local_user=local_user)
+    log.info(f"SSH config import: {len(result.hosts)} host(s) from {config_path} "
+             f"({len(result.skipped)} skipped, {len(result.notes)} note(s))")
+    return result
 
 
 def dedupe_hosts(hosts, existing_keys=None, key_fn=None):

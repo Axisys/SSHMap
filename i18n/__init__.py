@@ -124,6 +124,22 @@ def _log_debug(message: str) -> None:
         pass
 
 
+def _log_warning(message: str) -> None:
+    """A WARNING line — the v1.5.2 LANGUAGE-FALLBACK record (ROADMAP task 2).
+
+    A language that cannot be loaded is a real fallback (the app keeps the previous
+    one, or English), and until v1.5.2 it was a DEBUG line — invisible in the activity
+    panel and easy to miss in the file. `_log_debug` stays for the chatty cases (a
+    missing key, a missing "name" meta key); this one is for "your choice was not
+    applied, and here is why". Never raises.
+    """
+    try:
+        from modules.logger import get_logger
+        get_logger("i18n").warning(message)
+    except Exception:  # noqa: BLE001 — i18n must work without the app
+        pass
+
+
 def _strip_meta(data) -> Dict[str, str]:
     """The translations of a language file without the meta keys (v1.3.3).
 
@@ -237,7 +253,9 @@ def _user_language_path(code) -> Optional[str]:
         return None
     data, reason = _read_language_file(path)
     if data is None:
-        _log_debug(f"user language {code!r} skipped ({reason}) — not a language file: {path}")
+        # v1.5.2 (ROADMAP task 2): a WARNING, not a DEBUG line — the built-in file takes
+        # over here, i.e. the user's own file is silently ignored unless the log says so.
+        _log_warning(f"user language {code!r} skipped ({reason}) — not a language file: {path}")
         return None
     return path
 
@@ -396,18 +414,26 @@ def load_language(language: str) -> bool:
 
     filepath = language_file_path(language)
     if filepath is None:
+        # v1.5.2 (ROADMAP task 2): the OTHER half of the language-fallback record — the
+        # active language is kept and the caller only learns "False" without this line.
+        _log_warning(f"language {language!r} not loaded (no usable file) — keeping "
+                     f"{_current_language!r}")
         return False
 
     try:
         with open(filepath, "r", encoding=_LANG_ENCODING) as f:
             data = json.load(f)
         if not isinstance(data, dict):
+            _log_warning(f"language {language!r} not loaded (the root of {filepath} is not "
+                         f"an object) — keeping {_current_language!r}")
             return False
 
         _translations = _strip_meta(data)
         _current_language = language
         return True
-    except (json.JSONDecodeError, IOError):
+    except (json.JSONDecodeError, IOError) as e:
+        _log_warning(f"language {language!r} not loaded ({e!r}) — keeping "
+                     f"{_current_language!r}")
         return False
 
 

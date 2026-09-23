@@ -317,10 +317,10 @@ check("the tab order: General / Appearance / Terminal / Status Checks / Autosave
 import ui.hotkey_registry as _HR
 
 _expected_rows = len(_HR.action_ids())
-check("'Hotkeys': one ACTION row per registry action (49 in v1.5rc4: +view.focus_map), "
+check("'Hotkeys': one ACTION row per registry action (52 in v1.5.2: +the activity-panel View item), "
       "grouped by family",
       len(dlg.hotkey_edits) == _expected_rows
-      and _expected_rows == 49
+      and _expected_rows == 52
       and dlg.hotkeys_table.rowCount() == _expected_rows + len(dlg.hotkey_family_rows())
       and [dlg._hotkey_rows[r][1] for r in dlg.hotkey_action_rows()]
       == [aid for fam in _HR.family_order() for aid in _HR.actions_by_family()[fam]],

@@ -375,8 +375,8 @@ app.processEvents()
 print("== §5 the release state — v1.5rc5 added NO i18n key ==")
 # ════════════════════════════════════════════════════════════════════════════
 
-check("§5 the batch itself added no key (the pin then moved on with v1.5, +1)",
-      EXPECTED_I18N_KEYS == 644, str(EXPECTED_I18N_KEYS))
+check("§5 the batch itself added no key (the pin moved on with v1.5 +1, v1.5.1 +4 and v1.5.2 +13)",
+      EXPECTED_I18N_KEYS == 661, str(EXPECTED_I18N_KEYS))
 check_release_state(ROOT)
 _langs = load_i18n_langs(ROOT)
 check_i18n_parity(_langs)

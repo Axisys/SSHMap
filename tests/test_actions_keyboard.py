@@ -142,12 +142,13 @@ class _FakeChecker:
 print("== 1. the registry is complete ==")
 
 ids = HR.action_ids()
-check("registry: 49 actions — the v1.3.2 set + Save As + the zoom family + the empty defaults "
+check("registry: 52 actions — the v1.3.2 set + Save As + the zoom family + the empty defaults "
       "(v1.3.3.7: +file.export_svg; v1.4rc1: +plugins.reload; v1.4rc3: +plugins.run_on_nodes; "
       "v1.4.1: +file.import_ssh_config; v1.4.2: +view.toggle_minimap; "
       "v1.4.5: +view.toggle_legend; v1.5rc3: +help.cheatsheet (F1) and +help.example; "
-      "v1.5rc4: +view.focus_map — the ONE new action of that release)",
-      len(ids) == 49 and len(set(ids)) == 49, str(len(ids)))
+      "v1.5rc4: +view.focus_map; v1.5.1: +file.copy_map and +file.docs_frame; "
+      "v1.5.2: +view.toggle_activity)",
+      len(ids) == 52 and len(set(ids)) == 52, str(len(ids)))
 check("registry: the 4 new SEQUENCED actions carry exactly the promised defaults",
       {a: HR.default_sequence(a) for a in NEW_DEFAULT_ACTIONS} == NEW_DEFAULT_ACTIONS,
       str({a: HR.default_sequence(a) for a in NEW_DEFAULT_ACTIONS}))
@@ -204,7 +205,8 @@ check("source audit: the named ids cover every menu family (file/edit/view/profi
 #      (the v1.2.4-fix pitfall: the auto-connection of addAction(text, slot) carries no
 #      state), so it is built by hand and registered through _register_hotkey_target.
 #      v1.4.5 adds view.toggle_legend to the same family (the checkable View item of the
-#      legend panel, mirrored by a toolbar button).
+#      legend panel, mirrored by a toolbar button); v1.5.2 adds view.toggle_activity
+#      (the checkable View item of the activity panel — the same hand-built pattern).
 _recorded = []
 _orig_add_menu_action = MW.MainWindow._add_menu_action
 
@@ -231,12 +233,14 @@ check("runtime audit: EVERY global action of the menubar carries an action_id (n
 _bad_ids = sorted({a for _k, a in _recorded if a} - set(ids))
 check("runtime audit: every action_id the menu passes is a registry action", not _bad_ids,
       str(_bad_ids))
+# The ids created MANUALLY (never through `_add_menu_action`), so absent from the record:
+# the dynamic ones (multi_input is installed by the mode, palette.open is a QShortcut) and
+# the CHECKABLE View items, which must be connected to toggled(bool) — see above.
+_MANUAL_IDS = {"view.multi_input", "palette.open", "view.toggle_minimap", "view.toggle_legend",
+               "view.toggle_activity"}
 check("runtime audit: the menubar covers the whole registry (every action has a menu item)",
-      set(ids) <= {a for _k, a in _recorded}
-      | {"view.multi_input", "palette.open", "view.toggle_minimap", "view.toggle_legend"},
-      str(sorted(set(ids) - {a for _k, a in _recorded}
-                 - {"view.multi_input", "palette.open", "view.toggle_minimap",
-                    "view.toggle_legend"})))
+      set(ids) <= {a for _k, a in _recorded} | _MANUAL_IDS,
+      str(sorted(set(ids) - {a for _k, a in _recorded} - _MANUAL_IDS)))
 
 check("window: EVERY registry action is bound to a real object (no unregistered id)",
       set(mw._hotkey_targets) == set(ids) and all(mw._hotkey_targets.values()),

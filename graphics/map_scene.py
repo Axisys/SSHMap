@@ -58,6 +58,18 @@ class MapScene(QGraphicsScene):
     NOTE_ANCHOR_OFFSET_X = 12.0
     NOTE_ANCHOR_OFFSET_Y = 12.0
 
+    # ── v1.5.1 (ROADMAP task 2): the FIXED frame of the documentation poster ───────
+    # `render_to_pixmap` fits the CONTENT (`itemsBoundingRect` + padding), so the size of
+    # its result is a property of the map; a documentation image must instead be the SAME
+    # size for every map (the README, an issue report and a slide all want one frame).
+    # The frame is declared in LOGICAL pixels and rendered at `DOCS_FRAME_SCALE` (2×, the
+    # scale every raster export already uses), i.e. 3200×1800 px out of the factory.
+    # 1600×900 is 16:9 — the ratio of every screen the picture is looked at on.
+    DOCS_FRAME_W = 1600.0
+    DOCS_FRAME_H = 900.0
+    DOCS_FRAME_SCALE = 2.0
+    DOCS_FRAME_PADDING = 40.0
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setSceneRect(-5000, -5000, 10000, 10000)
@@ -754,6 +766,99 @@ class MapScene(QGraphicsScene):
             self.render(painter, target=QRectF(pixmap.rect()), source=src)
             painter.end()
             return pixmap
+
+    # ── v1.5.1 (ROADMAP task 2): the fixed-frame documentation poster ────────────
+
+    def render_frame_to_pixmap(self, scale: float = None, padding: float = None,
+                               frame_w: float = None, frame_h: float = None,
+                               palette=theme.PALETTE_THEME) -> "QPixmap":
+        """Render the map inside a FIXED frame (v1.5.1) — the documentation poster.
+
+        The v1.5.1 sibling of `render_to_pixmap`, and deliberately a SEPARATE method:
+        the export fits the content (`itemsBoundingRect` + padding), so its pixel size
+        is a property of the map and changes with every node added — useless as a
+        documentation image. Here the FRAME is the constant: `frame_w × frame_h` LOGICAL
+        pixels (1600×900 by default, the 16:9 screen ratio) rendered at `scale` (2 → a
+        3200×1800 PNG), with the content fitted into it by `frame_source_rect()` (the
+        larger dimension decides the scale, the free axis is centred) on a margin of
+        `padding` scene units, and the canvas background painted around it.
+
+        **The poster is a SCENE render, on purpose** — the frame holds the MAP and
+        nothing else. The floating panels (the legend, the minimap, the search bar, the
+        first-run hint) and the whole chrome (the sidebar, the toolbar, the status bar)
+        are children of `MapView`, never scene items, so they cannot enter the image
+        (the v1.4.2/v1.4.5 rule); the rejected alternative — a screenshot of the window —
+        would need a temporary window resize that must never reach the persisted
+        geometry. `MapScene.itemsBoundingRect()` is therefore the ONE source of the
+        content and the frame is the ONE thing this method adds.
+
+        **The palette defaults to `theme.PALETTE_THEME` — the CURRENT look**, because a
+        poster is read on screen: `PALETTE_PRINT` (the light page of every export) stays
+        available for a caller that wants a printable one. The caller's palette is handed
+        to the scoped `export_palette()` swap exactly like in `render_to_pixmap`, so an
+        empty map, a DARK window and a palette override all go down the same path. The
+        size is DETERMINISTIC: the same scene renders the same pixel size twice (the
+        acceptance of the ROADMAP task).
+        """
+        from PySide6.QtGui import QPixmap, QColor
+
+        scale = self.DOCS_FRAME_SCALE if scale is None else float(scale)
+        padding = self.DOCS_FRAME_PADDING if padding is None else float(padding)
+        frame_w = self.DOCS_FRAME_W if frame_w is None else float(frame_w)
+        frame_h = self.DOCS_FRAME_H if frame_h is None else float(frame_h)
+
+        with self.export_palette(palette):
+            src = self.frame_source_rect(frame_w, frame_h, padding)
+            w = max(int(frame_w * scale), 1)
+            h = max(int(frame_h * scale), 1)
+            pixmap = QPixmap(w, h)
+            pixmap.fill(QColor(theme.RENDER_BG))  # the surface of the EXPORT palette
+
+            painter = QPainter(pixmap)
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+            self.render(painter, target=QRectF(pixmap.rect()), source=src)
+            painter.end()
+            return pixmap
+
+    def frame_source_rect(self, frame_w: float = None, frame_h: float = None,
+                          padding: float = None) -> QRectF:
+        """The source rect of the FIXED-frame render — PURE geometry, no painting.
+
+        The map (plus the declared margin) is fitted into the frame's LOGICAL size and
+        centred: a small map is scaled UP to the frame and a huge one DOWN, so the poster
+        looks the same way for a 5-card demo and a 200-card production map, and the
+        returned rect carries the FRAME's own proportions — the rendered poster is
+        therefore edge-to-edge identical in shape to the declared 16:9 frame, with the
+        map centred (the grid and the canvas background fill whatever the fit leaves
+        free). An empty scene (`itemsBoundingRect()` is empty) falls back to the same
+        `QRectF(-400, -300, 800, 600)` rect `render_to_pixmap` uses, so an empty map
+        renders a framed poster instead of raising (the acceptance of the task).
+
+        It is a public method of the scene (not a private helper) because it is the part
+        the gate can measure without a render: the fit ratio, the centring and the
+        determinism.
+        """
+        padding = self.DOCS_FRAME_PADDING if padding is None else float(padding)
+        frame_w = self.DOCS_FRAME_W if frame_w is None else float(frame_w)
+        frame_h = self.DOCS_FRAME_H if frame_h is None else float(frame_h)
+
+        box = QRectF(self.itemsBoundingRect())
+        if box.isEmpty():
+            box = QRectF(-400, -300, 800, 600)
+        box = box.adjusted(-padding, -padding, padding, padding)
+
+        # ONE ratio per axis from the DECLARED frame, the larger one wins: the source rect
+        # is the whole frame in scene units, so the render is never distorted (the content
+        # keeps its proportions and the free axis just carries more canvas).
+        ratio = max(box.width() / max(frame_w, 1.0), box.height() / max(frame_h, 1.0))
+        vis_w = frame_w * ratio
+        vis_h = frame_h * ratio
+
+        # The scene is rendered with explicit target/source rects (`QGraphicsScene
+        # .render`), i.e. the scene->view transform is the identity here, so the source
+        # rect is the content centred on the frame.
+        center = box.center()
+        return QRectF(center.x() - vis_w / 2.0, center.y() - vis_h / 2.0, vis_w, vis_h)
 
     # ── v1.5rc2 (ROADMAP task 3): the PRINT-FRIENDLY export palette ──────────────
 

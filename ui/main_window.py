@@ -116,6 +116,17 @@ try:  # v1.4rc1 (plugin foundation): discovery + the registry of the plugins
 except ImportError:
     from modules import plugin_manager as plugin_manager
 
+try:  # v1.5.2 (ROADMAP task 1): the in-memory activity ring the panel renders
+    from ..modules import activity_log as _activity_mod
+except ImportError:
+    try:
+        from modules import activity_log as _activity_mod
+    except ImportError:  # flat layout: the modules/ directory itself is on sys.path
+        try:
+            import activity_log as _activity_mod
+        except ImportError:  # a stripped build — the panel is simply unavailable
+            _activity_mod = None
+
 try:  # v1.2.5: central theme (palette/radii/fonts — ui/theme.py)
     from . import theme
 except ImportError:
@@ -552,6 +563,15 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         self._sidebar_collapsed = False
         self._map_collapsed = False
 
+        # ── v1.5.2 (ROADMAP task 3): the activity panel ────────────
+        # The saved visibility is read BEFORE _setup_menubar builds the checkable View
+        # item (the ui_legend/ui_minimap pattern: the menu item is the OWNER of the
+        # state, the panel is created right after the menubar and follows it). The ring
+        # itself is the process-wide singleton of `modules/activity_log.py` — the panel
+        # only renders it, so a window that is closed and reopened loses no history.
+        self._activity_enabled = MainWindow._read_activity_visible()
+        self.activity_panel = None
+
         # ── v1.4rc1 (plugin foundation, rc series): the plugin registry ─────
         # The manager is created HERE because the "Plugins" menu is built from it; the
         # DISCOVERY itself runs later — main.py calls start_plugin_discovery() after
@@ -588,6 +608,10 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         self._setup_ui()
         self._setup_toolbar()
         self._setup_menubar()
+        # v1.5.2 (ROADMAP task 3): the activity panel + the status-bar tap. AFTER the
+        # menubar (the View item owns its visibility) and BEFORE the first
+        # `_apply_ui_translations()` below, so the startup messages are already history.
+        self._setup_activity_panel()
         # v1.3.2 (task 3): the hotkeys — applied at startup, AFTER the whole UI
         # (menus/toolbar/palette) exists; the same method runs after the dialog's OK.
         self._apply_hotkeys()
@@ -1329,6 +1353,15 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         if _legend is not None:
             try:
                 _legend.retranslate()
+            except RuntimeError:
+                pass  # Qt teardown — the panel is already destroyed
+        # v1.5.2 (ROADMAP task 3): the activity panel — the CHROME only (its title, the
+        # level captions, the column headers, Clear). The event LINES are logging lines
+        # and stay English: one key per event kind would be an i18n cost with no reader.
+        _activity = getattr(self, "activity_panel", None)
+        if _activity is not None:
+            try:
+                _activity.retranslate()
             except RuntimeError:
                 pass  # Qt teardown — the panel is already destroyed
         # v1.4.5 (ROADMAP task 2): the first-run hint (its button text + the paint).
@@ -2568,6 +2601,13 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         self._add_menu_action(file_menu, "file.export_pdf", self._export_map_pdf, "file.export_pdf")
         # v1.3.3.7: export the map to SVG (QSvgGenerator — the vector member of the set)
         self._add_menu_action(file_menu, "file.export_svg", self._export_map_svg, "file.export_svg")
+        # v1.5.1 (ROADMAP tasks 1/2): the two IMAGE paths of the same machinery — the 2×
+        # render straight to the clipboard (the CURRENT theme, NO palette question) and the
+        # fixed 1600×900 @2× poster of the documentation. Both are registry actions with an
+        # EMPTY default, so the keyboard can reach them through the Hotkeys tab.
+        self._add_menu_action(file_menu, "file.copy_map", self._copy_map_image, "file.copy_map")
+        self._add_menu_action(file_menu, "file.docs_frame", self._export_docs_frame,
+                              "file.docs_frame")
         file_menu.addSeparator()
         self._add_menu_action(file_menu, "file.exit", self.close, "file.exit")
 
@@ -2685,6 +2725,20 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         self._register_i18n(self.act_show_legend, "view.toggle_legend")
         self._register_hotkey_target("view.toggle_legend", self.act_show_legend)
         self._wire_view_toolbar_button("view.toggle_legend", self.act_show_legend)
+        # v1.5.2 (ROADMAP task 3): the ACTIVITY panel — the same "created manually +
+        # toggled(bool)" pattern and the same registry rule (an EMPTY default:
+        # assignable, no key taken from anyone). It is deliberately the ONLY panel
+        # toggle WITHOUT a toolbar mirror: the v1.5rc4 toolbar overflow policy measures
+        # the live buttons, and a fifth view toggle would crowd the strip for a surface
+        # that is opened to READ, not to glance at (it has a menu item, a hotkey slot and
+        # the command palette instead).
+        self.act_show_activity = view_menu.addAction(
+            self.t("view.toggle_activity") if self._i18n_available else "Activity panel")
+        self.act_show_activity.setCheckable(True)
+        self.act_show_activity.setChecked(bool(getattr(self, "_activity_enabled", False)))
+        self.act_show_activity.toggled.connect(self._toggle_activity)
+        self._register_i18n(self.act_show_activity, "view.toggle_activity")
+        self._register_hotkey_target("view.toggle_activity", self.act_show_activity)
         # v1.2.4.1 (task 2): corner collapse buttons — the same QAction (toggle()).
         # v1.2.4.1-fix (QA request): the icon — a "◇" diamond on both panels, both
         # at the bottom right (the sidebar's bottom row / the map's right BOTTOM corner — the top is
@@ -4492,6 +4546,75 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
                 self, self.t("msg.error_title"),
                 self.t("msg.export_failed", error=str(e)))
 
+    # ── v1.5.1 (ROADMAP tasks 1/2): the two IMAGE paths of the map ────────────────
+
+    def _copy_map_image(self):
+        """Copy the map into the clipboard as an image (v1.5.1, ROADMAP task 1).
+
+        The SAME 2× render as the PNG export, with `QApplication.clipboard()
+        .setPixmap()` instead of the file dialog — and ONE deliberate difference: **the
+        copy uses the CURRENT theme and asks NO palette question**. An export is a
+        document (the v1.5rc2 print-friendly default), a copy is "what I am looking at";
+        routing this action through the export palette dialog would turn a screenshot of
+        the window into a light page behind a modal, which is the defect this comment
+        exists to prevent. No dialog at all, so the action is a pure function of the
+        scene and the active palette (the gate asserts the `PALETTE_THEME` render).
+
+        An empty map is a valid copy (the render falls back to the fixed rect), and a
+        failed render reports through `msg.export_failed` like every other export path.
+        """
+        try:
+            pixmap = self.scene.render_to_pixmap(scale=2.0, palette=theme.PALETTE_THEME)
+            QApplication.clipboard().setPixmap(pixmap)
+            self.statusBar().showMessage(self.t("status.map_copied"))
+            if self.log:
+                self.log.info("Map copied to the clipboard",
+                              extra={"width": pixmap.width(), "height": pixmap.height(),
+                                     "palette": theme.PALETTE_THEME})
+        except Exception as e:  # noqa: BLE001 — a GUI action must not crash the app
+            QMessageBox.critical(
+                self, self.t("msg.error_title"),
+                self.t("msg.export_failed", error=str(e)))
+
+    def _export_docs_frame(self):
+        """Save the map as a FIXED-FRAME documentation image (v1.5.1, ROADMAP task 2).
+
+        The poster path: `MapScene.render_frame_to_pixmap()` renders the map inside a
+        1600×900 LOGICAL frame at 2× (3200×1800 px), the content fitted and centred on
+        the canvas background — the SAME size for every map, which is what makes it
+        usable in a README, an issue report or a slide (the ordinary PNG export sizes
+        itself to the content). The palette is the CURRENT theme (a poster is read on
+        screen); the file is written with the PNG writer and reported in the status bar.
+
+        The image holds the MAP only: the floating panels and the chrome are children of
+        `MapView`, never scene items, so they cannot leak into a poster (see the method
+        docstring). The subject for the shipped documentation is the EXAMPLE map — real
+        topologies are gitignored and must never be published; the workflow (the
+        destination, the README link and the refresh rule) is pinned in `DOCUMENTATION.md`
+        §5 and `AGENTS.md` §2.
+        """
+        path, _ = QFileDialog.getSaveFileName(
+            self, self.t("file.docs_frame"), "",
+            "PNG Images (*.png)")
+        if not path:
+            return
+        if not path.lower().endswith(".png"):
+            path += ".png"
+        try:
+            pixmap = self.scene.render_frame_to_pixmap()
+            if not pixmap.save(path):
+                raise OSError("QPixmap.save returned False")
+            self.statusBar().showMessage(
+                self.t("status.docs_frame_saved", file=os.path.basename(path)))
+            if self.log:
+                self.log.info("Documentation image saved",
+                              extra={"file": path, "width": pixmap.width(),
+                                     "height": pixmap.height()})
+        except Exception as e:  # noqa: BLE001
+            QMessageBox.critical(
+                self, self.t("msg.error_title"),
+                self.t("msg.export_failed", error=str(e)))
+
     def _set_background_image(self):
         """Choose and set the map background image (v0.9.1 #2/#3)."""
         path, _ = QFileDialog.getOpenFileName(
@@ -5263,6 +5386,128 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
             save_config(dict(data))
         except Exception:  # noqa: BLE001 — a cosmetic state must not break the toggle
             pass
+
+    # ── v1.5.2 (ROADMAP task 3): the activity panel ─────────────────────────────
+    # The surface of the history `modules/activity_log.py` keeps: a NON-MODAL window
+    # (never a fifth floating panel — see `ui/activity_panel.py`, the placement is
+    # decided there), fed by the SAME ring the logging tap fills. The window owns the
+    # visibility key and the two taps; the panel owns nothing but its rows.
+
+    @staticmethod
+    def _read_activity_visible() -> bool:
+        """`ui_activity_panel` from config.json → the saved visibility (default OFF).
+
+        Off by default: the panel is a diagnostic surface, and a first run must not open
+        a second window. A broken value costs the default — never the panel.
+        """
+        try:
+            from i18n import load_config
+            cfg = load_config()
+        except Exception:  # noqa: BLE001 — without a config the default (hidden) stands
+            return False
+        raw = cfg.get("ui_activity_panel")
+        return bool(raw) if isinstance(raw, bool) else False
+
+    def _save_activity_config(self, data: dict) -> None:
+        """Merge-write the panel's own UI state (the `ui_legend` pattern)."""
+        try:
+            from i18n import save_config
+            save_config(dict(data))
+        except Exception:  # noqa: BLE001 — a cosmetic state must not break the toggle
+            pass
+
+    def _setup_activity_panel(self):
+        """Create the panel and install the TWO taps of the history (v1.5.2, task 1).
+
+        (a) the logging tap is installed by `modules/logger.py` (beside the file
+        handler) and needs nothing here; (b) the status-bar tap is this connection:
+        `statusBar().messageChanged` for the ordinary transient messages and the
+        `UndoStatusBar.offer_shown` signal for the destructive actions' sentences — the
+        Undo offer never travels through `messageChanged` (it replaces the temporary
+        message), and losing exactly those lines would empty the history of the events a
+        user is most likely to look for. Nothing else is rewired.
+        """
+        try:
+            from ui.activity_panel import ActivityPanel
+        except ImportError:  # flat layout: the ui/ directory itself is on sys.path
+            try:
+                from activity_panel import ActivityPanel
+            except ImportError:  # a stripped build — no panel, the app works as before
+                return
+        try:
+            panel = ActivityPanel(parent=self)
+            panel.on_hidden = self._on_activity_hidden
+            self.activity_panel = panel
+        except Exception as e:  # noqa: BLE001 — a history surface must not break startup
+            if self.log:
+                self.log.warning(f"Activity panel unavailable: {e}")
+            return
+        if bool(getattr(self, "_activity_enabled", False)):
+            try:
+                panel.set_visible(True)
+            except RuntimeError:
+                pass  # Qt teardown — the panel is already destroyed
+        try:
+            bar = self.statusBar()
+            bar.messageChanged.connect(self._record_activity_message)
+            offer = getattr(bar, "offer_shown", None)
+            if offer is not None:
+                offer.connect(self._record_activity_message)
+        except (RuntimeError, AttributeError, TypeError):
+            pass  # a status bar without the signal is still a working status bar
+
+    def _record_activity_message(self, text):
+        """The status-bar tap: one transient UI message → the history (v1.5.2).
+
+        Called on EVERY `messageChanged`, an empty text included (Qt emits
+        `messageChanged("")` on every clear) — `record_status_message()` drops it. A
+        failure here must never reach the status bar: the history is cosmetic.
+        """
+        if _activity_mod is None:
+            return
+        try:
+            _activity_mod.record_status_message(text)
+        except Exception:  # noqa: BLE001 — the history must not break a status message
+            pass
+
+    def _toggle_activity(self, checked: bool):
+        """v1.5.2: show/hide the activity panel + persist `ui_activity_panel`.
+
+        The panel instance lives for the whole session (the history survives closing
+        it), so the toggle only shows/hides — `ui/activity_panel.py` explains why.
+        """
+        panel = getattr(self, "activity_panel", None)
+        if panel is None:
+            return
+        visible = bool(checked)
+        try:
+            panel.set_visible(visible)
+        except RuntimeError:
+            return  # Qt teardown — the panel is already destroyed
+        self._activity_enabled = visible
+        self._save_activity_config({"ui_activity_panel": visible})
+
+    def _on_activity_hidden(self):
+        """The panel was closed by the user (its X): make the View item tell the truth.
+
+        The item OWNS the state, so the close is mirrored into it with BLOCKED signals
+        (no `toggled` loop back into `set_visible`) and persisted — the next start
+        opens the window only if it was left open.
+        """
+        action = getattr(self, "act_show_activity", None)
+        self._activity_enabled = False
+        if action is None:
+            return
+        try:
+            if action.isChecked():
+                action.blockSignals(True)
+                try:
+                    action.setChecked(False)
+                finally:
+                    action.blockSignals(False)
+        except RuntimeError:
+            return  # Qt teardown — the action is already destroyed
+        self._save_activity_config({"ui_activity_panel": False})
 
     def _wire_view_toolbar_button(self, action_id: str, action) -> None:
         """v1.4.6: keep a toolbar VIEW toggle in step with its checkable menu item.

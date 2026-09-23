@@ -841,8 +841,8 @@ langs = load_i18n_langs(ROOT)
 check_i18n_parity(langs)
 check_i18n_format(langs)
 check("§7 the v1.4.4 release added no key of its own (the pin has moved on with "
-      "v1.4.5 … v1.5 — the pin in tests/_common.py is the shipped one)",
-      EXPECTED_I18N_KEYS == 644
+      "v1.4.5 … v1.5.2 — the pin in tests/_common.py is the shipped one)",
+      EXPECTED_I18N_KEYS == 661
       and all(len(translation_keys(langs[c])) == EXPECTED_I18N_KEYS for c in i18n_lang_codes(ROOT)),
       str({c: len(translation_keys(langs[c])) for c in sorted(langs)}))
 check("§7 v1.5rc1 named the switch in EVERY language (the one string this release adds)",
@@ -854,6 +854,6 @@ check("§7 ui/motion.py is the module this release documents",
       os.path.exists(os.path.join(ROOT, "ui", "motion.py")))
 check_release_state(ROOT)
 check("§7 the version pin of this test file is the release it describes",
-      EXPECTED_APP_VERSION == "1.5", EXPECTED_APP_VERSION)
+      EXPECTED_APP_VERSION == "1.5.2", EXPECTED_APP_VERSION)
 
 finish()

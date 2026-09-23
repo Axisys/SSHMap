@@ -7,6 +7,13 @@ Usage in any module:
     log.error("Connection failed", exc_info=True)
 
 All logs go to: ~/.sshmap/logs/ (created automatically)
+
+v1.5.2 (ROADMAP task 1): a THIRD handler is installed beside the file and console
+ones — `activity_log.ActivityLogHandler`, the thin tap that pushes every record into
+the in-memory ring the activity panel renders (`modules/activity_log.py`). It is
+installed HERE, in the ONE place that already owns the logger tree, so no module has to
+know that a panel exists; the ring itself is memory-only, so `setup_logging()` stays the
+only durable destination (~/.sshmap/logs/sshmap.log).
 """
 
 import logging
@@ -60,6 +67,23 @@ def setup_logging(level: int = logging.DEBUG) -> logging.Logger:
     )
     console_handler.setFormatter(console_formatter)
     root_logger.addHandler(console_handler)
+
+    # ── v1.5.2 (ROADMAP task 1): the activity tap ─────────────
+    # The panel's history is fed from the SAME records the file gets — no emitter is
+    # rewired, and the ring is bounded/memory-only (`modules/activity_log.py`). A
+    # failure here costs the panel, never the logging: setup_logging() still returns.
+    try:
+        from modules.activity_log import install_activity_handler
+    except ImportError:  # flat layout: the modules/ directory itself is on sys.path
+        try:
+            from activity_log import install_activity_handler
+        except ImportError:
+            install_activity_handler = None
+    if install_activity_handler is not None:
+        try:
+            install_activity_handler()
+        except Exception:  # noqa: BLE001 — a history tap must not break the startup
+            pass
 
     return root_logger
 

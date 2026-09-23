@@ -13,6 +13,12 @@ Logic:
     still created with host=name, ip="" — the user will sort it out manually.
 
 Passwords/users are not touched — the user sets them up after the import.
+
+v1.5.2 (ROADMAP task 2): the DNS stage of the import left no record at all. The resolver
+thread now writes ONE summary per run (how many names got an address, how many did not,
+and whether the run was cancelled), so the activity history answers "did the import
+actually resolve anything" — the question the batch's own "Imported N servers" line
+cannot answer (the node is created either way, with an empty `ip`).
 """
 
 import ipaddress
@@ -21,6 +27,13 @@ import threading
 from typing import Dict, List, Optional
 
 from PySide6.QtCore import QThread, Signal
+
+try:  # v1.5.2: the DNS stage of the import reaches the activity history (task 2)
+    from modules.logger import get_logger
+except ImportError:  # pragma: no cover — the package layout (sshmap.services.*)
+    from ..modules.logger import get_logger
+
+log = get_logger(__name__)
 
 
 def parse_hosts_file(text: str) -> List[str]:
@@ -123,6 +136,18 @@ class HostResolverThread(QThread):
             except Exception:
                 result[name] = None  # a resolution failure must not kill the thread
             self.progress.emit(i, total)
+        # v1.5.2 (ROADMAP task 2): ONE record for the DNS stage of the import — the
+        # hostnames and the counts, never a credential (there is none here).
+        try:
+            resolved = sum(1 for value in result.values() if value)
+            cancelled = self._cancel.is_set() and len(result) < total
+            if cancelled:
+                log.info(f"TXT import: DNS resolution cancelled after {len(result)} of "
+                         f"{total} name(s) ({resolved} resolved)")
+            else:
+                log.info(f"TXT import: {resolved} of {total} name(s) resolved")
+        except Exception:  # noqa: BLE001 — the record is a side channel
+            pass
         self.resolved_map.emit(result)
 
 

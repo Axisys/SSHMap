@@ -146,7 +146,7 @@ check("§2 the saved position is cleared with the NULL sentinel (a merge write c
       and MW.MainWindow._saved_position(["a", "b"]) is None)
 check("§2 it costs NO new menu entry, action or hotkey (the rejected \"Reset positions\")",
       not any("reset_panel" in a or "reset.position" in a for a in HR.HOTKEY_ACTIONS)
-      and len(HR.HOTKEY_ACTIONS) == 49)
+      and len(HR.HOTKEY_ACTIONS) == 52)
 
 win = make_main()
 _legend = win.legend
@@ -264,10 +264,12 @@ print("== §4 the release state & the \"no new contract\" audit ==")
 # ════════════════════════════════════════════════════════════════════════════
 
 check_release_state(ROOT)
-check("§4 EXPECTED_APP_VERSION is the closing release of the 1.5 line",
-      EXPECTED_APP_VERSION == "1.5" and re.fullmatch(r"1\.5", EXPECTED_APP_VERSION) is not None)
-check("§4 the i18n pin moved by exactly ONE key (the emulation marker)",
-      EXPECTED_I18N_KEYS == 644)
+check("§4 the pin is the LATER of the releases (v1.5.2 is the shipped version; this file "
+      "still describes the closing release of the 1.5 line, whose section it gates)",
+      EXPECTED_APP_VERSION == "1.5.2" and re.fullmatch(r"1\.5\.2", EXPECTED_APP_VERSION) is not None)
+check("§4 the i18n pin moved on by the closing release's ONE key, v1.5.1's four and v1.5.2's "
+      "thirteen (the activity panel's chrome)",
+      EXPECTED_I18N_KEYS == 661)
 check_i18n_parity(_langs)
 check_i18n_format(_langs)
 check("§4 every language carries the marker key with a non-empty value",
@@ -293,8 +295,9 @@ _hub = SettingsDialog(make_main())
 check("§4 no new config key (the settings hub still collects 22)",
       len(_hub.collect()) == 22, str(len(_hub.collect())))
 _hub.close()
-check("§4 no new action and no new empty default (the registry is untouched)",
-      len(HR.HOTKEY_ACTIONS) == 49 and len(HR.empty_default_action_ids()) == 26)
+check("§4 no new action and no new empty default of THIS release (the registry grew only with "
+      "the two v1.5.1 File actions and the v1.5.2 View item after it)",
+      len(HR.HOTKEY_ACTIONS) == 52 and len(HR.empty_default_action_ids()) == 29)
 check("§4 no new theme field (the palette is the v1.5rc1 one)",
       len(dataclasses.fields(theme.Theme)) == 60)
 _deps = {"PySide6", "paramiko", "keyring", "wcwidth"}
@@ -304,8 +307,8 @@ check("§4 no new dependency (the four pinned ones and nothing else)",
       and not re.search(r"^\s*(?!PySide6|paramiko|keyring|wcwidth|#)[A-Za-z][\w.-]*\s*[><=]",
                         _req, re.M))
 check("§4 the version constants agree everywhere (version.py ↔ pyproject ↔ requirements)",
-      __import__("version").APP_VERSION == "1.5"
-      and '"1.5"' in _src("version.py") and 'version = "1.5"' in _src("pyproject.toml"))
+      __import__("version").APP_VERSION == "1.5.2"
+      and '"1.5.2"' in _src("version.py") and 'version = "1.5.2"' in _src("pyproject.toml"))
 check("§4 VERSION_FORMAT did NOT move (the project schema is unchanged)",
       __import__("version").VERSION_FORMAT == "0.9")
 

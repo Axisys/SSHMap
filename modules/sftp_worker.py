@@ -64,9 +64,19 @@ operation reports task_error, and the QUEUE DOES NOT DIE (the v1.1.3 rule). A
 directory delete is NOT recursive (rmdir — a non-empty directory reports the server's
 error); recursive transfers are out of the version.
 
+v1.5.2 (ROADMAP task 2): the worker logged NOTHING — a failed transfer existed only as a
+progress line that vanished with the tab. Every task of the TRANSFER / FILE-MANAGER
+family (upload, download, mkdir, rename, delete) now leaves ONE record when it finishes,
+fails or is cancelled, and it reaches both `sshmap.log` and the activity panel. `list`
+(a directory listing) and `read` (the viewer opening a file) are deliberately NOT logged:
+they are navigation, and they happen on every click — a history of them would drown the
+facts a user opens the panel for. The record carries the task's own LABEL (a path), never
+a credential: this module never holds a password.
+
 The queue_* methods are intended to be called from the GUI thread (the task id
 counter is not synchronized — all calls come from a single thread).
 """
+import logging
 import os
 import posixpath
 import queue
@@ -75,6 +85,17 @@ import threading
 from typing import List, Optional
 
 from PySide6.QtCore import QThread, Signal
+
+try:  # v1.5.2: the task records of the activity history (ROADMAP task 2)
+    from .logger import get_logger
+except ImportError:
+    try:
+        from modules.logger import get_logger
+    except ImportError:  # pragma: no cover — a stripped build logs nowhere
+        def get_logger(name):  # noqa: N802 — the same signature
+            return logging.getLogger(name)
+
+log = get_logger(__name__)
 
 
 # Transfer chunk size: 32 KB = paramiko's SFTP_MAX_REQUEST_SIZE — the same size
@@ -93,6 +114,39 @@ KIND_DELETE = "delete"
 # The operation kinds (no bytes, no progress bar): the page's status line stays
 # silent about them — the SFTP tab reports their outcome itself (its message signal).
 OP_KINDS = (KIND_MKDIR, KIND_RENAME, KIND_DELETE)
+
+# ── v1.5.2 (ROADMAP task 2): the logged family of the activity history ────────
+# The TRANSFER and FILE-MANAGER kinds are logged; `list` (navigation) and `read` (the
+# viewer opening a file) are not — see the module docstring. The set is declared once,
+# so a new kind cannot be forgotten silently: it either joins this tuple or it is a
+# navigation kind by an explicit decision.
+LOGGED_KINDS = (KIND_UPLOAD, KIND_DOWNLOAD, KIND_MKDIR, KIND_RENAME, KIND_DELETE)
+
+OUTCOME_DONE = "done"
+OUTCOME_FAILED = "failed"
+OUTCOME_CANCELLED = "cancelled"
+
+
+def task_log_line(kind: str, label: str, outcome: str = OUTCOME_DONE, error: str = "",
+                  detail: str = ""):
+    """The PURE record of one finished SFTP task (v1.5.2) → `(line, level)` or ("", …).
+
+    The topic test pins the sentence without an SFTP server (the topical-test
+    convention of the project). `detail` (the task's own final path — the new directory,
+    the target file) wins over the short `label` when it is known, so a rename or a
+    delete names the whole path a user can act on; a FAILED task usually has no detail
+    yet and falls back to the label. A NAVIGATION kind (`list`, `read`) answers an empty
+    line: it is not part of the history by the module's own decision. The text carries a
+    remote path — never a credential, because this module never holds one.
+    """
+    if str(kind) not in LOGGED_KINDS:
+        return "", logging.INFO
+    text = str(detail or label or "")
+    if outcome == OUTCOME_FAILED:
+        return f"SFTP {kind} failed: {text} — {error}", logging.ERROR
+    if outcome == OUTCOME_CANCELLED:
+        return f"SFTP {kind} cancelled: {text}", logging.INFO
+    return f"SFTP {kind} finished: {text}", logging.INFO
 
 # v1.3.3.2 (ROADMAP tasks 3 and 6): the provisional name of BOTH transfer directions
 # (a local `<dest>.part` committed with os.replace, a remote `<target>.part` renamed
@@ -418,6 +472,7 @@ class SftpWorker(QThread):
                     # flag is reset immediately and the rest of the queue contents
                     # is reported.
                     self._emit(self.task_cancelled, task.id, task.kind)
+                    self._log_task(task, outcome=OUTCOME_CANCELLED)
                     self._apply_cancel()
                     continue
 
@@ -438,18 +493,37 @@ class SftpWorker(QThread):
                     else:
                         self._do_download(task)
                     self._emit(self.task_done, task.id, task.detail)
+                    self._log_task(task, outcome=OUTCOME_DONE)
                 except _SftpCancelled:
                     self._emit(self.task_cancelled, task.id, task.kind)
+                    self._log_task(task, outcome=OUTCOME_CANCELLED)
                     self._apply_cancel()
                 except Exception as e:  # noqa: BLE001 — path/permission/network error
                     # THE QUEUE DOES NOT DIE: the task reported an error, the
                     # loop continues (ROADMAP task 5 requirement).
                     self._emit(self.task_error, task.id, task.kind, str(e))
+                    self._log_task(task, outcome=OUTCOME_FAILED, error=str(e))
         finally:
             try:
                 self._sftp.close()
             except Exception:
                 pass
+
+    def _log_task(self, task: _SftpTask, outcome: str = OUTCOME_DONE, error: str = ""):
+        """v1.5.2 (ROADMAP task 2): ONE record per transfer / file-manager task.
+
+        The line is built by the PURE `task_log_line()` (pinned by the topical test) and
+        written from the worker thread: `~/.sshmap/logs/sshmap.log` AND the activity ring
+        both take it (`modules/activity_log.py` is thread-safe by design). It is called
+        from `run()` only, i.e. never for `list`/`read` — see the module docstring. A
+        broken logging setup must never break the queue, hence the guard.
+        """
+        try:
+            line, level = task_log_line(task.kind, task.label, outcome, error, task.detail)
+            if line:
+                log.log(level, line)
+        except Exception:  # noqa: BLE001 — the record is a side channel
+            pass
 
     def _check_cancel(self):
         if self._cancel_event.is_set() or self._stop_event.is_set():

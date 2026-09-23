@@ -3,6 +3,14 @@
 Desktop application (Python + PySide6): an interactive map of your IT infrastructure with direct SSH connections to nodes.
 *"Draw your infrastructure. Organize it. Connect to it."*
 
+![The example map in SSH Map](docs/map-example.png)
+
+*The example map (Help → Open the example map): five servers, one connection of every type, a group, a note — all on
+documentation addresses (`192.0.2.0/24`), and the statuses it declares are marked as emulated. Taken with
+**File → Save Documentation Image…** (a fixed 1600×900 frame at 2×) — the refresh rule is in
+[DOCUMENTATION.md](DOCUMENTATION.md) §5: re-run `python tests/_gen_docs_image.py` after a change that alters the
+cards, the theme or the demo map, and commit `docs/map-example.png`.*
+
 ---
 
 ## 1. Running & Tests
@@ -16,7 +24,7 @@ pipx install .                    # or pip install . → sshmap command (install
 Tests are plain Python scripts without pytest: one topical `test_*.py` file per area plus a single parallel runner. Each file is an isolated process (sandbox HOME, offscreen Qt, UTF-8 stdout), so nothing extra is needed on cp1251 consoles or in CI:
 
 ```bash
-python tests/run_all.py               # everything (96 test files + i18n check); auto workers = cores (cap 16), longest file first; exit 0 ⇔ all green
+python tests/run_all.py               # everything (98 test files + i18n check); auto workers = cores (cap 16), longest file first; exit 0 ⇔ all green
 python tests/run_all.py --fast        # daily profile: skips files tagged slow/network
 python tests/run_all.py --tag network # only network-tagged files - real-network sections run ONLY on explicit opt-in (env SSHMAP_TEST_TAGS)
 python tests/run_all.py --failed-only # re-run only files that failed in the last run (cache test-results/last_run.json)
@@ -51,7 +59,8 @@ modules/                     # ssh_worker.py - one-shot SSH worker + registry; s
                              # multi_input.py - multi-input broadcast hub; sftp_worker.py / sftp_tab.py - SFTP over the live transport (listing, upload/download, a file manager: new folder/rename/delete, an overwrite prompt, atomic transfers, drag-out of a path, read-only preview with "no preview" row marks and syntax highlighting);
                              # syntax_highlight.py - the viewer's grammars (number-only, verified JSON/XML, heuristic YAML) and its one highlighter;
                              # terminal_widget.py - cell-based canvas (full keyboard, selection, scrollback); terminal_screen.py - pyte screen + palettes;
-                             # window_geometry.py; host_key_policy.py; external_terminal.py; undo_commands.py (15 QUndoCommands); logger.py
+                             # window_geometry.py; host_key_policy.py; external_terminal.py; undo_commands.py (15 QUndoCommands);
+                             # logger.py (the file/console handlers + the activity tap); activity_log.py (the bounded, memory-only history ring)
 storage/                     # project.py - JSON save/load; example_project.py - the DEMO map built in code (five nodes, six connections, RFC 5737 addresses only);
                              # autosave.py - autosave + backup ring buffer; export_drawio.py - .drawio export (tags + comment included; the print-friendly palette by default)
 services/                    # credential_manager.py (keyring); diagnostics.py (ping / reverse DNS off the GUI thread); host_importer.py (TXT import);
@@ -63,7 +72,7 @@ ui/                          # main_window.py - façade over ProjectIOMixin / No
                              # legend.py (the collapsible legend: the 6 connection types + the 3 statuses, each with a sample of its line style or shape);
                              # status_shape.py (the status marks: a filled dot / a ring / a triangle);
                              # empty_state.py (first-run hint over an empty map: add a server, open the example map, the palette hotkey); motion.py (animation standards: camera flights, the node scale-in);
-                             # status_bar.py (the status bar with the Undo affordance of the last destructive action); hotkey_sheet_dialog.py (the shortcut list, rendered from the registry);
+                             # status_bar.py (the status bar with the Undo affordance of the last destructive action); activity_panel.py (the activity history window); hotkey_sheet_dialog.py (the shortcut list, rendered from the registry);
                              # command_palette.py (Ctrl+K); hotkey_registry.py (configurable hotkeys); about_dialog.py (Help → About);
                              # icons.py; mixin_support.py; theme.py (the `Theme` object - DARK/LIGHT, the accent hue; pure data);
                              # theme_qss.py (the palette + the ONE QSS builder + the live switch)
@@ -72,6 +81,7 @@ i18n/                        # t(key, **kwargs); every *.json is a language (fil
                              # ~/.sshmap/languages/*.json is the USER folder - it shadows the built-in file of the same code
                              # (import/export in "Settings → Language") and needs no change to the installed package
 tests/                       # test_*.py without pytest + _common.py harness + run_all.py (parallel runner) + check_i18n_keys.py - map: tests/INDEX.md
+docs/                        # the README's documentation image (docs/map-example.png) - rendered from the EXAMPLE map by tests/_gen_docs_image.py
 examples/                    # two working example plugins (hello.py - the minimal one; disk_monitor.py - the Disk Space Monitor) +
                              # examples/README.md: copy a file into ~/.sshmap/plugins/ and use Plugins → Reload; not installed, never auto-discovered
 third_party/                 # pyte 0.8.2 managed fork (vendored): PyPI sdist + patches 0001–0003; provenance/sha256 - third_party/pyte-patches/MANIFEST.md
@@ -149,6 +159,15 @@ Format invariants:
 - Exports are print-friendly by default: PNG, PDF, SVG and drawio all leave a light page with high-contrast lines (whatever theme you are working in), and the six types stay apart by their line style. The export dialog has one checkbox — "use the current theme colours" — if you want the screen look instead; a `.drawio` export carries the same palette and the same line styles.
 - The suite keeps it honest (`tests/test_encoding.py`): the samples, the greyscale separations of all six types in both themes, the measured dash rhythms and rails in a real desaturated render, the three shapes and the export palette of every format.
 
+### Map images (v1.5.1)
+- **Copy the map** (File → Copy Map as Image, or the empty map's right-click menu): the same 2× render as the PNG export goes straight to the clipboard — no file dialog, and deliberately no palette question. An export is a document (light page by default), a copy is *what you are looking at* (your current theme). Paste it into a chat, a ticket or a slide.
+- **A documentation image in a fixed frame** (File → Save Documentation Image…): the map rendered inside 1600×900 at 2× (3200×1800 px), content fitted and centred on a 40 px margin, so the picture has the same size for every map. It is a **poster of the map**: the floating panels and the whole chrome are children of the view, never scene items, so they stay out of the image — no window resizing, no screenshots.
+- The README picture above is that action's output on the example map. It is regenerated in one command and only ever from the **example map** — real projects (`server_map*.json`) are gitignored and must never be published.
+
+### Activity history (v1.5.2)
+- **View → Activity panel** opens a window with what just happened: probe rounds, imports, SFTP transfers, plugin errors, theme and language fallbacks — newest first, four columns (time, level, source, message), a level filter (Info / Warnings / Errors / Interface) and **Clear**. The status bar still shows the *now*; this window keeps the history the interface never had, and it is **memory only** — the last 200 events, never written to disk (`~/.sshmap/logs/sshmap.log` stays the durable record, and it got the missing lines: a round summary, every transfer's outcome, every import's result).
+- The event lines are English, like the log file; the window's own chrome (title, columns, level names, Clear) is translated. It opens again where you left it (one `config.json` flag, off by default) and there is nothing else to configure.
+
 ### List mode
 - Collapsing the map turns the sidebar into a server table: the panel already stretches to the whole window width, and the tree now uses it (alias, host (IP), status, OS, CPU, RAM, disk and tags taken straight from the server data; an empty field is an empty cell; columns are draggable). Expand the map and the compact one-column list is back.
 - It is the same sidebar, only wider: search and tag/status filters narrow the table, the row context menu is unchanged, and a double click on a row does what a double click on a card does (`Settings → Map`: properties or connect).
@@ -207,7 +226,7 @@ Format invariants:
   - `autosave_enabled` / `autosave_interval_sec` / `backup_count` (live, drive the autosave QTimer);
   - `language` (applied immediately, before OK);
   - `theme` (`{"mode": "dark"|"light"|"auto", "accent": "#rrggbb", "motion": true}`). The Appearance tab: dark theme is the default, `auto` follows the operating system's colour scheme live, the accent is one hue (8 swatches or your own colour), and the "Reduce motion" box turns the animations off. A broken value falls back to dark + the default sky + the motion on. Applied live before OK; Cancel restores the previous theme and the previous motion flag.
-  - `hotkeys` (dict action_id → sequence, e.g. `"file.save": "Ctrl+S"`). The whole set is edited in the Hotkeys tab from the action registry `ui/hotkey_registry.py`: every one of the 49 global actions has a row; an empty string means no hotkey (the value the actions without a shortcut ship with); "Reset to defaults" restores the whole map; missing or broken values fall back to the default. Applied live after OK. The terminal's own keys (F1–F12, Ctrl+C/D/Z, arrows) are xterm protocol and not configurable.
+  - `hotkeys` (dict action_id → sequence, e.g. `"file.save": "Ctrl+S"`). The whole set is edited in the Hotkeys tab from the action registry `ui/hotkey_registry.py`: every one of the 51 global actions has a row; an empty string means no hotkey (the value the actions without a shortcut ship with); "Reset to defaults" restores the whole map; missing or broken values fall back to the default. Applied live after OK. The terminal's own keys (F1–F12, Ctrl+C/D/Z, arrows) are xterm protocol and not configurable.
   - `ui_font_family` / `ui_font_size` (UI font, live via `QApplication.setFont`, 0 = system), `ui_node_double_click` (`"properties"` default | `"connect"`; double-clicking a node opens the SSHConnectDialog directly), `ui_show_sidebar_buttons` (the sidebar button block; hide the whole sidebar via View → Sidebar), `ui_show_connection_type` (type on the connection badge, "SSH · <label>", handy for PNG/PDF export) + 20-character limit on the connection label (input only; old projects with long labels load unchanged);
   - `plugins` (`{plugin id: true|false}`, which plugins are switched off; written by the Plugins menu; a missing id means enabled).
 
@@ -222,7 +241,7 @@ Format invariants:
 
 ### Hotkeys + Command Palette
 - Default hotkeys: Ctrl+N/O/S for projects; Ctrl+Shift+S Save As…; Ctrl+Z / Y(+Shift) undo/redo; Ctrl+Shift+A/G/C add server/group/connection; Ctrl+I properties; Ctrl+Enter SSH to the selected node; Ctrl+E edit node; Ctrl+D duplicate node; Ctrl+Shift+N a note in the centre of the visible area; Delete delete selection; Ctrl+0 / Ctrl+= / Ctrl+- reset zoom / zoom in / zoom out; Ctrl+Shift+F fit map; Ctrl+F map search (search bar over the canvas, Enter/Shift+Enter jump between matches with centering and an accent frame, Esc close).
-- Every global action is assignable (Settings → Hotkeys): the tab lists all 49 global actions (grouped by family: File / Edit / View / Node / Plugins / Help) with a filter box, so it is not only the ones that happen to have a shortcut, so File → Save As…, the exports, the backups, "Check statuses now", "Reload plugins", "Run on selected servers", the minimap and the About window can get keys of your own, on top of the zoom family this release gave real keys. One row per action with a key recorder; a duplicate combination marks both rows and warns but still saves; an empty row means no hotkey (the menu item keeps working); "Reset to defaults" puts every row back at once. Stored in `~/.sshmap/config.json` and applied instantly, no restart. Multi-input keeps its own rule: whatever key you pick works only while the mode is on, so it never steals a key from your shell.
+- Every global action is assignable (Settings → Hotkeys): the tab lists all 51 global actions (grouped by family: File / Edit / View / Node / Plugins / Help) with a filter box, so it is not only the ones that happen to have a shortcut, so File → Save As…, the exports, the map images, the backups, "Check statuses now", "Reload plugins", "Run on selected servers", the minimap and the About window can get keys of your own, on top of the zoom family this release gave real keys. One row per action with a key recorder; a duplicate combination marks both rows and warns but still saves; an empty row means no hotkey (the menu item keeps working); "Reset to defaults" puts every row back at once. Stored in `~/.sshmap/config.json` and applied instantly, no restart. Multi-input keeps its own rule: whatever key you pick works only while the mode is on, so it never steals a key from your shell.
 - The terminal canvas keeps its own keys (F1–F12, Ctrl+C/D/Z, arrows): they are xterm protocol and deliberately not configurable.
 - Multi-selection: Ctrl+click on a node adds to the selection (native Qt); Ctrl+drag on empty space is rubber-band selection (Shift+Ctrl adds to current). Group drag moves all selected; right-click during multi-selection offers "Connect selected" / "Delete selected" (one confirmation, guarded per item).
 - Ctrl+K opens the command palette (`ui/command_palette.py`): fuzzy search (subsequence scoring, no dependencies) over all menu QActions + project servers + commands contributed by plugins (their own section after the servers, so a plugin can never shadow a built-in command; the text is the plugin author's). Selecting a server selects the node and centers on it. Enter/Up/Down/Esc navigate. With an EMPTY query it opens on a bounded "Start here" list (the actions you already ran in this session, then the frequent ones) instead of a wall of rows.
@@ -311,6 +330,8 @@ Built-in languages: en (default), ru, zh, de; any other language joins by droppi
 - readable in both themes: the accent has a decorative and a strong role (borders vs. text and fills), the light palette was re-tuned against the surface each tone is drawn on, and a contrast gate in the suite keeps it honest — a colour without a threshold or a written exemption fails the tests
 - the interface no longer explains itself in colour alone: each connection type has its own line style (solid / dashed / dotted / dash-dot / double / long dash) and each status its own shape (dot / ring / triangle), the legend shows a sample of both, and a second gate keeps the two channels honest
 - print-friendly exports: a light page with high-contrast lines by default, with "use the current theme" as a one-click opt-out in the export dialog
+- map images without a screenshot tool: **Copy the map as an image** puts the 2× render of your current theme on the clipboard (no dialog), and **Save Documentation Image…** writes a fixed 1600×900 @2× poster of the map for a README, an issue or a slide
+- an activity history (View → **Activity panel**): what just happened — probe rounds, imports, transfers, plugin errors, theme and language fallbacks — newest first, with a level filter and Clear. It is memory only (the last 200 events) and never a second status bar; the log file gains the same facts
 - motion: the map glides instead of jumping (Show on map, Fit map), a new server scales in, hovering a connection dims everything but its two ends; every animation is interruptible, so the wheel or a drag always wins, and one switch turns the motion off entirely
 - three theme modes: dark, light and Auto (system), which follows the operating system's colour scheme without a restart
 - denser interface and friendlier first run: sidebar buttons became a compact grid, an empty map shows how to start, status counters filter the sidebar with one click, and a small legend explains arrow colours and statuses (hide it, fold it or drag it; it remembers where it was)
@@ -331,7 +352,7 @@ Built-in languages: en (default), ru, zh, de; any other language joins by droppi
 - plugins run inside the application's process: a plugin with a broken C extension can take it down; install plugins you trust
 
 **Roadmap** (tasks, order, acceptance in ROADMAP.md):
-- next: `v1.5.1` map images (Copy the map to the clipboard + a fixed documentation poster), then the activity panel, freshness for the collected facts and a "why is it red?" answer, the group aggregate and the inventory export
+- next: freshness for the collected facts and a "why is it red?" answer, then the group aggregate and the inventory export; the activity history shipped in v1.5.2
 
 ---
 

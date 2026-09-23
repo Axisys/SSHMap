@@ -123,6 +123,10 @@ class NodeOpsMixin:
             with open(path, "r", encoding="utf-8", errors="replace") as f:
                 text = f.read()
         except OSError as e:
+            # v1.5.2 (ROADMAP task 2): a refused file was a dialog only — the history
+            # keeps the reason too (the dialog is gone the moment it is dismissed).
+            if self.log:
+                self.log.warning(f"TXT import: {path} is unreadable — {e}")
             QMessageBox.critical(self, self.t("msg.error_title"),
                                  self.t("msg.import_servers_failed", error=str(e)))
             return
@@ -158,6 +162,11 @@ class NodeOpsMixin:
             existing.add(entry.lower())
 
         if not pending:
+            # v1.5.2 (ROADMAP task 2): "the import found nothing new" is a RESULT — it
+            # reached a dialog and nothing else. The history keeps it.
+            if self.log:
+                self.log.info(f"TXT import: no new servers in {path} "
+                              f"({skipped} duplicate(s) skipped)")
             QMessageBox.information(self, self.t("msg.info_title"),
                                     self.t("msg.import_servers_result", added=0, skipped=skipped))
             return
@@ -331,6 +340,10 @@ class NodeOpsMixin:
             for host in duplicates
         ]
         if not fresh:
+            # v1.5.2 (ROADMAP task 2): the "nothing new" result of the second import path.
+            if self.log:
+                self.log.info(f"SSH config import: no new servers in "
+                              f"{result.path or config_path} ({len(skipped)} skipped)")
             QMessageBox.information(
                 self, self.t("msg.info_title"),
                 self.t("msg.import_ssh_config_result", added=0, skipped=len(skipped)))

@@ -259,8 +259,34 @@ def clear_cfg(*extra_paths: str) -> None:
 # in 12 i18n files + the APP_VERSION/requirements pins in 7 release-state sections).
 # The misses of the keys themselves against the code are caught by check_i18n_keys.py.
 # ─────────────────────────────────────────────────────────────────────────────
-EXPECTED_APP_VERSION = "1.5"     # the current release (a sentinel: it catches "a bump to the wrong version")
-EXPECTED_I18N_KEYS = 644        # the parity of the TRANSLATION keys (v1.5 — "the release
+EXPECTED_APP_VERSION = "1.5.2"   # the current release (a sentinel: it catches "a bump to the wrong version")
+EXPECTED_I18N_KEYS = 661        # the parity of the TRANSLATION keys (v1.5.2 — "the activity panel:
+                                # the history the interface never kept": the SECOND patch ON the
+                                # released 1.5). +13 keys × en/ru/zh/de, ALL of them the chrome of the
+                                # new panel: `view.toggle_activity` (the checkable View item — a
+                                # registry action with an EMPTY default, so the Hotkeys tab grows
+                                # 51 → 52 rows and the empty-default set 28 → 29), its title
+                                # (`activity.title`), the Clear button (`activity.clear`), the
+                                # empty-state line (`activity.empty`), the FIVE level captions of the
+                                # filter (`activity.level.all/.info/.warning/.error/.status`) and the
+                                # four column headers (`activity.col.time/.level/.source/.message`).
+                                # The event LINES themselves are NOT translated — they are logging
+                                # lines (the panel's own rule), which is what keeps a new EVENT KIND
+                                # from costing an i18n key; the ring bound, the coalescing window and
+                                # the level policy are numbers and a pure function, and the ONE new
+                                # config key (`ui_activity_panel`) is UI state written by its owner,
+                                # so the hub's `collect()` stays 22. The `_common.py` pins of the
+                                # releases before it (the v1.5.1 figure of 648 and the 51/28 of the
+                                # registry) move with this line: the release-state sections of the
+                                # topical files quote the CURRENT pin, not a historical one.
+                                # (v1.5.1 — "map images: copy the render, and a fixed frame for the
+                                # documentation": +4 keys × en/ru/zh/de: the two File-menu labels
+                                # (`file.copy_map` and `file.docs_frame`) and their two reports
+                                # (`status.map_copied`, `status.docs_frame_saved` with {file}); the
+                                # two registry actions with an EMPTY default made the Hotkeys tab
+                                # grow 49 → 51 and the empty-default set 26 → 28. No config key,
+                                # no theme field, no dependency.
+                                # (v1.5 — "the release
                                 # that closes the 1.5 line": the three features the
                                 # interface review left for the closing release — the
                                 # floating-panel SNAP, the EMULATED demo statuses and the

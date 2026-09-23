@@ -235,14 +235,16 @@ write_raw("arr.json", '["not", "a", "language"]')         # a non-object root
 write_raw("meta.json", '{"name": "Only Meta"}')           # no translation key
 write_raw("notes.txt", 'this is not even JSON')           # a foreign file
 # The requirement is "skipped WITH A LOG LINE", not merely "no crash": capture the
-# module's own log seam while the discovery walks the folder.
+# module's own log seam while the discovery walks the folder. v1.5.2 raised this line
+# from DEBUG to WARNING (a skipped file is a real FALLBACK — the built-in takes over),
+# so the seam under test is `_log_warning`.
 _logged = []
-_orig_log_debug = i18n._log_debug
-i18n._log_debug = lambda message: _logged.append(str(message))
+_orig_log_warning = i18n._log_warning
+i18n._log_warning = lambda message: _logged.append(str(message))
 try:
     _codes = lang_codes()
 finally:
-    i18n._log_debug = _orig_log_debug
+    i18n._log_warning = _orig_log_warning
 check("every skipped user file leaves a LOG line naming the file and the reason",
       any("bad" in m and "not_json" in m for m in _logged)
       and any("arr" in m and "not_object" in m for m in _logged)

@@ -98,6 +98,7 @@ of the file itself.
 | file | tags | what it checks (first line of the docstring) |
 |---|---|---|
 | `test_actions_keyboard.py` | — | v1.3.3.3 — The action registry, completed: keyboard, on-demand operations, About. |
+| `test_activity_panel.py` | — | v1.5.2 — the activity panel: the history the interface never kept. |
 | `test_alt_screen.py` | — | v1.2.12 — Terminal: alternate screen (private modes 47/1047/1048/1049). |
 | `test_audit_rc1_threads.py` | slow | v1.2.10rc1 — Audit: threads and teardown (AUDIT.md auto #2 + manual #1 + a verification finding). |
 | `test_audit_rc2_robustness.py` | — | v1.2.10rc2 — Audit: robustness and code hygiene (AUDIT.md manual #5, auto #7, manual #6). |
@@ -132,6 +133,7 @@ of the file itself.
 | `test_list_mode.py` | — | v1.4.6 — List mode: collapsing the map = server parameters (ROADMAP v1.4.6). |
 | `test_main_window_split.py` | — | v1.1.4: main_window.py hygiene — split into mixins (ROADMAP v1.1.4 acceptance). |
 | `test_map_bigpicture.py` | — | v1.4.2 — The big-picture map level: the minimap, the cached card drop-shadow, the group fold. |
+| `test_map_images.py` | — | v1.5.1 — map images: "Copy Map as Image" and the fixed-frame documentation poster. |
 | `test_map_search.py` | — | Regression v0.9.8 — map search (Ctrl+F). |
 | `test_menu_actions_regression.py` | — | v1.2.4-fix — REGRESSION: the real click path on checkable menu items (QAction.trigger()). |
 | `test_motion.py` | — | v1.4.4 — Motion: the standards, the camera flights, the node scale-in, the hover focus/dim. |

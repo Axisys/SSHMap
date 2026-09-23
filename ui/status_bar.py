@@ -31,9 +31,14 @@ The pinned decisions (ROADMAP 1.5rc3, task 2):
 internal calls go straight to C++, which is exactly what we want for a statusTip:
 it must NOT carry the button). The class is cosmetic on its own: the window owns the
 callback (`set_undo_callback`).
+
+v1.5.2: the offer also announces itself through `offer_shown(str)` — the activity panel's
+status tap listens to `messageChanged`, and the OFFER never travels through it (the offer
+replaces the temporary message on purpose). Without the signal the history would silently
+lose exactly the sentences a destructive action produces.
 """
 
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QStatusBar, QToolButton, QWidget
 
 try:  # the ONE QSS registry (v1.4.3): no hardcoded colour/radius in a widget
@@ -134,6 +139,10 @@ class UndoStatusBar(QStatusBar):
 
     #: How long the offer stays on screen (ms) — the `showMessage(..., timeout)` idea.
     OFFER_TIMEOUT_MS = 12_000
+
+    #: v1.5.2: the offer's own message (the activity panel's status tap needs it — the
+    #: offer never reaches `messageChanged`, see the module docstring).
+    offer_shown = Signal(str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -247,6 +256,12 @@ class UndoStatusBar(QStatusBar):
             self._timer.start(self.OFFER_TIMEOUT_MS)
         except RuntimeError:
             pass  # Qt teardown — nothing to show
+        try:
+            # v1.5.2: the activity panel's tap — emitted AFTER the offer is up, so a
+            # listener that reads the bar sees the state the message describes.
+            self.offer_shown.emit(str(text))
+        except (RuntimeError, TypeError):
+            pass  # Qt teardown / a dead receiver — the offer itself is already shown
 
     def _hide_offer(self) -> None:
         try:

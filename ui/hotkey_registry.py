@@ -108,6 +108,16 @@ HOTKEY_ACTIONS: Dict[str, dict] = {
     "file.export_drawio":   {"label": "file.export_drawio",   "default": ""},
     "file.export_pdf":      {"label": "file.export_pdf",      "default": ""},
     "file.export_svg":      {"label": "file.export_svg",      "default": ""},
+    # v1.5.1 (ROADMAP task 1): "Copy Map as Image" — the 2× render of the CURRENT theme
+    # straight to the clipboard, with NO palette question (an export is a document, a copy
+    # is "what I am looking at"). File menu + the empty-space map menu; an EMPTY default
+    # like its export siblings.
+    "file.copy_map":        {"label": "file.copy_map",        "default": ""},
+    # v1.5.1 (ROADMAP task 2): "Save Documentation Image…" — the SAME render machinery with
+    # a FIXED frame (1600×900 logical at 2× = 3200×1800 px), content fitted and centred on
+    # the canvas background. A POSTER of the map (a scene render: the floating panels and
+    # the chrome are children of the view, so they are deliberately not in the image).
+    "file.docs_frame":      {"label": "file.docs_frame",      "default": ""},
     "file.backups":         {"label": "file.backups",         "default": ""},
     "file.restore_autosave": {"label": "file.restore_autosave", "default": ""},
     "file.exit":            {"label": "file.exit",            "default": ""},
@@ -128,6 +138,12 @@ HOTKEY_ACTIONS: Dict[str, dict] = {
     # item next to the minimap, mirrored by a toolbar button); assignable, no key
     # out of the box.
     "view.toggle_legend":   {"label": "view.toggle_legend",   "default": ""},
+    # v1.5.2 (ROADMAP task 3): the ACTIVITY panel — the history surface. The same family
+    # (a checkable View item), and the ONE panel toggle with NO toolbar mirror: the
+    # v1.5rc4 toolbar overflow policy measures the live buttons, and a fifth view toggle
+    # would crowd the strip for a window that is opened to READ, not to glance at.
+    # Assignable, no key out of the box.
+    "view.toggle_activity": {"label": "view.toggle_activity", "default": ""},
     "view.set_background":  {"label": "view.set_background",  "default": ""},
     "view.remove_background": {"label": "view.remove_background", "default": ""},
     "profile.manage":       {"label": "profile.manage",       "default": ""},
@@ -157,7 +173,7 @@ EMPTY_DEFAULT_ACTIONS = tuple(aid for aid, spec in HOTKEY_ACTIONS.items()
                               if not str(spec.get("default", "")).strip())
 
 # ── v1.5rc4 (ROADMAP task 4): the FAMILIES of the actions ─────────────────────
-# The "Hotkeys" tab groups its rows by family so a 49-row table stops being one long
+# The "Hotkeys" tab groups its rows by family so a 52-row table stops being one long
 # wall. The families are the application's OWN areas (the same six the plan pins) and
 # they are derived from the action ID — NOT declared a second time per action, so a new
 # action joins its family by being named `<family>.<something>` and cannot be forgotten.
