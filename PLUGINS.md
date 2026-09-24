@@ -1,8 +1,8 @@
 # PLUGINS.md — the SSH Map plugin foundation (API v1)
 
 > **Status.** This document is the **frozen API v1 contract** of the plugin foundation
-> (ROADMAP `v1.4rc1 → v1.4`, the rc series). It was pinned BEFORE the first rc, in the
-> same way `PYTE82_AUDIT.md` froze the pyte fork: **the rc series implements this
+> (the v1.4rc1 → v1.4 series). It was pinned BEFORE the first rc — the contract is frozen by
+> SPECIFICATION, not by the implementation: **the rc series implements this
 > contract, it does not change it.** A behaviour that is not described here is not part
 > of API v1; a change to what IS described here belongs to **API v2**, which ships as a
 > new entry-point group (`sshmap.plugins/v2`) next to this one — installed v1 plugins
@@ -180,7 +180,8 @@ reach for the model.
 * **Qt objects.** A plugin that creates a QAction (or any QObject) hands the reference
   to the manager — the manager keeps every reference in its guard. A Python wrapper
   whose C++ object has an attached menu and dies takes the C++ menu with it (the
-  PySide6 6.11 pitfall documented in `AGENTS.md` §7 gotcha #9).
+  PySide6 6.11 pitfall — that is why the manager's guard holds every reference it is
+  handed).
 * **Never throws.** Every call into a plugin is wrapped: an exception is a log line and
   a failed call, never a crash of the host and never a broken neighbour plugin.
 * **Forbidden:** touching the GUI outside the hooks; blocking the GUI thread; importing
@@ -206,7 +207,7 @@ policy (a plugin ships its own translations, or none). Only the core's own lines
 An event bus; settings-dialog tabs or panels/docks contributed by a plugin; terminal
 input/output interception; a plugin API for the map scene (drawing, layout); automatic
 download or update of plugins; a marketplace; sandboxing. Some of these are on the
-horizon (`ROADMAP.md` → "v1.5+ / horizon"); the rest are rejected.
+horizon (no version promises them yet); the rest are rejected.
 
 ## 9. Coming with rc3
 
@@ -352,11 +353,11 @@ points on the next start — no registration file, no cooperation from the appli
 loads both through the real discovery, drives their hooks and pins the "a plugin never
 imports the core" rule with a source scan.
 
-### 10.5 Where the core's own documents continue
+### 10.5 Where to read more
 
-* `DOCUMENTATION.md` §33 — the implementation notes (the manager, the context, the
-  isolation machinery, the UI half and the Qt pitfall behind the guard);
-* `ROADMAP.md` — what is planned beyond API v1 (an event bus, UI extensions, terminal
-  interception: the `v1.5+ / horizon` list);
-* `tests/test_plugins.py` / `tests/test_plugin_runtime.py` / `tests/test_plugin_ui.py` —
-  the executable specification of what a plugin may rely on.
+* The core's own side of this contract — `modules/plugin_manager.py` (the discovery, the
+  registry and the guard), `modules/plugin_context.py` (the context and `PluginNode`),
+  `modules/plugin_runner.py` (`ctx.run_command`) and the `Plugins` menu in
+  `ui/main_window.py`;
+* `tests/test_plugins.py` / `tests/test_plugin_runtime.py` / `tests/test_plugin_ui.py` /
+  `tests/test_plugin_examples.py` — the executable specification of what a plugin may rely on.

@@ -90,6 +90,9 @@ EMPTY_DEFAULT_ACTIONS = {
     # v1.5rc3: "Open the example map" (the Help item of the demo map — the empty state's
     # second button calls the same window method). No key out of the box.
     "help.example",
+    # v1.5.5: the inventory report of the LIST mode — the visible server table to the
+    # clipboard and to a CSV/TSV file. Two permanent File-menu items, no key by default.
+    "file.copy_list", "file.export_list",
 }
 
 # v1.3.3.3 i18n additions (13 keys: 477 → 490).
@@ -142,14 +145,15 @@ class _FakeChecker:
 print("== 1. the registry is complete ==")
 
 ids = HR.action_ids()
-check("registry: 54 actions — the v1.3.2 set + Save As + the zoom family + the empty defaults "
+check("registry: 56 actions — the v1.3.2 set + Save As + the zoom family + the empty defaults "
       "(v1.3.3.7: +file.export_svg; v1.4rc1: +plugins.reload; v1.4rc3: +plugins.run_on_nodes; "
       "v1.4.1: +file.import_ssh_config; v1.4.2: +view.toggle_minimap; "
       "v1.4.5: +view.toggle_legend; v1.5rc3: +help.cheatsheet (F1) and +help.example; "
       "v1.5rc4: +view.focus_map; v1.5.1: +file.copy_map and +file.docs_frame; "
       "v1.5.2: +view.toggle_activity; "
-      "v1.5.3: +node.collect_info and +node.diagnose — the freshness pair, both EMPTY defaults)",
-      len(ids) == 54 and len(set(ids)) == 54, str(len(ids)))
+      "v1.5.3: +node.collect_info and +node.diagnose — the freshness pair, both EMPTY defaults; "
+      "v1.5.5: +file.copy_list and +file.export_list — the inventory report pair, both EMPTY defaults)",
+      len(ids) == 56 and len(set(ids)) == 56, str(len(ids)))
 check("registry: the 4 new SEQUENCED actions carry exactly the promised defaults",
       {a: HR.default_sequence(a) for a in NEW_DEFAULT_ACTIONS} == NEW_DEFAULT_ACTIONS,
       str({a: HR.default_sequence(a) for a in NEW_DEFAULT_ACTIONS}))

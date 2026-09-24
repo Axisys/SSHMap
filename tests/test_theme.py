@@ -500,10 +500,10 @@ clear_cfg()
 
 node = ServerNode(ServerData(id="th-live", alias="web-1", host="10.0.0.5", user="root",
                              tags=["prod"]))
-check("§7 (dark) the card's class colours and the tag strip are the dark tones",
+check("§7 (dark) the card's class colours and the ICON's environment tone are the dark ones",
       node.COLOR_BG.name() == "#1e293b" and node.COLOR_BORDER.name() == "#3b82f6"
       and node.STATUS_COLORS["offline"].name() == "#ef4444"
-      and node._tag_segments[0].brush().color().name() == "#ef4444")
+      and node._icon.brush().color().name() == "#ef4444")
 check("§7 (dark) the arrow/group/note class colours are the dark tones",
       ConnectionArrow.COLOR_IDLE.name() == "#34d399"
       and ConnectionArrow.COLOR_HOVER.name() == "#6ee7b7"
@@ -552,7 +552,7 @@ check("§7 a STALE brush is the reason refresh_theme exists (the item keeps what
 scene.refresh_theme()
 check("§7 scene.refresh_theme() repaints the whole map with the new theme",
       live_node._bg.brush().color().name() == theme.LIGHT.node_bg
-      and live_node._tag_segments[0].brush().color().name() == theme.LIGHT.status_offline
+      and live_node._icon.brush().color().name() == theme.LIGHT.status_offline
       and live_arrow.pen().color().name() == theme.LIGHT.arrow_ssh
       and live_arrow._label_bg.brush().color().name() == theme.LIGHT.canvas_bg
       and live_arrow._label_bg.brush().color().alpha() == 190

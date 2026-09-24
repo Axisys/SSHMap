@@ -60,7 +60,7 @@ from _common import (bootstrap, check, finish, load_i18n_langs, check_i18n_parit
 
 ROOT, WORK = bootstrap()  # BEFORE the app module imports (the HOME isolation and faulthandler inside)
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QRect
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QMessageBox, QDockWidget
 
@@ -224,14 +224,43 @@ check("the menu (trigger #2): the map is expanded, the item is checked",
       not win.view.isHidden() and win.act_show_map.isChecked())
 
 # the overlay button follows the resizeEvent (the MapView.resized signal) — in the bottom RIGHT corner
+# of the VIEWPORT (v1.5.6: the VIEW's own corner put it ON TOP of the scrollbars and the frame).
 win.resize(1400, 800)
 app.processEvents()
 btn = win._map_collapse_btn
-check("the overlay button after a resize: the bottom right corner of view",
-      btn.y() + btn.height() >= win.view.height() - 12
-      and btn.x() + btn.width() <= win.view.width()
-      and btn.y() > win.view.height() // 2,
-      f"btn=({btn.x()},{btn.y()}) view={win.view.width()}x{win.view.height()}")
+_vp = win.view.viewport().geometry()
+check("the overlay button after a resize: the bottom right corner of the VIEWPORT",
+      btn.y() + btn.height() <= _vp.bottom() + 1
+      and btn.x() + btn.width() <= _vp.right() + 1
+      and btn.y() > _vp.height() // 2,
+      f"btn=({btn.x()},{btn.y()}) viewport={_vp} view={win.view.width()}x{win.view.height()}")
+check("v1.5.6 ...and it is RAISED out of the very corner (a different level from the sidebar's)",
+      btn.y() + btn.height()
+      <= _vp.bottom() + 1 - win.COLLAPSE_BTN_MARGIN - win.COLLAPSE_BTN_RAISE + 1
+      and win.COLLAPSE_BTN_RAISE > 0
+      and btn.y() != win.sidebar.collapse_btn.geometry().y(),
+      f"btn bottom={btn.y() + btn.height()} viewport bottom={_vp.bottom()} "
+      f"sidebar y={win.sidebar.collapse_btn.geometry().y()}")
+
+# v1.5.6 (customer request): the button must stay clear of the SCROLLBARS that appear with content.
+for _i in range(6):
+    win.scene.add_server(ServerData(id=f"scroll-{_i}", alias=f"node-{_i}", host="10.0.0.9",
+                                    user="u", x=_i * 700.0, y=_i * 500.0))
+app.processEvents()
+app.processEvents()
+win._position_map_collapse_btn()
+app.processEvents()
+_vbar = win.view.verticalScrollBar()
+_hbar = win.view.horizontalScrollBar()
+_vp = win.view.viewport().geometry()
+btn = win._map_collapse_btn
+check("v1.5.6 the map button keeps clear of the SCROLLBARS (it used to be drawn over them)",
+      _vbar.isVisible() and _hbar.isVisible()
+      and btn.x() + btn.width() <= _vp.right() + 1
+      and btn.y() + btn.height() <= _vp.bottom() + 1
+      and not QRect(btn.geometry()).intersects(QRect(_vbar.geometry()))
+      and not QRect(btn.geometry()).intersects(QRect(_hbar.geometry())),
+      f"btn={btn.geometry()} vbar={_vbar.geometry()} hbar={_hbar.geometry()} viewport={_vp}")
 
 # ════════════════════════════════════════════════════════════
 # 3b. v1.4.6: the Sidebar / Map toggles on the toolbar

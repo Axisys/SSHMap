@@ -727,10 +727,11 @@ print("== §4 the release state ==")
 # ════════════════════════════════════════════════════════════════════════════
 
 check("§4 the version pin is the version this file describes",
-      EXPECTED_APP_VERSION == "1.5.4" and _version.APP_VERSION == "1.5.4",
+      EXPECTED_APP_VERSION == "1.5.6" and _version.APP_VERSION == "1.5.6",
       f"{EXPECTED_APP_VERSION} / {_version.APP_VERSION}")
-check("§4 the i18n pin counts the SHIPPED release (661 + 20 of v1.5.3 + 11 of v1.5.4)",
-      EXPECTED_I18N_KEYS == 692, str(EXPECTED_I18N_KEYS))
+check("§4 the i18n pin counts the SHIPPED release (661 + 20 of v1.5.3 + 11 of v1.5.4"
+      " + 14 of v1.5.5 + 2 of v1.5.6)",
+      EXPECTED_I18N_KEYS == 708, str(EXPECTED_I18N_KEYS))
 check("§4 the 20 new keys are present and non-empty in every language",
       all(str(LANGS[c].get(k, "")).strip() for k in NEW_KEYS for c in LANGS)
       and len(NEW_KEYS) == 20,
@@ -739,8 +740,9 @@ check("§4 the placeholders of the new keys match en in every language",
       all({m for m in re.findall(r"\{([A-Za-z_][A-Za-z0-9_]*)\}", LANGS[c][k])}
           == {m for m in re.findall(r"\{([A-Za-z_][A-Za-z0-9_]*)\}", LANGS["en"][k])}
           for k in NEW_KEYS for c in LANGS))
-check("§4 the registry grew 52 -> 54 (the assignable set 29 -> 31: no key out of the box)",
-      len(HR.HOTKEY_ACTIONS) == 54 and len(HR.empty_default_action_ids()) == 31
+check("§4 the registry grew 52 -> 54 (the assignable set 29 -> 31: no key out of the box; the "
+      "v1.5.5 inventory pair takes it to 56 / 33)",
+      len(HR.HOTKEY_ACTIONS) == 56 and len(HR.empty_default_action_ids()) == 33
       and {"node.collect_info", "node.diagnose"} <= set(HR.empty_default_action_ids()),
       f"{len(HR.HOTKEY_ACTIONS)} / {len(HR.empty_default_action_ids())}")
 check("§4 task 1's OPEN question is decided: the schema does NOT change",

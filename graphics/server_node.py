@@ -45,12 +45,16 @@ def _t(key: str, **kw) -> str:
 
 
 # ── v1.5 (ROADMAP): the ENVIRONMENT badge — the declared vocabulary ────────────────
-# The card carries its tags as a 5 px colour strip on the left edge, so the environment
-# is read from a colour the SAME card already uses for availability (`Theme.tag_colors`:
-# `prod` → `status_offline`, `staging` → `status_warn`, `dev` → `status_online`) and an
-# arbitrary tag gets a `crc32` colour from `tag_palette`. That is meaning in a colour
-# alone — rule 2 of the 1.5 line — so v1.5 adds the second channel: the tag as TEXT in
-# the free band above the alias, with the colour kept as a redundant tint.
+# The card carries its tags as a tone the SAME card already uses for availability
+# (`Theme.tag_colors`: `prod` → `status_offline`, `staging` → `status_warn`, `dev` →
+# `status_online`) and an arbitrary tag gets a `crc32` colour from `tag_palette`. That is
+# meaning in a colour alone — rule 2 of the 1.5 line — so v1.5 added the second channel:
+# the tag as TEXT in a chip, with the colour kept as a redundant tint.
+#
+# The COLOUR channel is the card's ICON — the brush of the circle the `_glyph` sits in — and
+# the TEXT channel is the chip in the free band ABOVE the alias (the `y ≈ 2..17` band the
+# measured layout leaves empty in both layouts): the chip keeps its own row, so it never
+# competes with the name for one.
 #
 # The vocabulary is DECLARED here and its ORDER IS THE PRECEDENCE: a card tagged
 # `["dev", "prod"]` is production, whatever order the user typed the tags in. `staging`
@@ -174,6 +178,10 @@ class ServerNode(QGraphicsItemGroup):
     INFO_X = 10.0             # x of the info block
     DOT_ZONE_LEFT = 46.0      # left edge of the status dot: W - 46 (see update_appearance)
     ELIDE_GAP = 4.0           # gap from the end of the text to the dots
+    #: The alias is the card's headline and the ONE line a user reads from a distance, so it
+    #: is a bold UI face (v1.5.6: 10 pt — a size STEP DOWN from the 11 pt the card used to
+    #: carry, which buys roughly 10% more characters of the name before the elide).
+    ALIAS_FONT_SIZE = 10
     # UI polish v0.9.x: the server icon is a bit large in both modes — we scale
     # circle+glyph to 70% (40 px -> 28 px) around the center of the original circle (30, 30).
     ICON_SCALE = 0.70
@@ -237,22 +245,13 @@ class ServerNode(QGraphicsItemGroup):
     # v1.4.3: both are live views of the ACTIVE theme.
     TAG_PALETTE = theme.ThemeMap("tag_palette", as_list=True)
     TAG_COLORS = theme.ThemeMap("tag_colors")
-    # Tag strip on the card: vertical segments along the left edge.
-    TAG_STRIP_WIDTH = 5.0
-    # v1.5rc5 (N5): the strip is INSET from the card's outline and corners. It used to be a
-    # square bar at x = 0..5 over the rounded outline, so it painted over the 2 px status
-    # frame (the primary availability channel) and poked out of the 10 px corner. The gap
-    # between the segments makes the boundary between two tags visible — they used to merge
-    # into ONE continuous bar.
-    TAG_STRIP_INSET_X = 3.0
-    TAG_STRIP_GAP = 1.0
 
     # ── v1.5 (ROADMAP): the two optional badges of the card ────────────────────────
-    # THE FREE BAND. Measured on `update_appearance()`: the alias sits at (55, 18), the
-    # host at (55, 36), the info plaque at (10, 58), the status/SSH marks at
-    # (W-46, 23) / (W-24, 23) and the chevron's centre at (W-16, 23) — so the band
-    # `y ≈ 2..17 × x = 55..W-10` is empty in BOTH layouts, and neither the height
-    # formula (`58 + info + 12`) nor `MIN_NODE_HEIGHT` changes because of a badge.
+    # THE FREE BAND — the top of the card carries both optional badges, and it is measured:
+    # the alias sits at (55, 18), the host at (55, 36), the info plaque at (10, 58), the
+    # status/SSH marks at (W-46, 23) / (W-24, 23) and the chevron's centre at (W-16, 23) —
+    # so the band `y ≈ 2..17 × x = 55..W-10` is empty in the expanded layout, and neither
+    # the height formula (`58 + info + 12`) nor `MIN_NODE_HEIGHT` changes because of a badge.
     ENV_BADGE_Y = 2.0              # the top of the band (above the alias)
     ENV_BADGE_FONT_SIZE = 7
     # The EMULATED marker shares the SAME band, right-aligned — the measured geometry left no
@@ -260,7 +259,7 @@ class ServerNode(QGraphicsItemGroup):
     # path's own +23) over the info plaque's top-right corner, so the band is the one place
     # where a marker cannot cover another channel (and it works in the collapsed layout too,
     # whose marks are raised to y = 16..30). `_apply_badges()` places this badge FIRST and the
-    # environment badge elides into the room that is left, so the two can never collide.
+    # environment chip elides into the room that is left, so the two can never collide.
     DEMO_BADGE_FONT_SIZE = 6
     #: The chips of a badge: the inner padding, the corner radius and the gap between the two
     #: badges of the band.
@@ -270,6 +269,9 @@ class ServerNode(QGraphicsItemGroup):
     BADGE_RIGHT_INSET = 10.0       # the right edge of the band (clear of the chevron)
     BADGE_GAP = 4.0                # the gap between the emulated marker and the tag badge
     BADGE_MIN_SPAN = 18.0          # less room than this — the tag badge is hidden, not "…"
+    #: How many characters of the label must survive the elide for the chip to be worth
+    #: drawing ("pro…" yes, "p…" no) — the font-independent half of `BADGE_MIN_SPAN`.
+    BADGE_MIN_CHARS = 3
 
     # ── v1.5.3 (ROADMAP task 1): the AGE of the collected facts ───────────────────
     # The v1.5rc3 mechanism applied to the SECOND family of measured data. A status is a
@@ -354,8 +356,6 @@ class ServerNode(QGraphicsItemGroup):
         self.setPos(data.x, data.y)
 
         self._ssh_worker: Optional[SSHWorker] = None
-        # v0.9.4: tag-strip segments (created lazily in _rebuild_tag_strip)
-        self._tag_segments: list = []
         # v0.7.1: status-change pulse animation — overlay fade-out (opacity 1 -> 0).
         # The QPropertyAnimation(target=QGraphicsItem) variant doesn't work in PySide6 6.11:
         # the C++ QGraphicsItem* has no meta-object property introspection ("non-existing
@@ -363,9 +363,6 @@ class ServerNode(QGraphicsItemGroup):
         self._pulse_anim: Optional[QVariantAnimation] = None
 
         self._build_appearance()
-        # v0.9.4: tag strip at creation (update_appearance may not change
-        # the geometry and thus not call _rebuild_frame_paths)
-        self._rebuild_tag_strip()
 
     def _build_appearance(self):
         # v1.4.2 (ROADMAP task 3): the drop-shadow — a cached PIXMAP HALO, not a path item
@@ -396,9 +393,12 @@ class ServerNode(QGraphicsItemGroup):
         # Icon: circle + vector "server" glyph (UI polish: emoji removed —
         # Segoe UI Emoji renders monochrome/squares on Linux and pixelates on zoom;
         # QPainterPath is cross-platform and crisp at any scale).
+        # v1.5.6 (ROADMAP task 3): the circle's BRUSH is the card's environment tone —
+        # the primary tag's colour (`_apply_env_icon()`); a card without tags keeps the
+        # neutral `NODE_ICON_BG` it always had.
         self._icon = QGraphicsEllipseItem(10, 10, 40, 40, self)
         self._icon.setPen(QPen(self.COLOR_BORDER, 2))
-        self._icon.setBrush(QBrush(QColor(theme.NODE_ICON_BG)))
+        self._apply_env_icon()
 
         glyph_pen = QPen(self.COLOR_TEXT, 1.6)
         glyph_pen.setCapStyle(Qt.PenCapStyle.RoundCap)
@@ -418,7 +418,7 @@ class ServerNode(QGraphicsItemGroup):
 
         # Alias
         self._alias = QGraphicsTextItem(self.data.alias or "Unnamed", self)
-        self._alias.setFont(QFont(theme.FONT_UI, 11, QFont.Bold))
+        self._alias.setFont(QFont(theme.FONT_UI, self.ALIAS_FONT_SIZE, QFont.Bold))
         self._alias.setDefaultTextColor(self.COLOR_TEXT)
         self._alias.setPos(55, 18)
 
@@ -513,48 +513,36 @@ class ServerNode(QGraphicsItemGroup):
         # Pulse follows the background (v0.7.1) — the same rounded frame
         self._pulse.setPath(self._rounded(0, 0, width, height, r))
 
-        # v0.9.4: tag strip along the left edge (rebuild the segments)
-        if getattr(self, "_tag_segments", None) is not None:
-            self._rebuild_tag_strip()
+    # ── v1.5.6 (ROADMAP task 3): the ENVIRONMENT is a TONE on the card's ICON ─────────
 
-    def _rebuild_tag_strip(self):
-        """v0.9.4: a vertical strip of colored segments from data.tags.
+    def env_icon_color(self) -> QColor:
+        """The brush tone of the card's icon: the primary tag's colour, or the neutral one.
 
-        The segments split the card's INNER height evenly (max 4 visible tags — beyond that
-        the strip loses readability); drawn over the background (z=-0.8), under the content.
-
-        v1.5rc5 (N5): the strip belongs to the CARD, not to its edge. It is inset from the
-        outline (`TAG_STRIP_INSET_X` — clear of the 2/3 px frame pen) and from the rounded
-        corners (the band starts below the corner radius and ends the same distance above the
-        bottom one), so it neither overpaints the status frame nor leaves the silhouette.
-        A card too short for the insets falls back to a 2 px margin.
+        The pick is `env_tag()` (the declared vocabulary, its precedence included); the
+        tone is the SAME `tag_color()` the badge chip and the tag filter use, so the two
+        channels of one tag can never disagree. A card WITHOUT tags answers the neutral
+        `NODE_ICON_BG` — it paints exactly like a card from before v1.5.
         """
-        tags = (getattr(self.data, "tags", None) or [])[:4]
-        n_needed = len(tags)
-        while len(self._tag_segments) < n_needed:
-            from PySide6.QtWidgets import QGraphicsRectItem
-            item = QGraphicsRectItem(self)
-            item.setPen(QPen(Qt.PenStyle.NoPen))
-            item.setZValue(-0.8)
-            self._tag_segments.append(item)
-        h_total = max(float(self._current_height), 1.0)
-        corner = float(self.CORNER_RADIUS)
-        y0 = corner if h_total - 2.0 * corner >= float(n_needed) else 2.0
-        band = max(h_total - 2.0 * y0, 1.0)
-        seg_h = band / n_needed if n_needed else 0.0
-        gap = min(self.TAG_STRIP_GAP, max(seg_h - 1.0, 0.0)) if n_needed else 0.0
-        for i, item in enumerate(self._tag_segments):
-            if i < n_needed:
-                item.setRect(self.TAG_STRIP_INSET_X, y0 + i * seg_h,
-                             self.TAG_STRIP_WIDTH, max(seg_h - gap, 0.5))
-                item.setBrush(QBrush(ServerNode.tag_color(tags[i])))
-                item.show()
-            else:
-                item.hide()
+        text = env_tag(getattr(self.data, "tags", None))
+        if not text:
+            return QColor(theme.NODE_ICON_BG)
+        return ServerNode.tag_color(text)
+
+    def _apply_env_icon(self) -> None:
+        """Paint the icon with the environment tone (BOTH card modes — the icon is always there)."""
+        try:
+            self._icon.setBrush(QBrush(self.env_icon_color()))
+        except RuntimeError:
+            pass  # Qt teardown — the item is already destroyed
 
     def refresh_tags(self):
-        """v0.9.4: public hook to update the strip after editing data.tags."""
-        self._rebuild_tag_strip()
+        """v0.9.4: public hook to update the environment marks after editing data.tags.
+
+        v1.5.6 (ROADMAP task 3): the tags reach the card through TWO channels — the ICON's
+        tone and the chip's TEXT — so this hook re-applies both (the tag filter's own
+        dimming is not part of the card).
+        """
+        self._apply_env_icon()
         self._apply_badges()
         self.update()
 
@@ -566,7 +554,7 @@ class ServerNode(QGraphicsItemGroup):
         A card that carries neither an environment tag nor an emulated status therefore
         carries NO extra item at all — the "a card without an env tag is byte-identical
         to today" rule holds literally, and a 500-card map pays for the badges it shows,
-        not for the ones it could show (the lazy `_tag_segments` precedent).
+        not for the ones it could show.
         """
         if self._env_badge is not None:
             return
@@ -592,13 +580,13 @@ class ServerNode(QGraphicsItemGroup):
         """Draw one badge: a tinted chip behind the text — the text carries the meaning.
 
         The chip is the REDUNDANT channel (a light fill of the tag colour plus its
-        1 px outline, exactly how the left-edge strip shows the same tag), the label is
-        painted in `ink` — a theme tone the contrast gate holds at AA on the card, so no
-        badge can ever create an ungated colour pair (rule 3 of the 1.5 line).
+        1 px outline — the SAME tone the card's icon carries), the label is painted in `ink`
+        — a theme tone the contrast gate holds at AA on the card, so no badge can ever
+        create an ungated colour pair (rule 3 of the 1.5 line).
 
         `x_right` is the right edge of the badge; `x_left` (optional) is a left edge it
-        starts from (the environment band). A label too wide for the room it has is
-        elided — the full text goes to the item's tooltip. Returns the badge's width.
+        starts from (the environment band). A label too wide for the room it has is elided —
+        the full text goes to the item's tooltip. Returns the badge's width.
         """
         font = text_item.font()
         fm = QFontMetrics(font)
@@ -610,6 +598,15 @@ class ServerNode(QGraphicsItemGroup):
             limit = max(int(fm.horizontalAdvance(label)), 1)
         shown = label if fm.horizontalAdvance(label) <= limit else \
             fm.elidedText(label, Qt.TextElideMode.ElideRight, limit)
+        if shown != label and not self._badge_readable(shown):
+            # The room holds an ellipsis and little else: a chip reading "…" (or "p…") says
+            # nothing while claiming the band. The caller draws NO badge instead — the same
+            # "hidden, not '…'" rule as the span check, applied to what would really be
+            # PRINTED (a width alone is font-dependent: a two-glyph prefix is short in a
+            # narrow UI font and passes in a wide fallback one).
+            chip.hide()
+            text_item.hide()
+            return 0.0
         text_item.setText(shown)
         text_item.setBrush(QBrush(QColor(ink)))
         text_item.setToolTip(label if shown != label else "")
@@ -629,18 +626,35 @@ class ServerNode(QGraphicsItemGroup):
         text_item.show()
         return w
 
-    def _apply_env_badge(self, width: float, reserved: float = 0.0):
-        """The primary tag as TEXT in the free band above the alias (v1.5, ROADMAP).
+    def _badge_readable(self, shown: str) -> bool:
+        """Does an ELIDED chip label still say something (v1.5.6)?
 
-        The pick and its precedence are `ENV_TAGS` / `env_tag()`; the colour is the SAME
-        `tag_color()` the left-edge strip paints with, used as a redundant tint (the text
-        carries the meaning, the tint repeats it — rule 2 of the 1.5 line). A card without
-        tags — and every COLLAPSED card, whose single line has no second row — hides the
-        badge and paints exactly like a pre-v1.5 card.
+        A chip must keep at least `BADGE_MIN_CHARS` characters of the label before the
+        ellipsis; below that it is noise that costs a band. Font-independent on purpose —
+        the metric of "p…" depends on the family, the count of its letters does not.
+        """
+        text = str(shown or "")
+        for marker in ("\u2026", "..."):
+            if text.endswith(marker):
+                text = text[:-len(marker)]
+                break
+        return len(text) >= int(self.BADGE_MIN_CHARS)
+
+    def _apply_env_badge(self, width: float, reserved: float = 0.0):
+        """The primary tag as TEXT in the free band ABOVE the alias (v1.5, ROADMAP task 3).
+
+        The chip is the second channel of the tag: the card's ICON carries the TONE and the
+        WORDS sit in the measured band over the alias, which leaves the alias row itself to
+        the name (a chip on that row would have to shorten it). The pick and its precedence
+        are `ENV_TAGS` / `env_tag()`; the colour is the SAME `tag_color()` the icon paints
+        with, used as a redundant tint.
 
         `reserved` is the width the EMULATED marker already took from the right end of the
-        band: the tag badge elides into what is left, and it is HIDDEN (never reduced to
-        "…") when that is less than `BADGE_MIN_SPAN`.
+        band: the tag chip elides into what is left, and it is HIDDEN (never reduced to "…")
+        when that is less than `BADGE_MIN_SPAN` or when the elided label would keep fewer
+        than `BADGE_MIN_CHARS` characters. A card without tags — and every COLLAPSED card,
+        whose single line has no second row — hides the chip and paints exactly like a
+        pre-v1.5 card.
         """
         text = "" if getattr(self.data, "collapsed", False) \
             else env_tag(getattr(self.data, "tags", None))
@@ -654,8 +668,7 @@ class ServerNode(QGraphicsItemGroup):
             return
         self._ensure_badge_items()
         self._place_badge(self._env_chip, self._env_badge, text, self.COLOR_LABEL,
-                          self.tag_color(text), self.ENV_BADGE_Y,
-                          right, self.LABEL_X)
+                          self.tag_color(text), self.ENV_BADGE_Y, right, self.LABEL_X)
 
     def _apply_demo_badge(self, collapsed: bool) -> float:
         """The EMULATED marker — a status the demo map declares is always MARKED (v1.5).
@@ -710,7 +723,9 @@ class ServerNode(QGraphicsItemGroup):
         self._bg.setBrush(QBrush(self.COLOR_BG))
         self._pulse.setPen(QPen(self.STATUS_COLORS.get("offline", self.COLOR_BORDER), 3))
         self._icon.setPen(QPen(self.COLOR_BORDER, 2))
-        self._icon.setBrush(QBrush(QColor(theme.NODE_ICON_BG)))
+        # v1.5.6 (ROADMAP task 3): the icon's BRUSH is the environment tone — a value like
+        # every other brush, so the switch re-resolves it (and the tag's own tone with it).
+        self._apply_env_icon()
         _glyph_pen = QPen(self.COLOR_TEXT, 1.6)
         _glyph_pen.setCapStyle(Qt.PenCapStyle.RoundCap)
         self._glyph.setPen(_glyph_pen)
@@ -729,7 +744,6 @@ class ServerNode(QGraphicsItemGroup):
         self._apply_status_dot()
         self._ssh_status.setBrush(QBrush(self.COLOR_DOT_IDLE))
         self._apply_visual_state()
-        self._rebuild_tag_strip()
         # v1.5: the two badges are VALUES too (a chip brush/pen and an ink brush) — a
         # theme switch re-resolves both, including the tag colour of the environment chip
         # (`ServerNode.tag_color` reads the ACTIVE theme's tag maps).
@@ -1232,8 +1246,9 @@ class ServerNode(QGraphicsItemGroup):
         icon_dy = self.COLLAPSED_ICON_DY
         self._icon.setPos(0, icon_dy)
         self._glyph.setPos(0, icon_dy)
-        # v1.5: the ENVIRONMENT badge is hidden in the single-line layout (there is no
-        # second row), the EMULATED marker follows the raised marks of that line
+        # v1.5: the ENVIRONMENT chip is HIDDEN in the single-line layout (its band belongs to
+        # the expanded card; the alias line carries the icon's tone instead), the EMULATED
+        # marker follows the raised marks of that line
         self._apply_badges()
         self._apply_visual_state()
         if self.scene():

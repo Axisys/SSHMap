@@ -33,6 +33,7 @@ from _common import (bootstrap, check, finish, check_i18n_parity, check_i18n_for
 ROOT, WORK = bootstrap()  # BEFORE the app module imports (HOME isolation, offscreen)
 
 from PySide6.QtCore import QPoint  # noqa: E402
+from PySide6.QtGui import QColor  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
 app = QApplication.instance() or QApplication([])
@@ -85,16 +86,26 @@ check("§1 the resolver is pure and the vocabulary WINS the pick",
 check("§1 ...so a free-form map still gets a header (the FIRST tag, the primary label)",
       env_tag(["webfarm", "db"]) == "webfarm" and env_tag([]) == "")
 
+# A realistic record: the info plaque is what makes the card wide enough for the chip
+# (the chip lives on the alias row, so a MIN-width card has no room for it — its ICON
+# carries the environment alone, which is exactly the fallback the geometry defines).
+_FULL = dict(os_name="Ubuntu 22.04.3 LTS x86_64", cpu="Intel Xeon E5-2670 v3",
+             ram="32 GB DDR4", disk="512 GB SSD", ip="192.0.2.10")
 _card = ServerNode(ServerData(id="rel-env", alias="web-01", host="192.0.2.10", user="root",
-                              tags=["prod", "web"]))
+                              tags=["prod", "web"], **_FULL))
 check("§1 the badge is TEXT (the meaning) on a tint of the tag colour (the redundant channel)",
       _card._env_badge.text() == "prod"
       and _card._env_chip.pen().color().name() == ServerNode.tag_color("prod").name()
       and _card._env_badge.brush().color().name()
       != _card._env_chip.pen().color().name())
-_plain = ServerNode(ServerData(id="rel-env2", alias="web-01", host="192.0.2.10", user="root"))
+check("§1 v1.5.6 the colour channel is the card's ICON — the strip is gone",
+      _card._icon.brush().color().name() == ServerNode.tag_color("prod").name()
+      and not hasattr(_card, "_tag_segments")
+      and "TAG_STRIP" not in _src("graphics", "server_node.py"))
+_plain = ServerNode(ServerData(id="rel-env2", alias="web-01", host="192.0.2.10", user="root",
+                               **_FULL))
 _long = ServerNode(ServerData(id="rel-env4", alias="web-01", host="192.0.2.10", user="root",
-                              tags=["free-form-" + "x" * 60]))
+                              tags=["free-form-" + "x" * 60], **_FULL))
 check("§1 ...and it does not enter the card's WIDTH formula (an arbitrarily long tag does not "
       "stretch the card)",
       _long._current_width == _plain._current_width
@@ -102,18 +113,21 @@ check("§1 ...and it does not enter the card's WIDTH formula (an arbitrarily lon
       and _long._env_badge.toolTip() == "free-form-" + "x" * 60,
       f"{_plain._current_width} vs {_long._current_width} ({_long._env_badge.text()!r})")
 _band = _card._env_chip.path().boundingRect()
-check("§1 the band is the measured free one (below the top edge, above the alias)",
-      0.0 <= _band.top() and _band.bottom() <= 18.0
-      and _band.left() >= ServerNode.LABEL_X
-      and _band.right() <= _card._current_width - ServerNode.BADGE_RIGHT_INSET,
-      str(_band))
+_alias_row = _card._alias.boundingRect().translated(_card._alias.pos())
+check("§1 v1.5 the chip sits in the free band ABOVE the alias (left-aligned with it)",
+      0.0 <= _band.top() and _band.bottom() <= _alias_row.top() + 0.01
+      and _band.left() >= ServerNode.LABEL_X - 0.01
+      and _band.right() <= _card._current_width - ServerNode.BADGE_RIGHT_INSET + 0.01,
+      f"{_band} alias row={_alias_row}")
 check("§1 a card without tags builds NO badge item (byte-identical to a pre-v1.5 card)",
       _plain._env_chip is None and _plain._env_badge is None and _plain._demo_chip is None
-      and _plain._demo_badge is None)
+      and _plain._demo_badge is None
+      and _plain._icon.brush().color().name() == QColor(theme.NODE_ICON_BG).name())
 _plain.toggle_collapsed()
 _card.toggle_collapsed()
-check("§1 a collapsed card hides the badge (one line, no second row)",
+check("§1 a collapsed card hides the chip (one line, no band) and keeps the TONE",
       _card._env_badge.isVisible() is False
+      and _card._icon.brush().color().name() == ServerNode.tag_color("prod").name()
       and _card._current_height == ServerNode.COLLAPSED_HEIGHT)
 _card.toggle_collapsed()
 
@@ -144,9 +158,10 @@ check("§2 the saved position is cleared with the NULL sentinel (a merge write c
       '{"x": None, "y": None}' in _src("ui", "main_window.py")
       and MW.MainWindow._saved_position({"x": None, "y": None}) is None
       and MW.MainWindow._saved_position(["a", "b"]) is None)
-check("§2 it costs NO new menu entry, action or hotkey (the rejected \"Reset positions\")",
+check("§2 it costs NO new menu entry, action or hotkey (the rejected \"Reset positions\"; "
+      "the 56 of v1.5.5 are the inventory pair)",
       not any("reset_panel" in a or "reset.position" in a for a in HR.HOTKEY_ACTIONS)
-      and len(HR.HOTKEY_ACTIONS) == 54)
+      and len(HR.HOTKEY_ACTIONS) == 56)
 
 win = make_main()
 _legend = win.legend
@@ -264,13 +279,15 @@ print("== §4 the release state & the \"no new contract\" audit ==")
 # ════════════════════════════════════════════════════════════════════════════
 
 check_release_state(ROOT)
-check("§4 the pin quotes the SHIPPED version (v1.5.4; this file still describes the closing "
+check("§4 the pin quotes the SHIPPED version (v1.5.6; this file still describes the closing "
       "release of the 1.5 line, whose section it gates)",
-      EXPECTED_APP_VERSION == "1.5.4" and re.fullmatch(r"1\.5\.4", EXPECTED_APP_VERSION) is not None)
+      EXPECTED_APP_VERSION == "1.5.6" and re.fullmatch(r"1\.5\.6", EXPECTED_APP_VERSION) is not None)
 check("§4 the i18n pin moved on by the closing release's ONE key, v1.5.1's four, v1.5.2's "
-      "thirteen (the activity panel's chrome), v1.5.3's twenty (the freshness family) and "
-      "v1.5.4's eleven (the aggregate, the lens and the filter plaque)",
-      EXPECTED_I18N_KEYS == 692)
+      "thirteen (the activity panel's chrome), v1.5.3's twenty (the freshness family), "
+      "v1.5.4's eleven (the aggregate, the lens and the filter plaque), v1.5.5's fourteen "
+      "(the inventory columns, the age captions and the report) and v1.5.6's two (the Export "
+      "menu and the third first-run door) on top",
+      EXPECTED_I18N_KEYS == 708)
 check_i18n_parity(_langs)
 check_i18n_format(_langs)
 check("§4 every language carries the marker key with a non-empty value",
@@ -297,8 +314,9 @@ check("§4 no new config key (the settings hub still collects 22)",
       len(_hub.collect()) == 22, str(len(_hub.collect())))
 _hub.close()
 check("§4 no new action and no new empty default of THIS release (the registry grew with "
-      "the two v1.5.1 File actions, the v1.5.2 View item and the v1.5.3 freshness pair after it)",
-      len(HR.HOTKEY_ACTIONS) == 54 and len(HR.empty_default_action_ids()) == 31)
+      "the two v1.5.1 File actions, the v1.5.2 View item, the v1.5.3 freshness pair and the "
+      "v1.5.5 inventory pair after it)",
+      len(HR.HOTKEY_ACTIONS) == 56 and len(HR.empty_default_action_ids()) == 33)
 check("§4 no new theme field (the palette is the v1.5rc1 one)",
       len(dataclasses.fields(theme.Theme)) == 60)
 _deps = {"PySide6", "paramiko", "keyring", "wcwidth"}
@@ -308,8 +326,8 @@ check("§4 no new dependency (the four pinned ones and nothing else)",
       and not re.search(r"^\s*(?!PySide6|paramiko|keyring|wcwidth|#)[A-Za-z][\w.-]*\s*[><=]",
                         _req, re.M))
 check("§4 the version constants agree everywhere (version.py ↔ pyproject ↔ requirements)",
-      __import__("version").APP_VERSION == "1.5.4"
-      and '"1.5.4"' in _src("version.py") and 'version = "1.5.4"' in _src("pyproject.toml"))
+      __import__("version").APP_VERSION == "1.5.6"
+      and '"1.5.6"' in _src("version.py") and 'version = "1.5.6"' in _src("pyproject.toml"))
 check("§4 VERSION_FORMAT did NOT move (the project schema is unchanged)",
       __import__("version").VERSION_FORMAT == "0.9")
 

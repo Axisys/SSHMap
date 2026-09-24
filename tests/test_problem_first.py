@@ -555,10 +555,11 @@ print("== §4 the release state ==")
 # ════════════════════════════════════════════════════════════════════════════
 
 check("§4 the version pin is the version this file describes",
-      EXPECTED_APP_VERSION == "1.5.4" and _version.APP_VERSION == "1.5.4",
+      EXPECTED_APP_VERSION == "1.5.6" and _version.APP_VERSION == "1.5.6",
       f"{EXPECTED_APP_VERSION} / {_version.APP_VERSION}")
-check("§4 the i18n pin counts the SHIPPED release (681 + 11 of v1.5.4)",
-      EXPECTED_I18N_KEYS == 692, str(EXPECTED_I18N_KEYS))
+check("§4 the i18n pin counts the SHIPPED release (681 + 11 of v1.5.4 + 14 of v1.5.5"
+      " + 2 of v1.5.6)",
+      EXPECTED_I18N_KEYS == 708, str(EXPECTED_I18N_KEYS))
 check("§4 the eleven new keys are present and non-empty in every language",
       all(str(LANGS[c].get(k, "")).strip() for k in NEW_KEYS for c in LANGS)
       and len(NEW_KEYS) == 11,
@@ -567,10 +568,12 @@ check("§4 the placeholders of the new keys match en in every language",
       all({m for m in re.findall(r"\{([A-Za-z_][A-Za-z0-9_]*)\}", LANGS[c][k])}
           == {m for m in re.findall(r"\{([A-Za-z_][A-Za-z0-9_]*)\}", LANGS["en"][k])}
           for k in NEW_KEYS for c in LANGS))
-check("§4 the keys are ADDITIVE (the pin moved by exactly the eleven)",
-      EXPECTED_I18N_KEYS - 681 == len(NEW_KEYS))
-check("§4 no new registry action (the lens and the plaque are controls, not menu items)",
-      len(HR.HOTKEY_ACTIONS) == 54 and len(HR.empty_default_action_ids()) == 31,
+check("§4 the eleven keys of THIS release stayed in the pin (the later releases only add)",
+      EXPECTED_I18N_KEYS >= 681 + len(NEW_KEYS)
+      and all(k in LANGS["en"] for k in NEW_KEYS))
+check("§4 no new registry action (the lens and the plaque are controls, not menu items; the "
+      "v1.5.5 inventory pair takes the registry to 56 / 33)",
+      len(HR.HOTKEY_ACTIONS) == 56 and len(HR.empty_default_action_ids()) == 33,
       f"{len(HR.HOTKEY_ACTIONS)} / {len(HR.empty_default_action_ids())}")
 check("§4 no new colour field (the release reuses the status tones and the declared shapes)",
       len(dataclasses.fields(theme.DARK)) == 60

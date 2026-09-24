@@ -259,8 +259,38 @@ def clear_cfg(*extra_paths: str) -> None:
 # in 12 i18n files + the APP_VERSION/requirements pins in 7 release-state sections).
 # The misses of the keys themselves against the code are caught by check_i18n_keys.py.
 # ─────────────────────────────────────────────────────────────────────────────
-EXPECTED_APP_VERSION = "1.5.4"   # the current release (a sentinel: it catches "a bump to the wrong version")
-EXPECTED_I18N_KEYS = 692        # the parity of the TRANSLATION keys (v1.5.4 — "trouble first: the map
+EXPECTED_APP_VERSION = "1.5.6"   # the current release (a sentinel: it catches "a bump to the wrong version")
+EXPECTED_I18N_KEYS = 708        # the parity of the TRANSLATION keys (v1.5.6 — "the customer requests: the
+                                # Export menu, a third first-run button, environment icons, buttons that
+                                # look like buttons": the SIXTH patch ON the released 1.5).
+                                # +2 keys × en/ru/zh/de: the new top-level menu (`menu.export` — the
+                                # container BETWEEN "Edit" and "Profile" that takes every export) and
+                                # the third door of the first screen (`empty.state.open_map` — "open an
+                                # existing map", between the primary action and the demo). The moved
+                                # export actions keep their `file.*` keys AND their ids (a `hotkeys`
+                                # value is keyed by the action id, so a rename would drop a user's
+                                # binding), the environment tone on the card's icon is a tag colour the
+                                # theme already carries and the framed collapse buttons are a QSS
+                                # registry entry — none of them is text.
+                                # (v1.5.5 — "the inventory: the list
+                                # mode becomes a report": the FIFTH patch ON the released 1.5).
+                                # +14 keys × en/ru/zh/de in three families: the new COLUMNS of the
+                                # table (`sidebar.list.port` / `.user` / `.status_age` / `.info_age` /
+                                # `.comment` — the captions of the fields the model already holds)
+                                # and the four COMPACT age forms of the two age cells
+                                # (`sidebar.list.age_now` / `.age_min` {minutes} / `.age_hours`
+                                # {hours} / `.age_days` {days}) — a table column cannot carry the
+                                # card's full sentences, and a CSV of them would not parse; the
+                                # REPORT itself (`file.copy_list`, `file.export_list`) with its
+                                # three reports (`status.list_copied` {count}, `status.list_exported`
+                                # {file} and `status.list_empty`). The sort keys, the delimiters,
+                                # the quoting rule and the empty-last ordering are BEHAVIOUR and
+                                # numbers, not text. The TWO new registry actions (`file.copy_list`
+                                # / `file.export_list`, both EMPTY defaults) move the action count
+                                # 54 → 56 and the assignable set 31 → 33; the hub's `collect()`
+                                # stays 22 keys (the mode and the sort live in memory / in the
+                                # view: no new `config.json` key).
+                                # (v1.5.4 — "trouble first: the map
                                 # answers 'where is the problem'": the FOURTH patch ON the released 1.5).
                                 # +11 keys × en/ru/zh/de in three families: the group AGGREGATE
                                 # (`group.status.empty` — "an empty group says so" — and

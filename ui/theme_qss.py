@@ -390,6 +390,27 @@ QTextEdit#StickyNoteEditor {{
     # never the decorative tone and never a new colour.
     "focus.widget": lambda t: f"border: {FOCUS_RING_WIDTH}px solid {t.accent_strong};",
     "focus.widget_off": lambda t: f"border: {FOCUS_RING_WIDTH}px solid transparent;",
+    # v1.5.6 (ROADMAP task 4): the two panel COLLAPSE buttons (the "◇" of the sidebar's
+    # bottom row and the map's corner overlay). They are plain QToolButtons — the frame
+    # the macro panel's collapse button already draws — and this entry is its ONE
+    # definition: a themed surface fill with a border, so the button READS as a button
+    # before the pointer arrives (an auto-raised button appears only under the cursor).
+    # The padding is deliberately tight: the glyph stays the whole point of the control.
+    "collapse.button": lambda t: f"""
+QToolButton {{
+    background-color: {t.surface_alt};
+    color: {t.text_primary};
+    border: 1px solid {t.base_bg};
+    border-radius: 4px;
+    padding: 2px 6px;
+}}
+QToolButton:hover {{
+    border: 1px solid {t.accent};
+}}
+QToolButton:pressed {{
+    background-color: {t.base_bg};
+}}
+""",
 }
 
 

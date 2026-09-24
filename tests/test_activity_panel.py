@@ -539,12 +539,12 @@ print("== §5 the release state and the 'no new contract' audit ==")
 
 check_release_state(ROOT)
 check("§5 EXPECTED_APP_VERSION is the shipped release (v1.5.2 was the second patch on 1.5;"
-      " the pin quotes the CURRENT one — v1.5.4 — like every topical file)",
-      EXPECTED_APP_VERSION == "1.5.4"
-      and re.fullmatch(r"1\.5\.4", EXPECTED_APP_VERSION) is not None)
+      " the pin quotes the CURRENT one — v1.5.6 — like every topical file)",
+      EXPECTED_APP_VERSION == "1.5.6"
+      and re.fullmatch(r"1\.5\.6", EXPECTED_APP_VERSION) is not None)
 check("§5 the i18n pin counts the shipped release (v1.5.2's 661 + v1.5.3's twenty"
-      " + v1.5.4's eleven)",
-      EXPECTED_I18N_KEYS == 692, str(EXPECTED_I18N_KEYS))
+      " + v1.5.4's eleven + v1.5.5's fourteen + v1.5.6's two)",
+      EXPECTED_I18N_KEYS == 708, str(EXPECTED_I18N_KEYS))
 check_i18n_parity(_langs)
 check_i18n_format(_langs)
 
@@ -568,9 +568,9 @@ check("§5 the ONE new action is registered with an EMPTY default (assignable, n
       and HR.default_sequence("view.toggle_activity") == ""
       and "view.toggle_activity" in HR.empty_default_action_ids()
       and HR.action_family("view.toggle_activity") == "view")
-check("§5 the registry grew 51 -> 52 in v1.5.2 (and 52 -> 54 with the v1.5.3 pair)"
-      " and the empty-default set 28 -> 29 (-> 31)",
-      len(HR.HOTKEY_ACTIONS) == 54 and len(HR.empty_default_action_ids()) == 31,
+check("§5 the registry grew 51 -> 52 in v1.5.2 (and 52 -> 54 with the v1.5.3 pair,"
+      " 54 -> 56 with the v1.5.5 inventory pair) and the empty-default set 28 -> 29 (-> 31, -> 33)",
+      len(HR.HOTKEY_ACTIONS) == 56 and len(HR.empty_default_action_ids()) == 33,
       f"{len(HR.HOTKEY_ACTIONS)} / {len(HR.empty_default_action_ids())}")
 
 _win = make_main()
@@ -602,7 +602,7 @@ check("§5 no new dependency (the four pinned ones and nothing else)",
                         _req, re.M))
 check("§5 VERSION_FORMAT did NOT move (the project schema is unchanged)",
       __import__("version").VERSION_FORMAT == "0.9"
-      and __import__("version").APP_VERSION == "1.5.4")
+      and __import__("version").APP_VERSION == "1.5.6")
 check("§5 the durable record stays the FILE — the ring is the second, memory-only home",
       "LOG_FILE" in _src("modules", "logger.py")
       and "MAX_LOG_SIZE_MB" in _src("modules", "logger.py")

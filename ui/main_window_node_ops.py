@@ -759,6 +759,37 @@ class NodeOpsMixin:
         self._mark_dirty()  # ← unsaved changes
         return True
 
+    def _copy_text_to_clipboard(self, text, message_key: str = "status.copied_to_clipboard",
+                                **kw) -> bool:
+        """Put TEXT on the clipboard and report it — the ONE text-clipboard helper (v1.5.5).
+
+        Every text copy of the application goes through here (the node's IP / hostname and,
+        since v1.5.5, the server list of the LIST mode), so the two rules live in ONE place:
+
+          * **the dead-object guard** — a copy can be triggered from a LATE callback (the
+            reverse-DNS thread answers after the window was closed): `QApplication
+            .clipboard()` / `statusBar()` are C++ objects and touching a dead one raises
+            `RuntimeError`. A copy that cannot happen is a silent False, never a crash in
+            a callback Qt no longer knows about;
+          * **the report** — the message carries the action's own words (`message_key` +
+            its placeholders, e.g. `value=` of `status.copied_to_clipboard`).
+
+        The copied text is `text`, NOT `value`: the placeholder of the node copy is spelled
+        `{value}`, and a caller must be able to pass it by keyword (the two names collided
+        once and made that call a TypeError).
+
+        Returns True when the text really reached the clipboard.
+        """
+        try:
+            QApplication.clipboard().setText(str(text))
+        except RuntimeError:
+            return False  # Qt teardown — the clipboard is already destroyed
+        try:
+            self.statusBar().showMessage(self.t(message_key, **kw))
+        except Exception:  # noqa: BLE001 — the hint must not undo a successful copy
+            pass
+        return True
+
     def _copy_node_info(self, node: "ServerNode", what: str = "ip"):
         """Copy the node's IP or hostname to the clipboard (v0.7.3).
 
@@ -766,14 +797,14 @@ class NodeOpsMixin:
         separate thread — with an unavailable resolver the GUI thread earlier
         froze on the DNS timeout.
         v0.9.9.3: the thread was moved to services/diagnostics.py (ReverseDnsThread).
+        v1.5.5: the copy itself is the shared `_copy_text_to_clipboard()` helper.
         """
         if node is None:
             return
 
         def _copy(value: str, what_: str):
-            QApplication.clipboard().setText(value)
-            self.statusBar().showMessage(self.t("status.copied_to_clipboard", value=value))
-            if self.log:
+            if self._copy_text_to_clipboard(
+                    value, "status.copied_to_clipboard", value=value) and self.log:
                 self.log.info(f"Copied {what_} to clipboard", extra={"alias": node.data.alias})
 
         if what == "hostname":

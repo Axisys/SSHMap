@@ -18,11 +18,17 @@ still be able to run the suite).
      naming convention, and `ROADMAP.md` plans no ALREADY RELEASED version — the "a released
      section is removed from the plan" rule, generalised beyond the one version it started with;
   §2 the counters the reference docs quote are the code's counters: the i18n key pin and the
-     action registry (its size and its EMPTY-default count);
-  §3 `DOCUMENTATION.md` is self-consistent: every `§N` reference resolves to a heading, the
-     contents list names every section, and every gotcha citation stays inside the numbered list
-     whose numbering `AGENTS.md` §7 shares (a "#13" must not mean two different items);
-  §4 `tests/INDEX.md` is fresh (the generator `_gen_index.py` is the single source of truth).
+     action registry (its size in EVERY spelling — bold or not, "actions" or "entries" — and its
+     EMPTY-default count);
+  §3 `DOCUMENTATION.md` is self-consistent: every `§N` reference resolves to a heading, a DOTTED
+     `§N.M` reference names `AGENTS.md` (that numbering is not this file's), the contents list names
+     every section, and every gotcha citation stays inside the numbered list whose numbering
+     `AGENTS.md` §7 shares (a "#13" must not mean two different items);
+  §4 `tests/INDEX.md` is fresh (the generator `_gen_index.py` is the single source of truth);
+  §5 the documentation rules `AGENTS.md` states are ENFORCED: the changelog never leaks into the two
+     reference docs (no release narrative), a chapter number never collides with a numbered section,
+     no block is copied between the files, and every cross-file `§`-reference resolves in the file
+     that it names.
 
 A missing documentation set is a SKIP, not a defect (they are gitignored): the guards are for
 the maintainer's working copy, and a fresh clone stays runnable.
@@ -139,7 +145,15 @@ import ui.hotkey_registry as HR  # noqa: E402 — the declarative list, no windo
 
 _N_ACTIONS = len(HR.HOTKEY_ACTIONS)
 _N_EMPTY = len(HR.empty_default_action_ids())
-_ACTION_FIGURE = re.compile(r"\b(\d+)\s+actions\b")
+# The markdown-tolerant pattern: "**51** actions" is the SAME claim as "51 actions" — the v1.5.5
+# review found figures wrapped in bold that the bare pattern could not see at all, so a guard over
+# this counter has to see every spelling of it.
+_ACTION_FIGURE = re.compile(r"\b(\d+)\*{0,2}\s+\*{0,2}actions\b")
+# "the registry stays 46" / "stays at **49 entries**" — the same counter in OTHER words, which is
+# how a stale registry size ("the action registry stays 46" in the v1.4.6 section, against a live 56)
+# survived the suite for a whole line.
+_REGISTRY_FIGURE = re.compile(r"registry\s+(?:holds|stays|is)\s+(?:at\s+)?\*{0,2}(\d+)\*{0,2}"
+                              r"(?:\s+(?:actions|entries))?")
 _EMPTY_FIGURE = re.compile(r"\b(\d+)\s+(?:of the \d+(?:\s+actions)?\s+ship this way"
                            r"|of them empty|with an EMPTY default|empty defaults)")
 for _name in REFERENCE_DOCS:
@@ -155,10 +169,13 @@ for _name in REFERENCE_DOCS:
     # about the present, and it is what this pair of checks exists to catch.
     _stale_actions = _stale_figures(_text, _ACTION_FIGURE, _N_ACTIONS)
     _stale_empty = _stale_figures(_text, _EMPTY_FIGURE, _N_EMPTY)
+    _stale_registry = _stale_figures(_text, _REGISTRY_FIGURE, _N_ACTIONS)
     check(f"§2 {_name}: every action figure is the live one or a chain successor",
           not _stale_actions, f"stale={_stale_actions}")
     check(f"§2 {_name}: every empty-default figure is the live one or a chain successor",
           not _stale_empty, f"stale={_stale_empty}")
+    check(f"§2 {_name}: every registry-size figure is the live one or a chain successor",
+          not _stale_registry, f"stale={_stale_registry}")
 
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -174,6 +191,19 @@ _refs = {m for m in re.findall(r"§\s?([0-9]{1,2}[a-z]?)", _doc)}
 check("§3 every §-reference resolves to a heading of this document",
       not (_refs - _headings - _TEST_SECTIONS),
       sorted(_refs - _headings - _TEST_SECTIONS))
+
+# The DOTTED form is AGENTS.md's ("§4.6"): this document numbers its sections 1..48 and has no §4.x,
+# so an unlabelled "§4.6" here resolves to §4 and quietly points the reader at the wrong section (the
+# v1.5.5 review found six of them — the theme, i18n, secrets and the hotkey registry all live in
+# OTHER sections of this file). Two dotted forms are legitimate: this file's OWN sub-sections, which
+# it declares in bold ("**§45.2 The two thin taps**"), and a reference that NAMES AGENTS.md.
+_DOTTED_REF = re.compile(r"§\s?(\d{1,2}\.[0-9]+)")
+_SELF_SUBSECTIONS = set(re.findall(r"\*\*§(\d{1,2}\.\d+)\b", _doc))
+_unlabelled_refs = sorted({m.group(0) for m in _DOTTED_REF.finditer(_doc)
+                           if m.group(1) not in _SELF_SUBSECTIONS
+                           and "AGENTS" not in _doc[max(0, m.start() - 40):m.start() + 40]})
+check("§3 a dotted §-reference in DOCUMENTATION.md names its file (the numbering is AGENTS.md's)",
+      not _unlabelled_refs, _unlabelled_refs)
 
 check("§3 the contents block is really there (a guard over nothing is useless)",
       "<summary><b>Contents" in _doc and "</details>" in _doc)
@@ -211,5 +241,123 @@ check("§4 every test file carries a module docstring (the INDEX table needs it)
 check("§4 tests/INDEX.md is fresh (update: python tests/_gen_index.py)",
       GI.extract_block(_read(GI.INDEX_PATH)) == _block,
       f"the «Suite files» block differs ({len(_names)} files)")
+
+
+# ════════════════════════════════════════════════════════════════════════════
+print("== §5 the documentation rules are enforced ==")
+# ════════════════════════════════════════════════════════════════════════════
+
+# §5 guards the rules AGENTS.md states in "THE DOCUMENTATION RULES": the changelog family never leaks
+# into the two reference docs, a chapter number never collides with a numbered section, no block is
+# copied between the files and a cross-file §-reference resolves where it points. The rules block
+# ITSELF is EXCLUDED from the marker scan (it names the forbidden words on purpose) — and its
+# existence is asserted, so the exclusion can never silently swallow the whole file.
+
+_RULES_BLOCK = {
+    "AGENTS.md": ("> **THE DOCUMENTATION RULES", "\n---\n"),
+    "DOCUMENTATION.md": ("> **THE RULES OF THIS FILE**", "\n\n"),
+}
+
+
+def _without_rules(name, text):
+    """The document without its rules block (None when the block is gone)."""
+    start, end = _RULES_BLOCK[name]
+    i = text.find(start)
+    j = text.find(end, i) if i >= 0 else -1
+    return None if i < 0 or j < 0 else text[:i] + text[j:]
+
+
+_rules_free = {n: _without_rules(n, _read(os.path.join(ROOT, n))) for n in REFERENCE_DOCS}
+check("§5 both reference docs still carry their rules block (the scans below exclude it)",
+      all(_rules_free.values()), [n for n in REFERENCE_DOCS if not _rules_free[n]])
+_rules_free = {n: (_rules_free[n] if _rules_free[n] is not None else _read(os.path.join(ROOT, n)))
+               for n in REFERENCE_DOCS}
+
+# The release narrative the changelog family owns: the patterns are deliberately HIGH-PRECISION (a
+# present-tense "no longer exists" or a dated PINNED decision is documentation, not history), and
+# every one of them reads 0 in the current docs.
+_HISTORY_MARKERS = (
+    ("'used to'", re.compile(r"\bused to\b", re.I)),
+    ("a removal story", re.compile(r"\b(?:was|were|has been|have been)\s+removed\b", re.I)),
+    ("the all-caps REMOVED status", re.compile(r"\bREMOVED\b")),
+    ("a change attributed to a release",
+     re.compile(r"\b(?:added|introduced|renamed|replaced|dropped|deleted|removed|fixed)\b"
+                r"[^.]{0,40}\b(?:in|since)\s+v?\d+(?:\.\d+)+", re.I)),
+    ("a -fix marker", re.compile(r"\bv?\d[\d.]*-fix\b")),
+    ("'fixed in vX.Y'", re.compile(r"\bfixed in v\d", re.I)),
+    ("a narrative 'in vX.Y <subject>'",
+     re.compile(r"\bin v\d+(?:\.\d+)+\s+(?:we|the|a|this|it)\b", re.I)),
+    ("a release verb",
+     re.compile(r"\bv\d+(?:\.\d+)+\s+(?:renamed|rewrote|rewritten|reworked|replaced|dropped"
+                r"|deleted|introduced|reintroduced)\b", re.I)),
+    ("'this release/version adds|changed|fixes'",
+     re.compile(r"\bthis (?:release|version|line)\s+"
+                r"(?:adds|added|changes|changed|fixes|fixed|brings|brought|replaces|replaced)\b")),
+)
+for _name in REFERENCE_DOCS:
+    _flat_text = re.sub(r"\s+", " ", _rules_free[_name])
+    _hits = []
+    for _label, _pat in _HISTORY_MARKERS:
+        _m = _pat.search(_flat_text)
+        if _m:
+            _hits.append(f"{_label}: …{_flat_text[max(0, _m.start() - 40):_m.end() + 40]}…")
+    check(f"§5 {_name} carries no release narrative (that is the changelog family's)",
+          not _hits, _hits[:2])
+
+# The numbering: a "## N." chapter must NEVER share a number with a "#### N." section — that is the
+# collision that made a bare "§5" mean both "Project format" and "5. ConnectionArrow".
+for _name in REFERENCE_DOCS:
+    _text = _rules_free[_name]
+    _chapters = set(re.findall(r"^## ([0-9]{1,2})\.", _text, re.M))
+    _sections = set(re.findall(r"^#### ([0-9]{1,2})[a-z]?\.", _text, re.M))
+    check(f"§5 {_name}: no chapter number collides with a numbered section",
+          not (_chapters & _sections),
+          f"chapters={sorted(_chapters)} sections={sorted(_sections)}" if _chapters & _sections else "")
+check("§5 DOCUMENTATION.md cites its chapters by NAME (they are unnumbered there)",
+      not re.findall(r"^## [0-9]{1,2}\.", _doc, re.M),
+      re.findall(r"^## [0-9]{1,2}\.", _doc, re.M))
+
+# A cross-file reference must resolve in the file it NAMES (§3 above only checks the in-file ones).
+_agt_text = _rules_free["AGENTS.md"]
+_doc_refs = set()
+for _line in _agt_text.splitlines():
+    if "DOCUMENTATION.md" in _line:
+        _doc_refs |= set(re.findall(r"§\s?([0-9]{1,2}[a-z]?)", _line))
+_doc_sections = set(re.findall(r"^#{2,4} ([0-9]{1,2}[a-z]?)\.", _doc, re.M))
+check("§5 every §-reference AGENTS.md makes into DOCUMENTATION.md resolves there",
+      not (_doc_refs - _doc_sections), sorted(_doc_refs - _doc_sections))
+_agt_refs = set()
+for _line in _doc.splitlines():
+    if "AGENTS" in _line:
+        _agt_refs |= set(re.findall(r"§\s?([0-9]{1,2}\.[0-9]+)", _line))
+_agt_sections = set(re.findall(r"^### (4\.[0-9]+)", _agt_text, re.M))
+check("§5 every §-reference DOCUMENTATION.md makes into AGENTS.md resolves there",
+      not (_agt_refs - _agt_sections), sorted(_agt_refs - _agt_sections))
+
+# No block is copied between the two files (or repeated inside one) — a fact that moves must be
+# DELETED from its old home, and a copied block is the shape the drift takes.
+_DUP_MIN_LINES, _DUP_MIN_CHARS = 4, 200
+
+
+def _paragraphs(text):
+    out = []
+    for _para in re.split(r"\n\s*\n", text):
+        _lines = [l.strip() for l in _para.splitlines() if l.strip()]
+        if len(_lines) < _DUP_MIN_LINES or len(" ".join(_lines)) < _DUP_MIN_CHARS:
+            continue
+        out.append((re.sub(r"\s+", " ", " ".join(_lines)).strip(), _lines[0][:60]))
+    return out
+
+
+_paras = {n: _paragraphs(_rules_free[n]) for n in REFERENCE_DOCS}
+_shared = collections.Counter(k for k, _ in _paras["AGENTS.md"]) & \
+          collections.Counter(k for k, _ in _paras["DOCUMENTATION.md"])
+check("§5 no block is copied between AGENTS.md and DOCUMENTATION.md",
+      not _shared, [k[:70] for k in list(_shared)[:2]])
+for _name in REFERENCE_DOCS:
+    _counted = collections.Counter(k for k, _ in _paras[_name])
+    _dup = [k for k, n in _counted.items() if n > 1]
+    check(f"§5 {_name} has no block duplicated inside itself", not _dup,
+          [k[:70] for k in _dup[:2]])
 
 finish()

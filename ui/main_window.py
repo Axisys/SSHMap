@@ -79,8 +79,11 @@ except ImportError:
 
 try:  # v0.9.9.4: sidebar cluster (tree, tag filter, status markers, context menu)
     from .sidebar import SidebarPanel
+    # v1.5.5 (ROADMAP task 2): the inventory report — the pure CSV/TSV writer of the table
+    from .sidebar import list_delimiter, list_table_text
 except ImportError:
     from sidebar import SidebarPanel
+    from sidebar import list_delimiter, list_table_text
 
 try:  # v1.5rc3 (ROADMAP task 2): the status bar that can offer an Undo
     from .status_bar import UndoStatusBar
@@ -1322,6 +1325,9 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
                 continue
             try:
                 btn.setIcon(_diamond_icon())
+                # v1.5.6 (ROADMAP task 4): the FRAME is a QSS VALUE of the same kind —
+                # the `collapse.button` entry is re-applied with the icon ink.
+                self._style_collapse_btn(btn)
             except RuntimeError:
                 continue  # Qt teardown
         # The command palette builds its rows on open — re-theme the OPEN one.
@@ -1694,9 +1700,13 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         # collapse button lives in the SidebarPanel's bottom row (self.sidebar.collapse_btn);
         # icon/tooltip/wiring — in _setup_menubar (after the QAction is created).
         self._map_collapse_btn = QToolButton(self.view)
-        self._map_collapse_btn.setAutoRaise(True)
         self._map_collapse_btn.setToolTip("Map")  # fallback without i18n
+        self._style_collapse_btn(self._map_collapse_btn)   # v1.5.6: the button FRAME
         self.view.resized.connect(self._position_map_collapse_btn)
+        # v1.5.6: the corner is the VIEWPORT's, and a scrollbar that appears or disappears
+        # resizes it without resizing the view — so the placement follows the two ranges too.
+        for _bar in (self.view.verticalScrollBar(), self.view.horizontalScrollBar()):
+            _bar.rangeChanged.connect(lambda *_a: self._position_map_collapse_btn())
         self._position_map_collapse_btn()
 
         # v0.9.8: map search (Ctrl+F) — a floating bar over the canvas
@@ -2671,6 +2681,21 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         self._sync_status_bar_overflow(width)
         self._sync_overlay_priority()
 
+    def _style_collapse_btn(self, btn) -> None:
+        """v1.5.6 (ROADMAP task 4): give a panel collapse button its FRAME.
+
+        The two "◇" corners are plain QToolButtons — no `setAutoRaise` — and their look
+        comes from the ONE `collapse.button` entry of the QSS registry (a QSS string is a
+        VALUE, so it is re-applied by `_refresh_icons()` on a theme switch, next to the
+        icon ink). Never raises: a cosmetic style must not be able to break the chrome.
+        """
+        if btn is None or theme_qss is None:
+            return
+        try:
+            theme_qss.refresh(btn, "collapse.button")
+        except RuntimeError:
+            pass  # Qt teardown — the button is already destroyed
+
     def _mark_toolbar_mirror(self, action) -> None:
         """v1.3.3.3: keep a toolbar button that MIRRORS a menu action shortcut-free.
 
@@ -2752,23 +2777,6 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         # second import path of the same family; both add their batch as ONE undo command.
         self._add_menu_action(file_menu, "file.import_ssh_config",
                               self._import_servers_from_ssh_config, "file.import_ssh_config")
-        # v0.9.1: export the map to an image (PNG/JPEG)
-        file_menu.addSeparator()
-        self._add_menu_action(file_menu, "file.export_png", self._export_map_image, "file.export_png")
-        # v0.9.5: export the map to drawio (.drawio)
-        self._add_menu_action(file_menu, "file.export_drawio", self._export_map_drawio,
-                              "file.export_drawio")
-        # v0.9.9.7: export the map to PDF (QPdfWriter on top of render_to_pixmap)
-        self._add_menu_action(file_menu, "file.export_pdf", self._export_map_pdf, "file.export_pdf")
-        # v1.3.3.7: export the map to SVG (QSvgGenerator — the vector member of the set)
-        self._add_menu_action(file_menu, "file.export_svg", self._export_map_svg, "file.export_svg")
-        # v1.5.1 (ROADMAP tasks 1/2): the two IMAGE paths of the same machinery — the 2×
-        # render straight to the clipboard (the CURRENT theme, NO palette question) and the
-        # fixed 1600×900 @2× poster of the documentation. Both are registry actions with an
-        # EMPTY default, so the keyboard can reach them through the Hotkeys tab.
-        self._add_menu_action(file_menu, "file.copy_map", self._copy_map_image, "file.copy_map")
-        self._add_menu_action(file_menu, "file.docs_frame", self._export_docs_frame,
-                              "file.docs_frame")
         file_menu.addSeparator()
         self._add_menu_action(file_menu, "file.exit", self.close, "file.exit")
 
@@ -2814,6 +2822,48 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
                               "node.collect_info")
         self._add_menu_action(edit_menu, "ctx.diagnose", self._diagnose_node,
                               "node.diagnose")
+
+        # Export menu
+        # The ONE home of everything that LEAVES the application. It is a CONTAINER, not a
+        # new family: the actions keep their ids and their `file.*` keys, because a
+        # `config.json` `hotkeys` value is keyed by the ACTION ID (a rename would drop every
+        # user's binding silently) and the Hotkeys tab groups by the id's family. Three
+        # groups, separated by the SUBJECT of the report: the map IMAGE exports, the two
+        # image paths of the clipboard/poster family, and the DATA reports (the inventory
+        # table of the LIST mode). The two DATA items are ENABLED only while the table
+        # exists (`_sync_list_mode` — the one place the mode changes).
+        export_menu = menubar.addMenu(self.t("menu.export") if self._i18n_available else "Export")
+        self._register_i18n(export_menu, "menu.export")
+        # v0.9.1: export the map to an image (PNG/JPEG)
+        self._add_menu_action(export_menu, "file.export_png", self._export_map_image,
+                              "file.export_png")
+        # v0.9.5: export the map to drawio (.drawio)
+        self._add_menu_action(export_menu, "file.export_drawio", self._export_map_drawio,
+                              "file.export_drawio")
+        # v0.9.9.7: export the map to PDF (QPdfWriter on top of render_to_pixmap)
+        self._add_menu_action(export_menu, "file.export_pdf", self._export_map_pdf,
+                              "file.export_pdf")
+        # v1.3.3.7: export the map to SVG (QSvgGenerator — the vector member of the set)
+        self._add_menu_action(export_menu, "file.export_svg", self._export_map_svg,
+                              "file.export_svg")
+        # v1.5.1 (ROADMAP tasks 1/2): the two IMAGE paths of the same machinery — the 2×
+        # render straight to the clipboard (the CURRENT theme, NO palette question) and the
+        # fixed 1600×900 @2× poster of the documentation. Both are registry actions with an
+        # EMPTY default, so the keyboard can reach them through the Hotkeys tab.
+        export_menu.addSeparator()
+        self._add_menu_action(export_menu, "file.copy_map", self._copy_map_image, "file.copy_map")
+        self._add_menu_action(export_menu, "file.docs_frame", self._export_docs_frame,
+                              "file.docs_frame")
+        # v1.5.5 (ROADMAP tasks 2/3): the INVENTORY family — the server table of the LIST
+        # mode leaves the application: the visible table to the clipboard as TSV (one paste
+        # into a spreadsheet) and to a file as CSV or TSV. A different SUBJECT from the map
+        # exports above (a report of the DATA, not a picture of the map), which is why the
+        # two groups are separated.
+        export_menu.addSeparator()
+        self.act_copy_list = self._add_menu_action(
+            export_menu, "file.copy_list", self._copy_list_table, "file.copy_list")
+        self.act_export_list = self._add_menu_action(
+            export_menu, "file.export_list", self._export_list_table, "file.export_list")
 
         # Profile menu
         profile_menu = menubar.addMenu(self.t("menu.profile") if self._i18n_available else "Profile")
@@ -2917,10 +2967,12 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         # at the bottom right (the sidebar's bottom row / the map's right BOTTOM corner — the top is
         # reserved for the minimap per the new discussions).
         self.sidebar.collapse_btn.setIcon(_diamond_icon())
+        self._style_collapse_btn(self.sidebar.collapse_btn)   # v1.5.6: the FRAME (task 4)
         if self._i18n_available:
             self.sidebar.collapse_btn.setToolTip(self.t("view.toggle_sidebar"))
         self.sidebar.collapse_clicked.connect(lambda: self.act_show_sidebar.toggle())
         self._map_collapse_btn.setIcon(_diamond_icon())
+        self._style_collapse_btn(self._map_collapse_btn)
         if self._i18n_available:
             self._map_collapse_btn.setToolTip(self.t("view.toggle_map"))
         self._map_collapse_btn.clicked.connect(lambda: self.act_show_map.toggle())
@@ -3824,12 +3876,24 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         the startup config and the settings dialog never rebuild the tree twice. Only a
         REAL switch refreshes the rows (`refresh_sidebar()` — the one composition hook
         every add/remove/import/load/undo already passes through).
+
+        v1.5.5 (ROADMAP task 2): the two INVENTORY actions follow the mode. "Copy List" and
+        "Export List…" report the TABLE, so they are enabled exactly while the table exists
+        — a disabled item (the `act_backups` pattern for "no project is open") is the honest
+        affordance for "there is no list on screen right now"; the enable state is applied on
+        EVERY call, not only on a real switch, because the actions are built after the first
+        `_sync_list_mode()` of the startup path.
         """
         panel = getattr(self, "sidebar", None)
         if panel is None:
             return
         try:
-            if panel.set_list_mode(bool(getattr(self, "_map_collapsed", False))):
+            list_mode = bool(getattr(self, "_map_collapsed", False))
+            for action in (getattr(self, "act_copy_list", None),
+                           getattr(self, "act_export_list", None)):
+                if action is not None:
+                    action.setEnabled(list_mode)
+            if panel.set_list_mode(list_mode):
                 self.refresh_sidebar()
         except RuntimeError:
             pass  # Qt teardown — the panel or its tree is already destroyed
@@ -3902,7 +3966,8 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         (the diamond is "at the bottom" both before and after collapsing); the top is
         reserved for the minimap per the new discussions. Repositioned on resizeEvent
         (the MapView.resized signal: a window resize, a splitter-handle drag,
-        a "Terminals" dock size change).
+        a "Terminals" dock size change) and whenever a scrollbar appears or disappears
+        (their `rangeChanged` — the viewPORT is what the corner is measured against).
 
         v1.5rc4 (ROADMAP task 7): the third rule of the floating-panel priority — the
         diamond is NEVER covered by a panel. The corner is where the legend (bottom-left,
@@ -3910,19 +3975,28 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         window; the button therefore probes a few candidate spots around the panel that
         covers the corner and takes the first one that is free. Nothing else moves: the
         USER's panel position always wins over the window's own button.
+
+        v1.5.6 (customer request): the corner is the VIEWPORT's, not the view's. The view's
+        own rect INCLUDES the frame and the scrollbars, so the button used to be drawn ON
+        TOP of the sliders; `viewport().geometry()` already excludes both. The extra
+        `COLLAPSE_BTN_RAISE` lifts it out of the very corner, so the two collapse buttons
+        (the sidebar's bottom row and this overlay) sit at visibly different levels.
         """
         btn = getattr(self, "_map_collapse_btn", None)
         view = getattr(self, "view", None)
         if btn is None or view is None:
             return
         try:
-            w, h = view.width(), view.height()
+            vp = view.viewport()
+            corner = vp.geometry()          # the view's coordinates WITHOUT frame/scrollbars
+            w, h = corner.width(), corner.height()
             if w <= 0 or h <= 0:
                 return
             bw = max(btn.sizeHint().width(), 24)
             bh = max(btn.sizeHint().height(), 24)
-            x = max(4, w - bw - 8)
-            y = max(4, h - bh - 8)
+            x = max(4, corner.right() + 1 - bw - self.COLLAPSE_BTN_MARGIN)
+            y = max(4, corner.bottom() + 1 - bh - self.COLLAPSE_BTN_MARGIN
+                    - self.COLLAPSE_BTN_RAISE)
             panels = self._overlay_panel_rects(view)
             if panels:
                 for candidate in self._collapse_btn_candidates(x, y, bw, bh, w, h, panels):
@@ -4789,6 +4863,94 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
                 self, self.t("msg.error_title"),
                 self.t("msg.export_failed", error=str(e)))
 
+    # ── v1.5.5 (ROADMAP tasks 2/3): the inventory report ─────────────────────────
+
+    def _list_report_rows(self) -> list:
+        """The visible LIST table (the header row first) — or [] when there is no table.
+
+        The ONE reader the two report actions share: the panel builds the rows (they ARE
+        the cells `list_cell_values()` produced, in the order the user sorted them), so the
+        report and the screen can never disagree about the columns or the content.
+        """
+        panel = getattr(self, "sidebar", None)
+        if panel is None:
+            return []
+        try:
+            return panel.list_report_rows()
+        except RuntimeError:
+            return []  # Qt teardown — the panel is already destroyed
+
+    def _report_table_unavailable(self) -> None:
+        """Say WHY there is nothing to report (the two actions share the sentence)."""
+        try:
+            self.statusBar().showMessage(self.t("status.list_empty"))
+        except Exception:  # noqa: BLE001 — a hint must not break the action
+            pass
+
+    def _copy_list_table(self):
+        """Copy the VISIBLE server table to the clipboard as TSV (v1.5.5, ROADMAP task 2).
+
+        TSV, not CSV, on purpose: the clipboard is for the next PASTE, and a spreadsheet
+        splits tab-separated text into cells natively (a comma-separated paste lands in one
+        column). The text comes from the pure `list_table_text()` — the SAME writer the file
+        export uses, so a value with a comma, a quote or a line break cannot be copied
+        differently from the way it is exported.
+        """
+        rows = self._list_report_rows()
+        if not rows:
+            self._report_table_unavailable()
+            return
+        text = list_table_text(rows, list_delimiter("tsv"))
+        count = len(rows) - 1        # the header is not a server
+        if self._copy_text_to_clipboard(text, "status.list_copied", count=count) and self.log:
+            self.log.info("Server list copied to the clipboard",
+                          extra={"rows": count, "columns": len(rows[0])})
+
+    def _export_list_table(self):
+        """Export the VISIBLE server table as CSV or TSV (v1.5.5, ROADMAP task 2).
+
+        The ordinary save-dialog pattern of every export of this window (the extension from
+        the chosen filter, the status bar on success, `msg.export_failed` on a failure), with
+        ONE deliberate difference: the file is written as **UTF-8 with a BOM**. An inventory
+        carries aliases, OS names and comments in the user's own alphabet, and the BOM is
+        what makes Excel open such a CSV correctly instead of as mojibake — the report is the
+        artefact a human passes on, not an internal file.
+
+        The columns are the VISIBLE ones and the rows are the VISIBLE rows in their visible
+        order (the filters and the sort included): an export is "what I am looking at",
+        documented — the same rule the map's copy follows.
+        """
+        rows = self._list_report_rows()
+        if not rows:
+            self._report_table_unavailable()
+            return
+        path, selected_filter = QFileDialog.getSaveFileName(
+            self, self.t("file.export_list"), "",
+            "CSV — Comma Separated Values (*.csv);;TSV — Tab Separated Values (*.tsv)")
+        if not path:
+            return
+        # The format follows the CHOSEN filter, and a typed extension wins over both.
+        fmt = "tsv" if "TSV" in (selected_filter or "") else "csv"
+        lowered = str(path).lower()
+        if lowered.endswith(".tsv"):
+            fmt = "tsv"
+        elif lowered.endswith(".csv"):
+            fmt = "csv"
+        else:
+            path += f".{fmt}"
+        try:
+            with open(path, "w", encoding="utf-8-sig", newline="") as f:
+                f.write(list_table_text(rows, list_delimiter(fmt)))
+            self.statusBar().showMessage(
+                self.t("status.list_exported", file=os.path.basename(path)))
+            if self.log:
+                self.log.info("Server list exported",
+                              extra={"file": path, "format": fmt, "rows": len(rows) - 1})
+        except Exception as e:  # noqa: BLE001 — a GUI action must not crash the app
+            QMessageBox.critical(
+                self, self.t("msg.error_title"),
+                self.t("msg.export_failed", error=str(e)))
+
     def _set_background_image(self):
         """Choose and set the map background image (v0.9.1 #2/#3)."""
         path, _ = QFileDialog.getOpenFileName(
@@ -5499,6 +5661,14 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
 
         self.empty_state = EmptyStateOverlay(self.view)
         self.empty_state.add_server_requested.connect(self._add_server)
+        # v1.5.6 (ROADMAP task 2): the THIRD door of the first screen — an existing
+        # project file. The widget only emits; the dialog and the load belong to the
+        # window, and the door is the ORDINARY project-open path (the same one File → Open
+        # and a dropped project use), so every downstream rule is shared.
+        try:
+            self.empty_state.open_map_requested.connect(self._open_project)
+        except (RuntimeError, AttributeError):
+            pass  # a stripped build without the signal — the other two doors still work
         # v1.5rc3 (ROADMAP task 1): the second button — the demo map. The SAME method the
         # Help item calls, so the two entry points cannot diverge (and both go through
         # the ordinary project load path).
@@ -5557,6 +5727,15 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
     # ── v1.4.5 (ROADMAP task 4): the legend panel ────────────────────────────────
 
     LEGEND_MARGIN = 12          # the inset of the DEFAULT (bottom-left) position
+
+    # ── v1.5.6 (customer request): the map collapse button keeps out of the corner ──
+
+    #: The inset of the map's collapse button from the VIEWPORT's bottom-right corner.
+    #: The viewport already excludes the frame AND the scrollbars (the button used to be
+    #: placed in the VIEW's corner, i.e. on top of the sliders), and the extra raise lifts
+    #: it out of the very corner so the two collapse buttons sit at different levels.
+    COLLAPSE_BTN_MARGIN = 8
+    COLLAPSE_BTN_RAISE = 1
 
     # ── v1.5 (ROADMAP): the floating panels re-attach by dropping on an edge ──────
 

@@ -18,6 +18,12 @@ v1.5rc3 (ROADMAP tasks 1 and 4) adds the two halves of "and then what?":
     (`palette_hotkey()` reads the action registry) and the `?` key of the cheat-sheet
     — the first screen stops being a dead end for a user who has no servers yet.
 
+v1.5.6 (ROADMAP task 2) puts the **third door** between those two: "Open an existing
+map" — a user who already has a project file must not go through the menus to find it.
+The widget only EMITS (`open_map_requested`); the window owns the dialog and calls its
+ORDINARY project-open path (`_open_project` → `_load_project_at`), the same one
+File → Open and a dropped project use.
+
 The pinned decisions (ROADMAP v1.4.5, task 2 — unchanged by the new pieces):
 
   * **it never blocks the canvas.** The hint card is `WA_TransparentForMouseEvents`
@@ -106,11 +112,15 @@ class EmptyStateOverlay(QWidget):
     Signals:
         add_server_requested — the "Add your first server" button was clicked (the
         window opens the AddServer dialog through its ordinary path);
+        open_map_requested — v1.5.6: "Open an existing map" was clicked (the window
+        runs its ORDINARY project-open path — the File → Open entry point);
         example_requested — v1.5rc3: "Open the example map" was clicked (the window
         loads the in-code demo project through the ORDINARY project load path).
     """
 
     add_server_requested = Signal()
+    #: v1.5.6 (ROADMAP task 2): the third door — an existing project file on disk.
+    open_map_requested = Signal()
     #: v1.5rc3 (ROADMAP task 1): the second way out of an empty map — the demo project.
     example_requested = Signal()
 
@@ -145,6 +155,18 @@ class EmptyStateOverlay(QWidget):
         if theme_qss is not None:
             theme_qss.refresh(self.btn_add_first, "empty_state.button")
         self.btn_add_first.hide()
+
+        # v1.5.6 (ROADMAP task 2): "Open an existing map" — the door BETWEEN the two:
+        # a user who already saved a project must not travel through File → Open to find
+        # it, and the demo is not what they came for either. It shares the neutral look of
+        # the example button (the accent fill belongs to the ONE primary action) and is
+        # wired the way the other two are: the widget only emits, the window owns the dialog.
+        self.btn_open_map = QPushButton(_t("empty.state.open_map"), self._view)
+        self.btn_open_map.setObjectName("EmptyStateOpenButton")
+        self.btn_open_map.setMinimumHeight(self.BUTTON_H)
+        self.btn_open_map.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_open_map.clicked.connect(self.open_map_requested)
+        self.btn_open_map.hide()
 
         # v1.5rc3 (ROADMAP task 1): "Open the example map" — the neutral secondary
         # action (the accent fill belongs to the ONE primary action above), and the
@@ -192,8 +214,18 @@ class EmptyStateOverlay(QWidget):
     def retranslate(self):
         """Re-read the strings (language switch)."""
         self.btn_add_first.setText(_t("empty.state.add_first"))
+        self.btn_open_map.setText(_t("empty.state.open_map"))
         self.btn_example.setText(_t("example.open"))
         self.update()
+
+    def buttons(self) -> tuple:
+        """The three doors of the first screen, in reading order (v1.5.6).
+
+        ONE declaration: `place()`, `set_state_visible()` and the raise/focus walks all
+        read THIS tuple, so a fourth door would be added in one place. The order is the
+        story the screen tells — add a server, open a saved map, look at the example.
+        """
+        return (self.btn_add_first, self.btn_open_map, self.btn_example)
 
     # ── Visibility ───────────────────────────────────────────────────────────
 
@@ -211,14 +243,14 @@ class EmptyStateOverlay(QWidget):
         """
         visible = bool(visible)
         self._visible = visible
-        for widget in (self, self.btn_add_first, self.btn_example):
+        for widget in (self,) + self.buttons():
             try:
                 widget.setVisible(visible)
             except RuntimeError:
                 continue  # Qt teardown — the widget is already destroyed
         if visible:
             self.raise_()
-            for button in (self.btn_add_first, self.btn_example):
+            for button in self.buttons():
                 try:
                     button.raise_()
                 except RuntimeError:
@@ -227,22 +259,26 @@ class EmptyStateOverlay(QWidget):
     # ── Geometry ─────────────────────────────────────────────────────────────
 
     def place(self, view_w: int, view_h: int) -> None:
-        """Center the card (a bit above the middle) and put the two buttons under it.
+        """Center the card (a bit above the middle) and put the THREE buttons under it.
 
         Called by the window on every view resize — the same split as the minimap
         and the legend: the window owns the placement, the widget owns its painting.
-        The buttons share the row: the primary one first, the example second, both
-        squeezed into the card when the view is narrow (their labels elide).
+        The buttons share ONE row in the order of `buttons()`: the primary action first,
+        then "open an existing map", then the example. They are squeezed into the card
+        when the view is narrow (their labels elide — a QPushButton elides its own text).
         """
         title_fm = QFontMetrics(self._title_font)
         hint_fm = QFontMetrics(self._hint_font)
         lines = (self.title_text(), self.hint_text(), self.palette_text())
         max_text_w = max(fm.horizontalAdvance(line) for fm, line in
                          ((title_fm, lines[0]), (hint_fm, lines[1]), (hint_fm, lines[2])))
-        btn_add_w = max(self.btn_add_first.sizeHint().width(), self.BUTTON_MIN_W)
-        btn_ex_w = max(self.btn_example.sizeHint().width(), self.BUTTON_MIN_W)
-        width = max(max_text_w, self.btn_add_first.sizeHint().width(),
-                    self.btn_example.sizeHint().width(), self.MIN_WIDTH) + 2 * self.PADDING_X
+        buttons = self.buttons()
+        widths = [max(btn.sizeHint().width(), self.BUTTON_MIN_W) for btn in buttons]
+        gaps = self.GAP * (len(buttons) - 1)
+        row_hint = sum(widths) + gaps
+        # The row of THREE full labels is what a wide window shows, so the card is wide
+        # enough for it (the sentences are measured too — a long hint still wins).
+        width = max(max_text_w, row_hint, self.MIN_WIDTH) + 2 * self.PADDING_X
         # The card must stay INSIDE the view (the map can be as narrow as 240 px): the
         # sentences then elide rather than the card overflowing the canvas.
         width = min(width, max(int(view_w) - 16, 160))
@@ -253,17 +289,16 @@ class EmptyStateOverlay(QWidget):
         y = max(0, int(int(view_h) * 0.42) - height // 2)
         self.setGeometry(int(x), int(y), int(width), int(height))
 
-        avail = max(int(width) - 2 * self.PADDING_X, 2 * self.BUTTON_MIN_W)
-        if btn_add_w + self.GAP + btn_ex_w > avail:   # narrow view — share what there is
-            half = max((avail - self.GAP) // 2, 60)
-            btn_add_w = min(btn_add_w, half)
-            btn_ex_w = min(btn_ex_w, half)
-        row_w = btn_add_w + self.GAP + btn_ex_w
+        avail = max(int(width) - 2 * self.PADDING_X, 1)
+        if row_hint > avail:          # narrow view — share what there is
+            share = max((avail - gaps) // len(buttons), 1)
+            widths = [min(w, share) for w in widths]
+        row_w = sum(widths) + gaps
         btn_y = int(y + height - self.PADDING_Y - self.BUTTON_H)
         btn_x = int(x + (width - row_w) // 2)
-        self.btn_add_first.setGeometry(btn_x, btn_y, int(btn_add_w), self.BUTTON_H)
-        self.btn_example.setGeometry(btn_x + int(btn_add_w) + self.GAP, btn_y,
-                                     int(btn_ex_w), self.BUTTON_H)
+        for button, button_w in zip(buttons, widths):
+            button.setGeometry(btn_x, btn_y, int(button_w), self.BUTTON_H)
+            btn_x += int(button_w) + self.GAP
 
     # ── Rendering ────────────────────────────────────────────────────────────
 

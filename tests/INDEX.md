@@ -128,6 +128,7 @@ of the file itself.
 | `test_hotkeys_palette.py` | — | Hotkeys + command palette v0.9.2 (former smoke_test "v0.9.2 hotkeys + command palette"). |
 | `test_i18n_languages.py` | — | v1.3.3 — Languages without writing code ("name" in JSON + parity policy + documentation): the release's themed test. |
 | `test_i18n_live.py` | slow | v1.3.3.1 — Live i18n: the containers follow a language switch + the checks of the policy. |
+| `test_inventory.py` | — | v1.5.5 — The inventory: the LIST mode becomes a report (ROADMAP v1.5.5). |
 | `test_keyring_fail_backend.py` | — | Regression v0.9.4b: the keyring fail backend + review notes. |
 | `test_keyring_validation.py` | — | Regression v0.9.5.5 (security #1): the keyring backend — validation and guard. |
 | `test_language_folder.py` | — | v1.3.3.8 — What the app supports but the UI cannot reach: the user language folder, the import/export manager, one range for `terminal_max_open`, a UI for `terminal_wheel`. |
@@ -193,6 +194,7 @@ of the file itself.
 | `test_theme_contrast.py` | — | v1.5rc1 — the CONTRAST GATE: the LIGHT palette, the two accent roles and the numbers that pin them. |
 | `test_ui_density.py` | — | v1.4.5 — UI density & first run (ROADMAP v1.4.5): the compact sidebar grid, the first-run |
 | `test_ui_polish.py` | — | UI polish: nodes, grid, fit/zoom, status bar, icons, arrow hit zones (former smoke_test). |
+| `test_ui_requests.py` | — | v1.5.6 — the customer requests: the Export menu, a third first-run button, environment |
 | `test_undo_redo.py` | — | Regression tests v0.8.3 — Undo/Redo. |
 | `test_view_toggles.py` | — | v1.2.4.1 — Collapsing the sidebar and the map into a thin line (buttons + menu, ROADMAP v1.2.4.1). |
 | `test_wcwidth_cjk.py` | — | v1.2.9 — full wcwidth(3) for CJK (ROADMAP "Terminal hygiene", task 2). |

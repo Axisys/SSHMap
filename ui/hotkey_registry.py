@@ -127,6 +127,14 @@ HOTKEY_ACTIONS: Dict[str, dict] = {
     # the canvas background. A POSTER of the map (a scene render: the floating panels and
     # the chrome are children of the view, so they are deliberately not in the image).
     "file.docs_frame":      {"label": "file.docs_frame",      "default": ""},
+    # v1.5.5 (ROADMAP tasks 2/3): the inventory REPORT of the LIST mode — "Copy List as
+    # TSV" (the visible table straight to the clipboard) and "Export List…" (CSV or TSV
+    # through the ordinary save dialog). Both are File-menu items and both act on what is
+    # ON SCREEN (the columns, the rows the filters kept, the sort the user picked), so the
+    # window enables them only while the table exists (the map is collapsed). An EMPTY
+    # default like their export siblings: assignable, no key taken from anyone.
+    "file.copy_list":       {"label": "file.copy_list",       "default": ""},
+    "file.export_list":     {"label": "file.export_list",     "default": ""},
     "file.backups":         {"label": "file.backups",         "default": ""},
     "file.restore_autosave": {"label": "file.restore_autosave", "default": ""},
     "file.exit":            {"label": "file.exit",            "default": ""},

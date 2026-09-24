@@ -148,8 +148,10 @@ win = make_main()
 check("out of the box the map is expanded and the tree is NARROW (one column, no header)",
       win.tree.columnCount() == 1 and win.tree.isHeaderHidden()
       and not win.sidebar.is_list_mode())
-check("the LIST layout is the 8 columns of the plan (alias | host (IP) | status | OS | CPU | RAM | DISK | tags)",
-      [f for f, _k in LIST_COLUMNS] == ["alias", "host", "status", "os", "cpu", "ram", "disk", "tags"],
+check("the LIST layout is the 13 columns of the inventory (alias | host (IP) | port | user | "
+      "status | checked | OS | CPU | RAM | DISK | facts | comment | tags)",
+      [f for f, _k in LIST_COLUMNS] == ["alias", "host", "port", "user", "status", "status_age",
+                                        "os", "cpu", "ram", "disk", "info_age", "comment", "tags"],
       str([f for f, _k in LIST_COLUMNS]))
 check("every column header is an i18n key of the `sidebar.list.*` family",
       all(key.startswith("sidebar.list.") for _f, key in LIST_COLUMNS))
@@ -201,25 +203,25 @@ check("list_cell_values(): one cell per LIST_COLUMNS entry",
       len(list_cell_values(_full, "Online")) == N_COLUMNS)
 check("list_cell_values(): every value comes from ServerData",
       list_cell_values(_full, "Online") == [
-          "DbOne", "10.20.0.5 (192.168.5.5)", "Online", "Ubuntu 24.04 LTS",
-          "2 vCPU", "4 GB", "80 GB", "prod, db"],
+          "DbOne", "10.20.0.5 (192.168.5.5)", "22", "root", "Online", "", "Ubuntu 24.04 LTS",
+          "2 vCPU", "4 GB", "80 GB", "", "", "prod, db"],
       str(list_cell_values(_full, "Online")))
 check("list_cell_values(): the status cell is the caller's translated text (empty = not probed)",
       list_cell_values(_full, "")[_LIST_STATUS_COLUMN] == ""
       and list_cell_values(_full, "Warn")[_LIST_STATUS_COLUMN] == "Warn")
 check("list_cell_values(): the CPU falls back to the auto-collected cpu_model",
       list_cell_values(ServerData(id="p2", alias="A", host="h", user="u",
-                                  cpu_model="Intel Xeon E5"), "")[4] == "Intel Xeon E5")
+                                  cpu_model="Intel Xeon E5"), "")[7] == "Intel Xeon E5")
 check("list_cell_values(): host == ip is not repeated in parentheses",
       list_cell_values(ServerData(id="p3", alias="A", host="10.0.0.1", user="u",
                                   ip="10.0.0.1"), "")[1] == "10.0.0.1")
 check("list_cell_values(): an empty model gives EMPTY cells, never the string \"None\"",
       list_cell_values(ServerData(id="p4", alias="A", host="h", user="u"), "") ==
-      ["A", "h", "", "", "", "", "", ""],
+      ["A", "h", "22", "u", "", "", "", "", "", "", "", "", ""],
       str(list_cell_values(ServerData(id="p4", alias="A", host="h", user="u"), "")))
 check("list_cell_values(): blank tag entries are dropped from the joined cell",
       list_cell_values(ServerData(id="p5", alias="A", host="h", user="u",
-                                  tags=["", "  ", "prod"]), "")[7] == "prod")
+                                  tags=["", "  ", "prod"]), "")[12] == "prod")
 
 # ── the live rows of a window ─────────────────────────────────────────────────
 clear_cfg()
@@ -235,12 +237,13 @@ win.refresh_sidebar()
 collapse_map(win)
 
 check("a fully described node fills every column from ServerData",
-      row_of(win, "lm-rich") == ["DbMain", "10.30.0.7 (172.16.0.9)", i18n.t("legend.status.online"),
-                                 "Debian 12", "4 vCPU", "8 GB", "160 GB", "prod, db"],
+      row_of(win, "lm-rich") == ["DbMain", "10.30.0.7 (172.16.0.9)", "22", "root",
+                                 i18n.t("legend.status.online"), "", "Debian 12", "4 vCPU",
+                                 "8 GB", "160 GB", "", "", "prod, db"],
       str(row_of(win, "lm-rich")))
 check("a node with empty fields has EMPTY cells (not \"None\", not the alias repeated)",
-      row_of(win, "lm-bare") == ["Sparse", "10.30.0.8", i18n.t("legend.status.warn"),
-                                 "", "", "", "", ""],
+      row_of(win, "lm-bare") == ["Sparse", "10.30.0.8", "22", "root", i18n.t("legend.status.warn"),
+                                 "", "", "", "", "", "", "", ""],
       str(row_of(win, "lm-bare")))
 check("the status column carries the READY legend.status.* words (no fourth translation)",
       row_of(win, "lm-rich")[_LIST_STATUS_COLUMN] == i18n.t("legend.status.online")
