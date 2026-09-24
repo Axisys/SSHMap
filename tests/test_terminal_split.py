@@ -181,9 +181,11 @@ check("the pane is bound to its host and carries the split marker",
 check("the pane joined the MainWindow session registry (green dot / multi-input)",
       len(mw._terminal_windows) == 2 and pane_a in mw._terminal_windows)
 # ── v1.3.3.5-fix: the pane is a COMMAND LINE — no SFTP tab, no SFTP channel ──────
-check("a TAB keeps its SFTP tab (the default with_sftp=True is untouched)",
-      top_a.sftp_tab is not None and top_a.tabs.count() == 2
-      and top_a.tabs.widget(1) is top_a.sftp_tab)
+check("a TAB keeps its SFTP and History tabs (with_sftp=True is untouched)",
+      top_a.sftp_tab is not None and top_a.history_tab is not None
+      and top_a.tabs.count() == 3
+      and top_a.tabs.widget(1) is top_a.sftp_tab
+      and top_a.tabs.widget(2) is top_a.history_tab)
 check("the PANE has NO SFTP tab: one tab (the canvas) and sftp_tab is None",
       pane_a.sftp_tab is None and pane_a.tabs.count() == 1
       and pane_a.tabs.widget(0) is pane_a.widget)

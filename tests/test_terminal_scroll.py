@@ -228,6 +228,63 @@ finally:
 
 
 # ════════════════════════════════════════════════════════════
+# 2b. v1.5.7: the grid computed BEFORE the connection is NOT lost
+# ════════════════════════════════════════════════════════════
+# The layout runs when the window appears — long before paramiko authenticates — so the
+# debounced resize_pty of that pass used to be refused by the `channel is None` guard while
+# `_last_cols/_last_rows` were already updated: no further Resize event followed and the PTY
+# kept invoke_shell's 120x32 for the whole life of the session (every TUI then drew a 120x32
+# screen inside a canvas of another size). The request now WAITS for the channel.
+print("== the initial PTY grid survives the connect (v1.5.7) ==")
+
+win2 = None
+chan2 = FakeChannel()
+try:
+    ST.SSHTerminalThread = _FakeTerm
+    win2 = ST.SSHTerminalWindow(ServerData(id="rc3x", alias="B", host="127.0.0.1", user="u"), None)
+    page2 = win2.page
+    check("a fresh session has no channel yet (paramiko is still connecting)",
+          page2._pty_channel() is None)
+
+    win2.show()
+    app.processEvents()
+    grid2 = (win2.tscreen.columns, win2.tscreen.lines)
+    spin(400)   # the debounce expires with NO channel — the grid must survive it
+    check("the debounce of a NOT-connected session keeps the grid PENDING (it is not dropped)",
+          page2._pending_pty == grid2 and chan2.calls == [],
+          f"pending={page2._pending_pty} calls={chan2.calls}")
+
+    win2.terminal_thread.channel = chan2   # the transport comes up
+    win2.terminal_thread.connected_signal.emit()   # the REAL trigger (the page's slot)
+    app.processEvents()
+    check("connected_signal hands the pending grid to the PTY (the initial SIGWINCH)",
+          chan2.calls == [grid2] and page2._pending_pty is None,
+          f"calls={chan2.calls} pending={page2._pending_pty}")
+    page2._flush_pty_grid()
+    check("a repeated flush is a no-op — the pending value was consumed",
+          chan2.calls == [grid2], f"calls={chan2.calls}")
+
+    # The not-laid-out guard: _visible_grid() clamps to 2x1 and that must never reach the PTY.
+    n_before2 = len(chan2.calls)
+    keep = win2.tscreen.columns, win2.tscreen.lines
+    page2.widget.resize(0, 0)
+    page2._pending_pty = None
+    page2._sync_grid()
+    check("_sync_grid ignores a canvas that is not laid out (never a 2x1 PTY grid)",
+          (win2.tscreen.columns, win2.tscreen.lines) == keep and page2._pending_pty is None
+          and len(chan2.calls) == n_before2,
+          f"grid={(win2.tscreen.columns, win2.tscreen.lines)} pending={page2._pending_pty}")
+finally:
+    ST.SSHTerminalThread = _orig_thread_cls
+    if win2 is not None:
+        try:
+            win2.close()
+            app.processEvents()
+        except Exception:
+            pass
+
+
+# ════════════════════════════════════════════════════════════
 # 3. Keyboard: Ctrl+Shift+PgUp/PgDn → scrollback, bare ones — to the shell
 # ════════════════════════════════════════════════════════════
 print("== keyboard: Ctrl+Shift scroll vs bare forward ==")

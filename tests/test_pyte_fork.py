@@ -10,11 +10,13 @@ unchanged; this file adds the PROVENANCE CHECKS on top of them:
 
   * the sha256 of every file of third_party/pyte/ == the tables of MANIFEST.md (two tables:
     the pristine files == the upstream PyPI sdist 0.8.2; the post-patch — the expected hashes
-    after the patches 0001–0003); the drift "and forgot what was changed" is caught here;
+    after the patches 0001–0004); the drift "and forgot what was changed" is caught here;
   * the manifest of the patches: the files are in place, the names by the convention NNNN-slug.patch, the headers
     with the provenance (the upstream issue/PR, the date) and the attribution (0003 — the author of PR #212,
     dwgx; the code of pyte is LGPL-3.0 — the attribution is mandatory);
-  * the behavioral smoke of the fork itself (headless, without Qt): the private SGR does not crash +
+  * the behavioral smoke of the fork itself (headless, without Qt): the private SGR does not crash;
+    a private CSI with a NON-mode final byte (`\x1b[?r` — XTRESTORE, sent by ncurses/mc on exit —
+    and the private DSR) is ignored while the public DECSTBM keeps working (patch 0004) +
     the tail of the chunk is preserved (b'AB\x1b[?4mCD\r\n' → "ABCD"); the LNM is the default
     (b'ab\ncd' → ["ab", "cd"], after the explicit \x1b[20l — the shift x=2); the alt-screen
     round-trip (\x1b[?1049h…\x1b[?1049l → the grid is equal to before the enter
@@ -42,6 +44,7 @@ EXPECTED_PATCHES = (
     "0001-private-sgr-ignore.patch",
     "0002-lnm-default.patch",
     "0003-alt-screen-47-1047-1048-1049.patch",
+    "0004-private-csi-ignore.patch",
 )
 SDIST_SHA256 = "5af970e843fa96a97149d64e170c984721f20e52227a2f57f0a54207f08f083f"  # PyPI pyte-0.8.2.tar.gz
 
@@ -132,7 +135,7 @@ print("== patch manifest ==")
 
 actual_patches = sorted(
     n for n in os.listdir(PATCHDIR) if n.endswith(".patch"))
-check("patches 0001–0003 are in place, no extras", actual_patches == list(EXPECTED_PATCHES),
+check("patches 0001–0004 are in place, no extras", actual_patches == list(EXPECTED_PATCHES),
       str(actual_patches))
 check("the names follow the NNNN-slug.patch convention",
       all(re.fullmatch(r"\d{4}-[a-z0-9][a-z0-9-]*\.patch", n) for n in actual_patches),
@@ -143,6 +146,7 @@ for name, must_contain in (
     (EXPECTED_PATCHES[0], ("PR #203",)),
     (EXPECTED_PATCHES[1], ("LNM",)),
     (EXPECTED_PATCHES[2], ("PR #212", "dwgx")),   # the attribution to the PR author — mandatory (LGPL)
+    (EXPECTED_PATCHES[3], ("CSI ? r", "XTRESTORE")),
 ):
     path = os.path.join(PATCHDIR, name)
     if not os.path.isfile(path):
@@ -212,6 +216,31 @@ grid1 = [[alt.buffer[y][x] for x in range(80)] for y in range(24)]
 check("alt: \\x1b[?1049l → the grid equals G0 character by character (including fg/bg)", grid1 == grid0)
 check("alt: the cursor is restored (1049 = 1047+1048)",
       (alt.cursor.x, alt.cursor.y) == cur0, str((alt.cursor.x, alt.cursor.y)))
+
+# 3.4 A PRIVATE CSI whose final byte is NOT a mode (patch 0004). `pyte/streams.py` dispatches
+#     every `?`-prefixed CSI as `handler(*params, private=True)`; `CSI ? r` (XTRESTORE — what an
+#     ncurses program such as mc sends on exit) lands on the DECSTBM handler and `CSI ? 6 n` on the
+#     DSR one. Both raised TypeError out of feed() before the patch, which aborted the whole chunk
+#     and left the canvas on the previous frame.
+for _seq, _what in ((b"\x1b[?r", "XTRESTORE (mc on exit)"),
+                    (b"\x1b[?1r", "XTRESTORE with a parameter"),
+                    (b"\x1b[?6n", "the private DSR")):
+    _scr = pyte.HistoryScreen(20, 5)
+    try:
+        pyte.ByteStream(_scr).feed(_seq)
+        _exc = ""
+    except Exception as _e:  # noqa: BLE001
+        _exc = repr(_e)
+    check(f"private CSI: {_seq!r} ({_what}) — no exception out of feed()", _exc == "", _exc)
+_marg = pyte.HistoryScreen(20, 5)
+_marg_stream = pyte.ByteStream(_marg)
+_marg_stream.feed(b"\x1b[?r")
+check("private CSI: `CSI ? r` is NOT a DECSTBM (the margins stay unset)",
+      _marg.margins is None, str(_marg.margins))
+_marg_stream.feed(b"\x1b[1;5r")
+check("the PUBLIC `CSI 1;5r` still sets the scrolling region (vim/less splits)",
+      _marg.margins is not None
+      and (_marg.margins.top, _marg.margins.bottom) == (0, 4), str(_marg.margins))
 
 
 # ════════════════════════════════════════════════════════════

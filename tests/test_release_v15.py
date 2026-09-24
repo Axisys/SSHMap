@@ -279,15 +279,16 @@ print("== §4 the release state & the \"no new contract\" audit ==")
 # ════════════════════════════════════════════════════════════════════════════
 
 check_release_state(ROOT)
-check("§4 the pin quotes the SHIPPED version (v1.5.6; this file still describes the closing "
-      "release of the 1.5 line, whose section it gates)",
-      EXPECTED_APP_VERSION == "1.5.6" and re.fullmatch(r"1\.5\.6", EXPECTED_APP_VERSION) is not None)
+check("§4 the pin quotes the SHIPPED version (v1.5.7 — the release that closes the 1.5 "
+      "line this file describes)",
+      EXPECTED_APP_VERSION == "1.5.7" and re.fullmatch(r"1\.5\.7", EXPECTED_APP_VERSION) is not None)
 check("§4 the i18n pin moved on by the closing release's ONE key, v1.5.1's four, v1.5.2's "
       "thirteen (the activity panel's chrome), v1.5.3's twenty (the freshness family), "
       "v1.5.4's eleven (the aggregate, the lens and the filter plaque), v1.5.5's fourteen "
-      "(the inventory columns, the age captions and the report) and v1.5.6's two (the Export "
-      "menu and the third first-run door) on top",
-      EXPECTED_I18N_KEYS == 708)
+      "(the inventory columns, the age captions and the report), v1.5.6's two (the Export "
+      "menu and the third first-run door) and v1.5.7's twenty-nine (the command-history tab, "
+      "the panel chrome and the six menu items) on top",
+      EXPECTED_I18N_KEYS == 737)
 check_i18n_parity(_langs)
 check_i18n_format(_langs)
 check("§4 every language carries the marker key with a non-empty value",
@@ -326,8 +327,8 @@ check("§4 no new dependency (the four pinned ones and nothing else)",
       and not re.search(r"^\s*(?!PySide6|paramiko|keyring|wcwidth|#)[A-Za-z][\w.-]*\s*[><=]",
                         _req, re.M))
 check("§4 the version constants agree everywhere (version.py ↔ pyproject ↔ requirements)",
-      __import__("version").APP_VERSION == "1.5.6"
-      and '"1.5.6"' in _src("version.py") and 'version = "1.5.6"' in _src("pyproject.toml"))
+      __import__("version").APP_VERSION == "1.5.7"
+      and '"1.5.7"' in _src("version.py") and 'version = "1.5.7"' in _src("pyproject.toml"))
 check("§4 VERSION_FORMAT did NOT move (the project schema is unchanged)",
       __import__("version").VERSION_FORMAT == "0.9")
 

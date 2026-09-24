@@ -259,10 +259,31 @@ def clear_cfg(*extra_paths: str) -> None:
 # in 12 i18n files + the APP_VERSION/requirements pins in 7 release-state sections).
 # The misses of the keys themselves against the code are caught by check_i18n_keys.py.
 # ─────────────────────────────────────────────────────────────────────────────
-EXPECTED_APP_VERSION = "1.5.6"   # the current release (a sentinel: it catches "a bump to the wrong version")
-EXPECTED_I18N_KEYS = 708        # the parity of the TRANSLATION keys (v1.5.6 — "the customer requests: the
-                                # Export menu, a third first-run button, environment icons, buttons that
-                                # look like buttons": the SIXTH patch ON the released 1.5).
+EXPECTED_APP_VERSION = "1.5.7"   # the current release (a sentinel: it catches "a bump to the wrong version")
+EXPECTED_I18N_KEYS = 737        # the parity of the TRANSLATION keys (v1.5.7 — "the command history: a
+                                # third tab of the session, one history per server": the version that
+                                # CLOSES the 1.5 line).
+                                # +29 keys × en/ru/zh/de, all in one family: the TAB itself
+                                # (`terminal.tab_history` — deliberately NOT an `sftp.*` key, because
+                                # the tab is not SFTP), the chrome of the panel
+                                # (`terminal.history.filter_placeholder`, the three column captions,
+                                # the empty / no-matches / counts lines and the `last_unknown` marker
+                                # of an undated entry) and the SIX context-menu items with their
+                                # reports and their refusal lines (the file import, the server import
+                                # with the two worker verdicts it surfaces — `too_large` and
+                                # `binary` — the copy, the send, the duplicate merge and the
+                                # confirmed clear) plus the per-row Delete with its question and
+                                # its report (the label reuses `terminal.cmdlib.delete`). The
+                                # parser's rules, the two caps
+                                # (`MAX_CMD_CHARS` / `MAX_ENTRIES_PER_SERVER`), the sha1 file key,
+                                # the merge-on-write and the auto-record of what the application
+                                # sends are behaviour and numbers — no keys, no config key and no
+                                # new colour field. The "Send to terminal" reports reuse
+                                # `terminal.cmdlib.sent_to` / `terminal.cmdlib.no_active_session`
+                                # (no second spelling of the same sentence).
+                                # (v1.5.6 — "the customer requests: the
+                                # Export menu, a third first-run button, environment icons, buttons
+                                # that look like buttons": the SIXTH patch ON the released 1.5).
                                 # +2 keys × en/ru/zh/de: the new top-level menu (`menu.export` — the
                                 # container BETWEEN "Edit" and "Profile" that takes every export) and
                                 # the third door of the first screen (`empty.state.open_map` — "open an

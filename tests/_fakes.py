@@ -315,6 +315,10 @@ class FakeSftpClient:
         self._chunk_delay = chunk_delay
         self._closed = False
         self.posix_rename_ok = True
+        # v1.5.7: the home directory the worker's `~/` expansion resolves against
+        # (`SftpWorker._expand_home` → `normalize(".")`); "/" keeps every older
+        # scenario byte-identical, and a test that imports a `~/`-path sets its own.
+        self.home = "/"
         # v1.5rc5 (N2): the N-th and every later `rename()` raises (the network died
         # mid-commit). 1 = the very first rename; 2 = the retry AFTER the destination
         # was already cleared — the case where the `.part` file is the only copy.
@@ -430,6 +434,20 @@ class FakeSftpClient:
                 fs.mtimes[new] = fs.mtimes.pop(old)
             return
         raise IOError("No such file")
+
+    def normalize(self, path):
+        """The REALPATH of "." is the HOME directory (paramiko's SFTPClient.normalize).
+
+        v1.5.7: this is what `SftpWorker._expand_home()` asks for, so a scenario can read a
+        `~/…` path of the fake server — set `client.home` to the home the test wants.
+        """
+        self._pause()
+        home = getattr(self, "home", "/") or "/"
+        if path in (".", "", None):
+            return home
+        if str(path).startswith("/"):
+            return _norm(str(path))
+        return _norm(posixpath.join(home, str(path)))
 
     def get_channel(self):
         return self  # "channel" = the client itself (the closed attribute for the worker check)

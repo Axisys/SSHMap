@@ -390,6 +390,9 @@ class SftpWorker(QThread):
         path for the limit check; the hard limit is re-checked while reading.
         The content arrives via read_ready(task_id, remote_path, data); a refusal
         (binary / too large) — via task_error with a READ_ERROR_* code.
+        v1.5.7: a `~/`-prefixed path is resolved against the server's home inside the
+        worker thread (`_expand_home`) — the caller (the command history's "Import from
+        the server…") asks for `~/.bash_history` and never touches the network itself.
         """
         return self._queue_task(_SftpTask(
             self._next_id, KIND_READ, posixpath.basename(remote_path),
@@ -707,6 +710,26 @@ class SftpWorker(QThread):
         except Exception:
             return False
 
+    def _expand_home(self, path: str) -> str:
+        """A `~/`-relative path → an absolute one, resolved ON THIS THREAD (v1.5.7).
+
+        The SFTP protocol has no tilde expansion of its own: the home directory is what the
+        server answers to a REALPATH of `.`, and asking for it is a network round trip — so it
+        happens HERE, inside the worker thread, never on the GUI thread. A path that does not
+        start with `~/` is returned unchanged, and a client whose normalize fails (or answers
+        nothing) leaves the path alone: the read then reports the server's own error instead of
+        a path this module invented.
+        """
+        if not isinstance(path, str) or not path.startswith("~/"):
+            return path
+        try:
+            home = self._sftp.normalize(".")
+        except Exception:   # noqa: BLE001 — the read reports the failure, not this helper
+            return path
+        if not home:
+            return path
+        return posixpath.join(str(home), path[2:])
+
     def _do_read(self, task: _SftpTask):
         """v1.3.1 (ROADMAP task 2): read a text file into memory (the viewer).
 
@@ -717,12 +740,16 @@ class SftpWorker(QThread):
         an unknown size trips the guard on the chunk that crosses the limit.
         The null-byte screen runs on the FIRST chunk (a binary file stops after
         one chunk, before anything is decoded or shown).
+        v1.5.7: a `~/`-prefixed path is expanded on this thread first (`_expand_home`), so the
+        command history can ask for the server's `~/.bash_history`; the ANSWER keeps the path
+        the caller asked for, so a panel matches its own task by the name it sent.
         """
         if int(task.total_size or 0) > MAX_READ_BYTES:
             raise _SftpReadTooLarge()
-        if classify_extension(task.remote_path) == "binary":
+        remote_path = self._expand_home(task.remote_path)
+        if classify_extension(remote_path) == "binary":
             raise _SftpReadBinary()
-        remote_fh = self._sftp.open(task.remote_path, "rb")  # no file → error
+        remote_fh = self._sftp.open(remote_path, "rb")  # no file → error
         try:
             chunks = []
             done = 0

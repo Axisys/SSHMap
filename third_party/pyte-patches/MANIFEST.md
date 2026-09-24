@@ -22,11 +22,13 @@
 | 0001 | 0001-private-sgr-ignore.patch | upstream PR #203 (issue #202, Vim 9+ `\x1b[?4m`), merged into master 2025-09-02; the hunks are byte-for-byte as in the PR | drop when it lands in an upstream release (0.8.3+) |
 | 0002 | 0002-lnm-default.patch | sshmap, PYTE82_AUDIT.md batch A2 (v1.2.11): LNM=20 in `_DEFAULT_MODE` — a bare LF = CR+LF (xterm); one line | keep until upstream ships it; then drop |
 | 0003 | 0003-alt-screen-47-1047-1048-1049.patch | the semantics of upstream PR #212, author **dwgx** (closed without merge 2026-08-14; issue #90); moved verbatim from the v1.2.12 subclass | permanent: PR #212 was never merged — an upstream patch will not absorb it |
+| 0004 | 0004-private-csi-ignore.patch | sshmap (v1.5.7): the `CSI ? r` / `CSI ? n` crash found from a real session — `pyte/streams.py` passes `private=True` to the handler of every `?`-prefixed CSI, and the DECSTBM/DSR handlers do not accept it, so `feed()` raised `TypeError` and the canvas kept the old frame | keep until upstream makes the private dispatch tolerant (0.8.3+); then drop |
 
-Rebasing onto a future upstream release: `git apply` (or `git am`) the three patches onto the new
+Rebasing onto a future upstream release: `git apply` (or `git am`) the four patches onto the new
 base, drop the ones absorbed upstream, recompute the tables below. Verified 2026-09-10:
 the patches apply to the pristine base with `git apply` without offsets; the result is byte-for-byte
-identical to the post-patch table (the conversion script).
+identical to the post-patch table (the conversion script). 0004 was generated from the post-0003
+tree and verified with `git apply -R --check` (the diff and the tree agree byte for byte).
 
 ## sha256 — pristine base (upstream pyte 0.8.2, before the patches)
 
@@ -57,11 +59,11 @@ identical to the post-patch table (the conversion script).
 | graphics.py | 6a38c4f4cdcbc8178097ec90ce1d7bce6b3b356d9f2e27d4b7e2d26d35fa898a |
 | modes.py | ffc0ad1a8264ac7e500349d5f3a8084cc634b72cc782b8664d0841d5d24e2650 |
 | py.typed | e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855 |
-| screens.py | 904381ed8ecc63c08d5b1e5d38e18d0f4690993ad30066100a18ed6005a62504 |
+| screens.py | fc36eac2b4e4560dbe14b1c2d8e30c0db1ce16d5d19d58980d09ec0a766324a2 |
 | streams.py | a8c667e0f288b20064c3d8600aaf792f562cdfa84b4a39bc852ce05acc04c14d |
 
 The files untouched by the patches have the same hash in both tables; the only
-file changed by patches 0001–0003 is `screens.py`.
+file changed by patches 0001–0004 is `screens.py`.
 
 ## Verified facts about the upstream internals (moved here from PYTE82_AUDIT.md §5/§7 and the terminal_screen.py docstring)
 
@@ -76,4 +78,7 @@ Knowledge about someone else's code lives here, not in our docstrings; the histo
 - HistoryScreen auto-return to live: `before_event()` spins `next_page()` in a loop for every event except prev_page/next_page (measurement D1 v1.2.12: 68–73 ms/chunk with deep history → batching D2 in modules/terminal_screen.py, v1.2.14);
 - `HistoryScreen.__getattribute__` wraps set_mode/reset_mode/index/reverse_index (all of them are in `Stream.events`) and calls `self.before_event(event)` by name → subclass overrides are picked up automatically; `before_event` is not in `_wrapped` (no recursion);
 - `Char` has an `italics` field; a wide glyph = 2 cells, the second one — a stub with `data==""` (draw() uses wcwidth(3)); `display()` skips the stubs;
+- the private-CSI dispatch (`pyte/streams.py`): `csi_dispatch[char](*params, private=True)` for EVERY
+  `?`-prefixed CSI — the handlers that must act on the flag declare `**kwargs` (set_mode/reset_mode);
+  the rest raise `TypeError` unless they do (patch 0004: `set_margins` and `report_device_status`);
 - `Screen.reset()` restores `mode = _DEFAULT_MODE.copy()` (after patch 0002 — {DECAWM, DECTCEM, LNM}); `HistoryScreen.__init__` sets `self.history` first, then calls `super().__init__()` (which calls `self.reset()`) → the alt state is initialized in `Screen.__init__` BEFORE reset.

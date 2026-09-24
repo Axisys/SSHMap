@@ -533,6 +533,11 @@ class CommandLibraryPanel(QWidget):
         # the native itemActivated is NOT connected — in Qt 6.11 it duplicates the dblclick).
         self.tree.itemDoubleClicked.connect(self._activate_item)
         self.tree.entry_entered.connect(self._activate_item)
+        # The POLICY is what makes the signal exist: with the default `Qt.DefaultContextMenu`
+        # the right click is a contextMenuEvent this widget ignores, so it travels up to the
+        # container — which is why the documented "right-click the library" gesture used to do
+        # nothing here (and answered "Split Terminal" in the terminal window).
+        self.tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.tree.customContextMenuRequested.connect(self._on_context_menu)
         bl.addWidget(self.tree, 1)
 

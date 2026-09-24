@@ -642,8 +642,8 @@ check("the examples contribute no translation key (a plugin's text is the AUTHOR
       not any("Say hello" == value or "Hello on this server" == value
               for data in _langs.values() for value in data.values()))
 check("the parity pin is the shipped one (the examples contribute nothing — the releases "
-      "move the pin, not this file; v1.5.6 left it at 708)",
-      EXPECTED_I18N_KEYS == 708 and all(len(translation_keys(d)) == EXPECTED_I18N_KEYS
+      "move the pin, not this file; v1.5.7 left it at 737)",
+      EXPECTED_I18N_KEYS == 737 and all(len(translation_keys(d)) == EXPECTED_I18N_KEYS
                                          for d in _langs.values()),
       str({c: len(translation_keys(d)) for c, d in _langs.items()}))
 check_i18n_parity(_langs)
@@ -651,7 +651,7 @@ check_i18n_format(_langs)
 check("the plugin strings of both examples stay outside the parity policy",
       "disk: " not in json.dumps(_langs["en"]) and "threshold 90" not in json.dumps(_langs["en"]))
 check("the release is the version this file ships with (the pin quotes the shipped one)",
-      EXPECTED_APP_VERSION == "1.5.6", EXPECTED_APP_VERSION)
+      EXPECTED_APP_VERSION == "1.5.7", EXPECTED_APP_VERSION)
 check_release_state(ROOT)
 check("the example file for these tasks is described in examples/README.md",
       "disk_monitor" in read(os.path.join(EXAMPLES_DIR, "README.md"))

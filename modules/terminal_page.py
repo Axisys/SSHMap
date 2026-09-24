@@ -60,6 +60,11 @@ try:
 except ImportError:
     from modules.sftp_tab import SftpTab, format_size
 
+try:  # v1.5.7 (ROADMAP task 1): the per-server COMMAND history (the third tab)
+    from .command_history import CommandHistoryPanel, CommandHistoryStore
+except ImportError:
+    from modules.command_history import CommandHistoryPanel, CommandHistoryStore
+
 try:  # v1.2.5: the central theme (status labels — ui/theme.py)
     from ..ui import theme
 except ImportError:
@@ -92,6 +97,19 @@ def get_translator():
     """Safe i18n helper — returns cached translator or fallback (as in ssh_terminal)."""
     mod = _st_module()
     return mod.get_translator()
+
+
+def _log():
+    """The app logger (lazy — the command_history / terminal_widget pattern).
+
+    v1.5.7: the output path uses it for a FEED FAILURE — a swallowed emulator error used to
+    cost the repaint silently, and silence is what made the symptom unguessable from outside.
+    """
+    try:
+        from modules.logger import get_logger as _gl
+        return _gl("modules.terminal_page")
+    except Exception:
+        return None
 
 
 # ── v1.3.3.4 (ROADMAP task 6): the transfer rate / ETA — the detachable task 7 of
@@ -168,9 +186,10 @@ class TerminalSessionPage(QWidget):
     """v1.2: an SSH session as a reusable widget.
 
     Composition: terminal_thread (SSHTerminalThread) + tscreen (TerminalScreen) +
-    widget (TerminalWidget, the canvas) + a QTabWidget [Terminal | Files] (SftpTab,
-    a lazy worker). The terminal_* config is read from config.json at creation time
-    (load_terminal_settings — defaults = the v1.0 behaviour).
+    widget (TerminalWidget, the canvas) + a QTabWidget [Terminal | Files | History]
+    (SftpTab, a lazy worker; CommandHistoryPanel, the per-server command history) +
+    the history STORE of this server. The terminal_* config is read from config.json at
+    creation time (load_terminal_settings — defaults = the v1.0 behaviour).
 
     The host (SSHTerminalWindow / a future dock) creates the page with a parent
     and may:
@@ -188,6 +207,10 @@ class TerminalSessionPage(QWidget):
     strip (one tab — nothing to switch) and has no status line, so a pane is its
     canvas + the QTabWidget frame; `with_status_line` is kept as the public ctor
     argument it has always been, no longer selecting a layout.
+    v1.5.7: the same flag governs the THIRD tab — a pane never gets the command
+    History tab (its layout budget is a command line, and it has no SFTP channel to
+    import a history through); the history STORE and the record hook exist on every
+    page, because what the application sends belongs to the server either way.
     """
 
     # v1.0RC3: resize PTY — a grid-change guard + a ~150 ms debounce before
@@ -326,6 +349,31 @@ class TerminalSessionPage(QWidget):
         self.sftp_tab = SftpTab() if self._with_sftp else None
         if self.sftp_tab is not None:
             self.tabs.addTab(self.sftp_tab, t("sftp.tab_files"))
+
+        # v1.5.7 (ROADMAP task 1): the COMMAND history — the THIRD tab of the session
+        # (`Terminal | Files | History`), one history per server. The STORE exists on every
+        # page, because what the application sends belongs to the server whether it went to a
+        # tab or to a split PANE; the TAB exists only on a page with the SFTP channel
+        # (`with_sftp=True`), because the panel's "Import from the server…" has no channel to
+        # read through on a compact pane and the pane's layout budget is deliberately small
+        # (§4.3). The panel is duck-typed against this page: `send_macro()` (the ONE send
+        # path), `server_data.alias` and `ensure_sftp_worker()`.
+        self.command_history = CommandHistoryStore(getattr(server_data, "id", ""))
+        self.history_tab = None
+        if self._with_sftp:
+            self.history_tab = CommandHistoryPanel(store=self.command_history, session=self)
+            self.tabs.addTab(self.history_tab, t("terminal.tab_history"))
+            self.history_tab.status_message.connect(self._on_history_message)
+
+        # v1.5.7 (ROADMAP task 7): the application records exactly what IT sent. The hook sits
+        # on the CANVAS, because that is the ONE method (`TerminalWidget.send_macro`) every
+        # explicit send goes through — the macro library calls it directly on `page.widget`,
+        # and the page's own `send_macro()` (the History tab) reaches it the same way. Typed
+        # input is deliberately NOT recorded: the canvas sees raw bytes and keys, not the
+        # shell's line editing. Quick launch sends through `terminal_thread.send_data()`, so it
+        # records itself in `_send_initial_command()`.
+        self.widget.command_sent_hook = self.record_sent_command
+
         # v1.4.7 follow-up (the maintainer's request): a page with a SINGLE tab does not
         # show a tab STRIP at all — the split pane is a command line, and the strip spent
         # a row of a ~140 px pane on one redundant title. The QTabWidget keeps its frame
@@ -368,6 +416,9 @@ class TerminalSessionPage(QWidget):
         # v1.1.3: the user may already be sitting on the "Files" tab during the
         # connection — open SFTP as soon as the client appears in the thread.
         self.terminal_thread.connected_signal.connect(self._on_connected_for_sftp)
+        # v1.5.7: the PTY receives the grid the layout computed BEFORE the connection —
+        # the one debounced resize that the missing channel refused (see _flush_pty_grid).
+        self.terminal_thread.connected_signal.connect(self._flush_pty_grid)
 
         # v1.0RC4: Quick Launch — the first command is sent after the connection
         # (connected_signal), not before: on a failed authentication the command
@@ -389,30 +440,44 @@ class TerminalSessionPage(QWidget):
     def retranslate(self):
         """v1.3.3.1: re-text the page's own strings in the current language.
 
-        The tab titles of the inner QTabWidget (`Terminal | Files`; a page built with
-        `with_sftp=False` has the `Terminal` tab only — guarded by the tab count; and
-        v1.3.3.5: the `Terminal` title is re-composed by `_apply_session_tab_title()` —
-        the multi-input badge a SPLIT PANE carries there AND its live status text, both
-        of which must survive the switch); every
+        The tab titles of the inner QTabWidget (`Terminal | Files | History`; a page built with
+        `with_sftp=False` has the `Terminal` tab alone) — the walk reads the tab COUNT and asks
+        each page which widget it is, so a page with a different tab set re-texts exactly what
+        it has; and v1.3.3.5: the `Terminal` title is re-composed by `_apply_session_tab_title()`
+        — the multi-input badge a SPLIT PANE carries there AND its live status text, both of
+        which must survive the switch. Every
         string already has an i18n key (ZERO new keys) and the module translator is
         looked up at call time — no cache to invalidate. The status label carries the
         LIVE session state (connecting/opened/closed — emitted by the thread), so it
-        is deliberately left alone; the SFTP tab re-texts itself. Never raises — the
-        dead-C++-object discipline of every container method.
+        is deliberately left alone; the SFTP tab and the History panel re-text themselves. Never
+        raises — the dead-C++-object discipline of every container method.
         """
+        t = get_translator()
         try:
-            if self.tabs.count() > 1:
-                self.tabs.setTabText(1, get_translator()("sftp.tab_files"))
+            tabs = self.tabs
+            for i in range(tabs.count()):
+                widget = tabs.widget(i)
+                if widget is self.sftp_tab and self.sftp_tab is not None:
+                    tabs.setTabText(i, t("sftp.tab_files"))
+                elif widget is self.history_tab and self.history_tab is not None:
+                    tabs.setTabText(i, t("terminal.tab_history"))
         except RuntimeError:
             pass  # the C++ object was already destroyed (a close race)
         # v1.3.3.5: the inner `Terminal` title carries the multi-input badge of a SPLIT
-        # PANE and — when the page has no status line — its live status: re-composed
-        # here so a language switch re-texts the badge instead of dropping it.
+        # PANE — re-composed here so a language switch re-texts the badge instead of dropping it.
         self._apply_session_tab_title()
         sftp_tab = getattr(self, "sftp_tab", None)
         if sftp_tab is not None:
             try:
                 sftp_tab.retranslate()
+            except RuntimeError:
+                pass  # Qt teardown — the tab is already destroyed
+        # v1.5.7 (ROADMAP task 4): the History panel — its headers, its placeholder and the
+        # `terminal.history.last_unknown` cells are all translated text.
+        history_tab = getattr(self, "history_tab", None)
+        if history_tab is not None:
+            try:
+                history_tab.retranslate()
             except RuntimeError:
                 pass  # Qt teardown — the tab is already destroyed
         # v1.3.3.4: the canvas's own strings (the find panel — if it is open)
@@ -426,8 +491,8 @@ class TerminalSessionPage(QWidget):
     def refresh_theme(self):
         """v1.4.3 (ROADMAP task 4): re-apply the theme to this session.
 
-        The page's status label, the canvas (the find bar is its child) and the
-        SFTP tab. The terminal's OUTPUT palette is deliberately out of the UI
+        The page's status label, the canvas (the find bar is its child), the SFTP tab and the
+        History panel. The terminal's OUTPUT palette is deliberately out of the UI
         theme's scope (AGENTS.md §4.6) — a session keeps its colours. Never
         raises: a session may be closing under the switch.
         """
@@ -444,9 +509,11 @@ class TerminalSessionPage(QWidget):
                     hook()
                 except RuntimeError:
                     pass
-        sftp_tab = getattr(self, "sftp_tab", None)
-        if sftp_tab is not None:
-            hook = getattr(sftp_tab, "refresh_theme", None)
+        for tab_name in ("sftp_tab", "history_tab"):   # v1.5.7: the panel joins the walk
+            tab = getattr(self, tab_name, None)
+            if tab is None:
+                continue
+            hook = getattr(tab, "refresh_theme", None)
             if callable(hook):
                 try:
                     hook()
@@ -500,11 +567,64 @@ class TerminalSessionPage(QWidget):
     def send_macro(self, text) -> bool:
         """v1.3 (ROADMAP v1.3): a command-library macro → the terminal canvas
         (widget.send_macro: a direct send_data of its own session, not a broadcast).
-        RuntimeError — a close race (the C++ object was destroyed) → False."""
+        RuntimeError — a close race (the C++ object was destroyed) → False.
+
+        v1.5.7 (ROADMAP task 6): this is the send path the History tab's "Send to terminal"
+        uses, and the canvas records it through `command_sent_hook` — the timestamp and the
+        count of the entry move as a result of the send, exactly as the ROADMAP requires."""
         try:
             return self.widget.send_macro(text)
         except RuntimeError:
             return False
+
+    # ── v1.5.7 (ROADMAP task 7): the COMMAND history of this server ─────────
+
+    def record_sent_command(self, text) -> bool:
+        """Append what the APPLICATION sent to this server's command history (v1.5.7).
+
+        Called by the canvas hook after a successful `TerminalWidget.send_macro()` and by the
+        quick-launch path — the two places where the application knows the exact command line it
+        put on the wire. **Nothing is inferred from the typed input**: the canvas sees raw bytes
+        and key events, not the shell's line editing, so a reconstruction of what a user typed
+        would be a guess (the documented non-goal of the version). An over-long or empty text is
+        ignored by the store's own rules. Never raises — a history failure must not break a send.
+        """
+        store = getattr(self, "command_history", None)
+        if store is None:
+            return False
+        try:
+            store.record(text)
+        except Exception:   # noqa: BLE001 — the history is bookkeeping, never a send path
+            return False
+        panel = getattr(self, "history_tab", None)
+        if panel is not None:
+            try:
+                panel.reload()   # the new row / the moved timestamp is on screen at once
+            except RuntimeError:
+                pass  # Qt teardown — the panel is already destroyed
+        return True
+
+    def ensure_sftp_worker(self):
+        """The SFTP worker of this session, started lazily — or None (v1.5.7).
+
+        The ONE way the History tab reaches the channel the Files tab uses: the panel asks for
+        the worker and queues its read into it, so the file of the server is read OFF the GUI
+        thread. A page without the SFTP tab (`with_sftp=False`, the split pane) has no channel
+        and answers None — its History tab does not exist either.
+        """
+        try:
+            if self._ensure_sftp():
+                return self._sftp_worker
+        except RuntimeError:
+            pass  # Qt teardown — the session is already going away
+        return None
+
+    def _on_history_message(self, msg: str, timeout: int):
+        """A History-panel message → the page's status_message bridge (the SFTP tab pattern)."""
+        try:
+            self.status_message.emit(msg, timeout)
+        except RuntimeError:
+            pass  # Qt teardown — no host left to tell
 
     # ── v1.2: teardown — one method for all paths ───────────────────────────
 
@@ -645,6 +765,7 @@ class TerminalSessionPage(QWidget):
             # send the first Quick Launch command into the void after a successful
             # connection.
             _dissig(thread.connected_signal, self._on_connected_for_sftp)
+            _dissig(thread.connected_signal, self._flush_pty_grid)
             # Quick Launch — only if the connection was made (the Connection object from __init__)
             if getattr(self, "_initial_cmd_conn", None) is not None:
                 try:
@@ -674,6 +795,18 @@ class TerminalSessionPage(QWidget):
             QTimer.singleShot(0, self._sync_grid)
         return super().eventFilter(obj, event)
 
+    def showEvent(self, event):
+        """v1.5.7: the first SHOW re-computes the grid, so a session never depends on a
+        resize event to find out how big it is.
+
+        A page that is shown without its canvas changing size (a dock tab revealed later, a
+        window restored to the very geometry of the layout pass) would otherwise keep
+        `invoke_shell`'s 120×32 as its only grid definition. Deferred with singleShot(0): at
+        show time the layout has not run yet, and `_sync_grid` guards the not-laid-out case.
+        """
+        super().showEvent(event)
+        QTimer.singleShot(0, self._sync_grid)
+
     def _on_output(self, data: bytes):
         """A slot from the SSH thread (a queued signal — already in the GUI thread):
         raw bytes into pyte + a direct canvas update(). A 30 FPS timer is not
@@ -688,12 +821,23 @@ class TerminalSessionPage(QWidget):
         coordinates were pinned on the HISTORICAL screen in the release, and after
         the return they point at OTHER cells of the live screen — Ctrl+C would
         copy someone else's text. Without new output / without an active selection,
-        the behaviour of a plain click and of Ctrl+C does not change."""
+        the behaviour of a plain click and of Ctrl+C does not change.
+
+        v1.5.7: a failure INSIDE the emulator no longer costs the repaint. This path used to
+        `return` on any exception — the canvas then kept the previous frame until the NEXT
+        output arrived, which from the outside looks like "the full-screen application is gone
+        but the prompt only appears when I press a key" (a TUI's exit sequence is followed by
+        silence until the user types). The state is now whatever pyte managed to apply: it is
+        repainted, and the failure is LOGGED instead of swallowed.
+        """
+        pos_before = None
         try:
             pos_before = self.tscreen.scroll_info()[0]
             self.tscreen.feed(data)
-        except Exception:
-            return
+        except Exception as exc:  # noqa: BLE001 — the canvas must repaint whatever state exists
+            log = _log()
+            if log is not None:
+                log.warning(f"terminal: feed failed ({exc!r}) — repainting the current state")
         # v1.3.3.4 (ROADMAP task 3): the transcript tee. Inside the output path but
         # deliberately OUTSIDE the pyte block above: a broken file must not stop the
         # rendering (write_transcript swallows everything and stops the tee itself).
@@ -705,7 +849,7 @@ class TerminalSessionPage(QWidget):
         # the only path that changes the position without a manual scroll). An active
         # selection on the "old" screen is reset before copying.
         try:
-            if self.tscreen.scroll_info()[0] != pos_before \
+            if pos_before is not None and self.tscreen.scroll_info()[0] != pos_before \
                     and self.widget.has_selection():
                 self.widget.clear_selection()
         except RuntimeError:
@@ -725,8 +869,16 @@ class TerminalSessionPage(QWidget):
         return cols, rows
 
     def _sync_grid(self):
-        """A recompute of the visible grid (after the layout settled)."""
+        """A recompute of the visible grid (after the layout settled).
+
+        v1.5.7: a canvas that is not laid out yet (width/height 0 — a page built into a
+        hidden dock) is left alone. `_visible_grid()` clamps to 2×1, and pushing that into
+        pyte/the PTY would destroy the session's grid for a frame (the showEvent hook makes
+        this reachable in cases where no resize event would have been).
+        """
         try:
+            if self.widget.width() <= 0 or self.widget.height() <= 0:
+                return  # not laid out yet — the Resize/showEvent path will come back
             cols, rows = self._visible_grid()
             if (cols, rows) == (self._last_cols, self._last_rows):
                 return  # the grid did not change — no pyte.resize, no PTY signal
@@ -738,20 +890,60 @@ class TerminalSessionPage(QWidget):
         except RuntimeError:
             pass  # the C++ object was already destroyed (a WA_DeleteOnClose race on close)
 
-    def _on_pty_debounce(self):
-        """The debounce expired — resize_pty with the LAST grid (only a live channel)."""
-        if self._pending_pty is None:
-            return
-        cols, rows = self._pending_pty
-        self._pending_pty = None
+    def _pty_channel(self):
+        """The LIVE PTY channel of this session, or None (not connected / closed / gone)."""
         thread = getattr(self, "terminal_thread", None)
         channel = getattr(thread, "channel", None) if thread is not None else None
-        if channel is None or channel.closed:
-            return
+        if channel is None or getattr(channel, "closed", False):
+            return None
+        return channel
+
+    def _send_pty_resize(self) -> bool:
+        """Send the pending grid to the PTY. True — it went out; False — not possible yet."""
+        pending = getattr(self, "_pending_pty", None)
+        if pending is None:
+            return False
+        channel = self._pty_channel()
+        if channel is None:
+            return False
+        self._pending_pty = None
         try:
-            channel.resize_pty(width=cols, height=rows)
+            channel.resize_pty(width=pending[0], height=pending[1])
         except Exception:
-            pass  # the channel died during the debounce — nothing to do
+            return False   # the channel died — nothing to do
+        return True
+
+    def _on_pty_debounce(self):
+        """The debounce expired — resize_pty with the LAST grid (only a live channel).
+
+        v1.5.7: a grid computed BEFORE the connection is no longer thrown away. The layout
+        runs when the window appears — long before paramiko has authenticated — so the first
+        (and, on a window nobody resizes, the ONLY) grid change used to be dropped right here:
+        `_last_cols/_last_rows` were already updated, no further Resize event followed, and the
+        session kept `invoke_shell`'s 120×32 for its whole life while the pyte grid held the
+        real canvas size. Every full-screen application then drew a 120×32 screen inside a
+        differently sized canvas (the tester's "not full screen until I resize the window").
+        The request now WAITS: it stays pending and `_flush_pty_grid()` sends it on connect.
+        """
+        if self._pending_pty is None:
+            return
+        if self._pty_channel() is None:
+            return   # not connected yet — keep the pending value for the connect flush
+        self._send_pty_resize()
+
+    def _flush_pty_grid(self):
+        """connected_signal: hand the PTY the grid the layout computed while connecting.
+
+        The initial PTY is 120×32 (`invoke_shell`), the canvas has had its real size since the
+        first layout pass, and that pass's debounced resize was refused by the missing channel.
+        Making the PTY match the canvas is therefore the FIRST thing a connected session does —
+        it is the SIGWINCH every TUI needs at startup, and without it the applications draw a
+        120×32 screen inside a window of another size until the user happens to resize it.
+        """
+        try:
+            self._send_pty_resize()
+        except RuntimeError:
+            pass  # Qt teardown — the session is already going away
 
     def _set_status(self, text: str):
         self._set_status_text(text)
@@ -825,6 +1017,11 @@ class TerminalSessionPage(QWidget):
                 if channel is None or channel.closed:
                     return
                 thread.send_data((cmd + "\n").encode("utf-8"))
+                # v1.5.7 (ROADMAP task 7): quick launch is the second path the APPLICATION
+                # knows the exact command of — it does not go through send_macro(), so it
+                # records itself (the macro library and the History tab are covered by the
+                # canvas hook).
+                self.record_sent_command(cmd)
             except Exception:  # noqa: BLE001 — the window may have closed (WA_DeleteOnClose)
                 pass
         QTimer.singleShot(self.INITIAL_COMMAND_DELAY_MS, _do)

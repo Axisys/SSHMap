@@ -785,7 +785,7 @@ print("== §9 the release state ==")
 # ════════════════════════════════════════════════════════════════════════════
 
 check("EXPECTED_APP_VERSION is the version this test file describes",
-      EXPECTED_APP_VERSION == "1.5.6", EXPECTED_APP_VERSION)
+      EXPECTED_APP_VERSION == "1.5.7", EXPECTED_APP_VERSION)
 check("the pin counts the keys of the SHIPPED release (v1.5.2 added THIRTEEN — all the CHROME "
       "of the activity panel — v1.5.3 added TWENTY in three families: the age of the "
       "collected facts (`node.info.collected_now` plus the minutes/hours/days steps), the "
@@ -795,10 +795,13 @@ check("the pin counts the keys of the SHIPPED release (v1.5.2 added THIRTEEN —
       "captions, the three strings of the \"problems only\" chip and the six of the "
       "active-filter plaque, v1.5.5 added FOURTEEN: the five inventory columns, the four "
       "compact age captions of the two age cells and the two report actions with their three "
-      "reports, and v1.5.6 added TWO: the new top-level `menu.export` container and the third "
-      "door of the first screen (`empty.state.open_map`); the numbers and the behaviour of a "
-      "release cost no key, so 661 + 20 + 11 + 14 + 2 = 708)",
-      EXPECTED_I18N_KEYS == 708, str(EXPECTED_I18N_KEYS))
+      "reports, v1.5.6 added TWO: the new top-level `menu.export` container and the third "
+      "door of the first screen (`empty.state.open_map`), and v1.5.7 added TWENTY-NINE: the "
+      "`History` tab, the panel's chrome (the filter, the three columns, the empty / "
+      "no-matches / counts lines, the `last_unknown` marker) and the six context-menu items "
+      "with their import reports and refusal lines; the numbers and the behaviour of a "
+      "release cost no key, so 661 + 20 + 11 + 14 + 2 + 29 = 737)",
+      EXPECTED_I18N_KEYS == 737, str(EXPECTED_I18N_KEYS))
 check_release_state(ROOT)
 for _code in i18n_lang_codes(ROOT):
     check(f"i18n/{_code}.json carries the v1.5 node.status.emulated marker",

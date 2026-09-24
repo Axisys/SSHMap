@@ -196,8 +196,10 @@ check("the pyte screen is 120×32 (the invoke_shell geometry)",
       p1d.tscreen.columns == 120 and p1d.tscreen.lines == 32,
       f"{p1d.tscreen.columns}x{p1d.tscreen.lines}")
 check("the terminal canvas is a TerminalWidget", isinstance(p1d.widget, TerminalWidget))
-check("QTabWidget [Terminal | Files] (v1.1.3)", p1d.tabs.count() == 2
-      and p1d.tabs.widget(0) is p1d.widget and p1d.tabs.widget(1) is p1d.sftp_tab)
+check("QTabWidget [Terminal | Files | History] (v1.1.3; the third tab — v1.5.7)",
+      p1d.tabs.count() == 3
+      and p1d.tabs.widget(0) is p1d.widget and p1d.tabs.widget(1) is p1d.sftp_tab
+      and p1d.tabs.widget(2) is p1d.history_tab)
 # ── v1.4.7 follow-up: the page draws NO status line — the HOST's bar is the surface ──
 check("the page draws no status line: the label is state, not a row (terminal.initializing)",
       p1d.status_label.text() != "" and p1d.status_label.isHidden() is True

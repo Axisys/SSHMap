@@ -29,6 +29,7 @@ generated from that example map only, by `python tests/_gen_docs_image.py`.*
 - Built-in SSH terminal on a vendored pyte fork: scrollback, full keyboard, mouse selection, alternate screen (vim/htop/less restore the previous screen), wheel passthrough to TUIs, a find bar, clear scrollback / reset screen / save transcript.
 - Sessions as tabs in separate windows or in a detachable "Terminals" dock on the map, a split pane with a second shell of the same node, multi-input broadcast with per-session exclusions, and a command library of macros.
 - SFTP over the same live transport (no second authentication): a directory tree, upload/download including drag & drop, a file manager (new folder / rename / delete, an overwrite prompt, atomic transfers, rate and ETA) and a read-only text preview (≤ 1 MB) with syntax highlighting and "no preview" row markers.
+- A **History** tab per session: the commands of that server, kept between sessions. Import a history file from disk or the server's `~/.bash_history` over the session's SFTP channel, filter and sort the rows by their data (command, last use, repeat count), copy one, send one back to the terminal, delete a single row, merge the duplicates and clear the list.
 - External system terminal as an alternative to the built-in one.
 
 ### The list becomes a report
@@ -112,6 +113,7 @@ survive a restart. The external terminal is an OS `ssh` process: the password is
 - The background image is stored by path: move the file together with the project.
 - Plugins run inside the application's process: a plugin with a broken C extension can take it down — install plugins you trust.
 - A host key change and an unreadable project are reported, never repaired silently; recovery means an autosave or backup slot.
+- The command history is a plain-text file per server under `~/.sshmap/history/`. Its entries are the commands the application sent or the ones you imported, so they can contain secrets (a token or a password passed as an argument); the file is never written into a project, never exported and never logged. Passwords typed into a shell are not recorded — only what the app itself sends is.
 
 ---
 
@@ -165,13 +167,13 @@ PySide6 / Qt 6 gotchas worth knowing before writing UI code:
 | `version.py` | `APP_VERSION` and `VERSION_FORMAT` — the single source of truth |
 | `models/` | `ServerData` (a password is never serialized), SSH profiles |
 | `graphics/` | The scene and its items: cards, typed arrows, notes, groups, background, the minimap |
-| `modules/` | Terminals, SFTP, the pyte fork seam, plugins, the command library, undo commands, logging |
+| `modules/` | Terminals, SFTP, the pyte fork seam, plugins, the command library and the command history, undo commands, logging |
 | `storage/` | Project save/load, the example map, autosave with backups, the `.drawio` writer |
 | `services/` | Credentials, probes, reachability diagnostics, info batches, importers |
 | `dialogs/` | Add/edit dialogs, connect, profiles, backups, imports, export options |
 | `ui/` | Main window and mixins, sidebar, theme, palette, panels, settings, hotkeys, icons |
 | `i18n/` | `en` (reference), `ru`, `zh`, `de` — one JSON file per language |
-| `tests/` | 102 test files, the parallel runner and the harness — map in `tests/INDEX.md` |
+| `tests/` | 103 test files, the parallel runner and the harness — map in `tests/INDEX.md` |
 | `examples/plugins/` | Two working example plugins, not installed and never auto-discovered |
 | `third_party/pyte/`, `third_party/pyte-patches/` | The managed pyte 0.8.2 fork: sdist plus explicit patches, provenance in the patches' `MANIFEST.md` |
 | `docs/` | The map image above, rendered from the example map |

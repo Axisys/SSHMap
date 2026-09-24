@@ -336,12 +336,21 @@ class Screen:
         self.lines, self.columns = lines, columns
         self.set_margins()
 
-    def set_margins(self, top: Optional[int] = None, bottom: Optional[int] = None) -> None:
+    def set_margins(self, top: Optional[int] = None, bottom: Optional[int] = None,
+                    **kwargs: Any) -> None:
         """Select top and bottom margins for the scrolling region.
 
         :param int top: the smallest line number that is scrolled.
         :param int bottom: the biggest line number that is scrolled.
+
+        sshmap fork (patch 0004): the stream passes ``private=True`` to the handler of every
+        ``CSI ? … <final>``, and ``? r`` (XTRESTORE — restore DEC private mode values, sent by
+        ncurses/mc on exit) lands here because its final byte is ``r``. There is no private
+        DECSTBM: the sequence is IGNORED instead of raising ``TypeError`` out of ``feed()``
+        (which aborted the whole chunk, and with it the repaint of the canvas).
         """
+        if kwargs.get("private"):
+            return
         # XXX 0 corresponds to the CSI with no parameters.
         if (top is None or top == 0) and bottom is None:
             self.margins = None
@@ -1093,14 +1102,20 @@ class Screen:
         if mode == 0 and not kwargs.get("private"):
             self.write_process_input(ctrl.CSI + "?6c")
 
-    def report_device_status(self, mode: int) -> None:
+    def report_device_status(self, mode: int, **kwargs: Any) -> None:
         """Report terminal status or cursor position.
 
         :param int mode: if 5 -- terminal status, 6 -- cursor position,
                          otherwise a noop.
 
         .. versionadded:: 0.5.0
+
+        sshmap fork (patch 0004): a PRIVATE DSR (``CSI ? 5 n`` / ``CSI ? 6 n``) is not the public
+        sequence — it has no defined report, so it is ignored (the same crash class as
+        ``set_margins``: ``TypeError`` out of ``feed()``).
         """
+        if kwargs.get("private"):
+            return
         if mode == 5:    # Request for terminal status.
             self.write_process_input(ctrl.CSI + "0n")
         elif mode == 6:  # Request for cursor position.

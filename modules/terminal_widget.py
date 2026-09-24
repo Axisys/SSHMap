@@ -437,6 +437,11 @@ class TerminalWidget(QWidget):
         self._format_cache_limit = int(format_cache_limit)
         self._format_cache = {}   # (fg,bg,bold,italics,underscore,strikethrough) → (QPen,QBrush,QFont)
 
+        # v1.5.7: the COMMAND HISTORY hook of this canvas. The owning page installs its own
+        # recorder here (TerminalSessionPage.record_sent_command) and send_macro() calls it
+        # after a successful send — the canvas itself knows no store and no i18n.
+        self.command_sent_hook = None
+
         self._bg_color = QColor(self._palette["default_bg"])
         self._cursor_color = QColor(self.CURSOR_COLOR)
         self._selection_color = QColor(*self.SELECTION_COLOR)
@@ -1056,7 +1061,15 @@ class TerminalWidget(QWidget):
         decision) — the multi-input broadcast would have duplicated it to all the open
         sessions (the precedent: the wheel passthrough of v1.2.13). The payload is built
         by build_macro_payload() (single-line — raw + \\n; multi-line — the bracketed
-        paste). Never raises; False — an empty payload, no thread, or a dead/closed channel."""
+        paste). Never raises; False — an empty payload, no thread, or a dead/closed channel.
+
+        v1.5.7: this is the ONE path every explicit send of the application goes through (the
+        macro library, the History tab's "Send to terminal", the page's own `send_macro()`), so
+        the COMMAND HISTORY of the session is fed from here — through the optional
+        `command_sent_hook` the owning page installs (`TerminalSessionPage.record_sent_command`).
+        The canvas stays Qt-light and knows no store: a hook that raises costs the history entry,
+        never the send. Typed input is deliberately NOT recorded — the canvas sees raw bytes.
+        """
         payload = build_macro_payload(text)
         if not payload or self.terminal_thread is None:
             return False
@@ -1065,9 +1078,15 @@ class TerminalWidget(QWidget):
             return False
         try:
             self.terminal_thread.send_data(payload)
-            return True
         except Exception:   # noqa: BLE001 — a dead channel/thread mid-teardown
             return False
+        hook = getattr(self, "command_sent_hook", None)
+        if callable(hook):
+            try:
+                hook(text)
+            except Exception:   # noqa: BLE001 — the history must never break a send
+                pass
+        return True
 
     # ── v1.0RC3: scrollback (wheel + Ctrl+Shift+PgUp/PgDn, TERMINAL.md §5.4) ──
     def scroll_page_up(self):

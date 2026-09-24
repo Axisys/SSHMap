@@ -596,6 +596,13 @@ try:
         menu = p8._build_context_menu(top)
         check("the context menu by category: all the actions are disabled",
               all(not a.isEnabled() for a in menu.actions()))
+        # The POLICY is what makes the gesture exist: without it the right click is a plain
+        # contextMenuEvent the tree ignores, so it travels up to the container (where the
+        # terminal window answered it with its own "Split Terminal" menu and the dock with
+        # nothing) and the documented "right-click the library" affordance never opened.
+        check("the tree carries the CustomContextMenu policy (the right-click reaches the panel)",
+              p8.tree.contextMenuPolicy() == Qt.ContextMenuPolicy.CustomContextMenu,
+              str(p8.tree.contextMenuPolicy()))
     finally:
         CL.QMessageBox = _orig_qmb
 finally:

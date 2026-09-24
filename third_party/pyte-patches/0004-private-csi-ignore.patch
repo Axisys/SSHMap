@@ -1,0 +1,72 @@
+Subject: [sshmap fork 0004] a PRIVATE CSI must never crash the emulator (CSI ? r / CSI ? n)
+
+Provenance: sshmap, the v1.5.7 defect report of the testers ("mc does not leave the screen: the
+            prompt appears only after a key press"). The application's own log named the
+            handler: `terminal: feed failed (TypeError("Screen.set_margins() got an
+            unexpected keyword argument 'private'"))`. Root cause read off the vendored
+            source: `pyte/streams.py` ends a `CSI` on
+                csi_dispatch[char](*params, private=True)   # for every `?`-prefixed CSI
+            while the handlers of `? r` (XTRESTORE — "restore DEC private mode values",
+            emitted by ncurses/mc on exit) and of `? n` (the private DSR) do not accept
+            a keyword argument. No upstream issue was filed: the fork carries the fix.
+Implemented: Screens.set_margins / Screen.report_device_status accept **kwargs and IGNORE a
+            private dispatch. A `CSI ? r` is NOT a DECSTBM (there is no private form) and a
+            `CSI ? 6 n` is not the public DSR — the only correct answer to both is a no-op;
+            the public `CSI r` / `CSI 1;5r` (scroll regions, used by vim/less splits) and the
+            public `CSI 6 n` keep their behaviour byte for byte.
+Base:       pyte 0.8.2, pyte/screens.py (after patches 0001-0003).
+Policy:     keep until upstream makes the private dispatch tolerant (0.8.3+); the crash class is
+            in the DISPATCH (`private=True` for every `?`-CSI), so the fork fixes the two
+            handlers that a real terminal program can actually reach.
+Applied:    2026-09-24, sshmap v1.5.7.
+
+diff --git a/pyte/screens.py b/pyte/screens.py
+--- a/pyte/screens.py
++++ b/pyte/screens.py
+@@ -336,12 +336,21 @@
+         self.lines, self.columns = lines, columns
+         self.set_margins()
+ 
+-    def set_margins(self, top: Optional[int] = None, bottom: Optional[int] = None) -> None:
++    def set_margins(self, top: Optional[int] = None, bottom: Optional[int] = None,
++                    **kwargs: Any) -> None:
+         """Select top and bottom margins for the scrolling region.
+ 
+         :param int top: the smallest line number that is scrolled.
+         :param int bottom: the biggest line number that is scrolled.
+-        """
++
++        sshmap fork (patch 0004): the stream passes ``private=True`` to the handler of every
++        ``CSI ? … <final>``, and ``? r`` (XTRESTORE — restore DEC private mode values, sent by
++        ncurses/mc on exit) lands here because its final byte is ``r``. There is no private
++        DECSTBM: the sequence is IGNORED instead of raising ``TypeError`` out of ``feed()``
++        (which aborted the whole chunk, and with it the repaint of the canvas).
++        """
++        if kwargs.get("private"):
++            return
+         # XXX 0 corresponds to the CSI with no parameters.
+         if (top is None or top == 0) and bottom is None:
+             self.margins = None
+@@ -1093,14 +1102,20 @@
+         if mode == 0 and not kwargs.get("private"):
+             self.write_process_input(ctrl.CSI + "?6c")
+ 
+-    def report_device_status(self, mode: int) -> None:
++    def report_device_status(self, mode: int, **kwargs: Any) -> None:
+         """Report terminal status or cursor position.
+ 
+         :param int mode: if 5 -- terminal status, 6 -- cursor position,
+                          otherwise a noop.
+ 
+         .. versionadded:: 0.5.0
+-        """
++
++        sshmap fork (patch 0004): a PRIVATE DSR (``CSI ? 5 n`` / ``CSI ? 6 n``) is not the public
++        sequence — it has no defined report, so it is ignored (the same crash class as
++        ``set_margins``: ``TypeError`` out of ``feed()``).
++        """
++        if kwargs.get("private"):
++            return
+         if mode == 5:    # Request for terminal status.
+             self.write_process_input(ctrl.CSI + "0n")
+         elif mode == 6:  # Request for cursor position.

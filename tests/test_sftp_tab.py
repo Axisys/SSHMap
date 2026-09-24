@@ -474,11 +474,13 @@ fs_first = FakeSftpFS()
 fs_first.add_dir("/data")  # a non-empty root — there is something to render in the listing
 first_sftp = FakeSftpClient(fs_first)
 win_a = make_win("a", _FakeSshClient(first_sftp))
-check("a QTabWidget with two tabs", win_a.tabs.count() == 2)
-check("the tab titles: Terminal | Files (the i18n en)",
+check("a QTabWidget with three tabs (Terminal | Files | History — v1.5.7)",
+      win_a.tabs.count() == 3)
+check("the tab titles: Terminal | Files | History (the i18n en)",
       win_a.tabs.tabText(0) == i18n.t("sftp.tab_terminal")
-      and win_a.tabs.tabText(1) == i18n.t("sftp.tab_files"),
-      f"got={win_a.tabs.tabText(0)!r}/{win_a.tabs.tabText(1)!r}")
+      and win_a.tabs.tabText(1) == i18n.t("sftp.tab_files")
+      and win_a.tabs.tabText(2) == i18n.t("terminal.tab_history"),
+      f"got={win_a.tabs.tabText(0)!r}/{win_a.tabs.tabText(1)!r}/{win_a.tabs.tabText(2)!r}")
 check("the worker is NOT created before the move to the tab (the lazy start)",
       win_a._sftp_worker is None)
 # isHidden() — the flag of the widget itself: the window is not show()n in the test, hence
