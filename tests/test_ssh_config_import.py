@@ -665,14 +665,14 @@ print("== §9 the release state ==")
 from _common import EXPECTED_APP_VERSION, EXPECTED_I18N_KEYS  # noqa: E402
 
 check("§9 the version pin is the version this test file describes",
-      EXPECTED_APP_VERSION == "1.5.3", EXPECTED_APP_VERSION)
+      EXPECTED_APP_VERSION == "1.5.4", EXPECTED_APP_VERSION)
 check("§9 the key pin counts the SHIPPED release (545 + 21 of v1.4.1 + 4 of v1.4.2 + 16 of v1.4.3"
       " — v1.4.4 adds none: motion is behaviour only; v1.4.5 adds 17: the panel/grid UI;"
       " v1.4.6 adds 9: the sidebar.list.* column headers + the minimap title band;"
       " v1.4.7 adds 1: the SFTP viewer's heuristic-highlighting note;"
       " v1.5rc1 adds 3: the Auto mode and the Reduce-motion switch of the Appearance tab;"
-      " v1.5rc2 adds 3: the export-options dialog and its two strings; v1.5rc3 adds 11: the demo map, the undo affordance, the freshness line and the first screen; v1.5rc4 adds 13: the settings search, the hotkey filter/counts/families and the toolbar overflow; v1.5rc5 adds NONE: the review batch reuses the existing ssh.* messages; v1.5 adds 1: node.status.emulated, the marker of the demo's emulated statuses; v1.5.1 adds 4: the two map-image actions and their two reports; v1.5.2 adds 13: the chrome of the activity panel; v1.5.3 adds 20: the age of the collected facts, the batch collection and the reachability report)",
-      EXPECTED_I18N_KEYS == 681, str(EXPECTED_I18N_KEYS))
+      " v1.5rc2 adds 3: the export-options dialog and its two strings; v1.5rc3 adds 11: the demo map, the undo affordance, the freshness line and the first screen; v1.5rc4 adds 13: the settings search, the hotkey filter/counts/families and the toolbar overflow; v1.5rc5 adds NONE: the review batch reuses the existing ssh.* messages; v1.5 adds 1: node.status.emulated, the marker of the demo's emulated statuses; v1.5.1 adds 4: the two map-image actions and their two reports; v1.5.2 adds 13: the chrome of the activity panel; v1.5.3 adds 20: the age of the collected facts, the batch collection and the reachability report; v1.5.4 adds 11: the two group-aggregate captions, the three strings of the problems-only chip and the six of the active-filter plaque)",
+      EXPECTED_I18N_KEYS == 692, str(EXPECTED_I18N_KEYS))
 check_i18n_parity(load_i18n_langs(ROOT))
 check_release_state(ROOT)
 for _code in i18n_lang_codes(ROOT):

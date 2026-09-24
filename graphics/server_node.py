@@ -1430,6 +1430,26 @@ class ServerNode(QGraphicsItemGroup):
         # Static frame + pulse (overlay fade-out: opacity 1 -> 0)
         self._apply_visual_state()
         self._start_pulse(color)
+        self._notify_group_aggregate()
+
+    def _notify_group_aggregate(self) -> None:
+        """v1.5.4 (ROADMAP task 1): tell the MAP that this card's status changed.
+
+        A group paints an AGGREGATE of its members (the worst status + the counts) and
+        reads the values LIVE at paint time, so the only thing a status change needs is a
+        repaint of the groups that hold the card. Asking the scene HERE — not at the
+        window's status slot — is what makes every path behave the same: a probe result,
+        an emulated demo status, a `reset_status()` after editing the host and a test
+        fixture all end in `set_status`/`reset_status`. The `itemChange` hook already
+        talks to the scene the same way (the geometric membership). Never raises.
+        """
+        try:
+            scene = self.scene()
+            hook = getattr(scene, "refresh_group_aggregates", None)
+            if scene is not None and callable(hook):
+                hook(self)
+        except (AttributeError, RuntimeError):
+            pass  # no scene yet / Qt teardown — the aggregate is cosmetic
 
     def _apply_status_tooltip(self, status: str):
         """v0.7.1/v1.4rc2/v1.5rc3/v1.5: the status tooltip — the plugin detail and the AGE.
@@ -1542,6 +1562,8 @@ class ServerNode(QGraphicsItemGroup):
         self._apply_content_opacity()
         self._apply_badges()
         self._apply_visual_state()
+        # v1.5.4 (ROADMAP task 1): the card left every aggregate it belonged to
+        self._notify_group_aggregate()
 
     def itemChange(self, change, value):
         if change == QGraphicsItem.ItemPositionChange:

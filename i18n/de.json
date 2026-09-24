@@ -680,5 +680,16 @@
   "diagnose.banner_silent": "TCP {host}:{port} nahm die Verbindung an, sendete aber keinen SSH-Banner — kein SSH-Dienst oder ein defektes sshd",
   "diagnose.banner_foreign": "Port {port} von {host} antwortete mit {banner} — dort lauscht ein anderer Dienst",
   "diagnose.ping_ok": "ICMP-Ping antwortete — der Host lebt, also wird der Port gefiltert und nicht der Host",
-  "diagnose.ping_failed": "Auch der ICMP-Ping schlug fehl — der Host scheint down zu sein oder blockt ICMP"
+  "diagnose.ping_failed": "Auch der ICMP-Ping schlug fehl — der Host scheint down zu sein oder blockt ICMP",
+  "group.status.empty": "Keine Server",
+  "group.status.unchecked": "Nicht geprüft",
+  "statusbar.problems": "Probleme: {count}",
+  "statusbar.problems.tooltip": "Alle Server dimmen, die nicht Warnung / Offline / veraltet sind (erneuter Klick setzt zurück)",
+  "statusbar.problems.active": "Nur Probleme: die Karte hebt die Server hervor, die Aufmerksamkeit brauchen",
+  "filter.plaque.title": "Filter",
+  "filter.plaque.search": "Suche: {query}",
+  "filter.plaque.tag": "Tag: {tag}",
+  "filter.plaque.status": "Status: {status}",
+  "filter.plaque.problems": "Nur Probleme",
+  "filter.plaque.tooltip": "Die Karte ist gefiltert — ein Filter wird mit seinem × gelöscht"
 }

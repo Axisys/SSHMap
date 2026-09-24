@@ -378,12 +378,12 @@ print("== §4 the release state and the 'no new contract' audit ==")
 
 check_release_state(ROOT)
 check("§4 EXPECTED_APP_VERSION is the shipped release (v1.5.1 was the first patch on 1.5;"
-      " the pin quotes the CURRENT one — v1.5.3)",
-      EXPECTED_APP_VERSION == "1.5.3"
-      and re.fullmatch(r"1\.5\.3", EXPECTED_APP_VERSION) is not None)
+      " the pin quotes the CURRENT one — v1.5.4)",
+      EXPECTED_APP_VERSION == "1.5.4"
+      and re.fullmatch(r"1\.5\.4", EXPECTED_APP_VERSION) is not None)
 check("§4 the i18n pin moved by exactly FOUR keys in v1.5.1 (two labels + two reports), by "
-      "v1.5.2's thirteen and by v1.5.3's twenty on top",
-      EXPECTED_I18N_KEYS == 681, str(EXPECTED_I18N_KEYS))
+      "v1.5.2's thirteen, by v1.5.3's twenty and by v1.5.4's eleven on top",
+      EXPECTED_I18N_KEYS == 692, str(EXPECTED_I18N_KEYS))
 check_i18n_parity(_langs)
 check_i18n_format(_langs)
 
@@ -425,6 +425,6 @@ check("§4 no new dependency (the four pinned ones and nothing else)",
                         _req, re.M))
 check("§4 VERSION_FORMAT did NOT move (the project schema is unchanged)",
       __import__("version").VERSION_FORMAT == "0.9"
-      and __import__("version").APP_VERSION == "1.5.3")
+      and __import__("version").APP_VERSION == "1.5.4")
 
 finish()

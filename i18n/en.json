@@ -680,5 +680,16 @@
   "diagnose.banner_silent": "TCP {host}:{port} accepted the connection but sent no SSH banner — not an SSH service, or a broken sshd",
   "diagnose.banner_foreign": "Port {port} of {host} answered with {banner} — another service is listening there",
   "diagnose.ping_ok": "ICMP ping answered — the host is up, so the port is filtered rather than the host dead",
-  "diagnose.ping_failed": "ICMP ping also failed — the host looks down or blocks ICMP"
+  "diagnose.ping_failed": "ICMP ping also failed — the host looks down or blocks ICMP",
+  "group.status.empty": "No members",
+  "group.status.unchecked": "Not checked",
+  "statusbar.problems": "Problems: {count}",
+  "statusbar.problems.tooltip": "Dim every server that is not warn / offline / stale (click again to reset)",
+  "statusbar.problems.active": "Problems only: the map highlights the servers that need attention",
+  "filter.plaque.title": "Filters",
+  "filter.plaque.search": "Search: {query}",
+  "filter.plaque.tag": "Tag: {tag}",
+  "filter.plaque.status": "Status: {status}",
+  "filter.plaque.problems": "Problems only",
+  "filter.plaque.tooltip": "The map is filtered — clear one filter with its ×"
 }

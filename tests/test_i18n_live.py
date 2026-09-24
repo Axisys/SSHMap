@@ -785,15 +785,17 @@ print("== §9 the release state ==")
 # ════════════════════════════════════════════════════════════════════════════
 
 check("EXPECTED_APP_VERSION is the version this test file describes",
-      EXPECTED_APP_VERSION == "1.5.3", EXPECTED_APP_VERSION)
+      EXPECTED_APP_VERSION == "1.5.4", EXPECTED_APP_VERSION)
 check("the pin counts the keys of the SHIPPED release (v1.5.2 added THIRTEEN — all the CHROME "
-      "of the activity panel — and v1.5.3 added TWENTY in three families: the age of the "
+      "of the activity panel — v1.5.3 added TWENTY in three families: the age of the "
       "collected facts (`node.info.collected_now` plus the minutes/hours/days steps), the "
       "batch collection (progress / done / failed / none) and the reachability report "
       "(`ctx.diagnose`, `status.diagnose_running` and the eight `diagnose.*` verdicts with "
-      "their two ICMP evidence lines); the numbers and the behaviour of the release cost no "
-      "key, so 661 + 20 = 681)",
-      EXPECTED_I18N_KEYS == 681, str(EXPECTED_I18N_KEYS))
+      "their two ICMP evidence lines), and v1.5.4 added ELEVEN: the group aggregate's two "
+      "captions, the three strings of the \"problems only\" chip and the six of the "
+      "active-filter plaque; the numbers and the behaviour of a release cost no key, "
+      "so 661 + 20 + 11 = 692)",
+      EXPECTED_I18N_KEYS == 692, str(EXPECTED_I18N_KEYS))
 check_release_state(ROOT)
 for _code in i18n_lang_codes(ROOT):
     check(f"i18n/{_code}.json carries the v1.5 node.status.emulated marker",

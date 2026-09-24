@@ -259,8 +259,22 @@ def clear_cfg(*extra_paths: str) -> None:
 # in 12 i18n files + the APP_VERSION/requirements pins in 7 release-state sections).
 # The misses of the keys themselves against the code are caught by check_i18n_keys.py.
 # ─────────────────────────────────────────────────────────────────────────────
-EXPECTED_APP_VERSION = "1.5.3"   # the current release (a sentinel: it catches "a bump to the wrong version")
-EXPECTED_I18N_KEYS = 681        # the parity of the TRANSLATION keys (v1.5.3 — "freshness everywhere:
+EXPECTED_APP_VERSION = "1.5.4"   # the current release (a sentinel: it catches "a bump to the wrong version")
+EXPECTED_I18N_KEYS = 692        # the parity of the TRANSLATION keys (v1.5.4 — "trouble first: the map
+                                # answers 'where is the problem'": the FOURTH patch ON the released 1.5).
+                                # +11 keys × en/ru/zh/de in three families: the group AGGREGATE
+                                # (`group.status.empty` — "an empty group says so" — and
+                                # `group.status.unchecked`; the counts themselves are numbers joined to
+                                # the EXISTING `legend.status.*` words, because the application has one
+                                # spelling of online/warn/offline); the "problems only" LENS
+                                # (`statusbar.problems` {count}, its tooltip and the sentence of the
+                                # toggle — the chip is a status-bar CONTROL, so it takes no registry
+                                # action and no hotkey, exactly like the three counters beside it); and
+                                # the active-filter PLAQUE (`filter.plaque.title` and one caption per
+                                # row — `search` {query}, `tag` {tag}, `status` {status}, `problems` —
+                                # plus the panel tooltip). The severity order, the aggregate itself and
+                                # the dimming are behaviour and numbers, not keys.
+                                # (v1.5.3 — "freshness everywhere:
                                 # the facts get an age, and a red card answers 'why'": the THIRD patch ON
                                 # the released 1.5). +20 keys × en/ru/zh/de in three families:
                                 # the AGE of the collected facts (`node.info.collected_now` and the

@@ -705,8 +705,8 @@ _missing = {code: [k for k in _NEW_KEYS if not str(data.get(k) or "").strip()]
 check(f"§8 the {len(_NEW_KEYS)} keys of v1.5rc4 are present and non-empty in every language",
       not any(_missing.values()), str({c: v for c, v in _missing.items() if v}))
 check(f"§8 the pin moved 630 → {EXPECTED_I18N_KEYS} (13 keys of v1.5rc4, +1 of v1.5, +4 of v1.5.1,"
-      f" +13 of v1.5.2, +20 of v1.5.3)",
-      EXPECTED_I18N_KEYS == 681)
+      f" +13 of v1.5.2, +20 of v1.5.3, +11 of v1.5.4)",
+      EXPECTED_I18N_KEYS == 692)
 
 check("§8 the family map of the registry is complete (every action has a home)",
       all(HR.action_family(a) in HR.family_order() for a in HR.action_ids())

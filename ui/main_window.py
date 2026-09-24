@@ -9,11 +9,15 @@ try:
     from ..graphics.map_view import MapView
     from ..graphics.server_node import ServerNode
     from ..graphics.node_group import NodeGroup  # v0.8.1: node grouping (clusters/folders)
+    # v1.5.4 (ROADMAP tasks 1/2): the ONE declaration of "in trouble" — the group
+    # aggregate and the "problems only" lens must mean the same thing by construction
+    from ..graphics.node_group import is_in_trouble as node_in_trouble
 except ImportError:
     from graphics.map_scene import MapScene
     from graphics.map_view import MapView
     from graphics.server_node import ServerNode
     from graphics.node_group import NodeGroup  # v0.8.1
+    from graphics.node_group import is_in_trouble as node_in_trouble
 
 try:
     from ..dialogs.add_server_dialog import AddServerDialog
@@ -349,6 +353,59 @@ class _StatusCounter(QLabel):
         if event.button() == Qt.MouseButton.LeftButton:
             try:
                 self.clicked.emit(self.status)
+            except RuntimeError:
+                pass  # Qt teardown — the receiver is gone
+            event.accept()
+            return
+        super().mousePressEvent(event)
+
+
+class _ProblemsChip(QLabel):
+    """The "problems only" toggle of the status bar (v1.5.4, ROADMAP task 2).
+
+    The lens has to be reachable from somewhere, and the v1.4.5 status counters are the
+    precedent the ROADMAP names: a CLICKABLE piece of the status bar beside the three
+    status counters, transient by construction (nothing is written to `config.json`), so
+    a restart never leaves the map dimmed for no visible reason. It is deliberately NOT a
+    registry action — it is not a menu item, and the counters next to it are not either.
+
+    The count is a TOTAL (the servers that need attention right now), never the filtered
+    view: the counters keep telling the whole truth while a lens is on. The WINDOW owns
+    what the click means and what the count is; this widget only reports the click and
+    paints its active state — the `_StatusCounter` split.
+    """
+
+    clicked = Signal()
+
+    def __init__(self, parent=None):
+        super().__init__("", parent)
+        self._active = False
+        self.setObjectName("ProblemsChip")
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+
+    def is_active(self) -> bool:
+        """Is the "problems only" lens on?"""
+        return bool(self._active)
+
+    def set_active(self, active: bool) -> None:
+        """Mark the chip as the applied lens (bold) or as a plain counter."""
+        active = bool(active)
+        if active == self._active:
+            return
+        self._active = active
+        self.refresh_theme()
+
+    def refresh_theme(self):
+        """Re-apply the chip's stylesheet (a QSS string is a value — v1.4.3)."""
+        if theme_qss is None:
+            return
+        theme_qss.refresh(self, "status.bar_filter_active" if self._active
+                          else "status.bar_filter")
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            try:
+                self.clicked.emit()
             except RuntimeError:
                 pass  # Qt teardown — the receiver is gone
             event.accept()
@@ -860,6 +917,14 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
                     self.refresh_sidebar()
                 except RuntimeError:
                     pass  # Qt teardown — the window is closing
+            elif getattr(self, "_problems_only", False):
+                # v1.5.4 (ROADMAP task 2): the LENS reads the status too — a card that
+                # just went red must light up (and a card that recovered must recede)
+                # without a rebuild of the sidebar, which no status filter asked for.
+                try:
+                    self._apply_map_dimming()
+                except Exception:  # noqa: BLE001 — the lens is cosmetic on teardown
+                    pass
 
     # ── v1.5rc3 (ROADMAP task 3): status freshness ──────────────────────────────
 
@@ -909,6 +974,15 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
             if checker is not None:
                 self._apply_node_freshness(node)
             self._apply_node_info_freshness(node)
+        # v1.5.4 (ROADMAP task 2): a datum that has just grown STALE is a NEW problem —
+        # the chip re-counts and, while the lens is on, the dimming follows (nothing else
+        # is touched: a lens is a view, and the counters keep their totals).
+        try:
+            self._sync_problems_chip()
+            if getattr(self, "_problems_only", False):
+                self._apply_map_dimming()
+        except (AttributeError, RuntimeError):
+            pass  # Qt teardown / a window without the v1.5.4 pieces
 
     def _apply_node_info_freshness(self, node) -> bool:
         """Give ONE card the age of its collected facts (the data is the source of truth).
@@ -1050,7 +1124,12 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
             pass  # Qt teardown — the status bar is already destroyed
         # v1.4.5 (ROADMAP task 3): the clickable status counters (their ACTIVE styling
         # is the widget's own state — `refresh_theme()` picks the right registry entry).
-        for counter in (getattr(self, "status_filter_labels", {}) or {}).values():
+        # v1.5.4 (ROADMAP task 2): the "problems only" chip belongs to the same family
+        # (its QSS is a VALUE too, and `set_active` only re-applies it on a real change).
+        for counter in list((getattr(self, "status_filter_labels", {}) or {}).values()) \
+                + [getattr(self, "problems_chip", None)]:
+            if counter is None:
+                continue
             try:
                 counter.refresh_theme()
             except RuntimeError:
@@ -1109,7 +1188,8 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         # bar (v0.9.8), the minimap (v1.4.2), the legend (v1.4.5) and the first-run
         # empty state (v1.4.5) — all repaint from the live theme.
         for widget in (getattr(self, "map_search", None), getattr(self, "legend", None),
-                       getattr(self, "empty_state", None)):
+                       getattr(self, "empty_state", None),
+                       getattr(self, "filter_plaque", None)):
             hook = getattr(widget, "refresh_theme", None)
             if callable(hook):
                 try:
@@ -1380,6 +1460,15 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
                 _legend.retranslate()
             except RuntimeError:
                 pass  # Qt teardown — the panel is already destroyed
+        # v1.5.4 (ROADMAP task 3): the active-filter plaque — it BUILDS its captions from
+        # the live filter state, so a re-text is one call (the values never move).
+        _plaque = getattr(self, "filter_plaque", None)
+        if _plaque is not None:
+            try:
+                _plaque.retranslate()
+                self._position_filter_plaque()  # the captions changed width — re-place it
+            except RuntimeError:
+                pass  # Qt teardown — the panel is already destroyed
         # v1.5.2 (ROADMAP task 3): the activity panel — the CHROME only (its title, the
         # level captions, the column headers, Clear). The event LINES are logging lines
         # and stay English: one key per event kind would be an i18n cost with no reader.
@@ -1627,6 +1716,12 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         # and the menu item simply joins the same state.
         self._setup_legend()
 
+        # v1.5.4 (ROADMAP task 3): the active-filter plaque — the panel that NAMES the
+        # filters which dim the map (the v1.4.5 panel pattern: a child of the view, out of
+        # the exports). Created after the legend, because it yields its corner to no one
+        # and simply joins the floating-panel priority resolver below.
+        self._setup_filter_plaque()
+
         # Status bar
         if self._i18n_available:
             try:
@@ -1663,6 +1758,16 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
             _counter.refresh_theme()
             self.statusBar().addPermanentWidget(_counter)
             self.status_filter_labels[_status] = _counter
+
+        # v1.5.4 (ROADMAP task 2): the "problems only" lens — ONE transient toggle beside
+        # the status counters whose click DIMS everything that is not warn/offline/stale.
+        # It is UI state (memory only, never a config key) and it never changes the
+        # counters: a lens is a view, not a fact.
+        self._problems_only = False
+        self.problems_chip = _ProblemsChip(self)
+        self.problems_chip.clicked.connect(self._on_problems_chip_clicked)
+        self.problems_chip.refresh_theme()
+        self.statusBar().addPermanentWidget(self.problems_chip)
 
         self.zoom_label = QLabel("100%")
         self.zoom_label.setMinimumWidth(44)
@@ -2380,6 +2485,9 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         widgets = [getattr(self, "counts_label", None)]
         for status in STATUS_FILTER_ORDER:
             widgets.append((getattr(self, "status_filter_labels", None) or {}).get(status))
+        # v1.5.4 (ROADMAP task 2): the "problems only" chip belongs to the interactive
+        # family the policy never gives up — it is a CONTROL, not passive text.
+        widgets.append(getattr(self, "problems_chip", None))
         widgets.append(getattr(self, "zoom_label", None))
         plaque = getattr(self, "_multi_plaque", None)
         if plaque is not None:
@@ -2400,15 +2508,20 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         """True while the totals pair is hidden (the topical test's seam)."""
         return bool(getattr(self, "_status_bar_compact", False))
     # ── v1.5rc4 (ROADMAP task 7): the floating-panel priority rule ──────────────
-    # Four panels float over the canvas (the search bar, the minimap, the legend and the
-    # first-run hint) plus the map-collapse diamond, which is a child of the view too.
-    # Where they sit is decided in ONE place, from the LIVE geometry:
+    # Five panels float over the canvas (the search bar, the minimap, the legend, the
+    # first-run hint and — since v1.5.4 — the active-filter plaque) plus the map-collapse
+    # diamond, which is a child of the view too. Where they sit is decided in ONE place,
+    # from the LIVE geometry:
     #
     #   1. the first-run hint WINS over the legend — while an empty map explains itself,
     #      the legend is suppressed (it explains a map that has nothing to explain yet);
     #   2. the minimap yields to the OPEN search bar (the v1.4.2 rule, kept: the panel
     #      steps below the bar);
     #   3. the collapse diamond is never covered by a panel — it is moved out of the way.
+    #
+    # The filter plaque joined the SAME resolution in v1.5.4 (it is a rect in
+    # `_overlay_panel_rects()` and it yields to the bar the way the minimap does), so the
+    # rule has one home and one call site instead of a second layout pass.
     #
     # The suppression is TEMPORARY and never touches the saved state: the legend's own
     # `ui_legend` key and `_legend_enabled` are the user's, and `_legend_suppressed` is
@@ -2420,8 +2533,12 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         self._sync_legend_suppression()
         # The minimap's own rule lives with its placement (`_position_minimap`), and the
         # diamond is placed by `_position_map_collapse_btn` — both are re-run here so ONE
-        # call site keeps the four panels consistent after any geometry change.
+        # call site keeps the panels consistent after any geometry change.
         self._position_minimap()
+        # v1.5.4 (ROADMAP task 3): the filter plaque yields to an OPEN search bar (it steps
+        # below it) — its placement is part of the same ONE resolution, so the bar opening
+        # and closing move it without a second call site.
+        self._position_filter_plaque()
         self._position_map_collapse_btn()
 
     def _sync_legend_suppression(self) -> bool:
@@ -3821,11 +3938,12 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
 
         The view's own coordinates (every panel is a child of `MapView`), in the order the
         priority rule cares about: the first-run hint first (it is the temporary one), then
-        the search bar, the minimap and the legend. A panel that is hidden — including the
-        legend suppressed by the priority rule itself — contributes nothing.
+        the search bar, the minimap, the legend and — since v1.5.4 — the filter plaque (a
+        panel that only exists while a filter dims the map). A panel that is hidden —
+        including the legend suppressed by the priority rule itself — contributes nothing.
         """
         rects = []
-        for name in ("empty_state", "map_search", "minimap", "legend"):
+        for name in ("empty_state", "map_search", "minimap", "legend", "filter_plaque"):
             panel = getattr(self, name, None)
             if panel is None:
                 continue
@@ -4898,21 +5016,27 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
             return None
 
     def _apply_map_dimming(self):
-        """v0.9.4/v0.9.8/v1.4.4: dimming + highlighting of the active filters on the map.
+        """v0.9.4/v0.9.8/v1.4.4/v1.5.4: dimming + highlighting of the active filters on the map.
 
         A node "glows" only if it passes ALL active filters (the same semantics as in
         the sidebar — refresh_sidebar applies the query and the tag at once):
         - the v0.9.4 tag filter: nodes without the selected tag are dimmed;
         - the v0.9.8 map search (Ctrl+F): non-matches are dimmed,
           matches get the accent frame (ServerNode.set_search_match);
+        - the v1.5.4 "problems only" LENS (ROADMAP task 2): everything that is not
+          `warn` / `offline` / stale is dimmed — the lens COMPOSES with the two above
+          instead of replacing them (one `and`, one owner);
         - the v1.4.4 arrow hover focus (ROADMAP task 4): hovering a connection highlights
           its TWO ends and dims everything else. It is merged HERE on purpose — this method
-          is the single owner of the dim state, so the hover, the tag filter and the search
-          cannot stack into a "stuck" opacity (the ROADMAP's "one owner" rule).
+          is the single owner of the dim state, so the hover, the tag filter, the search and
+          the lens cannot stack into a "stuck" opacity (the ROADMAP's "one owner" rule).
         The arrows are not touched: connections between dimmed nodes are read from context.
+        The floating filter plaque (v1.5.4, task 3) is re-synced from the SAME place: this
+        is the one call every filter change already passes through.
         """
         active = self._active_tag_filter()
         query = (getattr(self, "_map_search_query", "") or "").strip().lower()
+        lens = bool(getattr(self, "_problems_only", False))
         focus = self._hover_focus()
         focus_ids = set()
         if focus is not None:
@@ -4933,7 +5057,12 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
                 match_ok = query in haystack
             else:
                 match_ok = True
-            dimmed = not (tag_ok and match_ok)
+            # v1.5.4: the lens — "needs attention" is the DECLARED predicate shared with
+            # the group aggregate (`graphics.node_group.is_in_trouble`), so the two can
+            # never drift apart.
+            problem_ok = (not lens) or node_in_trouble(
+                getattr(node, "status", ""), bool(getattr(node, "is_stale", False)))
+            dimmed = not (tag_ok and match_ok and problem_ok)
             matched = bool(query) and match_ok
             if focus is not None:
                 # The hover focus wins: the two ends are read, the rest recedes — and the
@@ -4948,9 +5077,186 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
                 node.set_search_match(matched)
             except (AttributeError, RuntimeError):
                 pass
+        self._sync_filter_plaque()
 
     # Backward-compat: the v0.9.4 name (external code/tests may reference it)
     _apply_map_tag_dimming = _apply_map_dimming
+
+    # ── v1.5.4 (ROADMAP task 2): the "problems only" lens ───────────────────────
+
+    def _on_problems_chip_clicked(self):
+        """The status-bar chip: toggle the lens (the `_on_status_filter_clicked` pattern)."""
+        self._set_problems_only(not bool(getattr(self, "_problems_only", False)))
+
+    def _set_problems_only(self, active: bool, announce: bool = True) -> bool:
+        """Turn the "problems only" lens on/off. Returns True when the state changed.
+
+        TRANSIENT by construction: the flag lives in memory only (never a `config.json`
+        key) — the v1.4.5 status-filter rule, because a restart must not leave the map
+        dimmed for no visible reason. The counters are untouched (a lens is a view, not
+        a fact), and the whole effect is delegated to the ONE dim owner.
+        """
+        active = bool(active)
+        if active == bool(getattr(self, "_problems_only", False)):
+            return False
+        self._problems_only = active
+        chip = getattr(self, "problems_chip", None)
+        if chip is not None:
+            try:
+                chip.set_active(active)
+            except RuntimeError:
+                pass  # Qt teardown — the chip is already destroyed
+        self._apply_map_dimming()
+        if announce:
+            try:
+                self.statusBar().showMessage(
+                    self.t("statusbar.problems.active") if active else self.t("status.ready"))
+            except Exception:  # noqa: BLE001 — the hint must not break the lens
+                pass
+        return True
+
+    @property
+    def problems_only(self) -> bool:
+        """v1.5.4: is the map showing only the servers that need attention?"""
+        return bool(getattr(self, "_problems_only", False))
+
+    def _trouble_nodes(self) -> list:
+        """The nodes the lens keeps highlighted (warn / offline / stale) — the TOTALS."""
+        try:
+            nodes = list(self.scene.nodes())
+        except (AttributeError, RuntimeError):
+            return []
+        return [n for n in nodes
+                if node_in_trouble(getattr(n, "status", ""),
+                                   bool(getattr(n, "is_stale", False)))]
+
+    def _sync_problems_chip(self) -> int:
+        """Re-text the chip with the number of servers that need attention (the TOTAL).
+
+        The count is the whole truth, not the filtered view: a lens never rewrites a
+        counter (the v1.4.5 rule). Called by the composition hook and by the freshness
+        tick, because a datum that has just grown old IS a new problem.
+        """
+        chip = getattr(self, "problems_chip", None)
+        count = len(self._trouble_nodes())
+        if chip is None:
+            return count
+        try:
+            chip.setText(self.t("statusbar.problems", count=count))
+            chip.setToolTip(self.t("statusbar.problems.tooltip"))
+            chip.set_active(bool(getattr(self, "_problems_only", False)))
+        except RuntimeError:
+            pass  # Qt teardown — the chip is already destroyed
+        return count
+
+    # ── v1.5.4 (ROADMAP task 3): the floating plaque of the ACTIVE filters ───────
+
+    #: The inset of the plaque's default (top-left) position — the legend's margin, so
+    #: the two panels of the window share one spacing standard.
+    FILTER_MARGIN = 12
+
+    def _setup_filter_plaque(self):
+        """Create the active-filter plaque (a child of the view) and wire its two signals.
+
+        The widget owns no filter logic: it reports a click per row (`clear_requested`)
+        and the window clears that ONE filter. Its placement hangs off `view.resized`
+        like the other floating panels, and it starts hidden (no filter is active yet).
+        """
+        try:
+            from ui.filter_plaque import FilterPlaque
+        except ImportError:  # flat launch from the project root
+            from filter_plaque import FilterPlaque
+
+        self.filter_plaque = FilterPlaque(self.view)
+        self.filter_plaque.clear_requested.connect(self._on_filter_clear)
+        self.view.resized.connect(self._position_filter_plaque)
+        self._position_filter_plaque()
+        self._sync_filter_plaque()
+
+    def _sync_filter_plaque(self) -> bool:
+        """Show/hide and re-text the plaque from the LIVE filter state. True — visible.
+
+        The window is the ONE owner of the filter state (the search query, the tag pick,
+        the status filter and the lens), so the plaque is a pure projection of it: it
+        appears exactly while at least one filter is active and disappears with the last
+        × — which is what makes "a forgotten filter" impossible to mistake for deleted
+        servers. Idempotent and cheap: the widget compares the RAW state and a repeated
+        push costs one dict comparison.
+        """
+        plaque = getattr(self, "filter_plaque", None)
+        if plaque is None:
+            return False
+        query = (getattr(self, "_map_search_query", "") or "").strip()
+        try:
+            changed = plaque.set_state(search=query, tag=self._active_tag_filter(),
+                                       status=getattr(self, "_status_filter", "") or "",
+                                       problems=bool(getattr(self, "_problems_only", False)))
+            if plaque.is_empty():
+                if plaque.isVisible():
+                    plaque.hide()
+                return False
+            if not plaque.isVisible():
+                plaque.setVisible(True)
+                changed = True
+            if changed:
+                self._position_filter_plaque()
+                plaque.raise_()
+        except RuntimeError:
+            return False  # Qt teardown — the panel is already destroyed
+        return True
+
+    def _position_filter_plaque(self):
+        """Place the plaque in the TOP-LEFT corner, clear of the open search bar.
+
+        The top-left is the one corner the other floating panels leave free (the search
+        bar is top-centre, the minimap top-right, the legend bottom-left, the collapse
+        diamond bottom-right). On a narrow window the centred search bar reaches into it,
+        so the plaque STEPS BELOW the bar instead of fighting it for the pixels — the same
+        "yield, never cover" idea the v1.5rc4 priority rule uses.
+        """
+        plaque = getattr(self, "filter_plaque", None)
+        view = getattr(self, "view", None)
+        if plaque is None or view is None:
+            return
+        try:
+            w, h = view.width(), view.height()
+            if w <= 0 or h <= 0:
+                return
+            x = self.FILTER_MARGIN
+            y = self.FILTER_MARGIN
+            bar = getattr(self, "map_search", None)
+            if bar is not None and bar.isVisible():
+                geometry = bar.geometry()
+                if geometry.left() < x + plaque.width() + self.FILTER_MARGIN:
+                    y = geometry.bottom() + self.FILTER_MARGIN
+            x = min(max(int(x), 0), max(w - plaque.width(), 0))
+            y = min(max(int(y), 0), max(h - plaque.height(), 0))
+            plaque.move(int(x), int(y))
+        except RuntimeError:
+            pass  # Qt teardown — the widget is already destroyed
+
+    def _on_filter_clear(self, kind: str):
+        """The × of one plaque row: clear THAT filter and nothing else (v1.5.4).
+
+        Every branch reuses the ordinary path of its own filter (the search panel's close,
+        the tag combo, the status counter's toggle, the lens setter), so a plaque click
+        behaves exactly like the gesture that turned the filter on — no second semantics
+        to keep in sync.
+        """
+        kind = str(kind or "")
+        if kind == "search":
+            self._close_map_search()
+        elif kind == "tag":
+            combo = getattr(self, "tag_filter", None)
+            if combo is not None:
+                try:
+                    combo.setCurrentIndex(0)   # "All tags" → _on_tag_filter_changed
+                except (RuntimeError, AttributeError):
+                    pass  # Qt teardown / a panel without the combo
+        elif kind == "status":
+            self._on_status_filter_clicked(getattr(self, "_status_filter", ""))
+        elif kind == "problems":
+            self._set_problems_only(False)
 
     # ── v0.9.8: map search (Ctrl+F) — ROADMAP v0.9.8 ────────────────
 
@@ -5824,6 +6130,9 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
                 counter.set_active(status == active)
             except RuntimeError:
                 continue  # Qt teardown — this counter is already destroyed
+        # v1.5.4 (ROADMAP task 2): the "problems only" chip counts the servers that need
+        # attention — a TOTAL like the three status counters beside it, never the view.
+        self._sync_problems_chip()
         self._sync_empty_state()
 
     # ── v1.4.5 (ROADMAP task 3): the status filter of the sidebar ────────────────

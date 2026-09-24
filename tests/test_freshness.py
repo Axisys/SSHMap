@@ -727,10 +727,10 @@ print("== §4 the release state ==")
 # ════════════════════════════════════════════════════════════════════════════
 
 check("§4 the version pin is the version this file describes",
-      EXPECTED_APP_VERSION == "1.5.3" and _version.APP_VERSION == "1.5.3",
+      EXPECTED_APP_VERSION == "1.5.4" and _version.APP_VERSION == "1.5.4",
       f"{EXPECTED_APP_VERSION} / {_version.APP_VERSION}")
-check("§4 the i18n pin counts the SHIPPED release (661 + 20 of v1.5.3)",
-      EXPECTED_I18N_KEYS == 681, str(EXPECTED_I18N_KEYS))
+check("§4 the i18n pin counts the SHIPPED release (661 + 20 of v1.5.3 + 11 of v1.5.4)",
+      EXPECTED_I18N_KEYS == 692, str(EXPECTED_I18N_KEYS))
 check("§4 the 20 new keys are present and non-empty in every language",
       all(str(LANGS[c].get(k, "")).strip() for k in NEW_KEYS for c in LANGS)
       and len(NEW_KEYS) == 20,

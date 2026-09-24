@@ -437,8 +437,8 @@ check("§4 it is a NON-MODAL window — never a fifth floating panel (the placem
       panel.isModal() is False and isinstance(panel, QDialog) and panel.parent() is win)
 _resolver = _src("ui", "main_window.py")
 _open = _resolver.index("def _overlay_panel_rects")
-check("§4 ...so it never joins the floating-panel priority resolver (only the four VIEW children)",
-      'for name in ("empty_state", "map_search", "minimap", "legend")'
+check("§4 ...so it never joins the floating-panel priority resolver (only the VIEW children)",
+      'for name in ("empty_state", "map_search", "minimap", "legend", "filter_plaque")'
       in _resolver[_open:_open + 900] and panel.parent() is not win.view)
 check("§4 it owns retranslate() (the v1.3.3.1 container invariant)",
       callable(getattr(panel, "retranslate", None)))
@@ -539,11 +539,12 @@ print("== §5 the release state and the 'no new contract' audit ==")
 
 check_release_state(ROOT)
 check("§5 EXPECTED_APP_VERSION is the shipped release (v1.5.2 was the second patch on 1.5;"
-      " the pin quotes the CURRENT one — v1.5.3 — like every topical file)",
-      EXPECTED_APP_VERSION == "1.5.3"
-      and re.fullmatch(r"1\.5\.3", EXPECTED_APP_VERSION) is not None)
-check("§5 the i18n pin counts the shipped release (v1.5.2's 661 + v1.5.3's twenty)",
-      EXPECTED_I18N_KEYS == 681, str(EXPECTED_I18N_KEYS))
+      " the pin quotes the CURRENT one — v1.5.4 — like every topical file)",
+      EXPECTED_APP_VERSION == "1.5.4"
+      and re.fullmatch(r"1\.5\.4", EXPECTED_APP_VERSION) is not None)
+check("§5 the i18n pin counts the shipped release (v1.5.2's 661 + v1.5.3's twenty"
+      " + v1.5.4's eleven)",
+      EXPECTED_I18N_KEYS == 692, str(EXPECTED_I18N_KEYS))
 check_i18n_parity(_langs)
 check_i18n_format(_langs)
 
@@ -601,7 +602,7 @@ check("§5 no new dependency (the four pinned ones and nothing else)",
                         _req, re.M))
 check("§5 VERSION_FORMAT did NOT move (the project schema is unchanged)",
       __import__("version").VERSION_FORMAT == "0.9"
-      and __import__("version").APP_VERSION == "1.5.3")
+      and __import__("version").APP_VERSION == "1.5.4")
 check("§5 the durable record stays the FILE — the ring is the second, memory-only home",
       "LOG_FILE" in _src("modules", "logger.py")
       and "MAX_LOG_SIZE_MB" in _src("modules", "logger.py")

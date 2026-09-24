@@ -183,6 +183,32 @@ class MapScene(QGraphicsScene):
         """All groups (v0.8.1; a list copy)."""
         return list(self._groups)
 
+    def refresh_group_aggregates(self, node=None) -> int:
+        """v1.5.4 (ROADMAP task 1): repaint the groups whose aggregate just changed.
+
+        The aggregate itself is read LIVE from the members at paint time (no cache to
+        invalidate), so the ONE thing a status change needs is a repaint — otherwise a
+        group that just gained its first offline member would keep its old frame until
+        something else asked for a paint. `node` narrows the walk to the groups that
+        really hold it (the probe-round path: one node, a handful of groups); without it
+        every group is asked (a project load, a test seam).
+
+        Returns the number of groups repainted (the topical test's seam). Never raises:
+        a dead item during Qt teardown is skipped.
+        """
+        painted = 0
+        for group in list(self._groups):
+            try:
+                if node is not None and not group.has_member(node):
+                    continue
+                group.refresh_aggregate()
+                painted += 1
+            except (RuntimeError, AttributeError):
+                continue  # Qt teardown / a group without the v1.5.4 hook
+            except Exception:  # noqa: BLE001 — one broken group must not stop the map
+                continue
+        return painted
+
     def _current_grid_step(self, scale: float) -> int:
         """The grid step in scene coordinates for the current view scale.
 

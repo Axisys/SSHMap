@@ -680,5 +680,16 @@
   "diagnose.banner_silent": "TCP {host}:{port} принял подключение, но баннер SSH не пришёл — это не SSH или sshd неисправен",
   "diagnose.banner_foreign": "Порт {port} на {host} ответил «{banner}» — там слушает другой сервис",
   "diagnose.ping_ok": "ICMP ping ответил — хост жив, значит фильтруется порт, а не хост",
-  "diagnose.ping_failed": "ICMP ping тоже не ответил — хост недоступен или блокирует ICMP"
+  "diagnose.ping_failed": "ICMP ping тоже не ответил — хост недоступен или блокирует ICMP",
+  "group.status.empty": "Нет серверов",
+  "group.status.unchecked": "Не проверено",
+  "statusbar.problems": "Проблемы: {count}",
+  "statusbar.problems.tooltip": "Приглушить все серверы, которые не warn / offline и не устарели (повторный клик — сброс)",
+  "statusbar.problems.active": "Только проблемы: на карте подсвечены серверы, требующие внимания",
+  "filter.plaque.title": "Фильтры",
+  "filter.plaque.search": "Поиск: {query}",
+  "filter.plaque.tag": "Тег: {tag}",
+  "filter.plaque.status": "Статус: {status}",
+  "filter.plaque.problems": "Только проблемы",
+  "filter.plaque.tooltip": "Карта отфильтрована — снимите фильтр его ×"
 }

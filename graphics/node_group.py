@@ -1,5 +1,20 @@
 """Node grouping (v0.8.1): a cluster/folder on the map.
 
+v1.5.4 (ROADMAP task 1) — THE GROUP ANSWERS "WHERE IS THE PROBLEM". A group used to
+know only `member_count()`: a frame around twenty cards said nothing about them, so a
+red card inside a folded group was invisible. The group now carries an AGGREGATE of its
+members' availability — the WORST status plus the counts — painted on the title band of
+the frame (which the FOLD keeps: folding re-fits the frame, it does not remove the band)
+and in the group's tooltip. The vocabulary of severity lives HERE (`STATUS_SEVERITY` /
+`PROBLEM_STATUSES`, `worst_status()` / `aggregate_status()` / `is_in_trouble()`), because
+the aggregate and the "problems only" lens of the same release must mean the same thing
+by ONE declaration.
+
+The aggregate is a VIEW FACT and is never serialized: `to_dict()` still writes only
+`{id, name, x, y, width, height}` (+ the optional fold keys), and every value is read
+LIVE from the members at paint time — a probe round changes a card and the next repaint
+of its group tells the truth (`MapScene.refresh_group_aggregates()` is the nudge).
+
 A group — a labeled rectangular area UNDER the nodes and arrows (z = Z_VALUE,
 the lowest: the map's "background" zone). The gestures — as in StickyNote
 (manual mouse handling, ItemIsMovable is NOT set — see the sticky_note.py
@@ -36,12 +51,138 @@ try:  # v1.2.5: central theme (palette/radii/fonts — ui/theme.py)
 except ImportError:
     from ui import theme
 
+try:  # v1.5.4 (ROADMAP task 1): the DECLARED status shapes — the mark of the aggregate
+    from ..ui import status_shape
+except ImportError:
+    try:
+        from ui import status_shape
+    except ImportError:  # flat layout: the ui/ directory itself is on sys.path
+        status_shape = None
+
 
 def _tint(hex_color: str, alpha: int) -> "QColor":
     """v1.2.5: a central theme color with opacity (the group fills)."""
     c = QColor(hex_color)
     c.setAlpha(alpha)
     return c
+
+
+def _t(key: str, **kw) -> str:
+    """Safe i18n hook (the ui/empty_state.py pattern): the key itself without i18n."""
+    try:
+        from i18n import t as _translate
+        return _translate(key, **kw) if kw else _translate(key)
+    except Exception:  # noqa: BLE001 — a missing i18n must not break a paint
+        return key
+
+
+# ── v1.5.4 (ROADMAP task 1): the DECLARED severity of an availability status ──────
+# The group aggregate and the "problems only" lens of the SAME release answer one
+# question ("what needs attention here?") and therefore share ONE declaration: the
+# severity order is ASCENDING (the LAST entry is the worst) and `PROBLEM_STATUSES`
+# names what "in trouble" means. A status outside the tuple is not a datum at all —
+# a card that was never probed carries "" and neither wins the aggregate nor counts.
+STATUS_SEVERITY = ("online", "warn", "offline")
+PROBLEM_STATUSES = ("warn", "offline")
+
+
+def worst_status(statuses) -> str:
+    """The WORST declared status among ``statuses`` ("" — none of them has one).
+
+    The pick follows `STATUS_SEVERITY`, never the order of the members: an offline
+    card wins over a warn one wherever the two sit in the iteration, which is what
+    makes the aggregate of a group independent of its composition order.
+    """
+    worst = ""
+    rank = -1
+    for status in statuses or ():
+        text = str(status or "")
+        if text not in STATUS_SEVERITY:
+            continue
+        value = STATUS_SEVERITY.index(text)
+        if value > rank:
+            rank, worst = value, text
+    return worst
+
+
+def aggregate_status(statuses) -> dict:
+    """The aggregate of a set of availability statuses — a PURE summary (v1.5.4).
+
+    Returns ``{"worst": str, "counts": {status: n}, "total": int, "members": int}``: the
+    worst declared status ("" when no member carries one), a count per DECLARED status,
+    the number of members that really have a status and the number of MEMBERS. The two
+    last numbers are deliberately separate — "a group with no members" and "a group whose
+    members were never probed" are different facts and the caption says so
+    (`group.status.empty` vs `group.status.unchecked`); an unchecked member is absent
+    from `counts`/`total`, the "a filter is a view, not a fact" discipline.
+    """
+    values = [str(status or "") for status in (statuses or ())]
+    counts = {status: 0 for status in STATUS_SEVERITY}
+    total = 0
+    for text in values:
+        if text in counts:
+            counts[text] += 1
+            total += 1
+    return {"worst": worst_status(values), "counts": counts, "total": total,
+            "members": len(values)}
+
+
+def is_in_trouble(status, stale: bool = False) -> bool:
+    """Does this card need attention? — the ONE predicate of the release (v1.5.4).
+
+    `warn` / `offline`, or a status whose datum has grown STALE (a result nothing
+    refreshed is exactly the "the map is lying to me" case the lens exists for). An
+    UNCHECKED card is deliberately not trouble: there is no measurement to call a
+    problem, and dimming "never probed" as an incident would be a false alarm. The
+    predicate is pure, so the topical test pins it without a window.
+    """
+    return bool(stale) or str(status or "") in PROBLEM_STATUSES
+
+
+def status_caption(summary, translate=None) -> str:
+    """The aggregate as ONE line of words (v1.5.4) — the plaque and the tooltip text.
+
+    Composed, not declared as a sentence: the COUNTS are numbers and the status WORDS
+    are the existing `legend.status.*` keys (there is no fourth spelling of
+    online/warn/offline in this application). The rules, in order:
+
+      * no member at all → `group.status.empty` ("an empty group says so");
+      * members that were never checked → `group.status.unchecked` (an untouched group
+        must not be dressed up as an incident);
+      * otherwise the PROBLEMS, worst first (`Offline 2 · Warn 1`) — and when there
+        is no problem at all, the healthy count (`Online 5`), so a fully green group
+        still says how many cards answered.
+
+    `translate` is injectable for the pure test (it defaults to the i18n hook).
+    """
+    t = translate if callable(translate) else _t
+    data = summary or {}
+    counts = data.get("counts") or {}
+    try:
+        members = int(data.get("members", data.get("total") or 0))
+    except (TypeError, ValueError):
+        members = 0
+    if members <= 0:
+        return t("group.status.empty")
+    worst = str(data.get("worst") or "")
+    if not worst:
+        return t("group.status.unchecked")
+    parts = []
+    for status in ("offline", "warn"):
+        try:
+            count = int(counts.get(status) or 0)
+        except (TypeError, ValueError):
+            count = 0
+        if count > 0:
+            word = t(f"legend.status.{status}")
+            parts.append(f"{word} {count}")
+    if not parts:
+        try:
+            count = int(counts.get("online") or 0)
+        except (TypeError, ValueError):
+            count = 0
+        parts.append(f"{t('legend.status.online')} {count}")
+    return " · ".join(parts)
 
 
 class NodeGroup(QGraphicsObject):
@@ -75,6 +216,15 @@ class NodeGroup(QGraphicsObject):
     # v1.4.2: the fold (the grid of badges + the chevron's click zone in the title band)
     BADGE_GAP = 8.0        # the gap between two badges of a folded group
     CHEVRON_ZONE = 26.0    # the chevron's click zone in the RIGHT corner of the title band
+    # v1.5.4 (ROADMAP task 1): the aggregate plaque of the title band — the worst
+    # member status as a SHAPE + the counts as words. A fixed slot at the right end of
+    # the band (before the chevron), so the title elides into what is left instead of
+    # fighting it; `AGGREGATE_MIN_SPAN` is the room below which the plaque is dropped
+    # entirely (a two-character group on a 160 px frame has no room for a second text).
+    AGGREGATE_MARK = 10.0
+    AGGREGATE_GAP = 5.0
+    AGGREGATE_RIGHT_PAD = 6.0
+    AGGREGATE_MIN_SPAN = 46.0
 
     CORNER_RADIUS = theme.RADIUS_GROUP   # rounding of the frame (in one style with the node card)
 
@@ -170,6 +320,8 @@ class NodeGroup(QGraphicsObject):
         # v1.4.2: a member captured while the group is folded joins the grid (a session
         # fold only — a group restored folded from a file keeps its saved arrangement)
         self.membershipChanged.connect(self._on_membership_changed)
+        # v1.5.4 (ROADMAP task 1): the aggregate of the group changed with the composition
+        self.membershipChanged.connect(self._on_membership_changed_aggregate)
 
     # ── Geometry helpers (the StickyNote/ServerNode pattern: explicit geometry) ──
 
@@ -425,6 +577,115 @@ class NodeGroup(QGraphicsObject):
             self._members.clear()
             self.membershipChanged.emit()
 
+    def refresh_aggregate(self) -> None:
+        """Repaint the aggregate and refresh its words (v1.5.4) — the scene's nudge.
+
+        Called when something the aggregate is built from has changed outside the group's
+        own signals: a probe result on a member (`MapScene.refresh_group_aggregates(node)`)
+        or a membership change (the group's own `membershipChanged` slot). The values are
+        read live in `paint()`, so this only asks for a repaint — never raises.
+        """
+        try:
+            self.update()
+            self._apply_tooltip()
+        except RuntimeError:
+            pass  # Qt teardown — the item is already destroyed
+
+    # ── v1.5.4 (ROADMAP task 1): the group AGGREGATE — "where is the problem" ────────
+
+    def status_summary(self) -> dict:
+        """The aggregate of the members' statuses, read LIVE (v1.5.4).
+
+        Never cached: the members ARE the source of truth, so a probe result needs no
+        bookkeeping in the group — only a repaint (`MapScene.refresh_group_aggregates()`
+        is the nudge, and the NEXT paint reads the new values by itself).
+        """
+        statuses = []
+        for member in list(self._members):
+            statuses.append(getattr(member, "status", ""))
+        return aggregate_status(statuses)
+
+    def worst_member_status(self) -> str:
+        """The worst member status ("" — no member carries one)."""
+        return str(self.status_summary().get("worst") or "")
+
+    def status_caption(self) -> str:
+        """The aggregate as ONE line of words — the tooltip and the plaque text."""
+        return status_caption(self.status_summary())
+
+    def _aggregate_font(self) -> QFont:
+        """The plaque's font: the group title one point smaller (a caption, not a title)."""
+        return QFont(theme.FONT_UI, 8)
+
+    def aggregate_rects(self):
+        """``(mark_rect, text_rect)`` of the aggregate plaque in LOCAL coordinates.
+
+        Both are empty when the aggregate is not painted (a frame with no room for it).
+        The topical test reads this instead of re-deriving the geometry, so the paint
+        and the test cannot disagree about where the mark sits.
+        """
+        summary = self.status_summary()
+        text = self.status_caption()
+        if not text:
+            return QRectF(), QRectF()
+        fm = QFontMetrics(self._aggregate_font())
+        worst = str(summary.get("worst") or "")
+        mark_w = (self.AGGREGATE_MARK + self.AGGREGATE_GAP) if worst else 0.0
+        right = float(self._width) - self.CHEVRON_ZONE - self.AGGREGATE_RIGHT_PAD
+        avail = right - 14.0 - mark_w
+        if avail < self.AGGREGATE_MIN_SPAN:
+            return QRectF(), QRectF()
+        shown = fm.elidedText(text, Qt.TextElideMode.ElideRight, int(avail))
+        text_w = float(fm.horizontalAdvance(shown))
+        top = 3.0
+        height = self.TITLE_ZONE_H - 6.0
+        text_rect = QRectF(right - text_w, top, text_w, height)
+        if not worst:
+            return QRectF(), text_rect
+        mark_rect = QRectF(text_rect.left() - self.AGGREGATE_GAP - self.AGGREGATE_MARK,
+                           top + (height - self.AGGREGATE_MARK) / 2.0,
+                           self.AGGREGATE_MARK, self.AGGREGATE_MARK)
+        return mark_rect, text_rect
+
+    def _aggregate_tone(self):
+        """The ink of the aggregate: the worst status' colour, or the muted tone.
+
+        Never a new colour — the tone of the worst status is the one its own card frame
+        uses (`Theme.status_colors`). A group whose members carry no status at all (or
+        none at all) reads in `text_muted`, the "nothing to report" tone.
+        """
+        worst = self.worst_member_status()
+        if worst:
+            return QColor(theme.STATUS_COLORS.get(worst) or theme.TEXT_MUTED)
+        return QColor(theme.TEXT_MUTED)
+
+    def _paint_aggregate(self, painter: QPainter):
+        """Paint the aggregate plaque: the declared SHAPE of the worst status + the counts.
+
+        The second channel of the 1.5 line applied to a group: the shape comes from the
+        SAME declaration the cards and the legend draw (`theme.STATUS_SHAPES` through
+        `ui/status_shape.py`), the words carry the numbers and the tone repeats the
+        severity. A group with no members shows the "no members" caption with no mark.
+        """
+        mark_rect, text_rect = self.aggregate_rects()
+        text = self.status_caption()
+        if not text:
+            return
+        worst = self.worst_member_status()
+        tone = self._aggregate_tone()
+        if mark_rect.width() > 0.0 and status_shape is not None:
+            try:
+                status_shape.paint_shape(painter, mark_rect, worst, tone)
+            except Exception:  # noqa: BLE001 — a mark is cosmetic; the words stay
+                pass
+        fm = QFontMetrics(self._aggregate_font())
+        shown = fm.elidedText(text, Qt.TextElideMode.ElideRight, max(int(text_rect.width()), 1))
+        painter.setFont(self._aggregate_font())
+        painter.setPen(QPen(tone))
+        painter.drawText(text_rect,
+                         int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter),
+                         shown)
+
     # ── v1.4.2 (ROADMAP task 5): the FOLD — the members become a grid of badges ──────
 
     def is_collapsed(self) -> bool:
@@ -636,6 +897,15 @@ class NodeGroup(QGraphicsObject):
         self._fold_members()
         self._layout_badges()
 
+    def _on_membership_changed_aggregate(self):
+        """v1.5.4: a member joined/left — the AGGREGATE changed, so repaint.
+
+        The aggregate is read live at paint time, so the only thing a composition
+        change needs is a repaint: without it a group that just lost its only offline
+        member would keep the red frame until something else asked for a repaint.
+        """
+        self.refresh_aggregate()
+
     # ── Title ──────────────────────────────────────────────
 
     def _title_font(self) -> QFont:
@@ -647,16 +917,42 @@ class NodeGroup(QGraphicsObject):
         max_w = max(int(self._width - 28), 1)
         if self._name and fm.horizontalAdvance(self._name) > max_w:
             self._display_name = fm.elidedText(self._name, Qt.TextElideMode.ElideRight, max_w)
-            self.setToolTip(self._name)
         else:
             self._display_name = self._name
-            self.setToolTip("")
+        self._apply_tooltip()
+
+    def _apply_tooltip(self):
+        """The group's tooltip: the full name (when the band elided it) + the aggregate words.
+
+        The WORDS of the aggregate live here, not only in the painted plaque — the 1.5
+        line's rule ("the tooltips keep the words"), so the shape+counts caption is never
+        a riddle. A group with neither a name nor members keeps an empty tooltip.
+        """
+        lines = []
+        if self._name and self._display_name != self._name:
+            lines.append(self._name)
+        caption = self.status_caption()
+        if caption:
+            lines.append(caption)
+        try:
+            self.setToolTip("\n".join(lines))
+        except RuntimeError:
+            pass  # Qt teardown — the item is already destroyed
 
     # ── Rendering (all the graphics in paint() — no child items:
     #      a single hit object, the standard drag works over the whole frame area) ──
 
     def _state_colors(self):
-        """(pen_color, pen_width, fill, title_color) for the current state."""
+        """(pen_color, pen_width, fill, title_color) for the current state.
+
+        v1.5.4 (ROADMAP task 1): in the ORDINARY state the frame takes the colour of the
+        group's WORST member status when that is a problem (`warn` / `offline`) — the
+        "trouble first" signal the feature exists for. It is a REDUNDANT channel: the
+        aggregate plaque carries the same fact as a declared SHAPE and as words, so a
+        greyscale print and a colour-vision deficiency read it too. Selection and hover
+        are INTERACTIONS and always win over the aggregate; a group without trouble (or
+        without members) keeps its violet frame exactly as before.
+        """
         if self.isSelected():
             return (self.COLOR_SELECTED, 2.5, self.COLOR_FILL_SELECTED,
                     QColor(theme.GROUP_TITLE_SELECTED))
@@ -664,6 +960,11 @@ class NodeGroup(QGraphicsObject):
             color = QColor(self.COLOR_HOVER)
             color.setAlpha(170)
             return (color, 2.0, self.COLOR_FILL_HOVER, QColor(theme.GROUP_TITLE_HOVER))
+        worst = self.worst_member_status()
+        if worst in PROBLEM_STATUSES:
+            status_color = theme.STATUS_COLORS.get(worst)
+            if status_color:
+                return (QColor(status_color), 2.0, self.COLOR_FILL, self.COLOR_TITLE)
         return (self.COLOR_BORDER, 1.5, self.COLOR_FILL, self.COLOR_TITLE)
 
     def paint(self, painter: QPainter, option, widget=None):
@@ -691,6 +992,11 @@ class NodeGroup(QGraphicsObject):
                 QRectF(14.0, 3.0, max(w - 28.0 - self.CHEVRON_ZONE, 1.0), self.TITLE_ZONE_H - 6.0),
                 Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
                 self._display_name)
+
+        # v1.5.4 (ROADMAP task 1): the aggregate plaque — the worst member status and the
+        # counts, in the right end of the SAME band (so the group FOLD, which re-fits the
+        # frame and keeps the band, keeps the aggregate as well).
+        self._paint_aggregate(painter)
 
         # v1.4.2: the fold chevron in the right corner of the title band (▾ folded /
         # ▴ expanded) — always visible, so the fold is discoverable without a menu.

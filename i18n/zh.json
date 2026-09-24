@@ -680,5 +680,16 @@
   "diagnose.banner_silent": "TCP {host}:{port} 接受了连接但未发送 SSH 标识 — 不是 SSH 服务或 sshd 异常",
   "diagnose.banner_foreign": "{host} 的 {port} 端口返回了 {banner} — 该端口由其他服务监听",
   "diagnose.ping_ok": "ICMP ping 有响应 — 主机在线，说明是端口被过滤而不是主机宕机",
-  "diagnose.ping_failed": "ICMP ping 也无响应 — 主机可能已关机或屏蔽了 ICMP"
+  "diagnose.ping_failed": "ICMP ping 也无响应 — 主机可能已关机或屏蔽了 ICMP",
+  "group.status.empty": "没有服务器",
+  "group.status.unchecked": "未检查",
+  "statusbar.problems": "问题：{count}",
+  "statusbar.problems.tooltip": "淡化所有非警告 / 离线 / 过期的服务器（再次点击可重置）",
+  "statusbar.problems.active": "仅问题：地图仅高亮需要注意的服务器",
+  "filter.plaque.title": "筛选器",
+  "filter.plaque.search": "搜索：{query}",
+  "filter.plaque.tag": "标签：{tag}",
+  "filter.plaque.status": "状态：{status}",
+  "filter.plaque.problems": "仅问题",
+  "filter.plaque.tooltip": "地图已被筛选 — 点击其 × 可清除对应筛选"
 }

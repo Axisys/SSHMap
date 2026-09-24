@@ -8,7 +8,7 @@ Desktop application (Python + PySide6): an interactive map of your IT infrastruc
 *The example map (Help → Open the example map): five servers, one connection of every type, a group, a note — all on
 documentation addresses (`192.0.2.0/24`), and the statuses it declares are marked as emulated. Taken with
 **File → Save Documentation Image…** (a fixed 1600×900 frame at 2×) — the refresh rule is in
-[DOCUMENTATION.md](DOCUMENTATION.md) §5: re-run `python tests/_gen_docs_image.py` after a change that alters the
+DOCUMENTATION.md §5: re-run `python tests/_gen_docs_image.py` after a change that alters the
 cards, the theme or the demo map, and commit `docs/map-example.png`.*
 
 ---
@@ -24,7 +24,7 @@ pipx install .                    # or pip install . → sshmap command (install
 Tests are plain Python scripts without pytest: one topical `test_*.py` file per area plus a single parallel runner. Each file is an isolated process (sandbox HOME, offscreen Qt, UTF-8 stdout), so nothing extra is needed on cp1251 consoles or in CI:
 
 ```bash
-python tests/run_all.py               # everything (99 test files + i18n check); auto workers = cores (cap 16), longest file first; exit 0 ⇔ all green
+python tests/run_all.py               # everything (100 test files + i18n check); auto workers = cores (cap 16), longest file first; exit 0 ⇔ all green
 python tests/run_all.py --fast        # daily profile: skips files tagged slow/network
 python tests/run_all.py --tag network # only network-tagged files - real-network sections run ONLY on explicit opt-in (env SSHMAP_TEST_TAGS)
 python tests/run_all.py --failed-only # re-run only files that failed in the last run (cache test-results/last_run.json)
@@ -41,7 +41,7 @@ Requirements: Python 3.10+, Windows/Linux/macOS. Logs: `~/.sshmap/logs/sshmap.lo
 
 ## 2. Project Structure
 
-The full per-file annotated tree lives in `DOCUMENTATION.md` §2; version history is in `CHANGELOG.md`. Compact overview:
+Compact overview:
 
 ```
 main.py                      # Entry point: logging → QApplication → MainWindow → status checks
@@ -199,6 +199,22 @@ Format invariants:
 - **Gather information for many servers at once** ("Collect system info" in the Edit menu and in both context menus): the selection when there is one, the clicked server from a context menu, the whole map when nothing is selected. The collections run in a bounded queue — at most `info_max_parallel` at a time (default 4, a performance key in `config.json`), a server that is already being collected is skipped, and one failure never stops the rest. The status bar shows progress and the final line **names the failures**; the full list goes to the activity panel.
 - **"Why is it offline?"** asks the red card a direct question and answers it with the steps the app already takes, in order: DNS resolve → TCP connect → SSH banner → ICMP ping. The first failing step is named in its own words, so a wrong name, a refused port, a filtered port and a server that answers with something that is not SSH produce four different sentences. When the port is unreachable the ping says which of the two it is ("host down" vs "firewall"). The answer appears in the card's tooltip, the status bar and the activity history — and **the status itself is never changed by it**, because a report explains, it does not decide. One report per server at a time; no new dependency, and every step keeps the 3 s probe budget.
 
+### Where is the problem? (v1.5.4)
+- **A group answers for its members.** Its frame (and its folded badge grid) carries the worst member status as a
+  shape plus the counts — `Offline 2 · Warn 1`, `Online 5`, "No members" for an empty group, "Not checked" for one
+  nobody probed. The worst status also colours the frame while it is a problem, and a probe round updates it. A
+  group's status is a VIEW fact: it is never written into the project file.
+- **The "problems only" lens**: one click on the chip next to the status counters dims everything that is not warn,
+  offline or stale (a result older than its freshness budget counts as trouble too). It composes with the tag filter,
+  the map search and the hover focus instead of replacing them, the counters keep showing the totals, and nothing is
+  saved — a restart never leaves the map dimmed for no visible reason.
+- **The filter plaque** names what the map is showing: the search query, the tag, the status filter and the lens, each
+  with its own ×. It appears only while a filter is active, it never enters an export, and it stays clear of the
+  collapse diamond (and of the search bar on a narrow window).
+- The words are the ones the app already uses (the legend's status names), the shape comes from the same declaration
+  the cards and the legend draw from, and the suite (`tests/test_problem_first.py`) measures the aggregate, the
+  composition of the filters and the plaque.
+
 ### Terminal
 - Architecture: session = `TerminalSessionPage` (`modules/terminal_page.py`: thread + pyte screen + canvas + SFTP tab). All cleanup logic lives on the page; every teardown path (tab/window close, session error, MainWindow shutdown, limit reached) goes through the single idempotent `page.shutdown()`, and the "ask" gate is `page.confirm_close()`.
 - Status bar: a session does not draw a status line of its own (it would repeat one row above the tabs text the window's status bar already shows). Every state (connecting, opened, closed, error) goes to that one bar.
@@ -309,6 +325,11 @@ Built-in languages: en (default), ru, zh, de; any other language joins by droppi
 - collected facts with an age (v1.5.3): the info plaque says when the OS/CPU/RAM/disk data was measured and turns grey after a week — the values never change, and an old project simply shows no age
 - one click gathers the system info of the selection (or the whole map): a bounded queue, a per-server guard, live progress and a closing line that names the failures
 - **"why is it offline?"** (v1.5.3): one on-demand report per server — DNS → TCP → SSH banner → ICMP ping — names the first failing step in its own words and lands in the tooltip, the status bar and the activity history; the status itself is never changed
+- **trouble first** (v1.5.4): a group answers for its members — the worst status as its own shape plus the
+  counts (`Offline 2 · Warn 1`) on the frame (the fold keeps it, an empty group says so, and nothing of it is
+  ever written to the project file), one click on the status bar dims everything that is not warn / offline /
+  stale while the counters keep their totals, and a floating plaque names every active filter (the search, the
+  tag, the status, the lens) with one × each — so a forgotten filter can no longer look like deleted servers
 - the card names its environment: the primary tag (`prod` / `staging` / `dev` / …) as text above the alias, so an environment is never just the colour of a status
 - floating panels that come back: drop the legend or the minimap at the edge it hangs from and it re-anchors to its corner (the dragged position is forgotten)
 - the command palette on the first screen: an empty Ctrl+K opens a short "Start here" list, the empty map names the key, and `?` / F1 open the shortcut list built from the registry
@@ -363,7 +384,7 @@ Built-in languages: en (default), ru, zh, de; any other language joins by droppi
 - plugins run inside the application's process: a plugin with a broken C extension can take it down; install plugins you trust
 
 **Roadmap** (tasks, order, acceptance in ROADMAP.md):
-- next: the group aggregate (the worst member status on the frame and the folded badge grid), the transient "problems only" lens and the plaque that names the active filters; the inventory export (sorting, CSV/TSV, more columns) follows. The freshness release shipped in v1.5.3
+- next: the inventory export (sorting, CSV/TSV, more columns for the list mode). The trouble-first release shipped in v1.5.4
 
 ---
 
