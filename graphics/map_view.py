@@ -1231,11 +1231,14 @@ class MapView(QGraphicsView):
             if hasattr(win, "_edit_node"):
                 act_edit = menu.addAction(_t("ctx.edit_server"))
                 act_edit.triggered.connect(lambda _=False, n=win_node: self.window()._edit_node(n))
-            # v0.9: automatic server-info collection (Linux) over SSH
-            if hasattr(win, "_collect_node_info"):
+            # v0.9: automatic server-info collection (Linux) over SSH.
+            # v1.5.3 (ROADMAP task 2): the row now starts the BOUNDED BATCH — the selection
+            # when several cards are selected, this node otherwise (`_collect_info_many`),
+            # so one entry covers "gather information for these" and "for this one".
+            if hasattr(win, "_collect_info_many"):
                 act_info = menu.addAction(_t("ctx.collect_info"))
                 act_info.triggered.connect(
-                    lambda _=False, n=win_node: self.window()._collect_node_info(n))
+                    lambda _=False, n=win_node: self.window()._collect_info_many(node=n))
             # v0.8.4 (former DESIGN.md §D): collapse/expand the badge
             if hasattr(win_node, "toggle_collapsed"):
                 act_col = menu.addAction(
@@ -1254,6 +1257,13 @@ class MapView(QGraphicsView):
             # the SELECTION (the clicked node when nothing is selected). The probes stay
             # off the GUI thread (StatusChecker.start_round → _ProbeThread); the action
             # is registered (an empty default) and appears in the sidebar menu too.
+            # v1.5.3 (ROADMAP task 3): "Why is it offline?" — the on-demand reachability
+            # report (DNS → TCP → banner → ICMP ping) of THIS node; its sentence lands in
+            # the card tooltip, the status bar and the activity history.
+            if hasattr(win, "_diagnose_node"):
+                act_diag = menu.addAction(_t("ctx.diagnose"))
+                act_diag.triggered.connect(
+                    lambda _=False, n=win_node: self.window()._diagnose_node(n))
             if hasattr(win, "_check_statuses_now"):
                 act_status = menu.addAction(_t("ctx.check_status"))
                 act_status.triggered.connect(

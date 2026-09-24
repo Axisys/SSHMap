@@ -112,6 +112,10 @@ EMPTY_DEFAULT_IDS = {
     "view.focus_map",
     # v1.5.2: the activity panel — the checkable View item of the history surface (task 3).
     "view.toggle_activity",
+    # v1.5.3: the freshness pair — "Gather information" (the bounded batch for the
+    # selection / all) and "Why is it offline?" (the reachability report). Both live on a
+    # permanent Edit-menu item and are assignable, with no key out of the box.
+    "node.collect_info", "node.diagnose",
 }
 def new_window():
     """A MainWindow with the autosave timer stopped (no event loop in the tests)."""
@@ -150,15 +154,16 @@ ALL_IDS = sorted(set(EXPECTED_DEFAULTS) | EMPTY_DEFAULT_IDS)
 print("== 1. the action registry ==")
 
 ids = HR.action_ids()
-check("registry: the grown action set (23 sequenced + 28 empty-default; v1.5rc3 adds F1, "
-      "v1.5rc4 adds view.focus_map, v1.5.1 the two map-image actions)",
-      set(ids) == set(ALL_IDS) and len(ids) == 52,
+check("registry: the grown action set (23 sequenced + 31 empty-default; v1.5rc3 adds F1, "
+      "v1.5rc4 adds view.focus_map, v1.5.1 the two map-image actions, v1.5.3 the "
+      "freshness pair)",
+      set(ids) == set(ALL_IDS) and len(ids) == 54,
       str(sorted(set(ids) ^ set(ALL_IDS))))
 check("registry: the sequenced defaults are the v1.3.1.1 set + the v1.3.3.3 additions "
       "+ help.cheatsheet (F1, v1.5rc3)",
       {a: HR.default_sequence(a) for a in ids if HR.default_sequence(a)} == EXPECTED_DEFAULTS,
       str({a: HR.default_sequence(a) for a in ids if HR.default_sequence(a)}))
-check("registry: exactly the 28 remaining global actions carry an EMPTY default",
+check("registry: exactly the 31 remaining global actions carry an EMPTY default",
       {a for a in ids if not HR.default_sequence(a)} == EMPTY_DEFAULT_IDS
       and set(HR.empty_default_action_ids()) == EMPTY_DEFAULT_IDS,
       str(sorted(EMPTY_DEFAULT_IDS ^ {a for a in ids if not HR.default_sequence(a)})))
@@ -395,8 +400,8 @@ dlg._refresh_hotkey_conflicts()
 check("dialog: two disabled (empty) hotkeys are not a conflict",
       HR.find_conflicts(dlg.hotkey_sequences()) == set()
       and dlg.hotkey_sequences()["file.open"] == "" == dlg.hotkey_sequences()["edit.properties"])
-check("dialog: the 26 empty-default rows are not a conflict among themselves",
-      len([a for a in EMPTY_DEFAULT_IDS if dlg.hotkey_sequences()[a] == ""]) == 29
+check("dialog: the 31 empty-default rows are not a conflict among themselves",
+      len([a for a in EMPTY_DEFAULT_IDS if dlg.hotkey_sequences()[a] == ""]) == 31
       and HR.find_conflicts(dlg.hotkey_sequences()) == set())
 
 # A prefill from the config (a saved value shows up in the table)

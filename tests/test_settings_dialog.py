@@ -106,7 +106,8 @@ check("_BUTTONS: exactly 6 buttons, the 6th — (btn_settings, settings, btn.set
       str(_BUTTONS))
 _actions = {k: (lambda node, _k=k: None) for k in
             ("ssh", "external", "edit", "copy_ip", "copy_hostname", "ping",
-             "collect_info", "check_status", "reveal", "delete")}   # v1.3.3.3: + check_status
+             "collect_info", "check_status", "diagnose", "reveal", "delete")}
+            # v1.3.3.3: + check_status; v1.5.3: + diagnose
 sb = SidebarPanel(translate_fn=i18n.t, actions=_actions)
 check("btn_settings exists and carries the vector gear",
       hasattr(sb, "btn_settings") and not sb.btn_settings.icon().isNull())
@@ -317,10 +318,10 @@ check("the tab order: General / Appearance / Terminal / Status Checks / Autosave
 import ui.hotkey_registry as _HR
 
 _expected_rows = len(_HR.action_ids())
-check("'Hotkeys': one ACTION row per registry action (52 in v1.5.2: +the activity-panel View item), "
-      "grouped by family",
+check("'Hotkeys': one ACTION row per registry action (54 in v1.5.3: +the activity-panel View "
+      "item and the freshness pair), grouped by family",
       len(dlg.hotkey_edits) == _expected_rows
-      and _expected_rows == 52
+      and _expected_rows == 54
       and dlg.hotkeys_table.rowCount() == _expected_rows + len(dlg.hotkey_family_rows())
       and [dlg._hotkey_rows[r][1] for r in dlg.hotkey_action_rows()]
       == [aid for fam in _HR.family_order() for aid in _HR.actions_by_family()[fam]],

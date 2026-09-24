@@ -259,8 +259,27 @@ def clear_cfg(*extra_paths: str) -> None:
 # in 12 i18n files + the APP_VERSION/requirements pins in 7 release-state sections).
 # The misses of the keys themselves against the code are caught by check_i18n_keys.py.
 # ─────────────────────────────────────────────────────────────────────────────
-EXPECTED_APP_VERSION = "1.5.2"   # the current release (a sentinel: it catches "a bump to the wrong version")
-EXPECTED_I18N_KEYS = 661        # the parity of the TRANSLATION keys (v1.5.2 — "the activity panel:
+EXPECTED_APP_VERSION = "1.5.3"   # the current release (a sentinel: it catches "a bump to the wrong version")
+EXPECTED_I18N_KEYS = 681        # the parity of the TRANSLATION keys (v1.5.3 — "freshness everywhere:
+                                # the facts get an age, and a red card answers 'why'": the THIRD patch ON
+                                # the released 1.5). +20 keys × en/ru/zh/de in three families:
+                                # the AGE of the collected facts (`node.info.collected_now` and the
+                                # `{minutes}` / `{hours}` / `{days}` steps — the status family uses one
+                                # "checked N min ago" line, while a hardware fact needs a readable scale,
+                                # so the granularity IS the text); the BATCH collection
+                                # (`status.info_batch_progress` {done}/{total}, `.info_batch_done`
+                                # {ok}/{total}, `.info_batch_failed` {names} and `.info_batch_none`) and
+                                # the REACHABILITY report (`ctx.diagnose`, `status.diagnose_running`
+                                # {alias} and the eight `diagnose.*` verdicts + the two ICMP evidence
+                                # lines — the report NAMES the first failing step, so its words are the
+                                # feature, not chrome). The timestamps, the batch's cap and queue, the
+                                # stale threshold of a fact, the report's step order and the three new
+                                # config-free seams are numbers and behaviour — no keys. The ONE new
+                                # registry pair (`node.collect_info` / `node.diagnose`, both EMPTY
+                                # defaults) moves the action count 52 → 54 and the assignable set
+                                # 29 → 31; the hub's `collect()` stays 22 keys (`info_max_parallel` is an
+                                # optional performance key read by its owner, not a hub row).
+                                # (v1.5.2 — "the activity panel:
                                 # the history the interface never kept": the SECOND patch ON the
                                 # released 1.5). +13 keys × en/ru/zh/de, ALL of them the chrome of the
                                 # new panel: `view.toggle_activity` (the checkable View item — a

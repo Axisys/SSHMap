@@ -271,6 +271,19 @@ class ServerNode(QGraphicsItemGroup):
     BADGE_GAP = 4.0                # the gap between the emulated marker and the tag badge
     BADGE_MIN_SPAN = 18.0          # less room than this — the tag badge is hidden, not "…"
 
+    # ── v1.5.3 (ROADMAP task 1): the AGE of the collected facts ───────────────────
+    # The v1.5rc3 mechanism applied to the SECOND family of measured data. A status is a
+    # fact with a timestamp (the checker owns WHEN and the threshold); the collected
+    # hardware facts carry their own timestamp INSIDE the data (`info_collected_at`, the
+    # collection path writes it) and their own horizon here — the manager of the two halves
+    # is the same: the mark is painted in the IDLE tone, the tooltip names the age, and the
+    # stored VALUE is never touched.
+    # The threshold is deliberately NOT the status one: `max(2 × interval, 90 s)` answers
+    # "did I miss a probe round", while hardware rarely moves — a week is the point where a
+    # "DISK: 468.4 gb" line stops being a measurement and becomes a memory. The mark is a
+    # LABEL: an old fact keeps its value, its card and its size.
+    INFO_STALE_AFTER_SEC = 7 * 24 * 3600.0   # one week
+
 
     @staticmethod
     def tag_color(tag: str) -> QColor:
@@ -311,6 +324,20 @@ class ServerNode(QGraphicsItemGroup):
         # is always MARKED as emulated, never carries a freshness line (it is not the
         # result of a probe) and can only be produced by the demo's own declaration.
         self._status_emulated = False
+        # v1.5.3 (ROADMAP task 1): the age of the COLLECTED FACTS. `_info_at` mirrors
+        # `data.info_collected_at` (the window feeds it after a collection and the freshness
+        # tick re-reads it), `_info_stale` is the mark, `_info_tip_full` keeps the full
+        # multi-line info text so the plaque tooltip can compose it with the age line.
+        # Independent of the status freshness above: a card can have a fresh status and
+        # year-old hardware lines, or the other way round.
+        self._info_at = 0.0
+        self._info_stale = False
+        self._info_tip_full = ""
+        # v1.5.3 (ROADMAP task 3): the "why" of the shown status — the sentence of the last
+        # on-demand reachability report ("" — none was asked). It refines the status
+        # tooltip; a NEW status from a probe clears it (fresh evidence replaces the old
+        # explanation), a repeated one keeps it.
+        self._status_report = ""
         # v1.5: the two OPTIONAL badges (the environment tag, the emulated marker) are
         # built ON FIRST USE — a card that needs neither carries no extra item at all.
         self._env_chip = None
@@ -688,7 +715,9 @@ class ServerNode(QGraphicsItemGroup):
         _glyph_pen.setCapStyle(Qt.PenCapStyle.RoundCap)
         self._glyph.setPen(_glyph_pen)
         self._alias.setDefaultTextColor(self.COLOR_TEXT)
-        self._info.setDefaultTextColor(self.COLOR_LABEL)
+        # v1.5.3 (ROADMAP task 1): the info plaque's tone is the card's STATE (the idle tone
+        # once the facts are old) — a switch re-reads it through the same helper.
+        self._apply_info_tone()
         self._host_label.setDefaultTextColor(QColor(theme.DOT_IDLE))
         _info_bg_color = QColor(theme.WINDOW_BG)
         _info_bg_color.setAlpha(150)
@@ -844,6 +873,121 @@ class ServerNode(QGraphicsItemGroup):
             return _t("node.status.checked_now")
         return _t("node.status.checked_ago", minutes=minutes)
 
+    # ── v1.5.3 (ROADMAP task 1): how old the COLLECTED FACTS are ─────────────────
+
+    def set_info_collected_at(self, timestamp) -> bool:
+        """Record WHEN this card's collected facts were measured (epoch seconds).
+
+        The window calls this with `data.info_collected_at` right after a collection and
+        from its freshness tick; `0.0` (a missing / refused value) means "not dated" and
+        clears the mark. Returns True when the STALE state changed (the topical test's
+        seam). Never raises — a repaint is cosmetic.
+        """
+        try:
+            moment = float(timestamp or 0.0)
+        except (TypeError, ValueError):
+            moment = 0.0
+        self._info_at = moment if moment > 0.0 else 0.0
+        return self.refresh_info_freshness()
+
+    def refresh_info_freshness(self, now: float = None) -> bool:
+        """Recompute the info mark + the plaque tooltip from the stored timestamp.
+
+        The IDLE TONE is the whole mark (the v1.5rc3 pattern): no colour is invented, no
+        value is rewritten and no geometry changes. A card that was never collected is
+        never stale — there is no datum to age.
+        """
+        moment = time.time() if now is None else float(now)
+        stale = bool(self._info_at > 0.0) \
+            and (moment - self._info_at) > float(self.INFO_STALE_AFTER_SEC)
+        changed = (stale != self._info_stale)
+        self._info_stale = stale
+        self._apply_info_tone()
+        self._apply_info_tooltip()
+        return changed
+
+    @property
+    def is_info_stale(self) -> bool:
+        """v1.5.3: the collected facts are older than `INFO_STALE_AFTER_SEC`."""
+        return bool(self._info_stale)
+
+    @property
+    def info_collected_at(self) -> float:
+        """v1.5.3: epoch seconds of the collected facts (0.0 — never collected)."""
+        return float(self._info_at)
+
+    def info_freshness_text(self, now: float = None) -> str:
+        """"collected … ago" — the age line of the info plaque ("" when not dated).
+
+        Built here, not by the window, because it describes THIS card's datum (the
+        `freshness_text()` rule of v1.5rc3). Three granularities on purpose: minutes for
+        "just did it", hours for today, days for the fact that has become a memory
+        (`node.info.collected_now` / `.min` / `.hours` / `.days`). The values are never
+        touched — the sentence is a LABEL on them.
+        """
+        if self._info_at <= 0.0:
+            return ""
+        moment = time.time() if now is None else float(now)
+        age = max(0.0, moment - self._info_at)
+        if age < 60.0:
+            return _t("node.info.collected_now")
+        minutes = int(age // 60.0)
+        if minutes < 60:
+            return _t("node.info.collected_min", minutes=minutes)
+        hours = int(age // 3600.0)
+        if hours < 48:
+            return _t("node.info.collected_hours", hours=hours)
+        return _t("node.info.collected_days", days=int(age // 86400.0))
+
+    def _apply_info_tone(self):
+        """Paint the info plaque's text in the idle tone once the facts are old.
+
+        The v1.5rc3 mark is the SAME channel for both families: the idle grey says "this
+        is not current" while every value stays exactly where it was. A dead C++ object
+        (Qt teardown) is a silent no-op.
+        """
+        try:
+            self._info.setDefaultTextColor(
+                self.COLOR_DOT_IDLE if self._info_stale else self.COLOR_LABEL)
+        except RuntimeError:
+            pass  # Qt teardown — the item is already destroyed
+
+    def _apply_info_tooltip(self):
+        """Compose the plaque tooltip: the full text (when it was elided) + the age line.
+
+        The plaque's tooltip is the one place that already answers "what is written here"
+        (the elided full line), so the age joins it instead of opening a second home; a
+        non-elided, undated plaque keeps an empty tooltip exactly as before v1.5.3.
+        """
+        lines = []
+        if self._info_tip_full:
+            lines.append(self._info_tip_full)
+        age = self.info_freshness_text()
+        if age:
+            lines.append(age)
+        try:
+            self._info.setToolTip("\n".join(lines))
+        except RuntimeError:
+            pass  # Qt teardown — see _apply_info_tone
+
+    # ── v1.5.3 (ROADMAP task 3): why the status is what it is ────────────────────
+
+    def set_status_report(self, text: str) -> None:
+        """Attach the sentence of the last on-demand reachability report to the card.
+
+        It rides the STATUS tooltip (below the plugin detail and the age) and is cleared by
+        a NEW probe result: an explanation describes one state, and once the state changed
+        the old explanation would be a claim about a measurement that no longer holds.
+        """
+        self._status_report = str(text or "")
+        if self._status:
+            self._apply_status_tooltip(self._status)
+
+    @property
+    def status_report(self) -> str:
+        """v1.5.3: the last reachability report of this card ("" — none was asked)."""
+        return self._status_report
+
     def update_appearance(self):
         """Rebuild the text elements when the data changes.
 
@@ -934,6 +1078,8 @@ class ServerNode(QGraphicsItemGroup):
 
         # Info block (line by line); full multi-line text — in the tooltip, if anything was shortened.
         # Under the MAX cap, short lines stay full — only overflow is cut.
+        # v1.5.3 (ROADMAP task 1): the tooltip is COMPOSED in ONE place (_apply_info_tooltip) —
+        # the full text when it was elided, plus the age of the datum.
         if info_lines:
             elided = []
             any_elided = False
@@ -945,9 +1091,11 @@ class ServerNode(QGraphicsItemGroup):
                 else:
                     elided.append(line)
             self._info.setPlainText("\n".join(elided))
-            self._info.setToolTip("\n".join(info_lines) if any_elided else "")
+            self._info_tip_full = "\n".join(info_lines) if any_elided else ""
         else:
-            self._info.setToolTip("")
+            self._info_tip_full = ""
+        self._apply_info_tone()
+        self._apply_info_tooltip()
 
         # New geometry calculation (height — from the actual info block; elide doesn't
         # wrap lines, so the line count doesn't depend on the shortening).
@@ -1264,6 +1412,10 @@ class ServerNode(QGraphicsItemGroup):
         # timestamp altogether (`set_checked_at`).
         self._checked_at = 0.0
         self._stale = False
+        # v1.5.3 (ROADMAP task 3): a NEW status invalidates the old explanation — the
+        # on-demand report described the state that just changed ("why is it red?" answered
+        # for a card that is now green would be a stale claim about the present).
+        self._status_report = ""
 
         self._apply_status_tooltip(status)
 
@@ -1306,6 +1458,11 @@ class ServerNode(QGraphicsItemGroup):
             age = self.freshness_text()
             if age:
                 lines.append(age)
+        # v1.5.3 (ROADMAP task 3): the "why" of this status — the last on-demand
+        # reachability report. It joins the tooltip the status already owns (ONE home per
+        # fact) and is dropped by the next probe result, which speaks about a NEW state.
+        if self._status_report:
+            lines.append(self._status_report)
         self.setToolTip("\n".join(lines))
 
     def _start_pulse(self, color: QColor):
@@ -1375,6 +1532,9 @@ class ServerNode(QGraphicsItemGroup):
         self._stale = False
         # v1.5: and the EMULATED marker — the emulation is a property of the status
         self._status_emulated = False
+        # v1.5.3 (ROADMAP task 3): the reachability report explained THIS status — it goes
+        # with it (a new host/port has never been diagnosed).
+        self._status_report = ""
         self.setToolTip("")
         # UI polish: the dot — gray (not checked), the content — full brightness
         # (v1.5rc2: the mark returns to the plain dot of an unchecked status)

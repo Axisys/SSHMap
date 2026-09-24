@@ -122,6 +122,7 @@ of the file itself.
 | `test_ext_terminal_dialog.py` | — | Regression v0.9.9.2 — the external terminal UI (presets + reset to defaults). |
 | `test_external_terminal.py` | — | External (system) terminal v0.8.2: modules/external_terminal.py (former smoke_test). |
 | `test_first_run.py` | — | v1.5rc3 — First run & confidence: the demo map, the undo affordance and the age of a status. |
+| `test_freshness.py` | — | v1.5.3 — freshness everywhere: the collected facts get an age, and a red card answers "why". |
 | `test_groups.py` | — | Node groups on the map v0.8.1 (former smoke_test.py "v0.8.1 groups"). |
 | `test_hotkeys_config.py` | — | v1.3.2 — Configurable hotkeys (QKeySequenceEdit, action registry): the release's test. |
 | `test_hotkeys_palette.py` | — | Hotkeys + command palette v0.9.2 (former smoke_test "v0.9.2 hotkeys + command palette"). |

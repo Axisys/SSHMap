@@ -40,7 +40,11 @@ Ownership of shared state (AUDIT §3, pinned down by this comment):
   * ``self._terminals_dock`` — the "Terminals" dock (v1.2.2, lazy creation;
     modules/terminal_dock.TerminalsDock), None until the "tabs" mode was used;
   * ``self._ssh_connected_nodes`` — ids of nodes with an active session (green dot);
-  * ``self._info_collectors`` — registry of SystemInfoCollector by server_id.
+  * ``self._info_collectors`` — registry of SystemInfoCollector by server_id (v1.5.3:
+    the ONE per-node guard of the info family, written by `_track_info_collector()` and
+    asked by `_info_is_busy()` — the single-node path AND the batch obey it);
+  * ``self._info_batch`` — the bounded queue behind "gather information for the
+    selection / all" (v1.5.3, ROADMAP task 2; `services/info_batch.py`).
 The mixin does NOT import ui.main_window (cycle) — only duck-typing on the
 instance; SSHTerminalWindow/SSHConnectDialog/_ext_term are taken from the
 facade module at call time (host_attr) — a test seam for swapping
@@ -393,13 +397,14 @@ class SshMixin:
             return
         sid = node.data.id
         # Guard: do not spawn parallel collections for the same node
-        old = getattr(self, "_info_collectors", {}).get(sid)
-        if old is not None and old.isRunning():
+        # v1.5.3 (ROADMAP task 2): the ONE home of that guard is `_info_is_busy()` /
+        # `_track_info_collector()` — the batch path asks the same question and registers
+        # its collectors in the same registry, so "collect the selection" twice cannot
+        # double-probe a host.
+        if self._info_is_busy(sid):
             return
-        if not hasattr(self, "_info_collectors"):
-            self._info_collectors = {}
         collector = SystemInfoCollector(node.data, password=password, parent=self)
-        self._info_collectors[sid] = collector
+        self._track_info_collector(sid, collector)
 
         def _ready(server_id, info, coll=collector):
             self._on_info_ready(server_id, info, coll)
@@ -409,8 +414,6 @@ class SshMixin:
 
         collector.info_ready.connect(_ready)
         collector.info_failed.connect(_failed)
-        collector.finished.connect(
-            lambda *_a: self._info_collectors.pop(sid, None))
         collector.start()
         key = "status.info_running_auto" if auto else "status.info_running"
         try:
@@ -418,11 +421,210 @@ class SshMixin:
         except Exception:
             pass
 
-    def _on_info_ready(self, server_id: str, info: dict, collector):
-        """Collection result: write to node.data + dirty + redraw."""
+    def _info_is_busy(self, server_id) -> bool:
+        """v1.5.3 (ROADMAP task 2): is a collector already running for this node?
+
+        The per-node guard of the info family, in ONE place: the single-node path
+        (`_collect_node_info`) and the batch (`InfoBatch(is_busy=…)`) both ask here, so a
+        node can never be collected twice in parallel — not by a repeated menu click, not
+        by a selection that overlaps a running collection.
+        """
+        collectors = getattr(self, "_info_collectors", None)
+        if not isinstance(collectors, dict):
+            return False
+        collector = collectors.get(str(server_id))
+        if collector is None:
+            return False
+        is_running = getattr(collector, "isRunning", None)
+        if callable(is_running):
+            try:
+                return bool(is_running())
+            except RuntimeError:
+                return False   # the C++ object is gone — nothing is running
+        return True            # a duck-typed collector: registered = running
+
+    def _track_info_collector(self, server_id, collector) -> None:
+        """v1.5.3: register a live collector (the guard + the shutdown wait).
+
+        The registry `_info_collectors` is the ONE list of running collectors: it answers
+        `_info_is_busy()`, `_shutdown_background_threads()` waits on it, and the entry is
+        dropped when the collector finishes (its own `finished` signal) — an entry that
+        outlives its thread would block that node forever.
+        """
+        if not hasattr(self, "_info_collectors") or not isinstance(
+                getattr(self, "_info_collectors", None), dict):
+            self._info_collectors = {}
+        sid = str(server_id)
+        self._info_collectors[sid] = collector
+        try:
+            collector.finished.connect(lambda *_a, _sid=sid: self._info_collectors.pop(_sid, None))
+        except (AttributeError, RuntimeError):
+            pass  # a duck-typed collector without the signal — shutdown still waits on it
+
+    # ── v1.5.3 (ROADMAP task 2): collect for MANY nodes at once ────────────────
+
+    def _collectible_nodes(self) -> list:
+        """Every node of the map, in scene order (the "all" scope of the gather action)."""
+        try:
+            return list(self.scene.nodes())
+        except (AttributeError, RuntimeError):
+            return []
+
+    def _collect_info_scope(self, node=None) -> list:
+        """WHICH nodes the "gather information" action covers (v1.5.3, ROADMAP task 2).
+
+        The rule follows the map's own habits: a MULTI-selection means "these"; a single
+        selected node means it; a right-clicked row/node (a context-menu call) means that
+        one; nothing selected at all means the WHOLE map — the `_check_statuses_now()` and
+        "Run on selected servers" precedent, so one action answers both the selection and
+        "refresh everything" without a second menu entry or a dialog.
+        """
+        try:
+            selected = list(self.selected_nodes())
+        except (AttributeError, RuntimeError):
+            selected = []
+        if len(selected) > 1:
+            return selected
+        data = getattr(node, "data", None)
+        if data is not None:
+            return [node]
+        if selected:
+            return selected
+        return self._collectible_nodes()
+
+    def _collect_info_many(self, nodes=None, node=None) -> int:
+        """Start ONE bounded batch of info collections. Returns the accepted node count.
+
+        Nothing network-related happens on this call: the collectors are QThreads and the
+        batch starts at most `InfoBatch.max_parallel` of them (`info_max_parallel` in
+        config.json, default 4). The GUI thread only builds the queue.
+
+        `nodes` is duck-typed on purpose: the Edit-menu item connects the slot to
+        `QAction.triggered`, which hands a bool `checked` as the first argument (gotchas
+        #10/#12) — anything that is not an explicit list of nodes means "decide the scope".
+        """
+        if isinstance(nodes, bool) or nodes is None:
+            targets = self._collect_info_scope(node)
+        else:
+            try:
+                targets = list(nodes)
+            except TypeError:
+                targets = self._collect_info_scope(node)
+        targets = [n for n in targets if getattr(n, "data", None) is not None]
+        if not targets:
+            try:
+                self.statusBar().showMessage(self.t("status.info_batch_none"), 5000)
+            except Exception:  # noqa: BLE001
+                pass
+            return 0
+        batch = getattr(self, "_info_batch", None)
+        if batch is None:
+            from services.info_batch import InfoBatch, get_batch_settings
+            batch = InfoBatch(
+                collector_factory=self._make_info_collector,
+                is_busy=self._info_is_busy,
+                max_parallel=int(get_batch_settings()["max_parallel"]),
+                parent=self)
+            batch.progress.connect(self._on_info_batch_progress)
+            batch.node_ready.connect(self._on_info_batch_ready)
+            batch.node_failed.connect(self._on_info_batch_failed)
+            batch.finished.connect(self._on_info_batch_finished)
+            self._info_batch = batch
+        accepted = batch.start([(n.data.id, n.data.alias, n.data) for n in targets])
+        if accepted:
+            try:
+                self.statusBar().showMessage(
+                    self.t("status.info_batch_progress", done=batch.done, total=batch.total),
+                    5000)
+            except Exception:  # noqa: BLE001 — the status bar is cosmetic here
+                pass
+            if self.log:
+                self.log.info(f"Info batch started for {accepted} node(s)")
+        else:
+            try:
+                self.statusBar().showMessage(self.t("status.info_batch_none"), 5000)
+            except Exception:  # noqa: BLE001
+                pass
+        return accepted
+
+    def _make_info_collector(self, data, password: str = ""):
+        """The ONE factory the batch uses (the test seam is the SERVICE module attribute).
+
+        It registers the collector in `_info_collectors` (the guard + the shutdown wait)
+        through the SAME method the single-node path uses, and creates it with the window
+        as its parent, so a live QThread is never left unowned. The class is resolved from
+        `services.system_info_collector` AT CALL TIME — the documented seam
+        (`SIC.SystemInfoCollector = Fake`, the same one the single-node path honours).
+        """
+        try:
+            from services.system_info_collector import SystemInfoCollector
+        except ImportError:
+            from ..services.system_info_collector import SystemInfoCollector
+        collector = SystemInfoCollector(data, password=password, parent=self)
+        self._track_info_collector(data.id, collector)
+        return collector
+
+    def _on_info_batch_progress(self, done: int, total: int, alias: str):
+        """One node settled — the live progress line of the batch."""
+        batch = getattr(self, "_info_batch", None)
+        if batch is not None and batch.is_running:
+            try:
+                self.statusBar().showMessage(
+                    self.t("status.info_batch_progress", done=done, total=total), 3000)
+            except Exception:  # noqa: BLE001
+                pass
+
+    def _on_info_batch_ready(self, server_id: str, info: dict):
+        """A collected node — the ordinary single-node write path, without the message."""
+        self._apply_info_result(server_id, info)
+
+    def _on_info_batch_failed(self, server_id: str, alias: str, error: str):
+        """A failed node — logged (the activity panel shows it); the batch continues."""
+        if self.log:
+            self.log.warning(f"Info collection failed for {alias}: {error}")
+
+    def _on_info_batch_finished(self, ok_count: int, failures: list, cancelled: int):
+        """The batch is over: NAME the failures (the task's acceptance) and say the totals."""
+        failures = list(failures or [])
+        try:
+            if failures:
+                from services.info_batch import failed_alias_list
+                names = failed_alias_list(failures)
+                self.statusBar().showMessage(
+                    self.t("status.info_batch_done", ok=ok_count,
+                           total=ok_count + len(failures))
+                    + " — " + self.t("status.info_batch_failed", names=names), 12000)
+            else:
+                self.statusBar().showMessage(
+                    self.t("status.info_batch_done", ok=ok_count, total=ok_count), 8000)
+        except Exception:  # noqa: BLE001 — a summary is cosmetic
+            pass
+        if self.log:
+            self.log.info(f"Info batch finished: {ok_count} collected, "
+                          f"{len(failures)} failed, {cancelled} cancelled")
+
+    def _shutdown_info_batch(self):
+        """Cancel the queue and wait for the running collectors (window teardown)."""
+        batch = getattr(self, "_info_batch", None)
+        if batch is None:
+            return
+        try:
+            batch.shutdown()
+        except Exception as e:  # noqa: BLE001 — a teardown path never raises
+            if self.log:
+                self.log.warning(f"Info batch shutdown failed: {e}")
+
+    def _apply_info_result(self, server_id: str, info: dict) -> bool:
+        """Write a collection result into the node's data + DATE it. Returns True on a write.
+
+        The ONE write path of the collected facts (the single-node path and the batch both
+        end here): the values, the timestamp of THIS measurement (`info_collected_at`,
+        v1.5.3 task 1) and the redraw. The node may have been deleted while collecting —
+        then there is nothing to write and no date to set.
+        """
         node = self.scene.get_node(server_id)
         if node is None:
-            return  # the node was deleted while collecting
+            return False
         d = node.data
         if info.get("os_name"):
             d.os_name = info["os_name"]
@@ -434,9 +636,29 @@ class SshMixin:
             d.ram = info["ram_gb"]
         if info.get("disk_gb"):
             d.disk = info["disk_gb"]
+        # v1.5.3 (ROADMAP task 1): the date goes WITH the data — a fresh measurement is what
+        # the "collected N ago" line and the stale mark describe. It is an ordinary field of
+        # the model (optional in JSON, 0.0 = not dated) and it NEVER changes a value.
+        try:
+            import time as _time
+            d.info_collected_at = _time.time()
+        except Exception:  # noqa: BLE001 — the values are the important half
+            pass
         node.update_appearance()
+        try:
+            node.set_info_collected_at(getattr(d, "info_collected_at", 0.0))
+        except (AttributeError, RuntimeError):
+            pass  # a test double without the v1.5.3 hook — the values are already written
         self.refresh_sidebar()
         self._mark_dirty()
+        return True
+
+    def _on_info_ready(self, server_id: str, info: dict, collector):
+        """Collection result: write to node.data + dirty + redraw (the single-node path)."""
+        if not self._apply_info_result(server_id, info):
+            return  # the node was deleted while collecting
+        node = self.scene.get_node(server_id)
+        d = node.data
         try:
             self.statusBar().showMessage(
                 self.t("status.info_collected", alias=d.alias), 5000)

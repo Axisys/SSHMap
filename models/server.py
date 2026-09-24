@@ -38,12 +38,41 @@ class ServerData:
     # JSON without the key is read as an empty list (server_data_from_dict), and old
     # application versions simply ignore the unknown key.
     quick_launch: "list | None" = None
+    # v1.5.3 (ROADMAP task 1): WHEN the auto-collected facts above (os_name / cpu_model /
+    # cpu / ram / disk / ip) were collected — epoch seconds, 0.0 = "not dated" (never
+    # collected, or a project file written before this release). Optional and additive:
+    # a missing key loads as 0.0 and the card stays unmarked (the tags/quick_launch
+    # compatibility policy — write only when set, absent means the default, an old
+    # application version ignores the unknown key). It is written WITH the values (ONE
+    # write in `MainWindow._apply_info_result`), so a fact and its date can never drift:
+    # the date is the age of THAT measurement, not of the file.
+    # VERSION_FORMAT stays "0.9": an optional field with a default is not a schema change
+    # (the `collapsed` / `tags` / `quick_launch` precedent).
+    info_collected_at: float = 0.0
 
     def __post_init__(self):
         if self.tags is None:
             self.tags = []
         if self.quick_launch is None:
             self.quick_launch = []
+
+
+def info_collected_epoch(value) -> float:
+    """Coerce a raw "info_collected_at" value into epoch seconds (v1.5.3, ROADMAP task 1).
+
+    PURE, and the ONE place that decides what a usable timestamp is: a missing key, an
+    explicit null, a non-numeric string, a NaN / infinite number and a NEGATIVE epoch all
+    mean "not dated" (0.0). A negative value is refused on purpose: an epoch before 1970
+    cannot be a collection this application performed, and letting it through would paint
+    a "collected 20 000 days ago" mark on a hand-edited file.
+    """
+    try:
+        moment = float(value)
+    except (TypeError, ValueError):
+        return 0.0
+    if moment != moment or moment in (float("inf"), float("-inf")):  # NaN / ±inf
+        return 0.0
+    return moment if moment > 0.0 else 0.0
 
 
 def sanitize_quick_launch(raw) -> list:
@@ -123,10 +152,20 @@ def server_data_from_dict(raw: dict) -> ServerData:
     # v1.0RC4: Quick launch — missing in old JSON → empty list;
     # corrupt records are dropped (sanitize_quick_launch)
     data['quick_launch'] = sanitize_quick_launch(data.get('quick_launch'))
+    # v1.5.3 (ROADMAP task 1): the age of the collected facts — missing in old JSON (and in
+    # a hand-edited file with junk) → 0.0 = "not dated": the card stays unmarked and the
+    # project loads unchanged. The ONE coercion lives in info_collected_epoch().
+    data['info_collected_at'] = info_collected_epoch(data.get('info_collected_at'))
     return ServerData(**data)
 
 
 def server_data_to_dict(data: ServerData) -> dict:
     serialized = asdict(data)
     serialized.pop('password', None)  # the password is not stored in JSON
+    # v1.5.3 (ROADMAP task 1): the collection date is written ONLY when the node really has
+    # one ("write only when set, absent means default" — the project-format invariant), so a
+    # map whose data was never collected keeps the byte-for-byte file it had before this
+    # release and an undated card stays unmarked on the next load.
+    if not info_collected_epoch(serialized.get('info_collected_at')):
+        serialized.pop('info_collected_at', None)
     return serialized

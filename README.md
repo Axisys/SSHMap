@@ -24,7 +24,7 @@ pipx install .                    # or pip install . → sshmap command (install
 Tests are plain Python scripts without pytest: one topical `test_*.py` file per area plus a single parallel runner. Each file is an isolated process (sandbox HOME, offscreen Qt, UTF-8 stdout), so nothing extra is needed on cp1251 consoles or in CI:
 
 ```bash
-python tests/run_all.py               # everything (98 test files + i18n check); auto workers = cores (cap 16), longest file first; exit 0 ⇔ all green
+python tests/run_all.py               # everything (99 test files + i18n check); auto workers = cores (cap 16), longest file first; exit 0 ⇔ all green
 python tests/run_all.py --fast        # daily profile: skips files tagged slow/network
 python tests/run_all.py --tag network # only network-tagged files - real-network sections run ONLY on explicit opt-in (env SSHMAP_TEST_TAGS)
 python tests/run_all.py --failed-only # re-run only files that failed in the last run (cache test-results/last_run.json)
@@ -63,7 +63,8 @@ modules/                     # ssh_worker.py - one-shot SSH worker + registry; s
                              # logger.py (the file/console handlers + the activity tap); activity_log.py (the bounded, memory-only history ring)
 storage/                     # project.py - JSON save/load; example_project.py - the DEMO map built in code (five nodes, six connections, RFC 5737 addresses only);
                              # autosave.py - autosave + backup ring buffer; export_drawio.py - .drawio export (tags + comment included; the print-friendly palette by default)
-services/                    # credential_manager.py (keyring); diagnostics.py (ping / reverse DNS off the GUI thread); host_importer.py (TXT import);
+services/                    # credential_manager.py (keyring); diagnostics.py (ping / reverse DNS off the GUI thread + the v1.5.3 reachability report: DNS → TCP → banner → ICMP);
+                             # info_batch.py (the bounded queue behind "gather information for many nodes"); host_importer.py (TXT import);
                              # ssh_config_importer.py (~/.ssh/config import); status_checker.py (parallel SSH probes); system_info_collector.py (OS/CPU/RAM/disk)
 dialogs/                     # AddServer, SSHConnect (+ external terminal), Connection/EditConnection, ProfileManager, Backups, QuickLaunch,
                              # SshConfigImport (the checkbox picker of the ~/.ssh/config import), ExportOptions (print-friendly or current theme)
@@ -99,6 +100,7 @@ PLUGINS.md                   # the plugin contract: API v1 (manifest, hooks, con
                 "x": 0.0, "y": 0.0, "cpu": "", "ram": "", "disk": "", "ip": "",
                 "comment": "", "ssh_port": 22, "key_path": "",
                 "os_name": "", "cpu_model": "", "tags": ["prod", "dev"],
+                "info_collected_at": 1750000000.0,
                 "quick_launch": [{"type": "url", "name": "Webmin", "value": "http://host:10000/"},
                                  {"type": "command", "name": "K9S", "value": "k9s"}]}],
   "connections": [{"source_id": "...", "target_id": "...", "label": "", "type": "ssh", "bidirectional": true}],
@@ -115,6 +117,7 @@ Format invariants:
 - `bidirectional` is optional on a connection record: written only when true, absent means a one-way arrow (old files without the key load unchanged). A bidirectional arrow draws heads at both ends of the curve (two-way data exchange).
 - Group membership is not stored; it is computed from geometry. Each card joins exactly the topmost group whose rect contains its center.
 - `tags`: an array of strings on the server record; missing or non-array in old JSON becomes an empty list (`server_data_from_dict` normalizes it).
+- `info_collected_at` (v1.5.3): when the collected facts (`os_name`/`cpu_model`/`cpu`/`ram`/`disk`/`ip`) were measured, as epoch seconds. Written ONLY when the server has one, so an undated map keeps the file it had; a missing key, `null`, a non-numeric value or a negative epoch loads as "not dated" and the card stays unmarked. The key holds an age, never a status, and `VERSION_FORMAT` stays `"0.9"` — an optional field with a default is not a schema change.
 - `quick_launch`: an array of items `{"type": "url"|"command", "name", "value"}`; missing in old JSON is an empty list, broken records are dropped (`sanitize_quick_launch`). A URL opens in the default browser; a command becomes the first command sent to the SSH terminal.
 - `server_id` on a note is optional (the same pattern as `groups`/`background`): written only when set, absent means a free note. A broken reference (missing node or not a string) logs a warning and leaves the note free at its saved position; on load an attached note keeps its SAVED position (`attach_note_to_node(..., keep_position=True)` derives the anchor offset from the stored x/y relative to the node's card anchor), so a note that was moved by hand stays where it was left instead of jumping into the corner. `VERSION_FORMAT` stays `"0.9"`.
 - `background` stores a path to the image, not the file itself (nothing is embedded in the JSON); a missing file on load logs a warning and is ignored. Background geometry is not part of undo.
@@ -191,6 +194,11 @@ Format invariants:
 - Soft auto-interval: above 50 nodes the round interval doubles (`effective_interval_ms()`) with a one-time hint in the status bar; there is no hard limit on the server count.
 - `start_status_checks()` is called once from `main.py` after `show()`.
 
+### Fresh facts and "why is it red?" (v1.5.3)
+- **The collected facts carry their age too.** OS / CPU / RAM / disk / IP are written together with the moment they were measured, so the info plaque on a card says "collected just now" / "{days} days ago" in its tooltip, and a fact older than a week is painted in the grey "not current" tone **without changing a single value**. A project saved before this release loads unchanged and simply shows no age; a card can honestly have a fresh status above year-old hardware lines, because the two ages are separate.
+- **Gather information for many servers at once** ("Collect system info" in the Edit menu and in both context menus): the selection when there is one, the clicked server from a context menu, the whole map when nothing is selected. The collections run in a bounded queue — at most `info_max_parallel` at a time (default 4, a performance key in `config.json`), a server that is already being collected is skipped, and one failure never stops the rest. The status bar shows progress and the final line **names the failures**; the full list goes to the activity panel.
+- **"Why is it offline?"** asks the red card a direct question and answers it with the steps the app already takes, in order: DNS resolve → TCP connect → SSH banner → ICMP ping. The first failing step is named in its own words, so a wrong name, a refused port, a filtered port and a server that answers with something that is not SSH produce four different sentences. When the port is unreachable the ping says which of the two it is ("host down" vs "firewall"). The answer appears in the card's tooltip, the status bar and the activity history — and **the status itself is never changed by it**, because a report explains, it does not decide. One report per server at a time; no new dependency, and every step keeps the 3 s probe budget.
+
 ### Terminal
 - Architecture: session = `TerminalSessionPage` (`modules/terminal_page.py`: thread + pyte screen + canvas + SFTP tab). All cleanup logic lives on the page; every teardown path (tab/window close, session error, MainWindow shutdown, limit reached) goes through the single idempotent `page.shutdown()`, and the "ask" gate is `page.confirm_close()`.
 - Status bar: a session does not draw a status line of its own (it would repeat one row above the tabs text the window's status bar already shows). Every state (connecting, opened, closed, error) goes to that one bar.
@@ -222,11 +230,11 @@ Format invariants:
   - `terminal_max_open` (default 4, range 1..32): counts sessions in the registry across all containers, split panes excluded; when reached it offers to close the oldest instead of refusing.
   - `terminal_mode` (`"windows"` | `"tabs"`, see the Terminal section; broken value → default; applied to new sessions only);
   - `terminal_wheel` (`"scrollback"` | `"off"`: local scrollback or the application's; its combo lives in Settings → Terminal), `ui_terminal_split` (true opens a terminal window with the bottom pane already on) and `ui_terminal_split_ratio` (the pane's share of height, default 0.25, clamped 0.10–0.75); both split keys are written with the window geometry on close;
-  - `status_interval_sec` / `status_probe_timeout_sec` / `status_max_parallel` (defaults 30 s / 3.0 s / 16 parallel probes; live via `StatusChecker.set_interval/set_probe_timeout/set_max_parallel`);
+  - `status_interval_sec` / `status_probe_timeout_sec` / `status_max_parallel` (defaults 30 s / 3.0 s / 16 parallel probes; live via `StatusChecker.set_interval/set_probe_timeout/set_max_parallel`); `info_max_parallel` (v1.5.3: how many system-info collections "Gather information" runs at once, default 4, clamped 1..16 — read by the batch owner, not a settings-hub row);
   - `autosave_enabled` / `autosave_interval_sec` / `backup_count` (live, drive the autosave QTimer);
   - `language` (applied immediately, before OK);
   - `theme` (`{"mode": "dark"|"light"|"auto", "accent": "#rrggbb", "motion": true}`). The Appearance tab: dark theme is the default, `auto` follows the operating system's colour scheme live, the accent is one hue (8 swatches or your own colour), and the "Reduce motion" box turns the animations off. A broken value falls back to dark + the default sky + the motion on. Applied live before OK; Cancel restores the previous theme and the previous motion flag.
-  - `hotkeys` (dict action_id → sequence, e.g. `"file.save": "Ctrl+S"`). The whole set is edited in the Hotkeys tab from the action registry `ui/hotkey_registry.py`: every one of the 51 global actions has a row; an empty string means no hotkey (the value the actions without a shortcut ship with); "Reset to defaults" restores the whole map; missing or broken values fall back to the default. Applied live after OK. The terminal's own keys (F1–F12, Ctrl+C/D/Z, arrows) are xterm protocol and not configurable.
+  - `hotkeys` (dict action_id → sequence, e.g. `"file.save": "Ctrl+S"`). The whole set is edited in the Hotkeys tab from the action registry `ui/hotkey_registry.py`: every one of the 54 global actions has a row; an empty string means no hotkey (the value the actions without a shortcut ship with); "Reset to defaults" restores the whole map; missing or broken values fall back to the default. Applied live after OK. The terminal's own keys (F1–F12, Ctrl+C/D/Z, arrows) are xterm protocol and not configurable.
   - `ui_font_family` / `ui_font_size` (UI font, live via `QApplication.setFont`, 0 = system), `ui_node_double_click` (`"properties"` default | `"connect"`; double-clicking a node opens the SSHConnectDialog directly), `ui_show_sidebar_buttons` (the sidebar button block; hide the whole sidebar via View → Sidebar), `ui_show_connection_type` (type on the connection badge, "SSH · <label>", handy for PNG/PDF export) + 20-character limit on the connection label (input only; old projects with long labels load unchanged);
   - `plugins` (`{plugin id: true|false}`, which plugins are switched off; written by the Plugins menu; a missing id means enabled).
 
@@ -241,7 +249,7 @@ Format invariants:
 
 ### Hotkeys + Command Palette
 - Default hotkeys: Ctrl+N/O/S for projects; Ctrl+Shift+S Save As…; Ctrl+Z / Y(+Shift) undo/redo; Ctrl+Shift+A/G/C add server/group/connection; Ctrl+I properties; Ctrl+Enter SSH to the selected node; Ctrl+E edit node; Ctrl+D duplicate node; Ctrl+Shift+N a note in the centre of the visible area; Delete delete selection; Ctrl+0 / Ctrl+= / Ctrl+- reset zoom / zoom in / zoom out; Ctrl+Shift+F fit map; Ctrl+F map search (search bar over the canvas, Enter/Shift+Enter jump between matches with centering and an accent frame, Esc close).
-- Every global action is assignable (Settings → Hotkeys): the tab lists all 51 global actions (grouped by family: File / Edit / View / Node / Plugins / Help) with a filter box, so it is not only the ones that happen to have a shortcut, so File → Save As…, the exports, the map images, the backups, "Check statuses now", "Reload plugins", "Run on selected servers", the minimap and the About window can get keys of your own, on top of the zoom family this release gave real keys. One row per action with a key recorder; a duplicate combination marks both rows and warns but still saves; an empty row means no hotkey (the menu item keeps working); "Reset to defaults" puts every row back at once. Stored in `~/.sshmap/config.json` and applied instantly, no restart. Multi-input keeps its own rule: whatever key you pick works only while the mode is on, so it never steals a key from your shell.
+- Every global action is assignable (Settings → Hotkeys): the tab lists all 54 global actions (grouped by family: File / Edit / View / Node / Plugins / Help) with a filter box, so it is not only the ones that happen to have a shortcut, so File → Save As…, the exports, the map images, the backups, "Check statuses now", "Gather information", "Why is it offline?", "Reload plugins", "Run on selected servers", the minimap and the About window can get keys of your own, on top of the zoom family this release gave real keys. One row per action with a key recorder; a duplicate combination marks both rows and warns but still saves; an empty row means no hotkey (the menu item keeps working); "Reset to defaults" puts every row back at once. Stored in `~/.sshmap/config.json` and applied instantly, no restart. Multi-input keeps its own rule: whatever key you pick works only while the mode is on, so it never steals a key from your shell.
 - The terminal canvas keeps its own keys (F1–F12, Ctrl+C/D/Z, arrows): they are xterm protocol and deliberately not configurable.
 - Multi-selection: Ctrl+click on a node adds to the selection (native Qt); Ctrl+drag on empty space is rubber-band selection (Shift+Ctrl adds to current). Group drag moves all selected; right-click during multi-selection offers "Connect selected" / "Delete selected" (one confirmation, guarded per item).
 - Ctrl+K opens the command palette (`ui/command_palette.py`): fuzzy search (subsequence scoring, no dependencies) over all menu QActions + project servers + commands contributed by plugins (their own section after the servers, so a plugin can never shadow a built-in command; the text is the plugin author's). Selecting a server selects the node and centers on it. Enter/Up/Down/Esc navigate. With an EMPTY query it opens on a bounded "Start here" list (the actions you already ran in this session, then the frequent ones) instead of a wall of rows.
@@ -298,6 +306,9 @@ Built-in languages: en (default), ru, zh, de; any other language joins by droppi
 **Implemented features** (details in sections 3–4):
 - a first run that explains itself: an **example map built in code** (five nodes, six connections covering every type, a group, a note, tags — all on documentation addresses, with clearly **marked emulated statuses**), and a status bar that offers **Undo** right where a delete, a disconnect or an import happened
 - statuses with an age: the tooltip says when a result was taken, and an old one turns grey (keeping its shape) instead of pretending to be current — an emulated demo status never claims one
+- collected facts with an age (v1.5.3): the info plaque says when the OS/CPU/RAM/disk data was measured and turns grey after a week — the values never change, and an old project simply shows no age
+- one click gathers the system info of the selection (or the whole map): a bounded queue, a per-server guard, live progress and a closing line that names the failures
+- **"why is it offline?"** (v1.5.3): one on-demand report per server — DNS → TCP → SSH banner → ICMP ping — names the first failing step in its own words and lands in the tooltip, the status bar and the activity history; the status itself is never changed
 - the card names its environment: the primary tag (`prod` / `staging` / `dev` / …) as text above the alias, so an environment is never just the colour of a status
 - floating panels that come back: drop the legend or the minimap at the edge it hangs from and it re-anchors to its corner (the dragged position is forgotten)
 - the command palette on the first screen: an empty Ctrl+K opens a short "Start here" list, the empty map names the key, and `?` / F1 open the shortcut list built from the registry
@@ -320,7 +331,7 @@ Built-in languages: en (default), ru, zh, de; any other language joins by droppi
 - multi-input: typing in the focused session is broadcast to all other open sessions (F12 exits), with per-session exclusions
 - command library (macros): one click sends a saved command/script to the active terminal (single-line raw, multi-line bracketed paste)
 - undo/redo of scene operations including groups and note pinning
-- automatic info collection for Linux servers (OS/CPU/RAM/disk); profiles with passwords in the OS keyring, never written to JSON
+- automatic info collection for Linux servers (OS/CPU/RAM/disk) — one server from a context menu, a whole selection or the whole map through the bounded batch, each measurement dated so the card can show its age; profiles with passwords in the OS keyring, never written to JSON
 - autosave + ring buffer of backups with rollback (File → Backups…)
 - export to PNG/JPEG/PDF, SVG and draw.io `.drawio` (tags and comment included) — print-friendly by default: a light page with high-contrast lines, the six connection types kept apart by their line style; one checkbox switches to the current theme; bulk server import from TXT and from `~/.ssh/config` (alias, host, user, port and key file; checkbox picker; one undo for the whole batch)
 - i18n: en (default), ru, zh, de plus any language as one dropped-in JSON file; no code changes, the UI follows a switch live
@@ -352,7 +363,7 @@ Built-in languages: en (default), ru, zh, de; any other language joins by droppi
 - plugins run inside the application's process: a plugin with a broken C extension can take it down; install plugins you trust
 
 **Roadmap** (tasks, order, acceptance in ROADMAP.md):
-- next: freshness for the collected facts and a "why is it red?" answer, then the group aggregate and the inventory export; the activity history shipped in v1.5.2
+- next: the group aggregate (the worst member status on the frame and the folded badge grid), the transient "problems only" lens and the plaque that names the active filters; the inventory export (sorting, CSV/TSV, more columns) follows. The freshness release shipped in v1.5.3
 
 ---
 

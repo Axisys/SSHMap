@@ -785,13 +785,15 @@ print("== §9 the release state ==")
 # ════════════════════════════════════════════════════════════════════════════
 
 check("EXPECTED_APP_VERSION is the version this test file describes",
-      EXPECTED_APP_VERSION == "1.5.2", EXPECTED_APP_VERSION)
-check("the pin counts the keys of the SHIPPED release (v1.5.2 — the second patch on 1.5 adds "
-      "THIRTEEN keys, all of them the CHROME of the activity panel: the View item "
-      "`view.toggle_activity`, `activity.title`, `activity.clear`, `activity.empty`, the five "
-      "level captions and the four column headers, so 648 + 13 = 661; the event LINES are "
-      "logging lines and the ring bound is a number, so no event kind costs a key)",
-      EXPECTED_I18N_KEYS == 661, str(EXPECTED_I18N_KEYS))
+      EXPECTED_APP_VERSION == "1.5.3", EXPECTED_APP_VERSION)
+check("the pin counts the keys of the SHIPPED release (v1.5.2 added THIRTEEN — all the CHROME "
+      "of the activity panel — and v1.5.3 added TWENTY in three families: the age of the "
+      "collected facts (`node.info.collected_now` plus the minutes/hours/days steps), the "
+      "batch collection (progress / done / failed / none) and the reachability report "
+      "(`ctx.diagnose`, `status.diagnose_running` and the eight `diagnose.*` verdicts with "
+      "their two ICMP evidence lines); the numbers and the behaviour of the release cost no "
+      "key, so 661 + 20 = 681)",
+      EXPECTED_I18N_KEYS == 681, str(EXPECTED_I18N_KEYS))
 check_release_state(ROOT)
 for _code in i18n_lang_codes(ROOT):
     check(f"i18n/{_code}.json carries the v1.5 node.status.emulated marker",

@@ -142,13 +142,14 @@ class _FakeChecker:
 print("== 1. the registry is complete ==")
 
 ids = HR.action_ids()
-check("registry: 52 actions — the v1.3.2 set + Save As + the zoom family + the empty defaults "
+check("registry: 54 actions — the v1.3.2 set + Save As + the zoom family + the empty defaults "
       "(v1.3.3.7: +file.export_svg; v1.4rc1: +plugins.reload; v1.4rc3: +plugins.run_on_nodes; "
       "v1.4.1: +file.import_ssh_config; v1.4.2: +view.toggle_minimap; "
       "v1.4.5: +view.toggle_legend; v1.5rc3: +help.cheatsheet (F1) and +help.example; "
       "v1.5rc4: +view.focus_map; v1.5.1: +file.copy_map and +file.docs_frame; "
-      "v1.5.2: +view.toggle_activity)",
-      len(ids) == 52 and len(set(ids)) == 52, str(len(ids)))
+      "v1.5.2: +view.toggle_activity; "
+      "v1.5.3: +node.collect_info and +node.diagnose — the freshness pair, both EMPTY defaults)",
+      len(ids) == 54 and len(set(ids)) == 54, str(len(ids)))
 check("registry: the 4 new SEQUENCED actions carry exactly the promised defaults",
       {a: HR.default_sequence(a) for a in NEW_DEFAULT_ACTIONS} == NEW_DEFAULT_ACTIONS,
       str({a: HR.default_sequence(a) for a in NEW_DEFAULT_ACTIONS}))
@@ -206,7 +207,9 @@ check("source audit: the named ids cover every menu family (file/edit/view/profi
 #      state), so it is built by hand and registered through _register_hotkey_target.
 #      v1.4.5 adds view.toggle_legend to the same family (the checkable View item of the
 #      legend panel, mirrored by a toolbar button); v1.5.2 adds view.toggle_activity
-#      (the checkable View item of the activity panel — the same hand-built pattern).
+#      (the checkable View item of the activity panel — the same hand-built pattern);
+#      v1.5.3 adds NOTHING to the manual set: the freshness pair (node.collect_info /
+#      node.diagnose) is built through `_add_menu_action` on permanent Edit-menu items.
 _recorded = []
 _orig_add_menu_action = MW.MainWindow._add_menu_action
 
@@ -535,7 +538,7 @@ check("check now: the sidebar context menu carries the entry",
       str(SB.CONTEXT_MENU_ITEMS))
 _sb_actions = {k: (lambda node, _k=k: None) for k in
                ("ssh", "external", "edit", "copy_ip", "copy_hostname", "ping",
-                "collect_info", "check_status", "reveal", "delete")}
+                "collect_info", "check_status", "diagnose", "reveal", "delete")}
 _sidebar = SB.SidebarPanel(translate_fn=i18n.t, actions=_sb_actions)
 from PySide6.QtWidgets import QMenu  # noqa: E402
 

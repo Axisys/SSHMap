@@ -82,6 +82,10 @@ CONTEXT_MENU_ITEMS = (
     # v1.3.3.3 (ROADMAP task 5): the on-demand status round — the same entry point as
     # on the map; the row's node is the fallback when nothing is selected.
     ("check_status", "ctx.check_status"),
+    # v1.5.3 (ROADMAP task 3): "why is it offline?" — the on-demand reachability report
+    # (DNS → TCP → banner → ICMP ping). It sits next to the status round because it is the
+    # question that round raises: a red row, and no answer beyond "offline".
+    ("diagnose", "ctx.diagnose"),
     None,
     ("reveal", "ctx.reveal_on_map"),
     None,

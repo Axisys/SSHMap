@@ -24,6 +24,12 @@ from the facade module at call time (host_attr) — the test seam for
 ``_is_scene_point`` moved here with the cluster (AUDIT §3: "module-level
 globals go to their own mixin or stay in the core"); main_window.py imports
 it back — ``_add_group_at`` (groups, the core) uses the same guard.
+
+v1.5.3 (ROADMAP task 3): the cluster also owns "why is it offline?" —
+``_diagnose_node()`` and the report slots. The report RUNS in
+``services/diagnostics.ReachabilityThread`` (never on the GUI thread); the
+registry of live reports is ``self._diagnose_threads`` (keyed by server id, so
+"the same node twice" is refused while a different node is fine).
 """
 from PySide6.QtWidgets import QDialog, QMessageBox, QApplication
 
@@ -551,6 +557,114 @@ class NodeOpsMixin:
             if self.log:
                 self.log.info(f"Manual status round started for {len(targets)} node(s)")
         return started
+
+    # ── v1.5.3 (ROADMAP task 3): "why is it red?" ───────────────────────────────
+
+    def _diagnose_node(self, node: "ServerNode" = None) -> bool:
+        """Run ONE reachability report for a node and answer with its own sentence.
+
+        The problem the report solves: `probe_ssh` collapses DNS, refused and timeout into
+        one `offline`, while the user's question is "which one is it?". The report runs the
+        EXISTING pieces in order — DNS resolve → TCP connect → SSH banner → ICMP ping —
+        and names the FIRST step that failed (`services/diagnostics.diagnose_reachability`).
+
+        `node` is duck-typed like `_check_statuses_now()`: the Edit menu hands the slot a
+        bool (`QAction.triggered`) and a selection decides in that case, the context menus
+        hand over the clicked node. Returns True when a report was really started; a second
+        report for the SAME node while the first runs is refused with an honest message.
+
+        Not one byte of network work happens here: the report lives in
+        `ReachabilityThread` (QThread), because it blocks on DNS/TCP and may launch `ping`.
+        """
+        target = node
+        if target is None or isinstance(target, bool) or getattr(target, "data", None) is None:
+            selected = self.selected_nodes()
+            target = selected[0] if selected else None
+        if target is None or getattr(target, "data", None) is None:
+            try:
+                QMessageBox.information(self, self.t("msg.info_title"),
+                                        self.t("msg.select_server_ssh"))
+            except (RuntimeError, AttributeError):
+                pass
+            return False
+        data = target.data
+        sid = str(data.id)
+        threads = getattr(self, "_diagnose_threads", None)
+        if not isinstance(threads, dict):
+            threads = {}
+            self._diagnose_threads = threads
+        live = threads.get(sid)
+        if live is not None and getattr(live, "isRunning", lambda: False)():
+            try:
+                self.statusBar().showMessage(
+                    self.t("status.diagnose_running", alias=data.alias), 4000)
+            except (RuntimeError, AttributeError):
+                pass
+            return False
+        try:
+            from services.diagnostics import ReachabilityThread
+        except ImportError:
+            from services.diagnostics import ReachabilityThread
+        try:
+            port = int(data.ssh_port or 22)
+        except (TypeError, ValueError):
+            port = 22
+        thread = ReachabilityThread(sid, data.host, port, parent=self)
+
+        def _on_report(server_id, report, _t=thread):
+            try:
+                self._on_diagnose_report(server_id, report)
+            finally:
+                if getattr(self, "_diagnose_threads", {}).get(str(server_id)) is _t:
+                    self._diagnose_threads.pop(str(server_id), None)
+
+        thread.report_ready.connect(_on_report)
+        threads[sid] = thread
+        thread.start()
+        try:
+            self.statusBar().showMessage(
+                self.t("status.diagnose_running", alias=data.alias), 5000)
+        except (RuntimeError, AttributeError):
+            pass
+        return True
+
+    def _diagnose_report_text(self, report) -> str:
+        """Compose the sentence(s) of a report from its i18n key/params pairs.
+
+        The module reports FACTS (`report_parts()` hands over `(key, params)`), the WINDOW
+        owns the words — the same split as `status_checker` vs the status bar. One place,
+        so the status bar, the card tooltip and the log line can never disagree.
+        """
+        try:
+            from services.diagnostics import report_parts
+        except ImportError:
+            from services.diagnostics import report_parts
+        lines = []
+        for key, params in report_parts(report):
+            try:
+                lines.append(self.t(key, **params))
+            except Exception:  # noqa: BLE001 — a missing key must not lose the report
+                lines.append(key)
+        return "\n".join(lines)
+
+    def _on_diagnose_report(self, server_id, report):
+        """The report arrived: card tooltip + status bar + the log (the activity panel)."""
+        text = self._diagnose_report_text(report)
+        node = self.scene.get_node(server_id) if hasattr(self.scene, "get_node") else None
+        alias = getattr(getattr(node, "data", None), "alias", None) or server_id
+        if node is not None:
+            try:
+                node.set_status_report(text)
+            except (AttributeError, RuntimeError):
+                pass  # a test double / Qt teardown — the message below still lands
+        try:
+            # ONE line in the status bar (the tooltip keeps the multi-line form)
+            self.statusBar().showMessage(text.replace("\n", " — "), 12000)
+        except (RuntimeError, AttributeError):
+            pass
+        if self.log:
+            self.log.info(f"Reachability report for {alias}: "
+                          + text.replace("\n", " — "))
 
     def _delete_selected_nodes(self):
         """v0.9.3: delete ALL selected nodes (each via the guarded path)."""

@@ -522,6 +522,13 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         self._ssh_connected_nodes: set = set()
         self._ping_thread = None   # v0.7.3: ping thread (AUDIT v0.7.2 #8: guard against clobbering)
         self._dns_thread = None    # AUDIT v0.7.2 (#6): reverse-DNS thread for copy-hostname
+        # v1.5.3 (ROADMAP tasks 2/3): the two new background registries of the release.
+        # `_info_collectors` (created lazily by SshMixin._track_info_collector) is the ONE
+        # per-node guard of the info family; `_info_batch` is the bounded queue behind
+        # "gather information for the selection / all"; `_diagnose_threads` holds the live
+        # reachability reports keyed by server id.
+        self._info_batch = None
+        self._diagnose_threads = {}
         # v1.1.2RC2 (N6): batch DNS resolution for TXT imports off the GUI thread —
         # thread + batch context (pending/path/skipped) awaiting resolved_map
         self._import_resolve_thread = None
@@ -886,16 +893,34 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         timestamps the checker already recorded and repaints what has grown old. A
         status that cannot be refreshed (no checker, a headless test) is simply left as
         it is — the map is honest either way, it just says less.
+
+        v1.5.3 (ROADMAP task 1): the SAME tick re-reads the age of the COLLECTED FACTS.
+        They are dated in the data itself (`info_collected_at`), so no checker is involved
+        and the two families stay independent: this second walk only repaints a plaque
+        whose measurement has crossed `ServerNode.INFO_STALE_AFTER_SEC` (a week) — a fresh
+        status never hides an old hardware line and the other way round.
         """
-        checker = getattr(self, "_status_checker", None)
-        if checker is None:
-            return
         try:
             nodes = list(self.scene.nodes())
         except (AttributeError, RuntimeError):
             return  # the scene is not created yet / already destroyed
+        checker = getattr(self, "_status_checker", None)
         for node in nodes:
-            self._apply_node_freshness(node)
+            if checker is not None:
+                self._apply_node_freshness(node)
+            self._apply_node_info_freshness(node)
+
+    def _apply_node_info_freshness(self, node) -> bool:
+        """Give ONE card the age of its collected facts (the data is the source of truth).
+
+        Called by the freshness tick. Returns True when the mark changed. A card without a
+        date (0.0 — never collected / an old project file) is left untouched and unmarked.
+        """
+        try:
+            return bool(node.set_info_collected_at(
+                getattr(node.data, "info_collected_at", 0.0)))
+        except (RuntimeError, AttributeError):
+            return False  # Qt teardown / a test double without the v1.5.3 hook
 
     def _freshness_tick(self):
         """The QTimer slot — never raises (a repaint is cosmetic)."""
@@ -1452,10 +1477,14 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
                 "copy_ip": lambda n: self._copy_node_info(n, "ip"),
                 "copy_hostname": lambda n: self._copy_node_info(n, "hostname"),
                 "ping": lambda n: self._ping_node(n),
-                "collect_info": lambda n: self._collect_node_info(n),
+                # v1.5.3 (ROADMAP task 2): "Gather information" — the row's node, or the
+                # whole selection when several rows are selected (the batch path).
+                "collect_info": lambda n: self._collect_info_many(node=n),
                 # v1.3.3.3 (task 5): one round for the selection (the row's node when
                 # nothing is selected) — the map's context menu calls the same method.
                 "check_status": lambda n: self._check_statuses_now(n),
+                # v1.5.3 (task 3): the reachability report of the row's node.
+                "diagnose": lambda n: self._diagnose_node(n),
                 "reveal": lambda n: self._reveal_node_on_map(n),
                 "delete": lambda n: self._remove_node_guarded(n),
                 # v1.0RC4: Quick launch — a submenu as the first item (above SSH);
@@ -1897,6 +1926,13 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         threads = []
 
         # Automatic system-info collection (SystemInfoCollector)
+        # v1.5.3 (ROADMAP task 2): the BATCH first — it cancels everything not yet started
+        # and waits (bounded) for the collectors it owns; the loop below then waits for the
+        # survivors through the same `_info_collectors` registry it always used.
+        try:
+            self._shutdown_info_batch()
+        except Exception:  # noqa: BLE001 — a teardown path never raises
+            pass
         for coll in getattr(self, "_info_collectors", {}).values():
             stop = getattr(coll, "stop", None) or getattr(coll, "request_stop", None)
             if callable(stop):
@@ -1913,6 +1949,8 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         # exits between names); PingThread/ReverseDnsThread have NO stop() — the current
         # getaddrinfo/ping runs out its timeout. Threads that outlive the wait budget below
         # are registered in the orphan registry (services/diagnostics.register_orphan_thread).
+        # v1.5.3 (ROADMAP task 3): the REACHABILITY reports join the same list — one
+        # ReachabilityThread per running report, held in `_diagnose_threads` by server id.
         for attr in ("_ping_thread", "_dns_thread", "_import_resolve_thread"):
             th = getattr(self, attr, None)
             if th is not None and hasattr(th, "isRunning") and th.isRunning():
@@ -1923,6 +1961,12 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
                     except Exception:
                         pass
                 threads.append(th)
+        for th in list(getattr(self, "_diagnose_threads", {}).values()):
+            try:
+                if hasattr(th, "isRunning") and th.isRunning():
+                    threads.append(th)
+            except RuntimeError:
+                continue  # the C++ object is already gone — nothing left to wait for
 
         # Terminal SESSIONS (v1.2: the registry stores pages, not windows): their teardown
         # does thread.stop()+wait() itself via page.shutdown(); here we only wait for
@@ -2641,6 +2685,18 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         # click, so its QAction cannot carry a configurable sequence.
         self._add_menu_action(edit_menu, "ctx.check_status", self._check_statuses_now,
                               "node.check_status")
+        # v1.5.3 (ROADMAP tasks 2/3): the two on-demand answers of the freshness release.
+        # "Gather information" — one bounded batch for the SELECTION (or the whole map when
+        # nothing is selected), off the GUI thread; it reuses the existing `ctx.collect_info`
+        # label, so the sidebar/map context menus and this permanent Edit item read the same.
+        # "Why is it offline?" — the reachability report (DNS → TCP → banner → ping) whose
+        # sentence lands in the card tooltip, the status bar and the activity history.
+        # Both are permanent menu items on purpose: a context menu is rebuilt on every right
+        # click, so its QAction cannot carry a configurable sequence (the v1.3.3.3 rule).
+        self._add_menu_action(edit_menu, "ctx.collect_info", self._collect_info_many,
+                              "node.collect_info")
+        self._add_menu_action(edit_menu, "ctx.diagnose", self._diagnose_node,
+                              "node.diagnose")
 
         # Profile menu
         profile_menu = menubar.addMenu(self.t("menu.profile") if self._i18n_available else "Profile")
