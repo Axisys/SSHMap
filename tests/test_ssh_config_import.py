@@ -666,7 +666,7 @@ print("== §9 the release state ==")
 from _common import EXPECTED_APP_VERSION, EXPECTED_I18N_KEYS  # noqa: E402
 
 check("§9 the version pin is the version this test file describes",
-      EXPECTED_APP_VERSION == "1.5.7", EXPECTED_APP_VERSION)
+      EXPECTED_APP_VERSION == "1.5.7.1", EXPECTED_APP_VERSION)
 check("§9 the key pin counts the SHIPPED release (545 + 21 of v1.4.1 + 4 of v1.4.2 + 16 of v1.4.3"
       " — v1.4.4 adds none: motion is behaviour only; v1.4.5 adds 17: the panel/grid UI;"
       " v1.4.6 adds 9: the sidebar.list.* column headers + the minimap title band;"

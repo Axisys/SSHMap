@@ -259,10 +259,10 @@ def clear_cfg(*extra_paths: str) -> None:
 # in 12 i18n files + the APP_VERSION/requirements pins in 7 release-state sections).
 # The misses of the keys themselves against the code are caught by check_i18n_keys.py.
 # ─────────────────────────────────────────────────────────────────────────────
-EXPECTED_APP_VERSION = "1.5.7"   # the current release (a sentinel: it catches "a bump to the wrong version")
+EXPECTED_APP_VERSION = "1.5.7.1"  # the current release (a sentinel: it catches "a bump to the wrong version")
 EXPECTED_I18N_KEYS = 737        # the parity of the TRANSLATION keys (v1.5.7 — "the command history: a
                                 # third tab of the session, one history per server": the version that
-                                # CLOSES the 1.5 line).
+                                # CLOSES the 1.5 line; v1.5.7.1 adds no key — the pyte defect sweep).
                                 # +29 keys × en/ru/zh/de, all in one family: the TAB itself
                                 # (`terminal.tab_history` — deliberately NOT an `sftp.*` key, because
                                 # the tab is not SFTP), the chrome of the panel

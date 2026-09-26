@@ -1,0 +1,58 @@
+Subject: [sshmap fork 0008] VPA and DSR do not crash under DECOM without a scrolling region
+
+Provenance: the published defect report BUG-D of the pyte audit
+            (github.com/org-ai-assisted/pyte-audit, `BUGS/BUG-D-decom-no-margins-assert.md`; the tree
+            F:\PythonAI\pyte_org-ai-assisted_fork) — reported and NOT fixed there, and live in
+            upstream master (0.8.3.dev) too. Re-measured against the vendored fork: `cursor_to_line()`
+            (VPA) and `report_device_status()` (the DSR cursor-position report) add
+            `self.margins.top` behind a bare `assert self.margins is not None`, while
+            `cursor_position()` guards the very same situation with
+            `if self.margins is not None and mo.DECOM in self.mode`. With origin mode on and no
+            DECSTBM ever sent, `self.margins` is `None`: `ESC[?6h ESC[5d` and `ESC[?6h ESC[6n`
+            raise `AssertionError` out of `feed()` (and `AttributeError` under `python -O`, where
+            the assert is compiled out) — the DSR case is the worse one, because a program that
+            asked for the cursor position WAITS for an answer: a query with no reply desynchronises
+            every later reply.
+            The fix mirrors the existing guard; the honest reading of DECOM without a region is the
+            full screen (`margins.top == 0`). This is the same crash class as patch 0004, which
+            already taught this handler to ignore a private dispatch.
+Base:       pyte 0.8.2 (PyPI sdist, sha256 in MANIFEST.md), pyte/screens.py (after patches 0001-0007).
+Policy:     drop when upstream merges the report's fix (0.8.3+); the report declares the defect open
+            in master. Behaviour with a region SELECTED is unchanged (the region arithmetic is
+            untouched).
+Applied:    2026-09-26, sshmap v1.5.7.1.
+
+diff --git a/pyte/screens.py b/pyte/screens.py
+index bcc24b0..5efa4d8 100644
+--- a/pyte/screens.py
++++ b/pyte/screens.py
+@@ -1070,9 +1070,12 @@ class Screen:
+         self.cursor.y = (line or 1) - 1
+ 
+         # If origin mode (DECOM) is set, line number are relative to
+-        # the top scrolling margin.
+-        if mo.DECOM in self.mode:
+-            assert self.margins is not None
++        # the top scrolling margin. sshmap fork (patch 0008): the bare `assert` raised
++        # (`AssertionError`, or `AttributeError` under `python -O`) whenever DECOM was set and
++        # no scrolling region had ever been selected — the very case `cursor_position()`
++        # guards with the same `is not None` test, and the honest reading of DECOM without a
++        # region is the FULL screen (top = 0).
++        if mo.DECOM in self.mode and self.margins is not None:
+             self.cursor.y += self.margins.top
+ 
+             # FIXME: should we also restrict the cursor to the scrolling
+@@ -1179,9 +1182,10 @@ class Screen:
+             x = self.cursor.x + 1
+             y = self.cursor.y + 1
+ 
+-            # "Origin mode (DECOM) selects line numbering."
+-            if mo.DECOM in self.mode:
+-                assert self.margins is not None
++            # "Origin mode (DECOM) selects line numbering." sshmap fork (patch 0008): the same
++            # guard as `cursor_position()` — a DSR under DECOM without a region must ANSWER,
++            # not raise (a program waits for the reply; see the audit's report).
++            if mo.DECOM in self.mode and self.margins is not None:
+                 y -= self.margins.top
+             self.write_process_input(ctrl.CSI + "{0};{1}R".format(y, x))
+ 

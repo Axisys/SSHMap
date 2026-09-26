@@ -86,7 +86,7 @@ The wrapper calls self.before_event(event) by name → the override is picked up
 
 v1.3rc1 (PYTE82_AUDIT.md "managed fork"): pyte → a managed fork. The import seam —
 one line `from third_party import pyte`: the vendored pyte 0.8.2 (the PyPI sdist
-with provenance, sha256) + the explicit patches 0001–0004 in third_party/pyte/;
+with provenance, sha256) + the explicit patches 0001–0009 in third_party/pyte/;
 the single source of truth — third_party/pyte-patches/MANIFEST.md. The batch A
 overrides (private SGR → patch 0001, LNM → patch 0002) and batch B (the
 alternative screen → patch 0003) were removed from the subclass — now they are

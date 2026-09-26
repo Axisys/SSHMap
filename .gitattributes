@@ -1,0 +1,6 @@
+# Byte-exact by contract: tests/test_pyte_fork.py hashes the WORKING-TREE bytes against MANIFEST.md,
+# and the patch files are applied with `git apply`. Never let git convert them: with the
+# Git-for-Windows default core.autocrlf=true a checkout writes CRLF, every hash stops matching
+# (96c1a763… instead of fc36eac2…) and the provenance test goes red on a fresh clone.
+third_party/pyte/**         -text
+third_party/pyte-patches/** -text

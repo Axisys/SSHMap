@@ -349,10 +349,24 @@ class Stream:
                         if char == ";":
                             current = ""
                         else:
-                            if private:
-                                csi_dispatch[char](*params, private=True)
-                            else:
-                                csi_dispatch[char](*params)
+                            # sshmap fork (patch 0006): the mapped handlers have FIXED
+                            # signatures, so a surplus numeric parameter (`ESC[1;2A` ->
+                            # ``cursor_up(1, 2)``) or a private marker on a command that has no
+                            # private form (`ESC[?0A` -> ``cursor_up(0, private=True)``) raised
+                            # ``TypeError`` out of ``feed()`` and aborted the whole chunk. A
+                            # terminal ignores what it does not understand: the failed dispatch
+                            # goes to the catch-all ``debug`` sink — the SAME endpoint the
+                            # dispatcher already uses for an unknown final byte. The cost of the
+                            # guard is stated in the patch header: a ``TypeError`` raised INSIDE a
+                            # handler is swallowed too (the handlers are simple enough that this is
+                            # the cheaper half of the trade).
+                            try:
+                                if private:
+                                    csi_dispatch[char](*params, private=True)
+                                else:
+                                    csi_dispatch[char](*params)
+                            except TypeError:
+                                debug(*params, private=private)
                             break  # CSI is finished.
             elif char == OSC_C1:
                 code = yield None

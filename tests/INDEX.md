@@ -154,6 +154,7 @@ of the file itself.
 | `test_pyproject.py` | — | v0.9.9.6 — pyproject.toml: installable identity for 1.0 (ROADMAP). |
 | `test_pyte_compat.py` | — | v1.2.11 — Terminal: pyte 0.8.2 compatibility (private SGR + LNM). |
 | `test_pyte_fork.py` | — | v1.3rc1 — Terminal: the managed pyte fork (vendored 0.8.2 + patch manifest). |
+| `test_pyte_hardening.py` | — | v1.5.7.1 — Terminal: the pyte fork takes the five defects of the dependency audit. |
 | `test_quick_launch.py` | — | v1.0RC4 — Quick launch (server links/commands): the release's themed test. |
 | `test_rc2_map_import_sidebar.py` | — | v1.1.2RC2 — Map, import, sidebar (release theme). |
 | `test_rc3_terminal_window.py` | — | v1.1.2RC3 — Terminal windows (ROADMAP v1.1.2RC3, AUDIT §4/§5). |

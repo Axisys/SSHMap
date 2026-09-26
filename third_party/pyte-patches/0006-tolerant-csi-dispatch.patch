@@ -1,0 +1,64 @@
+Subject: [sshmap fork 0006] a malformed CSI is ignored, not raised (the TypeError class of patch 0004)
+
+Provenance: the published defect report BUG-A/BUG-B of the pyte audit
+            (github.com/org-ai-assisted/pyte-audit, `BUGS/BUG-AB-malformed-csi-crash.md`, the
+            tree F:\PythonAI\pyte_org-ai-assisted_fork) — the report's own proposed fix, which
+            upstream master (0.8.3.dev) does NOT carry: this class is unfixed upstream AND in
+            that fork. The report's finding, re-measured here against the vendored fork: the
+            CSI branch of `_parser_fsm()` forwards EVERY collected parameter to the mapped
+            handler (`csi_dispatch[char](*params)`, and `(*params, private=True)` for every
+            `?`-prefixed CSI) while the handlers have fixed signatures, so a sequence with a
+            surplus parameter raises `TypeError` out of `feed()` — measured over the fork's own
+            CSI table (27 finals): 19 finals for the surplus shape (`ESC[1;2A` ->
+            `cursor_up() takes from 1 to 2 positional arguments but 3 were given`) and 19 for
+            the private marker (`ESC[?0A` -> `cursor_up() got an unexpected keyword argument
+            'private'`). The crash reaches the canvas as the logged "terminal: feed failed" with
+            the tail of the chunk lost — the shape the v1.5.7 tester hit with `mc` (patch 0004,
+            which closed exactly two handlers of the class: `? r` and `? n`).
+            The alternative considered and NOT taken: widening ~21 single-argument handlers with
+            `*args, private=False`. It is a larger diff over the same class, it freezes the
+            parser's argument shape into every handler, and it still needs a per-handler audit
+            for the new finals; the parser-level guard tolerates the class in ONE place. The
+            accepted cost, stated in the code comment as well: a `TypeError` raised INSIDE a
+            handler is routed to `debug` instead of escaping `feed()` — pyte's handlers are
+            small and the debug sink records the sequence, so the loss of a traceback is the
+            cheaper half of the trade.
+Base:       pyte 0.8.2 (PyPI sdist, sha256 in MANIFEST.md), pyte/streams.py (after patches 0001-0005).
+Policy:     drop when upstream makes the private dispatch and the surplus parameters tolerant
+            (0.8.3+); the report declares the defect open in master, so until then the fork
+            carries it.
+Applied:    2026-09-26, sshmap v1.5.7.1.
+
+diff --git a/pyte/streams.py b/pyte/streams.py
+index cd0f51c..c94da87 100644
+--- a/pyte/streams.py
++++ b/pyte/streams.py
+@@ -349,10 +349,24 @@ class Stream:
+                         if char == ";":
+                             current = ""
+                         else:
+-                            if private:
+-                                csi_dispatch[char](*params, private=True)
+-                            else:
+-                                csi_dispatch[char](*params)
++                            # sshmap fork (patch 0006): the mapped handlers have FIXED
++                            # signatures, so a surplus numeric parameter (`ESC[1;2A` ->
++                            # ``cursor_up(1, 2)``) or a private marker on a command that has no
++                            # private form (`ESC[?0A` -> ``cursor_up(0, private=True)``) raised
++                            # ``TypeError`` out of ``feed()`` and aborted the whole chunk. A
++                            # terminal ignores what it does not understand: the failed dispatch
++                            # goes to the catch-all ``debug`` sink — the SAME endpoint the
++                            # dispatcher already uses for an unknown final byte. The cost of the
++                            # guard is stated in the patch header: a ``TypeError`` raised INSIDE a
++                            # handler is swallowed too (the handlers are simple enough that this is
++                            # the cheaper half of the trade).
++                            try:
++                                if private:
++                                    csi_dispatch[char](*params, private=True)
++                                else:
++                                    csi_dispatch[char](*params)
++                            except TypeError:
++                                debug(*params, private=private)
+                             break  # CSI is finished.
+             elif char == OSC_C1:
+                 code = yield None

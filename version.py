@@ -14,6 +14,6 @@ VERSION_FORMAT holds the version of the project JSON FORMAT (changes only on
 an actual schema change; the format is not required to match the release).
 """
 
-APP_VERSION = "1.5.7"        # application release (startup log, window title)
+APP_VERSION = "1.5.7.1"      # application release (startup log, window title)
 APP_NAME = "SSH Map"         # base name (window title)
 VERSION_FORMAT = "0.9"       # project JSON format version (+ "background", storage/project.py)

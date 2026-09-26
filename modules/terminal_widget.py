@@ -112,6 +112,13 @@ with what it shows:
   skips such a session and the container badge shows it (terminal.multi_excluded_badge).
   The state is deliberately NOT persisted (a session is short-lived) and the mode's
   own rules (F12, the registry entry, the plaque counter) are unchanged.
+
+v1.5.7.1 (pyte fork patch 0005) — the CELL width is `wcswidth`: a cell may hold a whole
+grapheme cluster now (a ZWJ emoji, a base + mark, an NFC-merged pair), and `wcswidth` is not a
+per-code-point sum — it knows the emoji ZWJ sequences (a family emoji is TWO cells there and
+FOUR in the sum). `char_width()` reads `wcswidth` for a multi-code-point cell and `wcwidth` for a
+single one, i.e. the SAME table `Screen.draw()` lays the grid out with; a mismatch here shifts
+every run after the cluster (split_row_runs() and the run painter both read this function).
 """
 
 import math
@@ -121,8 +128,11 @@ import time
 # v1.2.9 (ROADMAP "terminal hygiene"): the full wcwidth(3) — the SAME library
 # that pyte 0.8.2 itself uses for grid layout (pyte.screens: `from wcwidth import
 # wcwidth`); a hard dependency of pyte, so it is always present when pyte is.
+# v1.5.7.1 (pyte fork patch 0005): the grid measures a CELL with `wcswidth` now — a cell may hold
+# a grapheme cluster (a ZWJ emoji, a base + mark), and `wcswidth` is not a per-code-point sum: it
+# knows the emoji ZWJ sequences, so the canvas must read the same table as `Screen.draw()`.
 try:
-    from wcwidth import wcwidth as _wcwidth
+    from wcwidth import wcswidth as _wcswidth, wcwidth as _wcwidth
 except ImportError as e:  # pragma: no cover
     raise ImportError(
         "The terminal canvas requires the 'wcwidth' package (installed together with pyte)"
@@ -241,7 +251,7 @@ def _fmt_key(ch):
 
 def char_width(data: str) -> int:
     """The full width of a character per wcwidth(3): 0 — zero width (combining/control),
-    1 — narrow, 2 — wide (CJK/Fullwidth).
+    1 — narrow, 2 — wide (CJK/Fullwidth/emoji).
 
     v1.2.9 (ROADMAP "terminal hygiene"): replaces the east_asian_width W/F heuristic
     of v1.0RC1 — the v1.0 known limitation is closed. The SAME `wcwidth` library
@@ -249,27 +259,30 @@ def char_width(data: str) -> int:
     for grid layout, so the wide/narrow classification of the canvas always
     matches how pyte places glyphs in the cells (+ the placeholder after a wide one).
     An empty string (a placeholder) → 0; non-printable control characters (-1) are clamped to 0.
-    data — the contents of a SINGLE cell: usually one character, but pyte NFC-merges
-    combining marks into the preceding cell (a multi-character grapheme cluster),
-    so the width = the per-character sum (exactly like pyte's per-character draw());
-    on the grid it is always 0/1/2.
+    data — the contents of a SINGLE cell. v1.5.7.1 (pyte fork patch 0005): pyte stores a
+    GRAPHEME CLUSTER in one cell now (a ZWJ emoji, a base + mark, an NFC-merged pair), and its
+    grid width comes from `wcswidth(cluster)` — NOT from the per-code-point sum (the wcwidth
+    package makes a ZWJ family two cells, the sum says four). A multi-code-point cell therefore
+    measures `wcswidth` too; a single code point keeps `wcwidth` (the 0.8.2 table).
     """
     if not data:
         return 0
-    total = 0
-    for ch in data:
-        w = _wcwidth(ch)
-        total += 0 if w < 0 else w
-    return total
+    if len(data) > 1:
+        w = _wcswidth(data)
+        return 0 if w < 0 else w
+    w = _wcwidth(data)
+    return 0 if w < 0 else w
 
 
 def is_wide_char(data: str) -> bool:
-    """Is the glyph wide (double width, CJK/Fullwidth)?
+    """Is the glyph wide (double width, CJK/Fullwidth/emoji)?
 
     v1.2.9: the full wcwidth(3) via the `wcwidth` library (the same one pyte 0.8.2 uses),
-    instead of the east_asian_width W/F heuristic (v1.0RC1). Important: in pyte 0.8.2 the
-    glyph itself is stored with len(data)==1 ("wide" cannot be determined from the data) —
-    the WIDE one is the FOLLOWING "placeholder" cell with data==''; split_row_runs skips it.
+    instead of the east_asian_width W/F heuristic (v1.0RC1). Important: pyte stores the WIDE
+    glyph itself in the cell ("wide" cannot be read off the widest cell alone) — the second
+    half is the FOLLOWING "placeholder" cell with data==''; split_row_runs skips it.
+    v1.5.7.1 (patch 0005): the wide cell may hold a whole grapheme cluster (a ZWJ emoji is
+    `wcswidth == 2`), which `char_width()` measures with the same table the grid uses.
     """
     return char_width(data) == 2
 

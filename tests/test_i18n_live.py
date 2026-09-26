@@ -785,7 +785,7 @@ print("== §9 the release state ==")
 # ════════════════════════════════════════════════════════════════════════════
 
 check("EXPECTED_APP_VERSION is the version this test file describes",
-      EXPECTED_APP_VERSION == "1.5.7", EXPECTED_APP_VERSION)
+      EXPECTED_APP_VERSION == "1.5.7.1", EXPECTED_APP_VERSION)
 check("the pin counts the keys of the SHIPPED release (v1.5.2 added THIRTEEN — all the CHROME "
       "of the activity panel — v1.5.3 added TWENTY in three families: the age of the "
       "collected facts (`node.info.collected_now` plus the minutes/hours/days steps), the "

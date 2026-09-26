@@ -37,7 +37,7 @@ from collections import deque, defaultdict
 from functools import lru_cache
 from typing import Any, Callable, DefaultDict, Dict, Generator, List, NamedTuple, Optional, Set, Sequence, TextIO, TypeVar
 
-from wcwidth import wcwidth as _wcwidth  # type: ignore[import]
+from wcwidth import wcwidth as _wcwidth, wcswidth as _wcswidth  # type: ignore[import]
 
 from . import (
     charsets as cs,
@@ -47,6 +47,7 @@ from . import (
 )
 from .streams import Stream
 
+wcswidth: Callable[[str], int] = lru_cache(maxsize=4096)(_wcswidth)
 wcwidth: Callable[[str], int] = lru_cache(maxsize=4096)(_wcwidth)
 
 KT = TypeVar("KT")
@@ -70,7 +71,7 @@ class Savepoint(NamedTuple):
 class Char(NamedTuple):
     """A single styled on-screen character.
 
-    :param str data: unicode character. Invariant: ``len(data) == 1``.
+    :param str data: unicode character or grapheme cluster.
     :param str fg: foreground colour. Defaults to ``"default"``.
     :param str bg: background colour. Defaults to ``"default"``.
     :param bool bold: flag for rendering the character using bold font.
@@ -113,6 +114,36 @@ class Cursor:
         self.y = y
         self.attrs = attrs
         self.hidden = False
+
+
+def grapheme_clusters(text: str) -> Generator[str, None, None]:
+    """Yield grapheme clusters from *text*.
+
+    sshmap fork (patch 0005): upstream's generator, with the "extend" test widened from
+    `unicodedata.combining` (canonical combining class != 0) to the whole M category set
+    (Mn/Mc/Me). A mark whose class IS 0 — a Thai vowel sign, a Devanagari matra, the keycap's
+    U+20E3 — became its own zero-width cluster, and such a cluster cannot be drawn by anyone:
+    upstream `break`s the whole chunk on it, a `wcwidth`-only loop loses it. A terminal
+    attaches it to the glyph it follows; this is that rule.
+    """
+    cluster = ""
+    for char in text:
+        if not cluster:
+            cluster = char
+            continue
+        if (
+            cluster.endswith("\u200d")
+            or unicodedata.category(char).startswith("M")
+            or char == "\u200d"
+            or 0xFE00 <= ord(char) <= 0xFE0F
+            or 0x1F3FB <= ord(char) <= 0x1F3FF
+        ):
+            cluster += char
+        else:
+            yield cluster
+            cluster = char
+    if cluster:
+        yield cluster
 
 
 class StaticDefaultDict(Dict[KT, VT]):
@@ -249,8 +280,8 @@ class Screen:
                     is_wide_char = False
                     continue
                 char = line[x].data
-                assert sum(map(wcwidth, char[1:])) == 0
-                is_wide_char = wcwidth(char[0]) == 2
+                char_width = wcswidth(char)
+                is_wide_char = char_width == 2
                 yield char
 
         return ["".join(render(self.buffer[y])) for y in range(self.lines)]
@@ -335,6 +366,16 @@ class Screen:
 
         self.lines, self.columns = lines, columns
         self.set_margins()
+        # sshmap fork (patch 0009): clamp the cursor to the NEW geometry. `restore_cursor()`
+        # above ran `ensure_vbounds()` while `self.lines` still held the OLD value, and the
+        # column-shrink branch never re-clamped at all — a shrink therefore left the cursor
+        # below the last line or past the last column, and the next `draw()` wrote an
+        # off-screen cell that display()/snapshot() never show (silent data loss; measured
+        # on a 32 -> 12 row shrink with the cursor at y=20: the first line printed afterwards
+        # was swallowed). `set_margins()` has just cleared the scrolling region, so both
+        # helpers bound to the FULL new screen.
+        self.ensure_hbounds()
+        self.ensure_vbounds()
 
     def set_margins(self, top: Optional[int] = None, bottom: Optional[int] = None,
                     **kwargs: Any) -> None:
@@ -546,8 +587,17 @@ class Screen:
         data = data.translate(
             self.g1_charset if self.charset else self.g0_charset)
 
-        for char in data:
-            char_width = wcwidth(char)
+        for char in grapheme_clusters(data):
+            char_width = wcswidth(char)
+
+            if len(char) > 1:
+                # sshmap fork (patch 0005): the 0.8.2 loop merged a combining mark into the
+                # PREVIOUS cell with NFC. A cluster keeps that result (`A` + U+0301 -> `Á`),
+                # which upstream's version no longer applies — it stores the decomposed form.
+                # NFC preserves the display width, but the value is recomputed anyway: it is
+                # the width every branch below uses.
+                char = unicodedata.normalize("NFC", char)
+                char_width = wcswidth(char)
 
             # If this was the last column in a line and auto wrap mode is
             # enabled, move the cursor to the beginning of the next line,
@@ -576,7 +626,7 @@ class Screen:
                 if self.cursor.x + 1 < self.columns:
                     line[self.cursor.x + 1] = self.cursor.attrs \
                         ._replace(data="")
-            elif char_width == 0 and unicodedata.combining(char):
+            elif char_width == 0 and all(unicodedata.category(c).startswith("M") for c in char):
                 # A zero-cell character is combined with the previous
                 # character either on this or preceding line.
                 if self.cursor.x:
@@ -588,6 +638,12 @@ class Screen:
                     normalized = unicodedata.normalize("NFC", last.data + char)
                     self.buffer[self.cursor.y - 1][self.columns - 1] = \
                         last._replace(data=normalized)
+            elif char_width == 0:
+                # sshmap fork (patch 0005): a zero-width cluster that is NOT a mark — a stray
+                # zero-width formatter (U+FEFF), a lone ZWJ the text started with — is SKIPPED.
+                # Upstream breaks out of the loop here, which drops the REST of the data string:
+                # the tail of the chunk disappears in silence (no exception, no log line).
+                continue
             else:
                 break  # Unprintable character or doesn't advance the cursor.
 
@@ -821,14 +877,21 @@ class Screen:
         :param bool private: when ``True`` only characters marked as
                              erasable are affected **not implemented**.
         """
-        self.dirty.add(self.cursor.y)
         if how == 0:
             interval = range(self.cursor.x, self.columns)
         elif how == 1:
             interval = range(self.cursor.x + 1)
         elif how == 2:
             interval = range(self.columns)
+        else:
+            # sshmap fork (patch 0007): a terminal IGNORES an erase mode it does not
+            # implement, and `interval` stayed unbound here — `ESC[3K` / `ESC[4J` raised
+            # `UnboundLocalError` out of feed() and aborted the chunk. Validate BEFORE touching
+            # `dirty`, so a refused mode marks nothing for redraw (the order erase_in_display
+            # already uses).
+            return
 
+        self.dirty.add(self.cursor.y)
         line = self.buffer[self.cursor.y]
         for x in interval:
             line[x] = self.cursor.attrs
@@ -862,6 +925,10 @@ class Screen:
             interval = range(self.cursor.y)
         elif how == 2 or how == 3:
             interval = range(self.lines)
+        else:
+            # sshmap fork (patch 0007): as in erase_in_line — an unrecognised erase mode is a
+            # no-op, not an `UnboundLocalError`.
+            return
 
         self.dirty.update(interval)
         for y in interval:
@@ -1013,9 +1080,12 @@ class Screen:
         self.cursor.y = (line or 1) - 1
 
         # If origin mode (DECOM) is set, line number are relative to
-        # the top scrolling margin.
-        if mo.DECOM in self.mode:
-            assert self.margins is not None
+        # the top scrolling margin. sshmap fork (patch 0008): the bare `assert` raised
+        # (`AssertionError`, or `AttributeError` under `python -O`) whenever DECOM was set and
+        # no scrolling region had ever been selected — the very case `cursor_position()`
+        # guards with the same `is not None` test, and the honest reading of DECOM without a
+        # region is the FULL screen (top = 0).
+        if mo.DECOM in self.mode and self.margins is not None:
             self.cursor.y += self.margins.top
 
             # FIXME: should we also restrict the cursor to the scrolling
@@ -1122,9 +1192,10 @@ class Screen:
             x = self.cursor.x + 1
             y = self.cursor.y + 1
 
-            # "Origin mode (DECOM) selects line numbering."
-            if mo.DECOM in self.mode:
-                assert self.margins is not None
+            # "Origin mode (DECOM) selects line numbering." sshmap fork (patch 0008): the same
+            # guard as `cursor_position()` — a DSR under DECOM without a region must ANSWER,
+            # not raise (a program waits for the reply; see the audit's report).
+            if mo.DECOM in self.mode and self.margins is not None:
                 y -= self.margins.top
             self.write_process_input(ctrl.CSI + "{0};{1}R".format(y, x))
 

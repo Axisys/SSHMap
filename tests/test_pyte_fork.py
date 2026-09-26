@@ -1,8 +1,9 @@
 # -*- coding: utf-8 -*-
 """v1.3rc1 — Terminal: the managed pyte fork (vendored 0.8.2 + patch manifest).
+v1.5.7.1 — the dependency audit's five patches (0005–0009) join the manifest and its smoke.
 
 (ROADMAP v1.3rc1, the PYTE82_AUDIT.md "The application: the 'controlled fork' variant" +
-the section "The decision".)
+the section "The decision"; v1.5.7.1 — its raise-review section.)
 
 The test of the provenance of the fork in third_party/pyte/. Zero behavioral conversion —
 the existing terminal tests (test_pyte_compat / test_alt_screen / …) are green
@@ -10,17 +11,22 @@ unchanged; this file adds the PROVENANCE CHECKS on top of them:
 
   * the sha256 of every file of third_party/pyte/ == the tables of MANIFEST.md (two tables:
     the pristine files == the upstream PyPI sdist 0.8.2; the post-patch — the expected hashes
-    after the patches 0001–0004); the drift "and forgot what was changed" is caught here;
+    after the patches 0001–0009); the drift "and forgot what was changed" is caught here;
+    the two patched files are screens.py (0001–0005, 0007–0009) and streams.py (0006);
   * the manifest of the patches: the files are in place, the names by the convention NNNN-slug.patch, the headers
-    with the provenance (the upstream issue/PR, the date) and the attribution (0003 — the author of PR #212,
-    dwgx; the code of pyte is LGPL-3.0 — the attribution is mandatory);
+    with the provenance (the upstream issue/PR, the audit report, the date) and the attribution (0003 — the
+    author of PR #212, dwgx; the code of pyte is LGPL-3.0 — the attribution is mandatory); the patch files
+    are UTF-8 (a cp1251-piped `git diff` produces mojibake in their non-ASCII comments);
   * the behavioral smoke of the fork itself (headless, without Qt): the private SGR does not crash;
-    a private CSI with a NON-mode final byte (`\x1b[?r` — XTRESTORE, sent by ncurses/mc on exit —
+    a private CSI with a NON-mode final byte (`\\x1b[?r` — XTRESTORE, sent by ncurses/mc on exit —
     and the private DSR) is ignored while the public DECSTBM keeps working (patch 0004) +
-    the tail of the chunk is preserved (b'AB\x1b[?4mCD\r\n' → "ABCD"); the LNM is the default
-    (b'ab\ncd' → ["ab", "cd"], after the explicit \x1b[20l — the shift x=2); the alt-screen
-    round-trip (\x1b[?1049h…\x1b[?1049l → the grid is equal to before the enter
-    character by character, including the fg/bg).
+    the tail of the chunk is preserved (b'AB\\x1b[?4mCD\\r\\n' → "ABCD"); the LNM is the default
+    (b'ab\\ncd' → ["ab", "cd"], after the explicit \\x1b[20l — the shift x=2); the alt-screen
+    round-trip (\\x1b[?1049h…\\x1b[?1049l → the grid is equal to before the enter
+    character by character, including the fg/bg); and one probe per defect of v1.5.7.1 (§3.5–§3.9):
+    a grapheme cluster lands whole (the tail is not dropped), no final of the CSI table raises on a
+    malformed sequence, an unknown erase mode is a no-op, DECOM without a region neither raises nor
+    goes silent, and a resize keeps the cursor — and the following text — inside the screen.
 
 Run: python tests/test_pyte_fork.py   (from the project root) or python tests/run_all.py
 """
@@ -45,6 +51,11 @@ EXPECTED_PATCHES = (
     "0002-lnm-default.patch",
     "0003-alt-screen-47-1047-1048-1049.patch",
     "0004-private-csi-ignore.patch",
+    "0005-grapheme-clusters.patch",
+    "0006-tolerant-csi-dispatch.patch",
+    "0007-erase-unknown-mode-noop.patch",
+    "0008-decom-guard.patch",
+    "0009-resize-cursor-clamp.patch",
 )
 SDIST_SHA256 = "5af970e843fa96a97149d64e170c984721f20e52227a2f57f0a54207f08f083f"  # PyPI pyte-0.8.2.tar.gz
 
@@ -116,12 +127,14 @@ for name in actual_files:
         break
 check("the sha256 of every third_party/pyte/ file == the post-patch table", hash_ok, detail)
 
-# The unpatched files are identical in both tables; the only patched one — screens.py.
+# The unpatched files are identical in both tables; patches 0001–0009 touch TWO files:
+# screens.py (0001–0005, 0007–0009) and streams.py (0006).
 untouched = [n for n in actual_files if pristine_tbl.get(n) == postpatch_tbl.get(n)]
 changed = [n for n in actual_files if pristine_tbl.get(n) != postpatch_tbl.get(n)]
-check("the unpatched files: the same hash in both tables (10 of 11)",
-      len(untouched) == 10 and len(changed) == 1, f"untouched={len(untouched)}, changed={changed}")
-check("the only patched file is screens.py", changed == ["screens.py"], str(changed))
+check("the unpatched files: the same hash in both tables (9 of 11)",
+      len(untouched) == 9 and len(changed) == 2, f"untouched={len(untouched)}, changed={changed}")
+check("the patched files are screens.py and streams.py", changed == ["screens.py", "streams.py"],
+      str(changed))
 
 # The seam: the production code uses THE SAME fork (not the stock pyte from site-packages).
 check("the seam: modules.terminal_screen imports third_party/pyte (the same module)",
@@ -135,19 +148,31 @@ print("== patch manifest ==")
 
 actual_patches = sorted(
     n for n in os.listdir(PATCHDIR) if n.endswith(".patch"))
-check("patches 0001–0004 are in place, no extras", actual_patches == list(EXPECTED_PATCHES),
+check("patches 0001–0009 are in place, no extras", actual_patches == list(EXPECTED_PATCHES),
       str(actual_patches))
 check("the names follow the NNNN-slug.patch convention",
       all(re.fullmatch(r"\d{4}-[a-z0-9][a-z0-9-]*\.patch", n) for n in actual_patches),
       str(actual_patches))
 
 HEADER_FIELDS = ("Subject:", "Provenance:", "Base:", "Policy:", "Applied:")
-for name, must_contain in (
-    (EXPECTED_PATCHES[0], ("PR #203",)),
-    (EXPECTED_PATCHES[1], ("LNM",)),
-    (EXPECTED_PATCHES[2], ("PR #212", "dwgx")),   # the attribution to the PR author — mandatory (LGPL)
-    (EXPECTED_PATCHES[3], ("CSI ? r", "XTRESTORE")),
-):
+# (patch, the file its diff must touch, the provenance tokens the header must carry).
+# 0003's author attribution is mandatory (LGPL); 0005–0009 name the audit report they come from,
+# so a future rebase can find the upstream discussion again.
+PATCH_PROVENANCE = (
+    (EXPECTED_PATCHES[0], "pyte/screens.py", ("PR #203",)),
+    (EXPECTED_PATCHES[1], "pyte/screens.py", ("LNM",)),
+    (EXPECTED_PATCHES[2], "pyte/screens.py", ("PR #212", "dwgx")),   # the attribution — mandatory (LGPL)
+    (EXPECTED_PATCHES[3], "pyte/screens.py", ("CSI ? r", "XTRESTORE")),
+    (EXPECTED_PATCHES[4], "pyte/screens.py", ("0.8.3.dev", "grapheme")),
+    (EXPECTED_PATCHES[5], "pyte/streams.py", ("BUG-A", "surplus")),
+    (EXPECTED_PATCHES[6], "pyte/screens.py", ("BUG-C",)),
+    (EXPECTED_PATCHES[7], "pyte/screens.py", ("BUG-D",)),
+    (EXPECTED_PATCHES[8], "pyte/screens.py", ("BUG-E",)),
+)
+check("every patch is covered by the provenance table (a new patch cannot skip it)",
+      [n for n, _, _ in PATCH_PROVENANCE] == list(EXPECTED_PATCHES),
+      str([n for n, _, _ in PATCH_PROVENANCE]))
+for name, target, must_contain in PATCH_PROVENANCE:
     path = os.path.join(PATCHDIR, name)
     if not os.path.isfile(path):
         check(f"{name}: the header with the provenance and the diff body", False, "the file is not found")
@@ -156,10 +181,22 @@ for name, must_contain in (
         text = f.read()
     head_ok = all(field in text for field in HEADER_FIELDS)
     attr_ok = all(tok in text for tok in must_contain)
-    diff_ok = "diff --git a/pyte/screens.py b/pyte/screens.py" in text
+    diff_ok = f"diff --git a/{target} b/{target}" in text
     check(f"{name}: the header (Subject/Provenance/Base/Policy/Applied) + the provenance "
-          f"({', '.join(must_contain)}) + unified diff", head_ok and attr_ok and diff_ok,
+          f"({', '.join(must_contain)}) + unified diff of {target}", head_ok and attr_ok and diff_ok,
           f"head={head_ok}, provenance={attr_ok}, diff={diff_ok}")
+
+# A patch header that carries a mojibake em dash is what a cp1251-piped `git diff` produces — the
+# patches are UTF-8, and so is every reader of them.
+_patch_encoding_ok = True
+for _name in EXPECTED_PATCHES:
+    with open(os.path.join(PATCHDIR, _name), encoding="utf-8") as _f:
+        _text = _f.read()
+    if "\ufffd" in _text or "\u0402" in _text or "\u0403" in _text:
+        _patch_encoding_ok = False
+        break
+check("every patch file is valid UTF-8 (no cp1251 mojibake in the non-ASCII comments)",
+      _patch_encoding_ok, _name)
 
 
 # ════════════════════════════════════════════════════════════
@@ -242,9 +279,111 @@ check("the PUBLIC `CSI 1;5r` still sets the scrolling region (vim/less splits)",
       _marg.margins is not None
       and (_marg.margins.top, _marg.margins.bottom) == (0, 4), str(_marg.margins))
 
+# 3.5 Grapheme clusters (patch 0005). An emoji sequence used to TRUNCATE the chunk in silence:
+#     draw() `break`s out of the whole data string on a zero-width code point that is not a
+#     combining mark (ZWJ U+200D, VS16 U+FE0F), so everything after it in the same feed() was
+#     dropped with no exception and no log line (AUDIT_PENDING.md N26). The fork's cluster rule
+#     also attaches the marks whose canonical combining class is 0 (Thai, Devanagari, the keycap's
+#     U+20E3) — upstream leaves those as zero-width clusters and still loses the tail on them.
+for _text, _what in (("A\u2764\ufe0fB", "a heart + VS16"),
+                     ("A\U0001f469\u200d\U0001f469B", "a ZWJ sequence"),
+                     ("A1\ufe0f\u20e3B", "a keycap (its U+20E3 is Me — the M-extend rule)"),
+                     ("a\u0e01\u0e31b", "a Thai vowel sign (Mn, class 0)"),
+                     ("x\u0915\u093ey", "a Devanagari matra (Mc, class 0)")):
+    _emoji = pyte.HistoryScreen(20, 3)
+    pyte.ByteStream(_emoji).feed(_text.encode("utf-8"))
+    check(f"grapheme: {_what} lands whole (the tail is no longer dropped)",
+          lines(_emoji)[0] == _text, repr(lines(_emoji)[0]))
+_comb = pyte.HistoryScreen(20, 3)
+pyte.ByteStream(_comb).feed("A\u0301B".encode("utf-8"))
+check("grapheme: a combining mark still merges into the previous cell (NFC) → \"\u00c1B\"",
+      lines(_comb)[0] == "\u00c1B", repr(lines(_comb)[0]))
+_zwj = pyte.HistoryScreen(20, 3)
+pyte.ByteStream(_zwj).feed("a\U0001f469\u200d\U0001f469".encode("utf-8"))
+check("grapheme: a ZWJ cluster is ONE wide cell + the data=='' stub (the grid and the canvas agree)",
+      _zwj.buffer[0][1].data == "\U0001f469\u200d\U0001f469" and _zwj.buffer[0][2].data == "",
+      repr([_zwj.buffer[0][x].data for x in range(4)]))
+
+# 3.6 A malformed CSI is ignored (patch 0006). The parser forwards every collected parameter to
+#     the mapped handler, so a surplus parameter or a private marker on a command with no private
+#     form raised TypeError out of feed() (AUDIT_PENDING.md N27 — 19 finals per shape).
+_finals = sorted(pyte.Stream(pyte.Screen(10, 5)).csi)
+_crashes = []
+for _final in _finals:
+    for _seq in (f"\x1b[?0{_final}", f"\x1b[1;2{_final}"):
+        try:
+            pyte.Stream(pyte.Screen(10, 5)).feed(_seq)
+        except Exception as _e:  # noqa: BLE001
+            _crashes.append((_seq, repr(_e)))
+check(f"malformed CSI: NO final of the CSI table ({len(_finals)}) raises for either shape",
+      not _crashes, str(_crashes[:2]))
+_tail = pyte.Screen(10, 5)
+pyte.Stream(_tail).feed("\x1b[1;2AA")
+check("malformed CSI: the tail of the chunk survives → \"A\"", _tail.display[0].rstrip() == "A",
+      repr(_tail.display[0]))
+
+# 3.7 An erase mode the handler does not know is a no-op (patch 0007) — ESC[3K / ESC[4J raised
+#     UnboundLocalError out of feed() (AUDIT_PENDING.md N28).
+for _seq, _keep in ((b"\x1b[3K", "abc"), (b"\x1b[4J", "abc")):
+    _el = pyte.HistoryScreen(10, 3)
+    try:
+        pyte.ByteStream(_el).feed(b"abc" + _seq)
+        _exc = ""
+    except Exception as _e:  # noqa: BLE001
+        _exc = repr(_e)
+    check(f"erase: {_seq!r} is a no-op, not an exception", _exc == "" and lines(_el)[0] == _keep,
+          f"{_exc!r} line={lines(_el)[0]!r}")
+_el_public = pyte.HistoryScreen(10, 3)
+pyte.ByteStream(_el_public).feed(b"abc\x1b[2K")
+check("erase: the PUBLIC `ESC[2K` still erases the line", lines(_el_public)[0] == "",
+      repr(lines(_el_public)[0]))
+_ed_public = pyte.HistoryScreen(10, 3)
+pyte.ByteStream(_ed_public).feed(b"abc\x1b[2J")
+check("erase: the PUBLIC `ESC[2J` still clears the display", lines(_ed_public)[0] == "",
+      repr(lines(_ed_public)[0]))
+
+# 3.8 DECOM without a scrolling region cannot raise (patch 0008): VPA and the DSR report added
+#     `self.margins.top` behind a bare `assert` (AUDIT_PENDING.md N29).
+for _seq, _what in ((b"\x1b[?6h\x1b[5d", "VPA"), (b"\x1b[?6h\x1b[6n", "DSR")):
+    _decom = pyte.HistoryScreen(10, 5)
+    try:
+        pyte.ByteStream(_decom).feed(_seq)
+        _exc = ""
+    except Exception as _e:  # noqa: BLE001
+        _exc = repr(_e)
+    check(f"DECOM, no region: {_what} — no exception out of feed()", _exc == "", _exc)
+_answers = []
+_dsr = pyte.HistoryScreen(10, 5)
+_dsr.write_process_input = _answers.append
+pyte.ByteStream(_dsr).feed(b"\x1b[?6h\x1b[1;1H\x1b[6n")
+check("DECOM, no region: the DSR really ANSWERS (a program waits for the reply)",
+      _answers == ["\x1b[1;1R"], repr(_answers))
+_vpa_reg = pyte.HistoryScreen(10, 5)
+pyte.ByteStream(_vpa_reg).feed(b"\x1b[2;4r\x1b[?6h\x1b[2d")
+check("DECOM WITH a region: the VPA arithmetic is unchanged (line 2 of the region → y=2)",
+      _vpa_reg.cursor.y == 2, str(_vpa_reg.cursor.y))
+
+# 3.9 A resize clamps the cursor into the new geometry (patch 0009): the clamp used to run against
+#     the OLD bounds (or not at all), so the next draw() wrote an off-screen cell that display()
+#     never showed — silent data loss (AUDIT_PENDING.md N30).
+_rows = pyte.HistoryScreen(20, 10)
+pyte.ByteStream(_rows).feed(b"".join(b"line %d\r\n" % n for n in range(8)))
+_rows.resize(lines=3, columns=20)
+check("resize: the cursor is inside the shrunk screen", _rows.cursor.y < 3, str(_rows.cursor.y))
+pyte.ByteStream(_rows).feed(b"VISIBLE")
+check("resize: the first text after a row shrink is VISIBLE",
+      "VISIBLE" in "\n".join(_rows.display), repr(_rows.display[:3]))
+_cols = pyte.HistoryScreen(20, 3)
+pyte.ByteStream(_cols).feed(b"x" * 15)
+_cols.resize(lines=3, columns=4)
+check("resize: the cursor x is inside the shrunk width", _cols.cursor.x < 4, str(_cols.cursor.x))
+pyte.ByteStream(_cols).feed(b"Z")
+check("resize: the text after a width shrink is VISIBLE",
+      "Z" in "\n".join(_cols.display), repr(_cols.display[:1]))
+
 
 # ════════════════════════════════════════════════════════════
-# 4. Release state + i18n parity (no new keys — 427)
+# 4. Release state + i18n parity (no new keys — the pin does not move)
 # ════════════════════════════════════════════════════════════
 print("== release state ==")
 

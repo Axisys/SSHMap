@@ -1,0 +1,64 @@
+Subject: [sshmap fork 0007] an erase mode the handler does not know is a no-op (ESC[3K / ESC[4J])
+
+Provenance: the published defect report BUG-C of the pyte audit
+            (github.com/org-ai-assisted/pyte-audit, `BUGS/BUG-C-erase-unhandled-how-unboundlocal.md`;
+            the tree F:\PythonAI\pyte_org-ai-assisted_fork) — and the FIX is that fork's own: `C` is
+            one of the two findings its `pyte-audit-fixes.txt` declares fixed, while upstream master
+            (0.8.3.dev) still carries the defect. Re-measured against the vendored fork first:
+            `erase_in_line()` builds its local `interval` only for the modes it implements (0/1/2)
+            and `erase_in_display()` for 0/1/2/3, then uses the local unconditionally — `ESC[3K`
+            and `ESC[4J` raise `UnboundLocalError: cannot access local variable 'interval' where it
+            is not associated with a value` out of `feed()`, and the same two sequences raise
+            through `TerminalScreen.feed` (`SshmapHistoryScreen`, whose `erase_in_display` override
+            calls `super()` first), i.e. the whole chunk after them is lost.
+            xterm's ctlseqs defines EL for Ps = 0/1/2 only — the "Erase Saved Lines" Ps = 3 belongs
+            to ED (`CSI 3 J`), which the fork already implements through `HistoryScreen` — so
+            `ESC[3K` is malformed input and a no-op IS the honest answer. Mapping `EL 3` onto "erase
+            the saved lines" was considered and deliberately NOT taken: that is a semantics
+            addition, and v1.5.7.1 is a hardening release.
+            The `dirty` ordering: the fix validates BEFORE `self.dirty.add(...)` in `erase_in_line`,
+            so a refused mode marks no line for redraw — the order `erase_in_display` already uses.
+Base:       pyte 0.8.2 (PyPI sdist, sha256 in MANIFEST.md), pyte/screens.py (after patches 0001-0006).
+Policy:     drop when upstream merges the report's fix (0.8.3+); the report declares the defect open
+            in master. `CSI 0K`/`1K`/`2K`/`3J` keep their behaviour byte for byte, the `HistoryScreen`
+            scrollback reset on `ED 3` included.
+Applied:    2026-09-26, sshmap v1.5.7.1.
+
+diff --git a/pyte/screens.py b/pyte/screens.py
+index 3c19e4f..bcc24b0 100644
+--- a/pyte/screens.py
++++ b/pyte/screens.py
+@@ -867,14 +867,21 @@ class Screen:
+         :param bool private: when ``True`` only characters marked as
+                              erasable are affected **not implemented**.
+         """
+-        self.dirty.add(self.cursor.y)
+         if how == 0:
+             interval = range(self.cursor.x, self.columns)
+         elif how == 1:
+             interval = range(self.cursor.x + 1)
+         elif how == 2:
+             interval = range(self.columns)
++        else:
++            # sshmap fork (patch 0007): a terminal IGNORES an erase mode it does not
++            # implement, and `interval` stayed unbound here — `ESC[3K` / `ESC[4J` raised
++            # `UnboundLocalError` out of feed() and aborted the chunk. Validate BEFORE touching
++            # `dirty`, so a refused mode marks nothing for redraw (the order erase_in_display
++            # already uses).
++            return
+ 
++        self.dirty.add(self.cursor.y)
+         line = self.buffer[self.cursor.y]
+         for x in interval:
+             line[x] = self.cursor.attrs
+@@ -908,6 +915,10 @@ class Screen:
+             interval = range(self.cursor.y)
+         elif how == 2 or how == 3:
+             interval = range(self.lines)
++        else:
++            # sshmap fork (patch 0007): as in erase_in_line — an unrecognised erase mode is a
++            # no-op, not an `UnboundLocalError`.
++            return
+ 
+         self.dirty.update(interval)
+         for y in interval:

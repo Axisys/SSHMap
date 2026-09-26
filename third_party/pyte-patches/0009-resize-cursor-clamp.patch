@@ -1,0 +1,49 @@
+Subject: [sshmap fork 0009] a resize clamps the cursor into the new geometry
+
+Provenance: the published defect report BUG-E of the pyte audit
+            (github.com/org-ai-assisted/pyte-audit, `BUGS/BUG-E-resize-cursor-out-of-bounds.md`; the
+            tree F:\PythonAI\pyte_org-ai-assisted_fork) — reported and fixed NOWHERE: live in
+            upstream master (0.8.3.dev) as well. Re-measured against the vendored fork:
+            `resize()` applies the new geometry only AFTER `restore_cursor()`, whose
+            `ensure_vbounds()` still reads the OLD `self.lines`, and the column-shrink branch never
+            re-clamps the cursor at all — a shrink leaves `cursor.y >= lines` or
+            `cursor.x >= columns`, and the next `draw()` writes a buffer row/column outside the
+            visible grid, so the text never appears in `display()`/`snapshot()`: silent data loss
+            until the next absolute positioning sequence. Measured on the application's own path
+            (`_sync_grid` -> `TerminalScreen.resize` -> `screen.resize`, i.e. every window resize):
+            shrinking 32 -> 12 rows with the cursor at y = 20 swallowed the first line printed
+            afterwards; a 120 -> 60 column shrink with the cursor at x = 100 lost the first
+            character and broke the line. The invariant a resize owes is `0 <= cursor.x <= columns`,
+            `0 <= cursor.y < lines`.
+            ONE deviation from the report's proposed diff, which puts the two clamps BEFORE
+            `self.set_margins()`: here they run AFTER it. `set_margins()` (with no arguments) clears
+            the scrolling region, so the clamps bound to the FULL new screen — an intentional,
+            documented ordering, not an accident: the cursor must be inside the visible grid, and a
+            region that the shrink just invalidated must not be able to keep it outside.
+Base:       pyte 0.8.2 (PyPI sdist, sha256 in MANIFEST.md), pyte/screens.py (after patches 0001-0008).
+Policy:     drop when upstream merges the report's fix (0.8.3+); the report declares the defect open
+            in master. A resize to the SAME size still returns early (the 0.7.0 no-op), and a
+            GROWING resize never moves the cursor except through the clamp.
+Applied:    2026-09-26, sshmap v1.5.7.1.
+
+diff --git a/pyte/screens.py b/pyte/screens.py
+index 5efa4d8..ff27e8a 100644
+--- a/pyte/screens.py
++++ b/pyte/screens.py
+@@ -366,6 +366,16 @@ class Screen:
+ 
+         self.lines, self.columns = lines, columns
+         self.set_margins()
++        # sshmap fork (patch 0009): clamp the cursor to the NEW geometry. `restore_cursor()`
++        # above ran `ensure_vbounds()` while `self.lines` still held the OLD value, and the
++        # column-shrink branch never re-clamped at all — a shrink therefore left the cursor
++        # below the last line or past the last column, and the next `draw()` wrote an
++        # off-screen cell that display()/snapshot() never show (silent data loss; measured
++        # on a 32 -> 12 row shrink with the cursor at y=20: the first line printed afterwards
++        # was swallowed). `set_margins()` has just cleared the scrolling region, so both
++        # helpers bound to the FULL new screen.
++        self.ensure_hbounds()
++        self.ensure_vbounds()
+ 
+     def set_margins(self, top: Optional[int] = None, bottom: Optional[int] = None,
+                     **kwargs: Any) -> None:

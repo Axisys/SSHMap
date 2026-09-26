@@ -1,0 +1,161 @@
+Subject: [sshmap fork 0005] grapheme clusters: an emoji sequence must not truncate the chunk
+
+Provenance: upstream pyte master (0.8.3.dev) — the "Fixed rendering of multi code-point emoji
+            sequences" change (CHANGES, 0.8.3 Unreleased): the `grapheme_clusters()` generator and
+            the cached `wcswidth` in draw()/display(). `wcswidth` is NOT a per-character sum: the
+            wcwidth package knows the emoji ZWJ sequences, which is exactly why the GRID needs it
+            and why the canvas must read the same table. Reproduced against the vendored 0.8.2 fork
+            first: `Screen.draw()` `break`s out of the WHOLE data string on a code point whose
+            `wcwidth` is 0 and which is not `unicodedata.combining` — the ZWJ U+200D, the variation
+            selectors U+FE0E/U+FE0F — so `feed()` silently drops everything after it
+            (`A\u2764\ufe0fB` -> "A\u2764"); no exception and no log line, which is why the ledger
+            entry (AUDIT_PENDING.md N26) calls it the silent one.
+            TWO deliberate deviations from upstream's version, recorded here because a rebase must
+            not "fix" them away:
+            (1) the "extend" test inside `grapheme_clusters()` is the whole M category set
+                (Mn/Mc/Me) instead of `unicodedata.combining` (canonical combining class != 0).
+                A mark whose class IS 0 — a Thai vowel sign, a Devanagari matra, the keycap's
+                U+20E3 — became its own zero-width cluster; upstream `break`s the chunk on it and
+                loses the tail, and no emulator can draw a mark that is not attached to a base.
+                Measured: 'A1\ufe0f\u20e3B' keeps its trailing 'B' here and loses it upstream;
+                '\u0e01\u0e31' (Thai) and '\u0915\u093e' (Devanagari) attach to their base instead
+                of vanishing.
+            (2) the 0.8.2 NFC merge is preserved: the old single-character loop merged a combining
+                mark into the PREVIOUS cell with `unicodedata.normalize("NFC", ...)`, so a
+                decomposed stream produced the cell `Á`; upstream's cluster version stores the
+                decomposed form, which changes what a search over `TerminalScreen.text_lines()`
+                finds. A multi-code-point cluster is normalized before it is stored (NFC preserves
+                the display width, and the width is recomputed from the normalized value).
+            The residual rule that is OURS alone: a zero-width cluster that is not a mark at all
+            (U+FEFF, a lone leading ZWJ) is SKIPPED instead of `break`ing the chunk — a terminal
+            ignores what it cannot draw, and the tail of the chunk must always survive.
+            The canvas half of the contract is NOT in this patch: `modules/terminal_widget.py`
+            `char_width()` sums `wcwidth` per code point, so a ZWJ/skin-tone cluster measured 4
+            where the grid reserves 2 — it moves to `wcswidth` for a cell that carries more than
+            one code point in the same release (v1.5.7.1).
+Base:       pyte 0.8.2 (PyPI sdist, sha256 in MANIFEST.md), pyte/screens.py (after patches 0001-0004).
+Policy:     drop when the base is raised to an upstream release that carries the emoji fix
+            (0.8.3+); (1), (2) and the zero-width skip have no upstream counterpart — keep them, or
+            file them upstream.
+Applied:    2026-09-26, sshmap v1.5.7.1.
+
+diff --git a/pyte/screens.py b/pyte/screens.py
+index 082a078..3c19e4f 100644
+--- a/pyte/screens.py
++++ b/pyte/screens.py
+@@ -37,7 +37,7 @@ from collections import deque, defaultdict
+ from functools import lru_cache
+ from typing import Any, Callable, DefaultDict, Dict, Generator, List, NamedTuple, Optional, Set, Sequence, TextIO, TypeVar
+ 
+-from wcwidth import wcwidth as _wcwidth  # type: ignore[import]
++from wcwidth import wcwidth as _wcwidth, wcswidth as _wcswidth  # type: ignore[import]
+ 
+ from . import (
+     charsets as cs,
+@@ -47,6 +47,7 @@ from . import (
+ )
+ from .streams import Stream
+ 
++wcswidth: Callable[[str], int] = lru_cache(maxsize=4096)(_wcswidth)
+ wcwidth: Callable[[str], int] = lru_cache(maxsize=4096)(_wcwidth)
+ 
+ KT = TypeVar("KT")
+@@ -70,7 +71,7 @@ class Savepoint(NamedTuple):
+ class Char(NamedTuple):
+     """A single styled on-screen character.
+ 
+-    :param str data: unicode character. Invariant: ``len(data) == 1``.
++    :param str data: unicode character or grapheme cluster.
+     :param str fg: foreground colour. Defaults to ``"default"``.
+     :param str bg: background colour. Defaults to ``"default"``.
+     :param bool bold: flag for rendering the character using bold font.
+@@ -115,6 +116,36 @@ class Cursor:
+         self.hidden = False
+ 
+ 
++def grapheme_clusters(text: str) -> Generator[str, None, None]:
++    """Yield grapheme clusters from *text*.
++
++    sshmap fork (patch 0005): upstream's generator, with the "extend" test widened from
++    `unicodedata.combining` (canonical combining class != 0) to the whole M category set
++    (Mn/Mc/Me). A mark whose class IS 0 — a Thai vowel sign, a Devanagari matra, the keycap's
++    U+20E3 — became its own zero-width cluster, and such a cluster cannot be drawn by anyone:
++    upstream `break`s the whole chunk on it, a `wcwidth`-only loop loses it. A terminal
++    attaches it to the glyph it follows; this is that rule.
++    """
++    cluster = ""
++    for char in text:
++        if not cluster:
++            cluster = char
++            continue
++        if (
++            cluster.endswith("\u200d")
++            or unicodedata.category(char).startswith("M")
++            or char == "\u200d"
++            or 0xFE00 <= ord(char) <= 0xFE0F
++            or 0x1F3FB <= ord(char) <= 0x1F3FF
++        ):
++            cluster += char
++        else:
++            yield cluster
++            cluster = char
++    if cluster:
++        yield cluster
++
++
+ class StaticDefaultDict(Dict[KT, VT]):
+     """A :func:`dict` with a static default value.
+ 
+@@ -249,8 +280,8 @@ class Screen:
+                     is_wide_char = False
+                     continue
+                 char = line[x].data
+-                assert sum(map(wcwidth, char[1:])) == 0
+-                is_wide_char = wcwidth(char[0]) == 2
++                char_width = wcswidth(char)
++                is_wide_char = char_width == 2
+                 yield char
+ 
+         return ["".join(render(self.buffer[y])) for y in range(self.lines)]
+@@ -546,8 +577,17 @@ class Screen:
+         data = data.translate(
+             self.g1_charset if self.charset else self.g0_charset)
+ 
+-        for char in data:
+-            char_width = wcwidth(char)
++        for char in grapheme_clusters(data):
++            char_width = wcswidth(char)
++
++            if len(char) > 1:
++                # sshmap fork (patch 0005): the 0.8.2 loop merged a combining mark into the
++                # PREVIOUS cell with NFC. A cluster keeps that result (`A` + U+0301 -> `Á`),
++                # which upstream's version no longer applies — it stores the decomposed form.
++                # NFC preserves the display width, but the value is recomputed anyway: it is
++                # the width every branch below uses.
++                char = unicodedata.normalize("NFC", char)
++                char_width = wcswidth(char)
+ 
+             # If this was the last column in a line and auto wrap mode is
+             # enabled, move the cursor to the beginning of the next line,
+@@ -576,7 +616,7 @@ class Screen:
+                 if self.cursor.x + 1 < self.columns:
+                     line[self.cursor.x + 1] = self.cursor.attrs \
+                         ._replace(data="")
+-            elif char_width == 0 and unicodedata.combining(char):
++            elif char_width == 0 and all(unicodedata.category(c).startswith("M") for c in char):
+                 # A zero-cell character is combined with the previous
+                 # character either on this or preceding line.
+                 if self.cursor.x:
+@@ -588,6 +628,12 @@ class Screen:
+                     normalized = unicodedata.normalize("NFC", last.data + char)
+                     self.buffer[self.cursor.y - 1][self.columns - 1] = \
+                         last._replace(data=normalized)
++            elif char_width == 0:
++                # sshmap fork (patch 0005): a zero-width cluster that is NOT a mark — a stray
++                # zero-width formatter (U+FEFF), a lone ZWJ the text started with — is SKIPPED.
++                # Upstream breaks out of the loop here, which drops the REST of the data string:
++                # the tail of the chunk disappears in silence (no exception, no log line).
++                continue
+             else:
+                 break  # Unprintable character or doesn't advance the cursor.
+ 
