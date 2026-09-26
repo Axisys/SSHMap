@@ -779,6 +779,15 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
             # the plugin's detail (a tooltip line) on its own signal. With no plugin
             # implementing the hook the provider returns None and nothing changes.
             self._status_checker.status_detail.connect(self._on_node_status_detail)
+            # v1.6.6 (ROADMAP task 2): the checker is told the CADENCE the config declares
+            # before anything can arm a round — `status_interval_sec = 0` is the manual-only
+            # sentinel, and the mode has to be in place before `start_status_checks()` and
+            # before any project load could start a round of its own.
+            try:
+                self._status_checker.set_manual_only(bool(_st_cfg.get("manual", False)))
+            except Exception as e:  # noqa: BLE001 — the probes must run without the mode too
+                if self.log:
+                    self.log.warning(f"Manual-only status mode not applied: {e}")
             try:
                 self._status_checker.set_status_provider(self._plugin_manager.status_provider)
             except Exception as e:  # noqa: BLE001 — the probes must run without plugins too
@@ -4386,6 +4395,10 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
             try:
                 from services.status_checker import get_status_settings as _get_st
                 _st_cfg = _get_st()
+                # v1.6.6 (ROADMAP task 2): the mode is applied LIVE and BEFORE the interval —
+                # switching it ON stops a running timer at once, switching it OFF resumes the
+                # periodic rounds this window already had enabled (the checker remembers).
+                checker.set_manual_only(bool(_st_cfg.get("manual", False)))
                 checker.set_interval(int(_st_cfg["interval_sec"]) * 1000)
                 checker.set_probe_timeout(float(_st_cfg["probe_timeout_sec"]))
                 # v1.1.2 final (task 2): the parallel-probe cap — from the next round

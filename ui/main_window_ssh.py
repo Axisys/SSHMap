@@ -679,6 +679,15 @@ class SshMixin:
             d.ram = info["ram_gb"]
         if info.get("disk_gb"):
             d.disk = info["disk_gb"]
+        # v1.6.6 (ROADMAP task 5): the DATA-mount family, written as ONE unit by this same
+        # path. A collection that says anything about a mount — an ANSWER or a NAMED refusal —
+        # writes all three answers, so a refusal CLEARS them: the pair is never a stale figure
+        # beside a request that no longer resolves. A collection that is silent about a data
+        # mount (a legacy batch, a fixture carrying only `os_name`) leaves the pair alone.
+        if "disk_note" in info or "disk_path" in info:
+            d.disk_path = str(info.get("disk_path") or "")
+            d.disk_free = str(info.get("disk_free") or "")
+            d.disk_size = str(info.get("disk_size") or "")
         # v1.5.3 (ROADMAP task 1): the date goes WITH the data — a fresh measurement is what
         # the "collected N ago" line and the stale mark describe. It is an ordinary field of
         # the model (optional in JSON, 0.0 = not dated) and it NEVER changes a value.
@@ -692,9 +701,44 @@ class SshMixin:
             node.set_info_collected_at(getattr(d, "info_collected_at", 0.0))
         except (AttributeError, RuntimeError):
             pass  # a test double without the v1.5.3 hook — the values are already written
+        # v1.6.6 (ROADMAP task 4): a refused data mount is REPORTED where a collection reports
+        # — the status bar (the English line is already in the log and the activity ring).
+        self._report_disk_note(d, info)
         self.refresh_sidebar()
         self._mark_dirty()
         return True
+
+    def _report_disk_note(self, data, info: dict) -> None:
+        """v1.6.6 (ROADMAP task 4): the status-bar sentence of a refused data mount.
+
+        The collection's own report half — a share refused BY NAME, or a requested path that is
+        not on the host. `disk_refusal_kind()` is the ONE classifier of the note the collector
+        wrote, so the window never re-invents it, and this method never raises: a report is a
+        side channel and must not break the write of the values that DID arrive.
+        """
+        try:
+            if not isinstance(info, dict):
+                return
+            try:
+                from services.system_info_collector import (
+                    disk_refusal_kind, resolve_disk_mount,
+                    DISK_REFUSAL_NETWORK, DISK_REFUSAL_NONE)
+            except ImportError:  # flat layout
+                from system_info_collector import (
+                    disk_refusal_kind, resolve_disk_mount,
+                    DISK_REFUSAL_NETWORK, DISK_REFUSAL_NONE)
+            kind = disk_refusal_kind(info.get("disk_note"))
+            if kind == DISK_REFUSAL_NONE:
+                return
+            mount = resolve_disk_mount(getattr(data, "disk_mount", ""))
+            if kind == DISK_REFUSAL_NETWORK:
+                text = self.t("status.disk_mount_network", alias=data.alias, mount=mount,
+                              type=str(info.get("disk_note") or ""))
+            else:
+                text = self.t("status.disk_mount_missing", alias=data.alias, mount=mount)
+            self.statusBar().showMessage(text, 8000)
+        except (RuntimeError, AttributeError, ImportError):
+            pass  # Qt teardown / a stripped window — the values are already written
 
     def _on_info_ready(self, server_id: str, info: dict, collector):
         """Collection result: write to node.data + dirty + redraw (the single-node path)."""

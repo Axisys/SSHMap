@@ -259,8 +259,17 @@ def clear_cfg(*extra_paths: str) -> None:
 # in 12 i18n files + the APP_VERSION/requirements pins in 7 release-state sections).
 # The misses of the keys themselves against the code are caught by check_i18n_keys.py.
 # ─────────────────────────────────────────────────────────────────────────────
-EXPECTED_APP_VERSION = "1.6.5"  # the current release (a sentinel: it catches "a bump to the wrong version")
-EXPECTED_I18N_KEYS = 800        # the parity of the TRANSLATION keys (v1.6.5 — "the neighbours on
+EXPECTED_APP_VERSION = "1.6.6"  # the current release (a sentinel: it catches "a bump to the wrong version")
+EXPECTED_I18N_KEYS = 811        # the parity of the TRANSLATION keys (v1.6.6 — "the measurement you
+                                # asked for: the status round you start, and the data mount that holds
+                                # the capacity": the manual-only cadence and the two-mount disk read
+                                # are BEHAVIOUR and numbers (a sentinel value, a horizon, a row parser
+                                # and a classifier), and the ELEVEN new keys are the manual-only
+                                # checkbox with the sentence that spells out what the mode means, the
+                                # dialog's ONE data-mount row (its label, its three placeholders and
+                                # its tooltip), the card's measured line and the two refusal sentences
+                                # of a collection — 800 + 11.
+                                # (v1.6.5 — "the neighbours on
                                 # the map: a card for a server you do not administer": the
                                 # `unmanaged` flag, the disabled credential family, the cleared
                                 # keyring, the card's "NO SSH" chip, the skip set and the ONE

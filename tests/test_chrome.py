@@ -708,8 +708,8 @@ check(f"§8 the {len(_NEW_KEYS)} keys of v1.5rc4 are present and non-empty in ev
 check(f"§8 the pin moved 630 → {EXPECTED_I18N_KEYS} (13 keys of v1.5rc4, +1 of v1.5, +4 of v1.5.1,"
       f" +13 of v1.5.2, +20 of v1.5.3, +11 of v1.5.4, +14 of v1.5.5, +2 of v1.5.6,"
       f" +29 of v1.5.7, +41 of v1.6, +4 of v1.6.2, +4 of v1.6.3, +3 of v1.6.4,"
-      f" +11 of v1.6.5)",
-      EXPECTED_I18N_KEYS == 800)
+      f" +11 of v1.6.5 +11 of v1.6.6)",
+      EXPECTED_I18N_KEYS == 811)
 
 check("§8 the family map of the registry is complete (every action has a home)",
       all(HR.action_family(a) in HR.family_order() for a in HR.action_ids())

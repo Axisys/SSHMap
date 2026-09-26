@@ -799,5 +799,16 @@
   "node.unmanaged.ping_ok": "Manual reachability check: {host} answered",
   "node.unmanaged.ping_failed": "Manual reachability check: {host} did not answer",
   "unmanaged.blocked": "“{action}” needs an SSH login — this card is unmanaged.",
-  "status.unmanaged_blocked": "This card is unmanaged — no SSH access"
+  "status.unmanaged_blocked": "This card is unmanaged — no SSH access",
+  "settings.statuses.manual_only": "Check statuses only when I ask",
+  "settings.statuses.manual_only.hint": "No round starts by itself: not at startup and not when a project is opened. “Check statuses now” and the card's menu still probe. The age of a status becomes the only signal — one older than a day is marked stale.",
+  "server.disk_mount": "Data mount:",
+  "server.disk_mount_hint": "/opt (default)",
+  "server.disk_path_hint": "mount point",
+  "server.disk_free_hint": "free",
+  "server.disk_size_hint": "size",
+  "server.disk_mount_tooltip": "Left: the path to measure (empty means /opt). Right: what the collection found — the mount point df reported, its free space and its capacity. Empty means nothing was measured: a network share is not reported as capacity.",
+  "node.disk_mount": "DISK {mount}: {free} free of {size}",
+  "status.disk_mount_network": "Data mount {mount} on {alias} is a network filesystem ({type}) — a share is not reported as capacity",
+  "status.disk_mount_missing": "Data mount {mount} was not found on {alias} — nothing was measured"
 }

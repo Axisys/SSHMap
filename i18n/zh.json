@@ -799,5 +799,16 @@
   "node.unmanaged.ping_ok": "手动可达性检查：{host} 有响应",
   "node.unmanaged.ping_failed": "手动可达性检查：{host} 无响应",
   "unmanaged.blocked": "“{action}”需要 SSH 登录 — 此卡片为非托管。",
-  "status.unmanaged_blocked": "此卡片为非托管 — 无 SSH 访问权限"
+  "status.unmanaged_blocked": "此卡片为非托管 — 无 SSH 访问权限",
+  "settings.statuses.manual_only": "仅在需要时检查状态",
+  "settings.statuses.manual_only.hint": "不会自动执行任何检查：启动时不会，打开项目时也不会。“立即检查状态”和卡片菜单仍可手动探测。状态的年龄成为唯一信号——超过一天的会被标记为过期。",
+  "server.disk_mount": "数据挂载点：",
+  "server.disk_mount_hint": "/opt（默认）",
+  "server.disk_path_hint": "挂载点",
+  "server.disk_free_hint": "可用",
+  "server.disk_size_hint": "容量",
+  "server.disk_mount_tooltip": "左侧是要测量的路径（留空表示 /opt）。右侧是采集结果——df 实际报告的挂载点、可用空间与容量。留空表示未测量：网络共享不计入容量。",
+  "node.disk_mount": "DISK {mount}：可用 {free} / 共 {size}",
+  "status.disk_mount_network": "{alias} 的数据挂载点 {mount} 是网络文件系统（{type}）——共享不计入容量",
+  "status.disk_mount_missing": "在 {alias} 上未找到数据挂载点 {mount}——未进行任何测量"
 }

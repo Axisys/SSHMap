@@ -59,6 +59,20 @@ kept"). `start_round()`'s `_on_done` now writes ONE summary record per round int
 `~/.sshmap/logs/sshmap.log` AND into the activity ring the panel renders. It is a
 SUMMARY on purpose: the per-node answers are already on the cards, and a hundred-node
 map must not turn one round into a hundred log lines.
+
+v1.6.6 (ROADMAP task 1/2): the cadence has a THIRD state — **manual only**, selected by
+`status_interval_sec = 0` (`MANUAL_INTERVAL_SEC`, a DECLARED sentinel, so one setting keeps
+one home and no second key appears). In that mode NOTHING starts a round by itself: `start()`
+arms neither the timer nor the deferred first round, a project load is refused by the ONE
+guard in `MainWindow._load_project_at()`, and `set_manual_only(True)` stops a running timer
+immediately. The deferred first round becomes a GUARDED slot (`_deferred_first_round()`) —
+a `QTimer.singleShot` cannot be un-armed, so the slot re-asks the mode when it fires. The
+MANUAL doors are untouched: "Check statuses now" and the node context menu still call
+`start_round()`, `_subset()`, `is_busy` and the skip set behave exactly as they do
+automatically. Because "two missed rounds" means nothing where there are no rounds, the
+freshness horizon of that mode is the DECLARED `MANUAL_STALE_SEC` (one day) instead of
+`max(2 × the interval, STALE_MIN_SEC)` — the freshness tick keeps running either way, so a
+green card that was true yesterday is not presented as a current fact.
 """
 import socket
 import threading
@@ -87,6 +101,16 @@ DEFAULT_INTERVAL_MS = 30_000   # interval between periodic checks
 DEFAULT_INTERVAL_SEC = 30      # the same, in seconds — default for the status_interval_sec key (v1.1)
 PROBE_TIMEOUT_S = 3.0          # timeout of a single probe (connect + banner)
 
+# v1.6.6 (ROADMAP task 1): the cadence's DECLARED range and its third state. The range is
+# the clamp the key has always had (`5..86400`); `MANUAL_INTERVAL_SEC = 0` is the SENTINEL
+# that selects "manual only" — NOT a second config key, so the setting keeps ONE home.
+# `resolve_interval_sec()` is the PURE reader: exactly 0 means manual, every other value
+# (a missing, negative, non-numeric or out-of-range one included) keeps the ordinary clamp,
+# so a corrupt value degrades to a REAL interval rather than to a silent mode change.
+MANUAL_INTERVAL_SEC = 0        # the sentinel: no round starts by itself
+MIN_INTERVAL_SEC = 5
+MAX_INTERVAL_SEC = 86400
+
 # v1.1.2 final (tasks 1–3): parallel probes and a soft auto-interval
 DEFAULT_MAX_PARALLEL = 16      # default for the status_max_parallel key (ROADMAP: "default 16")
 MAX_PARALLEL_LIMIT = 64        # clamp ceiling (dialog spinbox and validator — one range)
@@ -100,6 +124,14 @@ LARGE_MAP_THRESHOLD = 50       # N > 50 nodes → round interval doubles ("N > ~
 # a status and never starts a round: it only repaints the mark and the tooltip line
 # (see ServerNode.refresh_freshness).
 STALE_MIN_SEC = 90.0
+
+# v1.6.6 (ROADMAP task 1): the horizon of the MANUAL mode. "Two missed rounds" is not a
+# sentence that means anything where there are no rounds, and marking a 90-second-old manual
+# check stale would be noise rather than a signal — so the manual mode answers this DECLARED
+# horizon instead. It is deliberately LONG (one day): the age of a status is the only clock
+# the manual mode has, and it has to be patient enough to be a signal and short enough that a
+# green card is never presented as a current fact for a whole week.
+MANUAL_STALE_SEC = 86400.0
 
 
 def round_summary(results) -> str:
@@ -131,17 +163,55 @@ def round_summary(results) -> str:
     return f"Status round: {total} probed — " + ", ".join(parts)
 
 
+def resolve_interval_sec(value=DEFAULT_INTERVAL_SEC) -> int:
+    """The round interval the key REALLY selects — 0 meaning "manual only" (v1.6.6).
+
+    PURE, and the ONE reader of the `status_interval_sec` value (v1.1 + v1.6.6):
+    exactly `0` is the DECLARED sentinel of the manual mode and is answered as `0`; every
+    other usable number keeps the ordinary clamp (`MIN_INTERVAL_SEC..MAX_INTERVAL_SEC`).
+    A MISSING (`None`), non-numeric, boolean, NaN / ±inf or out-of-range value answers the
+    DEFAULT (`DEFAULT_INTERVAL_SEC`) — never the sentinel: a corrupt value must degrade to a
+    real interval, because silently switching the probes OFF is the one failure this reader
+    exists to prevent. A negative number is an ordinary out-of-range value (clamped to
+    `MIN_INTERVAL_SEC`), not a way to select the manual mode.
+    """
+    if value is None or isinstance(value, bool):
+        return DEFAULT_INTERVAL_SEC
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return DEFAULT_INTERVAL_SEC
+    if number != number or number in (float("inf"), float("-inf")):  # NaN / ±inf
+        return DEFAULT_INTERVAL_SEC
+    if number == MANUAL_INTERVAL_SEC:
+        return MANUAL_INTERVAL_SEC
+    return max(MIN_INTERVAL_SEC, min(int(number), MAX_INTERVAL_SEC))
+
+
+def is_manual_interval(resolved_sec) -> bool:
+    """Does a RESOLVED interval mean "manual only"? (PURE — the `0` sentinel, one place.)"""
+    try:
+        return int(resolved_sec) == MANUAL_INTERVAL_SEC
+    except (TypeError, ValueError):
+        return False
+
+
 def get_status_settings() -> dict:
     """v1.1 (ROADMAP task 4) + v1.1.2 final (task 2): status settings from ~/.sshmap/config.json.
 
     Source — i18n.load_config() (never raises, {} on error). Returns:
-        {"interval_sec": int, "probe_timeout_sec": float, "max_parallel": int}
+        {"interval_sec": int, "manual": bool, "probe_timeout_sec": float, "max_parallel": int}
     Keys are OPTIONAL, defaults = the current v1.0 behavior (30 s / 3.0 s / 16):
-        status_interval_sec      — round period (clamped 5..86400 s);
+        status_interval_sec      — round period (clamped 5..86400 s) OR the DECLARED `0`
+                                   sentinel, which selects the MANUAL-only mode (v1.6.6);
         status_probe_timeout_sec — timeout of a single probe (clamped 0.2..60 s);
         status_max_parallel      — ceiling of parallel probes per round
                                    (clamped 1..MAX_PARALLEL_LIMIT; v1.1.2 final).
     Corrupt values (non-numeric, bool) → default. Never raises.
+
+    v1.6.6 (ROADMAP task 1): the resolved PAIR is answered — `interval_sec` and the
+    `manual` flag it implies (`resolve_interval_sec()` + `is_manual_interval()` are the ONE
+    place that decides both), so no caller has to compare a number to a magic zero.
     """
     cfg: dict = {}
     try:
@@ -158,15 +228,14 @@ def get_status_settings() -> dict:
         except (TypeError, ValueError):
             return float(default)
 
-    interval = int(_num(cfg.get("status_interval_sec"), DEFAULT_INTERVAL_SEC))
-    interval = max(5, min(interval, 86400))
+    interval = resolve_interval_sec(cfg.get("status_interval_sec"))
     timeout = _num(cfg.get("status_probe_timeout_sec"), PROBE_TIMEOUT_S)
     timeout = max(0.2, min(timeout, 60.0))
     # v1.1.2 final (task 2): ceiling of parallel probes — clamped as in the dialog (1..64)
     max_parallel = int(_num(cfg.get("status_max_parallel"), DEFAULT_MAX_PARALLEL))
     max_parallel = max(1, min(max_parallel, MAX_PARALLEL_LIMIT))
-    return {"interval_sec": interval, "probe_timeout_sec": timeout,
-            "max_parallel": max_parallel}
+    return {"interval_sec": interval, "manual": is_manual_interval(interval),
+            "probe_timeout_sec": timeout, "max_parallel": max_parallel}
 
 
 def probe_ssh(host: str, port: int, timeout: float = PROBE_TIMEOUT_S) -> str:
@@ -364,6 +433,13 @@ class StatusChecker(QObject):
         self._skip_ids: set = set()
         self._thread: _ProbeThread | None = None
         self._cancel = threading.Event()  # AUDIT v0.7.2 #5: cancel the current round
+        # v1.6.6 (ROADMAP task 2): the cadence's third state and whether periodic checking
+        # was ever ASKED for. `_manual_only` is the live switch ("no round starts by itself");
+        # `_enabled` remembers a `start()` that a `stop()` has not undone, so switching the
+        # manual mode OFF resumes the periodic rounds the user had already enabled — and
+        # switching it on BEFORE `start()` arms nothing later.
+        self._manual_only = False
+        self._enabled = False
 
         self._timer = QTimer(self)
         self._timer.setInterval(self.effective_interval_ms())
@@ -381,6 +457,16 @@ class StatusChecker(QObject):
     @property
     def is_busy(self) -> bool:
         return self._busy
+
+    @property
+    def manual_only(self) -> bool:
+        """v1.6.6 (ROADMAP task 2): is the checker in the manual-only mode?
+
+        The ONE predicate of the mode, read by the two guards that decide whether a round may
+        start by itself (`start()` and `MainWindow._load_project_at()`). Purely a MODE: the
+        manual doors ("Check statuses now", the node context menu) never ask it.
+        """
+        return bool(self._manual_only)
 
     @property
     def max_parallel(self) -> int:
@@ -438,6 +524,30 @@ class StatusChecker(QObject):
             mp = DEFAULT_MAX_PARALLEL
         self._max_parallel = max(1, min(mp, MAX_PARALLEL_LIMIT))
 
+    def set_manual_only(self, flag: bool) -> None:
+        """v1.6.6 (ROADMAP task 2): the ONE live switch of the manual-only mode.
+
+        ON — the periodic timer is stopped AT ONCE and no later `start()` will arm it, and no
+        deferred first round will slip through (the slot re-asks this flag when it fires).
+        OFF — a `start()` that a `stop()` has not undone resumes the periodic rounds, so
+        un-ticking the box in the settings does not silently leave the map unmonitored until
+        the next launch. Idempotent, safe BEFORE `start()` (nothing is armed either way) and
+        safe on a torn-down Qt object (RuntimeError is swallowed, the flag is already set).
+
+        The manual DOORS are deliberately untouched: `start_round()`, `_subset()`, `is_busy`,
+        the results and the skip set behave exactly as they do in the automatic mode, so
+        "Check statuses now" and the node context menu keep working.
+        """
+        flag = bool(flag)
+        self._manual_only = flag
+        try:
+            if flag:
+                self._timer.stop()
+            elif self._enabled and not self._timer.isActive():
+                self._timer.start()
+        except RuntimeError:
+            pass  # Qt teardown — the timer's C++ object is already destroyed
+
     def set_status_provider(self, provider) -> None:
         """v1.4rc2: install the plugin status provider (`provider(sid, ssh_status)`).
 
@@ -462,7 +572,14 @@ class StatusChecker(QObject):
         a large map (whose interval the soft doubling already stretched) gets the same
         "two missed rounds" rule as a small one. The single place that decides it; the
         card only paints what it is told.
+
+        v1.6.6 (ROADMAP task 1): in the MANUAL mode the answer is the DECLARED
+        `MANUAL_STALE_SEC` (one day) instead. There are no rounds to miss, and the age of a
+        status is then the ONLY clock — a threshold of 90 s would mark every manual check
+        stale before the user had a chance to look at it.
         """
+        if self._manual_only:
+            return MANUAL_STALE_SEC
         return max(2.0 * float(self.effective_interval_ms()) / 1000.0, STALE_MIN_SEC)
 
     def last_checked_at(self, server_id: str) -> float:
@@ -596,16 +713,36 @@ class StatusChecker(QObject):
         thread.start()
         return True
 
+    def _deferred_first_round(self):
+        """The 2 s deferred first round of `start()` — a GUARDED slot (v1.6.6, task 2).
+
+        A `QTimer.singleShot` cannot be un-armed, so switching the manual mode ON inside the
+        2 s window would otherwise let exactly one stray round through — the one promise the
+        mode exists to keep. The slot therefore re-asks the mode when it FIRES instead of
+        being cancelled: a callback on a dangling object is impossible, and "manual only"
+        means the same thing whenever it was selected.
+        """
+        if self._manual_only:
+            return
+        self.start_round()
+
     def start(self):
         """Enable periodic checks + the first round a bit after startup.
 
         The first round via QTimer.singleShot(2000), not immediately: at app startup
         the event sequence is still unfolding, and in headless tests
         without an event loop the deferred call simply never happens (safe).
+
+        v1.6.6 (ROADMAP task 2): in the MANUAL-only mode this arms NOTHING — no timer and no
+        deferred round (`_deferred_first_round()` re-asks the flag anyway). Opening the
+        application is not "check my servers now": the manual doors are the only way in.
         """
+        self._enabled = True
+        if self._manual_only:
+            return
         if not self._timer.isActive():
             self._timer.start()
-            QTimer.singleShot(2000, self.start_round)
+            QTimer.singleShot(2000, self._deferred_first_round)
 
     def stop(self):
         """Stop the periodic checks and the current round.
@@ -616,6 +753,7 @@ class StatusChecker(QObject):
         ceil(N/max_parallel) × timeout + 2 s (v1.1.2 final: the round is parallel —
         the margin used to be computed sequentially as N × timeout).
         """
+        self._enabled = False  # v1.6.6: a stopped checker is not resumed by set_manual_only(False)
         self._timer.stop()
         self._cancel.set()
         thread = self._thread

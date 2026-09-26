@@ -799,5 +799,16 @@
   "node.unmanaged.ping_ok": "Manuelle Erreichbarkeitsprüfung: {host} hat geantwortet",
   "node.unmanaged.ping_failed": "Manuelle Erreichbarkeitsprüfung: {host} hat nicht geantwortet",
   "unmanaged.blocked": "„{action}“ benötigt eine SSH-Anmeldung — diese Karte ist nicht verwaltet.",
-  "status.unmanaged_blocked": "Diese Karte ist nicht verwaltet — kein SSH-Zugang"
+  "status.unmanaged_blocked": "Diese Karte ist nicht verwaltet — kein SSH-Zugang",
+  "settings.statuses.manual_only": "Status nur auf Anfrage prüfen",
+  "settings.statuses.manual_only.hint": "Keine Runde startet von selbst: nicht beim Start und nicht beim Öffnen eines Projekts. „Status jetzt prüfen“ und das Kartenmenü prüfen weiterhin. Das Alter eines Status wird zum einzigen Signal — älter als ein Tag wird als veraltet markiert.",
+  "server.disk_mount": "Daten-Mount:",
+  "server.disk_mount_hint": "/opt (Standard)",
+  "server.disk_path_hint": "Einhängepunkt",
+  "server.disk_free_hint": "frei",
+  "server.disk_size_hint": "Größe",
+  "server.disk_mount_tooltip": "Links: der zu messende Pfad (leer bedeutet /opt). Rechts: was die Erfassung gefunden hat — der von df gemeldete Einhängepunkt, freier Platz und Kapazität. Leer bedeutet, dass nichts gemessen wurde: eine Netzwerkfreigabe zählt nicht als Kapazität.",
+  "node.disk_mount": "DISK {mount}: {free} frei von {size}",
+  "status.disk_mount_network": "Daten-Mount {mount} auf {alias} ist ein Netzwerk-Dateisystem ({type}) — eine Freigabe zählt nicht als Kapazität",
+  "status.disk_mount_missing": "Daten-Mount {mount} wurde auf {alias} nicht gefunden — nichts gemessen"
 }

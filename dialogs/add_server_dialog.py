@@ -27,7 +27,7 @@ except ImportError:
 from PySide6.QtWidgets import (
     QDialog, QFormLayout, QLineEdit, QPushButton, QSpinBox,
     QFileDialog, QDialogButtonBox, QHBoxLayout, QVBoxLayout,
-    QLabel, QComboBox, QCheckBox,
+    QLabel, QComboBox, QCheckBox, QWidget,
 )
 
 
@@ -219,10 +219,47 @@ class AddServerDialog(QDialog):
         self.tags_edit.setPlaceholderText(
             self.t("server.tags_hint") if self._i18n_available else "prod, staging, dev")
 
+        # v1.6.6 (ROADMAP task 6): the DATA mount of the collected facts — ONE row, in which the
+        # REQUEST (an editable path, its placeholder naming the declared default `/opt`) is
+        # followed by the MEASURED ANSWER `df` really reported (the mount point, the free figure
+        # and the capacity). The three answer fields stay EDITABLE like `ram` / `disk` — the
+        # "collected fields are editable" precedent — and a REFUSED mount leaves them empty, so
+        # the dialog shows exactly what was measured and never a figure the collection declined
+        # to report. The arrow is the visual half of the request/answer distinction the model
+        # keeps (`disk_mount` vs `disk_path`).
+        self.disk_mount = QLineEdit()
+        self.disk_mount.setPlaceholderText(
+            self.t("server.disk_mount_hint") if self._i18n_available else "/opt (default)")
+        self.disk_path = QLineEdit()
+        self.disk_path.setPlaceholderText(
+            self.t("server.disk_path_hint") if self._i18n_available else "mount point")
+        self.disk_free = QLineEdit()
+        self.disk_free.setPlaceholderText(
+            self.t("server.disk_free_hint") if self._i18n_available else "free")
+        self.disk_size = QLineEdit()
+        self.disk_size.setPlaceholderText(
+            self.t("server.disk_size_hint") if self._i18n_available else "size")
+        self._disk_arrow = QLabel("→")
+        self.disk_mount_row = QWidget()
+        disk_hbox = QHBoxLayout(self.disk_mount_row)
+        disk_hbox.setContentsMargins(0, 0, 0, 0)
+        disk_hbox.setSpacing(4)
+        disk_hbox.addWidget(self.disk_mount, 3)
+        disk_hbox.addWidget(self._disk_arrow)
+        disk_hbox.addWidget(self.disk_path, 3)
+        disk_hbox.addWidget(self.disk_free, 2)
+        disk_hbox.addWidget(self.disk_size, 2)
+        self.disk_mount_row.setToolTip(
+            self.t("server.disk_mount_tooltip") if self._i18n_available
+            else "Left: the path to measure (empty means /opt). Right: what the collection "
+                 "found — the mount point df reported, its free space and its capacity. Empty "
+                 "means nothing was measured: a network share is not reported as capacity.")
+
         layout.addRow(self.t("server.os"), self.os_name)
         layout.addRow(self.t("server.cpu"), self.cpu)
         layout.addRow(self.t("server.ram"), self.ram)
         layout.addRow(self.t("server.disk"), self.disk)
+        layout.addRow(self.t("server.disk_mount"), self.disk_mount_row)
         layout.addRow(self.t("server.ip"), self.ip)
         layout.addRow(self.t("server.comment"), self.comment)
         layout.addRow(self.t("server.tags") if self._i18n_available else "Tags:", self.tags_edit)
@@ -426,6 +463,13 @@ class AddServerDialog(QDialog):
         self.ip.setText(d.ip)
         self.comment.setText(d.comment)
         self.tags_edit.setText(", ".join(getattr(d, "tags", None) or []))  # v0.9.4
+        # v1.6.6 (ROADMAP task 6): the data mount — the REQUEST and the measured ANSWER, each in
+        # its own field (a refused mount left the three answers empty in the model, so the dialog
+        # shows exactly what was measured and nothing that was declined).
+        self.disk_mount.setText(getattr(d, "disk_mount", "") or "")
+        self.disk_path.setText(getattr(d, "disk_path", "") or "")
+        self.disk_free.setText(getattr(d, "disk_free", "") or "")
+        self.disk_size.setText(getattr(d, "disk_size", "") or "")
 
         # v1.6.5 (ROADMAP tasks 1/5): the kind of the card. The box is set BEFORE the state
         # is applied (a programmatic setChecked fires `toggled`, which would stash and clear
@@ -474,6 +518,14 @@ class AddServerDialog(QDialog):
             cpu=self.cpu.text(),
             ram=self.ram.text(),
             disk=self.disk.text(),
+            # v1.6.6 (ROADMAP task 5/6): the DATA-mount family. The REQUEST and the ANSWER are
+            # separate fields on purpose — what the user asked to measure beside what `df`
+            # really answered — and they stay user-editable like the rest of the collected
+            # fields (`ram` / `disk`).
+            disk_mount=self.disk_mount.text().strip(),
+            disk_path=self.disk_path.text().strip(),
+            disk_free=self.disk_free.text().strip(),
+            disk_size=self.disk_size.text().strip(),
             ip=self.ip.text(),
             comment=self.comment.text(),
             tags=self._parse_tags(),  # v0.9.4

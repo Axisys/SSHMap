@@ -60,6 +60,25 @@ class ServerData:
     # ever made for the card. Per-NODE data (the `collapsed` precedent) — deliberately NOT
     # a `config.json` key, so the settings hub's `collect()` does not move.
     unmanaged_ping: bool = False
+    # v1.6.6 (ROADMAP task 5): the DATA MOUNT beside the root. A server whose capacity lives on
+    # a separate volume reports the root's small number in `disk` while the filesystem that
+    # really holds the data stays invisible; these four optional strings are the fix. They are
+    # the only fields of the pair family and each one has its OWN job:
+    #   disk_mount — the REQUEST: the path to measure ("" ⇒ the declared default `/opt`);
+    #   disk_path  — the ANSWER: the mount point `df` really reported (`/` when the requested
+    #                path has no filesystem of its own). Separate from the request ON PURPOSE:
+    #                collapsing them would make a symlinked or automounted path indistinguishable
+    #                from the typed one;
+    #   disk_free  — the free figure of that mount;
+    #   disk_size  — the capacity of that mount.
+    # Additive optional strings, the `tags` / `info_collected_at` compatibility policy: a
+    # missing key, an explicit null, a number or any foreign value loads as "" ("never
+    # measured"), an older build ignores the keys, and `VERSION_FORMAT` stays "0.9" — an
+    # optional field with a default is not a schema change.
+    disk_mount: str = ""
+    disk_path: str = ""
+    disk_free: str = ""
+    disk_size: str = ""
 
     def __post_init__(self):
         if self.tags is None:
@@ -107,6 +126,21 @@ def info_collected_epoch(value) -> float:
     if moment != moment or moment in (float("inf"), float("-inf")):  # NaN / ±inf
         return 0.0
     return moment if moment > 0.0 else 0.0
+
+
+def optional_text(value) -> str:
+    """Coerce a raw optional STRING field into its usable value (v1.6.6, ROADMAP task 5).
+
+    PURE, and the ONE rule of the DATA-mount family (`disk_mount` / `disk_path` / `disk_free` /
+    `disk_size`): a string is taken STRIPPED, and every other value — a missing key (`None`), an
+    explicit null, a number, a boolean, a list or a dict — answers `""` ("never measured"). A
+    number is deliberately NOT stringified: these fields hold a mount point or a formatted
+    figure, and a stray `22` silently becoming a mount path would be a lie about a measurement
+    instead of a missing one.
+    """
+    if isinstance(value, str):
+        return value.strip()
+    return ""
 
 
 def sanitize_quick_launch(raw) -> list:
@@ -166,6 +200,12 @@ def server_data_from_dict(raw: dict) -> ServerData:
                              ('comment', ''), ('os_name', ''), ('cpu_model', '')):
         if data.get(_field) is None:
             data[_field] = _default
+    # v1.6.6 (ROADMAP task 5): the four DATA-mount strings are coerced by ONE rule — the
+    # `disk_mount` precedent (`_optional_text()`): a missing key, an explicit null, a number, a
+    # list or any other foreign value all degrade to "" ("never measured"), so a hand-edited
+    # project file can never put a non-string into a field the card and the dialog render.
+    for _field in ('disk_mount', 'disk_path', 'disk_free', 'disk_size'):
+        data[_field] = optional_text(data.get(_field))
     try:
         data['ssh_port'] = int(data.get('ssh_port') or 22)
     except (TypeError, ValueError):
@@ -207,4 +247,12 @@ def server_data_to_dict(data: ServerData) -> dict:
     # release and an undated card stays unmarked on the next load.
     if not info_collected_epoch(serialized.get('info_collected_at')):
         serialized.pop('info_collected_at', None)
+    # v1.6.6 (ROADMAP task 5): the REQUEST is written like the collected fields it sits beside
+    # (an empty `disk_mount` is the meaningful "use the declared default"), while the three
+    # ANSWERS are MEASUREMENTS — nothing was measured ⇒ the key is ABSENT, so an ordinary map
+    # keeps the file it had and a project written before the release is never "measured" by a
+    # later save (the `info_collected_at` rule, applied to a string family).
+    for _field in ('disk_path', 'disk_free', 'disk_size'):
+        if not optional_text(serialized.get(_field)):
+            serialized.pop(_field, None)
     return serialized

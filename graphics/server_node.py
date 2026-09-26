@@ -1055,6 +1055,25 @@ class ServerNode(QGraphicsItemGroup):
         except RuntimeError:
             pass  # Qt teardown — the item is already destroyed
 
+    # ── v1.6.6 (ROADMAP task 7): the DATA mount of the collected facts ───────────
+
+    def _disk_mount_line(self) -> str:
+        """The info line of the MEASURED data mount (v1.6.6) — `""` when there is none.
+
+        Built from the measured pair (`disk_path` = the mount point `df` really reported,
+        `disk_free`/`disk_size` = its figures): `DISK /opt: 48 gb free of 59 gb`. The line
+        exists ONLY when the collection brought an answer — a refused mount leaves the pair
+        EMPTY and the card therefore claims nothing, which is the whole point of keeping the
+        REQUEST (`disk_mount`) and the ANSWER (`disk_path`) apart. Purely presentational: no
+        value is derived and no measurement is invented here.
+        """
+        path = str(getattr(self.data, "disk_path", "") or "")
+        free = str(getattr(self.data, "disk_free", "") or "")
+        size = str(getattr(self.data, "disk_size", "") or "")
+        if not (path and free and size):
+            return ""
+        return _t("node.disk_mount", mount=path, free=free, size=size)
+
     def _apply_info_tooltip(self):
         """Compose the plaque tooltip: the full text (when it was elided) + the age line.
 
@@ -1194,6 +1213,15 @@ class ServerNode(QGraphicsItemGroup):
             if cpu_text: info_lines.append(f"CPU: {cpu_text}")
             if self.data.ram: info_lines.append(f"RAM: {self.data.ram}")
             if self.data.disk: info_lines.append(f"DISK: {self.data.disk}")
+            # v1.6.6 (ROADMAP task 7): the DATA mount — the SECOND filesystem, and the one the
+            # capacity question is usually about. ONE more info line, built from the measured
+            # pair, so the measured height formula (`58 + info + 12`) follows the line count
+            # exactly as it always has; the info freshness of v1.5.3 covers it for free (it is a
+            # collected fact with the same date) and the COMPACT density drops it with the rest
+            # of the block. `LIST_COLUMNS` is untouched: the data mount is not an inventory
+            # column.
+            disk_mount_line = self._disk_mount_line()
+            if disk_mount_line: info_lines.append(disk_mount_line)
         if self.data.ip: info_lines.append(f"IP: {self.data.ip}")
         if self.data.ssh_port != 22: info_lines.append(f"SSH:{self.data.ssh_port}")
         # UI polish: the emoji prefix on the comment was removed (consistent style without emoji)

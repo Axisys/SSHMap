@@ -800,9 +800,10 @@ app.processEvents()
 
 check_release_state(ROOT)
 check("§8 the pins of this file are the release it describes",
-      EXPECTED_APP_VERSION == "1.6.5", EXPECTED_APP_VERSION)
-check("§8 the i18n pin moved by the ELEVEN keys of this release (789 + 11)",
-      EXPECTED_I18N_KEYS == 789 + 11 == 800, str(EXPECTED_I18N_KEYS))
+      EXPECTED_APP_VERSION == "1.6.6", EXPECTED_APP_VERSION)
+check("§8 the i18n pin moved by the ELEVEN keys of this release and by the ELEVEN "
+      "of v1.6.6 (789 + 11 + 11)",
+      EXPECTED_I18N_KEYS == 789 + 11 + 11 == 811, str(EXPECTED_I18N_KEYS))
 _missing = {code: [k for k in NEW_KEYS if not str(data.get(k) or "").strip()]
             for code, data in LANGS.items()}
 check(f"§8 the {len(NEW_KEYS)} keys of v1.6.5 are present and non-empty in every language",

@@ -1072,20 +1072,42 @@ class SettingsDialog(QDialog):
     def _build_statuses_tab(self):
         try:
             from ..services.status_checker import (
-                get_status_settings, MAX_PARALLEL_LIMIT as _MPL)
+                get_status_settings, MAX_PARALLEL_LIMIT as _MPL,
+                MANUAL_INTERVAL_SEC as _MANUAL_SEC)
         except ImportError:
             from services.status_checker import (
-                get_status_settings, MAX_PARALLEL_LIMIT as _MPL)
+                get_status_settings, MAX_PARALLEL_LIMIT as _MPL,
+                MANUAL_INTERVAL_SEC as _MANUAL_SEC)
         st = get_status_settings()
 
         tab = QWidget()
         form = QFormLayout(tab)
 
+        # v1.6.6 (ROADMAP task 3): the THIRD state of the cadence. The checkbox owns the visible
+        # state and the `status_interval_sec = 0` SENTINEL is what `collect()` writes for it, so
+        # one setting keeps one home; the interval spinbox beside it is DISABLED but REMEMBERED
+        # (never zeroed), so un-ticking the box gives the user their number back. The row is a
+        # VIEW of the state — the checker is its owner (`set_manual_only()`, applied live by
+        # `MainWindow._apply_settings_from_dialog()`).
+        self.manual_only_chk = QCheckBox(_t("settings.statuses.manual_only"))
+        self.manual_only_chk.setChecked(bool(st["manual"]))
+        self.manual_only_chk.toggled.connect(self._on_manual_only_toggled)
+        form.addRow("", self.manual_only_chk)
+
         self.status_interval_spin = QSpinBox()
         self.status_interval_spin.setRange(5, 3600)
-        self.status_interval_spin.setValue(st["interval_sec"])
+        self.status_interval_spin.setValue(
+            st["interval_sec"] if st["interval_sec"] > 0 else 30)
         self._lbl_status_interval = QLabel(_t("settings.statuses.interval"))
         form.addRow(self._lbl_status_interval, self.status_interval_spin)
+
+        # The sentence that spells out what "manual only" MEANS — shown with the state, because
+        # a green card that was true yesterday is exactly the failure the mode may not ship with.
+        self.manual_only_hint = QLabel(_t("settings.statuses.manual_only.hint"))
+        self.manual_only_hint.setWordWrap(True)
+        self.manual_only_hint.setVisible(bool(st["manual"]))
+        form.addRow("", self.manual_only_hint)
+        self._manual_interval_sec = _MANUAL_SEC
 
         self.probe_timeout_spin = QDoubleSpinBox()
         self.probe_timeout_spin.setRange(0.2, 60.0)
@@ -1102,8 +1124,32 @@ class SettingsDialog(QDialog):
         self._lbl_max_parallel = QLabel(_t("settings.statuses.max_parallel"))
         form.addRow(self._lbl_max_parallel, self.max_parallel_spin)
 
+        # The state of the widgets follows the checkbox BEFORE anything can read them.
+        self._on_manual_only_toggled(bool(st["manual"]))
+
         self._register_form_rows(tab, form)   # v1.5rc4: the searchable rows of this tab
         self.tabs.addTab(tab, _t("settings.tab.statuses"))
+
+    def _on_manual_only_toggled(self, checked: bool) -> None:
+        """v1.6.6 (ROADMAP task 3): the manual-only row follows its checkbox.
+
+        The interval spinbox is DISABLED and keeps its value (the user's number is remembered,
+        not zeroed — the sentinel is written by `collect()`, never by the spinbox), and the
+        sentence explaining what the mode means appears with it. A torn-down Qt object is a
+        silent no-op.
+        """
+        checked = bool(checked)
+        try:
+            self.status_interval_spin.setEnabled(not checked)
+        except RuntimeError:
+            pass  # Qt teardown — the widget is already destroyed
+        hint = getattr(self, "manual_only_hint", None)
+        if hint is not None:
+            try:
+                hint.setVisible(checked)
+            except RuntimeError:
+                pass
+
 
     # ── "Autosave" tab (v0.9.7 keys) ────────────────────────────────
 
@@ -1872,7 +1918,12 @@ class SettingsDialog(QDialog):
                       # SAME nested key, so the hub's collect() key count stays 22.
                       "density": (self.density_combo.currentData()
                                   or theme.DENSITY_NORMAL)},
-            "status_interval_sec": int(self.status_interval_spin.value()),
+            # v1.6.6 (ROADMAP task 3): the DECLARED `0` sentinel is what the manual-only
+            # checkbox writes — the spinbox itself is never zeroed, so the user's interval is
+            # still there when the box is un-ticked (the row is a VIEW of the state).
+            "status_interval_sec": (int(getattr(self, "_manual_interval_sec", 0))
+                                    if self.manual_only_chk.isChecked()
+                                    else int(self.status_interval_spin.value())),
             "status_probe_timeout_sec": float(self.probe_timeout_spin.value()),
             # v1.1.2 final (task 2): the cap on parallel probes per round
             "status_max_parallel": int(self.max_parallel_spin.value()),
@@ -2027,6 +2078,10 @@ class SettingsDialog(QDialog):
         self._lbl_status_interval.setText(_t("settings.statuses.interval"))
         self._lbl_probe_timeout.setText(_t("settings.statuses.timeout"))
         self._lbl_max_parallel.setText(_t("settings.statuses.max_parallel"))
+        # v1.6.6 (ROADMAP task 3): the manual-only row is a CONTAINER of its own — the checkbox
+        # and the sentence that explains the mode are re-texted with the rest of the tab.
+        self.manual_only_chk.setText(_t("settings.statuses.manual_only"))
+        self.manual_only_hint.setText(_t("settings.statuses.manual_only.hint"))
 
         self.autosave_enabled_chk.setText(_t("settings.autosave.enabled"))
         self._lbl_autosave_interval.setText(_t("settings.autosave.interval"))

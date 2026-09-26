@@ -164,19 +164,29 @@ print("== status settings ==")
 clear_cfg(LEGACY_PATH)
 st = get_status_settings()
 check("no config → the v1.0 defaults (30 s / 3.0 s / 16 parallel, the v1.1.2 final)",
-      st == {"interval_sec": 30, "probe_timeout_sec": 3.0, "max_parallel": 16}, str(st))
+      st == {"interval_sec": 30, "manual": False, "probe_timeout_sec": 3.0, "max_parallel": 16},
+      str(st))
 write_cfg({"status_interval_sec": 45, "status_probe_timeout_sec": 2.5})
 st = get_status_settings()
 check("the valid values are read (45 s / 2.5 s)",
-      st == {"interval_sec": 45, "probe_timeout_sec": 2.5, "max_parallel": 16}, str(st))
+      st == {"interval_sec": 45, "manual": False, "probe_timeout_sec": 2.5, "max_parallel": 16},
+      str(st))
+# v1.6.6 (ROADMAP task 1): the DECLARED sentinel — 0 means "manual only", and it is the only
+# value that selects it (the full rule is the topical tests/test_facts_on_request.py).
+write_cfg({"status_interval_sec": 0})
+st = get_status_settings()
+check("status_interval_sec = 0 → the manual-only mode (the sentinel)",
+      st["interval_sec"] == 0 and st["manual"] is True, str(st))
 write_cfg({"status_interval_sec": 1, "status_probe_timeout_sec": 99})
 st = get_status_settings()
 check("the clamps: interval ≥ 5 s, timeout ≤ 60 s",
-      st == {"interval_sec": 5, "probe_timeout_sec": 60.0, "max_parallel": 16}, str(st))
+      st == {"interval_sec": 5, "manual": False, "probe_timeout_sec": 60.0, "max_parallel": 16},
+      str(st))
 write_cfg({"status_interval_sec": True, "status_probe_timeout_sec": "abc"})
 st = get_status_settings()
 check("the broken values (bool/str) → the defaults",
-      st == {"interval_sec": 30, "probe_timeout_sec": 3.0, "max_parallel": 16}, str(st))
+      st == {"interval_sec": 30, "manual": False, "probe_timeout_sec": 3.0, "max_parallel": 16},
+      str(st))
 # v1.1.2 final: the clamps of status_max_parallel (details — tests/test_status_parallel.py)
 write_cfg({"status_max_parallel": 9999})
 st = get_status_settings()

@@ -123,6 +123,7 @@ of the file itself.
 | `test_export_fidelity.py` | — | v1.3.3.7 — Export fidelity: the drawio vertex keeps the map's data, SVG joins the formats. |
 | `test_ext_terminal_dialog.py` | — | Regression v0.9.9.2 — the external terminal UI (presets + reset to defaults). |
 | `test_external_terminal.py` | — | External (system) terminal v0.8.2: modules/external_terminal.py (former smoke_test). |
+| `test_facts_on_request.py` | — | v1.6.6 — the measurement you asked for: the status round you start, and the data mount |
 | `test_first_run.py` | — | v1.5rc3 — First run & confidence: the demo map, the undo affordance and the age of a status. |
 | `test_freshness.py` | — | v1.5.3 — freshness everywhere: the collected facts get an age, and a red card answers "why". |
 | `test_groups.py` | — | Node groups on the map v0.8.1 (former smoke_test.py "v0.8.1 groups"). |

@@ -522,8 +522,14 @@ class ProjectIOMixin:
                     self.log.warning(f"Failed to restore view state: {e}")
 
             # v0.7.1: right after the load — an immediate status check round
+            # v1.6.6 (ROADMAP task 3): ... UNLESS the checker is in the MANUAL-only mode.
+            # Opening a project is not "check my servers now", and a user who asked for manual
+            # only must not get traffic from File → Open: the checker answers the ONE predicate
+            # (`manual_only`), so this guard and `StatusChecker.start()` can never disagree, and
+            # the manual doors ("Check statuses now" and the node context menu) are untouched.
             checker = getattr(self, "_status_checker", None)
-            if checker is not None and not checker.is_busy:
+            if (checker is not None and not checker.is_busy
+                    and not getattr(checker, "manual_only", False)):
                 try:
                     checker.start_round()
                 except Exception as e:
