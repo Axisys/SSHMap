@@ -35,7 +35,9 @@ fetched from the ssh_terminal module at call time — monkeypatching
 `ST.SSHTerminalThread`/`ST.QMessageBox.question` in tests works unchanged.
 """
 
+import re
 import time
+import urllib.parse
 
 from PySide6.QtCore import QEvent, QTimer, Signal
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel, QTabWidget
@@ -117,6 +119,77 @@ def _log():
 # whole computation: the formatting of a duration and a sliding-window meter fed by
 # the progress signals of the SFTP worker (the sftp.progress line itself is unchanged
 # — the rate/ETA is appended to it, so a broken/absent measurement is invisible).
+
+# ── v1.6.3 (ROADMAP task 5): the Files tab follows the shell (OSC 7) ─────────
+# A shell can REPORT its working directory with the OSC 7 escape (`ESC ] 7 ; file://host/path`
+# terminated by BEL or ST) — the habit every file panel of this class has. The application has
+# ONE session kind (SSH), so there is no environment to preset at spawn: the session injects a
+# ONE-TIME hook, INVISIBLY (its echo is held back), APPENDED to the user's own PROMPT_COMMAND
+# and, under zsh, registered through `precmd_functions+=` (a bare `precmd` is clobbered by the
+# popular frameworks; the `$ZSH_VERSION` guard keeps a POSIX `sh` from failing to parse the
+# line). Both branches are IDEMPOTENT — a duplicated hook would report twice per prompt — and
+# NEVER overwrite what the user already has.
+FOLLOW_CWD_CONFIG_KEY = "terminal_follow_cwd"
+CWD_HOOK_COMMAND = (
+    "_sshmap_cwd() { printf '\\033]7;file://%s%s\\033\\\\'"
+    " \"${HOSTNAME:-localhost}\" \"$PWD\"; }; "
+    "if [ -n \"${ZSH_VERSION:-}\" ]; then "
+    "case \"${precmd_functions[*]:-}\" in *_sshmap_cwd*) ;; "
+    "*) eval 'precmd_functions+=(_sshmap_cwd)';; esac; "
+    "else case \"${PROMPT_COMMAND:-}\" in *_sshmap_cwd*) ;; "
+    "*) PROMPT_COMMAND=\"_sshmap_cwd${PROMPT_COMMAND:+;$PROMPT_COMMAND}\";; esac; fi"
+)
+#: How long after `connected_signal` the hook goes out: the remote shell needs a moment to
+#: reach its first prompt (the same reason the quick-launch command is deferred), and PTY
+#: input is buffered by the kernel, so the hook is never lost.
+CWD_HOOK_DELAY_MS = 400
+#: The first report is what releases the hold-back; a shell that never answers costs the held
+#: bytes back after this deadline (nothing is lost, the echo is simply shown).
+CWD_HOLD_DEADLINE_MS = 4000
+#: The hold-back buffer cap: a shell that floods (a `yes`-like startup script) must never
+#: grow the queue without a bound — past this the held bytes are shown.
+CWD_HOLD_MAX_BYTES = 256 * 1024
+#: The bytes kept between two chunks so an OSC 7 split across a chunk boundary is still seen.
+OSC7_CARRY_BYTES = 512
+#: `ESC ] 7 ; <host><path>` terminated by BEL or ST (the two endings xterm accepts).
+_OSC7_RE = re.compile(rb"\x1b\]7;([^\x07\x1b]*)(?:\x07|\x1b\\)")
+
+
+def parse_osc7(data) -> str:
+    """The directory of the LAST OSC 7 report in `data` ("" — none). PURE, no Qt.
+
+    The payload is `file://<host><path>`: the `file://` scheme is required (anything else
+    is a foreign report and means "no follow"), the host is everything up to the NEXT `/`
+    and is deliberately ignored (the LISTING is the tab's own business), and the path is
+    percent-DECODED (a directory with a space arrives as `%20`). A host-only payload, a
+    report without the scheme and a path that is not absolute all answer "" — the shell on
+    the other side is not ours to trust, so every degradation is "no follow", never an
+    exception.
+    """
+    try:
+        raw = bytes(data or b"")
+    except Exception:  # noqa: BLE001 — a caller that hands over a str/None
+        return ""
+    last = None
+    for last in _OSC7_RE.finditer(raw):
+        pass
+    if last is None:
+        return ""
+    payload = last.group(1)
+    if not payload.startswith(b"file://"):
+        return ""
+    rest = payload[len(b"file://"):]     # <host><path> — the host may be empty
+    cut = rest.find(b"/")
+    if cut < 0:
+        return ""
+    try:
+        path = urllib.parse.unquote(rest[cut:].decode("utf-8", "replace"))
+    except Exception:  # noqa: BLE001 — a malformed escape never breaks the session
+        return ""
+    if not path.startswith("/") or "\x00" in path:
+        return ""
+    return path
+
 
 def format_duration(seconds) -> str:
     """A duration in seconds → "M:SS" / "H:MM:SS" ("" — no usable value).
@@ -437,6 +510,23 @@ class TerminalSessionPage(QWidget):
             self._initial_cmd_conn = self.terminal_thread.connected_signal.connect(
                 self._send_initial_command)
 
+        # ── v1.6.3 (ROADMAP task 5): the cwd follow (OSC 7) ─────────────────
+        # The state of THIS session: the hook goes out ONCE (nothing in the canvas shows
+        # it — its echo is held back until the first report), the hold-back is released by
+        # the first OSC 7 or by the deadline, and everything degrades to "no follow".
+        self._follow_cwd = bool(term_cfg.get("follow_cwd"))
+        self._cwd_hook_sent = False
+        self._cwd_hold = None          # bytearray while the hook's echo is held back
+        self._cwd_hold_deadline = 0.0  # time.monotonic() reading the hold gives up at
+        self._cwd_carry = b""          # the tail kept for an OSC 7 split across chunks
+        self._last_cwd = ""            # the last directory the shell reported
+        if self.sftp_tab is not None:
+            self.sftp_tab.set_follow_cwd(self._follow_cwd)
+            self.sftp_tab.follow_cwd_changed.connect(self._on_follow_cwd_toggled)
+        # The follow's connect hook is UNCONDITIONAL (the slot itself checks the flag), so
+        # the teardown disconnects it by the bound method — the same rule as the PTY flush.
+        self.terminal_thread.connected_signal.connect(self._on_connected_for_follow)
+
         self.terminal_thread.start()
         # v1.6.1 (ROADMAP task 8): this call is a NO-OP — the page is still HIDDEN here and
         # Qt delivers no FocusIn to a hidden container, so the keystrokes of a fresh session
@@ -718,6 +808,10 @@ class TerminalSessionPage(QWidget):
         if self._shut_down:
             return
         self._shut_down = True
+        # v1.6.3: the cwd follow's hold-back is disarmed FIRST — a late chunk must not be
+        # buffered by a session that is going away (nothing is lost: the bytes die with it).
+        self._cwd_hold = None
+        self._follow_cwd = False
 
         # IMPORTANT (verified by running, PySide6 6.11): signal.disconnect(receiver)
         # raises TypeError — the disconnection is done by the EXACT slot (bound
@@ -779,6 +873,9 @@ class TerminalSessionPage(QWidget):
             # connection.
             _dissig(thread.connected_signal, self._on_connected_for_sftp)
             _dissig(thread.connected_signal, self._flush_pty_grid)
+            # v1.6.3: the cwd follow's hook — an orphan thread must not install it after
+            # the page is gone (the same reason the Quick Launch connection is dropped).
+            _dissig(thread.connected_signal, self._on_connected_for_follow)
             # Quick Launch — only if the connection was made (the Connection object from __init__)
             if getattr(self, "_initial_cmd_conn", None) is not None:
                 try:
@@ -798,6 +895,9 @@ class TerminalSessionPage(QWidget):
         # to unbind on a page built without the SFTP tab.
         if getattr(self, "sftp_tab", None) is not None:
             _dissig(self.sftp_tab.message, self._on_sftp_tab_message)
+            # v1.6.3: the follow checkbox reports into this page — drop the connection with
+            # the rest of the teardown.
+            _dissig(self.sftp_tab.follow_cwd_changed, self._on_follow_cwd_toggled)
 
     # ── v1.0RC3: dirty rendering without a timer (ROADMAP task 8) ───────────
 
@@ -875,7 +975,17 @@ class TerminalSessionPage(QWidget):
         but the prompt only appears when I press a key" (a TUI's exit sequence is followed by
         silence until the user types). The state is now whatever pyte managed to apply: it is
         repainted, and the failure is LOGGED instead of swallowed.
+
+        v1.6.3 (ROADMAP task 5): the OSC 7 SCAN runs on the RAW bytes FIRST — a directory
+        report is never delayed by the echo hold-back — and the hold-back itself follows:
+        while the injected hook's echo is being suppressed the canvas, the transcript and
+        pyte see NOTHING (the filtered stream); the first report drops the held bytes and a
+        shell that never answers gets them back at the deadline or at the cap.
         """
+        self._scan_osc7(data)
+        data = self._hold_cwd_echo(data)
+        if not data:
+            return
         pos_before = None
         try:
             pos_before = self.tscreen.scroll_info()[0]
@@ -904,6 +1014,146 @@ class TerminalSessionPage(QWidget):
             self.widget.update()
         except RuntimeError:
             pass  # the C++ object was already destroyed (a WA_DeleteOnClose close race)
+
+    # ── v1.6.3 (ROADMAP task 5): the cwd follow (OSC 7) ─────────────────────
+
+    def follow_cwd(self) -> bool:
+        """Is this session following the shell's directory? (the checkbox's state)"""
+        return bool(self._follow_cwd)
+
+    def set_follow_cwd(self, enabled, persist: bool = False) -> bool:
+        """Turn the follow on/off for THIS session (the checkbox / the config key).
+
+        `persist=True` writes the ONE `terminal_follow_cwd` key through the ordinary
+        merge-write (the settings-hub rule: an owner-written UI-state key). Turning it ON
+        mid-session injects the hook if it never went out — a session that starts following
+        late is not forced to reconnect. Never raises: a read-only HOME keeps the choice
+        for the session.
+        """
+        self._follow_cwd = bool(enabled)
+        tab = getattr(self, "sftp_tab", None)
+        if tab is not None:
+            tab.set_follow_cwd(self._follow_cwd)   # the checkbox is a VIEW of this state
+        if self._follow_cwd and not self._cwd_hook_sent:
+            self._inject_cwd_hook()
+        if persist:
+            self._save_follow_cwd()
+        return self._follow_cwd
+
+    def _save_follow_cwd(self) -> bool:
+        """Persist `terminal_follow_cwd` (the merge-write every config key uses). Never raises."""
+        try:
+            from i18n import save_config
+        except Exception:  # noqa: BLE001 — a build without i18n keeps the session state
+            return False
+        try:
+            return bool(save_config({FOLLOW_CWD_CONFIG_KEY: bool(self._follow_cwd)}))
+        except Exception:  # noqa: BLE001 — a read-only HOME is not worth an error dialog
+            return False
+
+    def _on_follow_cwd_toggled(self, checked: bool):
+        """The tab's checkbox changed → apply it to the session and persist it."""
+        self.set_follow_cwd(checked, persist=True)
+
+    def _on_connected_for_follow(self):
+        """connected_signal: arm the ONE-TIME hook (deferred — the shell needs a prompt)."""
+        if not self._follow_cwd:
+            return
+        QTimer.singleShot(CWD_HOOK_DELAY_MS, self._inject_cwd_hook)
+
+    def _inject_cwd_hook(self) -> bool:
+        """Send the OSC 7 hook ONCE, invisibly, over THIS session's channel.
+
+        Directly through `terminal_thread.send_data()` — never the multi-input broadcast:
+        one path typed into eight sessions would install eight hooks in eight shells.
+        Returns True when the bytes went out. A dead channel, a follow that was turned off
+        in the meantime and a repeated call are all ordinary False answers.
+        """
+        if self._cwd_hook_sent or not self._follow_cwd:
+            return False
+        thread = getattr(self, "terminal_thread", None)
+        if thread is None or self._pty_channel() is None:
+            return False   # not connected (yet) — the connected_signal path comes back
+        self._cwd_hook_sent = True
+        self._cwd_hold = bytearray()
+        self._cwd_hold_deadline = time.monotonic() + CWD_HOLD_DEADLINE_MS / 1000.0
+        try:
+            thread.send_data((CWD_HOOK_COMMAND + "\n").encode("utf-8"))
+        except Exception:  # noqa: BLE001 — a dead channel mid-teardown: no follow, no error
+            self._cwd_hold = None
+            return False
+        QTimer.singleShot(CWD_HOLD_DEADLINE_MS, self._on_cwd_hold_timeout)
+        return True
+
+    def _scan_osc7(self, data: bytes):
+        """Find an OSC 7 report in the RAW bytes and move the listing (never raises).
+
+        The carry keeps the last `OSC7_CARRY_BYTES` bytes of the previous chunk, so a
+        report split across two reads is still parsed. The FIRST report also releases the
+        echo hold-back — DROPPING what is held (that is the hook's own echo); every later
+        report only moves the listing, and a directory that did not change is a no-op.
+        """
+        if not self._follow_cwd:
+            return
+        try:
+            chunk = self._cwd_carry + bytes(data or b"")
+        except Exception:  # noqa: BLE001 — a caller that hands over something odd
+            return
+        path = parse_osc7(chunk)
+        self._cwd_carry = chunk[-OSC7_CARRY_BYTES:]
+        if not path:
+            return
+        if self._cwd_hold is not None:
+            self._cwd_hold = None      # the hook answered: the held echo is dropped
+        if path == self._last_cwd:
+            return
+        self._last_cwd = path
+        self._apply_cwd(path)
+
+    def _apply_cwd(self, path: str):
+        """Move the Files tab to the directory the shell reported (the follow itself).
+
+        Only a page with the SFTP tab and a LIVE worker can follow; a foreign path (the
+        tab's own guard) and an unreachable server degrade to "no follow" — the report is a
+        hint, never a command.
+        """
+        tab = getattr(self, "sftp_tab", None)
+        if tab is None or getattr(tab, "worker", None) is None:
+            return
+        try:
+            tab.follow_directory(path)
+        except RuntimeError:
+            pass  # Qt teardown — the tab is already destroyed
+
+    def _hold_cwd_echo(self, data: bytes) -> bytes:
+        """The hold-back of the hook's echo: the bytes to RENDER (b"" — nothing yet).
+
+        While the hold is armed the output is buffered; the deadline (and the size cap)
+        gives it BACK — a shell that never sends an OSC 7 costs nothing but a short pause,
+        and its echo appears then. The first report DROPS the held bytes (that is exactly
+        the hook's echo, which must never reach the canvas).
+        """
+        buf = self._cwd_hold
+        if buf is None:
+            return data
+        if time.monotonic() >= self._cwd_hold_deadline:
+            self._cwd_hold = None
+            return bytes(buf) + bytes(data or b"")
+        buf += bytes(data or b"")
+        if len(buf) > CWD_HOLD_MAX_BYTES:
+            self._cwd_hold = None
+            return bytes(buf)   # a flooding shell is shown, never buffered forever
+        return b""
+
+    def _on_cwd_hold_timeout(self):
+        """The deadline expired: give the held bytes BACK through the ordinary output path."""
+        buf = self._cwd_hold
+        if buf is None:
+            return
+        self._cwd_hold = None
+        if not buf:
+            return
+        self._on_output(bytes(buf))
 
     # ── v1.0RC3: resize PTY — a grid guard + debounce (ROADMAP task 6) ──────
 

@@ -107,6 +107,7 @@ of the file itself.
 | `test_audit_v161.py` | — | v1.6.1 — the review batch (hardening): the shipped facts, the guards and the leftovers. |
 | `test_autosave_backups.py` | — | Regression v0.9.7 — autosave + the project backup ring buffer. |
 | `test_bidirectional_arrows.py` | — | Bidirectional arrows (v1.2.6, ROADMAP task 1). |
+| `test_canvas_truth.py` | — | v1.6.3 — the canvas at the cell: the glyph grid, the mouse the TUI asks for, the Files tab that answers back (ROADMAP v1.6.3). |
 | `test_chrome.py` | — | v1.5rc4 — Density, focus & findability: the chrome answers the same questions as the map. |
 | `test_collapse.py` | — | Server card collapsing v0.8.4 (former DESIGN.md §D) (former tests/smoke_collapse.py). |
 | `test_command_library.py` | — | v1.3 — "Terminal macros": a command/script library in the terminal panel (ROADMAP v1.3). |

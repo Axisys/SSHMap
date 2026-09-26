@@ -259,8 +259,15 @@ def clear_cfg(*extra_paths: str) -> None:
 # in 12 i18n files + the APP_VERSION/requirements pins in 7 release-state sections).
 # The misses of the keys themselves against the code are caught by check_i18n_keys.py.
 # ─────────────────────────────────────────────────────────────────────────────
-EXPECTED_APP_VERSION = "1.6.2"  # the current release (a sentinel: it catches "a bump to the wrong version")
-EXPECTED_I18N_KEYS = 782        # the parity of the TRANSLATION keys (v1.6.2 — "the terminal that stops
+EXPECTED_APP_VERSION = "1.6.3"  # the current release (a sentinel: it catches "a bump to the wrong version")
+EXPECTED_I18N_KEYS = 786        # the parity of the TRANSLATION keys (v1.6.3 — "the canvas at the
+                                # cell: the glyph grid, the mouse the TUI asks for, the Files tab that
+                                # answers back": the renderer draws each glyph at its own cell (no key),
+                                # the mouse family and the stale-tracking decision are behaviour (no key),
+                                # and the Files tab gains FOUR × en/ru/zh/de — the address bar's
+                                # placeholder and its bad-path sentence, the cwd-follow checkbox and its
+                                # tooltip — 782 + 4.
+                                # (v1.6.2 — "the terminal that stops
                                 # lying: a dead session, the DEC graphics and a forgotten column": the
                                 # dead-session status line REUSES `terminal.session_closed` and the
                                 # column width is a config number, so the only new keys are the four of

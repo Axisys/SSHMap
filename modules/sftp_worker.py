@@ -36,11 +36,14 @@ Signals (emitted from the worker thread; delivery to the GUI — queued):
                                                 (directories first, then by name)
     task_started(task_id, kind, label)        — kind: "list" | "upload" | "download"
                                                 | "read" | "mkdir" | "rename" | "delete"
+                                                | "normalize"
     progress(task_id, done_bytes, total_bytes)
     task_done(task_id, detail)                — detail: final path (file/directory)
     task_error(task_id, kind, message)        — task error; the QUEUE does NOT die
     task_cancelled(task_id, kind)             — cancellation (not an error)
     read_ready(task_id, remote_path, data)    — v1.3.1: the viewer's file content (bytes)
+    normalize_ready(task_id, requested, resolved) — v1.6.3: the address bar's path,
+                                                resolved by the SERVER (REALPATH)
 
 For a "read" task the task_error message is a MACHINE CODE (READ_ERROR_*), not a
 human sentence: the SFTP tab maps it to an i18n message (the worker stays free of
@@ -110,6 +113,7 @@ KIND_READ = "read"          # v1.3.1: the SFTP viewer — read a text file into 
 KIND_MKDIR = "mkdir"        # v1.3.3.2: the file operations (ROADMAP task 1)
 KIND_RENAME = "rename"
 KIND_DELETE = "delete"
+KIND_NORMALIZE = "normalize"   # v1.6.3: the address bar's path resolution (the server's own)
 
 # The operation kinds (no bytes, no progress bar): the page's status line stays
 # silent about them — the SFTP tab reports their outcome itself (its message signal).
@@ -306,6 +310,7 @@ class SftpWorker(QThread):
     task_error = Signal(int, str, str)       # task_id, kind, message (READ_ERROR_* for reads)
     task_cancelled = Signal(int, str)        # task_id, kind
     read_ready = Signal(int, str, bytes)     # v1.3.1: task_id, remote_path, content
+    normalize_ready = Signal(int, str, str)  # v1.6.3: task_id, requested, resolved path
 
     def __init__(self, sftp_client, parent=None):
         super().__init__(parent)
@@ -399,6 +404,23 @@ class SftpWorker(QThread):
             remote_path=remote_path, total_size=int(total_size or 0),
             detail=remote_path))
 
+    def queue_normalize(self, remote_path: str, base_dir: str = "") -> Optional[int]:
+        """v1.6.3 (ROADMAP task 4): resolve a typed path THROUGH THE SERVER.
+
+        The address bar of the Files tab hands over exactly what the user typed and never
+        resolves it locally: `~` is expanded against the server's home (`_expand_home`, the
+        v1.5.7 helper), a RELATIVE path is joined onto `base_dir` (the directory the tab is
+        showing), and everything else — `.`/`..`, a symlink, a doubled slash — is answered
+        by `SFTPClient.normalize()`, i.e. by the remote's own REALPATH. The answer arrives
+        as `normalize_ready(task_id, requested, resolved)`; a path the server cannot resolve
+        (missing, no permission) is the ordinary `task_error` — a message, never a traceback.
+        """
+        path = str(remote_path or "").strip()
+        if path and not path.startswith(("/", "~")):
+            path = posixpath.join(base_dir or "/", path)
+        return self._queue_task(_SftpTask(
+            self._next_id, KIND_NORMALIZE, path, remote_path=path, detail=path))
+
     def cancel(self):
         """Cancel the current transfer and everything still queued.
 
@@ -487,6 +509,8 @@ class SftpWorker(QThread):
                         self._do_upload(task)
                     elif task.kind == KIND_READ:
                         self._do_read(task)
+                    elif task.kind == KIND_NORMALIZE:
+                        self._do_normalize(task)
                     elif task.kind == KIND_MKDIR:
                         self._do_mkdir(task)
                     elif task.kind == KIND_RENAME:
@@ -729,6 +753,30 @@ class SftpWorker(QThread):
         if not home:
             return path
         return posixpath.join(str(home), path[2:])
+
+    def _do_normalize(self, task: _SftpTask):
+        """v1.6.3 (ROADMAP task 4): the server's REALPATH of a typed path.
+
+        `~` first (a tilde is not part of the SFTP protocol — `_expand_home` asks the
+        server for its home), then `normalize()`. The resolved path is then CHECKED on the
+        server (`stat`), because the address bar is a directory bar: a path that does not
+        exist and a path that is a FILE both answer `task_error` — a sentence in the tab —
+        instead of navigating to a listing that can only fail or showing a file as if it
+        were a directory. An empty REALPATH is refused here as well. A client without
+        `stat` (a minimal stub) keeps the resolution alone.
+        """
+        target = self._expand_home(task.remote_path)
+        resolved = self._sftp.normalize(target)
+        if not resolved:
+            raise IOError("the server did not resolve %s" % (target,))
+        resolved = str(resolved)
+        stat_fn = getattr(self._sftp, "stat", None)
+        if stat_fn is not None:
+            info = stat_fn(resolved)
+            mode = getattr(info, "st_mode", None)
+            if mode is not None and not stat.S_ISDIR(mode):
+                raise IOError("not a directory: %s" % (resolved,))
+        self._emit(self.normalize_ready, task.id, task.remote_path, resolved)
 
     def _do_read(self, task: _SftpTask):
         """v1.3.1 (ROADMAP task 2): read a text file into memory (the viewer).

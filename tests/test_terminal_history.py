@@ -598,10 +598,10 @@ print("== §9 the release state ==")
 # ════════════════════════════════════════════════════════════════════════════
 
 check("EXPECTED_APP_VERSION is the version this test file describes",
-      EXPECTED_APP_VERSION == "1.6.2", EXPECTED_APP_VERSION)
+      EXPECTED_APP_VERSION == "1.6.3", EXPECTED_APP_VERSION)
 check("the pin counts the shipped keys (+29 of v1.5.7: the tab, the panel chrome, the seven menu items "
-      "with their reports and refusals) — 708 + 29 + 41 + 4 = 782",
-      EXPECTED_I18N_KEYS == 782, str(EXPECTED_I18N_KEYS))
+      "with their reports and refusals) — 708 + 29 + 41 + 4 + 4 = 786",
+      EXPECTED_I18N_KEYS == 786, str(EXPECTED_I18N_KEYS))
 check_release_state(ROOT)
 
 _langs = load_i18n_langs(ROOT)

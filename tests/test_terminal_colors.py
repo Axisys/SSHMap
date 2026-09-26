@@ -316,17 +316,20 @@ check("after the wide glyph: 'Y' on the cell 3 (the ink of the default_fg)",
       f"ink={ink_count(img_w, cw, chh, 3, 0, D['default_fg'])}")
 check("'Z' on the cell 4", ink_count(img_w, cw, chh, 4, 0, D["default_fg"]) >= 5)
 
-# runs, not per-character drawText: the paintEvent call counter
+# the runs and the cell painting: v1.6.3 — the RUN is still the fill/format unit, while the
+# text is drawn GLYPH BY GLYPH at its own cell (the wandering-column fix), so the counter now
+# reads "one call per glyph of the run" (tests/test_canvas_truth.py owns the geometry).
 scr_r = TerminalScreen(columns=10, lines=3)
-scr_r.feed(b"MMMMMMMMMM\r\n")   # a line of 10 identical glyphs → 1 run → 1 drawText
+scr_r.feed(b"MMMMMMMMMM\r\n")   # a line of 10 identical glyphs → 1 run → 10 drawText
 _wr, _img_r, _cw, _chh = render_widget(scr_r)
-check("a homogeneous line — one drawText (the runs)",
-      _wr.last_paint_stats["draw_text_calls"] == 1, f"stats={_wr.last_paint_stats}")
+check("a homogeneous line — ONE run, a drawText per glyph (v1.6.3)",
+      _wr.last_paint_stats["draw_text_calls"] == 10, f"stats={_wr.last_paint_stats}")
 
 scr_r2 = TerminalScreen(columns=10, lines=3)
-scr_r2.feed(b"\x1b[31mRR\x1b[32mGG\x1b[0m")   # two colors → two drawText
+scr_r2.feed(b"\x1b[31mRR\x1b[32mGG\x1b[0m")   # two colors → two runs → 4 drawText
 _wr2, _img_r2, _cw, _chh = render_widget(scr_r2)
-check("two colors — two drawText", _wr2.last_paint_stats["draw_text_calls"] == 2,
+check("two colors — two runs, a drawText per glyph (v1.6.3)",
+      _wr2.last_paint_stats["draw_text_calls"] == 4,
       f"stats={_wr2.last_paint_stats}")
 
 # ════════════════════════════════════════════════════════════

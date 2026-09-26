@@ -106,12 +106,12 @@ import os
 import posixpath
 from datetime import datetime
 
-from PySide6.QtCore import QEvent, QMimeData, Qt, Signal
+from PySide6.QtCore import QEvent, QMimeData, QStringListModel, Qt, Signal
 from PySide6.QtGui import QColor, QDrag, QFontDatabase, QIcon, QPainter, QPixmap
 from PySide6.QtWidgets import (
-    QApplication, QCheckBox, QFileDialog, QHBoxLayout, QInputDialog, QLabel,
-    QMenu, QMessageBox, QPlainTextEdit, QPushButton, QSplitter, QStyle,
-    QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget,
+    QApplication, QCheckBox, QCompleter, QFileDialog, QHBoxLayout, QInputDialog,
+    QLabel, QLineEdit, QMenu, QMessageBox, QPlainTextEdit, QPushButton, QSplitter,
+    QStyle, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget,
 )
 
 try:
@@ -134,13 +134,15 @@ except ImportError:
         theme_qss = None
 
 try:  # v1.3.1: the viewer's shared constants (limit + task_error codes)
-    from .sftp_worker import (KIND_DELETE, KIND_MKDIR, KIND_READ, KIND_RENAME,
-                              MAX_READ_BYTES, OP_KINDS, READ_ERROR_BINARY,
-                              READ_ERROR_TOO_LARGE, classify_extension)
+    from .sftp_worker import (KIND_DELETE, KIND_MKDIR, KIND_NORMALIZE, KIND_READ,
+                              KIND_RENAME, MAX_READ_BYTES, OP_KINDS,
+                              READ_ERROR_BINARY, READ_ERROR_TOO_LARGE,
+                              classify_extension)
 except ImportError:
-    from sftp_worker import (KIND_DELETE, KIND_MKDIR, KIND_READ, KIND_RENAME,
-                             MAX_READ_BYTES, OP_KINDS, READ_ERROR_BINARY,
-                             READ_ERROR_TOO_LARGE, classify_extension)
+    from sftp_worker import (KIND_DELETE, KIND_MKDIR, KIND_NORMALIZE, KIND_READ,
+                             KIND_RENAME, MAX_READ_BYTES, OP_KINDS,
+                             READ_ERROR_BINARY, READ_ERROR_TOO_LARGE,
+                             classify_extension)
 
 try:  # v1.4.7 (ROADMAP task 4): detection + tokenizers + the ONE highlighter
     from . import syntax_highlight as syntax
@@ -339,6 +341,10 @@ class SftpTab(QWidget):
     # Local hints in the window's status bar (waiting for connection, no selection).
     # Worker errors/progress are shown by the window itself via its signals.
     message = Signal(str)
+    # v1.6.3 (ROADMAP task 5): the user switched the cwd follow. The TAB only reports it —
+    # the session (TerminalSessionPage) installs the hook, applies it live and persists the
+    # `terminal_follow_cwd` key, because the follow is a state of the SESSION, not of a view.
+    follow_cwd_changed = Signal(bool)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -370,6 +376,17 @@ class SftpTab(QWidget):
         self._op_tasks = {}
         self._pending_batches = {}
         self._drag_source = None      # the widget the current drag event came from
+        # v1.6.3 (ROADMAP task 4): the address bar's own bookkeeping — the normalize tasks
+        # in flight (task_id → the text the user typed) and the completer's listings
+        # (task_id → the directory they answer). `_completer_dir` is the directory the
+        # completer is currently fed with, so the typed directory is listed at most ONCE
+        # per directory change.
+        self._normalize_tasks = {}
+        self._completer_lists = {}
+        self._completer_dir = None
+        # v1.6.3 (ROADMAP task 5): the cwd follow — the checkbox state the page installs
+        # (`set_follow_cwd`); the tab only REPORTS a change (the session owns the hook).
+        self._follow_cwd = False
 
         t = _t
         outer = QVBoxLayout(self)
@@ -377,9 +394,32 @@ class SftpTab(QWidget):
         outer.setSpacing(4)
 
         # Path row — the current directory (the "address bar").
-        self.path_label = QLabel(t("sftp.waiting_connection"))
+        # v1.6.3 (ROADMAP task 4): it is an EDITABLE QLineEdit now — Enter navigates through
+        # the SERVER's own resolution (the worker's queue_normalize), so `~`, a relative path
+        # and a symlink stay the remote's business. Before the connection it is read-only and
+        # carries the waiting text (the pre-connection state of the old QLabel).
+        self.path_label = QLineEdit(t("sftp.waiting_connection"))
         _apply_status_style(self.path_label, "status.sftp_row")
+        self.path_label.setReadOnly(True)   # until set_worker() binds a transport
+        self.path_label.setPlaceholderText(t("sftp.path_placeholder"))
+        self.path_label.setClearButtonEnabled(True)
+        self.path_label.returnPressed.connect(self._on_path_entered)
+        self.path_label.textEdited.connect(self._on_path_edited)
+        self.path_completer_model = QStringListModel([], self)
+        self.path_completer = QCompleter(self.path_completer_model, self)
+        self.path_completer.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
+        self.path_completer.setCompletionMode(QCompleter.CompletionMode.PopupCompletion)
+        self.path_completer.setCompletionRole(Qt.ItemDataRole.DisplayRole)
+        self.path_label.setCompleter(self.path_completer)
         outer.addWidget(self.path_label)
+
+        # v1.6.3 (ROADMAP task 5): "follow the shell's directory" — the OSC 7 switch of THIS
+        # session. It is a session state: the page installs the hook and persists the key.
+        self.chk_follow_cwd = QCheckBox(t("sftp.follow_cwd"))
+        self.chk_follow_cwd.setToolTip(t("sftp.follow_cwd_tooltip"))
+        self.chk_follow_cwd.setEnabled(False)   # until a transport exists
+        self.chk_follow_cwd.toggled.connect(self._on_follow_toggled)
+        outer.addWidget(self.chk_follow_cwd)
 
         # Buttons: navigation | operations.
         bar = QHBoxLayout()
@@ -538,6 +578,10 @@ class SftpTab(QWidget):
                                        _t("sftp.column_modified")])
             self.tree.setToolTip(_t("sftp.drag_hint"))
             self.btn_viewer_close.setToolTip(_t("sftp.viewer.close_tooltip"))
+            # v1.6.3: the address bar's placeholder and the cwd-follow switch.
+            self.path_label.setPlaceholderText(_t("sftp.path_placeholder"))
+            self.chk_follow_cwd.setText(_t("sftp.follow_cwd"))
+            self.chk_follow_cwd.setToolTip(_t("sftp.follow_cwd_tooltip"))
             # The row markers carry the refusal text in the tooltip — re-text the
             # rows of the CURRENT listing that are really marked (the facts of this
             # session; the marker itself is re-applied by the next listing).
@@ -559,7 +603,8 @@ class SftpTab(QWidget):
         if self._worker is not None:
             for sig in (self._worker.list_ready, self._worker.task_started,
                         self._worker.task_done, self._worker.task_error,
-                        self._worker.task_cancelled, self._worker.read_ready):
+                        self._worker.task_cancelled, self._worker.read_ready,
+                        self._worker.normalize_ready):
                 try:
                     sig.disconnect(self)
                 except TypeError:
@@ -570,6 +615,12 @@ class SftpTab(QWidget):
         # transport that was asked — a new worker starts with a clean bookkeeping.
         self._op_tasks.clear()
         self._pending_batches.clear()
+        # v1.6.3: the address bar's tasks and the completer's listings belong to ONE
+        # transport as well (a normalize of the previous server must not navigate THIS one).
+        self._normalize_tasks.clear()
+        self._completer_lists.clear()
+        self._completer_dir = None
+        self.path_completer_model.setStringList([])
         # v1.3.1.1: the previewability facts belong to ONE transport/session — a new
         # worker (a new connection, possibly another server on the same paths) starts
         # with a clean listing.
@@ -584,7 +635,9 @@ class SftpTab(QWidget):
             # v1.3.1: the preview belongs to the session's transport — the content
             # of a dead worker must not stay on the screen.
             self.close_viewer()
-            self.path_label.setText(_t("sftp.waiting_connection"))
+            self._set_path_text(_t("sftp.waiting_connection"))
+            self.path_label.setReadOnly(True)
+            self.chk_follow_cwd.setEnabled(False)
             for b in (self.btn_up, self.btn_refresh, self.btn_upload,
                       self.btn_download):
                 b.setEnabled(False)
@@ -596,9 +649,12 @@ class SftpTab(QWidget):
         worker.task_error.connect(self._on_task_error)
         worker.task_cancelled.connect(self._on_task_cancelled)
         worker.read_ready.connect(self._on_read_ready)   # v1.3.1: the viewer
+        worker.normalize_ready.connect(self._on_normalize_ready)   # v1.6.3: the address bar
         for b in (self.btn_up, self.btn_refresh, self.btn_upload,
                   self.btn_download):
             b.setEnabled(True)
+        self.path_label.setReadOnly(False)
+        self.chk_follow_cwd.setEnabled(True)
         self._relist("/")
 
     @property
@@ -623,12 +679,29 @@ class SftpTab(QWidget):
         """Enter a directory (double-click on a directory row)."""
         self._relist(path)
 
+    def follow_directory(self, path: str) -> bool:
+        """v1.6.3 (ROADMAP task 5): the SHELL moved — move the listing with it.
+
+        The caller is the session's OSC 7 scanner, so the path comes from the remote: an
+        empty / relative / NUL-carrying report is refused here (a "no follow", never an
+        error), a directory already on the screen is a no-op, and everything else goes
+        through the ORDINARY `_relist()` — the same listing, the same staleness filter and
+        the same `message` signal a click uses. Returns True when the view moved.
+        """
+        if self._worker is None:
+            return False
+        target = str(path or "")
+        if not target.startswith("/") or "\x00" in target or target == self._current_dir:
+            return False
+        self._relist(target)
+        return True
+
     def _relist(self, path: str):
         """Redraw the listing for the new current directory."""
         self._current_dir = path or "/"
         self.tree.clear()
         self._up_item = None
-        self.path_label.setText(self._current_dir)
+        self._set_path_text(self._current_dir)
         self.btn_up.setEnabled(self._current_dir != "/")
         if self._worker is None:
             return
@@ -636,7 +709,113 @@ class SftpTab(QWidget):
         if tid is not None:
             self._pending_lists[tid] = self._current_dir
 
+    # ── v1.6.3 (ROADMAP task 4): the address bar ─────────────────────────────
+
+    def _set_path_text(self, text: str):
+        """Write the address bar WITHOUT echoing it back as an edit.
+
+        `setText` on a QLineEdit does not emit `textEdited` (only `textChanged`), so no
+        loop exists — the guard is here because the completer's directory bookkeeping is
+        driven by `textEdited` alone and a programmatic write must never look like typing.
+        """
+        try:
+            self.path_label.setText(text or "")
+        except RuntimeError:
+            pass  # Qt teardown — the bar is already destroyed
+
+    def _on_path_entered(self):
+        """Enter in the address bar: navigate through the SERVER's own resolution.
+
+        The text goes to the worker AS TYPED (a `~`, a relative path, a symlink are the
+        remote's business — a local guess would be a second, worse truth); a path the server
+        cannot resolve answers `task_error` and is reported through the `message` signal,
+        never as a traceback. The bar keeps the typed text until the answer arrives, so a
+        failure leaves the user with what they typed.
+        """
+        if self._worker is None:
+            return
+        typed = self.path_label.text() or ""
+        if not typed.strip() or typed.strip() == _t("sftp.waiting_connection"):
+            return
+        tid = self._worker.queue_normalize(typed, self._current_dir)
+        if tid is not None:
+            self._normalize_tasks[tid] = typed
+
+    def _on_normalize_ready(self, task_id: int, requested: str, resolved: str):
+        """The server's REALPATH of a typed path → navigate there (v1.6.3)."""
+        self._normalize_tasks.pop(task_id, None)
+        target = resolved or requested
+        if not target:
+            return
+        self._relist(target)
+
+    def _on_path_edited(self, text: str):
+        """Feed the completer from the SAME async listing the tab already uses.
+
+        The directory part of what is being typed decides the listing — at most ONE
+        `queue_list()` per directory CHANGE (a keystroke inside the same directory costs
+        nothing), its answer fills the model with the directories first (a trailing `/`
+        makes the completion continue into them) and the files after. A relative directory
+        is resolved against the directory on the screen, exactly as Enter will resolve it.
+        """
+        if self._worker is None:
+            return
+        directory = posixpath.dirname(text)
+        if not directory:
+            directory = self._current_dir
+        elif not directory.startswith(("/", "~")):
+            directory = posixpath.join(self._current_dir, directory)
+        try:
+            self.path_completer.setCompletionPrefix(posixpath.basename(text))
+        except RuntimeError:
+            return  # Qt teardown
+        if directory == self._completer_dir:
+            return
+        self._completer_dir = directory
+        tid = self._worker.queue_list(directory)
+        if tid is not None:
+            self._completer_lists[tid] = directory
+
+    def _fill_completer(self, entries: list):
+        """The completion model: directories first with a trailing `/`, then the files."""
+        names = sorted(
+            [(str(e.get("name", "")) + "/") if e.get("is_dir") else str(e.get("name", ""))
+             for e in entries if e.get("name")],
+            key=lambda n: (not n.endswith("/"), n.lower()))
+        try:
+            self.path_completer_model.setStringList(names)
+        except RuntimeError:
+            pass  # Qt teardown — the model is gone with the tab
+
+    def _on_follow_toggled(self, checked: bool):
+        """The follow checkbox → the session (which owns the hook and the config key)."""
+        self._follow_cwd = bool(checked)
+        try:
+            self.follow_cwd_changed.emit(self._follow_cwd)
+        except RuntimeError:
+            pass  # Qt teardown — the tab is already gone
+
+    def set_follow_cwd(self, enabled: bool):
+        """Install the follow state in the checkbox WITHOUT reporting it back (v1.6.3).
+
+        The page owns the state; this is its write path (the checkbox is a VIEW of it), so
+        the signal is blocked — otherwise opening a session would "toggle" the setting.
+        """
+        self._follow_cwd = bool(enabled)
+        try:
+            was = self.chk_follow_cwd.blockSignals(True)
+            self.chk_follow_cwd.setChecked(bool(enabled))
+            self.chk_follow_cwd.blockSignals(was)
+        except RuntimeError:
+            pass  # Qt teardown
+
     def _on_list_ready(self, task_id: int, remote_dir: str, entries: list):
+        # v1.6.3: the completer's listing — it feeds the completion model and is NEVER
+        # rendered (that directory is not on the screen); it is checked FIRST, because the
+        # answer may belong to the directory the user is typing while the tree shows another.
+        if self._completer_lists.pop(task_id, None) is not None:
+            self._fill_completer(entries)
+            return
         # v1.3.3.2: the pre-flight listing of a drop on a directory row — the answer
         # is NOT rendered (that directory is not on the screen), it only feeds the
         # conflict check of the batch that is waiting for it.
@@ -825,6 +1004,11 @@ class SftpTab(QWidget):
             # listing is NOT refreshed: nothing changed on the server.
             self._op_tasks.pop(task_id, None)
             self.message.emit(_t("sftp.op.error", error=message))
+        elif kind == KIND_NORMALIZE:
+            # v1.6.3: the address bar asked for a path the server cannot resolve — the bar
+            # keeps the typed text (nothing navigated) and the reason is a sentence.
+            typed = self._normalize_tasks.pop(task_id, "")
+            self.message.emit(_t("sftp.path_error", path=typed, error=message))
         elif kind == "list":
             # v1.3.3.2: the pre-flight listing of a drop on a row failed (the
             # directory vanished / no permission) — the batch is dropped, the tab
@@ -1408,6 +1592,9 @@ class SftpTab(QWidget):
     def _on_task_finished(self, task_id: int):
         # v1.3.1: a read task that ended without an answer (cancelled) leaves no trace.
         self._read_tasks.pop(task_id, None)
+        # v1.6.3: the same for the address bar's tasks and the completer's listings.
+        self._normalize_tasks.pop(task_id, None)
+        self._completer_lists.pop(task_id, None)
         if task_id in self._transfer_tasks:
             self._transfer_tasks.discard(task_id)
             if not self._transfer_tasks:

@@ -560,6 +560,24 @@ class TerminalScreen:
             enabled = any((n << 5) in mode for n in (1000, 1002, 1003))
             return enabled, (1006 << 5) in mode
 
+    # ── v1.6.3 (ROADMAP task 2): WHICH tracking mode is on ───────────────────
+    def mouse_tracking_mode(self):
+        """(mode, sgr) — the HIGHEST mouse tracking mode the application asked for.
+
+        mode — 0 (no tracking) | 1000 (a press and a release) | 1002 (motion while a
+        button is held) | 1003 (any motion); sgr — DECSET 1006 is ON (the SGR extended
+        encoding). 1003 wins over 1002 wins over 1000 when a program enabled several
+        (xterm answers the most permissive one), which is what the canvas needs to decide
+        whether a MOTION is reportable. Read under the same lock as feed() and on EVERY
+        mouse event, like `mouse_tracking()` — a TUI toggles these during a session.
+        """
+        with self._lock:
+            mode = self.screen.mode
+            for n in (1003, 1002, 1000):
+                if (n << 5) in mode:
+                    return n, (1006 << 5) in mode
+            return 0, (1006 << 5) in mode
+
     # ── rendering for the GUI thread ───────────────────
     def snapshot(self):
         """v1.0RC1: a screen snapshot for the per-cell canvas (TerminalWidget, the GUI thread).

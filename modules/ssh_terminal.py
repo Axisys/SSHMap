@@ -143,13 +143,14 @@ def load_terminal_settings():
        "max_open": int,           # v1.1.1: limit of own open terminals (default 4)
        "wheel": str,              # v1.1.2RC3 (U3): "scrollback" (default) | "off" — the wheel
        "cursor": str,             # v1.6.2 (task 4): "block" | "bar" (default) | "underline"
+       "follow_cwd": bool,        # v1.6.3 (task 5): follow the shell's directory (OSC 7)
        "mode": str}               # v1.2.2: "windows" (default) | "tabs" — display mode
     Invalid values (a foreign type, out of range) → default. Never raises.
     """
     defaults = {"palette": None, "font_family": "", "font_size": None,
                 "history_lines": DEFAULT_HISTORY_LINES, "close_behavior": "close",
                 "max_open": 4, "wheel": "scrollback", "mode": "windows",
-                "cursor": CURSOR_STYLE_DEFAULT}
+                "cursor": CURSOR_STYLE_DEFAULT, "follow_cwd": False}
     try:
         from i18n import load_config
     except Exception:
@@ -199,6 +200,14 @@ def load_terminal_settings():
     v = cfg.get("terminal_cursor_style")
     if isinstance(v, str) and v.strip().lower() in CURSOR_STYLES:
         defaults["cursor"] = v.strip().lower()   # corrupt/foreign → the declared default
+
+    # v1.6.3 (ROADMAP task 5): the cwd follow — the Files tab moves when the shell's
+    # directory changes (the OSC 7 hook). A REAL bool, OPT-IN: a missing or unusable value
+    # is OFF, so a session never injects a hook the user did not ask for (the `terminal_wheel`
+    # validation rule; the write path is the tab's checkbox, not a settings-hub row).
+    v = cfg.get("terminal_follow_cwd")
+    if isinstance(v, bool):
+        defaults["follow_cwd"] = v
 
     # v1.2.2 (ROADMAP task 1): terminal display mode — "windows" (default,
     # current behaviour: separate SSHTerminalWindow windows) | "tabs"

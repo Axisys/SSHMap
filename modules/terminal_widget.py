@@ -119,6 +119,33 @@ per-code-point sum — it knows the emoji ZWJ sequences (a family emoji is TWO c
 FOUR in the sum). `char_width()` reads `wcswidth` for a multi-code-point cell and `wcwidth` for a
 single one, i.e. the SAME table `Screen.draw()` lays the grid out with; a mismatch here shifts
 every run after the cluster (split_row_runs() and the run painter both read this function).
+
+v1.6.3 (ROADMAP tasks 1–3) — the canvas at the cell:
+* THE GLYPH GRID (task 1): the text of a run is painted GLYPH BY GLYPH at
+  `(start_col + k) * cell_w` (the pen used to advance with the FONT's own widths while the
+  grid reserves `ceil(advance("M"))` per cell — a font that is not integral drifted every
+  glyph after the first, a wandering column in a box-drawing TUI), `_update_metrics()`
+  turns kerning OFF (a kerned pair is drawn closer than the two cells it occupies) and the
+  PURE `font_grid_problems(metrics, sample)` is the gate over a declared sample: it answers
+  `(label, advance, cell_w, drift_px, drift_cells)` per offending glyph, RED on a
+  non-integral metrics object and GREEN on the shipped font. `grid_metrics()` is its live
+  data source — run it with the user's `terminal_font` and the question closes either way.
+  `run_glyphs()` maps a run's text back to its CELLS (a cell may hold a cluster);
+* THE MOUSE FAMILY (task 2): the wheel encoder grew into the ONE `_send_mouse(button, col,
+  row, press)` — a press, a release and a motion reach the PTY while
+  `TerminalScreen.mouse_tracking_mode()` says the application asked for them (1000/1002/1003
+  × 1006/1015 encodings, motion = the button + 32, 1003 = any motion, 1002 = motion while a
+  button is held). A press while the application owns the mouse does NOT start a local
+  selection, and the bytes always go to `terminal_thread.send_data()` DIRECTLY (never
+  `_send()` / the multi-input broadcast — the coordinates are session-local, the v1.2.13 rule);
+* `Shift` = THE LOCAL OVERRIDE (task 3): held, the tracking is bypassed and the local
+  selection/scrollback wins — the ONE hatch out of a TUI that went away without its own
+  disable. The ACCEPTED COST is written down, not hidden: the tracked bits of a crashed TUI
+  stay in `screen.mode` (xterm clears nothing either, and clearing them on the alternate
+  screen's leave would be a divergence written into the vendored emulator), so after such a
+  crash the plain wheel keeps reporting to a dead application until the user presses `Shift`
+  or reconnects. The mitigation is the `Shift` override plus the existing keyboard hatch
+  (Ctrl+Shift+PageUp/PageDown).
 """
 
 import math
@@ -285,6 +312,107 @@ def is_wide_char(data: str) -> bool:
     `wcswidth == 2`), which `char_width()` measures with the same table the grid uses.
     """
     return char_width(data) == 2
+
+
+# ── v1.6.3 (ROADMAP task 1): the GLYPH GRID ─────────────────────────────────
+# A run used to be painted with ONE drawText at the run's starting x, so the pen
+# advanced with the FONT's own glyph widths while the grid reserves
+# `ceil(advance("M"))` per cell: the correctness of every row rested on an invariant
+# nobody checked, and `terminal_font` is free text. The canvas now draws the text of a
+# run GLYPH BY GLYPH at `(start_col + k) * cell_w`, and `font_grid_problems()` is the
+# gate that answers whether a given font really lands on that grid.
+FONT_GRID_SAMPLE = ("M", "i", "W", " ", "\u2500", "\u2502", "\u250c", "\u253c",
+                    "\u2588", "\u2591", "\u30b3")
+#: The run length the drift of `font_grid_problems()` is expressed over (cells).
+FONT_GRID_RUN_CELLS = 100
+#: How far a glyph may sit off the cell before it is a defect: sub-pixel rounding is
+#: the font engine's own business, a half pixel is a wandering column.
+FONT_GRID_TOLERANCE_PX = 0.01
+
+
+def glyph_label(ch: str) -> str:
+    """A printable label for one sample glyph: the character itself, or `U+XXXX`."""
+    try:
+        if len(ch) == 1 and 0x20 <= ord(ch) < 0x7f:
+            return ch
+    except TypeError:
+        return "?"
+    return " ".join(f"U+{ord(c):04X}" for c in str(ch))
+
+
+class FontGridMetrics:
+    """The metrics `font_grid_problems()` reads: the cell width and one glyph's advance.
+
+    A tiny adapter, so the gate can be driven by a SYNTHETIC non-integral object (the
+    RED case of the topical test) exactly like it is driven by the live widget font.
+    """
+
+    __slots__ = ("cell_w", "_advance")
+
+    def __init__(self, cell_w, advance):
+        self.cell_w = max(1, int(cell_w))
+        self._advance = advance
+
+    def advance(self, ch: str) -> float:
+        """The advance the painter's pen moves for `ch` (the font's own width)."""
+        return float(self._advance(ch))
+
+
+def font_grid_problems(metrics, sample=FONT_GRID_SAMPLE):
+    """The glyphs of `sample` whose ADVANCE does not match the cell — the grid gate.
+
+    `metrics` answers `cell_w` (the reserved cell width in pixels) and
+    `advance(ch)` (the width the font itself gives that glyph) — `FontGridMetrics`
+    over a live `QFontMetricsF`, or any object with the same two members. Returns ONE
+    tuple per offending glyph:
+
+        (label, advance, cell_w, drift_px, drift_cells)
+
+    where `drift_px` is `advance − cell_w` (the per-glyph error) and `drift_cells` is
+    the SAME drift accumulated over a `FONT_GRID_RUN_CELLS`-cell run, expressed in
+    cells — the number the acceptance of the version quotes ("a 100-cell run drifts
+    +0.00 px"). A glyph within `FONT_GRID_TOLERANCE_PX` is not reported, so the
+    shipped font answers an EMPTY list and a font that is not integral answers rows.
+    Pure (no Qt) — the topical test runs it against both objects.
+    """
+    cell_w = max(1, int(getattr(metrics, "cell_w", 1)))
+    problems = []
+    for ch in sample:
+        try:
+            advance = float(metrics.advance(ch))
+        except Exception:  # noqa: BLE001 — an unmeasurable glyph is not a grid defect
+            continue
+        drift_px = advance - float(cell_w)
+        if abs(drift_px) <= FONT_GRID_TOLERANCE_PX:
+            continue
+        problems.append((glyph_label(ch), advance, cell_w, drift_px,
+                         drift_px * FONT_GRID_RUN_CELLS / float(cell_w)))
+    return problems
+
+
+def run_glyphs(row, start, text):
+    """The glyph of EVERY cell of a NARROW run — a cell may hold a grapheme cluster.
+
+    A run's `text` is the join of the cell data (`split_row_runs`), and one cell of the
+    pyte fork holds a whole cluster (patch 0005: a base + mark, a ZWJ emoji, an
+    NFC-merged pair), so iterating over the CODE POINTS of `text` would drift the run by
+    exactly the cells that carry more than one. Walking the row and consuming as many
+    code points as each cell contributed keeps the glyph-to-cell mapping exact.
+    Pure (the topical test reads it without a widget).
+    """
+    glyphs = []
+    consumed = 0
+    total = len(text)
+    idx = start
+    n = len(row)
+    while consumed < total and idx < n:
+        data = row[idx].data
+        glyphs.append(data)
+        consumed += len(data)
+        idx += 1
+    if consumed < total:
+        glyphs.append(text[consumed:])   # a row out of step — never lose the ink
+    return glyphs
 
 
 def split_row_runs(row):
@@ -590,10 +718,25 @@ class TerminalWidget(QWidget):
 
     # ── metrics/palette/font ──────────────────────────────
     def _update_metrics(self):
+        # v1.6.3 (ROADMAP task 1): KERNING OFF — the grid is fixed, and a kerned pair of
+        # glyphs is drawn closer than the two cells it occupies, which is exactly the
+        # drift the per-cell painting below exists to prevent. Set on the FONT (before the
+        # metrics are read) so every cached QFont copy and every drawText shares it.
+        self._font.setKerning(False)
         fm = QFontMetricsF(self._font)
         self._cell_w = max(1, int(math.ceil(fm.horizontalAdvance("M"))))
         self._cell_h = max(1, int(math.ceil(fm.height())))
         self._ascent = int(math.ceil(fm.ascent()))
+
+    def grid_metrics(self) -> FontGridMetrics:
+        """The live metrics of THIS canvas for `font_grid_problems()` (v1.6.3).
+
+        The gate's data source: run it with the user's `terminal_font` /
+        `terminal_font_size` (and the display scale) and the question the `mc` report
+        asked — "does this font land on the cell?" — closes either way.
+        """
+        fm = QFontMetricsF(self._font)
+        return FontGridMetrics(self._cell_w, fm.horizontalAdvance)
 
     @property
     def cell_size(self):
@@ -717,13 +860,25 @@ class TerminalWidget(QWidget):
                 painter.setPen(pen)
                 cell_x, cell_y = x * self._cell_w, y * self._cell_h
                 # the wide glyphs — the double width (the font itself draws the glyph wide);
-                # the placeholder was already skipped in split_row_runs
-                run_cells = 2 if is_wide else len(text)
+                # the placeholder was already skipped in split_row_runs.
+                # v1.6.3 (ROADMAP task 1): a NARROW run's cell count comes from its GLYPHS, not
+                # from len(text) — one cell may hold a grapheme cluster (patch 0005).
+                glyphs = [text] if is_wide else run_glyphs(row, x, text)
+                run_cells = 2 if is_wide else len(glyphs)
                 painter.fillRect(cell_x, cell_y, run_cells * self._cell_w,
                                  self._cell_h, brush)
                 if has_ink:
-                    painter.drawText(cell_x, cell_y + self._ascent, text)
-                    stats["draw_text_calls"] += 1
+                    # v1.6.3 (ROADMAP task 1): GLYPH BY GLYPH at its own cell. The pen used to
+                    # advance with the FONT's widths for the whole run while the grid reserves
+                    # ceil(advance("M")) per cell, so a font whose glyph advances differ from the
+                    # cell shifted everything after the first such glyph — a wandering column in
+                    # a box-drawing TUI (the `mc` report). The batched fillRect per run and the
+                    # per-run font/pen switch are unchanged; a WIDE glyph is one cell pair drawn
+                    # in one call (the font itself draws it wide).
+                    for k, glyph in enumerate(glyphs):
+                        painter.drawText((x + k) * self._cell_w,
+                                         cell_y + self._ascent, glyph)
+                        stats["draw_text_calls"] += 1
             stats["rows"] += 1
 
         # v1.0RC2: the selection — a semi-transparent overlay over the selected cells.
@@ -1201,14 +1356,15 @@ class TerminalWidget(QWidget):
     def wheelEvent(self, event):
         """The mouse wheel: v1.2.13 — the TUI mouse tracking first, then the scrollback.
 
-        The check order (v1.2.13, PYTE82_AUDIT.md batch C):
-        1. tscreen.mouse_tracking() — DECSET 1000/1002/1003 is on (a TUI waits for
-           mouse reports) → the wheel goes to the PTY as an xterm report: SGR
-           (\\x1b[<64;{col};{row}M, with 1006 — up=64/down=65) or X10
-           (\\x1b[M + [96|97, 32+col, 32+row]). The coordinates — the 1-based cell from
-           the mouse position, clamped to the grid; X10 additionally to the protocol limit of 223.
-           Sending — directly terminal_thread.send_data(), NOT through _send() (the
-           coordinates are session-local — the multi-input must not broadcast them).
+        The v1.6.3 routing (ROADMAP tasks 2 and 3):
+        0. `Shift` held — the LOCAL override: the application's tracking is BYPASSED and
+           the event takes the local path below, so a TUI that left DECSET 1000/1002/1003
+           and 1006 behind (a crash, a kill — nothing clears them) cannot hijack the wheel:
+           `Shift` + the wheel is the local scrollback and nothing else.
+        1. `tscreen.mouse_tracking_mode()` — the application waits for mouse reports → the
+           wheel goes to the PTY through `_send_mouse()`: SGR (\\x1b[<64;{col};{row}M with
+           1006, up=64/down=65) or X10 (\\x1b[M + [96|97, 32+col, 32+row]). The coordinates
+           are the 1-based cell, clamped to the grid and (X10) to the protocol limit of 223.
            The passthrough takes precedence over wheel_mode="off".
         2. in_alt_screen() WITHOUT tracking → a no-op (v1.2.12: a TUI owns the grid,
            the history does not scroll; the event is not consumed — the ancestor
@@ -1222,13 +1378,14 @@ class TerminalWidget(QWidget):
         The auto-return to the live line on new output is built into pyte (before_event);
         the window's _on_output calls widget.update(), so the snapshot is visible immediately.
         """
-        enabled, sgr = self.tscreen.mouse_tracking()   # v1.2.13: read on every event
-        if not enabled and self.tscreen.in_alt_screen():
-            return  # the alt screen without tracking — a no-op (v1.2.12)
-        if enabled:
+        mode, sgr = self.tscreen.mouse_tracking_mode()   # v1.6.3: read on every event
+        local = self._mouse_local_override(event)
+        if mode and not local:
             self._send_wheel_to_pty(event, sgr)
             event.accept()
             return
+        if not mode and self.tscreen.in_alt_screen():
+            return  # the alt screen without tracking — a no-op (v1.2.12)
         if self._wheel_mode == "off":
             event.ignore()
             return
@@ -1243,40 +1400,136 @@ class TerminalWidget(QWidget):
     def _send_wheel_to_pty(self, event, sgr):
         """v1.2.13: the wheel → the PTY (an xterm mouse report, SGR/X10). Never raises.
 
-        The coordinates — the 1-based cell from the mouse position (event.position() in
-        the widget coordinates), clamped to the grid [1..columns]×[1..lines]: the widget
-        can be wider/taller than the grid by the remainder of the font-metrics rounding.
-        SGR (DECSET 1006): \\x1b[<64;{col};{row}M — wheel up = button 64, down = 65
-        (ctlseqs: buttons 4/5 = the button event codes 1/2 + 64), no limits on the
-        coordinates. X10: \\x1b[M + [96|97, 32+col, 32+row] — value+32 (up=96, down=97);
-        the protocol limits the coordinates to 223 (=255−32) — they are clamped
-        (ctlseqs "Extended coordinates": the extensions only via UTF-8 1005 /
-        SGR 1006; on the ultra-wide grids of >223 columns the X10 report is inexact,
-        SGR is not).
-
-        The sending — DIRECTLY to terminal_thread.send_data(), NOT through _send(): the
-        wheel is addressed to THIS session (its coordinates), the multi-input broadcast
+        v1.6.3 (ROADMAP task 2): the encoder is the ONE `_send_mouse()` — this method is
+        the wheel's door into it (the button is the wheel's own code, the flag is a press).
+        The coordinates come from `_event_cell()` (the 1-based cell, clamped to the grid).
+        The sending is DIRECTLY to `terminal_thread.send_data()`, NOT through `_send()`:
+        the wheel is addressed to THIS session (its coordinates), the multi-input broadcast
         to all open sessions would have delivered someone else's TUI reports with foreign
         coordinates — a deliberate decision, pinned by a test.
         """
-        if self.terminal_thread is None:
-            return
+        col, row = self._event_cell(event)
         up = event.angleDelta().y() > 0
+        self._send_mouse(self.MOUSE_WHEEL_UP if up else self.MOUSE_WHEEL_DOWN,
+                         col, row, True)
+
+    # ── v1.6.3 (ROADMAP task 2): the mouse family ─────────────────────────
+    # The canvas tracked the xterm mouse modes already (v1.2.13) and answered only the
+    # WHEEL: a press, a drag and a release were eaten by the local selection with nothing
+    # sent, so a TUI that asked for the mouse received half of the protocol. The encoder
+    # is ONE method now (`_send_mouse`), and the decision "report to the application or
+    # work locally" is ONE predicate (`_mouse_reports_to_pty`).
+
+    MOUSE_BUTTON_LEFT = 0
+    MOUSE_BUTTON_MIDDLE = 1
+    MOUSE_BUTTON_RIGHT = 2
+    MOUSE_BUTTON_NONE = 3        # "no button" — the 1003 motion report
+    MOUSE_MOTION_FLAG = 32       # ctlseqs: a motion report is the button code + 32
+    MOUSE_WHEEL_UP = 64
+    MOUSE_WHEEL_DOWN = 65
+    MOUSE_X10_LIMIT = 223        # 32 + 223 = 255 — the X10 byte ceiling
+
+    def _event_cell(self, event):
+        """The 1-based (col, row) of a mouse event, clamped to the grid.
+
+        The widget can be wider/taller than the pyte grid by the rounding remainder of the
+        font metrics, so the answer is clamped to [1..columns]×[1..lines]. Shared by the
+        wheel, the press/release and the motion reports (the v1.2.13 arithmetic, unchanged).
+        """
         cols, lines = self.tscreen.columns, self.tscreen.lines
         pos = event.position()
         col = max(1, min(int(pos.x() // max(1, self._cell_w)) + 1, cols))
         row = max(1, min(int(pos.y() // max(1, self._cell_h)) + 1, lines))
+        return col, row
+
+    def _send_mouse(self, button, col, row, press: bool = True):
+        """ONE xterm mouse report → the PTY (v1.6.3) — the whole press/release/motion family.
+
+        `button` is the xterm button EVENT code with the motion flag already added by the
+        caller (0/1/2 — left/middle/right, 3 — "no button", 64/65 — the wheel). `press`
+        is True for a press AND for a motion ('M' in SGR) and False for a RELEASE (SGR:
+        'm'; X10: the code + 3 — ctlseqs encodes a release as the button plus three).
+        The coordinates are 1-based and clamped to the grid; X10 has no room beyond 223
+        and is clamped to that ceiling (32 + 223 = 255), SGR has no limit. The bytes go
+        DIRECTLY to `terminal_thread.send_data()` — never through `_send()`: the
+        coordinates are session-local, so the multi-input hub must not broadcast them
+        (the v1.2.13 rule). Never raises: a dead channel mid-teardown drops the report.
+        """
+        if self.terminal_thread is None:
+            return
+        cols, lines = self.tscreen.columns, self.tscreen.lines
+        col = max(1, min(int(col), cols))
+        row = max(1, min(int(row), lines))
+        button = max(0, min(int(button), 255 - 32))
+        _mode, sgr = self.tscreen.mouse_tracking_mode()
         if sgr:
-            data = (b"\x1b[<" + str(64 if up else 65).encode("ascii") + b";"
-                    + str(col).encode("ascii") + b";" + str(row).encode("ascii") + b"M")
+            data = (b"\x1b[<" + str(button).encode("ascii") + b";"
+                    + str(col).encode("ascii") + b";" + str(row).encode("ascii")
+                    + (b"M" if press else b"m"))
         else:
-            col = min(col, 223)   # the X10 protocol limit (see the docstring)
-            row = min(row, 223)
-            data = b"\x1b[M" + bytes([96 if up else 97, 32 + col, 32 + row])
+            code = button if press else button + 3
+            code = min(code, 255 - 32)
+            col = min(col, self.MOUSE_X10_LIMIT)
+            row = min(row, self.MOUSE_X10_LIMIT)
+            data = b"\x1b[M" + bytes([32 + code, 32 + col, 32 + row])
         try:
             self.terminal_thread.send_data(data)
         except Exception:
-            pass  # a dead channel/thread mid-teardown — the wheel silently does not go out
+            pass  # a dead channel/thread mid-teardown — the report silently does not go out
+
+    @staticmethod
+    def _xterm_button(button):
+        """A Qt mouse button → the xterm event code (None — a button we do not report)."""
+        if button == Qt.MouseButton.LeftButton:
+            return TerminalWidget.MOUSE_BUTTON_LEFT
+        if button == Qt.MouseButton.MiddleButton:
+            return TerminalWidget.MOUSE_BUTTON_MIDDLE
+        if button == Qt.MouseButton.RightButton:
+            return TerminalWidget.MOUSE_BUTTON_RIGHT
+        return None
+
+    @staticmethod
+    def _held_button(buttons):
+        """The xterm code of the button held during a motion (3 — none, the 1003 case)."""
+        if buttons & Qt.MouseButton.LeftButton:
+            return TerminalWidget.MOUSE_BUTTON_LEFT
+        if buttons & Qt.MouseButton.MiddleButton:
+            return TerminalWidget.MOUSE_BUTTON_MIDDLE
+        if buttons & Qt.MouseButton.RightButton:
+            return TerminalWidget.MOUSE_BUTTON_RIGHT
+        return TerminalWidget.MOUSE_BUTTON_NONE
+
+    def _mouse_local_override(self, event) -> bool:
+        """`Shift` held → the LOCAL path wins (v1.6.3, ROADMAP task 3).
+
+        The ONE hatch out of a TUI that went away without its own disable: the tracked
+        bits stay in `screen.mode` (xterm clears nothing either) and the LOCAL wheel must
+        never depend on the remote's honesty, so `Shift` + the wheel scrolls the local
+        scrollback and `Shift` + a drag makes the local selection. Never raises.
+        """
+        try:
+            return bool(event.modifiers() & Qt.KeyboardModifier.ShiftModifier)
+        except Exception:  # noqa: BLE001 — a synthetic event without modifiers
+            return False
+
+    def _mouse_reports_to_pty(self, event, report_motion: bool = False) -> bool:
+        """Should this mouse event go to the PTY instead of the local selection?
+
+        True when the application asked for the mouse (DECSET 1000/1002/1003), `Shift` is
+        NOT held and the mode covers the event: a press/release is reported under all three
+        modes, a motion only under 1002 (while a button is held) or 1003 (any motion). The
+        caller sends the bytes — this predicate only decides.
+        """
+        if self._mouse_local_override(event):
+            return False
+        mode, _sgr = self.tscreen.mouse_tracking_mode()
+        if not mode:
+            return False
+        if not report_motion:
+            return True
+        if mode == 1003:
+            return True
+        return mode == 1002 and bool(event.buttons())
 
     # ══════════════════════════════════════════════════════════════════════════
     # v1.3.3.4 (ROADMAP task 1): the find bar — search in the visible grid AND
@@ -1767,6 +2020,16 @@ class TerminalWidget(QWidget):
 
     # ── mouse: LMB press → drag → release (v1.0RC2; v1.2.7 — double/triple-click) ─
     def mousePressEvent(self, event):
+        # v1.6.3 (ROADMAP task 2): the application asked for the mouse → the press is
+        # REPORTED and no local selection starts. Shift (the local override) sends it to
+        # the branch below instead.
+        if self._mouse_reports_to_pty(event):
+            button = self._xterm_button(event.button())
+            if button is not None:
+                col, row = self._event_cell(event)
+                self._send_mouse(button, col, row, True)
+                event.accept()
+                return
         if event.button() == Qt.MouseButton.LeftButton:
             cell = self._cell_at(event.position().toPoint())
             # v1.2.7: the click counter (QMouseEvent carries no click-count — we count ourselves):
@@ -1798,6 +2061,16 @@ class TerminalWidget(QWidget):
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event):
+        # v1.6.3 (ROADMAP task 2): a MOTION reaches the application under 1002 (while a
+        # button is held) or 1003 (any motion) — the report is the held button + 32, and
+        # "no button" is 3. Under 1000 a motion is not part of the protocol and falls
+        # through to the local drag.
+        if self._mouse_reports_to_pty(event, report_motion=True):
+            col, row = self._event_cell(event)
+            self._send_mouse(self._held_button(event.buttons()) + self.MOUSE_MOTION_FLAG,
+                             col, row, True)
+            event.accept()
+            return
         if self._sel_anchor is not None and (event.buttons() & Qt.MouseButton.LeftButton):
             # v1.2.7: a drag AFTER a double/triple-click — the pinned end =
             # the far end of the word/line (_click_sel_end), the selection extends from it.
@@ -1811,6 +2084,15 @@ class TerminalWidget(QWidget):
         super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event):
+        # v1.6.3 (ROADMAP task 2): the release closes the report the application is
+        # waiting for (SGR 'm' / the X10 code + 3) — the local selection is never touched.
+        if self._mouse_reports_to_pty(event):
+            button = self._xterm_button(event.button())
+            if button is not None:
+                col, row = self._event_cell(event)
+                self._send_mouse(button, col, row, False)
+                event.accept()
+                return
         if event.button() == Qt.MouseButton.LeftButton and self._sel_anchor is not None:
             if self._click_count >= 2:
                 # v1.2.7: a release after a double/triple-click does NOT wipe

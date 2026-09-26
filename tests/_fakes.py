@@ -435,19 +435,37 @@ class FakeSftpClient:
             return
         raise IOError("No such file")
 
+    def stat(self, path):
+        """v1.6.3: the address bar's resolution check — a directory, a file, or nothing.
+
+        The REALPATH itself never fails in this fake (it is a pure normpath), so `stat` is
+        what models the "No such file" a real server answers for a nonexistent path.
+        """
+        self._pause()
+        path = _norm(path)
+        if path in self._fs.dirs:
+            return FakeSftpAttr(posixpath.basename(path) or "/", True, 0, 0)
+        if path in self._fs.files:
+            return FakeSftpAttr(posixpath.basename(path), False,
+                                len(self._fs.files[path]), self._fs.mtimes.get(path, 0))
+        raise IOError("No such file")
+
     def normalize(self, path):
         """The REALPATH of "." is the HOME directory (paramiko's SFTPClient.normalize).
 
         v1.5.7: this is what `SftpWorker._expand_home()` asks for, so a scenario can read a
         `~/…` path of the fake server — set `client.home` to the home the test wants.
+        v1.6.3: the answer is a real NORMALIZATION (`posixpath.normpath`), so a `.`/`..`
+        component is collapsed like the real REALPATH does — the address bar navigates
+        through this answer.
         """
         self._pause()
         home = getattr(self, "home", "/") or "/"
         if path in (".", "", None):
             return home
         if str(path).startswith("/"):
-            return _norm(str(path))
-        return _norm(posixpath.join(home, str(path)))
+            return posixpath.normpath(str(path))
+        return posixpath.normpath(posixpath.join(home, str(path)))
 
     def get_channel(self):
         return self  # "channel" = the client itself (the closed attribute for the worker check)
@@ -486,6 +504,8 @@ def wire_worker(worker, log):
     worker.task_cancelled.connect(lambda tid, k: log.add("cancelled", tid, k))
     # v1.3.1: the viewer's read answer (task_id, remote_path, bytes)
     worker.read_ready.connect(lambda tid, p, data: log.add("read", tid, p, data))
+    # v1.6.3: the address bar's server-side path resolution (task_id, requested, resolved)
+    worker.normalize_ready.connect(lambda tid, q, r: log.add("normalize", tid, q, r))
 
 
 # ════════════════════════════════════════════════════════════
