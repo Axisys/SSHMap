@@ -788,5 +788,16 @@
   "settings.appearance.density": "Плотность карточек:",
   "settings.appearance.density.normal": "Обычная",
   "settings.appearance.density.compact": "Компактная",
-  "settings.appearance.density.tooltip": "Компактная скрывает информационный блок и метку окружения у каждой карточки — для плотной карты из многих серверов."
+  "settings.appearance.density.tooltip": "Компактная скрывает информационный блок и метку окружения у каждой карточки — для плотной карты из многих серверов.",
+  "dialog.unmanaged": "Неуправляемый сервер (нет доступа по SSH)",
+  "dialog.unmanaged.tooltip": "Учётные данные не сохраняются, карта никогда не опрашивается, а в её меню нет команд SSH.",
+  "dialog.unmanaged_ping": "Разрешить проверку доступности (ping)",
+  "dialog.unmanaged_ping.tooltip": "Один ICMP-запрос по требованию из меню карты. Ответ — ручная заметка, а не статус.",
+  "node.unmanaged": "нет ssh",
+  "node.unmanaged.tooltip": "Не администрируется отсюда: нет доступа по SSH, не отслеживается.",
+  "node.unmanaged.status": "не отслеживается",
+  "node.unmanaged.ping_ok": "Ручная проверка доступности: {host} ответил",
+  "node.unmanaged.ping_failed": "Ручная проверка доступности: {host} не ответил",
+  "unmanaged.blocked": "«{action}» требует входа по SSH — эта карта неуправляемая.",
+  "status.unmanaged_blocked": "Эта карта неуправляемая — нет доступа по SSH"
 }

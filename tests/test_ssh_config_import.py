@@ -667,7 +667,7 @@ print("== §9 the release state ==")
 from _common import EXPECTED_APP_VERSION, EXPECTED_I18N_KEYS  # noqa: E402
 
 check("§9 the version pin is the version this test file describes",
-      EXPECTED_APP_VERSION == "1.6.4", EXPECTED_APP_VERSION)
+      EXPECTED_APP_VERSION == "1.6.5", EXPECTED_APP_VERSION)
 check("§9 the key pin counts the SHIPPED release (545 + 21 of v1.4.1 + 4 of v1.4.2 + 16 of v1.4.3"
       " — v1.4.4 adds none: motion is behaviour only; v1.4.5 adds 17: the panel/grid UI;"
       " v1.4.6 adds 9: the sidebar.list.* column headers + the minimap title band;"
@@ -679,8 +679,11 @@ check("§9 the key pin counts the SHIPPED release (545 + 21 of v1.4.1 + 4 of v1.
       " v1.6.2 adds 4: the cursor shape and its three values; v1.6.3 adds 4: the address "
       "bar's placeholder and its bad-path sentence and the cwd-follow switch with its "
       "tooltip; v1.6.4 adds 3: the activity mark's tooltip, the zoom's status line and the "
-      "marked-secret tooltip of the command history)",
-      EXPECTED_I18N_KEYS == 789, str(EXPECTED_I18N_KEYS))
+      "marked-secret tooltip of the command history; v1.6.5 adds 11: the unmanaged card's "
+      "two dialog checkboxes with their tooltips, its band mark and the card tooltip, the "
+      "one 'not monitored' caption the table and the plaque share, the two lines of a "
+      "manual reachability check and the gate's refusal with its status-bar sentence)",
+      EXPECTED_I18N_KEYS == 800, str(EXPECTED_I18N_KEYS))
 check_i18n_parity(load_i18n_langs(ROOT))
 check_release_state(ROOT)
 for _code in i18n_lang_codes(ROOT):

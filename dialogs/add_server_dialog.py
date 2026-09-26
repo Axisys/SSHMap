@@ -16,10 +16,18 @@ try:  # v1.2.5: central theme (palette/radii/fonts — ui/theme.py)
 except ImportError:
     from ui import theme
 
+try:  # v1.6.5 (ROADMAP task 4): the ONE gate of an unmanaged card
+    from ..ui.unmanaged import refusal_text as _refusal_text
+except ImportError:
+    try:
+        from ui.unmanaged import refusal_text as _refusal_text
+    except ImportError:  # flat layout without ui/unmanaged — the dialog still opens
+        _refusal_text = None
+
 from PySide6.QtWidgets import (
     QDialog, QFormLayout, QLineEdit, QPushButton, QSpinBox,
     QFileDialog, QDialogButtonBox, QHBoxLayout, QVBoxLayout,
-    QLabel, QComboBox,
+    QLabel, QComboBox, QCheckBox,
 )
 
 
@@ -55,6 +63,14 @@ class AddServerDialog(QDialog):
         # of the server would reset the configured entries (ServerData.quick_launch).
         self._quick_launch_entries = [dict(e) for e in sanitize_quick_launch(
             getattr(edit_data, "quick_launch", None))] if edit_data is not None else []
+        # v1.6.5 (ROADMAP task 1): the KNOB of the unmanaged card. The checkbox owns the
+        # visible state; `_credential_stash` keeps what the disabled credential fields held
+        # so that unchecking the box really gives them BACK (clearing without a stash would
+        # silently destroy what the user had already typed).
+        self._credential_stash: Optional[dict] = None
+        # v1.6.5 (ROADMAP task 5): the OPT-IN ICMP check of an unmanaged card — it is only
+        # meaningful while the box above is ticked, and it is OFF for a new card.
+        self._unmanaged_ping_enabled = False
         
         # ── Profile data (loaded lazily, cached in instance) ──
         # Each entry: {"id": str, "name": str} — password fetched from keyring on demand
@@ -155,6 +171,30 @@ class AddServerDialog(QDialog):
 
         layout.addRow(self.t("server.alias"), self.alias)
         layout.addRow(self.t("server.host"), self.host)
+
+        # v1.6.5 (ROADMAP tasks 1/5): the KIND of the card and its ONE opt-in.
+        # "Unmanaged server (no SSH access)": the card describes a box this user does not
+        # administer, so the credential fields below are disabled AND cleared, the keyring
+        # is never written for it and no SSH verb reaches it (the gate of `ui/unmanaged.py`).
+        # The second box is the reachability check — DEFAULT OFF, and meaningful only while
+        # the first one is ticked (with it off no network call happens for the card at all).
+        self.unmanaged = QCheckBox(
+            self.t("dialog.unmanaged") if self._i18n_available
+            else "Unmanaged server (no SSH access)")
+        self.unmanaged.setToolTip(
+            self.t("dialog.unmanaged.tooltip") if self._i18n_available
+            else "No credentials are stored, the card is never probed and its menu has no SSH verbs.")
+        self.unmanaged.toggled.connect(self._on_unmanaged_toggled)
+        layout.addRow("", self.unmanaged)
+
+        self.unmanaged_ping = QCheckBox(
+            self.t("dialog.unmanaged_ping") if self._i18n_available
+            else "Allow a reachability check (ping)")
+        self.unmanaged_ping.setToolTip(
+            self.t("dialog.unmanaged_ping.tooltip") if self._i18n_available
+            else "One ICMP ping, on request, from the card's menu. The answer is a manual note — never a status.")
+        layout.addRow("", self.unmanaged_ping)
+
         layout.addRow(self.t("server.user"), self.user)
         layout.addRow(self.t("server.password"), self.password)
         layout.addRow(self.t("server.port"), self.port)
@@ -162,6 +202,7 @@ class AddServerDialog(QDialog):
         # Key path button (UI polish: emojis removed from the i18n server.key value)
         key_btn = QPushButton(self.t("server.key"))
         key_btn.clicked.connect(self._select_key_file)
+        self.key_btn = key_btn   # v1.6.5: the credential family is disabled as ONE group
         key_hbox = QHBoxLayout()
         key_hbox.addWidget(self.key_path)
         key_hbox.addWidget(key_btn)
@@ -204,6 +245,85 @@ class AddServerDialog(QDialog):
         btn_row.addWidget(btns)
         main_layout.addLayout(btn_row)
 
+        # v1.6.5 (ROADMAP tasks 1/5): the FORM opens in the state the two checkboxes say —
+        # a NEW card is managed, so the credential family is editable and the opt-in ping is
+        # disabled (it only means something for an unmanaged card). Applied ONCE here, after
+        # every widget the state touches exists; `_load_data()` re-applies it for an edit.
+        self._apply_unmanaged_state(self.unmanaged.isChecked())
+
+    def _on_unmanaged_toggled(self, checked: bool) -> None:
+        """v1.6.5 (ROADMAP task 1): the kind of the card changed.
+
+        Ticking the box TAKES the credentials away — the four fields are cleared (they
+        would otherwise be written to the keyring by the save path) and kept in
+        `_credential_stash`; unticking it GIVES THEM BACK, so a user who ticked the box by
+        accident loses nothing. The disabling itself is `_apply_unmanaged_state()`.
+        """
+        checked = bool(checked)
+        if checked:
+            self._credential_stash = {
+                "user": self.user.text(),
+                "password": self.password.text(),
+                "key_path": self.key_path.text(),
+                "port": self.port.value(),
+            }
+            self.user.clear()
+            self.password.clear()
+            self.key_path.clear()
+            self.port.setValue(22)
+        elif self._credential_stash is not None:
+            stash = self._credential_stash
+            self._credential_stash = None
+            self.user.setText(stash.get("user", ""))
+            self.password.setText(stash.get("password", ""))
+            self.key_path.setText(stash.get("key_path", ""))
+            try:
+                self.port.setValue(int(stash.get("port", 22) or 22))
+            except (TypeError, ValueError):
+                self.port.setValue(22)
+        self._apply_unmanaged_state(checked)
+
+    def _apply_unmanaged_state(self, checked: bool) -> None:
+        """Reflect the flag in the FORM: the credential family off, the opt-in usable.
+
+        The rule is ONE state for the whole credential family (user / password / port /
+        private key + the key picker) plus the profile selector, which exists to auto-fill
+        exactly those two fields; the reachability checkbox is enabled by the flag and
+        starts OFF, and the dialog's own "Connect via SSH" door is closed with the SAME
+        refusal sentence the menus use (the gate's ONE wording).
+        """
+        for widget in (getattr(self, "user", None), getattr(self, "password", None),
+                       getattr(self, "port", None), getattr(self, "key_path", None),
+                       getattr(self, "key_btn", None), getattr(self, "profile_combo", None)):
+            if widget is None:
+                continue
+            try:
+                widget.setEnabled(not checked)
+            except RuntimeError:
+                pass  # Qt teardown — the widget is already destroyed
+        ping_box = getattr(self, "unmanaged_ping", None)
+        if ping_box is not None:
+            try:
+                ping_box.setEnabled(checked)
+                if not checked:
+                    ping_box.setChecked(False)   # a managed card has no opt-in to grant
+            except RuntimeError:
+                pass
+        button = getattr(self, "ssh_connect_btn", None)
+        if button is not None:
+            label = self.t("ssh.connect") if self._i18n_available else "Connect via SSH"
+            try:
+                button.setEnabled(not checked)
+                button.setToolTip(self._refusal(label) if checked else "")
+            except RuntimeError:
+                pass
+
+    def _refusal(self, label: str) -> str:
+        """The refusal sentence of a closed door (the gate's ONE template; "" — no i18n)."""
+        if _refusal_text is None:
+            return ""
+        return _refusal_text(self.t, label)
+
     def _on_ok(self):
         """Validate before closing: host is required."""
         if not self.host.text().strip():
@@ -229,6 +349,11 @@ class AddServerDialog(QDialog):
         """When user selects a profile from the combo → auto-fill user + password."""
         if index <= 0 or not self._profiles:
             return  # manual-input item selected, keep current values
+        # v1.6.5 (ROADMAP task 1): an unmanaged card has no credentials to fill in — the
+        # selector is disabled for it, and this guard keeps a programmatic setCurrentIndex
+        # from sneaking a login into the two fields.
+        if self.unmanaged.isChecked():
+            return
         profile = self._profiles[index - 1]  # offset by 1 because of the manual-input item
         self.user.setText(profile["user"])
         # Fetch password from keyring (not stored in plain dict)
@@ -302,6 +427,16 @@ class AddServerDialog(QDialog):
         self.comment.setText(d.comment)
         self.tags_edit.setText(", ".join(getattr(d, "tags", None) or []))  # v0.9.4
 
+        # v1.6.5 (ROADMAP tasks 1/5): the kind of the card. The box is set BEFORE the state
+        # is applied (a programmatic setChecked fires `toggled`, which would stash and clear
+        # the credentials that `_load_data` has just put in — so the stash is discarded and
+        # the state applied ONCE, explicitly, after the two flags are in).
+        self.unmanaged.setChecked(bool(getattr(d, "unmanaged", False)))
+        self._credential_stash = None
+        self.unmanaged_ping.setChecked(bool(getattr(d, "unmanaged", False))
+                                      and bool(getattr(d, "unmanaged_ping", False)))
+        self._apply_unmanaged_state(self.unmanaged.isChecked())
+
         # Try to match current user against loaded profiles and auto-select
         self._ensure_profiles_loaded()
         for i, p in enumerate(self._profiles):
@@ -311,6 +446,12 @@ class AddServerDialog(QDialog):
 
     def get_data(self) -> ServerData:
         sid = self._data.id if self._data else str(uuid.uuid4())[:8]
+        # v1.6.5 (ROADMAP tasks 1/5): an UNMANAGED card carries NO credentials and NO port
+        # of its own, whatever the widgets happen to hold (they are disabled and cleared,
+        # but a programmatic path must not be able to sneak a login into the model — the
+        # save path writes `node.data.password` into the keyring). The opt-in ICMP flag is
+        # read only for such a card: a managed one has no exception to grant.
+        unmanaged = bool(self.unmanaged.isChecked())
         return ServerData(
             id=sid,
             # v1.2.10 (manual AUDIT #3): validation checks non-emptiness AFTER strip, while the value
@@ -318,10 +459,10 @@ class AddServerDialog(QDialog):
             # (terminal_page.py passes host as-is); the same fix also closes the SystemInfoCollector path.
             alias=self.alias.text().strip() or "Server",
             host=self.host.text().strip(),
-            user=self.user.text().strip(),
-            password=self.password.text(),  # plaintext from UI (server credentials are per-server)
-            key_path=self.key_path.text(),
-            ssh_port=self.port.value(),
+            user="" if unmanaged else self.user.text().strip(),
+            password="" if unmanaged else self.password.text(),  # plaintext from UI (server credentials are per-server)
+            key_path="" if unmanaged else self.key_path.text(),
+            ssh_port=22 if unmanaged else self.port.value(),
             x=self._data.x if self._data else 0,
             y=self._data.y if self._data else 0,
             # v1.0-fix (audit #1): collapsed was not passed earlier — in a new ServerData
@@ -337,6 +478,8 @@ class AddServerDialog(QDialog):
             comment=self.comment.text(),
             tags=self._parse_tags(),  # v0.9.4
             quick_launch=[dict(e) for e in self._quick_launch_entries],  # v1.0RC4
+            unmanaged=unmanaged,  # v1.6.5
+            unmanaged_ping=bool(unmanaged and self.unmanaged_ping.isChecked()),  # v1.6.5
         )
 
     def _parse_tags(self) -> list:

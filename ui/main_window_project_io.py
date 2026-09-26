@@ -29,6 +29,11 @@ try:
 except ImportError:
     from models.server import server_data_from_dict
 
+try:  # v1.6.5 (ROADMAP task 1): the unmanaged card owns no credentials — the keyring
+    from ..models.server import is_unmanaged as _is_unmanaged  # is never written for it
+except ImportError:
+    from models.server import is_unmanaged as _is_unmanaged
+
 try:
     from ..graphics.node_group import NodeGroup
     from ..graphics.connection_arrow import DEFAULT_CONNECTION_TYPE
@@ -134,7 +139,10 @@ class ProjectIOMixin:
         if checker is None:
             return
         try:
-            checker.set_skip_ids(self._emulated_statuses)
+            # v1.6.5 (ROADMAP task 3): the checker's skip set is ONE question —
+            # `_status_skip_ids()` answers it (the emulated ids AND every unmanaged card), so
+            # the demo's emulation and the "never probe a neighbour" rule cannot drift apart.
+            checker.set_skip_ids(self._status_skip_ids())
         except (AttributeError, RuntimeError):
             pass  # a stripped checker / Qt teardown — the emulation is a label, not a crash
 
@@ -527,6 +535,11 @@ class ProjectIOMixin:
                 from services.credential_manager import get_credential_manager as _get_cm
                 cm = _get_cm()
                 for node in list(self.scene.nodes()):
+                    # v1.6.5 (ROADMAP task 1): an UNMANAGED card has no credentials — the
+                    # whole credential family is closed for it, so a keyring entry that a
+                    # previous version left behind is not read back into it either.
+                    if _is_unmanaged(node.data):
+                        continue
                     sid = getattr(node.data, 'id', '')
                     cached_pw = cm.load_password(sid)
                     if cached_pw:
@@ -776,7 +789,12 @@ class ProjectIOMixin:
             for node in list(self.scene.nodes()):
                 pw = getattr(node.data, 'password', '')
                 sid = getattr(node.data, 'id', '')
-                if pw:  # only save non-empty passwords to keyring
+                # v1.6.5 (ROADMAP task 1): the keyring is NEVER written for an UNMANAGED
+                # card. The dialog clears the field for it, so this guard is the second
+                # half of the rule — a password that reached the model by any other route
+                # (a hand-edited file, an older build, a programmatic path) still does not
+                # leave the process.
+                if pw and not _is_unmanaged(node.data):  # only save non-empty passwords to keyring
                     saved_to_store = cm.is_available and bool(cm.save_password(sid, pw))
                     if saved_to_store:
                         node.data.password = ""  # clear in memory — the password is in the store

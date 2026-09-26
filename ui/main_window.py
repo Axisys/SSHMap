@@ -40,6 +40,16 @@ except ImportError:
     from dialogs.bulk_edit_dialog import BulkEditDialog
     from dialogs.arrange_group_dialog import ArrangeGroupDialog
 
+try:  # v1.6.5 (ROADMAP tasks 3/4): the ONE predicate and the ONE gate of an unmanaged card
+    from ..models.server import is_unmanaged as _is_unmanaged
+    from ..ui import unmanaged as _unmanaged_gate
+except ImportError:  # flat launch from the project root
+    from models.server import is_unmanaged as _is_unmanaged
+    try:
+        from ui import unmanaged as _unmanaged_gate
+    except ImportError:  # flat layout without ui/unmanaged — nothing is ever gated
+        _unmanaged_gate = None
+
 # v1.1.4: AddServerDialog/ConnectionDialog/SSHConnectDialog/SSHTerminalWindow/_ext_term —
 # TEST SUBSTITUTION POINTS (MW.<name> = Fake): methods moved to mixins
 # (NodeOpsMixin._add_server/_add_connection, SshMixin._run_ssh_connect/
@@ -848,6 +858,55 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
 
     # ── v0.7.1: node statuses ────────────────────────────────
 
+    def _status_skip_ids(self) -> set:
+        """The ids a status round must NEVER probe — the ONE source of the skip set (v1.6.5).
+
+        Two families meet here and they are the same RULE ("this node has no measurement to
+        make"): the demo map's EMULATED nodes (v1.5 — their status is declared by
+        `storage/example_project.py`, not measured) and every UNMANAGED card (v1.6.5 — a
+        server this user does not administer has no login to probe with, and painting it
+        `offline` would be a claim about a measurement nobody can make).
+
+        `StatusChecker.set_skip_ids()` filters in its `_subset()`, so the periodic timer, the
+        round a project load starts and the on-demand "Check statuses now" all obey ONE
+        filter without a second rule. Reading the SCENE is what makes a card switched to
+        unmanaged (or back) take effect on the next round: `_sync_status_targets()` re-installs
+        the set on every project load and after every node edit.
+        """
+        ids = {str(sid) for sid in (getattr(self, "_emulated_statuses", None) or {})}
+        try:
+            ids |= {str(n.data.id) for n in self.scene.nodes() if _is_unmanaged(n.data)}
+        except (AttributeError, RuntimeError):
+            pass  # no scene yet / Qt teardown — the emulated half is still correct
+        return ids
+
+    def _refuse_unmanaged(self, target, label_key: str = "") -> bool:
+        """The ONE programmatic gate: True — the action was refused AND the user was told.
+
+        Every entry point that cannot work without a login asks THIS question first (the SSH
+        family, the external terminal, the info collection, the status round, the
+        reachability report and a quick-launch COMMAND). `target` is a `ServerNode` or a bare
+        `ServerData`; `label_key` names the verb so the sentence can say WHICH one was
+        refused, and without it the generic `status.unmanaged_blocked` is used.
+
+        The two MENU builders do not call this: they ask `ui/unmanaged.action_blocked()`
+        while building and DISABLE the row, so the function-level gate is the second half of
+        a single policy (a disabled row explains itself up front; a programmatic call — a
+        hotkey, the palette, a double-click — reaches no row and must answer in the status
+        bar instead).
+        """
+        if not _is_unmanaged(target):
+            return False
+        try:
+            if label_key:
+                text = self.t("unmanaged.blocked", action=self.t(label_key))
+            else:
+                text = self.t("status.unmanaged_blocked")
+            self.statusBar().showMessage(text, 5000)
+        except (RuntimeError, AttributeError):
+            pass  # Qt teardown / a stripped window — the refusal itself already happened
+        return True
+
     def _sync_status_targets(self):
         """Update the StatusChecker target list to match the current scene nodes.
 
@@ -873,7 +932,10 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
             # installed by `_open_example_map()` before the load and cleared by every
             # ordinary load / new project / save). `_set_emulated_statuses` owns the write;
             # this call repeats it so a checker built AFTER the state cannot miss it.
-            checker.set_skip_ids(getattr(self, "_emulated_statuses", None) or ())
+            # v1.6.5 (ROADMAP task 3): the set is `_status_skip_ids()` — the emulated ids AND
+            # every unmanaged card, computed from the live scene, so a card switched to
+            # unmanaged by an edit stops being a target from the very next round.
+            checker.set_skip_ids(self._status_skip_ids())
             # v1.4rc2 (plugin foundation, rc2): the SAME pass feeds the plugin registry —
             # a `status_probe` / `run_on_nodes` hook sees exactly the nodes the map holds
             # (narrowed to {id, alias, host, port, user} by the manager, PLUGINS.md §5).
@@ -4508,11 +4570,46 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
             # v1.6 (ROADMAP tasks 1/6): the two selection-driven Edit items follow what is
             # selected — "Bulk edit" needs a card, "Arrange group members" needs a group.
             self._sync_bulk_actions()
+            # v1.6.5 (ROADMAP task 4): and so do the permanent Edit items of the SSH
+            # family — an unmanaged card disables them in place.
+            self._sync_gated_actions()
         except RuntimeError:
             # PySide6/Qt teardown on process exit: the scene's C++ object is already
             # destroyed, yet the selectionChanged signal reached a live Python slot.
             # A normal state — silently ignore it (otherwise a traceback in the console).
             pass
+
+    def _sync_gated_actions(self):
+        """Disable the Edit-menu verbs an UNMANAGED selection cannot serve (v1.6.5).
+
+        The permanent Edit items of the SSH family ("Connect via SSH", "Gather information",
+        "Check statuses now", "Why is it offline?") are the HOTKEY targets of the registry,
+        so they live for the whole session and cannot be rebuilt per node the way a context
+        menu is: they are enabled/disabled HERE, at the ONE moment the selection is synced —
+        `ui/unmanaged.REGISTRY_ACTION_IDS` names them and the sentence is the gate's own, so
+        a row disabled in this menu reads exactly like the one disabled in a context menu.
+        A selection of several cards is left alone: the batch paths filter the unmanaged
+        members themselves, and refusing the whole selection over one neighbour would be
+        wrong. Never raises — a selection change can arrive during Qt teardown.
+        """
+        if _unmanaged_gate is None:
+            return
+        try:
+            nodes = self.selected_nodes()
+        except (AttributeError, RuntimeError):
+            return
+        target = nodes[0] if len(nodes) == 1 else None
+        targets = getattr(self, "_hotkey_targets", None) or {}
+        for action_id in _unmanaged_gate.REGISTRY_ACTION_IDS:
+            blocked = target is not None and _unmanaged_gate.blocked_registry_action(action_id, target)
+            for act in list(targets.get(action_id, ()) or ()):
+                try:
+                    act.setEnabled(not blocked)
+                    act.setToolTip(
+                        _unmanaged_gate.refusal_text(self.t, act.text().replace("&", "").strip())
+                        if blocked else "")
+                except (RuntimeError, AttributeError):
+                    pass  # Qt teardown / a QShortcut without a text — the row is cosmetic
 
     def _sync_bulk_actions(self):
         """Enable the two selection-driven v1.6 Edit items (the `act_backups` pattern).

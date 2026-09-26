@@ -47,12 +47,48 @@ class ServerData:
     # VERSION_FORMAT stays "0.9": an optional field with a default is not a schema change
     # (the `collapsed` / `tags` / `quick_launch` precedent).
     info_collected_at: float = 0.0
+    # v1.6.5 (ROADMAP task 1): the NEIGHBOUR on the map — a card for a server this user
+    # does NOT administer. The flag is the ONE predicate of the whole release: the card
+    # carries no credentials (user / password / key_path / ssh_port are cleared and the
+    # keyring is never written for it), no SSH verb reaches it, no probe round ever touches
+    # it and it is painted with an honest "not monitored" mark instead of a status. Written
+    # through `asdict()` like `collapsed`, so an old project loads as fully managed and an
+    # older application version simply ignores the unknown key.
+    unmanaged: bool = False
+    # v1.6.5 (ROADMAP task 5): the OPT-IN reachability check of such a card — one ICMP
+    # ping, on request, never a TCP/SSH probe. DEFAULT OFF: with it off no network call is
+    # ever made for the card. Per-NODE data (the `collapsed` precedent) — deliberately NOT
+    # a `config.json` key, so the settings hub's `collect()` does not move.
+    unmanaged_ping: bool = False
 
     def __post_init__(self):
         if self.tags is None:
             self.tags = []
         if self.quick_launch is None:
             self.quick_launch = []
+
+
+def is_unmanaged(target) -> bool:
+    """Is this card an UNMANAGED one — a server this user does not administer? (v1.6.5)
+
+    The ONE predicate of the release (ROADMAP task 4): every SSH verb, the info
+    collection, the status round, the reachability report and the quick-launch
+    `command` entries ask THIS question, so a single flag can never be honoured in one
+    place and forgotten in another. PURE and duck-typed: a `ServerNode` (which carries
+    `.data`) and a bare `ServerData` both answer, and anything else answers False.
+    """
+    return bool(getattr(getattr(target, "data", target), "unmanaged", False))
+
+
+def unmanaged_ping_allowed(target) -> bool:
+    """May an unmanaged card be pinged on request? (v1.6.5, ROADMAP task 5)
+
+    The OPT-IN half of the flag, and the SECOND question of the gate: `is_unmanaged()`
+    refuses an action, this one asks whether the ONE exception the release grants — a
+    reachability check that is pure ICMP, never a TCP/SSH probe — was switched on for
+    this card. DEFAULT OFF, so a new unmanaged card makes no network call at all.
+    """
+    return bool(getattr(getattr(target, "data", target), "unmanaged_ping", False))
 
 
 def info_collected_epoch(value) -> float:
@@ -142,6 +178,11 @@ def server_data_from_dict(raw: dict) -> ServerData:
     # v0.8.4 (former DESIGN.md §D): missing key → expanded node; coercion to bool
     # in case of a corrupted value (0/1/strings from external JSON edits).
     data['collapsed'] = bool(data.get('collapsed') or False)
+    # v1.6.5 (ROADMAP tasks 1/5): the two additive flags of the UNMANAGED card. A project
+    # written before the release carries neither key, so it loads as a fully MANAGED map;
+    # a hand-edited junk value is coerced by the same bool() rule as `collapsed`.
+    data['unmanaged'] = bool(data.get('unmanaged') or False)
+    data['unmanaged_ping'] = bool(data.get('unmanaged_ping') or False)
     # v0.9.4: tags — missing in old JSON → empty list; coerce to list[str]
     raw_tags = data.get('tags')
     if not isinstance(raw_tags, (list, tuple)):

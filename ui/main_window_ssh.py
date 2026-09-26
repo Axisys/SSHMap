@@ -63,6 +63,11 @@ try:  # v1.1.4: shared seam for swapping the facade module's globals (see mixin_
 except ImportError:
     from mixin_support import host_attr
 
+try:  # v1.6.5 (ROADMAP task 4): the ONE predicate of the unmanaged gate
+    from ..models.server import is_unmanaged as _is_unmanaged
+except ImportError:  # flat launch from the project root
+    from models.server import is_unmanaged as _is_unmanaged
+
 try:  # v1.2.3 (ROADMAP v1.2.3): multi-input — highlight of the session containers
     from ..modules.multi_input import apply_container_highlight as _apply_multi_highlight
 except ImportError:
@@ -81,6 +86,11 @@ class SshMixin:
         if not node:
             QMessageBox.information(self, self.t("msg.info_title"),
                                   self.t("msg.select_server_ssh"))
+            return
+        # v1.6.5 (ROADMAP task 4): an UNMANAGED card has no login to connect with — the
+        # gate refuses where the user would otherwise meet a login dialog for a host
+        # nobody administers. ONE helper, asked by every SSH entry point below it.
+        if self._refuse_unmanaged(node, "ctx.ssh_connect"):
             return
         try:
             self._run_ssh_connect(node)
@@ -221,7 +231,14 @@ class SshMixin:
         node-window reuse does not apply; applied WITHOUT a restart: new
         sessions go to the chosen mode, open windows/dock keep living as they
         are until closed.
+
+        v1.6.5 (ROADMAP task 4): the terminal (and with it the SFTP tab of the same
+        session) is an SSH verb — an UNMANAGED card is refused HERE, which is the one
+        choke point every terminal path (connect, quick launch, split, the dock) goes
+        through, so no caller can open a shell on a host nobody administers.
         """
+        if self._refuse_unmanaged(node, "ctx.ssh_connect"):
+            return None
         try:
             from modules.ssh_terminal import load_terminal_settings as _load_ts
         except ImportError:
@@ -338,7 +355,13 @@ class SshMixin:
         the password from the properties fields, so the user does not retype it).
         v1.0RC4: initial_command — the first command for the terminal (quick
         launch with a command and no keyring password).
+
+        v1.6.5 (ROADMAP task 4): the second door of the SSH family — the properties
+        dialog's "Connect via SSH" and the double-click-to-connect mode both end here, so
+        the unmanaged gate is asked once more before a login dialog is built.
         """
+        if self._refuse_unmanaged(node, "ctx.ssh_connect"):
+            return
         dlg_cls = host_attr(self, "SSHConnectDialog")
         if dlg_cls is None:
             raise RuntimeError("SSHConnectDialog is not available in the MainWindow module")
@@ -392,7 +415,13 @@ class SshMixin:
 
         auto=True — a quiet auto-start after a successful SSH connect (no error
         messages, only the status bar).
+
+        v1.6.5 (ROADMAP task 4): the collector authenticates over SSH, so the gate is
+        asked here too — the single-node path of the family (the batch filters its own
+        scope) and the only one a caller outside the connect path can reach.
         """
+        if self._refuse_unmanaged(node, "ctx.collect_info"):
+            return
         try:
             from services.system_info_collector import SystemInfoCollector
         except ImportError as e:
@@ -515,6 +544,16 @@ class SshMixin:
             except TypeError:
                 targets = self._collect_info_scope(node)
         targets = [n for n in targets if getattr(n, "data", None) is not None]
+        # v1.6.5 (ROADMAP task 4): the hardware facts are collected OVER SSH, so an
+        # unmanaged card leaves the scope here. The gate is the ONE predicate, applied to
+        # the BATCH rather than to each node: "gather information for everything" collects
+        # from every card it can and never reports a neighbour as a failure — and a scope
+        # that held nothing else is refused in words instead of silently doing nothing.
+        allowed = [n for n in targets if not _is_unmanaged(n.data)]
+        if targets and not allowed:
+            self._refuse_unmanaged(targets[0], "ctx.collect_info")
+            return 0
+        targets = allowed
         if not targets:
             try:
                 self.statusBar().showMessage(self.t("status.info_batch_none"), 5000)
@@ -692,12 +731,18 @@ class SshMixin:
 
         The password is NOT passed (visible in ps) — the OS's ssh will ask for
         it itself / key auth.
+
+        v1.6.5 (ROADMAP task 4): the icon fields (user / port / private key) of an
+        UNMANAGED card are empty by construction and the host is not administered from
+        here, so the external terminal is refused by the same gate as the built-in one.
         """
         if node is None:
             node = self.scene.get_selected_node()
         if not node:
             QMessageBox.information(self, self.t("msg.info_title"),
                                   self.t("msg.select_server_ssh"))
+            return
+        if self._refuse_unmanaged(node, "ctx.ssh_external"):
             return
         ext_term = host_attr(self, "_ext_term")
         if ext_term is None:
@@ -769,6 +814,10 @@ class SshMixin:
 
         type="url"     -> the default browser (webbrowser);
         type="command" -> the first command in the server's SSH terminal.
+
+        v1.6.5 (ROADMAP task 4): a COMMAND entry is an SSH verb and is refused for an
+        unmanaged card — a URL entry still opens, because the browser needs no shell on
+        that host (the plan's own exception).
         """
         if node is None or not isinstance(entry, dict):
             return
@@ -776,6 +825,8 @@ class SshMixin:
         value = str(entry.get("value", "")).strip()
         name = str(entry.get("name") or value)
         if not value:
+            return
+        if etype == "command" and self._refuse_unmanaged(node, "ctx.quick_launch"):
             return
         try:
             if etype == "command":
@@ -821,7 +872,13 @@ class SshMixin:
         opens directly, without a dialog; no credentials at all — the regular
         SSH dialog, and after the connect the same command is sent to the
         terminal (initial_command).
+
+        v1.6.5 (ROADMAP task 4): the second half of the quick-launch gate — the command
+        can also be reached through this method directly, and it is the SSH terminal it
+        would be sent to.
         """
+        if self._refuse_unmanaged(node, "ctx.quick_launch"):
+            return
         data = node.data
         pwd = ""
         try:

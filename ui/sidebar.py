@@ -59,6 +59,15 @@ except ImportError:
     except ImportError:  # flat layout without ui/status_shape — the v1.4.x round dot
         status_shape = None
 
+try:  # v1.6.5 (ROADMAP task 6): the ONE predicate behind the Status cell of the table
+    from ..models.server import is_unmanaged as _is_unmanaged
+except ImportError:
+    try:
+        from models.server import is_unmanaged as _is_unmanaged
+    except ImportError:  # flat layout — every row is a managed one
+        def _is_unmanaged(target) -> bool:
+            return False
+
 try:  # v1.5rc4 (ROADMAP task 5): the ONE visible-focus indicator of the keyboard domains
     from . import focus_ring
 except ImportError:
@@ -66,6 +75,14 @@ except ImportError:
         from ui import focus_ring
     except ImportError:  # flat layout without ui/focus_ring — the panel simply has no frame
         focus_ring = None
+
+try:  # v1.6.5 (ROADMAP task 4): the ONE gate of an unmanaged card (a disabled row + why)
+    from . import unmanaged
+except ImportError:
+    try:
+        from ui import unmanaged
+    except ImportError:  # flat layout without ui/unmanaged — no row is ever gated
+        unmanaged = None
 
 
 # Context menu action keys (order and separators — ROADMAP v0.9.6, item 1).
@@ -132,6 +149,16 @@ _COMPACT_BUTTON_QSS = "QPushButton { text-align: left; padding-left: 6px; paddin
 # the same three the cards and the status dots know.
 _STATUS_FILTERS = ("online", "warn", "offline")
 
+# v1.6.5 (ROADMAP task 6): the Status cell of a card that is NEVER monitored. The cell
+# cannot stay empty — "not checked YET" is a question and "not monitored" is the answer —
+# so the panel's raw-value channel (`_RAW_ROLE`) carries this declared CAPTION ID instead of
+# a status, and the panel renders it with the SAME key the card's own tooltip uses
+# (`node.unmanaged.status`), so the table and the map cannot spell it two ways. It is
+# deliberately NOT a member of `_STATUS_FILTERS`: it is not a status the probe can produce,
+# and a filter over it (or a fourth counter in the status bar) would be a fourth kind of
+# status — exactly what the release refuses.
+STATUS_NOT_MONITORED = "not_monitored"
+
 # ── v1.4.6 (ROADMAP v1.4.6, task 1): the LIST layout of the sidebar tree ─────
 # Collapsing the map used to leave a dead ~18 px strip, while the sidebar CONTAINER
 # stretched to the whole window width with a single-column tree inside it — the "wide
@@ -186,8 +213,11 @@ _SORT_FILLED, _SORT_EMPTY = 0, 1
 _SORT_NUMBER, _SORT_TEXT = 0, 1
 
 # The DECLARED severity order of the status column (ascending: the healthy end first);
-# a status outside it is not a datum and its cell is empty.
-_STATUS_SORT_RANK = {"online": 0.0, "warn": 1.0, "offline": 2.0}
+# a status outside it is not a datum and its cell is empty. v1.6.5: the UNMANAGED caption
+# joins the ladder LAST — the three measured statuses come first, and "never monitored"
+# is the one row that will never move, so it is the honest end of the column.
+_STATUS_SORT_RANK = {"online": 0.0, "warn": 1.0, "offline": 2.0,
+                     STATUS_NOT_MONITORED: 3.0}
 
 # The units a hardware figure can carry ("8 GB" / "512 MB" / "2 TB"): binary multiples,
 # because that is what `df`/`free` and the collector report. An unknown unit = TEXT.
@@ -1046,8 +1076,15 @@ class SidebarPanel(QWidget):
         The `legend.status.*` keys are reused on purpose: the same three words the
         legend and the status-filter hint already use — no fourth spelling of
         online/warn/offline in the translation files.
+
+        v1.6.5 (ROADMAP task 6): the RAW value of an unmanaged row is
+        `STATUS_NOT_MONITORED` (never a status), and it renders as the ONE caption of the
+        release — the same sentence the card's tooltip carries, because "this box is not
+        monitored" is one fact with one wording.
         """
         value = str(status or "")
+        if value == STATUS_NOT_MONITORED:
+            return self._tr("node.unmanaged.status")
         if value not in _STATUS_FILTERS:
             return ""
         return self._tr(f"legend.status.{value}")
@@ -1155,7 +1192,13 @@ class SidebarPanel(QWidget):
             if list_mode:
                 item.set_row_index(tree.topLevelItemCount())   # the stable tie-break
                 status_age, info_age = self._status_age(node), self._info_age(node)
-                cells = list_cell_values(node.data, self._status_text(node.status),
+                # v1.6.5 (ROADMAP task 6): the RAW value of the Status cell is a STATUS —
+                # except on an unmanaged card, which has none and never will: its cell says
+                # so through the declared caption, and the same value is what the language
+                # switch re-texts (and what the sort key ranks).
+                raw_status = (STATUS_NOT_MONITORED if _is_unmanaged(node.data)
+                              else (node.status or ""))
+                cells = list_cell_values(node.data, self._status_text(raw_status),
                                          self._age_text(status_age),
                                          self._age_text(info_age))
                 for column, value in enumerate(cells):
@@ -1166,8 +1209,8 @@ class SidebarPanel(QWidget):
                     item.set_sort_key(column, key)
                 # The two cells a language switch re-texts remember their raw value.
                 status_column = list_column_index("status")
-                item.set_sort_key(status_column, list_sort_key("status", node.data, node.status),
-                                  raw=node.status or "")
+                item.set_sort_key(status_column, list_sort_key("status", node.data, raw_status),
+                                  raw=raw_status)
                 for field, age in (("status_age", status_age), ("info_age", info_age)):
                     column = list_column_index(field)
                     item.set_sort_key(column, list_sort_key(field, node.data, **{field: age}),
@@ -1176,7 +1219,11 @@ class SidebarPanel(QWidget):
                 item.setText(0, f"{node.data.alias}  ({node.data.host})")
             item.setData(0, Qt.UserRole, node.data.id)
             # Review fix v0.8.0 (#3): colored status marker for the node (online/warn/offline/not checked)
-            self.apply_status_marker(item, node.status, node.data.host or "")
+            # v1.6.5 (ROADMAP task 6): the marker receives the SAME raw value the Status cell
+            # was built from — for an unmanaged row that is the declared caption id, which is
+            # what makes the dot, its tooltip and the cell follow one decision.
+            self.apply_status_marker(item, raw_status if list_mode else node.status,
+                                     node.data.host or "")
             # v0.9.4: the tag caption at the end of the row ("[tag1, tag2]", up to 3 tags).
             # v1.4.6: only in the NARROW mode — the LIST layout has a column of its own.
             # v1.1.2RC2 (N8): setForeground(0, palette().windowText()) REMOVED — under
@@ -1294,7 +1341,12 @@ class SidebarPanel(QWidget):
         PREVIOUS status of every row — the defect this line exists to prevent.
         """
         item.setIcon(0, self._status_dot_icon(status))
-        if status and status in ServerNode.STATUS_COLORS:
+        if status == STATUS_NOT_MONITORED:
+            # v1.6.5 (ROADMAP task 6): a card that is never monitored carries its OWN
+            # sentence as the row's second channel — the same key the card's tooltip and
+            # the Status cell use, so the tree, the table and the map say one thing.
+            item.setToolTip(0, self._tr("node.unmanaged.tooltip"))
+        elif status and status in ServerNode.STATUS_COLORS:
             tip = self._tr(f"node.status.{status}", host=host or "")
             # i18n returned the "key" (no translation) — show the status without the key
             item.setToolTip(0, tip if not tip.startswith("[") else f"{status}: {host}")
@@ -1339,10 +1391,22 @@ class SidebarPanel(QWidget):
                 menu.addSeparator()
                 continue
             action_key, i18n_key = entry
-            act = menu.addAction(self._tr(i18n_key))
+            label = self._tr(i18n_key)
+            act = menu.addAction(label)
             callback = self._actions[action_key]
             # checked — the bool from QAction.triggered; we pass only the node to the callback.
             act.triggered.connect(lambda checked=False, n=node, cb=callback: cb(n))
+            # v1.6.5 (ROADMAP task 4): the rows that cannot work on an UNMANAGED card are
+            # DISABLED here, with the reason in their tooltip — the SAME gate the map's
+            # context menu asks (`ui/unmanaged.py` owns the table and the sentence), so the
+            # two menus can never disagree about which verb needs a login.
+            self._gate_row(act, action_key, node, label)
+
+    def _gate_row(self, act, action: str, node, label: str) -> bool:
+        """Disable ONE row the unmanaged gate refuses (v1.6.5; False — it was left alone)."""
+        if unmanaged is None:
+            return False
+        return unmanaged.gate_row(act, action, node, label, self._tr)
 
     def _fill_quick_launch(self, menu, node) -> None:
         """v1.0RC4: the "Quick Launch" submenu — the FIRST menu item (above SSH).
@@ -1384,6 +1448,10 @@ class SidebarPanel(QWidget):
             # checked — the bool from QAction.triggered; we close over both the node and the entry.
             act.triggered.connect(
                 lambda checked=False, n=node, en=e, cb=cb_entry: cb(n, en))
+            # v1.6.5 (ROADMAP task 4): a COMMAND entry is refused for an unmanaged card (a
+            # URL entry still opens — the browser needs no shell on that host).
+            if str(e.get("type", "url")).strip().lower() == "command":
+                self._gate_row(act, "ql_command", node, name)
         if entries:
             sub.addSeparator()
         if cb_config is not None:

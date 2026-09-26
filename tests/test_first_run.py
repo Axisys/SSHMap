@@ -137,8 +137,8 @@ check("§1 the format version comes from version.py (never a literal)",
       _raw["version"] == __import__("version").VERSION_FORMAT, _raw["version"])
 
 _servers = _raw["servers"]
-check("§1 five servers, each with a unique FIXED id (a deterministic demo)",
-      len(_servers) == 5 and len({s["id"] for s in _servers}) == 5
+check("§1 six servers, each with a unique FIXED id (a deterministic demo)",
+      len(_servers) == 6 and len({s["id"] for s in _servers}) == 6
       and [s["id"] for s in EP.build_example_project()["servers"]] == [s["id"] for s in _servers],
       str([s["id"] for s in _servers]))
 check("§1 the aliases are the documented set (the README/tests address them by name)",
@@ -153,10 +153,25 @@ check("§1 no record carries a password (never serialized — §4.4)",
       all("password" not in s for s in _servers))
 check("§1 NO status is baked into the FORMAT (the probes tell the truth)",
       not _has_key(_raw, "status"), str(sorted(_all_keys(_raw))))
+# v1.6.5 (ROADMAP task 6): the demo's live sample of the release — ONE card the operator
+# does not administer. It is the release's contract in data form: the flag, NO credentials
+# at all (not even a user) and the opt-in ping left OFF.
+_unmanaged_ids = set(EP.unmanaged_example_ids())
+_unmanaged = [s for s in _servers if s["id"] in _unmanaged_ids]
+check("§1 v1.6.5: the demo carries exactly ONE unmanaged card (the release's live sample)",
+      len(_unmanaged_ids) == 1 and len(_unmanaged) == 1
+      and _unmanaged[0].get("unmanaged") is True,
+      str([(s["id"], s.get("unmanaged")) for s in _servers]))
+check("§1 v1.6.5: it carries NO credentials and the opt-in ping is OFF",
+      _unmanaged[0].get("user") == "" and _unmanaged[0].get("unmanaged_ping") is False
+      and "password" not in _unmanaged[0] and "key_path" not in _unmanaged[0],
+      str(_unmanaged[0]))
+check("§1 v1.6.5: its host is a documentation address like every other card",
+      EP.is_reserved_host(_unmanaged[0]["host"]), _unmanaged[0]["host"])
 # v1.5 (ROADMAP): the demo DECLARES its statuses instead of measuring them — in code, not
 # in the file — and every one of them is therefore EMULATED and marked as such.
-check("§1 v1.5: the demo DECLARES one status per node (in code, never in the file)",
-      set(EP.DEMO_STATUSES) == {s["id"] for s in _servers},
+check("§1 v1.5: the demo DECLARES one status per MANAGED node (in code, never in the file)",
+      set(EP.DEMO_STATUSES) == {s["id"] for s in _servers} - _unmanaged_ids,
       str(sorted(EP.DEMO_STATUSES)))
 check("§1 v1.5: the declaration shows all THREE statuses (the legend at a glance)",
       sorted(set(EP.DEMO_STATUSES.values())) == ["offline", "online", "warn"],
@@ -228,15 +243,25 @@ check("§2 ...and it is NOT a user file: no path (Save asks for a name), not in 
       not win._project_file and win._recent_projects() == [],
       f"file={win._project_file!r} mru={win._recent_projects()}")
 check("§2 the loaded map carries the EMULATED statuses of the declaration (v1.5)",
-      {n.data.id: n.status for n in win.scene.nodes()} == dict(EP.DEMO_STATUSES),
+      {n.data.id: n.status for n in win.scene.nodes() if n.data.id not in _unmanaged_ids}
+      == dict(EP.DEMO_STATUSES),
       str({n.data.id: n.status for n in win.scene.nodes()}))
 check("§2 ...and EVERY one of them is marked as emulated (the honesty rule)",
       all(n.status_emulated and _t("node.status.emulated") in n.toolTip()
-          for n in win.scene.nodes()),
+          for n in win.scene.nodes() if n.data.id not in _unmanaged_ids),
       str([(n.data.alias, n.status_emulated) for n in win.scene.nodes()]))
 check("§2 ...and an emulated status carries NO age (it was never probed)",
       all(n.freshness_text() == "" and n.status_checked_at == 0.0
-          for n in win.scene.nodes()))
+          for n in win.scene.nodes() if n.data.id not in _unmanaged_ids))
+# v1.6.5 (ROADMAP task 6): the neighbour opens with the release's honest mark instead of a
+# status — and it is what the demo's own skip set must protect (no round may probe it).
+_neighbour = win.scene.get_node(sorted(_unmanaged_ids)[0])
+check("§2 the unmanaged card opens UNCHECKED and MARKED, with no emulation at all",
+      _neighbour is not None and _neighbour.status == "" and _neighbour.status_emulated is False
+      and _neighbour._no_ssh_badge.isVisible()
+      and _neighbour._no_ssh_badge.text() == _t("node.unmanaged")
+      and _t("node.unmanaged.tooltip") in _neighbour.toolTip(),
+      f"{_neighbour.status!r} {_neighbour.toolTip()!r}")
 check("§2 the three status counters count the EMULATED map (the map, not a probe)",
       {s: win.status_filter_labels[s].text() for s in ("online", "warn", "offline")}
       == {s: _t(f"statusbar.filter.{s}",
@@ -247,7 +272,7 @@ check("§2 the three status counters count the EMULATED map (the map, not a prob
 _members = sorted(m.data.alias for g in win.scene.groups() for m in g.get_members())
 check("§2 the group's membership is GEOMETRIC and holds exactly the web tier",
       _members == ["web-01", "web-02"], str(_members))
-check("§2 ...and the other three cards stay OUTSIDE the frame",
+check("§2 ...and the other cards stay OUTSIDE the frame",
       win.scene.groups()[0].member_count() == 2, str(win.scene.groups()[0].member_count()))
 
 # The Help item must reach the SAME method: reset the window, then trigger it.
@@ -339,12 +364,17 @@ check("§2b even a pushed timestamp cannot age an emulated status (the refusal i
 _st = StatusChecker(interval_ms=30_000)
 win._status_checker = _st
 win._sync_status_targets()
-check("§2b the periodic plan holds every node EXCEPT the emulated ones",
-      len(_st._subset()) == win.scene.node_count() - len(EP.DEMO_STATUSES)
-      and all(t[0] not in EP.DEMO_STATUSES for t in _st._subset()),
+check("§2b the periodic plan holds every node EXCEPT the emulated and the unmanaged ones",
+      len(_st._subset()) == win.scene.node_count() - len(EP.DEMO_STATUSES) - len(_unmanaged_ids)
+      and all(t[0] not in EP.DEMO_STATUSES for t in _st._subset())
+      and all(t[0] not in _unmanaged_ids for t in _st._subset()),
       str(_st._subset()))
 check("§2b an on-demand round of the emulated selection is EMPTY (no probe at all)",
       _st._subset(list(EP.DEMO_STATUSES)) == [], str(_st._subset(list(EP.DEMO_STATUSES))))
+check("§2b v1.6.5: the unmanaged card is in the skip set too (ONE rule, two families)",
+      _unmanaged_ids <= _st._skip_ids
+      and _st._subset(list(_unmanaged_ids)) == [],
+      f"skip={sorted(_st._skip_ids)}")
 check("§2b ...so a round over the demo alone never starts (nothing to probe)",
       _st.start_round() is False and _st.is_busy is False)
 _own = win.scene.add_server(ServerData(id="own-1", alias="mine", host="10.1.2.3", user="root"))

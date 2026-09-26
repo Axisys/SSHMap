@@ -788,5 +788,16 @@
   "settings.appearance.density": "Card density:",
   "settings.appearance.density.normal": "Comfortable",
   "settings.appearance.density.compact": "Compact",
-  "settings.appearance.density.tooltip": "Compact hides the information block and the environment chip of every card — for a dense map of many servers."
+  "settings.appearance.density.tooltip": "Compact hides the information block and the environment chip of every card — for a dense map of many servers.",
+  "dialog.unmanaged": "Unmanaged server (no SSH access)",
+  "dialog.unmanaged.tooltip": "No credentials are stored, the card is never probed and its menu has no SSH verbs.",
+  "dialog.unmanaged_ping": "Allow a reachability check (ping)",
+  "dialog.unmanaged_ping.tooltip": "One ICMP ping, on request, from the card's menu. The answer is a manual note — never a status.",
+  "node.unmanaged": "no ssh",
+  "node.unmanaged.tooltip": "Not administered from here: no SSH access, never monitored.",
+  "node.unmanaged.status": "not monitored",
+  "node.unmanaged.ping_ok": "Manual reachability check: {host} answered",
+  "node.unmanaged.ping_failed": "Manual reachability check: {host} did not answer",
+  "unmanaged.blocked": "“{action}” needs an SSH login — this card is unmanaged.",
+  "status.unmanaged_blocked": "This card is unmanaged — no SSH access"
 }

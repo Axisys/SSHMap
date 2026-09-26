@@ -417,9 +417,10 @@ print("== §5 the release state ==")
 # ════════════════════════════════════════════════════════════════════════════
 
 check("§5 the version pin is the version this file describes",
-      EXPECTED_APP_VERSION == "1.6.4", EXPECTED_APP_VERSION)
-check("§5 the i18n pin counts the SHIPPED release (786 + the 3 keys of the cheap batch)",
-      EXPECTED_I18N_KEYS == 789 and EXPECTED_I18N_KEYS == 786 + 3, str(EXPECTED_I18N_KEYS))
+      EXPECTED_APP_VERSION == "1.6.5", EXPECTED_APP_VERSION)
+check("§5 the i18n pin counts the SHIPPED release (786 + the 3 keys of the cheap batch"
+      " + the 11 of v1.6.5 — the unmanaged card)",
+      EXPECTED_I18N_KEYS == 800 and EXPECTED_I18N_KEYS == 789 + 11, str(EXPECTED_I18N_KEYS))
 check_release_state(ROOT)
 
 _langs = load_i18n_langs(ROOT)

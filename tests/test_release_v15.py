@@ -233,19 +233,26 @@ win = make_main()
 win._open_example_map()
 app.processEvents()
 _cards = {n.data.id: n for n in win.scene.nodes()}
+# v1.6.5 (ROADMAP task 6): the demo holds ONE unmanaged card as well — it declares no
+# status (there is nothing to emulate about a box nobody can reach), so the emulation is
+# asserted over the MANAGED cards and the neighbour is asserted on its own terms below.
+_neighbour_id = EP.unmanaged_example_ids()[0]
+_managed = {sid: n for sid, n in _cards.items() if sid != _neighbour_id}
 check("§3 the demo opens with exactly the declared statuses",
-      {sid: n.status for sid, n in _cards.items()} == dict(EP.DEMO_STATUSES),
+      {sid: n.status for sid, n in _managed.items()} == dict(EP.DEMO_STATUSES),
       str({sid: n.status for sid, n in _cards.items()}))
 check("§3 every one of them is MARKED emulated on the card, in the tooltip and by the badge",
       all(n.status_emulated and _t("node.status.emulated") in n.toolTip()
           and n._demo_badge.isVisible()
           and n._demo_badge.text() == _t("node.status.emulated")
-          for n in _cards.values()))
+          for n in _managed.values()))
 check("§3 ...and none of them claims an age (an emulation was never measured)",
       all(n.freshness_text() == "" and n.status_checked_at == 0.0 and n.is_stale is False
-          for n in _cards.values()))
-check("§3 the declaration is COMPLETE (a node left out would open unchecked)",
-      len(_cards) == len(EP.DEMO_STATUSES))
+          for n in _managed.values()))
+check("§3 the declaration is COMPLETE over the MANAGED cards (a node left out opens unchecked)",
+      len(_managed) == len(EP.DEMO_STATUSES)
+      and _cards[_neighbour_id].status == "" and _cards[_neighbour_id].status_emulated is False,
+      f"managed={len(_managed)} declared={len(EP.DEMO_STATUSES)}")
 
 # "Save as" produces an ordinary project: no status in the file, no emulation in the window.
 _path = os.path.join(WORK, "release_v15_demo.json")
@@ -258,8 +265,10 @@ check("§3 saving the demo writes an ordinary file WITHOUT any status",
 check("§3 ...and the window DROPS the emulation with it (the copy probes for real)",
       win._emulated_statuses == {} and win._example_project is False)
 check("§3 ...while the cards keep what they show — still marked as the demo's",
-      all(n.status_emulated for n in win.scene.nodes()),
-      str([n.status_emulated for n in win.scene.nodes()]))
+      all(n.status_emulated for n in _managed.values())
+      and _cards[_neighbour_id].status_emulated is False
+      and _cards[_neighbour_id].status == "",
+      str([(n.data.id, n.status_emulated) for n in win.scene.nodes()]))
 win._dirty = False
 win.close()
 
@@ -279,17 +288,17 @@ print("== §4 the release state & the \"no new contract\" audit ==")
 # ════════════════════════════════════════════════════════════════════════════
 
 check_release_state(ROOT)
-check("§4 the pin quotes the SHIPPED version (v1.6.4 — the cheap batch: the thread names, "
-      "the Ctrl+wheel zoom, the activity dot, the marked secret and the pinned scrollback)",
-      EXPECTED_APP_VERSION == "1.6.4" and re.fullmatch(r"1\.6(\.\d+)?", EXPECTED_APP_VERSION) is not None)
+check("§4 the pin quotes the SHIPPED version (v1.6.5 — the neighbours on the map: the "
+      "unmanaged card, its honest \"not monitored\" mark and its opt-in ICMP check)",
+      EXPECTED_APP_VERSION == "1.6.5" and re.fullmatch(r"1\.6(\.\d+)?", EXPECTED_APP_VERSION) is not None)
 check("§4 the i18n pin moved on by the closing release's ONE key, v1.5.1's four, v1.5.2's "
       "thirteen (the activity panel's chrome), v1.5.3's twenty (the freshness family), "
       "v1.5.4's eleven (the aggregate, the lens and the filter plaque), v1.5.5's fourteen "
       "(the inventory columns, the age captions and the report), v1.5.6's two (the Export "
       "menu and the third first-run door) and v1.5.7's twenty-nine (the command-history tab, "
       "the panel chrome and the six menu items), v1.6's forty-one, v1.6.2's four, "
-      "v1.6.3's four and v1.6.4's three on top",
-      EXPECTED_I18N_KEYS == 789)
+      "v1.6.3's four and v1.6.4's three on top, and v1.6.5's eleven",
+      EXPECTED_I18N_KEYS == 800)
 check_i18n_parity(_langs)
 check_i18n_format(_langs)
 check("§4 every language carries the marker key with a non-empty value",
@@ -328,8 +337,8 @@ check("§4 no new dependency (the four pinned ones and nothing else)",
       and not re.search(r"^\s*(?!PySide6|paramiko|keyring|wcwidth|#)[A-Za-z][\w.-]*\s*[><=]",
                         _req, re.M))
 check("§4 the version constants agree everywhere (version.py ↔ pyproject ↔ requirements)",
-      __import__("version").APP_VERSION == "1.6.4"
-      and '"1.6.4"' in _src("version.py") and 'version = "1.6.4"' in _src("pyproject.toml"))
+      __import__("version").APP_VERSION == "1.6.5"
+      and '"1.6.5"' in _src("version.py") and 'version = "1.6.5"' in _src("pyproject.toml"))
 check("§4 VERSION_FORMAT did NOT move (the project schema is unchanged)",
       __import__("version").VERSION_FORMAT == "0.9")
 

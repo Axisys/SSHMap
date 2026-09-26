@@ -788,5 +788,16 @@
   "settings.appearance.density": "Kartendichte:",
   "settings.appearance.density.normal": "Komfortabel",
   "settings.appearance.density.compact": "Kompakt",
-  "settings.appearance.density.tooltip": "Kompakt blendet den Informationsblock und das Umgebungs-Label jeder Karte aus — für eine dichte Karte mit vielen Servern."
+  "settings.appearance.density.tooltip": "Kompakt blendet den Informationsblock und das Umgebungs-Label jeder Karte aus — für eine dichte Karte mit vielen Servern.",
+  "dialog.unmanaged": "Nicht verwalteter Server (kein SSH-Zugang)",
+  "dialog.unmanaged.tooltip": "Es werden keine Zugangsdaten gespeichert, die Karte wird nie abgefragt und ihr Menü hat keine SSH-Befehle.",
+  "dialog.unmanaged_ping": "Erreichbarkeitsprüfung erlauben (Ping)",
+  "dialog.unmanaged_ping.tooltip": "Ein ICMP-Ping auf Anfrage aus dem Menü der Karte. Die Antwort ist eine manuelle Notiz — nie ein Status.",
+  "node.unmanaged": "kein ssh",
+  "node.unmanaged.tooltip": "Von hier aus nicht administriert: kein SSH-Zugang, wird nie überwacht.",
+  "node.unmanaged.status": "nicht überwacht",
+  "node.unmanaged.ping_ok": "Manuelle Erreichbarkeitsprüfung: {host} hat geantwortet",
+  "node.unmanaged.ping_failed": "Manuelle Erreichbarkeitsprüfung: {host} hat nicht geantwortet",
+  "unmanaged.blocked": "„{action}“ benötigt eine SSH-Anmeldung — diese Karte ist nicht verwaltet.",
+  "status.unmanaged_blocked": "Diese Karte ist nicht verwaltet — kein SSH-Zugang"
 }

@@ -7,7 +7,6 @@ thing LOOKS like when it is used. It is the "open the example map" of the empty
 state and of the Help menu.
 
 Four pinned decisions (ROADMAP 1.5rc3):
-
   * **built in CODE, never shipped as a data file.** A project shipped as a resource
     would have to be found by `pip install`/`pipx`/PyInstaller builds, and it could
     drift from the format between releases. A factory cannot drift: it returns the
@@ -21,9 +20,9 @@ Four pinned decisions (ROADMAP 1.5rc3):
     status field and `build_example_project()` still adds none (nothing is serialized:
     a status is a measurement, not data). v1.5rc3 left the demo opening grey and settling
     into five red cards, which is a poor first screen; `DEMO_STATUSES` therefore declares
-    a status per node that the WINDOW paints through the ordinary `set_status()` after the
-    load, and `StatusChecker` never probes those ids while the example map is open. The
-    honesty is mandatory and lives in three places: the "demo" badge on the card
+    a status per MANAGED node that the WINDOW paints through the ordinary `set_status()`
+    after the load, and `StatusChecker` never probes those ids while the example map is
+    open. The honesty is mandatory and lives in three places: the "demo" badge on the card
     (`node.status.emulated`), the tooltip line and the SUPPRESSED age (an emulated status
     was never measured, so it has no "checked N min ago"). "Save as" drops the emulation
     ON PURPOSE — the copy is an ordinary project and probes for real;
@@ -33,8 +32,15 @@ Four pinned decisions (ROADMAP 1.5rc3):
     `example.note_text`, so a German or Chinese user gets the tour in their own
     language.
 
+v1.6.5 (ROADMAP task 6): the demo gained ONE UNMANAGED card — the neighbour nobody here
+administers. It is the live sample of the release and it is HONEST in the same way the
+emulated statuses are: it declares no status (`DEMO_STATUSES` holds the managed nodes
+only), it is never probed (the window adds it to the checker's skip set) and the card
+says "not monitored" instead of a colour. `unmanaged_example_ids()` is the seam the
+topical test addresses it by.
+
 The module is pure: no Qt, no file I/O, no config. `build_example_project()` is the
-whole API (plus the two constants and `is_reserved_host()` for the gate).
+whole API (plus the constants above and `is_reserved_host()` for the gate).
 """
 
 try:  # the format version — the single source of truth (never a literal here)
@@ -55,9 +61,20 @@ WEB1 = "e0000002"
 WEB2 = "e0000003"
 DB1 = "e0000004"
 K8S1 = "e0000005"
+# v1.6.5 (ROADMAP task 6): the ONE UNMANAGED card of the demo — a neighbour this operator
+# does NOT administer. It is the live sample of the release: it carries `unmanaged: True`,
+# so no round ever probes it (the checker's skip set), it has no credentials, its menu has
+# no SSH verbs and its band says so in words; the COMMENT is the only information such a
+# card really has, which is exactly why the release keeps that line.
+NEIGHBOUR = "e0000006"
 
 WEB_GROUP = "e0000010"
 TOUR_NOTE = "e0000020"
+
+#: The comment of the unmanaged card — infrastructure DATA (English literal, like every alias
+#: and host of this factory), not a UI string: the tour is `example.note_text`, the box's own
+#: purpose is the user's own words.
+NEIGHBOUR_COMMENT = "Branch firewall — vendor-managed, no login for us"
 
 # ── v1.5 (ROADMAP): the EMULATED statuses of the demo ────────────────────────────────
 # The demo network does not exist, so a probe can only ever answer `offline` (and `warn`
@@ -111,16 +128,28 @@ def is_reserved_host(host: str) -> bool:
 
 def example_aliases() -> list:
     """The aliases of the demo's nodes, in map order (the test/README seam)."""
-    return ["core-router", "web-01", "web-02", "db-01", "k8s-01"]
+    return ["core-router", "web-01", "web-02", "db-01", "k8s-01", "neighbour-fw"]
+
+
+def unmanaged_example_ids() -> tuple:
+    """The ids of the demo's UNMANAGED cards (v1.6.5) — the release's live sample.
+
+    One card, and it is deliberately NOT in `DEMO_STATUSES`: an unmanaged card has no
+    status to declare either, because nothing measures it. The topical test addresses it by
+    name through this seam instead of hard-coding the id twice.
+    """
+    return (NEIGHBOUR,)
 
 
 def build_example_project() -> dict:
     """A small project dict in the ORDINARY format (see DOCUMENTATION.md §5).
 
-    Five servers, six connections — one of every connection type the map knows
-    (`ssh`, `vpn`, `http`, `database`, `nfs`, `kubernetes`) — one group, one note and
-    tags on every card. Every host is an RFC 5737 documentation address, so the probe
-    round can only ever report the truth about a network that does not exist.
+    Six servers (five managed, ONE unmanaged neighbour), six connections — one of every
+    connection type the map knows (`ssh`, `vpn`, `http`, `database`, `nfs`, `kubernetes`)
+    — one group, one note and tags on every card. Every host is an RFC 5737 documentation
+    address, so the probe round can only ever report the truth about a network that does
+    not exist. The unmanaged card is connected to nothing: a device that is drawn on the
+    diagram while nobody here holds a login for it is exactly what the v1.6.5 card is for.
 
     The returned dict carries NO key beyond the format: a load, a save and a
     `.drawio` export of it behave exactly like a user's own project, and the "this is
@@ -154,6 +183,15 @@ def build_example_project() -> dict:
          "ip": "192.0.2.30", "x": 420.0, "y": -170.0,
          "os_name": "Flatcar Container Linux", "cpu": "8 cores", "ram": "16 GB",
          "disk": "120 GB", "tags": ["k8s"]},
+        # ── v1.6.5 (ROADMAP task 6): the NEIGHBOUR — documented, not administered ──
+        # NO `user`, NO hardware and NO status: `unmanaged` closes the credential family,
+        # the probe plan and the SSH verbs, and the card paints what it has (the address,
+        # the comment and its tag chip) beside the "NO SSH" mark. `unmanaged_ping` stays
+        # False — the opt-in is the user's decision, and the demo makes no network call.
+        {"id": NEIGHBOUR, "alias": "neighbour-fw", "host": "192.0.2.40", "user": "",
+         "ip": "192.0.2.40", "x": -180.0, "y": 60.0,
+         "comment": NEIGHBOUR_COMMENT, "tags": ["network"],
+         "unmanaged": True, "unmanaged_ping": False},
     ]
 
     # One connection of EVERY type — the demo is also the legend's live sample. The

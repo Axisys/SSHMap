@@ -44,13 +44,23 @@ except Exception:  # pragma: no cover - flat run
         _translate = None
 
 
-def _t(key: str) -> str:
+def _t(key: str, **kw) -> str:
+    """Safe i18n hook. v1.6.5: it also carries the unmanaged gate's refusal template."""
     if _translate is not None:
         try:
-            return _translate(key)
+            return _translate(key, **kw) if kw else _translate(key)
         except Exception:
             pass
     return key
+
+
+try:  # v1.6.5 (ROADMAP task 4): the ONE gate of an unmanaged card
+    from . import unmanaged
+except ImportError:
+    try:
+        from ui import unmanaged
+    except ImportError:  # flat layout without ui/unmanaged — no row is ever gated
+        unmanaged = None
 
 
 # v1.4rc3: the glyph of each palette section (a plugin command is not a core action).
@@ -112,6 +122,10 @@ class CommandPalette(QDialog):
         self._recent = []        # [action_id, …] — bounded by PALETTE_RECENT_MAX
         self._start_here = []    # [(label, kind, callable)] — the block, built per open
         self._header_rows = 0    # 1 while the "Start here" header row is on screen
+        # v1.6.5 (ROADMAP task 4): the node the gate asks about — the palette's commands
+        # act on the SELECTION, so a row whose verb needs a login is disabled while an
+        # unmanaged card is the one the selection holds.
+        self._gate_target = None
         self._build_ui()
 
     # ── UI ───────────────────────────────────────────────────────
@@ -219,6 +233,13 @@ class CommandPalette(QDialog):
             servers = self.mw.scene.nodes()
         except Exception:
             servers = []
+        # v1.6.5 (ROADMAP task 4): the gate's subject — the selected card, when the window
+        # has exactly one. Read HERE (the same pass that collects the rows) so the whole
+        # palette is judged against ONE snapshot of the selection.
+        try:
+            self._gate_target = self.mw.scene.get_selected_node()
+        except Exception:  # noqa: BLE001 — a window without a scene has nothing to gate
+            self._gate_target = None
         for node in servers:
             label = "{} — {} ({})".format(
                 _t("palette.kind_server"),
@@ -384,7 +405,16 @@ class CommandPalette(QDialog):
         item.setData(Qt.UserRole, fn)
         # v1.5rc3: the registry id of this row ("" for a server/plugin row) — what
         # `_run_current()` feeds into the "recently used" list of the start-here block.
-        item.setData(Qt.UserRole + 1, self._action_ids.get(id(fn), ""))
+        action_id = self._action_ids.get(id(fn), "")
+        item.setData(Qt.UserRole + 1, action_id)
+        # v1.6.5 (ROADMAP task 4): a command that cannot work on the selected card is
+        # DISABLED here and carries the gate's own sentence in its tooltip — the palette
+        # filters through the SAME table the two context menus use, so it can neither offer
+        # a verb the menus refuse nor refuse one they offer.
+        if unmanaged is not None and action_id \
+                and unmanaged.blocked_registry_action(action_id, self._gate_target):
+            item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEnabled)
+            item.setToolTip(unmanaged.refusal_text(_t, label))
         # v0.9.3 fix: the "🖥/⚡" emojis were removed — the project
         # deliberately moved to vector icons (ui/icons.py,
         # Segoe UI Emoji renders poorly).
@@ -421,6 +451,12 @@ class CommandPalette(QDialog):
             return
         fn = item.data(Qt.UserRole)
         action_id = item.data(Qt.UserRole + 1)
+        # v1.6.5 (ROADMAP task 4): a gated row is disabled, and Enter on it is NOT a way
+        # around the gate (the event filter calls this method directly, so Qt's own refusal
+        # to activate a disabled item is not enough).
+        if not (item.flags() & Qt.ItemFlag.ItemIsEnabled):
+            self.accept()
+            return
         self.accept()
         # v1.5rc3 (ROADMAP task 4): a command that was really RUN is what the next
         # "Start here" block offers first (the caption row has no command — no record).

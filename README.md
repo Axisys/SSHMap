@@ -27,6 +27,7 @@ generated from that example map only, by `python tests/_gen_docs_image.py`.*
 - Collected hardware facts (OS / CPU / RAM / disk / IP) are dated too, and one click gathers them for a selection or the whole map through a bounded queue with progress and a summary that names the failures.
 - "Why is it offline?" asks a red card a direct question: DNS resolve → TCP connect → SSH banner → ICMP ping, in order, naming the first failing step in its own words. It explains; it never rewrites the status.
 - Trouble first: one click dims everything that is not warn, offline or stale, and a floating plaque names every active filter (search, tag, status, lens) with one × each.
+- **The neighbours on the map:** mark a server as **unmanaged** and it keeps its place in the diagram without pretending. Such a card stores no credentials, no probe round ever touches it, no SSH verb reaches it, and its band carries a "no ssh" mark while its tooltip says "not monitored" — the honest answer for a box nobody here administers. You can still ping it one card at a time if you switch that on; the answer is a manual note, never a status.
 
 ### Terminal & SFTP
 - Built-in SSH terminal on a vendored pyte fork: scrollback, full keyboard, mouse selection, alternate screen (vim/htop/less restore the previous screen), wheel passthrough to TUIs, a find bar, clear scrollback / reset screen / save transcript, and correct multi-code-point glyphs (emoji sequences and combining marks render as one cell, wide where the emoji is wide). Every glyph is drawn at its own grid cell, so a frame stays aligned whatever monospace font you pick.
@@ -129,6 +130,7 @@ survive a restart. The external terminal is an OS `ssh` process: the password is
 - `terminal_scroll` (a `~/.sshmap/config.json` key, no settings row) defaults to `"live"`: new output pulls the view back to the bottom. Set it to `"pin"` if you would rather keep reading history while a build talks — then typing or pasting returns you to the live line.
 - A full-screen program that dies without turning its mouse reporting off leaves that mode on in the session: the wheel keeps reporting to a program that is no longer there until you hold `Shift` (which always scrolls the scrollback) or reopen the session.
 - "Follow the shell's directory" writes one line into the shell of that session at connect (appended to `PROMPT_COMMAND`, with a `zsh` variant). It is off by default; a shell that never answers simply does not follow, and the tab keeps working.
+- An **unmanaged** card is never monitored and is never contacted: it holds no credentials (the keyring is never written for it, and a password that reaches the model by any other route is not stored either), the status round skips it together with the demo's emulated nodes, and every verb that needs a login — connect, the external terminal, the built-in terminal and its SFTP tab, gather information, "Check statuses now", "Why is it offline?" and a quick-launch *command* — is disabled with the reason in its tooltip. Copying its IP or hostname, revealing, duplicating, grouping, tagging, notes, the search and every export keep working, and a quick-launch **URL** still opens (the browser needs no shell on that host). The one network call such a card can make is the per-card ICMP check, OFF by default; its answer is a note marked as a manual result and never becomes a status. Older builds read the card as a fully managed one.
 
 ---
 
@@ -188,7 +190,7 @@ PySide6 / Qt 6 gotchas worth knowing before writing UI code:
 | `dialogs/` | Add/edit dialogs, connect, profiles, backups, imports, export options |
 | `ui/` | Main window and mixins, sidebar, theme, palette, panels, settings, hotkeys, icons |
 | `i18n/` | `en` (reference), `ru`, `zh`, `de` — one JSON file per language |
-| `tests/` | 109 test files, the parallel runner and the harness — map in `tests/INDEX.md` |
+| `tests/` | 110 test files, the parallel runner and the harness — map in `tests/INDEX.md` |
 | `examples/plugins/` | Two working example plugins, not installed and never auto-discovered |
 | `third_party/pyte/`, `third_party/pyte-patches/` | The managed pyte 0.8.2 fork: sdist plus explicit patches, provenance in the patches' `MANIFEST.md` |
 | `docs/` | The map image above, rendered from the example map |

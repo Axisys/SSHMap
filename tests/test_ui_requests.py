@@ -526,12 +526,12 @@ _langs = load_i18n_langs(ROOT)
 check_i18n_parity(_langs)
 check_i18n_format(_langs)
 check("§6 EXPECTED_APP_VERSION is the shipped release (the pin quotes the CURRENT one)",
-      EXPECTED_APP_VERSION == "1.6.4"
+      EXPECTED_APP_VERSION == "1.6.5"
       and re.fullmatch(r"1\.6(\.\d+)?", EXPECTED_APP_VERSION) is not None,
       EXPECTED_APP_VERSION)
 check("§6 the pin counts the shipped release (708 + the 29 keys of v1.5.7 + the 41 of v1.6"
-      " + the 4 of v1.6.2 + the 4 of v1.6.3 + the 3 of v1.6.4)",
-      EXPECTED_I18N_KEYS == 789, str(EXPECTED_I18N_KEYS))
+      " + the 4 of v1.6.2 + the 4 of v1.6.3 + the 3 of v1.6.4 + the 11 of v1.6.5)",
+      EXPECTED_I18N_KEYS == 800, str(EXPECTED_I18N_KEYS))
 for _key in ("menu.export", "empty.state.open_map"):
     check(f"§6 the key {_key} is present and non-empty in every discovered language",
           all(str(_langs[code].get(_key) or "").strip() for code in _langs),

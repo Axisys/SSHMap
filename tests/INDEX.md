@@ -203,6 +203,7 @@ of the file itself.
 | `test_ui_polish.py` | — | UI polish: nodes, grid, fit/zoom, status bar, icons, arrow hit zones (former smoke_test). |
 | `test_ui_requests.py` | — | v1.5.6 — the customer requests: the Export menu, a third first-run button, environment |
 | `test_undo_redo.py` | — | Regression tests v0.8.3 — Undo/Redo. |
+| `test_unmanaged.py` | — | v1.6.5 — the neighbours on the map: a card for a server you do not administer. |
 | `test_view_toggles.py` | — | v1.2.4.1 — Collapsing the sidebar and the map into a thin line (buttons + menu, ROADMAP v1.2.4.1). |
 | `test_wcwidth_cjk.py` | — | v1.2.9 — full wcwidth(3) for CJK (ROADMAP "Terminal hygiene", task 2). |
 | `test_worker_guard.py` | slow | SSHWorker: the active threads registry + the node deletion guard (former smoke_test.py §6c). |

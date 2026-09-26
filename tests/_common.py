@@ -259,8 +259,18 @@ def clear_cfg(*extra_paths: str) -> None:
 # in 12 i18n files + the APP_VERSION/requirements pins in 7 release-state sections).
 # The misses of the keys themselves against the code are caught by check_i18n_keys.py.
 # ─────────────────────────────────────────────────────────────────────────────
-EXPECTED_APP_VERSION = "1.6.4"  # the current release (a sentinel: it catches "a bump to the wrong version")
-EXPECTED_I18N_KEYS = 789        # the parity of the TRANSLATION keys (v1.6.4 — "the cheap batch: the
+EXPECTED_APP_VERSION = "1.6.5"  # the current release (a sentinel: it catches "a bump to the wrong version")
+EXPECTED_I18N_KEYS = 800        # the parity of the TRANSLATION keys (v1.6.5 — "the neighbours on
+                                # the map: a card for a server you do not administer": the
+                                # `unmanaged` flag, the disabled credential family, the cleared
+                                # keyring, the card's "NO SSH" chip, the skip set and the ONE
+                                # action gate are BEHAVIOUR (no key), and the ELEVEN new keys are
+                                # the dialog's two checkboxes with their two tooltips, the chip's
+                                # label and the card's tooltip, the one caption the table cell and
+                                # the info plaque share, the two lines of a MANUAL reachability
+                                # check and the gate's templated refusal with the status-bar
+                                # sentence that carries it — 789 + 11.
+                                # (v1.6.4 — "the cheap batch: the
                                 # names, the zoom, the dot, the secret and the pinned scrollback":
                                 # the thread names and the two scrollback modes are behaviour (no key),
                                 # the secret MARK is a field of the history file and a row marker (no

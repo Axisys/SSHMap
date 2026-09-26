@@ -788,5 +788,16 @@
   "settings.appearance.density": "卡片密度：",
   "settings.appearance.density.normal": "标准",
   "settings.appearance.density.compact": "紧凑",
-  "settings.appearance.density.tooltip": "紧凑模式会隐藏每张卡片的信息块和环境标签 — 适合服务器众多的高密度地图。"
+  "settings.appearance.density.tooltip": "紧凑模式会隐藏每张卡片的信息块和环境标签 — 适合服务器众多的高密度地图。",
+  "dialog.unmanaged": "非托管服务器（无 SSH 访问权限）",
+  "dialog.unmanaged.tooltip": "不保存任何凭据，该卡片从不被探测，其菜单中也没有 SSH 命令。",
+  "dialog.unmanaged_ping": "允许可达性检查（ping）",
+  "dialog.unmanaged_ping.tooltip": "按需从卡片菜单执行一次 ICMP ping。结果只是手动记录，绝不是状态。",
+  "node.unmanaged": "无 SSH",
+  "node.unmanaged.tooltip": "不在此处管理：无 SSH 访问权限，从不监控。",
+  "node.unmanaged.status": "不监控",
+  "node.unmanaged.ping_ok": "手动可达性检查：{host} 有响应",
+  "node.unmanaged.ping_failed": "手动可达性检查：{host} 无响应",
+  "unmanaged.blocked": "“{action}”需要 SSH 登录 — 此卡片为非托管。",
+  "status.unmanaged_blocked": "此卡片为非托管 — 无 SSH 访问权限"
 }

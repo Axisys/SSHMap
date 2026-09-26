@@ -261,6 +261,18 @@ class ServerNode(QGraphicsItemGroup):
     # whose marks are raised to y = 16..30). `_apply_badges()` places this badge FIRST and the
     # environment chip elides into the room that is left, so the two can never collide.
     DEMO_BADGE_FONT_SIZE = 6
+    # v1.6.5 (ROADMAP task 2): the "NO SSH" chip of an UNMANAGED card. It is the SAME
+    # channel as the emulated marker — WORDS on a neutral `dot_idle` frame — because a card
+    # nobody administers must say so in a colour-blind print, a greyscale screenshot and a
+    # spoken tooltip alike; the size matches the marker for the same reason (the two are the
+    # status-family words of the band, while the environment chip keeps the tag's own tone).
+    UNMANAGED_BADGE_FONT_SIZE = 6
+    #: THE BAND'S PRIORITY, right to left — ONE yield rule for the three marks of the free
+    #: band instead of three private ones. The first mark that applies takes the room it
+    #: needs from the right edge, the next one yields into what is left, and the ENVIRONMENT
+    #: chip is last: a card's kind and its emulation are facts of the card, while the tag
+    #: chip is the one label that can be elided or dropped without losing a warning.
+    BAND_ORDER = ("emulated", "unmanaged", "env")
     #: The chips of a badge: the inner padding, the corner radius and the gap between the two
     #: badges of the band.
     BADGE_PAD_X = 3.0
@@ -351,6 +363,13 @@ class ServerNode(QGraphicsItemGroup):
         self._env_badge = None
         self._demo_chip = None
         self._demo_badge = None
+        # v1.6.5 (ROADMAP task 2): the third optional mark — the "NO SSH" chip of an
+        # unmanaged card, built on first use like its two neighbours.
+        self._no_ssh_chip = None
+        self._no_ssh_badge = None
+        # v1.6.5 (ROADMAP task 5): the line of the last ON-DEMAND reachability check — a
+        # result the USER asked for, marked as manual, never a status.
+        self._manual_report = ""
         # v0.9.8: map search (Ctrl+F) — True if the node matches the active query
         self._search_matched = False
 
@@ -554,12 +573,12 @@ class ServerNode(QGraphicsItemGroup):
     # ── v1.5 (ROADMAP): the ENVIRONMENT badge and the EMULATED marker ──────────────
 
     def _ensure_badge_items(self):
-        """Build the four optional badge items the first time a card needs one.
+        """Build the optional badge items the first time a card needs one.
 
-        A card that carries neither an environment tag nor an emulated status therefore
-        carries NO extra item at all — the "a card without an env tag is byte-identical
-        to today" rule holds literally, and a 500-card map pays for the badges it shows,
-        not for the ones it could show.
+        A card that carries no environment tag, no emulated status and no unmanaged flag
+        therefore carries NO extra item at all — the "a card without an env tag is
+        byte-identical to today" rule holds literally, and a 500-card map pays for the
+        badges it shows, not for the ones it could show.
         """
         if self._env_badge is not None:
             return
@@ -579,6 +598,15 @@ class ServerNode(QGraphicsItemGroup):
         self._demo_badge.setFont(QFont(theme.FONT_MONO, self.DEMO_BADGE_FONT_SIZE))
         self._demo_badge.setZValue(4.9)
         self._demo_badge.hide()
+        # v1.6.5 (ROADMAP task 2): the "NO SSH" chip of an unmanaged card
+        self._no_ssh_chip = QGraphicsPathItem(self)
+        self._no_ssh_chip.setPen(QPen(Qt.PenStyle.NoPen))
+        self._no_ssh_chip.setZValue(4.8)
+        self._no_ssh_chip.hide()
+        self._no_ssh_badge = QGraphicsSimpleTextItem(self)
+        self._no_ssh_badge.setFont(QFont(theme.FONT_MONO, self.UNMANAGED_BADGE_FONT_SIZE))
+        self._no_ssh_badge.setZValue(4.9)
+        self._no_ssh_badge.hide()
 
     def _place_badge(self, chip, text_item, label: str, ink: str, tint, y: float,
                      x_right: float, x_left: float = None) -> float:
@@ -645,6 +673,18 @@ class ServerNode(QGraphicsItemGroup):
                 break
         return len(text) >= int(self.BADGE_MIN_CHARS)
 
+    def _band_right(self, reserved: float = 0.0) -> float:
+        """The RIGHT edge of the free band, short of what the marks to its right took.
+
+        ONE arithmetic for the three marks of the band (v1.6.5, `BAND_ORDER`): every
+        right-aligned mark asks for the room already taken, and the environment chip — the
+        last of the order — receives the same number and elides into what is left.
+        """
+        right = float(self._current_width) - self.BADGE_RIGHT_INSET - float(reserved or 0.0)
+        if reserved:
+            right -= self.BADGE_GAP
+        return right
+
     def _apply_env_badge(self, width: float, reserved: float = 0.0):
         """The primary tag as TEXT in the free band ABOVE the alias (v1.5, ROADMAP task 3).
 
@@ -654,18 +694,17 @@ class ServerNode(QGraphicsItemGroup):
         are `ENV_TAGS` / `env_tag()`; the colour is the SAME `tag_color()` the icon paints
         with, used as a redundant tint.
 
-        `reserved` is the width the EMULATED marker already took from the right end of the
-        band: the tag chip elides into what is left, and it is HIDDEN (never reduced to "…")
-        when that is less than `BADGE_MIN_SPAN` or when the elided label would keep fewer
-        than `BADGE_MIN_CHARS` characters. A card without tags — and every COLLAPSED card,
-        whose single line has no second row — hides the chip and paints exactly like a
-        pre-v1.5 card.
+        `reserved` is the width the marks that come BEFORE it in `BAND_ORDER` already took
+        from the right end of the band (the emulated marker and the "NO SSH" chip of an
+        unmanaged card): the tag chip elides into what is left, and it is HIDDEN (never
+        reduced to "…") when that is less than `BADGE_MIN_SPAN` or when the elided label
+        would keep fewer than `BADGE_MIN_CHARS` characters. A card without tags — and every
+        COLLAPSED card, whose single line has no second row — hides the chip and paints
+        exactly like a pre-v1.5 card.
         """
         text = "" if (getattr(self.data, "collapsed", False) or self._is_compact()) \
             else env_tag(getattr(self.data, "tags", None))
-        right = float(width) - self.BADGE_RIGHT_INSET - float(reserved or 0.0)
-        if reserved:
-            right -= self.BADGE_GAP
+        right = self._band_right(reserved)
         if not text or right - self.LABEL_X < self.BADGE_MIN_SPAN:
             if self._env_badge is not None:
                 self._env_badge.hide()
@@ -675,14 +714,15 @@ class ServerNode(QGraphicsItemGroup):
         self._place_badge(self._env_chip, self._env_badge, text, self.COLOR_LABEL,
                           self.tag_color(text), self.ENV_BADGE_Y, right, self.LABEL_X)
 
-    def _apply_demo_badge(self, collapsed: bool) -> float:
+    def _apply_demo_badge(self, collapsed: bool, reserved: float = 0.0) -> float:
         """The EMULATED marker — a status the demo map declares is always MARKED (v1.5).
 
         The honesty rule of the closing release: `node.status.emulated` sits in the card's
         free band, right-aligned, in the card's own label tone on a neutral `dot_idle` frame
         (the "this is not a fresh measurement" tone the stale mark already uses), so a
         colour-blind reader, a greyscale print and a screenshot all say the same thing.
-        Returns the width it occupies (0.0 when it is hidden) — the tag badge yields to it.
+        Returns the width it occupies (0.0 when it is hidden) — the marks after it in
+        `BAND_ORDER` yield to it.
         """
         if not self._status_emulated:
             if self._demo_badge is not None:
@@ -693,19 +733,57 @@ class ServerNode(QGraphicsItemGroup):
         return self._place_badge(self._demo_chip, self._demo_badge,
                                  _t("node.status.emulated"), self.COLOR_LABEL,
                                  theme.DOT_IDLE, self.ENV_BADGE_Y,
-                                 float(self._current_width) - self.BADGE_RIGHT_INSET)
+                                 self._band_right(reserved))
+
+    # ── v1.6.5 (ROADMAP task 2): the "NO SSH" mark of an UNMANAGED card ─────────────
+
+    @property
+    def unmanaged(self) -> bool:
+        """Is this card a server the user does NOT administer? (never probed, no SSH)"""
+        return bool(getattr(self.data, "unmanaged", False))
+
+    def _apply_unmanaged_badge(self, collapsed: bool, reserved: float = 0.0) -> float:
+        """The "NO SSH" chip — the card's KIND, said in the band in WORDS (v1.6.5).
+
+        The `_apply_demo_badge()` mechanism exactly: the same measured band, the same
+        `dot_idle` frame, the same card tone for the label — because "this card is not
+        administered from here" is a fact of the same family as "this status is a demo" and
+        neither may live in a colour alone (§4.6/§4.16). It applies in EVERY layout (the
+        expanded card, the compact one and the collapsed single line): a kind is not a
+        density. Returns the width it occupies (0.0 — the card is managed / the mark was
+        hidden), which the environment chip yields to.
+        """
+        if not self.unmanaged:
+            if self._no_ssh_badge is not None:
+                self._no_ssh_badge.hide()
+                self._no_ssh_chip.hide()
+            return 0.0
+        self._ensure_badge_items()
+        return self._place_badge(self._no_ssh_chip, self._no_ssh_badge,
+                                 _t("node.unmanaged"), self.COLOR_LABEL,
+                                 theme.DOT_IDLE, self.ENV_BADGE_Y,
+                                 self._band_right(reserved))
 
     def _apply_badges(self):
-        """Re-place both optional badges for the CURRENT layout and width.
+        """Re-place the optional marks of the free band for the CURRENT layout and width.
 
-        The EMULATED marker goes first and reports the room it took: it may never be pushed
-        aside (it is what keeps an emulated status honest), so the tag badge is the one that
-        elides — or disappears, when the band has no room left for it.
+        The order is DECLARED (`BAND_ORDER`) and the room is passed along: the EMULATED
+        marker goes first and reports what it took, the "NO SSH" chip of an unmanaged card
+        takes what is left of the right end, and the tag badge — the one label that may be
+        dropped — elides into whatever remains. ONE yield rule instead of three private
+        ones, so the three marks can never collide in the band.
         """
         collapsed = bool(getattr(self.data, "collapsed", False))
         try:
-            reserved = self._apply_demo_badge(collapsed)
-            self._apply_env_badge(self._current_width, reserved)
+            reserved = 0.0
+            for mark in self.BAND_ORDER:
+                if mark == "emulated":
+                    reserved += self._apply_demo_badge(collapsed, reserved)
+                elif mark == "unmanaged":
+                    reserved += self._apply_unmanaged_badge(collapsed, reserved)
+                else:
+                    self._apply_env_badge(self._current_width, reserved)
+            self._apply_card_tooltip()
         except RuntimeError:
             pass  # Qt teardown — the items are already destroyed
 
@@ -754,9 +832,10 @@ class ServerNode(QGraphicsItemGroup):
         self._apply_status_dot()
         self._ssh_status.setBrush(QBrush(self.COLOR_DOT_IDLE))
         self._apply_visual_state()
-        # v1.5: the two badges are VALUES too (a chip brush/pen and an ink brush) — a
-        # theme switch re-resolves both, including the tag colour of the environment chip
-        # (`ServerNode.tag_color` reads the ACTIVE theme's tag maps).
+        # v1.5: the badges are VALUES too (a chip brush/pen and an ink brush) — a theme
+        # switch re-resolves all of them, including the tag colour of the environment chip
+        # (`ServerNode.tag_color` reads the ACTIVE theme's tag maps) and the neutral frame of
+        # the emulated marker and of the v1.6.5 "NO SSH" chip.
         self._apply_badges()
         # The halo is a pixmap of one size and a neutral black layer — it has no
         # theme colour, but the cache is dropped with the switch so a caller that
@@ -1004,13 +1083,57 @@ class ServerNode(QGraphicsItemGroup):
         the old explanation would be a claim about a measurement that no longer holds.
         """
         self._status_report = str(text or "")
-        if self._status:
-            self._apply_status_tooltip(self._status)
+        self._apply_card_tooltip()
 
     @property
     def status_report(self) -> str:
         """v1.5.3: the last reachability report of this card ("" — none was asked)."""
         return self._status_report
+
+    # ── v1.6.5 (ROADMAP task 5): the MANUAL result of an opt-in reachability check ────
+
+    def set_manual_report(self, text: str) -> None:
+        """Attach the line of the last ON-DEMAND check the user asked for (v1.6.5).
+
+        The second home of "a measurement the user requested", beside the v1.5.3
+        reachability report: an unmanaged card has NO status to refine (nothing ever probes
+        it), so its one ICMP answer is a note of its own — MARKED as a manual result — and
+        it never becomes a fourth kind of status. An empty text clears it.
+        """
+        self._manual_report = str(text or "")
+        self._apply_card_tooltip()
+
+    @property
+    def manual_report(self) -> str:
+        """v1.6.5: the line of the last manual reachability check ("" — none was asked)."""
+        return self._manual_report
+
+    def _apply_card_tooltip(self):
+        """The ONE composer of the card's tooltip (v1.6.5).
+
+        Two families ride it. A card WITH a status keeps the v0.7.1/v1.4rc2/v1.5.3 sentence
+        exactly as before (the status line, the plugin detail, the age or the emulated
+        marker, the report) — that path is untouched, including the rule that a status
+        replaces the explanation. A card WITHOUT one is the UNMANAGED case: it says what it
+        is ("not monitored" — there is no measurement behind the idle mark), then the
+        sentences of the checks the user asked for by hand, each of which names itself as
+        such. Called wherever one of those facts changes and from `_apply_badges()`, so a
+        layout change repaints the words with the marks.
+        """
+        if self._status:
+            self._apply_status_tooltip(self._status)
+            return
+        lines = []
+        if self.unmanaged:
+            lines.append(_t("node.unmanaged.tooltip"))
+        if self._status_report:
+            lines.append(self._status_report)
+        if self._manual_report:
+            lines.append(self._manual_report)
+        try:
+            self.setToolTip("\n".join(lines))
+        except RuntimeError:
+            pass  # Qt teardown — the item is already destroyed
 
     def update_appearance(self):
         """Rebuild the text elements when the data changes.
@@ -1048,21 +1171,29 @@ class ServerNode(QGraphicsItemGroup):
         host_text = f"@{self.data.host}"
 
         info_lines = []
-        # v0.9: OS on its OWN line (main source — auto-collection, but the field is editable)
-        # v1.6.1 (ROADMAP task 10): the CPU MODEL used to ride this line as `f"{os} · {model}"`,
-        # and the line is elided to the card width — at the measured 360 px cap the OS name
-        # alone already overflows, so the model never reached the card at all (it survived in
-        # the tooltip only). The OS line carries the OS; the line that already owns the CPU
-        # fact is built from `cpu` and `cpu_model` in that order under the empty-field rule
-        # (an empty field adds no line), so the NUMBER of info lines — and with it the
-        # measured `58 + info + 12` height — does not move.
-        if getattr(self.data, "os_name", ""):
-            info_lines.append(self.data.os_name)
-        cpu_text = " · ".join(
-            part for part in (self.data.cpu, getattr(self.data, "cpu_model", "")) if part)
-        if cpu_text: info_lines.append(f"CPU: {cpu_text}")
-        if self.data.ram: info_lines.append(f"RAM: {self.data.ram}")
-        if self.data.disk: info_lines.append(f"DISK: {self.data.disk}")
+        # v1.6.5 (ROADMAP task 2): an UNMANAGED card has NO hardware lines BY CONSTRUCTION
+        # — nothing was ever collected from a box this user does not administer, so the OS /
+        # CPU / RAM / DISK family is not painted at all. What IDENTIFIES the neighbour stays:
+        # its address and the COMMENT (the "what is this box for" line, which is exactly what
+        # a documented appliance has). The measured height formula (`58 + info + 12`) and the
+        # `MIN_NODE_HEIGHT` floor are untouched — they follow the lines that remain.
+        unmanaged = self.unmanaged
+        if not unmanaged:
+            # v0.9: OS on its OWN line (main source — auto-collection, but the field is editable)
+            # v1.6.1 (ROADMAP task 10): the CPU MODEL used to ride this line as `f"{os} · {model}"`,
+            # and the line is elided to the card width — at the measured 360 px cap the OS name
+            # alone already overflows, so the model never reached the card at all (it survived in
+            # the tooltip only). The OS line carries the OS; the line that already owns the CPU
+            # fact is built from `cpu` and `cpu_model` in that order under the empty-field rule
+            # (an empty field adds no line), so the NUMBER of info lines — and with it the
+            # measured `58 + info + 12` height — does not move.
+            if getattr(self.data, "os_name", ""):
+                info_lines.append(self.data.os_name)
+            cpu_text = " · ".join(
+                part for part in (self.data.cpu, getattr(self.data, "cpu_model", "")) if part)
+            if cpu_text: info_lines.append(f"CPU: {cpu_text}")
+            if self.data.ram: info_lines.append(f"RAM: {self.data.ram}")
+            if self.data.disk: info_lines.append(f"DISK: {self.data.disk}")
         if self.data.ip: info_lines.append(f"IP: {self.data.ip}")
         if self.data.ssh_port != 22: info_lines.append(f"SSH:{self.data.ssh_port}")
         # UI polish: the emoji prefix on the comment was removed (consistent style without emoji)
@@ -1075,7 +1206,11 @@ class ServerNode(QGraphicsItemGroup):
         def _set_texts(a_text, h_text, i_lines):
             self._alias.setPlainText(a_text)
             self._host_label.setPlainText(h_text)
-            self._info.setPlainText("\n".join(i_lines) if i_lines else _t("node.no_data"))
+            # v1.6.5: an unmanaged card with nothing to show says WHAT IT IS instead of
+            # claiming that no data was collected yet ("no data collected yet" would be a
+            # promise of a collection that will never happen for this card).
+            empty = _t("node.unmanaged.status") if unmanaged else _t("node.no_data")
+            self._info.setPlainText("\n".join(i_lines) if i_lines else empty)
 
         def _needed_width() -> int:
             """Width formula as before the fix: right edge of content + 24 px."""
@@ -1544,7 +1679,7 @@ class ServerNode(QGraphicsItemGroup):
             if detail != self._status_detail or emulated != self._status_emulated:
                 self._status_detail = detail
                 self._status_emulated = emulated
-                self._apply_status_tooltip(status)
+                self._apply_card_tooltip()
                 self._apply_badges()
             return
         color = self.STATUS_COLORS[status]
@@ -1563,7 +1698,7 @@ class ServerNode(QGraphicsItemGroup):
         # for a card that is now green would be a stale claim about the present).
         self._status_report = ""
 
-        self._apply_status_tooltip(status)
+        self._apply_card_tooltip()
 
         # UI polish: the availability dot (reads faster than the frame at a small zoom)
         # + dimming the card content for offline nodes.
@@ -1688,8 +1823,13 @@ class ServerNode(QGraphicsItemGroup):
         return self._status
 
     def reset_status(self):
-        """v0.7.1: reset the status (e.g. after changing the node's host/port)."""
-        if not self._status:
+        """v0.7.1: reset the status (e.g. after changing the node's host/port).
+
+        v1.6.5: a card without a status and without a manual check's line has nothing to
+        reset — but an UNMANAGED card is exactly the case where the second family is the
+        only one that can be set, so the guard asks about both.
+        """
+        if not self._status and not self._manual_report:
             return
         self._status = ""
         self._status_detail = ""   # v1.4rc2: the plugin detail goes with the status
@@ -1701,7 +1841,10 @@ class ServerNode(QGraphicsItemGroup):
         # v1.5.3 (ROADMAP task 3): the reachability report explained THIS status — it goes
         # with it (a new host/port has never been diagnosed).
         self._status_report = ""
-        self.setToolTip("")
+        # v1.6.5 (ROADMAP task 5): and so does the manual check's line — it described the
+        # state of a card that has just been re-defined.
+        self._manual_report = ""
+        self._apply_card_tooltip()
         # UI polish: the dot — gray (not checked), the content — full brightness
         # (v1.5rc2: the mark returns to the plain dot of an unchecked status)
         self._apply_status_dot()

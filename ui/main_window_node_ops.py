@@ -39,6 +39,13 @@ try:
 except ImportError:
     from graphics.server_node import ServerNode
 
+try:  # v1.6.5 (ROADMAP tasks 4/5): the unmanaged gate and its ONE opt-in
+    from ..models.server import is_unmanaged as _is_unmanaged
+    from ..models.server import unmanaged_ping_allowed as _unmanaged_ping_allowed
+except ImportError:  # flat launch from the project root
+    from models.server import is_unmanaged as _is_unmanaged
+    from models.server import unmanaged_ping_allowed as _unmanaged_ping_allowed
+
 try:  # v1.1.4: the common seam for monkeypatching the facade module's globals (see mixin_support)
     from .mixin_support import host_attr
 except ImportError:
@@ -485,10 +492,12 @@ class NodeOpsMixin:
                 break
         data.id = new_id
         # v0.9.3: the password from the keyring by the new node's server_id (task #1)
+        # v1.6.5 (ROADMAP task 1): unless the card is UNMANAGED — the keyring is never
+        # written for such a card, and its copy is one of those cards too.
         try:
             from services.credential_manager import get_credential_manager
             cm = get_credential_manager()
-            pw = cm.load_password(node.data.id)
+            pw = None if _is_unmanaged(data) else cm.load_password(node.data.id)
             if pw:
                 cm.save_password(new_id, pw)
         except Exception:  # noqa: BLE001 — the keyring is unavailable: the copy has no password
@@ -546,17 +555,25 @@ class NodeOpsMixin:
         a manual round does not restart the QTimer countdown).
 
         Returns True when a round was actually started. Never raises.
+
+        v1.6.5 (ROADMAP task 4): an UNMANAGED card is refused before the target list is
+        built. It is also absent from the checker's own plan (`_status_skip_ids`), so this
+        is the sentence that explains WHY the menu row was disabled rather than a silent
+        no-op — and a selection that mixes kinds still checks every card it can.
         """
         checker = getattr(self, "_status_checker", None)
         if checker is None:
             return False
+        candidates = [n for n in self.selected_nodes()]
+        data = node.data if node is not None and not isinstance(node, bool) \
+            and hasattr(node, "data") else None
+        if not candidates and data is not None:
+            candidates = [node]
+        if candidates and all(_is_unmanaged(n.data) for n in candidates):
+            self._refuse_unmanaged(candidates[0], "ctx.check_status")
+            return False
         targets = [(n.data.id, n.data.host, n.data.ssh_port or 22)
-                   for n in self.selected_nodes()]
-        if not targets:
-            data = node.data if node is not None and not isinstance(node, bool) \
-                and hasattr(node, "data") else None
-            if data is not None:
-                targets = [(data.id, data.host, data.ssh_port or 22)]
+                   for n in candidates if not _is_unmanaged(n.data)]
         if not targets:
             return False
         try:
@@ -603,6 +620,12 @@ class NodeOpsMixin:
                                         self.t("msg.select_server_ssh"))
             except (RuntimeError, AttributeError):
                 pass
+            return False
+        # v1.6.5 (ROADMAP task 4): the report ends at the SSH banner — a host nobody
+        # administers has no banner to read, so the whole DNS → TCP → banner family is
+        # refused. The ONE thing an unmanaged card may be asked is the ICMP half, and it
+        # has its own opt-in (the ping of task 5, which names itself a manual result).
+        if self._refuse_unmanaged(target, "ctx.diagnose"):
             return False
         data = target.data
         sid = str(data.id)
@@ -1064,8 +1087,22 @@ class NodeOpsMixin:
 
         Windows: `ping -n 3`, POSIX: `ping -c 3`. The result — in the status bar.
         v0.9.9.3: the thread was moved to services/diagnostics.py (PingThread).
+
+        v1.6.5 (ROADMAP task 5): the SECOND reading of this action is the ONE network call
+        an UNMANAGED card may ever make — pure ICMP, never a TCP/SSH probe — and only when
+        the card itself opted in (`ServerData.unmanaged_ping`, DEFAULT OFF). The answer
+        takes the same status-bar road AND lands on the card as a line MARKED a manual
+        result (`set_manual_report`): it must never become a fourth kind of status, because
+        the counters, the aggregate and the "problems only" lens all read `online`/`warn`/
+        `offline`/unchecked and nothing else.
         """
         if node is None:
+            return
+        unmanaged = _is_unmanaged(node.data)
+        if unmanaged and not _unmanaged_ping_allowed(node.data):
+            # The row is disabled in the menus with the same sentence; this is the
+            # programmatic half (a hotkey, a palette row, an old caller).
+            self._refuse_unmanaged(node, "ctx.ping")
             return
 
         # AUDIT v0.7.2 (medium #8): do not clobber a still-running ping — a
@@ -1079,10 +1116,26 @@ class NodeOpsMixin:
         ping_thread = PingThread(node.data.host)
 
         def _on_ping_done(ok, text):
+            # v1.6.5 (ROADMAP task 5): the manual result of a card that HAS no status is a
+            # note of its own — the card line names the check as manual, so a reader of the
+            # tooltip cannot mistake it for a probe round's answer.
+            if unmanaged:
+                try:
+                    if ok:
+                        line = self.t("node.unmanaged.ping_ok", host=node.data.host)
+                    else:
+                        line = self.t("node.unmanaged.ping_failed", host=node.data.host)
+                    node.set_manual_report(line)
+                except (RuntimeError, AttributeError):
+                    pass  # Qt teardown — the line is cosmetic
             if ok:
                 self.statusBar().showMessage(text)
-            else:
+            elif not unmanaged:
                 QMessageBox.information(self, self.t("msg.info_title"), text)
+            else:
+                # An unmanaged card never pops a modal for a check the user asked for by
+                # hand: the sentence already went to the card and the status bar.
+                self.statusBar().showMessage(text, 8000)
             # Clear the reference only for OUR thread: a late old ping must not
             # null the reference of the already-started new one (AUDIT v0.7.2, medium #8).
             if getattr(self, "_ping_thread", None) is ping_thread:

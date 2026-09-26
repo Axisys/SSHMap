@@ -53,6 +53,14 @@ except ImportError:
     except ImportError:  # flat layout: the ui/ directory itself is on sys.path
         focus_ring = None
 
+try:  # v1.6.5 (ROADMAP task 4): the ONE gate of an unmanaged card
+    from ..ui import unmanaged
+except ImportError:
+    try:
+        from ui import unmanaged
+    except ImportError:  # flat layout without ui/unmanaged — no row is ever gated
+        unmanaged = None
+
 
 if TYPE_CHECKING:
     from ..graphics.map_scene import MapScene
@@ -64,13 +72,29 @@ from PySide6.QtGui import (QPainter, QWheelEvent, QKeyEvent, QMouseEvent, QFocus
 from PySide6.QtWidgets import QGraphicsView, QGraphicsPathItem, QMenu
 
 
-def _t(key: str) -> str:
-    """Safe i18n hook (consistent with server_node/connection_arrow)."""
+def _t(key: str, **kw) -> str:
+    """Safe i18n hook (consistent with server_node/connection_arrow).
+
+    v1.6.5: it also carries the refusal sentence of the unmanaged gate, which is a
+    template (`{action}`) — hence the optional placeholders.
+    """
     try:
         from i18n import t as _translate
-        return _translate(key)
+        return _translate(key, **kw) if kw else _translate(key)
     except Exception:
         return key
+
+
+def _gate_row(act, action: str, node, label_key: str) -> bool:
+    """Disable a node-context row the UNMANAGED gate refuses (v1.6.5, ROADMAP task 4).
+
+    The menu builder's ONE call: the policy lives in `ui/unmanaged.py` (the action table
+    and the sentence), the label is the row's OWN translated text, and a row that is not
+    gated is left exactly as it was built. True — the row was disabled.
+    """
+    if unmanaged is None:
+        return False
+    return unmanaged.gate_row(act, action, node, _t(label_key), _t)
 
 
 class MapView(QGraphicsView):
@@ -1194,6 +1218,11 @@ class MapView(QGraphicsView):
                     if not hasattr(win, "_run_quick_launch_entry"):
                         break
                     act_ql = ql_sub.addAction(str(e.get("name") or e.get("value") or "?"))
+                    # v1.6.5 (ROADMAP task 4): a COMMAND entry is an SSH verb and is refused
+                    # for an unmanaged card; a URL entry stays — the browser needs no shell
+                    # on that host. The gate asks the ENTRY's type, not the row's.
+                    if str(e.get("type", "url")).strip().lower() == "command":
+                        _gate_row(act_ql, "ql_command", win_node, "ctx.quick_launch")
                     def _ql(checked=False, n=win_node, en=e):  # checked — a bool from triggered
                         w = self.window()
                         if hasattr(w, "_run_quick_launch_entry"):
@@ -1219,6 +1248,9 @@ class MapView(QGraphicsView):
                     w._select_node(n)          # the SSH dialog takes the selected node
                     w._connect_ssh_to_selected()
                 act_ssh.triggered.connect(_ssh)
+                # v1.6.5 (ROADMAP task 4): the whole SSH family of the node menu is
+                # DISABLED (with the reason in the tooltip) for an unmanaged card.
+                _gate_row(act_ssh, "ssh", win_node, "ctx.ssh_connect")
             # v0.8.2: connection in the OS system terminal
             if hasattr(win, "_connect_ssh_external"):
                 act_ext = menu.addAction(_t("ctx.ssh_external"))
@@ -1227,6 +1259,7 @@ class MapView(QGraphicsView):
                     w._select_node(n)
                     w._connect_ssh_external(n)
                 act_ext.triggered.connect(_ssh_ext)
+                _gate_row(act_ext, "external", win_node, "ctx.ssh_external")
             if hasattr(win, "_edit_node"):
                 act_edit = menu.addAction(_t("ctx.edit_server"))
                 act_edit.triggered.connect(lambda _=False, n=win_node: self.window()._edit_node(n))
@@ -1238,6 +1271,7 @@ class MapView(QGraphicsView):
                 act_info = menu.addAction(_t("ctx.collect_info"))
                 act_info.triggered.connect(
                     lambda _=False, n=win_node: self.window()._collect_info_many(node=n))
+                _gate_row(act_info, "collect_info", win_node, "ctx.collect_info")
             # v0.8.4 (former DESIGN.md §D): collapse/expand the badge
             if hasattr(win_node, "toggle_collapsed"):
                 act_col = menu.addAction(
@@ -1252,6 +1286,10 @@ class MapView(QGraphicsView):
                 act_host.triggered.connect(lambda _=False, n=win_node: self.window()._copy_node_info(n, "hostname"))
                 act_ping = menu.addAction(_t("ctx.ping"))
                 act_ping.triggered.connect(lambda _=False, n=win_node: self.window()._ping_node(n))
+                # v1.6.5 (ROADMAP task 5): the ICMP check is the ONE network call an
+                # unmanaged card may make — it stays in the menu, disabled until the card
+                # opted in (with the refusal sentence saying so).
+                _gate_row(act_ping, "ping", win_node, "ctx.ping")
             # v1.3.3.3 (ROADMAP task 5): "Check statuses now" — one on-demand round for
             # the SELECTION (the clicked node when nothing is selected). The probes stay
             # off the GUI thread (StatusChecker.start_round → _ProbeThread); the action
@@ -1263,10 +1301,12 @@ class MapView(QGraphicsView):
                 act_diag = menu.addAction(_t("ctx.diagnose"))
                 act_diag.triggered.connect(
                     lambda _=False, n=win_node: self.window()._diagnose_node(n))
+                _gate_row(act_diag, "diagnose", win_node, "ctx.diagnose")
             if hasattr(win, "_check_statuses_now"):
                 act_status = menu.addAction(_t("ctx.check_status"))
                 act_status.triggered.connect(
                     lambda _=False, n=win_node: self.window()._check_statuses_now(n))
+                _gate_row(act_status, "check_status", win_node, "ctx.check_status")
             menu.addSeparator()
             if hasattr(win, "_duplicate_node"):
                 # v0.9.3: node duplication (copy of fields + keyring password under a new id)
