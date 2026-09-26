@@ -31,11 +31,6 @@ from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QKeyEvent
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QLineEdit, QPushButton, QWidget
 
-try:  # v1.2.5: central theme (palette/radii/fonts — ui/theme.py)
-    from ..ui import theme
-except ImportError:
-    from ui import theme
-
 try:  # v1.4.3 (ROADMAP task 4): the ONE QSS registry
     from ..ui import theme_qss
 except ImportError:

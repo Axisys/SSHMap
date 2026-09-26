@@ -246,10 +246,23 @@ def dedup_entries(entries):
     The store already merges on every write, so this exists for a hand-edited file (or one
     written by another tool): "Remove duplicates" of the context menu is exactly this function
     plus a write.
+
+    The REPORTED count is the number of entries that were really FOLDED into another one
+    (`normalize_entry()`'s identity is the command text); the per-server CAP of
+    `sort_entries()` — a truncation, not a duplicate — is never reported as one.
     """
     given = list(entries or [])
     folded = merge_entries(given, [])
-    return folded, max(0, len(given) - len(folded))
+    seen, duplicates = set(), 0
+    for entry in given:
+        norm = normalize_entry(entry)
+        if norm is None:
+            continue  # an unusable row is DROPPED, never counted as a duplicate
+        if norm["cmd"] in seen:
+            duplicates += 1
+        else:
+            seen.add(norm["cmd"])
+    return folded, duplicates
 
 
 def format_last_used(timestamp, translate_fn=None) -> str:

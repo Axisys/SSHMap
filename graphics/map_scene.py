@@ -1,4 +1,4 @@
-from typing import Optional, List, Dict
+from typing import Optional, List, Dict, TYPE_CHECKING
 
 try:
     from ..models.server import ServerData
@@ -41,6 +41,9 @@ from PySide6.QtGui import QBrush, QColor, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import QGraphicsScene
 
 from contextlib import contextmanager
+
+if TYPE_CHECKING:  # the string annotations of the two render helpers below
+    from PySide6.QtGui import QPixmap
 
 
 class MapScene(QGraphicsScene):

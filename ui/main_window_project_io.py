@@ -500,7 +500,6 @@ class ProjectIOMixin:
 
         try:
             server_count = len(raw.get('servers', []))
-            conn_count = len(raw.get('connections', []))
 
             self._import_project_raw(raw)
 

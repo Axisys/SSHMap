@@ -555,8 +555,8 @@ check("i18n: the placeholders of the new sentences survive every language",
           and "{file}" in _langs[c]["status.connections_exported"] for c in _langs))
 check_i18n_parity(_langs)
 check_i18n_format(_langs)
-check("the release is v1.6 with 778 keys and 59 actions",
-      __import__("version").APP_VERSION == "1.6"
+check("the release is v1.6.1 with 778 keys and 59 actions",
+      __import__("version").APP_VERSION == "1.6.1"
       and __import__("_common").EXPECTED_I18N_KEYS == 778
       and len(HR.HOTKEY_ACTIONS) == 59 and len(HR.empty_default_action_ids()) == 36,
       f"{__import__('version').APP_VERSION}"

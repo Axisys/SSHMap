@@ -266,8 +266,8 @@ def ask_conflict(parent, name: str, target: str, remaining: int = 0):
     box.setText(_t("sftp.conflict.message", name=name, target=target))
     btn_over = box.addButton(_t("sftp.conflict.overwrite"),
                              QMessageBox.ButtonRole.AcceptRole)
-    btn_skip = box.addButton(_t("sftp.conflict.skip"),
-                             QMessageBox.ButtonRole.RejectRole)
+    box.addButton(_t("sftp.conflict.skip"),
+                  QMessageBox.ButtonRole.RejectRole)
     btn_rename = box.addButton(_t("sftp.conflict.rename"),
                                QMessageBox.ButtonRole.ActionRole)
     check = QCheckBox(_t("sftp.conflict.apply_all"))

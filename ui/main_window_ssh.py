@@ -52,6 +52,7 @@ facade module at call time (host_attr) — a test seam for swapping
 an offscreen run would hang on the real modals).
 """
 import copy
+from typing import TYPE_CHECKING
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QKeySequence  # v1.2.3: multi-input F12 shortcut (QAction)
@@ -66,6 +67,9 @@ try:  # v1.2.3 (ROADMAP v1.2.3): multi-input — highlight of the session contai
     from ..modules.multi_input import apply_container_highlight as _apply_multi_highlight
 except ImportError:
     from modules.multi_input import apply_container_highlight as _apply_multi_highlight
+
+if TYPE_CHECKING:  # the `node` parameter annotations below (the mixin never imports it at runtime)
+    from graphics.server_node import ServerNode
 
 
 class SshMixin:

@@ -526,7 +526,7 @@ _langs = load_i18n_langs(ROOT)
 check_i18n_parity(_langs)
 check_i18n_format(_langs)
 check("§6 EXPECTED_APP_VERSION is the shipped release (the pin quotes the CURRENT one)",
-      EXPECTED_APP_VERSION == "1.6"
+      EXPECTED_APP_VERSION == "1.6.1"
       and re.fullmatch(r"1\.6(\.\d+)?", EXPECTED_APP_VERSION) is not None,
       EXPECTED_APP_VERSION)
 check("§6 the pin counts the shipped release (708 + the 29 keys of v1.5.7 + the 41 of v1.6)",

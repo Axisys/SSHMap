@@ -126,13 +126,23 @@ def write_project_json(path: str, data: dict) -> None:
 
     Atomicity — the same as save_project had before v0.9.7 (tmp + fsync +
     os.replace, v0.9.3 fix): a crash mid-write doesn't corrupt the map file.
+    A FAILED write removes the provisional file — the guard the rest of the
+    writer family already carries, so no `<project>.json.tmp` is left next to
+    the project (the error itself still propagates to the caller).
     """
     tmp_path = path + '.tmp'
-    with open(tmp_path, 'w', encoding='utf-8') as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
-        f.flush()
-        os.fsync(f.fileno())
-    os.replace(tmp_path, path)
+    try:
+        with open(tmp_path, 'w', encoding='utf-8') as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp_path, path)
+    except OSError:
+        try:
+            os.remove(tmp_path)
+        except OSError:
+            pass
+        raise
 
 
 def save_project(
@@ -164,7 +174,7 @@ def save_project(
                 "notes": len(data.get('notes', [])),
                 "groups": len(data.get('groups', [])),  # v0.8.1
             })
-    except Exception as e:
+    except Exception:
         if log:
             log.exception(f"Failed to save project {path}")
         raise

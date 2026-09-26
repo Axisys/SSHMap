@@ -52,6 +52,16 @@ try:
 except ImportError:
     from modules.ssh_terminal import SSHTerminalWindow
 
+# The LIVE-NAMESPACE SEAMS, declared once. Every name below is resolved on THIS
+# module at call time (host_attr) and swapped by the tests (MW.<name> = Fake), so it
+# must stay importable here although the window never calls it directly — the
+# declaration IS the seam, and it keeps a static analyser from reading a live seam
+# as a dead import (the modules/ssh_terminal.py `_st_module()` precedent).
+MODULE_FACADE_SEAMS = (
+    ConnectionDialog, SSHConnectDialog, SshConfigImportDialog,
+    BulkEditDialog, ArrangeGroupDialog, SSHTerminalWindow,
+)
+
 try:  # v0.8.2: external (system) terminal (v1.1.4: used by SshMixin via host_attr)
     from ..modules import external_terminal as _ext_term
 except ImportError:
@@ -177,7 +187,7 @@ from PySide6.QtGui import (
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QHBoxLayout, QSplitter,
     QLabel, QTreeWidgetItem,  # QTreeWidgetItem — tree slot annotations (v0.9.9.4: tree in ui/sidebar.py)
-    QToolBar, QMessageBox, QDialog, QFileDialog, QMenu,
+    QToolBar, QMessageBox, QDialog, QFileDialog, QMenu, QDockWidget,
     QApplication, QToolButton,  # QToolButton — exit button on the multi-input plaque (v1.2.3)
 )
 
@@ -312,11 +322,11 @@ _WIDGET_MAX_WIDTH = 16777215
 # CLUSTER, not one button: a new panel joins it by naming its action, with no second
 # mechanism (the bookmark panel of the backlog is the next one).
 _VIEW_TOOLBAR_ITEMS = (
-    ("view.toggle_sidebar", "sidebar_panel", "view.toggle_sidebar", "Sidebar"),
-    ("view.toggle_map", "map_panel", "view.toggle_map", "Map"),
+    ("view.toggle_sidebar", "sidebar_panel", "view.toggle_sidebar", "Sidebar / Map"),
+    ("view.toggle_map", "map_panel", "view.toggle_map", "Map / List"),
     ("view.toggle_minimap", "minimap", "view.toggle_minimap", "Minimap"),
     ("view.toggle_legend", "legend", "view.toggle_legend", "Legend"),
-    ("view.toggle_activity", "activity", "view.toggle_activity", "Activity"),
+    ("view.toggle_activity", "activity", "view.toggle_activity", "Activity panel"),
 )
 
 # action id → the MainWindow attribute holding the OWNER QAction (the wiring in
@@ -1926,7 +1936,7 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
             self.undo_stack.undo()
             self.statusBar().showMessage(
                 self.t("status.undone", action=self.undo_stack.text(self.undo_stack.index()))
-                if self._i18n_available else "Undo.")
+                if self._i18n_available else "Undone.")
         except Exception as e:
             if self.log:
                 self.log.warning(f"undo failed: {e}")
@@ -1935,7 +1945,7 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         try:
             self.undo_stack.redo()
             self.statusBar().showMessage(
-                self.t("status.redone") if self._i18n_available else "Redo.")
+                self.t("status.redone") if self._i18n_available else "Redone.")
         except Exception as e:
             if self.log:
                 self.log.warning(f"redo failed: {e}")
@@ -2951,7 +2961,7 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         # triggered WITHOUT state; an explicit connect passes the new state and fires
         # on a programmatic setChecked — the checkbox and the mechanism stay in sync).
         self.act_show_sidebar = view_menu.addAction(
-            self.t("view.toggle_sidebar") if self._i18n_available else "Sidebar")
+            self.t("view.toggle_sidebar") if self._i18n_available else "Sidebar / Map")
         self.act_show_sidebar.setCheckable(True)
         self.act_show_sidebar.setChecked(True)
         set_action_icon(self.act_show_sidebar, "sidebar_panel")  # v1.2.4.1: the pair's icon
@@ -2962,7 +2972,7 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         self._wire_view_toolbar_button("view.toggle_sidebar", self.act_show_sidebar)
         # v1.2.4.1 (task 3): the map — the same pattern (created manually, the pair's icon).
         self.act_show_map = view_menu.addAction(
-            self.t("view.toggle_map") if self._i18n_available else "Map")
+            self.t("view.toggle_map") if self._i18n_available else "Map / List")
         self.act_show_map.setCheckable(True)
         self.act_show_map.setChecked(True)
         set_action_icon(self.act_show_map, "map_panel")
@@ -4155,7 +4165,7 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
             else:
                 QMessageBox.warning(self, self.t("msg.error_title"), 
                                    f"{self.t('lang.switch_failed')}: {language_code}")
-        except Exception as e:
+        except Exception:
             if self.log:
                 self.log.exception(f"Error switching language to {language_code}")
 
@@ -4606,7 +4616,7 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         note = self.scene.add_note(x=x, y=y)
         # v0.8.3: creating a note — an undo command; the note itself is already added above
         # (add_note returned the object), but for undo it must be removed/restored by a command.
-        from modules.undo_commands import CmdAddRemoveNote, CmdEditTextNote
+        from modules.undo_commands import CmdAddRemoveNote
         raw = {"id": note.note_id, "text": "", "x": float(note.pos().x()),
                "y": float(note.pos().y()),
                "width": float(note.rect().width()), "height": float(note.rect().height())}
@@ -5197,7 +5207,7 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
                         CmdEditGroupName(self, group, group.name, new_name))
                     self._mark_dirty()
                 self.statusBar().showMessage(self.t("status.group_renamed"))
-        except Exception as e:
+        except Exception:
             if self.log:
                 self.log.exception(f"Error renaming group {group.name}")
 
@@ -6263,6 +6273,60 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
                 button.blockSignals(False)
         except RuntimeError:
             pass  # Qt teardown
+
+    # ── v1.6.1 (ROADMAP task 7): the toolbar's right-click menu ────────────────
+
+    def _panel_switch_actions(self):
+        """The checkable VIEW actions of the panel cluster, in the toolbar's own order.
+
+        ONE source for the toolbar buttons (`_VIEW_TOOLBAR_ITEMS` /
+        `_VIEW_TOOLBAR_ACTIONS`) and for the toolbar's own context menu, so the menu and
+        the buttons cannot drift apart. An action whose LABEL is empty is skipped: a
+        nameless row is never rendered anywhere (the `createPopupMenu()` rule).
+        """
+        out = []
+        for action_id, _icon, _key, _fallback in _VIEW_TOOLBAR_ITEMS:
+            action = getattr(self, _VIEW_TOOLBAR_ACTIONS.get(action_id, ""), None)
+            if action is None:
+                continue
+            try:
+                if not action.text().strip():
+                    continue
+            except RuntimeError:
+                continue  # Qt teardown — the action is already destroyed
+            out.append(action)
+        return out
+
+    def createPopupMenu(self):
+        """The toolbar's right-click menu — built from rows that HAVE a name.
+
+        Qt's own `QMainWindow::createPopupMenu()` lists the `toggleViewAction()` of every
+        toolbar and dock; the main bar is a bare `QToolBar()` with no window title, so
+        that row is a lone checkmark with an EMPTY label (v1.6.1, ROADMAP task 7). This
+        override lists the PANEL switches instead — their labels come from the action
+        registry, so the menu adds no i18n key — plus the dock rows that really carry a
+        name. A widget that cannot be NAMED is not listed at all, and neither is the
+        toolbar itself.
+        """
+        menu = QMenu(self)
+        for action in self._panel_switch_actions():
+            menu.addAction(action)
+        named_docks = []
+        for dock in self.findChildren(QDockWidget):
+            action = dock.toggleViewAction()
+            if action is None:
+                continue
+            try:
+                if not action.text().strip():
+                    continue
+            except RuntimeError:
+                continue
+            named_docks.append(action)
+        if named_docks:
+            menu.addSeparator()  # the panels above, the containers below
+            for action in named_docks:
+                menu.addAction(action)
+        return menu
 
     def _toggle_map_search(self):
         """v0.9.8: Ctrl+F / "View -> Search map..." — open or close the panel."""

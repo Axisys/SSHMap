@@ -97,7 +97,7 @@ def get_autosave_settings() -> Dict:
         except (TypeError, ValueError):
             return default
 
-    enabled = bool(cfg.get("autosave_enabled", DEFAULT_AUTOSAVE_ENABLED))
+    enabled = _bool_setting(cfg.get("autosave_enabled", DEFAULT_AUTOSAVE_ENABLED))
     interval = max(_MIN_INTERVAL_SEC, min(
         _int(cfg.get("autosave_interval_sec"), DEFAULT_AUTOSAVE_INTERVAL_SEC),
         _MAX_INTERVAL_SEC))
@@ -107,6 +107,33 @@ def get_autosave_settings() -> Dict:
     return {"enabled": enabled, "interval_sec": interval, "backup_count": backups}
 
 
+#: The spellings a HAND-EDITED config may use for "off" / "on". `bool("false")` is True,
+#: so the raw value cannot be coerced — the ON spellings are listed for symmetry and an
+#: unusable value falls back to the default.
+_FALSE_WORDS = ("false", "0", "no", "off", "disabled")
+_TRUE_WORDS = ("true", "1", "yes", "on", "enabled")
+
+
+def _bool_setting(value, default: bool = True) -> bool:
+    """A REAL bool out of a config value (`get_autosave_settings()`'s `autosave_enabled`).
+
+    A `bool` answers itself, a number answers `!= 0`, and a STRING is read as one of the
+    declared spellings (`"false"` / `"0"` / `"no"` mean OFF — the docstring's promise
+    "corrupt values → the default" holds for anything unusable).
+    """
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return value != 0
+    if isinstance(value, str):
+        word = value.strip().lower()
+        if word in _FALSE_WORDS:
+            return False
+        if word in _TRUE_WORDS:
+            return True
+    return bool(default)
+
+
 # ── Atomic write (save_project / save_config pattern) ────────────────────
 
 def atomic_write_json(path: str, data: dict) -> None:
@@ -114,16 +141,25 @@ def atomic_write_json(path: str, data: dict) -> None:
 
     A crash/power loss mid-write corrupts neither the autosave nor a backup —
     replace either happens in full or not at all (v0.9.3 fix for save_project).
+    A FAILED write removes the provisional file, so a rejected path leaves no
+    `*.tmp` behind (the error still propagates to the caller).
     """
     directory = os.path.dirname(path)
     if directory:
         os.makedirs(directory, exist_ok=True)
     tmp_path = path + ".tmp"
-    with open(tmp_path, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
-        f.flush()
-        os.fsync(f.fileno())
-    os.replace(tmp_path, path)
+    try:
+        with open(tmp_path, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp_path, path)
+    except OSError:
+        try:
+            os.remove(tmp_path)
+        except OSError:
+            pass
+        raise
 
 
 def read_json(path: str) -> Optional[dict]:
@@ -140,14 +176,23 @@ def _atomic_copy(src: str, dst: str) -> None:
     """Atomic file copy: copy2 to tmp + os.replace.
 
     copy2 preserves mtime — for backups this is "when the version was made"
-    (the "Modified" column in the backups dialog).
+    (the "Modified" column in the backups dialog). A FAILED copy removes the
+    provisional file (the `atomic_write_json` guard), so no `*.tmp` survives
+    a rejected destination.
     """
     directory = os.path.dirname(dst)
     if directory:
         os.makedirs(directory, exist_ok=True)
     tmp_path = dst + ".tmp"
-    shutil.copy2(src, tmp_path)
-    os.replace(tmp_path, dst)
+    try:
+        shutil.copy2(src, tmp_path)
+        os.replace(tmp_path, dst)
+    except OSError:
+        try:
+            os.remove(tmp_path)
+        except OSError:
+            pass
+        raise
 
 
 # ── Autosave (ROADMAP v0.9.7 #1, #3) ───────────────────────────────────

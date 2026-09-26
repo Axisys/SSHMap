@@ -259,8 +259,14 @@ def clear_cfg(*extra_paths: str) -> None:
 # in 12 i18n files + the APP_VERSION/requirements pins in 7 release-state sections).
 # The misses of the keys themselves against the code are caught by check_i18n_keys.py.
 # ─────────────────────────────────────────────────────────────────────────────
-EXPECTED_APP_VERSION = "1.6"  # the current release (a sentinel: it catches "a bump to the wrong version")
-EXPECTED_I18N_KEYS = 778        # the parity of the TRANSLATION keys (v1.6 — "the map at scale: bulk
+EXPECTED_APP_VERSION = "1.6.1"  # the current release (a sentinel: it catches "a bump to the wrong version")
+EXPECTED_I18N_KEYS = 778        # the parity of the TRANSLATION keys (v1.6.1 — "the review batch: the shipped
+                                # facts, the guards and the leftovers": a HARDENING slot, the v1.5rc5 shape —
+                                # it adds, renames and deletes NO key, and not one language file is touched:
+                                # the six no-i18n fallback literals follow `en.json` on the CODE side and the
+                                # new fourth part of `tests/check_i18n_keys.py` keeps them there, so the v1.6
+                                # figure of 778 stands.
+                                # (v1.6 — "the map at scale: bulk
                                 # editing, density, arrangement and the connections out": the release
                                 # that OPENED the 1.6 line. +41 keys × en/ru/zh/de in four families:
                                 # the BULK EDIT dialog (`bulk.*` — the title with its count, the hint that

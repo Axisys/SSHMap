@@ -28,7 +28,7 @@ already-translated QAction texts (no duplicate translations).
 from PySide6.QtCore import Qt, QPoint
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QLineEdit, QListWidget, QListWidgetItem,
-    QWidget, QHBoxLayout, QLabel,
+    QHBoxLayout, QLabel,
 )
 
 try:

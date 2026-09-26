@@ -104,6 +104,7 @@ of the file itself.
 | `test_audit_rc2_robustness.py` | — | v1.2.10rc2 — Audit: robustness and code hygiene (AUDIT.md manual #5, auto #7, manual #6). |
 | `test_audit_v1210.py` | — | v1.2.10 — Audit: confirmed bugs and data (AUDIT.md): the release's themed test. |
 | `test_audit_v15rc5.py` | — | v1.5rc5 — the review batch (hardening): the batch-level checks of the nine defects. |
+| `test_audit_v161.py` | — | v1.6.1 — the review batch (hardening): the shipped facts, the guards and the leftovers. |
 | `test_autosave_backups.py` | — | Regression v0.9.7 — autosave + the project backup ring buffer. |
 | `test_bidirectional_arrows.py` | — | Bidirectional arrows (v1.2.6, ROADMAP task 1). |
 | `test_chrome.py` | — | v1.5rc4 — Density, focus & findability: the chrome answers the same questions as the map. |

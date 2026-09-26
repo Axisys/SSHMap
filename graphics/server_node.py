@@ -1048,13 +1048,19 @@ class ServerNode(QGraphicsItemGroup):
         host_text = f"@{self.data.host}"
 
         info_lines = []
-        # v0.9: OS on the first line (main source — auto-collection, but the field is editable)
+        # v0.9: OS on its OWN line (main source — auto-collection, but the field is editable)
+        # v1.6.1 (ROADMAP task 10): the CPU MODEL used to ride this line as `f"{os} · {model}"`,
+        # and the line is elided to the card width — at the measured 360 px cap the OS name
+        # alone already overflows, so the model never reached the card at all (it survived in
+        # the tooltip only). The OS line carries the OS; the line that already owns the CPU
+        # fact is built from `cpu` and `cpu_model` in that order under the empty-field rule
+        # (an empty field adds no line), so the NUMBER of info lines — and with it the
+        # measured `58 + info + 12` height — does not move.
         if getattr(self.data, "os_name", ""):
-            os_line = self.data.os_name
-            if getattr(self.data, "cpu_model", ""):
-                os_line += f" · {self.data.cpu_model}"
-            info_lines.append(os_line)
-        if self.data.cpu: info_lines.append(f"CPU: {self.data.cpu}")
+            info_lines.append(self.data.os_name)
+        cpu_text = " · ".join(
+            part for part in (self.data.cpu, getattr(self.data, "cpu_model", "")) if part)
+        if cpu_text: info_lines.append(f"CPU: {cpu_text}")
         if self.data.ram: info_lines.append(f"RAM: {self.data.ram}")
         if self.data.disk: info_lines.append(f"DISK: {self.data.disk}")
         if self.data.ip: info_lines.append(f"IP: {self.data.ip}")

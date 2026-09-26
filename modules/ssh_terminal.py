@@ -6,6 +6,17 @@ try:
 except ImportError:
     from models.server import ServerData
 
+# ── THE LIVE NAMESPACE OF THE TERMINAL FAMILY (a test seam — do not "clean" it) ──
+# terminal_page.py and terminal_dock.py resolve these names on THIS module at call
+# time (`_st_module()`, the v1.1.4 host_attr pattern), and the tests substitute them
+# the same way (`ST.TerminalScreen`, `ST.QMessageBox`, …). The names therefore stay
+# imported here although this module never references them directly: a static
+# analyser reports them as unused, and that report is the EXPECTED state (the
+# v1.6.1 ROADMAP task 3 acceptance names this file as its only exception).
+#   TerminalScreen / DEFAULT_HISTORY_LINES / TerminalWidget — the session page's screen
+#   and canvas; SftpWorker / register_orphan_sftp_worker — the SFTP transport;
+#   SftpTab / format_size — the Files tab. QMessageBox is the same seam (see its own
+#   comment below).
 try:
     from .terminal_screen import TerminalScreen, DEFAULT_HISTORY_LINES
 except ImportError:
@@ -791,9 +802,12 @@ class SSHTerminalWindow(QMainWindow):
             # ~25 px of a ~140 px pane.
             page = TerminalSessionPage(
                 server_data, parent=self.split_host, with_sftp=False,
-                with_status_line=False,
+                with_status_line=False, split=True,
                 password=password, initial_command=initial_command)
             page.set_host_window(self)
+            # v1.6.1 (task 8): the constructor already marks the pane (it decides the
+            # keyboard claim); the assignment stays as the ONE visible statement of the
+            # marker this block is built around.
             page._is_split_pane = True
             self._wire_page(page)
             try:
@@ -1371,6 +1385,16 @@ class SSHTerminalWindow(QMainWindow):
             self._refresh_bridge()
             return
         self._set_bridged_page(page)
+        # v1.6.1 (ROADMAP task 8): the tab the user switched TO owns the keyboard, so a
+        # fresh session is usable without a click on the canvas. Skipped in the branch
+        # above — a pane that holds the keyboard keeps it. Duck-typed hook: a page that
+        # cannot take the focus answers False and is left alone.
+        claim = getattr(page, "claim_focus", None)
+        if callable(claim):
+            try:
+                claim()
+            except RuntimeError:
+                pass  # Qt teardown (a close race)
 
     def _set_bridged_page(self, page):
         """Bridge of the ACTIVE tab's signals into the window's status bar

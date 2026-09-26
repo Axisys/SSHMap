@@ -727,7 +727,7 @@ print("== §4 the release state ==")
 # ════════════════════════════════════════════════════════════════════════════
 
 check("§4 the version pin is the version this file describes",
-      EXPECTED_APP_VERSION == "1.6" and _version.APP_VERSION == "1.6",
+      EXPECTED_APP_VERSION == "1.6.1" and _version.APP_VERSION == "1.6.1",
       f"{EXPECTED_APP_VERSION} / {_version.APP_VERSION}")
 check("§4 the i18n pin counts the SHIPPED release (661 + 20 of v1.5.3 + 11 of v1.5.4"
       " + 14 of v1.5.5 + 2 of v1.5.6 + 29 of v1.5.7)",

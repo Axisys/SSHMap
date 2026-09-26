@@ -275,6 +275,9 @@ def _read_language_name(code: str) -> str:
     Missing key / an empty or non-string value / an unreadable or broken file →
     the CODE (the file name), so a hand-made language file is usable immediately.
     v1.3.3.8: the file is the one that WINS for the code (the user folder shadows).
+    A file that is not valid UTF-8 is "broken" like any other: `UnicodeDecodeError`
+    is a `ValueError` and is caught here exactly as `_read_language_file()` catches
+    it, so `get_available_languages()` can never raise on one.
     """
     path = language_file_path(code)
     name = None
@@ -284,7 +287,7 @@ def _read_language_name(code: str) -> str:
                 data = json.load(f)
             if isinstance(data, dict):
                 name = data.get(_META_KEYS[0])
-        except (json.JSONDecodeError, IOError, OSError):
+        except (ValueError, IOError, OSError):
             name = None
     if isinstance(name, str) and name.strip():
         return name.strip()
@@ -308,7 +311,7 @@ def is_partial(language: str) -> bool:
     try:
         with open(path, "r", encoding=_LANG_ENCODING) as f:
             data = json.load(f)
-    except (json.JSONDecodeError, IOError, OSError):
+    except (ValueError, IOError, OSError):
         return False
     return isinstance(data, dict) and data.get("partial") is True
 
@@ -409,6 +412,11 @@ def load_language(language: str) -> bool:
     (v1.3.3). A file whose root is not a JSON object is not a language file.
     v1.3.3.8: the file that WINS for the code is loaded (the USER folder shadows the
     package one), so an edited or replaced user file is picked up without a restart.
+
+    A file that is not valid UTF-8 is a BROKEN file, not a crash: `UnicodeDecodeError`
+    is a `ValueError` and is caught here (the `_read_language_file()` precedent), which
+    matters most for a broken PACKAGE file of the ACTIVE language — `load_language()`
+    runs during the import of `i18n` itself, i.e. on the startup path.
     """
     global _translations, _current_language
 
@@ -431,7 +439,7 @@ def load_language(language: str) -> bool:
         _translations = _strip_meta(data)
         _current_language = language
         return True
-    except (json.JSONDecodeError, IOError) as e:
+    except (ValueError, IOError) as e:
         _log_warning(f"language {language!r} not loaded ({e!r}) — keeping "
                      f"{_current_language!r}")
         return False
@@ -626,6 +634,8 @@ def _get_en_fallback() -> Dict[str, str]:
     Deliberately the PACKAGE file, never the user one: the reference must not be
     shadowable, or a user's partial `en.json` would shrink the fallback of every
     other language (v1.3.3.8). The import report uses this dict as its reference too.
+    An unreadable reference (including a file that is not valid UTF-8 — a `ValueError`)
+    answers an EMPTY fallback: `t()` then answers the key itself, never an exception.
     """
     global _en_fallback
     if _en_fallback is None:
@@ -633,7 +643,7 @@ def _get_en_fallback() -> Dict[str, str]:
         try:
             with open(path, "r", encoding=_LANG_ENCODING) as f:
                 _en_fallback = _strip_meta(json.load(f))
-        except (json.JSONDecodeError, IOError, OSError):
+        except (ValueError, IOError, OSError):
             _en_fallback = {}
     return _en_fallback
 

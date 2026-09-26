@@ -178,7 +178,7 @@ PySide6 / Qt 6 gotchas worth knowing before writing UI code:
 | `dialogs/` | Add/edit dialogs, connect, profiles, backups, imports, export options |
 | `ui/` | Main window and mixins, sidebar, theme, palette, panels, settings, hotkeys, icons |
 | `i18n/` | `en` (reference), `ru`, `zh`, `de` — one JSON file per language |
-| `tests/` | 105 test files, the parallel runner and the harness — map in `tests/INDEX.md` |
+| `tests/` | 106 test files, the parallel runner and the harness — map in `tests/INDEX.md` |
 | `examples/plugins/` | Two working example plugins, not installed and never auto-discovered |
 | `third_party/pyte/`, `third_party/pyte-patches/` | The managed pyte 0.8.2 fork: sdist plus explicit patches, provenance in the patches' `MANIFEST.md` |
 | `docs/` | The map image above, rendered from the example map |

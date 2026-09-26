@@ -256,6 +256,33 @@ def _shell_join(args: List[str]) -> str:
     return " ".join(_sh_quote(a) for a in args)
 
 
+def _applescript_quote(s: str) -> str:
+    """Escape a value for an AppleScript DOUBLE-QUOTED string literal.
+
+    AppleScript has NO single-quoted string literal, so `_sh_quote()` — the
+    POSIX helper of the `bash -c` branches — cannot be used inside an
+    `osascript -e` SOURCE: the interpreter refuses to compile the script and
+    Terminal.app never opens. Only the backslash and the double quote are
+    special inside such a literal (the escape order matters: backslashes
+    first, otherwise the escapes added for the quotes would be doubled).
+    """
+    return '"' + s.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
+# Interpreter-driven launchers: the process runs to completion and its EXIT
+# STATUS is the answer, so launch() must not report success for a source the
+# interpreter refused (the osascript case above).
+INTERPRETER_COMMANDS = ("osascript",)
+INTERPRETER_WAIT_SEC = 10.0
+
+
+def _is_interpreter_command(command: List[str]) -> bool:
+    """True when the launcher is an INTERPRETER whose exit status is the answer."""
+    if not command:
+        return False
+    return os.path.basename(command[0]) in INTERPRETER_COMMANDS
+
+
 def build_command(terminal: str, host: str, user: str, port: int = 22,
                   key_path: Optional[str] = None,
                   jump: Optional[str] = None) -> List[str]:
@@ -293,9 +320,12 @@ def build_command(terminal: str, host: str, user: str, port: int = 22,
         # not pass arguments that way. The correct way is osascript: open
         # Terminal.app and run the command in it (the window survives the
         # session drop thanks to `exec bash`).
+        # The `-e` SOURCE is AppleScript, so the ssh command it carries is
+        # escaped as an AppleScript literal — never with the POSIX `_sh_quote()`
+        # of the `bash -c` branches below.
         script = f"{_shell_join(ssh_args)}; exec bash"
         return ["osascript", "-e",
-                'tell application "Terminal" to do script ' + _sh_quote(script)]
+                'tell application "Terminal" to do script ' + _applescript_quote(script)]
     # Linux family: gnome-terminal/konsole/xfce4-terminal/alacritty/kitty/
     # x-terminal-emulator
     shell_cmd = f"{_shell_join(ssh_args)}; exec bash"
@@ -328,6 +358,9 @@ def launch(command: Optional[List[str]] = None, host: str = "", user: str = "",
     (AUDIT v0.8.3 #2: DETACHED_PROCESS from the old code was removed — the
     flags are mutually exclusive, only the second overwrite took effect).
     Returns True/False; a Popen exception is logged and turned into False.
+    An INTERPRETER launcher (`_is_interpreter_command()`, the osascript branch)
+    is WAITED for: a source the interpreter refused must not be reported as a
+    launched terminal.
     """
     if command is None:
         if not host:
@@ -341,7 +374,7 @@ def launch(command: Optional[List[str]] = None, host: str = "", user: str = "",
     if sys.platform == "win32":
         creationflags = getattr(subprocess, "CREATE_NEW_CONSOLE", 0)
     try:
-        subprocess.Popen(
+        proc = subprocess.Popen(
             command,
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
@@ -349,6 +382,17 @@ def launch(command: Optional[List[str]] = None, host: str = "", user: str = "",
             close_fds=True,
             creationflags=creationflags,
         )
+        if _is_interpreter_command(command):
+            try:
+                status = proc.wait(timeout=INTERPRETER_WAIT_SEC)
+            except subprocess.TimeoutExpired:
+                log.error("Interpreter %s did not return within %.0f s",
+                          command[0], INTERPRETER_WAIT_SEC)
+                return False
+            if status:
+                log.error("Interpreter %s exited with status %s — nothing was launched",
+                          command[0], status)
+                return False
         log.info("External terminal launched: %s", command[0])
         return True
     except FileNotFoundError as e:

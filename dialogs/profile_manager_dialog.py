@@ -3,13 +3,13 @@
 Access via Menu → Profiles → Manage profiles.
 """
 
-from typing import Optional, List
+from typing import Optional
 
 try:
-    from ..models.profile import (Profile, load_profiles, save_profiles, add_profile,
+    from ..models.profile import (Profile, load_profiles, add_profile,
                                   update_profile, delete_profile, get_profile_password)
 except ImportError:
-    from models.profile import (Profile, load_profiles, save_profiles, add_profile,
+    from models.profile import (Profile, load_profiles, add_profile,
                                 update_profile, delete_profile, get_profile_password)
 
 try:  # v1.2.5: central theme (palette/radii/fonts — ui/theme.py)
@@ -22,6 +22,23 @@ from PySide6.QtWidgets import (
     QTableWidgetItem, QLabel, QMessageBox, QLineEdit, QDialogButtonBox,
     QHeaderView,
 )
+
+
+#: The FIXED mask of a stored password in the profile table (v1.6.1, ROADMAP task 6).
+#: The cell still answers "a password is stored"; it deliberately does NOT answer HOW
+#: LONG it is — `"•" * len(password)` put the length of a keyring secret on the screen
+#: (and into every screenshot of the dialog), which the value mask alone cannot undo.
+PASSWORD_MASK = "•" * 8
+
+
+def password_cell_text(password, translate_fn=None) -> str:
+    """The password cell of ONE profile row (pure): the FIXED mask, or the "none" caption.
+
+    The same caption for every stored password — the length is not a readable fact here.
+    """
+    if password:
+        return PASSWORD_MASK
+    return translate_fn("profile.password_empty") if translate_fn else "(empty)"
 
 
 class ProfileManagerDialog(QDialog):
@@ -122,9 +139,10 @@ class ProfileManagerDialog(QDialog):
         for i, p in enumerate(profiles):
             name_item = QTableWidgetItem(p.name)
             user_item = QTableWidgetItem(p.user)
-            # The password lives in the keyring — loaded for display only (masked)
+            # The password lives in the keyring — loaded for display only (masked).
+            # v1.6.1 (task 6): a FIXED mask — the cell never reports the length.
             pw = get_profile_password(p.id) or ""
-            pw_display = "•" * max(len(pw), 1) if pw else self.t("profile.password_empty")
+            pw_display = password_cell_text(pw, self.t)
             password_item = QTableWidgetItem(pw_display)
             self.table.setItem(i, 0, name_item)
             self.table.setItem(i, 1, user_item)

@@ -26,6 +26,20 @@ LOG_FILE = os.path.join(LOG_DIR, "sshmap.log")
 MAX_LOG_SIZE_MB = 5  # Rotate after this size
 
 
+def _console_stream():
+    """The first stream a console handler can really use, or None.
+
+    `sys.stdout` and `sys.stderr` are BOTH `None` under `pythonw.exe` (and under a
+    detached GUI launch on any platform) — a `StreamHandler` built on either one
+    swallows every record it is handed. A stream without a usable `write` is treated
+    as absent for the same reason.
+    """
+    for stream in (sys.stdout, sys.stderr):
+        if stream is not None and hasattr(stream, "write"):
+            return stream
+    return None
+
+
 def setup_logging(level: int = logging.DEBUG) -> logging.Logger:
     """Configure root logger for SSH Map. Call once from main.py."""
     os.makedirs(LOG_DIR, exist_ok=True)
@@ -60,13 +74,20 @@ def setup_logging(level: int = logging.DEBUG) -> logging.Logger:
     root_logger.addHandler(file_handler)
 
     # ── Console handler (WARNING+: only warnings and errors) ──
-    console_handler = logging.StreamHandler(sys.stdout)
-    console_handler.setLevel(logging.WARNING)  # Only warnings+errors on console
-    console_formatter = logging.Formatter(
-        "[%(levelname)-7s] %(name)s: %(message)s"
-    )
-    console_handler.setFormatter(console_formatter)
-    root_logger.addHandler(console_handler)
+    # v1.6.1 (ROADMAP task 5): a GUI started by pythonw.exe has NO console — `sys.stdout`
+    # AND `sys.stderr` are None, and `StreamHandler(None)` then writes into a None stream,
+    # so every WARNING+ died inside `emit()` → `handleError()`. Take the first stream that
+    # really EXISTS and install no console handler when neither does: the rotating FILE
+    # handler is the durable record either way, and setup_logging() never raises.
+    console_stream = _console_stream()
+    if console_stream is not None:
+        console_handler = logging.StreamHandler(console_stream)
+        console_handler.setLevel(logging.WARNING)  # Only warnings+errors on console
+        console_formatter = logging.Formatter(
+            "[%(levelname)-7s] %(name)s: %(message)s"
+        )
+        console_handler.setFormatter(console_formatter)
+        root_logger.addHandler(console_handler)
 
     # ── v1.5.2 (ROADMAP task 1): the activity tap ─────────────
     # The panel's history is fed from the SAME records the file gets — no emitter is

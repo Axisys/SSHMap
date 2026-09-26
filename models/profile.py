@@ -7,7 +7,7 @@ This prevents plaintext passwords from appearing in config files.
 
 import json
 import os
-from dataclasses import dataclass, asdict, field
+from dataclasses import dataclass, asdict
 from typing import Optional, List
 
 

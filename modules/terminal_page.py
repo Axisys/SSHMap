@@ -37,13 +37,13 @@ fetched from the ssh_terminal module at call time — monkeypatching
 
 import time
 
-from PySide6.QtCore import Qt, QEvent, QTimer, Signal
+from PySide6.QtCore import QEvent, QTimer, Signal
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel, QTabWidget
 
 try:
-    from .terminal_screen import TerminalScreen, DEFAULT_HISTORY_LINES
+    from .terminal_screen import TerminalScreen
 except ImportError:
-    from modules.terminal_screen import TerminalScreen, DEFAULT_HISTORY_LINES
+    from modules.terminal_screen import TerminalScreen
 
 try:
     from .terminal_widget import TerminalWidget
@@ -239,7 +239,7 @@ class TerminalSessionPage(QWidget):
 
     def __init__(self, server_data, parent=None, password: str = None,
                  initial_command: str = "", with_sftp: bool = True,
-                 with_status_line: bool = True):
+                 with_status_line: bool = True, split: bool = False):
         super().__init__(parent)
         self.server_data = server_data
         self._host_window = None     # the host window (SSHTerminalWindow); close_terminal() closes it
@@ -250,8 +250,12 @@ class TerminalSessionPage(QWidget):
         # of MainWindow (_terminal_windows) keeps it for the green dot and the multi-input
         # provider, while the terminal_max_open limit and _find_terminal_window_for skip
         # it (ui/main_window_ssh.py): a pane is a session, not a reason to refuse a new
-        # terminal.
-        self._is_split_pane = False
+        # terminal. v1.6.1 (task 8): the flag is a CONSTRUCTOR argument — the page must know
+        # from birth that it is a pane, because the keyboard claim below is decided HERE.
+        self._is_split_pane = bool(split)
+        # v1.6.1 (ROADMAP task 8): the keyboard claim — the session takes the focus once,
+        # when it is really SHOWN (`claim_focus()`), never while it is still hidden.
+        self._focus_claimed = False
         # v1.3.3.5: the multi-input badge of the pane — it has no tab in session_tabs,
         # so the highlight marks its inner `Terminal` tab instead (set_session_badge).
         self._session_badge = None
@@ -433,7 +437,15 @@ class TerminalSessionPage(QWidget):
                 self._send_initial_command)
 
         self.terminal_thread.start()
-        self.widget.setFocus()
+        # v1.6.1 (ROADMAP task 8): this call is a NO-OP — the page is still HIDDEN here and
+        # Qt delivers no FocusIn to a hidden container, so the keystrokes of a fresh session
+        # went nowhere until the user clicked the canvas. The real claim is the DEFERRED
+        # `claim_focus()`, armed by the first `showEvent` and by the tab-current hook of the
+        # container (see `claim_focus()`). A SPLIT PANE does not even arm it: with two shells
+        # on one screen the choice of the target belongs to the user (and Qt would otherwise
+        # hand the window's focus_child to a pane the user never touched).
+        if not self._is_split_pane:
+            self.widget.setFocus()
 
     # ── v1.3.3.1 (ROADMAP task 1): live i18n — re-text on a language switch ──
 
@@ -795,6 +807,31 @@ class TerminalSessionPage(QWidget):
             QTimer.singleShot(0, self._sync_grid)
         return super().eventFilter(obj, event)
 
+    def claim_focus(self) -> bool:
+        """v1.6.1 (ROADMAP task 8): give the keyboard to THIS session's canvas.
+
+        `setFocus()` called while the page is still HIDDEN never reaches the container —
+        no `FocusIn` is delivered (the fact `modules/ssh_terminal.py` states at
+        `_wire_page()`), so a fresh session used to open with a blinking cursor and
+        keystrokes that went nowhere until the user clicked the canvas. The claim is
+        therefore ONE DEFERRED `setFocus` (singleShot(0), when the layout has run) and it
+        is armed from the two places that know the session is really on screen: the first
+        `showEvent` and the tab-current hook of the container.
+
+        A SPLIT PANE is deliberately left alone — with two shells on one screen the choice
+        of the target belongs to the user. Returns True when the request was made.
+        """
+        if getattr(self, "_is_split_pane", False) or self._shut_down:
+            return False
+        widget = getattr(self, "widget", None)
+        if widget is None:
+            return False
+        try:
+            QTimer.singleShot(0, widget.setFocus)
+        except RuntimeError:
+            return False  # Qt teardown — the canvas is already destroyed
+        return True
+
     def showEvent(self, event):
         """v1.5.7: the first SHOW re-computes the grid, so a session never depends on a
         resize event to find out how big it is.
@@ -803,9 +840,17 @@ class TerminalSessionPage(QWidget):
         window restored to the very geometry of the layout pass) would otherwise keep
         `invoke_shell`'s 120×32 as its only grid definition. Deferred with singleShot(0): at
         show time the layout has not run yet, and `_sync_grid` guards the not-laid-out case.
+
+        v1.6.1 (ROADMAP task 8): the FIRST show also claims the keyboard (`claim_focus()`),
+        deferred the same way. A LATER show (a tab switched back, a window re-shown) does not
+        re-claim it — the container's tab hook is the place for that, and a minimise/restore
+        must not move the focus the user placed somewhere else.
         """
         super().showEvent(event)
         QTimer.singleShot(0, self._sync_grid)
+        if not self._focus_claimed:
+            self._focus_claimed = True
+            self.claim_focus()
 
     def _on_output(self, data: bytes):
         """A slot from the SSH thread (a queued signal — already in the GUI thread):

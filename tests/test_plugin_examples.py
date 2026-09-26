@@ -651,7 +651,7 @@ check_i18n_format(_langs)
 check("the plugin strings of both examples stay outside the parity policy",
       "disk: " not in json.dumps(_langs["en"]) and "threshold 90" not in json.dumps(_langs["en"]))
 check("the release is the version this file ships with (the pin quotes the shipped one)",
-      EXPECTED_APP_VERSION == "1.6", EXPECTED_APP_VERSION)
+      EXPECTED_APP_VERSION == "1.6.1", EXPECTED_APP_VERSION)
 check_release_state(ROOT)
 check("the example file for these tasks is described in examples/README.md",
       "disk_monitor" in read(os.path.join(EXAMPLES_DIR, "README.md"))

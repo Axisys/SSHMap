@@ -89,7 +89,7 @@ def main():
         if log is not None:
             log.info("MainWindow shown")
         sys.exit(app.exec())
-    except Exception as e:
+    except Exception:
         if log is not None:
             log.exception("Fatal error during startup")
         else:

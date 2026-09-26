@@ -97,7 +97,6 @@ class TerminalDockContent(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        t = get_translator()
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -273,6 +272,15 @@ class TerminalDockContent(QWidget):
         except RuntimeError:
             page = None  # C++ object already deleted (close race)
         self._set_bridged_page(page)
+        # v1.6.1 (ROADMAP task 8): the tab the user just switched TO owns the keyboard —
+        # a fresh session is usable without a click on the canvas. Duck-typed hook: a page
+        # that cannot take the focus (a split pane) answers False and is left alone.
+        claim = getattr(page, "claim_focus", None)
+        if callable(claim):
+            try:
+                claim()
+            except RuntimeError:
+                pass  # Qt teardown (a close race)
 
     def _set_bridged_page(self, page):
         """Bridge of the ACTIVE tab's signals into the dock's status line; on tab

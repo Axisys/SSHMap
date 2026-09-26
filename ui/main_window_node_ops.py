@@ -450,7 +450,6 @@ class NodeOpsMixin:
                     QMessageBox.warning(self, self.t("msg.error_title"),
                                         self.t("validation.connection_error"))
                     return
-                arrow = None
                 if self.log:
                     src_node = self.scene.get_node(src)
                     tgt_node = self.scene.get_node(tgt)

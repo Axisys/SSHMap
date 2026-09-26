@@ -1,4 +1,4 @@
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, TYPE_CHECKING
 
 try:
     from ..graphics.server_node import ServerNode
@@ -9,6 +9,9 @@ try:
     from ..graphics.connection_arrow import CONNECTION_TYPES, DEFAULT_CONNECTION_TYPE
 except ImportError:
     from graphics.connection_arrow import CONNECTION_TYPES, DEFAULT_CONNECTION_TYPE
+
+if TYPE_CHECKING:  # the `arrow` parameter of EditConnectionDialog (no runtime import needed)
+    from graphics.connection_arrow import ConnectionArrow
 
 from PySide6.QtWidgets import (
     QDialog, QFormLayout, QComboBox, QLineEdit, QDialogButtonBox, QCheckBox,

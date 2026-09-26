@@ -16,10 +16,10 @@ from PySide6.QtWidgets import (
 )
 
 try:  # the pure mode vocabulary of the geometry (no Qt there)
-    from ..graphics.node_group import (ARRANGE_HORIZONTAL, ARRANGE_MODES, ARRANGE_ROWS,
+    from ..graphics.node_group import (ARRANGE_HORIZONTAL, ARRANGE_ROWS,
                                        ARRANGE_VERTICAL)
 except ImportError:
-    from graphics.node_group import (ARRANGE_HORIZONTAL, ARRANGE_MODES, ARRANGE_ROWS,
+    from graphics.node_group import (ARRANGE_HORIZONTAL, ARRANGE_ROWS,
                                      ARRANGE_VERTICAL)
 
 #: The default of the rows mode (how many cards per line the spinbox starts at).

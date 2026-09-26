@@ -7,7 +7,6 @@ storage/autosave.py) and receives the ``restore_requested(path, label)`` signal.
 All decisions (confirming a dirty change, overwriting the file, reloading the scene)
 stay in MainWindow — a single restore path (ROADMAP v0.9.7 #2).
 """
-import os  # noqa: F401 — kept for import compatibility with calling code
 from datetime import datetime
 
 try:

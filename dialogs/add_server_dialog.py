@@ -16,7 +16,6 @@ try:  # v1.2.5: central theme (palette/radii/fonts — ui/theme.py)
 except ImportError:
     from ui import theme
 
-from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
     QDialog, QFormLayout, QLineEdit, QPushButton, QSpinBox,
     QFileDialog, QDialogButtonBox, QHBoxLayout, QVBoxLayout,

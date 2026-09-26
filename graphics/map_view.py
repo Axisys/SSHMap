@@ -551,7 +551,6 @@ class MapView(QGraphicsView):
                     self._group_drag_olds = []
             # v0.9.3: Ctrl+LMB on empty space → selection rectangle (rubber band).
             elif bool(event.modifiers() & Qt.ControlModifier):
-                from PySide6.QtWidgets import QGraphicsRectItem
                 self._start_rubber_select(scene_pos,
                                           event.modifiers() & Qt.ShiftModifier)
                 return  # don't start panning

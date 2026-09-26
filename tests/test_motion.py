@@ -854,6 +854,6 @@ check("§7 ui/motion.py is the module this release documents",
       os.path.exists(os.path.join(ROOT, "ui", "motion.py")))
 check_release_state(ROOT)
 check("§7 the version pin of this test file is the release it describes",
-      EXPECTED_APP_VERSION == "1.6", EXPECTED_APP_VERSION)
+      EXPECTED_APP_VERSION == "1.6.1", EXPECTED_APP_VERSION)
 
 finish()

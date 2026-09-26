@@ -19,6 +19,8 @@ the changed signals are needed for the MainWindow dirty marker, as with notes/gr
 """
 import os
 
+from typing import TYPE_CHECKING
+
 from PySide6.QtCore import Qt, QRectF, QPointF, Signal
 from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen, QPixmap
 from PySide6.QtWidgets import QGraphicsItem, QGraphicsObject
@@ -27,6 +29,9 @@ try:  # v1.2.5: central theme (palette/radii/fonts — ui/theme.py)
     from ..ui import theme
 except ImportError:
     from ui import theme
+
+if TYPE_CHECKING:  # the `Optional[...]` return annotation of try_from_dict() below
+    from typing import Optional
 
 
 class BackgroundImage(QGraphicsObject):
