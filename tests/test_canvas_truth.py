@@ -553,6 +553,67 @@ check("§5 the deadline TIMER hands the held bytes back through the ordinary out
 check("§5 a second timeout call is an idempotent no-op",
       (page3._on_cwd_hold_timeout() is None))
 
+# ── v1.6.4 fix: the answer usually arrives WITH the echo, and it must still drop it ─────────
+# bash echoes the injected line and prints the next prompt within one read, and `PROMPT_COMMAND`
+# runs BEFORE that prompt is written — so the report comes first and the prompt follows it. The
+# hold used to be released by the scan BEFORE the same chunk was filtered, which rendered the
+# whole hook command on the screen (reproduced: `echo + report + prompt` in ONE chunk leaked).
+REPORT5 = b"\x1b]7;file://worker-node-2/home/ubuntu\x07"
+PROMPT5 = b"ubuntu@worker-node-2:~$ "
+ECHO5 = b"_sshmap_cwd() { printf '\\033]7;...'; }"
+
+check("§5 osc7_report_end: the boundary of the FIRST report (and -1 without one)",
+      TP.osc7_report_end(b"abc" + REPORT5 + b"tail") == 3 + len(REPORT5)
+      and TP.osc7_report_end(b"no report") == -1 and TP.osc7_report_end(None) == -1)
+check("§5 osc7_report_end: `after` skips a report that was already seen",
+      TP.osc7_report_end(REPORT5 + REPORT5, after=len(REPORT5)) == 2 * len(REPORT5)
+      and TP.osc7_report_end(REPORT5, after=len(REPORT5)) == -1)
+
+
+def echo_case(chunks):
+    """Feed `chunks` to a fresh session with the hold armed; answer (leaked, text)."""
+    fresh = find_terminal_page("cwd-" + str(len(chunks)) + str(len(chunks[0])), "10.0.0.12")
+    fresh._follow_cwd = True
+    fresh._cwd_hold_deadline = time.monotonic() + 60
+    fresh._inject_cwd_hook()
+    for chunk in chunks:
+        fresh._on_output(chunk)
+    app.processEvents()
+    text = fresh.widget.visible_text()
+    return "_sshmap_cwd" in text, text
+
+
+_leak_a, _text_a = echo_case([PROMPT5 + ECHO5 + b"\r\n" + REPORT5 + PROMPT5])
+check("§5 v1.6.4: the echo, the report AND the next prompt in ONE chunk — the echo never renders",
+      _leak_a is False, repr(_text_a[:120]))
+check("§5 ... while the tail of that very chunk (the new prompt, printed after the report) is shown",
+      PROMPT5.decode() in _text_a, repr(_text_a[:120]))
+_leak_b, _text_b = echo_case([PROMPT5 + ECHO5 + b"\r\n", REPORT5 + PROMPT5])
+check("§5 ... and the split case (the echo first, the answer in the next chunk) is unchanged",
+      _leak_b is False and PROMPT5.decode() in _text_b, repr(_text_b[:120]))
+
+_stale = find_terminal_page("cwd-stale", "10.0.0.13")
+_stale._follow_cwd = True
+_stale._cwd_hold_deadline = time.monotonic() + 60
+_stale._cwd_carry = REPORT5            # a report from a prompt that arrived BEFORE the injection
+_stale._inject_cwd_hook()
+_stale._on_output(PROMPT5 + ECHO5 + b"\r\n")
+app.processEvents()
+check("§5 v1.6.4: a report the shell emitted on its own (a stale carry) does NOT release the hold",
+      "_sshmap_cwd" not in _stale.widget.visible_text(),
+      repr(_stale.widget.visible_text()[:120]))
+
+_off = find_terminal_page("cwd-off", "10.0.0.14")
+_off._follow_cwd = True
+_off._cwd_hold_deadline = time.monotonic() + 60
+_off._inject_cwd_hook()
+_off._on_output(b"HELD-WHILE-FOLLOWING")
+_off.set_follow_cwd(False)            # the checkbox moves while the hold is armed
+app.processEvents()
+check("§5 v1.6.4: turning the follow OFF gives the held bytes back at once (the output is never lost)",
+      "HELD-WHILE-FOLLOWING" in _off.widget.visible_text(),
+      repr(_off.widget.visible_text()[:120]))
+
 # a fed OSC 7 really moves the listing of a page with a live SFTP channel
 page._ensure_sftp()
 wait_until(lambda: page.sftp_tab.worker is not None

@@ -298,6 +298,10 @@ class _HookWorker(QThread):
 
     def __init__(self, rec: PluginRecord, hook_name: str, args: tuple, parent=None):
         super().__init__(parent)
+        # v1.6.4 (ROADMAP task 1): the managed hook worker names itself — the manager's orphan
+        # registry holds it past its wait budget, so it is one of the threads Qt's
+        # "Destroyed while running" abort would otherwise report as ''. No behaviour.
+        self.setObjectName("_HookWorker")
         self._rec = rec
         self._hook_name = hook_name
         self._args = args

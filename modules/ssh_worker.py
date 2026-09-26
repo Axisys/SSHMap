@@ -70,6 +70,11 @@ class SSHWorker(QThread):
                  test_only: bool = False, load_from_store: bool = True,
                  parent=None):
         super().__init__(parent)
+        # v1.6.4 (ROADMAP task 1): the MANAGED worker names itself. Qt's abort —
+        # "QThread: Destroyed while thread '' is still running" — names NOTHING on an
+        # unnamed thread, in a codebase whose orphan registry below exists to prevent
+        # exactly that abort; the journal names the worker by this string. No behaviour.
+        self.setObjectName("SSHWorker")
         self.host = host
         self.user = user
         self.port = port

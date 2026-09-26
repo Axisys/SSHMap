@@ -259,8 +259,14 @@ def clear_cfg(*extra_paths: str) -> None:
 # in 12 i18n files + the APP_VERSION/requirements pins in 7 release-state sections).
 # The misses of the keys themselves against the code are caught by check_i18n_keys.py.
 # ─────────────────────────────────────────────────────────────────────────────
-EXPECTED_APP_VERSION = "1.6.3"  # the current release (a sentinel: it catches "a bump to the wrong version")
-EXPECTED_I18N_KEYS = 786        # the parity of the TRANSLATION keys (v1.6.3 — "the canvas at the
+EXPECTED_APP_VERSION = "1.6.4"  # the current release (a sentinel: it catches "a bump to the wrong version")
+EXPECTED_I18N_KEYS = 789        # the parity of the TRANSLATION keys (v1.6.4 — "the cheap batch: the
+                                # names, the zoom, the dot, the secret and the pinned scrollback":
+                                # the thread names and the two scrollback modes are behaviour (no key),
+                                # the secret MARK is a field of the history file and a row marker (no
+                                # key), and the THREE new keys are the activity mark's tooltip, the
+                                # zoom's status line and the marked-secret tooltip — 786 + 3.
+                                # (v1.6.3 — "the canvas at the
                                 # cell: the glyph grid, the mouse the TUI asks for, the Files tab that
                                 # answers back": the renderer draws each glyph at its own cell (no key),
                                 # the mouse family and the stale-tracking decision are behaviour (no key),

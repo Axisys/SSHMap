@@ -18,14 +18,19 @@ except ImportError:
 #   SftpTab / format_size — the Files tab. QMessageBox is the same seam (see its own
 #   comment below).
 try:
-    from .terminal_screen import TerminalScreen, DEFAULT_HISTORY_LINES
+    from .terminal_screen import (TerminalScreen, DEFAULT_HISTORY_LINES, SCROLL_MODE_DEFAULT,
+                                  SCROLL_MODES)
 except ImportError:
-    from modules.terminal_screen import TerminalScreen, DEFAULT_HISTORY_LINES
+    from modules.terminal_screen import (TerminalScreen, DEFAULT_HISTORY_LINES, SCROLL_MODE_DEFAULT,
+                                         SCROLL_MODES)
 
 try:
-    from .terminal_widget import TerminalWidget, CURSOR_STYLE_DEFAULT, CURSOR_STYLES
+    from .terminal_widget import (TerminalWidget, CURSOR_STYLE_DEFAULT, CURSOR_STYLES,
+                                  FONT_SIZE_MAX, FONT_SIZE_MIN)
 except ImportError:
-    from modules.terminal_widget import TerminalWidget, CURSOR_STYLE_DEFAULT, CURSOR_STYLES
+    from modules.terminal_widget import (TerminalWidget, CURSOR_STYLE_DEFAULT, CURSOR_STYLES,
+                                         FONT_SIZE_MAX, FONT_SIZE_MIN)
+
 
 try:
     from .host_key_policy import SshKnownHostsPolicy
@@ -58,6 +63,13 @@ try:
     from .terminal_page import TerminalSessionPage
 except ImportError:
     from modules.terminal_page import TerminalSessionPage
+
+# v1.6.4 (ROADMAP task 4): the ACTIVITY mark of an inactive session — the rendering is shared
+# by BOTH containers (the window and the dock), which is why it lives in the page's module.
+try:
+    from .terminal_page import refresh_session_activity, render_session_activity
+except ImportError:
+    from modules.terminal_page import refresh_session_activity, render_session_activity
 
 # v1.2.9: Qt imports — only those actually used (QPlainTextEdit/QApplication and
 # the other leftovers of the SSHTerminalTextEdit HTML path were removed along
@@ -143,6 +155,8 @@ def load_terminal_settings():
        "max_open": int,           # v1.1.1: limit of own open terminals (default 4)
        "wheel": str,              # v1.1.2RC3 (U3): "scrollback" (default) | "off" — the wheel
        "cursor": str,             # v1.6.2 (task 4): "block" | "bar" (default) | "underline"
+       "scroll": str,             # v1.6.4 (task 5): "live" (default) | "pin" — new output
+                                  #            pulls the view to the live line, or holds it still
        "follow_cwd": bool,        # v1.6.3 (task 5): follow the shell's directory (OSC 7)
        "mode": str}               # v1.2.2: "windows" (default) | "tabs" — display mode
     Invalid values (a foreign type, out of range) → default. Never raises.
@@ -150,7 +164,8 @@ def load_terminal_settings():
     defaults = {"palette": None, "font_family": "", "font_size": None,
                 "history_lines": DEFAULT_HISTORY_LINES, "close_behavior": "close",
                 "max_open": 4, "wheel": "scrollback", "mode": "windows",
-                "cursor": CURSOR_STYLE_DEFAULT, "follow_cwd": False}
+                "cursor": CURSOR_STYLE_DEFAULT, "scroll": SCROLL_MODE_DEFAULT,
+                "follow_cwd": False}
     try:
         from i18n import load_config
     except Exception:
@@ -166,7 +181,7 @@ def load_terminal_settings():
         defaults["font_family"] = v.strip()
 
     v = cfg.get("terminal_font_size")
-    if isinstance(v, int) and not isinstance(v, bool) and 6 <= v <= 72:
+    if isinstance(v, int) and not isinstance(v, bool) and FONT_SIZE_MIN <= v <= FONT_SIZE_MAX:
         defaults["font_size"] = v         # out of range → pt 10 (default)
 
     v = cfg.get("terminal_history_lines")
@@ -200,6 +215,15 @@ def load_terminal_settings():
     v = cfg.get("terminal_cursor_style")
     if isinstance(v, str) and v.strip().lower() in CURSOR_STYLES:
         defaults["cursor"] = v.strip().lower()   # corrupt/foreign → the declared default
+
+    # v1.6.4 (ROADMAP task 5): the SCROLLBACK mode — "live" (the default: new output pulls the
+    # view back to the live line, the behaviour of every earlier release) | "pin" (OPT-IN: the
+    # view keeps the lines the user is reading while output arrives). Read on session creation
+    # like the palette/font/cursor keys and validated the same way; the key is CONFIG-ONLY (the
+    # settings hub gains no row), the set of accepted values is the screen module's declaration.
+    v = cfg.get("terminal_scroll")
+    if isinstance(v, str) and v.strip().lower() in SCROLL_MODES:
+        defaults["scroll"] = v.strip().lower()   # corrupt/foreign → "live" (the default)
 
     # v1.6.3 (ROADMAP task 5): the cwd follow — the Files tab moves when the shell's
     # directory changes (the OSC 7 hook). A REAL bool, OPT-IN: a missing or unusable value
@@ -332,6 +356,10 @@ class SSHTerminalThread(QThread):
 
     def __init__(self, host, user, port, password="", key_path=""):
         super().__init__()
+        # v1.6.4 (ROADMAP task 1): the managed session thread names itself — Qt's abort on a
+        # thread destroyed while running names an UNNAMED thread as '', and THIS is the class
+        # `_orphan_threads` below exists to keep alive until `finished()`. No behaviour.
+        self.setObjectName("SSHTerminalThread")
         self.host = host
         self.user = user
         self.port = port
@@ -771,6 +799,10 @@ class SSHTerminalWindow(QMainWindow):
                 page.retranslate()
             except RuntimeError:
                 pass  # Qt teardown — the page is already destroyed
+        # v1.6.4 (ROADMAP task 4): the activity mark's TOOLTIP is translated text — an inactive
+        # session keeps its dot across a language switch, with the sentence in the new language
+        # (the mark itself is a pixmap, re-rendered by refresh_theme()).
+        refresh_session_activity(self)
         # v1.3.3.1: the "Terminal macros" panel belongs to the CONTAINER (both the
         # window and the dock own one), so it is re-texted here — not by the page.
         cmdlib = getattr(self, "cmdlib_panel", None)
@@ -824,6 +856,9 @@ class SSHTerminalWindow(QMainWindow):
                 theme_qss.refresh(self._split_status_label, "status.terminal_row")
             except RuntimeError:
                 pass  # Qt teardown — the label is already destroyed
+        # v1.6.4 (ROADMAP task 4): the activity mark is a PIXMAP — a VALUE (§4.6): re-render it
+        # in the new theme tone instead of leaving the old colour on the tab.
+        refresh_session_activity(self)
         try:
             self.update()
         except RuntimeError:
@@ -882,10 +917,10 @@ class SSHTerminalWindow(QMainWindow):
         # Qt: addTab makes only the FIRST tab current — activate the new one
         # explicitly (currentChanged → the signal bridge to the status bar).
         self.session_tabs.setCurrentIndex(idx)
-        try:
-            self.session_tabs.setTabToolTip(idx, t("terminal.tab_close_tooltip"))
-        except RuntimeError:
-            pass  # the C++ object was already destroyed (a close race) — the tooltip is not critical
+        # v1.6.4 (ROADMAP task 4): the FIXED icon slot (a transparent mark) + the ordinary close
+        # tooltip of a fresh tab — through the ONE renderer, so a later mark can never change
+        # the width of this tab.
+        render_session_activity(self.session_tabs, page, t)
         return page
 
     def close_page(self, page):
@@ -1459,7 +1494,12 @@ class SSHTerminalWindow(QMainWindow):
         (the v1.2 look); on tab switch — a reconnect: the status bar shows the
         active session, and inactive tabs' messages do not touch it. The SFTP
         progress bar syncs with the active tab's state (inactive transfers do
-        not update the bar)."""
+        not update the bar).
+
+        v1.6.4 (ROADMAP task 4): the bridged page IS the session the user is looking at — the
+        activity mark is cleared here, which is what makes a tab switch (and the focus moving
+        into the split pane) clear it in ONE place. Idempotent.
+        """
         old = self._bridged_page
         if old is not None and old is not page:
             try:
@@ -1472,6 +1512,13 @@ class SSHTerminalWindow(QMainWindow):
         self._bridged_page = page
         if page is None:
             return
+        # v1.6.4 (ROADMAP task 4): the visible session has no "new output" to announce.
+        clear = getattr(page, "set_activity", None)
+        if callable(clear):
+            try:
+                clear(False)
+            except RuntimeError:
+                pass  # Qt teardown — the page is already destroyed
         try:
             page.status_message.connect(self._on_page_status_message)
             page.progress_busy.connect(self._on_page_progress_busy)
@@ -1499,6 +1546,27 @@ class SSHTerminalWindow(QMainWindow):
                 self.statusBar().showMessage(text)
         except RuntimeError:
             pass  # the C++ object was already destroyed (a close race)
+
+    # ── v1.6.4 (ROADMAP task 4): the activity mark of an inactive session ────
+
+    def session_is_visible(self, page) -> bool:
+        """The container's answer to "is `page` the session on screen?" — the mark's ONE rule.
+
+        The v1.3.3.5 "active session" rule of this window: the FOCUSED split pane wins over the
+        active tab (with two shells on one screen the user's attention is where the keyboard
+        is). A page this window never showed is not visible. Never raises.
+        """
+        pane = self.focused_split_pane()
+        if pane is not None:
+            return page is pane
+        try:
+            return self.session_tabs.currentWidget() is page
+        except RuntimeError:
+            return False
+
+    def session_activity_changed(self, page):
+        """Re-render ONE session's tab: the activity mark and its tooltip (idempotent)."""
+        render_session_activity(self.session_tabs, page, get_translator())
 
     # ── v1.4.7 follow-up: the SECOND status text — the split pane ────────────
 

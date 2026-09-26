@@ -40,8 +40,10 @@ app = QApplication(sys.argv)
 
 from third_party import pyte          # v1.3rc1: the fork (MANIFEST.md)
 
-from modules.terminal_screen import TerminalScreen
+from modules.terminal_screen import (SCROLL_MODE_DEFAULT, SCROLL_MODE_LIVE, SCROLL_MODE_PIN,
+                                     TerminalScreen, resolve_scroll_mode)
 from modules.terminal_widget import TerminalWidget
+import modules.terminal_screen as TS
 
 
 # ════════════════════════════════════════════════════════════
@@ -496,5 +498,239 @@ app.processEvents()
 check("a repeated show → the timer is active again", wb._blink_timer.isActive())
 wb.hide()
 app.processEvents()
+
+
+# ════════════════════════════════════════════════════════════
+# 7. v1.6.4 (ROADMAP task 5): the PINNED scrollback — terminal_scroll = "live" | "pin"
+# ════════════════════════════════════════════════════════════
+# The opt-in mode where a chunk of output does NOT yank the view: the viewport keeps the LINES
+# it shows, which is what a real terminal does. The DEFAULT ("live") is the behaviour every
+# earlier release had, and the regression below asserts exactly that.
+print("== the pinned scrollback (terminal_scroll) ==")
+
+
+def lines_of(scr, count=None):
+    """The visible grid as text (the lines the user is looking at)."""
+    n = scr.lines if count is None else count
+    return ["".join(scr.screen.buffer[y][x].data for x in range(scr.columns)).rstrip()
+            for y in range(n)]
+
+
+class CountingHistory(TS.SshmapHistoryScreen):
+    """The shipped screen + a counter of the PYTEs PAGE operations (prev_page/next_page).
+
+    The D2 batching exists because those calls used to be spun in a loop (one per page); the
+    pinned restore must not reintroduce them, so the topical test counts THEM — never
+    milliseconds (the ROADMAP acceptance says so explicitly).
+    """
+    page_ops = 0
+
+    def prev_page(self):
+        type(self).page_ops += 1
+        super().prev_page()
+
+    def next_page(self):
+        type(self).page_ops += 1
+        super().next_page()
+
+
+_screen_cls = TS.SshmapHistoryScreen
+TS.SshmapHistoryScreen = CountingHistory
+try:
+    check("v1.6.4: the mode validator — 'live' | 'pin' (strip+lower) and ANYTHING else → 'live'",
+          resolve_scroll_mode(" live ") == SCROLL_MODE_LIVE
+          and resolve_scroll_mode(" PIN ") == SCROLL_MODE_PIN
+          and [resolve_scroll_mode(v) for v in ("garbage", "", None, 3, True, "pin!")]
+          == [SCROLL_MODE_DEFAULT] * 6
+          and SCROLL_MODE_DEFAULT == SCROLL_MODE_LIVE,
+          str([resolve_scroll_mode(v) for v in ("live", "pin", "x", None)]))
+
+    # 7a. the DEFAULT mode: the shipped yank is UNCHANGED (the regression the pin is opt-in for)
+    _live = TerminalScreen(columns=20, lines=10, history_lines=200)
+    for i in range(30):
+        _live.feed(("line %02d\r\n" % i).encode())
+    _live.scroll_up()
+    _live_view = lines_of(_live)
+    _live.feed(b"NEW\r\n")
+    check("v1.6.4: the DEFAULT 'live' still yanks the view to the new output (the shipped rule)",
+          lines_of(_live) != _live_view and _live.at_bottom() is True
+          and "NEW" in "\n".join(lines_of(_live)),
+          f"{_live_view[:1]} -> {lines_of(_live)[:2]}")
+
+    # the config key: absent or foreign → "live"
+    from _common import clear_cfg, merge_cfg
+    from modules.ssh_terminal import load_terminal_settings
+    clear_cfg()
+    check("v1.6.4: no `terminal_scroll` key → 'live' (the declared default is the shipped one)",
+          load_terminal_settings()["scroll"] == SCROLL_MODE_LIVE,
+          str(load_terminal_settings()["scroll"]))
+    merge_cfg({"terminal_scroll": "garbage"})
+    check("v1.6.4: a corrupt/foreign `terminal_scroll` → 'live' (never an error)",
+          load_terminal_settings()["scroll"] == SCROLL_MODE_LIVE,
+          str(load_terminal_settings()["scroll"]))
+    merge_cfg({"terminal_scroll": " Pin "})
+    check("v1.6.4: ' Pin ' is read as the opt-in mode (the terminal_wheel validation rule)",
+          load_terminal_settings()["scroll"] == SCROLL_MODE_PIN,
+          str(load_terminal_settings()["scroll"]))
+    clear_cfg()
+
+    # 7b. the PIN: the same lines stay, at ANY depth, in a BOUNDED number of page operations
+    def pinned_case(rows, history, up_pages, chunk):
+        scr = TerminalScreen(columns=20, lines=rows, history_lines=history,
+                             scroll_mode=SCROLL_MODE_PIN)
+        for i in range(int(history * 0.6)):
+            scr.feed(("d%04d\r\n" % i).encode())
+        for _ in range(up_pages):
+            scr.scroll_up()
+        before = lines_of(scr)
+        offset = len(scr.screen.history.top)
+        CountingHistory.page_ops = 0
+        scr.feed(chunk)
+        return scr, before, offset, CountingHistory.page_ops
+
+    _pin, _before, _off, _ops_shallow = pinned_case(10, 200, 2, b"CHUNK-A\r\n")
+    check("v1.6.4: under 'pin' the SAME lines stay on the screen across a chunk",
+          lines_of(_pin) == _before, f"{_before} -> {lines_of(_pin)}")
+    check("v1.6.4: ... and the viewport stays OFF the live line (the chunk did not yank it back)",
+          _pin.at_bottom() is False and _pin.pinned() is True
+          and len(_pin.screen.history.top) == _off,
+          f"bottom={_pin.at_bottom()} top={len(_pin.screen.history.top)} off={_off}")
+
+    _deep, _deep_before, _deep_off, _ops_deep = pinned_case(32, 1000, 40, b"CHUNK-B\r\n")
+    check("v1.6.4: ... at a DEEP offset too (600 lines of output, 40 page-ups back)",
+          lines_of(_deep) == _deep_before, str(lines_of(_deep)[:2]))
+    check("v1.6.4: the PAGE OPERATIONS of a chunk are bounded by a constant, not by the depth",
+          _ops_shallow <= 2 and _ops_deep <= 2 and _ops_shallow == _ops_deep,
+          f"shallow={_ops_shallow} deep={_ops_deep}")
+
+    # the pin's arithmetic equals the live one: the same input yields the same DOCUMENT
+    def document(scr):
+        s = scr.screen
+        rows = ["".join(s.history.top[i][x].data for x in range(s.columns)).rstrip()
+                for i in range(len(s.history.top))]
+        rows += lines_of(scr)
+        rows += ["".join(s.history.bottom[i][x].data for x in range(s.columns)).rstrip()
+                 for i in range(len(s.history.bottom))]
+        return rows
+
+    _ref = TerminalScreen(columns=20, lines=10, history_lines=200)
+    for i in range(120):
+        _ref.feed(("d%04d\r\n" % i).encode())
+    _ref.feed(b"CHUNK-A\r\n")
+    check("v1.6.4: the pinned document is byte-equal to the live one (no phantom line)",
+          document(_pin) == document(_ref),
+          f"pin={document(_pin)[-4:]} live={document(_ref)[-4:]}")
+
+    # 7c. USER INTENT returns to the live line — a keystroke, a paste and the wheel to the bottom
+    class _Thread:
+        def __init__(self):
+            self.sent = []
+
+        def send_data(self, data):
+            self.sent.append(data)
+
+        def stop(self):
+            pass
+
+    _tsc = TerminalScreen(columns=20, lines=10, history_lines=200, scroll_mode=SCROLL_MODE_PIN)
+    for i in range(30):
+        _tsc.feed(("line %02d\r\n" % i).encode())
+    _thr = _Thread()
+    _wk = TerminalWidget(_tsc, _thr)
+    _tsc.scroll_up()
+    check("v1.6.4: the pin really holds the viewport off the live line",
+          _wk.pinned() is True and _tsc.at_bottom() is False, str(_tsc.scroll_info()))
+    press_key(_wk, Qt.Key.Key_A, text="a")
+    check("v1.6.4: A KEYSTROKE is user intent → the view returns to the live line",
+          _tsc.at_bottom() is True and _thr.sent == [b"a"], f"{_tsc.at_bottom()} {_thr.sent!r}")
+
+    _tsc.scroll_up()
+    _thr.sent.clear()
+    QApplication.clipboard().setText("pasted command")
+    _wk._bracketed_paste()
+    check("v1.6.4: a PASTE returns to the live line too (it goes through the same _send)",
+          _tsc.at_bottom() is True and len(_thr.sent) == 1 and _thr.sent[0].startswith(b"\x1b[200~"),
+          f"{_tsc.at_bottom()} {_thr.sent!r}")
+
+    _tsc.scroll_up()
+    _ops_before = CountingHistory.page_ops
+    while not _tsc.at_bottom():
+        wheel(_wk, -120)
+    check("v1.6.4: the WHEEL to the bottom returns to live (the pin has nothing left to hold)",
+          _tsc.at_bottom() is True and CountingHistory.page_ops > _ops_before,
+          str(_tsc.scroll_info()))
+
+    # 7d. the N7 selection rule: the pin keeps it, the live mode still drops it
+    import modules.ssh_terminal as _ST
+    from models.server import ServerData
+    from modules.terminal_page import TerminalSessionPage
+    from _fakes import FakeSSHThread as _FakeThread
+
+    class _FakeTerm(_FakeThread):
+        def __init__(self, *a, **k):
+            super().__init__("127.0.0.1", "u", 9, "", "")
+
+        def run(self):
+            pass
+
+    _orig_cls = _ST.SSHTerminalThread
+    _ST.SSHTerminalThread = _FakeTerm
+    merge_cfg({"terminal_scroll": "pin"})   # the session reads the key at creation
+    try:
+        _page = TerminalSessionPage(
+            ServerData(id="pin-a", alias="p", host="127.0.0.1", user="u"))
+        app.processEvents()
+        _ps = _page.tscreen
+        for i in range(120):   # the page's grid is 120x32 — the history needs real depth
+            _ps.feed(("line %03d\r\n" % i).encode())
+        _ps.scroll_up()
+        _page.widget._sel_anchor = (2, 0)
+        _page.widget._sel_active = (2, 5)
+        _page._on_output(b"while reading\r\n")
+        check("v1.6.4: a selection made while reading history SURVIVES the chunk under 'pin'",
+              _page.widget.has_selection() is True and _ps.at_bottom() is False,
+              f"sel={_page.widget.has_selection()} bottom={_ps.at_bottom()}")
+        _page.widget._release_pin()
+        check("v1.6.4: ... and the return to live drops it (the N7 reasoning, on USER intent)",
+              _page.widget.has_selection() is False and _ps.at_bottom() is True)
+
+        # the "live" mode keeps the v1.1.2RC3 rule: the auto-return drops the selection
+        _ps.set_scroll_mode(SCROLL_MODE_LIVE)
+        _ps.scroll_up()
+        _page.widget._sel_anchor = (2, 0)
+        _page.widget._sel_active = (2, 5)
+        _page._on_output(b"yanks the view\r\n")
+        check("v1.6.4: the 'live' mode still resets the selection on the auto-return (N7)",
+              _page.widget.has_selection() is False and _ps.at_bottom() is True)
+        _page.shutdown()
+        app.processEvents()
+    finally:
+        _ST.SSHTerminalThread = _orig_cls
+        clear_cfg()
+
+    # 7e. the find bar's Ctrl+Shift+F → Enter → Esc round trip, in BOTH modes
+    def find_round_trip(mode):
+        scr = TerminalScreen(columns=20, lines=10, history_lines=200, scroll_mode=mode)
+        for i in range(60):
+            scr.feed(("line %02d\r\n" % i).encode())
+        w = TerminalWidget(scr, None)
+        for _ in range(3):
+            scr.scroll_up()
+        top_before = lines_of(scr)[0]
+        w.open_find()
+        w._on_find_query("line 05")
+        w.find_next()
+        moved = lines_of(scr)[0]
+        w.close_find(restore=True)
+        return top_before, moved, lines_of(scr)[0]
+
+    _lb, _lm, _la = find_round_trip(SCROLL_MODE_LIVE)
+    check("v1.6.4: the find round trip lands on the captured lines in the 'live' mode",
+          _la == _lb and _lm != _lb, f"{_lb!r} -> {_lm!r} -> {_la!r}")
+    _pb, _pm, _pa = find_round_trip(SCROLL_MODE_PIN)
+    check("v1.6.4: ... and exactly on them under 'pin' (the saved value is a CONTENT offset)",
+          _pa == _pb and _pm != _pb, f"{_pb!r} -> {_pm!r} -> {_pa!r}")
+finally:
+    TS.SshmapHistoryScreen = _screen_cls
 
 finish()

@@ -186,6 +186,7 @@ of the file itself.
 | `test_terminal_acceptance.py` | — | v1.0 — Terminal v1, final: full acceptance of all RCs + terminal_* config (ROADMAP tasks 9–10). |
 | `test_terminal_colors.py` | — | v1.0RC1 — the color engine + per-cell canvas (ROADMAP v1.0RC1). |
 | `test_terminal_dock.py` | — | v1.2.2 — Terminals docked in the map window (terminal.mode: windows/tabs, ROADMAP v1.2.2). |
+| `test_terminal_ergonomics.py` | — | v1.6.4 — the cheap batch: the thread names, the marked secret, the Ctrl+wheel zoom and the activity dot. |
 | `test_terminal_history.py` | — | v1.5.7 — the command history: the terminal's third tab, one history per server. |
 | `test_terminal_input.py` | — | v1.0RC2 — keyboard + selection/copy (ROADMAP v1.0RC2). |
 | `test_terminal_mouse.py` | — | v1.2.13 — the mouse wheel in the full-screen TUI (SGR/X10 passthrough) (ROADMAP v1.2.13, PYTE82_AUDIT.md batch C). |

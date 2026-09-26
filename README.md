@@ -36,7 +36,10 @@ generated from that example map only, by `python tests/_gen_docs_image.py`.*
 - Sessions as tabs in separate windows or in a detachable "Terminals" dock on the map, a split pane with a second shell of the same node, multi-input broadcast with per-session exclusions, and a command library of macros.
 - SFTP over the same live transport (no second authentication): a directory tree with a typed address bar (`~`, a relative path and a symlink are resolved by the server, and the field completes the names as you type), upload/download including drag & drop, a file manager (new folder / rename / delete, an overwrite prompt, atomic transfers, rate and ETA) and a read-only text preview (≤ 1 MB) with syntax highlighting and "no preview" row markers.
 - The Files tab can follow the shell: switch it on with "Follow the shell's directory" and the listing moves every time a `cd` in the terminal does (the hook the tab installs is appended to your `PROMPT_COMMAND` and never replaces it; off by default).
-- A **History** tab per session: the commands of that server, kept between sessions. Import a history file from disk or the server's `~/.bash_history` over the session's SFTP channel, filter and sort the rows by their data (command, last use, repeat count), copy one, send one back to the terminal, delete a single row, merge the duplicates and clear the list.
+- A **History** tab per session: the commands of that server, kept between sessions. Import a history file from disk or the server's `~/.bash_history` over the session's SFTP channel, filter and sort the rows by their data (command, last use, repeat count), copy one, send one back to the terminal, delete a single row, merge the duplicates and clear the list. A command that looks like it carries a secret (a password or a token in the line) is kept AND marked with a padlock in the list, so nothing you really sent disappears silently.
+- The wheel zooms the font: `Ctrl`+wheel steps the terminal's point size by one and remembers it; it is the same setting the Terminal tab shows, so a restart keeps the size you picked.
+- A session that produced output while you were looking at another one marks its tab with a dot (and says so in the tab's tooltip); switching to that tab clears it.
+- The scrollback behaves like a real terminal's when you want it to: with `terminal_scroll` set to `"pin"` in `~/.sshmap/config.json` (the default, `"live"`, is the behaviour above) new output no longer pulls you back to the bottom while you are reading history — typing or pasting returns you to the live line.
 - External system terminal as an alternative to the built-in one.
 
 ### The list becomes a report
@@ -122,7 +125,8 @@ survive a restart. The external terminal is an OS `ssh` process: the password is
 - Several connections between the same two servers are drawn as parallel arcs; a group arrangement moves the cards and never resizes the group frame, so a member pushed outside the frame leaves the group (one Ctrl+Z brings the whole arrangement back).
 - Plugins run inside the application's process: a plugin with a broken C extension can take it down — install plugins you trust.
 - A host key change and an unreadable project are reported, never repaired silently; recovery means an autosave or backup slot.
-- The command history is a plain-text file per server under `~/.sshmap/history/`. Its entries are the commands the application sent or the ones you imported, so they can contain secrets (a token or a password passed as an argument); the file is never written into a project, never exported and never logged. Passwords typed into a shell are not recorded — only what the app itself sends is.
+- The command history is a plain-text file per server under `~/.sshmap/history/`. Its entries are the commands the application sent or the ones you imported, so they can contain secrets (a token or a password passed as an argument); the file is never written into a project, never exported and never logged. Passwords typed into a shell are not recorded — only what the app itself sends is. A sent command that matches one of the declared secret shapes is marked in the list (the padlock and its tooltip) and is still kept: the mark is a warning, not a redaction, so the file itself stays plain text.
+- `terminal_scroll` (a `~/.sshmap/config.json` key, no settings row) defaults to `"live"`: new output pulls the view back to the bottom. Set it to `"pin"` if you would rather keep reading history while a build talks — then typing or pasting returns you to the live line.
 - A full-screen program that dies without turning its mouse reporting off leaves that mode on in the session: the wheel keeps reporting to a program that is no longer there until you hold `Shift` (which always scrolls the scrollback) or reopen the session.
 - "Follow the shell's directory" writes one line into the shell of that session at connect (appended to `PROMPT_COMMAND`, with a `zsh` variant). It is off by default; a shell that never answers simply does not follow, and the tab keeps working.
 
@@ -184,7 +188,7 @@ PySide6 / Qt 6 gotchas worth knowing before writing UI code:
 | `dialogs/` | Add/edit dialogs, connect, profiles, backups, imports, export options |
 | `ui/` | Main window and mixins, sidebar, theme, palette, panels, settings, hotkeys, icons |
 | `i18n/` | `en` (reference), `ru`, `zh`, `de` — one JSON file per language |
-| `tests/` | 108 test files, the parallel runner and the harness — map in `tests/INDEX.md` |
+| `tests/` | 109 test files, the parallel runner and the harness — map in `tests/INDEX.md` |
 | `examples/plugins/` | Two working example plugins, not installed and never auto-discovered |
 | `third_party/pyte/`, `third_party/pyte-patches/` | The managed pyte 0.8.2 fork: sdist plus explicit patches, provenance in the patches' `MANIFEST.md` |
 | `docs/` | The map image above, rendered from the example map |

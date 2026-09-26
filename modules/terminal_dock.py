@@ -41,6 +41,13 @@ try:
 except ImportError:
     from modules.terminal_page import TerminalSessionPage
 
+# v1.6.4 (ROADMAP task 4): the ACTIVITY mark of an inactive session — the SAME renderer the
+# terminal window uses (the page module owns it, both containers call it).
+try:
+    from .terminal_page import refresh_session_activity, render_session_activity
+except ImportError:
+    from modules.terminal_page import refresh_session_activity, render_session_activity
+
 # v1.3 (ROADMAP v1.3): the "Terminal Macros" panel — the same one as in
 # SSHTerminalWindow (a single config key ui_cmdlib_collapsed for both containers).
 try:
@@ -176,6 +183,9 @@ class TerminalDockContent(QWidget):
                 continue
             except Exception:  # noqa: BLE001 — one session must not stop the rest
                 continue
+        # v1.6.4 (ROADMAP task 4): the activity mark is a PIXMAP — a VALUE (§4.6): re-render it
+        # in the new theme tone instead of keeping the old colour on the tab.
+        refresh_session_activity(self)
 
     def retranslate(self):
         """v1.3.3.1: re-text the content and its sessions in the current language.
@@ -199,6 +209,9 @@ class TerminalDockContent(QWidget):
                 page.retranslate()
             except RuntimeError:
                 pass  # Qt teardown — the page is already destroyed
+        # v1.6.4 (ROADMAP task 4): the activity mark's TOOLTIP is translated text — re-render
+        # the tabs so an inactive session's sentence follows the language switch.
+        refresh_session_activity(self)
         # v1.3.3.1: the "Terminal macros" panel belongs to the CONTAINER (the dock
         # owns one, the window owns another), so it is re-texted here.
         cmdlib = getattr(self, "cmdlib_panel", None)
@@ -226,10 +239,9 @@ class TerminalDockContent(QWidget):
         page.set_host_window(self)
         idx = self.session_tabs.addTab(page, server_data.alias)
         self.session_tabs.setCurrentIndex(idx)
-        try:
-            self.session_tabs.setTabToolTip(idx, t("terminal.tab_close_tooltip"))
-        except RuntimeError:
-            pass  # C++ object already deleted (close race) — the tooltip is not critical
+        # v1.6.4 (ROADMAP task 4): the FIXED icon slot (a transparent mark) + the ordinary close
+        # tooltip of a fresh tab, through the ONE renderer both containers share.
+        render_session_activity(self.session_tabs, page, t)
         return page
 
     def close_page(self, page):
@@ -285,7 +297,11 @@ class TerminalDockContent(QWidget):
     def _set_bridged_page(self, page):
         """Bridge of the ACTIVE tab's signals into the dock's status line; on tab
         switch — reconnection (inactive tabs' messages do not arrive). SFTP
-        progress is synchronized with the active tab's state."""
+        progress is synchronized with the active tab's state.
+
+        v1.6.4 (ROADMAP task 4): the bridged page IS the visible session, so the activity mark
+        of an inactive tab is cleared here — one place for the tab switch (idempotent).
+        """
         old = self._bridged_page
         if old is not None and old is not page:
             try:
@@ -298,6 +314,13 @@ class TerminalDockContent(QWidget):
         self._bridged_page = page
         if page is None:
             return
+        # v1.6.4 (ROADMAP task 4): the visible session has no "new output" to announce.
+        clear = getattr(page, "set_activity", None)
+        if callable(clear):
+            try:
+                clear(False)
+            except RuntimeError:
+                pass  # Qt teardown — the page is already destroyed
         try:
             page.status_message.connect(self._on_page_status_message)
             page.progress_busy.connect(self._on_page_progress_busy)
@@ -314,6 +337,23 @@ class TerminalDockContent(QWidget):
                 self.sftp_progress.hide()
         except RuntimeError:
             pass  # C++ object already deleted (close race)
+
+    # ── v1.6.4 (ROADMAP task 4): the activity mark of an inactive session ────
+
+    def session_is_visible(self, page) -> bool:
+        """The container's answer to "is `page` the session on screen?" — the mark's ONE rule.
+
+        The dock has no split pane: the session on screen is the CURRENT tab (the v1.2.1 rule).
+        Never raises.
+        """
+        try:
+            return self.session_tabs.currentWidget() is page
+        except RuntimeError:
+            return False
+
+    def session_activity_changed(self, page):
+        """Re-render ONE session's tab: the activity mark and its tooltip (idempotent)."""
+        render_session_activity(self.session_tabs, page, get_translator())
 
     def _on_page_status_message(self, text: str, timeout_ms: int):
         """The active page's message → the dock's status line. timeout_ms > 0 —

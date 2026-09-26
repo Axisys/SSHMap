@@ -39,13 +39,14 @@ import re
 import time
 import urllib.parse
 
-from PySide6.QtCore import QEvent, QTimer, Signal
+from PySide6.QtCore import Qt, QEvent, QRectF, QTimer, Signal
+from PySide6.QtGui import QBrush, QColor, QIcon, QPainter, QPixmap
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel, QTabWidget
 
 try:
-    from .terminal_screen import TerminalScreen
+    from .terminal_screen import SCROLL_MODE_PIN, TerminalScreen
 except ImportError:
-    from modules.terminal_screen import TerminalScreen
+    from modules.terminal_screen import SCROLL_MODE_PIN, TerminalScreen
 
 try:
     from .terminal_widget import TerminalWidget
@@ -120,6 +121,123 @@ def _log():
 # the progress signals of the SFTP worker (the sftp.progress line itself is unchanged
 # — the rate/ETA is appended to it, so a broken/absent measurement is invisible).
 
+# ── v1.6.4 (ROADMAP task 3): the Ctrl+wheel font zoom ───────────────────────
+# The GESTURE belongs to the canvas (`TerminalWidget.wheelEvent`), the CONSEQUENCE to the
+# page: the PTY grid must follow the new cell metrics at once, the new size is written into
+# the SAME `terminal_font_size` key the settings hub owns — DEBOUNCED, because a wheel is a
+# stream of events and the §4.2 `CmdEditTextNote` rule is one write per gesture — and the
+# session's status line says which size is in force.
+FONT_SIZE_CONFIG_KEY = "terminal_font_size"
+#: The debounce of the write (the `COMMAND_WIDTH_SAVE_DEBOUNCE_MS` / `CmdEditTextNote` value).
+FONT_SIZE_SAVE_DEBOUNCE_MS = 600
+
+
+# ── v1.6.4 (ROADMAP task 4): the ACTIVITY mark of an inactive session ───────
+# A session whose canvas is not the one on screen keeps producing output (a long build in the
+# tab beside the one you are reading). The mark says so WITHOUT touching the session's own
+# state (the node's dot, the status line): it means exactly "there is new output here" and it
+# clears when the tab is focused.
+#
+# The rule lives ONCE, on the page (`TerminalSessionPage.note_output()`); the RENDERING lives
+# with the tab strip, and BOTH containers (the terminal window and the dock) share the two
+# module-level helpers below — the `multi_input.apply_container_highlight(host, on)` precedent:
+# a container is duck-typed by its `session_tabs`.
+#
+# The mark is a filled DOT — a SHAPE, never a colour alone (§4.6 / tests/test_encoding.py) —
+# in the theme's existing STRONG ACCENT role (no new colour field), it carries the meaning in
+# a TOOLTIP as its second channel, and EVERY tab gets the same fixed-size slot, so a mark
+# never changes the width of a tab.
+
+#: The size of the mark (px) — the fixed icon slot of every tab title.
+ACTIVITY_ICON_PX = 10
+
+#: `(on, tone)` → QIcon. A pixmap is a VALUE (§4.6): the key carries the theme tone, so a
+#: theme switch repaints the mark instead of keeping the old colour.
+_activity_icon_cache = {}
+
+
+def activity_tab_icon(on: bool) -> QIcon:
+    """The tab icon of one session: the mark (a filled dot) or the transparent fixed slot.
+
+    An UNMARKED tab gets a fully transparent pixmap of the SAME size — the icon column exists
+    on every tab, which is what keeps the width of a tab from changing when output arrives.
+    Never raises: a mark is cosmetic.
+    """
+    tone = str(getattr(theme, "ACCENT_STRONG", "") or getattr(theme, "accent_strong", ""))
+    key = (bool(on), tone)
+    icon = _activity_icon_cache.get(key)
+    if icon is not None:
+        return icon
+    try:
+        pixmap = QPixmap(ACTIVITY_ICON_PX, ACTIVITY_ICON_PX)
+        pixmap.fill(Qt.GlobalColor.transparent)
+        if on:
+            color = QColor(tone)
+            painter = QPainter(pixmap)
+            try:
+                painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+                painter.setPen(Qt.PenStyle.NoPen)
+                painter.setBrush(QBrush(color))
+                inset = ACTIVITY_ICON_PX * 0.12
+                painter.drawEllipse(QRectF(inset, inset,
+                                           ACTIVITY_ICON_PX - 2 * inset,
+                                           ACTIVITY_ICON_PX - 2 * inset))
+            finally:
+                painter.end()
+        icon = QIcon(pixmap)
+    except Exception:  # noqa: BLE001 — a mark is cosmetic: it may never break a container
+        icon = QIcon()
+    _activity_icon_cache[key] = icon
+    return icon
+
+
+def render_session_activity(tabs, page, t) -> bool:
+    """Draw (or clear) the activity mark + the tooltip of ONE session's tab. Never raises.
+
+    `tabs` is a container's QTabWidget, `page` a `TerminalSessionPage`, `t` the translator.
+    A page without a tab (the SPLIT PANE) answers False — it has no tab strip to mark, and the
+    amber frame of the pane is the multi-input's own channel, not this one's.
+
+    The tooltip is the mark's SECOND channel: while marked it says what the dot means, and an
+    unmarked tab carries the ordinary "close session" text back. Re-applying is idempotent, so
+    the same helper serves the first paint, the clear-on-focus, a language switch and a theme
+    switch.
+    """
+    try:
+        index = tabs.indexOf(page)
+        if index < 0:
+            return False
+        on = bool(getattr(page, "has_activity", False))
+        tabs.setTabIcon(index, activity_tab_icon(on))
+        tabs.setTabToolTip(index, t("terminal.tab_new_output") if on
+                           else t("terminal.tab_close_tooltip"))
+        return True
+    except RuntimeError:
+        return False   # Qt teardown — the tab strip is already gone
+
+
+def refresh_session_activity(container) -> int:
+    """Re-render the activity mark of EVERY tab of a container (a language/theme switch).
+
+    The container is duck-typed by `session_tabs` (the `modules/multi_input.py` rule), so the
+    terminal window and the dock share this one walk. Returns how many tabs were re-rendered.
+    """
+    try:
+        tabs = container.session_tabs
+        count = int(tabs.count())
+    except (AttributeError, RuntimeError, TypeError):
+        return 0
+    done = 0
+    for i in range(count):
+        try:
+            page = tabs.widget(i)
+        except RuntimeError:
+            break   # Qt teardown mid-walk
+        if page is not None and render_session_activity(tabs, page, get_translator()):
+            done += 1
+    return done
+
+
 # ── v1.6.3 (ROADMAP task 5): the Files tab follows the shell (OSC 7) ─────────
 # A shell can REPORT its working directory with the OSC 7 escape (`ESC ] 7 ; file://host/path`
 # terminated by BEL or ST) — the habit every file panel of this class has. The application has
@@ -189,6 +307,27 @@ def parse_osc7(data) -> str:
     if not path.startswith("/") or "\x00" in path:
         return ""
     return path
+
+
+def osc7_report_end(data, after: int = 0) -> int:
+    """The offset just PAST the first OSC 7 report that ends after `after` (-1 — none). PURE.
+
+    `parse_osc7()` answers WHAT the last report says; this answers WHERE the first report that
+    really arrived in this chunk ends — the boundary the echo hold-back needs: everything before
+    it is the answer's own head (the tty's echo of the injected hook) and is DROPPED with the
+    held bytes, while the tail (the new prompt, which bash prints AFTER `PROMPT_COMMAND` ran) is
+    rendered as usual. `after` is the carry length: a report that ends inside the carry was
+    already seen in an earlier chunk, so it is not an answer to a hook injected since.
+    """
+    try:
+        raw = bytes(data or b"")
+        start = max(0, int(after))
+    except Exception:  # noqa: BLE001 — a caller that hands over a str/None
+        return -1
+    for match in _OSC7_RE.finditer(raw):
+        if match.end() > start:
+            return match.end()
+    return -1
 
 
 def format_duration(seconds) -> str:
@@ -329,6 +468,10 @@ class TerminalSessionPage(QWidget):
         # v1.6.1 (ROADMAP task 8): the keyboard claim — the session takes the focus once,
         # when it is really SHOWN (`claim_focus()`), never while it is still hidden.
         self._focus_claimed = False
+        # v1.6.4 (ROADMAP task 4): the ACTIVITY mark — "this session produced output while you
+        # were looking at another one". The session owns the STATE, the host owns the tab strip
+        # (`note_output()` asks the host what "visible" means and the host re-renders).
+        self._activity = False
         # v1.3.3.5: the multi-input badge of the pane — it has no tab in session_tabs,
         # so the highlight marks its inner `Terminal` tab instead (set_session_badge).
         self._session_badge = None
@@ -387,8 +530,12 @@ class TerminalSessionPage(QWidget):
 
         # v0.8: the pyte screen — a 120x32 grid, the same geometry as invoke_shell;
         # the HistoryScreen scrollback depth — terminal_history_lines (default 1000).
+        # v1.6.4 (ROADMAP task 5): the `terminal_scroll` MODE — "live" (the default) | "pin"
+        # (the view keeps its lines while output arrives). It is read HERE, at session
+        # creation, like the palette/font/cursor keys; the key is config-only.
         self.tscreen = TerminalScreen(columns=120, lines=32,
-                                      history_lines=term_cfg["history_lines"])
+                                      history_lines=term_cfg["history_lines"],
+                                      scroll_mode=term_cfg["scroll"])
 
         # v1.0RC1: a per-cell canvas (QWidget + QPainter) instead of QPlainTextEdit+HTML.
         # The font — system monospace pt 10, the 'default' palette = the current look;
@@ -451,6 +598,10 @@ class TerminalSessionPage(QWidget):
         # shell's line editing. Quick launch sends through `terminal_thread.send_data()`, so it
         # records itself in `_send_initial_command()`.
         self.widget.command_sent_hook = self.record_sent_command
+        # v1.6.4 (ROADMAP task 3): the Ctrl+wheel font zoom — the canvas owns the gesture, the
+        # PAGE owns the consequence (the PTY grid, the debounced `terminal_font_size` write and
+        # the status line), the same split as the command-sent hook above.
+        self.widget.font_zoom_hook = self._on_font_zoomed
 
         # v1.4.7 follow-up (the maintainer's request): a page with a SINGLE tab does not
         # show a tab STRIP at all — the split pane is a command line, and the strip spent
@@ -486,6 +637,14 @@ class TerminalSessionPage(QWidget):
         self._pty_timer.setInterval(self.PTY_RESIZE_DEBOUNCE_MS)
         self._pty_timer.timeout.connect(self._on_pty_debounce)
         self.widget.installEventFilter(self)
+
+        # v1.6.4 (ROADMAP task 3): the Ctrl+wheel zoom's ONE debounced config write — the
+        # `CmdEditTextNote` pattern of AGENTS.md §4.2, restarted by every wheel notch.
+        self._font_size_pending = None
+        self._font_timer = QTimer(self)
+        self._font_timer.setSingleShot(True)
+        self._font_timer.setInterval(FONT_SIZE_SAVE_DEBOUNCE_MS)
+        self._font_timer.timeout.connect(self._save_font_size)
 
         self.terminal_thread.output_signal.connect(self._on_output)
         self.terminal_thread.error_signal.connect(self._show_error)
@@ -706,6 +865,101 @@ class TerminalSessionPage(QWidget):
             except RuntimeError:
                 pass  # Qt teardown — the panel is already destroyed
         return True
+
+    # ── v1.6.4 (ROADMAP task 3): the Ctrl+wheel font zoom ───────────────────
+
+    def _on_font_zoomed(self, size: int):
+        """The canvas zoomed its font: the grid, the config key and the status line follow.
+
+        The page's half of the gesture (the hook `TerminalWidget.font_zoom_hook`), three
+        consequences in ONE call:
+          * the GRID — `_sync_grid()` reads the canvas metrics the zoom has just changed, so
+            pyte and (through the ordinary debounce) the PTY receive the new columns/rows; a
+            font change is a grid change even though the WIDGET never resized;
+          * the KEY — `terminal_font_size`, written by ONE debounced timer (a wheel is a stream
+            of events and the §4.2 rule is one write per gesture);
+          * the WORDS — the session's status line, through the page's single `_set_status_text`.
+        Never raises: a view action of the canvas may not break on a page under teardown.
+        """
+        try:
+            self._sync_grid()
+        except RuntimeError:
+            return  # Qt teardown — the canvas/page is already gone
+        try:
+            self._font_size_pending = int(size)
+            self._font_timer.start()
+        except RuntimeError:
+            pass  # Qt teardown — the write is simply skipped
+        self._set_status_text(get_translator()("terminal.font_zoom", size=int(size)))
+
+    def _save_font_size(self) -> bool:
+        """The debounce target: write the pending size into `~/.sshmap/config.json`.
+
+        The `COMMAND_WIDTH_SAVE_DEBOUNCE_MS` / `_save_follow_cwd()` pattern: an owner-written
+        key of an existing setting (the settings hub reads and writes the same one), a
+        read-only HOME answers False and the session keeps the size either way.
+        """
+        size = getattr(self, "_font_size_pending", None)
+        if size is None:
+            return False
+        try:
+            from i18n import save_config
+        except Exception:  # noqa: BLE001 — a build without i18n keeps the session's size
+            return False
+        try:
+            return bool(save_config({FONT_SIZE_CONFIG_KEY: int(size)}))
+        except Exception:  # noqa: BLE001 — a read-only HOME is not worth an error dialog
+            return False
+
+    # ── v1.6.4 (ROADMAP task 4): the activity mark of an inactive session ───
+
+    def note_output(self) -> bool:
+        """Note that THIS session produced output → the mark of an INACTIVE session.
+
+        The ONE rule of the feature, asked once per fed output chunk (from `_on_output`): the
+        session asks its HOST whether it is the session the user is looking at
+        (`session_is_visible(page)` — only the container knows what "visible" means: the current
+        tab of the dock, and in a window the current tab OR the focused split pane) and marks
+        itself otherwise. A visible session CLEARS its mark here, which is the same call the tab
+        switch makes — the rule and the clearing are one method, so they cannot disagree.
+
+        The mark is the session's own state (`has_activity`); the tab strip belongs to the host,
+        which re-renders when the state really changes. Returns True when the session ends up
+        marked. Never raises — a mark is not worth a broken output path.
+        """
+        host = getattr(self, "_host_window", None)
+        visible = False
+        hook = getattr(host, "session_is_visible", None)
+        if callable(hook):
+            try:
+                visible = bool(hook(self))
+            except RuntimeError:
+                visible = False
+        return self.set_activity(not visible)
+
+    def set_activity(self, on: bool) -> bool:
+        """Set the activity mark and let the host re-render the tab. Idempotent, never raises.
+
+        The host hook (`session_activity_changed(page)`) is duck-typed like every other host
+        call of this page: a container without it simply keeps the state.
+        """
+        on = bool(on)
+        if on == self._activity:
+            return on
+        self._activity = on
+        host = getattr(self, "_host_window", None)
+        hook = getattr(host, "session_activity_changed", None)
+        if callable(hook):
+            try:
+                hook(self)
+            except RuntimeError:
+                pass   # Qt teardown — no tab strip left to mark
+        return on
+
+    @property
+    def has_activity(self) -> bool:
+        """Is there output this session produced while it was not the visible one?"""
+        return bool(self._activity)
 
     def ensure_sftp_worker(self):
         """The SFTP worker of this session, started lazily — or None (v1.5.7).
@@ -981,9 +1235,15 @@ class TerminalSessionPage(QWidget):
         while the injected hook's echo is being suppressed the canvas, the transcript and
         pyte see NOTHING (the filtered stream); the first report drops the held bytes and a
         shell that never answers gets them back at the deadline or at the cap.
+
+        v1.6.4 fix: the answer and the echo are usually in ONE chunk (bash echoes the line and
+        prints the next prompt — report first, prompt after — within one read), so the scan
+        answers WHERE that answer ends and the hold-back drops the head of the SAME chunk with
+        the held bytes (`osc7_report_end()`); releasing the hold without filtering the chunk
+        that released it was the leak that put the whole hook command on the screen.
         """
-        self._scan_osc7(data)
-        data = self._hold_cwd_echo(data)
+        cut = self._scan_osc7(data)
+        data = self._hold_cwd_echo(data, cut)
         if not data:
             return
         pos_before = None
@@ -1004,10 +1264,25 @@ class TerminalSessionPage(QWidget):
         # v1.1.2RC3 (N7): a history position change ⇔ an auto-return to live (feed() —
         # the only path that changes the position without a manual scroll). An active
         # selection on the "old" screen is reset before copying.
+        #
+        # v1.6.4 (ROADMAP task 5): under `terminal_scroll = "pin"` the viewport does NOT move —
+        # the chunk restores the very lines it held — so the (row, col) of a selection made
+        # while reading the history still point at the same cells and the guard is skipped (a
+        # selection dropped by every chunk would make the pin useless for copying). The move
+        # back to live is a USER action, and the canvas drops the selection with it
+        # (`TerminalWidget._release_pin`). The "live" mode keeps the N7 rule unchanged.
         try:
-            if pos_before is not None and self.tscreen.scroll_info()[0] != pos_before \
+            if pos_before is not None and self.tscreen.scroll_mode_id() != SCROLL_MODE_PIN \
+                    and self.tscreen.scroll_info()[0] != pos_before \
                     and self.widget.has_selection():
                 self.widget.clear_selection()
+        except RuntimeError:
+            pass  # the C++ object was already destroyed (a WA_DeleteOnClose close race)
+        # v1.6.4 (ROADMAP task 4): the ACTIVITY mark of an INACTIVE session — the last step of
+        # this path, after the canvas really has the new bytes (a page the user is not looking
+        # at says so in its tab strip; the host decides what "visible" means).
+        try:
+            self.note_output()
         except RuntimeError:
             pass  # the C++ object was already destroyed (a WA_DeleteOnClose close race)
         try:
@@ -1034,6 +1309,10 @@ class TerminalSessionPage(QWidget):
         tab = getattr(self, "sftp_tab", None)
         if tab is not None:
             tab.set_follow_cwd(self._follow_cwd)   # the checkbox is a VIEW of this state
+        if not self._follow_cwd:
+            # v1.6.4 fix: a follow turned OFF while its hook's echo is still held gives the held
+            # bytes back at once — the output must never stay invisible because a switch moved.
+            self._release_cwd_hold()
         if self._follow_cwd and not self._cwd_hook_sent:
             self._inject_cwd_hook()
         if persist:
@@ -1085,30 +1364,41 @@ class TerminalSessionPage(QWidget):
         QTimer.singleShot(CWD_HOLD_DEADLINE_MS, self._on_cwd_hold_timeout)
         return True
 
-    def _scan_osc7(self, data: bytes):
-        """Find an OSC 7 report in the RAW bytes and move the listing (never raises).
+    def _scan_osc7(self, data) -> int:
+        """Find an OSC 7 report in the RAW bytes, move the listing and answer WHERE it ends.
 
         The carry keeps the last `OSC7_CARRY_BYTES` bytes of the previous chunk, so a
-        report split across two reads is still parsed. The FIRST report also releases the
-        echo hold-back — DROPPING what is held (that is the hook's own echo); every later
-        report only moves the listing, and a directory that did not change is a no-op.
+        report split across two reads is still parsed. The FIRST report that really arrived in
+        this chunk also releases the echo hold-back — DROPPING what is held (that is the hook's
+        own echo); every later report only moves the listing, and a directory that did not
+        change is a no-op.
+
+        The return value is the offset in `data` just past that answering report (-1 — there was
+        none), which is what `_hold_cwd_echo()` needs: the released hold must NOT let the echo
+        through when the shell answered within the very same chunk. A report that lives entirely
+        in the carry was already seen in an earlier chunk and is therefore not an answer —
+        otherwise a shell that emits OSC 7 on its own would release the hold before the hook's
+        echo has even been buffered. Never raises.
         """
         if not self._follow_cwd:
-            return
+            return -1
         try:
-            chunk = self._cwd_carry + bytes(data or b"")
+            raw = bytes(data or b"")
         except Exception:  # noqa: BLE001 — a caller that hands over something odd
-            return
+            return -1
+        carry = self._cwd_carry
+        chunk = carry + raw
         path = parse_osc7(chunk)
         self._cwd_carry = chunk[-OSC7_CARRY_BYTES:]
         if not path:
-            return
-        if self._cwd_hold is not None:
-            self._cwd_hold = None      # the hook answered: the held echo is dropped
-        if path == self._last_cwd:
-            return
-        self._last_cwd = path
-        self._apply_cwd(path)
+            return -1
+        end = osc7_report_end(chunk, after=len(carry))
+        if path != self._last_cwd:
+            self._last_cwd = path
+            self._apply_cwd(path)
+        if end < 0:
+            return -1          # a STALE report (seen before this chunk) — it answers nothing
+        return max(0, end - len(carry))
 
     def _apply_cwd(self, path: str):
         """Move the Files tab to the directory the shell reported (the follow itself).
@@ -1125,17 +1415,26 @@ class TerminalSessionPage(QWidget):
         except RuntimeError:
             pass  # Qt teardown — the tab is already destroyed
 
-    def _hold_cwd_echo(self, data: bytes) -> bytes:
+    def _hold_cwd_echo(self, data: bytes, cut: int = 0) -> bytes:
         """The hold-back of the hook's echo: the bytes to RENDER (b"" — nothing yet).
 
         While the hold is armed the output is buffered; the deadline (and the size cap)
         gives it BACK — a shell that never sends an OSC 7 costs nothing but a short pause,
         and its echo appears then. The first report DROPS the held bytes (that is exactly
         the hook's echo, which must never reach the canvas).
+
+        `cut` is `_scan_osc7()`'s answer: the offset in `data` just past the report that
+        released the hold. When it is set, the answer arrived WITHIN this chunk (the usual
+        case — bash echoes the line and prints the next prompt in one read), so this chunk's
+        head belongs to the echo and goes with the buffer: only `data[cut:]` — the new prompt,
+        which bash writes AFTER `PROMPT_COMMAND` reported — is rendered.
         """
         buf = self._cwd_hold
         if buf is None:
             return data
+        if cut > 0:
+            self._cwd_hold = None
+            return bytes(data[max(0, int(cut)):])
         if time.monotonic() >= self._cwd_hold_deadline:
             self._cwd_hold = None
             return bytes(buf) + bytes(data or b"")
@@ -1147,13 +1446,27 @@ class TerminalSessionPage(QWidget):
 
     def _on_cwd_hold_timeout(self):
         """The deadline expired: give the held bytes BACK through the ordinary output path."""
+        self._release_cwd_hold()
+
+    def _release_cwd_hold(self) -> bytes:
+        """Hand the held bytes back through the ordinary output path (idempotent). Never raises.
+
+        The ONE release of a hold that was NOT answered by a report — the deadline of
+        `_on_cwd_hold_timeout` and a follow that is turned OFF while the hold is armed both come
+        here, so a hold can never outlive the reason it was taken for (the output must not stay
+        invisible because a checkbox changed).
+        """
         buf = self._cwd_hold
         if buf is None:
-            return
+            return b""
         self._cwd_hold = None
         if not buf:
-            return
-        self._on_output(bytes(buf))
+            return b""
+        try:
+            self._on_output(bytes(buf))
+        except Exception:  # noqa: BLE001 — a teardown race: the bytes are dropped, not raised
+            return b""
+        return bytes(buf)
 
     # ── v1.0RC3: resize PTY — a grid guard + debounce (ROADMAP task 6) ──────
 

@@ -142,6 +142,36 @@ SCROLL_RATIO = 0.1
 # remains finite; MAX_SCROLL_STEPS is the hard ceiling of that budget.
 MAX_SCROLL_STEPS = 200_000
 
+# ── v1.6.4 (ROADMAP task 5): the two modes of `terminal_scroll` ───────────────
+# The key is CONFIG-ONLY (no settings-hub row) and validated like `terminal_wheel`:
+# a missing / foreign / broken value is the DECLARED default, never an error.
+#
+#   * SCROLL_MODE_LIVE ("live") — the DEFAULT and the behaviour every earlier release
+#     had: new output pulls the view back to the live line, so the output is visible
+#     immediately even while the user was reading the scrollback (the auto-return that
+#     `before_event` performs in one bulk operation — batch D2).
+#   * SCROLL_MODE_PIN ("pin") — OPT-IN: the view stays on the SAME LINES while output
+#     keeps arriving, which is what a real terminal does. Implemented in OUR subclass,
+#     so the vendored fork is not touched: pyte's auto-return is our own override.
+SCROLL_MODE_LIVE = "live"
+SCROLL_MODE_PIN = "pin"
+SCROLL_MODES = (SCROLL_MODE_LIVE, SCROLL_MODE_PIN)
+SCROLL_MODE_DEFAULT = SCROLL_MODE_LIVE
+
+
+def resolve_scroll_mode(value) -> str:
+    """`terminal_scroll` → one of `SCROLL_MODES`; anything else → the declared default.
+
+    The PURE validator (the `resolve_cursor_style()` / `terminal_wheel` rule): a missing key,
+    a foreign type, a stray case or whitespace all answer `SCROLL_MODE_DEFAULT`.
+    """
+    if isinstance(value, str):
+        v = value.strip().lower()
+        if v in SCROLL_MODES:
+            return v
+    return SCROLL_MODE_DEFAULT
+
+
 # Palettes: the REQUIRED keys black…white + br_* (8+8) — otherwise the SGR 33/93
 # and the bright colors fall to default (critical error #2 from TERMINAL.md §3).
 # 'default' — the current xterm-like palette: the defaults = the current look.
@@ -229,16 +259,62 @@ class SshmapHistoryScreen(pyte.HistoryScreen):
     (before_event is not in _wrapped — no conflicts). prev_page/next_page —
     no-ops, as in pyte."""
 
-    # ── v1.2.14 (PYTE82_AUDIT.md batch D2): live-line auto-return batching ───────
-    def before_event(self, event):
-        """The auto-return to the live line batching (measurement D1, v1.2.12: 68–73 ms/chunk).
+    def __init__(self, columns, lines, history=100, ratio=0.5):
+        # v1.6.4 (ROADMAP task 5): the PIN state. `scroll_pin` is the MODE (`terminal_scroll`),
+        # `_pin_anchor` is the content offset of the pinned viewport's first line, captured once
+        # per fed chunk (None — nothing to re-anchor). Set BEFORE super().__init__() — pyte's
+        # HistoryScreen builds self.history there and calls reset(), which never reads these.
+        self.scroll_pin = False
+        self._pin_anchor = None
+        super().__init__(columns, lines, history=history, ratio=ratio)
 
-        pyte.HistoryScreen.before_event for every event except prev_page/next_page
-        spins next_page() in a loop: with a deep history up to ~250 iterations,
-        each O(lines) (measurement D1 v1.2.12: 68–73 ms/chunk against ~42 on the
-        live line — feed comes through a queued signal in the GUI thread). Here —
-        one bulk operation with the same arithmetic as HistoryScreen.next_page
-        (screens.py):
+    # ── v1.6.4 (ROADMAP task 5): the pinned scrollback ───────────────────────────
+
+    def pin_begin(self) -> None:
+        """Open a fed CHUNK (TerminalScreen.feed): the anchor is captured by the first event."""
+        self._pin_anchor = None
+
+    def pin_end(self):
+        """Close a fed chunk: put the pinned viewport back on the SAME lines. Returns the moved lines.
+
+        The other direction of the D2 arithmetic, in ONE operation per chunk whatever the depth:
+        the chunk ran with the view live (see `before_event`), so the whole document above the
+        live screen is in `history.top` now, and the viewport is restored by moving UP by the
+        distance between the anchor and the live line (`_page_up_bulk`).
+
+        The anchor is a CONTENT offset (the number of document lines above the viewport), not a
+        pyte `position`: pyte's position counts the distance to the live end, which grows with
+        every new line — exactly the arithmetic that makes a pinned view drift. A chunk that
+        cleared the history (ED 3 / a local reset) leaves nothing to restore and is a no-op.
+        """
+        anchor = self._pin_anchor
+        self._pin_anchor = None
+        if anchor is None:
+            return 0
+        return self._page_up_bulk(len(self.history.top) - int(anchor))
+
+    def pin_release(self) -> bool:
+        """USER INTENT: return to the live line now (one bulk operation). True — the view moved.
+
+        Called by the canvas on a keystroke or a paste (`TerminalWidget._release_pin()`); the wheel
+        needs no call, because scrolling DOWN to the bottom reaches the live line by itself and the
+        pin then has nothing left to hold. Never called on output. The MODE stays on: the next
+        scroll-back pins again.
+        """
+        self._pin_anchor = None
+        if self.history.position >= self.history.size:
+            return False
+        self._restore_live()
+        return True
+
+    def _restore_live(self) -> bool:
+        """The D2 bulk auto-return — pyte's next_page() loop collapsed into ONE operation.
+
+        pyte.HistoryScreen.before_event spun next_page() until the position reached the bottom:
+        with a deep history that is up to ~250 iterations, each O(lines) (measurement D1 v1.2.12:
+        68–73 ms/chunk against ~42 on the live line; feed comes through a queued signal in the
+        GUI thread). Here — one bulk operation with the same arithmetic as
+        HistoryScreen.next_page (screens.py):
         mid = min(len(history.bottom), size − position); top.extend(buffer[0:mid]);
         the buffer shifts up; buffer[-mid:] — from bottom.popleft();
         position += mid; dirty = all lines. O(lines) once instead of
@@ -256,6 +332,81 @@ class SshmapHistoryScreen(pyte.HistoryScreen):
         The result is identical to the next_page() loop: position == size, bottom
         empty, top fully restored, buffer = the live screen; at mid ≤ lines the
         code matches next_page() word for word.
+        """
+        h = self.history
+        if h.position >= h.size or not h.bottom:
+            return False
+        mid = min(len(h.bottom), h.size - h.position)
+        take = min(mid, self.lines)      # the buffer lines that go back to top
+        h.top.extend(self.buffer[y] for y in range(take))
+        if mid > take:                   # a deep history: the surplus — from the head of bottom to top
+            h.top.extend(h.bottom.popleft() for _ in range(mid - take))
+        for y in range(self.lines - take):        # the buffer shifts up (as in next_page)
+            self.buffer[y] = self.buffer[y + take]
+        for y in range(self.lines - take, self.lines):
+            self.buffer[y] = h.bottom.popleft()   # the bottom lines — from bottom
+        self.history = h._replace(position=h.position + mid)
+        self.dirty = set(range(self.lines))
+        return True
+
+    def _page_up_bulk(self, lines_up):
+        """Move the viewport UP by up to `lines_up` document lines — ONE operation (the D2 mirror).
+
+        `prev_page()` can only move by `ceil(lines × ratio)` (4 lines on the default grid), so
+        restoring a deep pinned offset through it re-introduces exactly the loop the D2 batching
+        removed (measured: 250 page-ups moved 968 lines in 17.9 ms against 0.175 ms for ONE bulk
+        auto-return). The arithmetic below is `HistoryScreen.prev_page`'s, with `mid` free:
+
+          * `mid ≤ lines` — word for word the pyte page: the last `mid` buffer lines leave to the
+            HEAD of `bottom` (in document order), the buffer shifts down and its first `mid` lines
+            come off the tail of `top`;
+          * `mid > lines` — the whole old viewport ends up BELOW the new one: the lines that stay
+            between them are `top`'s tail (`mid − lines` of them, in order), then the old buffer.
+            The new viewport is the last `lines` lines of what `top` had.
+
+        The result keeps pyte's own invariant `len(bottom) == size − position` (the two move by the
+        same number of lines), so the auto-return of `_restore_live()` still restores exactly this
+        viewport.
+        """
+        h = self.history
+        try:
+            k = int(lines_up)
+        except (TypeError, ValueError):
+            return 0
+        if k <= 0 or not h.top:
+            return 0
+        k = min(k, len(h.top), max(0, h.position - self.lines))
+        if k <= 0:
+            return 0
+        lines = self.lines
+        if k <= lines:
+            h.bottom.extendleft(self.buffer[y] for y in range(lines - 1, lines - k - 1, -1))
+            for y in range(lines - 1, k - 1, -1):
+                self.buffer[y] = self.buffer[y - k]
+            for y in range(k - 1, -1, -1):
+                self.buffer[y] = h.top.pop()
+        else:
+            surplus = k - lines
+            tail = [h.top.pop() for _ in range(surplus)]      # the last line first
+            below = list(reversed(tail)) + [self.buffer[y] for y in range(lines)]
+            h.bottom.extendleft(reversed(below))              # the head of bottom, in document order
+            for y in range(lines - 1, -1, -1):
+                self.buffer[y] = h.top.pop()
+        self.history = h._replace(position=h.position - k)
+        self.dirty = set(range(lines))
+        return k
+
+    # ── v1.2.14 (PYTE82_AUDIT.md batch D2): live-line auto-return batching ───────
+    def before_event(self, event):
+        """The auto-return to the live line batching (measurement D1, v1.2.12: 68–73 ms/chunk).
+
+        v1.6.4 (ROADMAP task 5): in the OPT-IN `"pin"` mode (terminal_scroll) the viewport is
+        NOT left historical while the chunk runs — pyte applies an event to the LIVE screen, and
+        `index()` on a scrolled-back buffer would append the viewport's top line instead of the
+        live one (the document gains a phantom line in the middle). The pin therefore returns to
+        the live line HERE, once per fed chunk, and `pin_end()` puts the viewport back on the
+        same lines afterwards: the user never sees the intermediate state (both run inside ONE
+        locked feed), and the cost is the same bulk arithmetic as the "live" mode.
 
         The pickup mechanism: the HistoryScreen.__getattribute__ wrapper calls
         self.before_event(event) by name → the subclass override is picked up
@@ -267,17 +418,9 @@ class SshmapHistoryScreen(pyte.HistoryScreen):
             return
         h = self.history
         if h.position < h.size and h.bottom:
-            mid = min(len(h.bottom), h.size - h.position)
-            take = min(mid, self.lines)      # the buffer lines that go back to top
-            h.top.extend(self.buffer[y] for y in range(take))
-            if mid > take:                   # a deep history: the surplus — from the head of bottom to top
-                h.top.extend(h.bottom.popleft() for _ in range(mid - take))
-            for y in range(self.lines - take):        # the buffer shifts up (as in next_page)
-                self.buffer[y] = self.buffer[y + take]
-            for y in range(self.lines - take, self.lines):
-                self.buffer[y] = h.bottom.popleft()   # the bottom lines — from bottom
-            self.history = h._replace(position=h.position + mid)
-            self.dirty = set(range(self.lines))
+            if self.scroll_pin and self._pin_anchor is None:
+                self._pin_anchor = len(h.top)   # a CONTENT offset — what pin_end() restores
+            self._restore_live()
 
     # v1.3rc1: the batch A/B overrides REMOVED — they became the fork patches
     # 0001/0002/0003 (third_party/pyte-patches/MANIFEST.md); the behavior is the same, the provenance is explicit.
@@ -292,27 +435,80 @@ class TerminalScreen:
     v1.3rc1: pyte — the managed fork third_party/pyte (the import seam, MANIFEST.md);
              only the before_event batching is left in the subclass (D2)."""
 
-    def __init__(self, columns=120, lines=32, history_lines=DEFAULT_HISTORY_LINES):
+    def __init__(self, columns=120, lines=32, history_lines=DEFAULT_HISTORY_LINES,
+                 scroll_mode=SCROLL_MODE_DEFAULT):
         self.columns = columns
         self.lines = lines
+        # v1.6.4 (ROADMAP task 5): the `terminal_scroll` MODE — "live" (the default: new
+        # output pulls the view back to the live line) | "pin" (OPT-IN: the view keeps the
+        # same lines while output arrives). An unknown value is the declared default.
+        self.scroll_mode = resolve_scroll_mode(scroll_mode)
         # v1.0RC3: HistoryScreen instead of Screen — a ready-made scrollback (deque history)
         # + the auto-return to the live line on new output (before_event).
         # v1.2.11: the SshmapHistoryScreen subclass (private SGR + LNM, batch A).
         # v1.3rc1: pyte — the fork third_party/pyte; only the D2 batching is left in the subclass.
         self.screen = SshmapHistoryScreen(columns, lines,
                                           history=int(history_lines), ratio=SCROLL_RATIO)
+        self.screen.scroll_pin = self.scroll_mode == SCROLL_MODE_PIN
         self.stream = pyte.ByteStream(self.screen)   # accepts bytes, utf-8 inside
         self._lock = threading.Lock()
 
     # ── input from the SSH thread ──────────────────────
     def feed(self, data: bytes):
+        """One chunk of the session's output → pyte (under the lock).
+
+        v1.6.4 (ROADMAP task 5): a CHUNK is the unit of the pinned scrollback. In the "pin"
+        mode the view is restored to the live line once here (`before_event`) and put back on
+        the very lines it showed once the chunk is done (`pin_end`) — both inside the lock, so
+        the GUI never paints the intermediate state. The "live" mode (the default) is byte for
+        byte the behaviour of every earlier release: the same call pair is inert, because
+        `pin_begin()` only drops an anchor and `pin_end()` answers 0 without one.
+        """
         with self._lock:
-            self.stream.feed(data)
+            if self.screen.scroll_pin:
+                self.screen.pin_begin()
+                try:
+                    self.stream.feed(data)
+                finally:
+                    self.screen.pin_end()
+            else:
+                self.stream.feed(data)
 
     def resize(self, columns, lines):
         with self._lock:
             self.columns, self.lines = columns, lines
             self.screen.resize(lines, columns)
+
+    # ── v1.6.4 (ROADMAP task 5): the scrollback mode ───────────────────────────
+
+    def scroll_mode_id(self) -> str:
+        """The ACTIVE `terminal_scroll` mode — one of `SCROLL_MODES`."""
+        return self.scroll_mode
+
+    def set_scroll_mode(self, mode) -> str:
+        """Apply a mode (`terminal_scroll`); an unknown value → the declared default.
+
+        A session switch, not a config write: the caller owns persistence (the key is
+        config-only and read at session creation).
+        """
+        self.scroll_mode = resolve_scroll_mode(mode)
+        with self._lock:
+            self.screen.scroll_pin = self.scroll_mode == SCROLL_MODE_PIN
+        return self.scroll_mode
+
+    def pinned(self) -> bool:
+        """Is the viewport OFF the live line while the pin is on (the test/debug seam)."""
+        return bool(self.screen.scroll_pin and not self.at_bottom())
+
+    def scroll_to_live(self) -> bool:
+        """USER INTENT: return to the live line now (the pin's release). True — the view moved.
+
+        The ONE door the canvas uses for "the user wants the live line again" (a keystroke, a
+        paste, the wheel to the bottom). An ordinary call in the "live" mode lands on the same
+        D2 bulk arithmetic; position already at the bottom → False (nothing to do).
+        """
+        with self._lock:
+            return bool(self.screen.pin_release())
 
     # ── v1.0RC3: the scrollback (HistoryScreen, TERMINAL.md §5.4) ──────────
     def scroll_up(self):
@@ -460,6 +656,35 @@ class TerminalScreen:
                     break                 # the edge of the history — as close as pyte gets
             scr.dirty = set(range(scr.lines))
             return scr.history.position
+
+    def scroll_to_offset(self, index) -> int:
+        """Put the document line `index` back at the TOP of the viewport. Returns the new top offset.
+
+        The v1.6.4 (ROADMAP task 5) twin of `scroll_to_position()` for the PINNED scrollback:
+        pyte's `position` counts the distance to the live end, so it DRIFTS while output keeps
+        arriving under the pin (that is what the pin does), while the CONTENT offset of a line
+        (`history_top_len()`) does not. The find bar captures the offset when it opens and hands
+        it back here on Esc, so the viewport lands on the very LINES it captured instead of on
+        the page border the position arithmetic would reach.
+
+        UP is ONE bulk move (the D2 mirror — the depth must not become a loop, exactly as in the
+        auto-return); DOWN uses pyte's own pages, which is the same loop `scroll_to_line()` runs.
+        A target the history no longer holds (the deque evicted it) lands as close as pyte gets.
+        """
+        with self._lock:
+            scr = self.screen
+            target = max(0, int(index))
+            delta = len(scr.history.top) - target
+            if delta > 0:
+                scr._page_up_bulk(delta)
+            elif delta < 0:
+                for _ in range(self._scroll_step_budget()):
+                    if len(scr.history.top) >= target:
+                        break
+                    if not self._page_locked(scr, up=False):
+                        break
+            scr.dirty = set(range(scr.lines))
+            return len(scr.history.top)
 
     # ── v1.3.3.4 (ROADMAP task 2): two LOCAL actions, no bytes to the PTY ────
 

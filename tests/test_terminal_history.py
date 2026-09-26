@@ -184,7 +184,7 @@ check("normalize_entry drops an unusable record and repairs a broken last/count"
       normalize_entry(None) is None and normalize_entry({"cmd": ""}) is None
       and normalize_entry({"cmd": _long}) is None and normalize_entry({"cmd": 5}) is None
       and normalize_entry({"cmd": "ls", "last": "x", "count": 0})
-      == {"cmd": "ls", "last": 0, "count": 1})
+      == {"cmd": "ls", "last": 0, "count": 1, CH.SECRET_FIELD: False})
 
 _merged = merge_entries([{"cmd": "ls", "last": 100, "count": 2}],
                         [{"cmd": "ls", "last": 300, "count": 1},
@@ -598,16 +598,18 @@ print("== §9 the release state ==")
 # ════════════════════════════════════════════════════════════════════════════
 
 check("EXPECTED_APP_VERSION is the version this test file describes",
-      EXPECTED_APP_VERSION == "1.6.3", EXPECTED_APP_VERSION)
+      EXPECTED_APP_VERSION == "1.6.4", EXPECTED_APP_VERSION)
 check("the pin counts the shipped keys (+29 of v1.5.7: the tab, the panel chrome, the seven menu items "
-      "with their reports and refusals) — 708 + 29 + 41 + 4 + 4 = 786",
-      EXPECTED_I18N_KEYS == 786, str(EXPECTED_I18N_KEYS))
+      "with their reports and refusals, + the marked secret of v1.6.4) — "
+      "708 + 29 + 41 + 4 + 4 + 3 = 789",
+      EXPECTED_I18N_KEYS == 789, str(EXPECTED_I18N_KEYS))
 check_release_state(ROOT)
 
 _langs = load_i18n_langs(ROOT)
-check("every discovered language carries the whole v1.5.7 command-history key family",
+check("every discovered language carries the whole v1.5.7 command-history key family "
+      "(+ the v1.6.4 marked-secret tooltip)",
       all(len([k for k in translation_keys(_langs[c]) if k.startswith("terminal.history.")])
-          == 28 and "terminal.tab_history" in translation_keys(_langs[c])
+          == 29 and "terminal.tab_history" in translation_keys(_langs[c])
           and str(_langs[c].get("terminal.tab_history", "")).strip()
           for c in i18n_lang_codes(ROOT)),
       str({c: len([k for k in translation_keys(_langs[c])

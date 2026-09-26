@@ -36,7 +36,9 @@ non-goal, not a bug.
 
 **Security.** `~/.sshmap/history/*.json` is a plain-text file and its entries may carry secrets
 (a token or a password passed as an argument of a command). It is never logged, never written
-into the project file and never exported.
+into the project file and never exported. An entry that the application SENDS and that matches
+the declared secret shapes is written AND MARKED (`SECRET_FIELD` + the panel's row marker) —
+the mark is additive to the file's own shape and the PROJECT's `VERSION_FORMAT` is untouched.
 """
 
 import hashlib
@@ -45,7 +47,8 @@ import os
 import re
 import time
 
-from PySide6.QtCore import Qt, QTimer, Signal
+from PySide6.QtCore import Qt, QRectF, QTimer, Signal
+from PySide6.QtGui import QBrush, QColor, QIcon, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import (
     QApplication, QFileDialog, QLabel, QLineEdit, QMenu, QMessageBox, QTreeWidget,
     QTreeWidgetItem, QVBoxLayout, QWidget,
@@ -145,6 +148,117 @@ HISTORY_COL_COMMAND_WIDTH_KEY = "ui_terminal_history_cmd_width"
 #: The debounce of the write: `sectionResized` fires per PIXEL of a drag (the
 #: `CmdEditTextNote` debounce pattern of AGENTS.md §4.2 — ONE timer, one write per gesture).
 COMMAND_WIDTH_SAVE_DEBOUNCE_MS = 600
+
+
+# ── v1.6.4 (ROADMAP task 2): the MARKED secret ──────────────────────────────
+# The store holds what the APPLICATION sent, and such an entry may carry a secret. The
+# DECIDED rule: the entry is WRITTEN **and MARKED** — the application never loses what it
+# really put on the wire (the one fact this store exists to keep, which a refusal would
+# silently drop), while the user can SEE that a row is sensitive. The two REFUSED variants
+# and their reasons are recorded in CHANGELOG.md.
+#
+# The mark is a declared boolean in the entry (`SECRET_FIELD`), and the pattern list below
+# is evaluated ONCE, at the single write path of what the application sends
+# (`CommandHistoryStore.record()` — reached from `record_sent_command()`). An IMPORTED
+# history file is deliberately NOT scanned: it is the shell's own record of what a human
+# typed, not what this application sent, and the mark is a statement about the latter.
+
+#: The entry field that carries the mark (additive to the history file's own shape; the
+#: PROJECT's `VERSION_FORMAT` is a different schema and is deliberately untouched, §5).
+SECRET_FIELD = "secret"
+
+#: The DECLARED secret shapes — a literal list, never a heuristic:
+#:   * `-p<value>` (mysql/sshpass/…: the value is ATTACHED to the flag) and `-p <value>`;
+#:   * `password=<value>` / `--password <value>`;
+#:   * `passwd:` / `passwd=<value>`;
+#:   * `token=` / `secret=` / `api_key=` / `access_key=<value>` (any separator `=` or `:`);
+#:   * `Bearer <value>`;
+#:   * `-----BEGIN` (a pasted PEM block).
+SECRET_PATTERNS = (
+    re.compile(r"(?:^|\s)-p\s*\S"),
+    re.compile(r"(?:^|\s)--?pass(?:word|wd)?\s*[:=]?\s*\S", re.I),
+    re.compile(r"\bpasswd\s*[:=]\s*\S", re.I),
+    re.compile(r"\b(?:token|secret|api_key|access_key)\s*[:=]\s*\S", re.I),
+    re.compile(r"\bBearer\s+\S"),
+    re.compile(r"-----BEGIN"),
+)
+
+
+def looks_like_secret(text) -> bool:
+    """Does one command line look like it carries a secret? A PURE predicate.
+
+    The ONE reader of `SECRET_PATTERNS`, evaluated once per recorded command (see the
+    module header of this block). A non-string / an empty text answers False — the caller
+    never has to guard the type.
+    """
+    if not isinstance(text, str) or not text:
+        return False
+    return any(pattern.search(text) is not None for pattern in SECRET_PATTERNS)
+
+
+#: The size of the row marker (px). Every row gets a marker of this size — a marked one the
+#: padlock, an unmarked one the SAME transparent slot — so the command text of the rows around
+#: a mark never shifts sideways.
+SECRET_ICON_PX = 14
+
+#: colour hex → QIcon. A pixmap is a VALUE (§4.6): the cache is keyed by the tone it was painted
+#: with, and `refresh_theme()` drops it, so a theme switch repaints the mark in the new palette.
+_secret_icon_cache = {}
+
+
+def _blank_row_icon() -> QIcon:
+    """The marker slot of an UNMARKED row: a fully transparent pixmap of the mark's size."""
+    icon = _secret_icon_cache.get("")
+    if icon is None:
+        pixmap = QPixmap(SECRET_ICON_PX, SECRET_ICON_PX)
+        pixmap.fill(Qt.GlobalColor.transparent)
+        icon = QIcon(pixmap)
+        _secret_icon_cache[""] = icon
+    return icon
+
+
+def secret_row_icon() -> QIcon:
+    """The row marker of a MARKED entry: a PADLOCK silhouette (v1.6.4, ROADMAP task 2).
+
+    A SHAPE, not a colour alone (the §4.6 / `tests/test_encoding.py` rule) — the tone is the
+    theme's existing warning one (`status_warn`: exactly the tone the SFTP tab already uses for
+    a row it refuses to preview), never a new colour field. The second channel is the row's
+    tooltip, which spells the meaning out in words. Never raises: a broken painter answers an
+    empty QIcon and the tooltip still carries the fact.
+    """
+    tone = str(getattr(theme, "STATUS_WARN", "") or getattr(theme, "status_warn", ""))
+    icon = _secret_icon_cache.get(tone)
+    if icon is not None:
+        return icon
+    try:
+        pixmap = QPixmap(SECRET_ICON_PX, SECRET_ICON_PX)
+        pixmap.fill(Qt.GlobalColor.transparent)
+        color = QColor(tone)
+        painter = QPainter(pixmap)
+        try:
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+            pen = QPen(color)
+            pen.setWidthF(max(1.0, SECRET_ICON_PX / 7.0))
+            painter.setPen(pen)
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            # the shackle: a half arc over the body
+            arc_w, arc_h = SECRET_ICON_PX * 0.42, SECRET_ICON_PX * 0.44
+            body_w, body_h = SECRET_ICON_PX * 0.66, SECRET_ICON_PX * 0.44
+            body_y = SECRET_ICON_PX - body_h - SECRET_ICON_PX * 0.08
+            painter.drawArc(QRectF((SECRET_ICON_PX - arc_w) / 2.0,
+                                   body_y - arc_h * 0.68, arc_w, arc_h),
+                            0, 180 * 16)
+            painter.setBrush(QBrush(color))
+            painter.drawRoundedRect(
+                QRectF((SECRET_ICON_PX - body_w) / 2.0, body_y, body_w, body_h),
+                SECRET_ICON_PX * 0.12, SECRET_ICON_PX * 0.12)
+        finally:
+            painter.end()
+        icon = QIcon(pixmap)
+    except Exception:  # noqa: BLE001 — a mark is cosmetic: it may never break the panel
+        icon = QIcon()
+    _secret_icon_cache[tone] = icon
+    return icon
 
 
 def command_width_from_config(cfg) -> int:
@@ -260,11 +374,16 @@ def parse_history_text(text):
 
 
 def normalize_entry(entry):
-    """One stored record → `{"cmd", "last", "count"}` or None (an invalid record is dropped).
+    """One stored record → `{"cmd", "last", "count", "secret"}` or None (an invalid record is dropped).
 
     The identity is the command text after `strip()` — the ONE normalization of this module. A
     record without a command, with a non-string command or with a command over the cap is
     unusable and is dropped one by one, like a broken `commands.json` entry.
+
+    v1.6.4 (ROADMAP task 2): `secret` is the additive MARK of an entry that looks like it
+    carries a secret (`SECRET_FIELD`). A record without it — every entry of an older file, and
+    every imported one — is simply unmarked; a foreign/truthy value is read as a real bool, so a
+    hand-edited `"secret": "yes"` can never crash the panel.
     """
     if not isinstance(entry, dict):
         return None
@@ -282,7 +401,8 @@ def normalize_entry(entry):
         count = int(entry.get("count") or 1)
     except (TypeError, ValueError):
         count = 1
-    return {"cmd": cmd, "last": max(0, last), "count": max(1, count)}
+    return {"cmd": cmd, "last": max(0, last), "count": max(1, count),
+            SECRET_FIELD: bool(entry.get(SECRET_FIELD))}
 
 
 def sort_entries(entries):
@@ -301,6 +421,12 @@ def merge_entries(base, incoming):
     The ONE merge rule of the module, used by both write paths: the same command keeps the
     latest timestamp and the SUM of its repeats. The result is capped (FIFO eviction by the
     least recently used).
+
+    v1.6.4 (ROADMAP task 2): **the secret mark SURVIVES the fold** — a pair keeps `secret`
+    when EITHER side carries it (`True` wins over an unmarked twin). The fold is exactly where
+    a flag dies: the timestamp and the count are merged arithmetically, so a name that is
+    merely copied from the first record would silently unmark a command that the application
+    really sent with a secret in it.
     """
     out, by_cmd = [], {}
     for entry in list(base or []) + list(incoming or []):
@@ -315,6 +441,7 @@ def merge_entries(base, incoming):
         else:
             current["last"] = max(int(current["last"]), norm["last"])
             current["count"] = int(current["count"]) + norm["count"]
+            current[SECRET_FIELD] = bool(current.get(SECRET_FIELD)) or norm[SECRET_FIELD]
     return sort_entries(out)
 
 
@@ -495,10 +622,19 @@ class CommandHistoryStore:
     # ── writing ─────────────────────────────────────────────────────────────
 
     def _write(self, entries) -> bool:
-        """Write the whole document; False on an I/O error (the file is left untouched)."""
-        doc = {"format": FORMAT_VERSION,
-               "commands": [{"cmd": e["cmd"], "last": int(e["last"]), "count": int(e["count"])}
-                            for e in entries]}
+        """Write the whole document; False on an I/O error (the file is left untouched).
+
+        v1.6.4 (ROADMAP task 2): the `secret` mark is written ONLY on a marked entry, so the
+        document of an ordinary history stays byte-identical to the one the earlier releases
+        wrote (`{"cmd", "last", "count"}`); the mark is additive in exactly one direction.
+        """
+        commands = []
+        for e in entries:
+            record = {"cmd": e["cmd"], "last": int(e["last"]), "count": int(e["count"])}
+            if e.get(SECRET_FIELD):
+                record[SECRET_FIELD] = True
+            commands.append(record)
+        doc = {"format": FORMAT_VERSION, "commands": commands}
         return _atomic_write_json(self.path, doc)
 
     def merge(self, entries) -> list:
@@ -521,11 +657,17 @@ class CommandHistoryStore:
         The text is normalized like every entry (strip, the `MAX_CMD_CHARS` cap) and the
         timestamp is `now` by default. An empty or over-long command is ignored: it is not an
         entry of a command history.
+
+        v1.6.4 (ROADMAP task 2): this is the SINGLE write path of what the application sends,
+        so it is where the DECLARED pattern list is evaluated ONCE (`looks_like_secret()`): the
+        entry is written AND marked, never dropped — the store keeps the one fact it exists for
+        (what really went on the wire) and tells the user the row is sensitive.
         """
         ts = int(time.time() if timestamp is None else timestamp)
         norm = normalize_entry({"cmd": cmd, "last": ts, "count": 1})
         if norm is None:
             return self._read_entries()
+        norm[SECRET_FIELD] = looks_like_secret(norm["cmd"])
         return self.merge([norm])
 
     def remove_duplicates(self):
@@ -654,11 +796,18 @@ class CommandHistoryPanel(QWidget):
     # ── the theme / the language ────────────────────────────────────────────
 
     def refresh_theme(self):
-        """Re-apply the theme: the info label's colour is a VALUE (the §4.6 rule)."""
+        """Re-apply the theme: the info label's colour is a VALUE (the §4.6 rule).
+
+        v1.6.4 (ROADMAP task 2): the secret marker's pixmap is a value too — the cache is
+        dropped here and the rows are rebuilt, so the padlock of a marked row is repainted in
+        the new theme's warning tone instead of keeping the old one.
+        """
         try:
             self.info_label.setStyleSheet(f"color: {theme.TEXT_MUTED};")
         except RuntimeError:
             pass  # Qt teardown — the label is already destroyed
+        _secret_icon_cache.clear()
+        self._rebuild_tree()
 
     def retranslate(self):
         """Re-text the panel in the current language. Never raises (the dead-C++ discipline)."""
@@ -764,11 +913,26 @@ class CommandHistoryPanel(QWidget):
                                   self._sort_order == Qt.SortOrder.DescendingOrder)
         except RuntimeError:
             return  # Qt teardown
+        blank_icon = None
+        secret_icon = None
         for entry in rows:
             item = QTreeWidgetItem([entry["cmd"],
                                     format_last_used(entry["last"], t),
                                     str(entry["count"])])
-            item.setToolTip(self.COL_COMMAND, entry["cmd"])   # the table elides, the tooltip is full
+            # The table elides, the tooltip is full. v1.6.4 (ROADMAP task 2): the MARKED entry
+            # carries its own sentence under the full command — the tooltip is the mark's
+            # SECOND channel, so the meaning never lives in the picture alone.
+            if entry.get(SECRET_FIELD):
+                secret_icon = secret_icon if secret_icon is not None else secret_row_icon()
+                item.setIcon(self.COL_COMMAND, secret_icon)
+                item.setToolTip(self.COL_COMMAND,
+                                f"{entry['cmd']}\n{t('terminal.history.secret_tooltip')}")
+            else:
+                # The SAME transparent slot on an unmarked row: the marker column exists on
+                # every row, so a mark never shifts the command text of the rows around it.
+                blank_icon = blank_icon if blank_icon is not None else _blank_row_icon()
+                item.setIcon(self.COL_COMMAND, blank_icon)
+                item.setToolTip(self.COL_COMMAND, entry["cmd"])
             item.setData(self.COL_COMMAND, Qt.ItemDataRole.UserRole, entry["cmd"])
             try:
                 self.tree.addTopLevelItem(item)

@@ -170,6 +170,16 @@ try:
 except ImportError:
     from modules.terminal_screen import PALETTES, resolve_color
 
+# v1.6.4 (ROADMAP task 5): the pinned scrollback — the canvas reads the MODE of its screen
+# (`terminal_scroll`) to decide whether new output may move the view and what "the user wants
+# the live line again" means. The resolver is the screen module's (ONE declaration, one default).
+try:
+    from .terminal_screen import (SCROLL_MODE_DEFAULT as _SCROLL_MODE_DEFAULT,
+                                  SCROLL_MODE_PIN as _SCROLL_MODE_PIN)
+except ImportError:
+    from modules.terminal_screen import (SCROLL_MODE_DEFAULT as _SCROLL_MODE_DEFAULT,
+                                         SCROLL_MODE_PIN as _SCROLL_MODE_PIN)
+
 # v1.2.3 (ROADMAP v1.2.3): multi-input — the broadcast hub of the input to all open sessions.
 # There is no import cycle: multi_input knows nothing about terminal_widget.
 try:
@@ -542,6 +552,14 @@ def resolve_cursor_style(style) -> str:
     return CURSOR_STYLE_DEFAULT
 
 
+# ── v1.6.4 (ROADMAP task 3): Ctrl+wheel = the FONT ZOOM ─────────────────────
+# The DECLARED point-size range of the canvas font. `terminal_font_size` validates a stored
+# value against exactly this range (`modules/ssh_terminal.py: load_terminal_settings()`), so a
+# zoom can never step outside what the settings hub can show and what a restart can restore.
+FONT_SIZE_MIN = 6
+FONT_SIZE_MAX = 72
+
+
 def cursor_shape_rect(style, x, y, width, height):
     """The rectangle the cursor is painted in, for a cell of `width × height` at `(x, y)`.
 
@@ -642,6 +660,12 @@ class TerminalWidget(QWidget):
         # recorder here (TerminalSessionPage.record_sent_command) and send_macro() calls it
         # after a successful send — the canvas itself knows no store and no i18n.
         self.command_sent_hook = None
+        # v1.6.4 (ROADMAP task 3): the FONT ZOOM hook — Ctrl+wheel steps the point size and the
+        # owning page persists it (ONE debounced timer, the §4.2 `CmdEditTextNote` pattern)
+        # and reports the new size in the session's status line. The canvas owns the GESTURE
+        # and the metrics; the config key and the words belong to the page (the
+        # `command_sent_hook` split: the canvas stays free of stores and of i18n).
+        self.font_zoom_hook = None
 
         self._bg_color = QColor(self._palette["default_bg"])
         self._cursor_color = QColor(self.CURSOR_COLOR)
@@ -683,6 +707,9 @@ class TerminalWidget(QWidget):
         self._find_matches = []
         self._find_current = -1
         self._find_saved_position = None
+        # v1.6.4 (ROADMAP task 5): the CONTENT offset captured beside the position — what Esc
+        # restores under `terminal_scroll = "pin"` (the position drifts there).
+        self._find_saved_top = None
 
         # v1.3.3.4 (ROADMAP task 3): the transcript — a tee of the session output into
         # a local file. The state lives here (the menu that toggles it is this widget's
@@ -764,6 +791,42 @@ class TerminalWidget(QWidget):
         self._update_metrics()
         self._format_cache.clear()
         self.update()
+
+    # ── v1.6.4 (ROADMAP task 3): Ctrl+wheel = the font zoom ─────────────────
+
+    def font_size(self) -> int:
+        """The LIVE point size of the canvas font (the zoom's read seam)."""
+        try:
+            return int(self._font.pointSize())
+        except (TypeError, ValueError):   # a broken QFont (never in practice) → the default
+            return 10
+
+    def zoom_font(self, step: int) -> int:
+        """Step the font by `step` points, clamped to `FONT_SIZE_MIN..FONT_SIZE_MAX`.
+
+        ONE `set_font()` call does the whole switch: the metrics (`_cell_w/_cell_h/_ascent`),
+        the format cache and — through the page's hook — the PTY grid follow it in one step,
+        so the grid of the emulator and the grid of the canvas can never disagree about the
+        size of a cell. A step at either END of the range is a no-op that still answers the
+        size in force; the hook is what persists the value and writes the status line.
+
+        Returns the point size in force after the call. Never raises.
+        """
+        try:
+            delta = int(step)
+        except (TypeError, ValueError):
+            return self.font_size()
+        current = self.font_size()
+        size = max(FONT_SIZE_MIN, min(FONT_SIZE_MAX, current + delta))
+        if size != current:
+            self.set_font(size=size)
+        hook = getattr(self, "font_zoom_hook", None)
+        if callable(hook):
+            try:
+                hook(size)
+            except Exception:   # noqa: BLE001 — a zoom must never break on a page teardown
+                pass
+        return size
 
     # ── v1.6.2 (ROADMAP task 4): the cursor shape ───────────────────────────
     def cursor_style(self) -> str:
@@ -1264,7 +1327,15 @@ class TerminalWidget(QWidget):
         (hub.broadcast: the source is skipped, the dead threads are filtered out).
         From here pass both the printable keys and the service ones
         (Return/Backspace/Esc/the arrows), and the Ctrl+V bracketed paste — in the multi
-        mode everything typed is duplicated."""
+        mode everything typed is duplicated.
+
+        v1.6.4 (ROADMAP task 5): typing (and pasting) is USER INTENT — under
+        `terminal_scroll = "pin"` the view returns to the live line here, because the user is
+        asking the shell for an answer. Output never does this; that is the whole point of the
+        pin. The release happens before the transport guard, so it is the user's keystroke that
+        is honoured and not "a keystroke that happened to reach a live channel".
+        """
+        self._release_pin()
         if not data or self.terminal_thread is None:
             return
         try:
@@ -1353,31 +1424,77 @@ class TerminalWidget(QWidget):
             return True
         return False
 
+    def _release_pin(self) -> bool:
+        """v1.6.4 (ROADMAP task 5): the USER-INTENT half of the pinned scrollback.
+
+        Under `terminal_scroll = "pin"` the view keeps the lines the user is reading while
+        output arrives; typing (or pasting) means "I want to see what the shell answers", so
+        the canvas returns to the live line HERE — through the screen's ONE bulk release. The
+        wheel needs no call: scrolling DOWN to the bottom reaches the live line by itself and
+        the pin has nothing left to hold.
+
+        An active selection is dropped with the move — exactly the v1.1.2RC3 (N7) reasoning
+        that the page's output guard used to apply: the (row, col) coordinates were pinned on
+        the HISTORICAL grid, and Ctrl+C after the return would copy other cells. False — the
+        mode is off or the view is already live (the "live" mode pays one attribute read).
+        """
+        if getattr(self.tscreen, "scroll_mode", _SCROLL_MODE_DEFAULT) != _SCROLL_MODE_PIN:
+            return False
+        release = getattr(self.tscreen, "scroll_to_live", None)
+        if not callable(release):
+            return False
+        try:
+            moved = bool(release())
+        except Exception:   # noqa: BLE001 — a teardown race: the input path must not break
+            return False
+        if moved:
+            self.clear_selection()
+            self.update()
+        return moved
+
+    def pinned(self) -> bool:
+        """Is this canvas reading the scrollback while the pin holds the view? (the test seam)"""
+        return bool(getattr(self.tscreen, "pinned", lambda: False)())
+
     def wheelEvent(self, event):
         """The mouse wheel: v1.2.13 — the TUI mouse tracking first, then the scrollback.
 
-        The v1.6.3 routing (ROADMAP tasks 2 and 3):
-        0. `Shift` held — the LOCAL override: the application's tracking is BYPASSED and
+        The v1.6.4 routing (ROADMAP tasks 3 and 5) — read top to bottom, the FIRST match wins:
+        0. `Ctrl` + the wheel (without `Alt` — the AltGr guard of the keyboard path) is the
+           FONT ZOOM (task 3): ±1 pt through `zoom_font()`, clamped to the range the
+           `terminal_font_size` key validates. The branch sits BEFORE every routing decision
+           below on purpose: the gesture is free (nothing in the canvas ever read a modifier),
+           and it must work in a tracking TUI and with `terminal_wheel = "off"` as well.
+        1. `Shift` held — the LOCAL override: the application's tracking is BYPASSED and
            the event takes the local path below, so a TUI that left DECSET 1000/1002/1003
            and 1006 behind (a crash, a kill — nothing clears them) cannot hijack the wheel:
            `Shift` + the wheel is the local scrollback and nothing else.
-        1. `tscreen.mouse_tracking_mode()` — the application waits for mouse reports → the
+        2. `tscreen.mouse_tracking_mode()` — the application waits for mouse reports → the
            wheel goes to the PTY through `_send_mouse()`: SGR (\\x1b[<64;{col};{row}M with
            1006, up=64/down=65) or X10 (\\x1b[M + [96|97, 32+col, 32+row]). The coordinates
            are the 1-based cell, clamped to the grid and (X10) to the protocol limit of 223.
            The passthrough takes precedence over wheel_mode="off".
-        2. in_alt_screen() WITHOUT tracking → a no-op (v1.2.12: a TUI owns the grid,
+        3. in_alt_screen() WITHOUT tracking → a no-op (v1.2.12: a TUI owns the grid,
            the history does not scroll; the event is not consumed — the ancestor
            QScrollAreas are not in the containers, the propagation is harmless).
-        3. Otherwise — the current v1.0RC3 behavior: the history scrollback (up → prev_page,
+        4. Otherwise — the current v1.0RC3 behavior: the history scrollback (up → prev_page,
            down → next_page; at the edges pyte is a no-op), wheel_mode="off" →
            event.ignore(). The scrollback under "off" stays on Ctrl+Shift+PageUp/PageDown.
+           Under `terminal_scroll = "pin"` this is also the way BACK to the live line: the
+           wheel down reaches the bottom and the pin has nothing left to hold (task 5).
 
         The modes are read on EVERY event (a TUI toggles them during a session —
         htop enables 1003+1006 at start, disables them on exit; caching is not allowed).
-        The auto-return to the live line on new output is built into pyte (before_event);
-        the window's _on_output calls widget.update(), so the snapshot is visible immediately.
+        The auto-return to the live line on new output is built into pyte (before_event) — in
+        the "pin" mode it is the session's own bulk return-and-restore instead; the window's
+        `_on_output` calls widget.update(), so the snapshot is visible immediately.
         """
+        mods = event.modifiers()
+        if (mods & Qt.KeyboardModifier.ControlModifier) \
+                and not (mods & Qt.KeyboardModifier.AltModifier):
+            self.zoom_font(1 if event.angleDelta().y() > 0 else -1)
+            event.accept()
+            return
         mode, sgr = self.tscreen.mouse_tracking_mode()   # v1.6.3: read on every event
         local = self._mouse_local_override(event)
         if mode and not local:
@@ -1556,13 +1673,20 @@ class TerminalWidget(QWidget):
         leaves the user somewhere else in the scrollback. A repeat call keeps the
         ALREADY CAPTURED position (the second Ctrl+Shift+F must not overwrite the
         origin with wherever the first search navigated to).
+
+        v1.6.4 (ROADMAP task 5): the origin is captured TWICE — as pyte's position and as the
+        CONTENT offset of the top visible line. Under `terminal_scroll = "pin"` the position
+        drifts while output arrives (the pin holds the lines, the distance to the live end
+        grows), so the offset is what Esc restores with; in the "live" mode the position is.
         """
         bar = self._ensure_find_bar()
         if self._find_saved_position is None:
             try:
                 self._find_saved_position = self.tscreen.scroll_info()[0]
+                self._find_saved_top = self.tscreen.history_top_len()
             except Exception:  # noqa: BLE001 — a screen under teardown: the restore is skipped
                 self._find_saved_position = None
+                self._find_saved_top = None
         bar.place(self.width(), self.height())
         bar.show()
         bar.raise_()
@@ -1578,6 +1702,10 @@ class TerminalWidget(QWidget):
         (the paging scrollback can only land on a page border — "the state before the
         search", not a pixel-exact restore). Never raises: a dead C++ object or a
         screen under teardown must not break the close path.
+
+        v1.6.4 (ROADMAP task 5): under the pin the captured CONTENT offset is restored instead
+        (`scroll_to_offset()`), so Esc lands on the same LINES it captured — the position
+        arithmetic would land somewhere else after the output the pin let through.
         """
         bar = self._find_bar
         if bar is not None:
@@ -1593,10 +1721,15 @@ class TerminalWidget(QWidget):
             bar.set_query("")   # emits query_changed → the handler already cleared the state
         if restore and self._find_saved_position is not None:
             try:
-                self.tscreen.scroll_to_position(self._find_saved_position)
+                if getattr(self.tscreen, "scroll_mode", _SCROLL_MODE_DEFAULT) == _SCROLL_MODE_PIN \
+                        and self._find_saved_top is not None:
+                    self.tscreen.scroll_to_offset(self._find_saved_top)
+                else:
+                    self.tscreen.scroll_to_position(self._find_saved_position)
             except Exception:  # noqa: BLE001 — teardown race: the viewport restore is cosmetic
                 pass
         self._find_saved_position = None
+        self._find_saved_top = None
         self.update()
         try:
             self.setFocus()

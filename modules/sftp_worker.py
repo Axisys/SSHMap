@@ -314,6 +314,10 @@ class SftpWorker(QThread):
 
     def __init__(self, sftp_client, parent=None):
         super().__init__(parent)
+        # v1.6.4 (ROADMAP task 1): the managed transfer worker names itself — Qt's abort on a
+        # thread destroyed while running names an UNNAMED one as '', and `register_orphan_sftp_worker`
+        # above exists to keep THIS class alive until finished(). No behaviour.
+        self.setObjectName("SftpWorker")
         self._sftp = sftp_client
         self._queue: "queue.Queue[_SftpTask]" = queue.Queue()
         self._stop_event = threading.Event()

@@ -160,6 +160,10 @@ class PluginCommandRunner(QThread):
                  node_facts: Optional[Dict[str, dict]] = None,
                  parent=None):
         super().__init__(parent)
+        # v1.6.4 (ROADMAP task 1): the managed plugin worker names itself — the manager's
+        # orphan registry keeps it alive past its wait budget, so this is one of the threads
+        # Qt's "Destroyed while running" abort would otherwise report as ''. No behaviour.
+        self.setObjectName("PluginCommandRunner")
         self._nodes: List[PluginNode] = [node_record(n) for n in (nodes or ())]
         self._command = str(command or "")
         self.plugin_id = str(plugin_id or "")
