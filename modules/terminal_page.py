@@ -322,7 +322,8 @@ class TerminalSessionPage(QWidget):
         # runs/cursor/wide glyphs — see terminal_widget.py. v1.1.2RC3 (AUDIT U3):
         # the wheel mode from the config (terminal_wheel).
         self.widget = TerminalWidget(self.tscreen, self.terminal_thread,
-                                     wheel_mode=term_cfg["wheel"])
+                                     wheel_mode=term_cfg["wheel"],
+                                     cursor_style=term_cfg["cursor"])
         # v1.3.3.4 (ROADMAP task 3): the transcript's suggested file name carries the
         # host — the page owns the server data, the canvas owns the menu that asks.
         self.widget.set_transcript_host(getattr(server_data, "host", "") or "")

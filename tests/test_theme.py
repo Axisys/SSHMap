@@ -436,7 +436,7 @@ check("§6 the swatch carries its colour in the QSS (the user sees the accent be
 check("§6 collect() carries the theme as ONE nested key (the appearance choice)",
       dlg.collect()["theme"] == {"mode": "dark", "accent": "#38bdf8", "motion": True,
                                  "density": "normal"}
-      and len(dlg.collect()) == 22,
+      and len(dlg.collect()) == 23,
       str(sorted(dlg.collect())))
 
 # The live application: the tab emits a Theme instance the moment a control moves.

@@ -181,6 +181,9 @@ win.close()
 print("== vim ==")
 
 win = make_window("vim")
+# v1.6.2: the pixel checks of this section count the ink of the whole cursor CELL, so the
+# historical BLOCK is requested explicitly (the application's default shape is the thin bar).
+win.widget.set_cursor_style("block")
 # The shell prompt BEFORE vim — the main screen that must be saved and restored.
 emit_out(win, b"\x1b[1;32mroot@master\x1b[0m:\x1b[1;34m~\x1b[0m$ vim notes.txt\r\n",
          until_substr="vim notes.txt")
@@ -352,10 +355,11 @@ from modules.ssh_terminal import load_terminal_settings
 # v1.2.2: + mode (the display mode: "windows" the default | "tabs" — the dock on the map).
 clear_cfg()
 s = load_terminal_settings()
-check("no config → the defaults (the palette default, pt 10, the history 1000 — the scrollback is on, close_behavior=close, max_open=4, wheel=scrollback, mode=windows)",
+check("no config → the defaults (the palette default, pt 10, the history 1000 — the scrollback is on, close_behavior=close, max_open=4, wheel=scrollback, mode=windows, cursor=bar)",
       s == {"palette": None, "font_family": "", "font_size": None,
             "history_lines": TS.DEFAULT_HISTORY_LINES, "close_behavior": "close",
-            "max_open": 4, "wheel": "scrollback", "mode": "windows"}, str(s))
+            "max_open": 4, "wheel": "scrollback", "mode": "windows",
+            "cursor": "bar"}, str(s))
 
 write_cfg({"terminal_palette": " nord ", "terminal_font": " Consolas ",
               "terminal_font_size": 12, "terminal_history_lines": 50})
@@ -363,7 +367,7 @@ s = load_terminal_settings()
 check("the valid values are read (the trimming of the spaces)",
       s == {"palette": "nord", "font_family": "Consolas", "font_size": 12,
             "history_lines": 50, "close_behavior": "close", "max_open": 4,
-            "wheel": "scrollback", "mode": "windows"}, str(s))
+            "wheel": "scrollback", "mode": "windows", "cursor": "bar"}, str(s))
 
 write_cfg({"terminal_palette": 42, "terminal_font": 7,
               "terminal_font_size": "big", "terminal_history_lines": -5})
@@ -371,7 +375,8 @@ s = load_terminal_settings()
 check("the broken values (the foreign types / out of the range) → the defaults",
       s == {"palette": None, "font_family": "", "font_size": None,
             "history_lines": TS.DEFAULT_HISTORY_LINES, "close_behavior": "close",
-            "max_open": 4, "wheel": "scrollback", "mode": "windows"}, str(s))
+            "max_open": 4, "wheel": "scrollback", "mode": "windows",
+            "cursor": "bar"}, str(s))
 
 # v1.1.1: terminal_max_open — the limit of own terminals (default 4, the range 1..32)
 write_cfg({"terminal_max_open": 8})

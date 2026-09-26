@@ -45,7 +45,7 @@ import os
 import re
 import time
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtWidgets import (
     QApplication, QFileDialog, QLabel, QLineEdit, QMenu, QMessageBox, QTreeWidget,
     QTreeWidgetItem, QVBoxLayout, QWidget,
@@ -118,6 +118,84 @@ FORMAT_VERSION = 1
 #: prefix is expanded ON THE WORKER THREAD (`SftpWorker._expand_home`), because the SFTP
 #: protocol has no tilde expansion of its own.
 SERVER_HISTORY_PATH = "~/.bash_history"
+
+
+# ── v1.6.2 (ROADMAP task 3): the Command column is SIZED, and the size is KEPT ─────
+# The panel never touched a column width, so all three sections sat at Qt's own default
+# (measured: `QHeaderView.defaultSectionSize()` = 100 px) and a 636 px command was elided to
+# a few characters. TWO halves, ONE rule: a DECLARED default and the width the user dragged,
+# persisted as ONE int in `~/.sshmap/config.json` and re-applied BEFORE the first `reload()`.
+# The name follows the `ui_terminal_split_ratio` precedent (a `ui_*` UI state written by its
+# OWNER, not a settings-hub row: `collect()` stays at its own key count).
+
+#: The width the panel opens with. 400 = 4 × Qt's default section size — the maintainer's ask,
+#: and the `modules/sftp_tab.py` precedent (`self.tree.setColumnWidth(0, 320)`) applied to the
+#: table whose FIRST column is a whole command line. Not a config default: a DECLARED constant,
+#: so a fresh profile and a corrupt value land on the same number.
+HISTORY_COL_COMMAND_WIDTH_DEFAULT = 400
+
+#: The accepted range of a STORED width (a wider ceiling than any screen: the value is a user's
+#: drag, and a foreign number must not squeeze the column to nothing).
+HISTORY_COL_COMMAND_WIDTH_MIN = 60
+HISTORY_COL_COMMAND_WIDTH_MAX = 4000
+
+#: The `~/.sshmap/config.json` key of the dragged width (an int; absent = the default).
+HISTORY_COL_COMMAND_WIDTH_KEY = "ui_terminal_history_cmd_width"
+
+#: The debounce of the write: `sectionResized` fires per PIXEL of a drag (the
+#: `CmdEditTextNote` debounce pattern of AGENTS.md §4.2 — ONE timer, one write per gesture).
+COMMAND_WIDTH_SAVE_DEBOUNCE_MS = 600
+
+
+def command_width_from_config(cfg) -> int:
+    """The STORED Command-column width of a config dict, or the DECLARED default.
+
+    Pure. A missing key, a foreign type (a string, a bool, a float), a `None` and an
+    out-of-range number all answer `HISTORY_COL_COMMAND_WIDTH_DEFAULT`: a broken config must
+    never squeeze the column to an unusable width — the `load_terminal_settings()` rule
+    applied to one number. Never raises.
+    """
+    try:
+        value = (cfg or {}).get(HISTORY_COL_COMMAND_WIDTH_KEY)
+    except Exception:  # noqa: BLE001 — a foreign mapping must not break the panel
+        return HISTORY_COL_COMMAND_WIDTH_DEFAULT
+    if isinstance(value, bool) or not isinstance(value, int):
+        return HISTORY_COL_COMMAND_WIDTH_DEFAULT
+    if not (HISTORY_COL_COMMAND_WIDTH_MIN <= value <= HISTORY_COL_COMMAND_WIDTH_MAX):
+        return HISTORY_COL_COMMAND_WIDTH_DEFAULT
+    return value
+
+
+def stored_command_width() -> int:
+    """The width from `~/.sshmap/config.json` (`command_width_from_config` on the real store).
+
+    The read is lazy and swallowed: a missing / unreadable config is the default, never an
+    exception (the panel is one tab of a session, not a place to fail).
+    """
+    try:
+        from i18n import load_config
+    except Exception:  # noqa: BLE001 — a build without i18n keeps the declared default
+        return HISTORY_COL_COMMAND_WIDTH_DEFAULT
+    try:
+        return command_width_from_config(load_config())
+    except Exception:  # noqa: BLE001
+        return HISTORY_COL_COMMAND_WIDTH_DEFAULT
+
+
+def save_command_width(width) -> bool:
+    """Persist ONE int through the merge-write every other config key uses. Never raises.
+
+    A read-only HOME / a broken store answers False — the column keeps the width for this
+    session either way, and a UI preference is not worth an error dialog.
+    """
+    try:
+        from i18n import save_config
+    except Exception:  # noqa: BLE001
+        return False
+    try:
+        return bool(save_config({HISTORY_COL_COMMAND_WIDTH_KEY: int(width)}))
+    except Exception:  # noqa: BLE001
+        return False
 
 
 # ── the pure parser ─────────────────────────────────────────────────────────
@@ -553,6 +631,19 @@ class CommandHistoryPanel(QWidget):
         header.sectionClicked.connect(self.on_section_clicked)
         layout.addWidget(self.tree, 1)
 
+        # v1.6.2 (ROADMAP task 3): the Command column's width. The ORDER is the deliverable:
+        # the stored (or declared) width is applied BEFORE `reload()` at the end of __init__,
+        # so the first paint already has it, and the construction call goes through
+        # `set_command_width()`, whose guard stops Qt's own `sectionResized` from being read
+        # as a DRAG — without it every new panel would write the default over the user's value.
+        self._command_width_guard = False
+        self._width_timer = QTimer(self)
+        self._width_timer.setSingleShot(True)
+        self._width_timer.setInterval(COMMAND_WIDTH_SAVE_DEBOUNCE_MS)
+        self._width_timer.timeout.connect(self._save_command_width)
+        header.sectionResized.connect(self._on_section_resized)
+        self.set_command_width(stored_command_width())
+
         self.info_label = QLabel("")
         self.info_label.setWordWrap(True)
         layout.addWidget(self.info_label)
@@ -606,6 +697,56 @@ class CommandHistoryPanel(QWidget):
     def set_session(self, session):
         """The owning session (the terminal page)."""
         self._session = session
+
+    # ── v1.6.2 (ROADMAP task 3): the Command column width ───────────────────
+
+    def command_width(self) -> int:
+        """The LIVE width of the Command section (the topical test's read seam)."""
+        try:
+            return int(self.tree.columnWidth(self.COL_COMMAND))
+        except RuntimeError:
+            return HISTORY_COL_COMMAND_WIDTH_DEFAULT   # Qt teardown
+
+    def set_command_width(self, width, persist: bool = False) -> int:
+        """Apply a width to the Command section WITHOUT reading it back as a drag.
+
+        The construction call (and any other programmatic apply) goes through here: the
+        guard makes the `sectionResized` Qt emits for a programmatic resize a no-op, so a
+        fresh panel can never write the default over the width the user stored. An
+        unusable value (`None`, a string, out of range) is the DECLARED default. `persist`
+        is for a caller that really wants the value written (the panel's own timer).
+        """
+        try:
+            width = int(width)
+        except (TypeError, ValueError):
+            width = HISTORY_COL_COMMAND_WIDTH_DEFAULT
+        if not (HISTORY_COL_COMMAND_WIDTH_MIN <= width <= HISTORY_COL_COMMAND_WIDTH_MAX):
+            width = HISTORY_COL_COMMAND_WIDTH_DEFAULT
+        self._command_width_guard = True
+        try:
+            self.tree.setColumnWidth(self.COL_COMMAND, width)
+        except RuntimeError:
+            return width   # Qt teardown — the value still answers for the caller
+        finally:
+            self._command_width_guard = False
+        if persist:
+            save_command_width(width)
+        return width
+
+    def _on_section_resized(self, index, old, new):
+        """A REAL drag of the Command section → ONE debounced write (the signal is per pixel)."""
+        if self._command_width_guard or int(index) != self.COL_COMMAND:
+            return
+        if int(old) == int(new):
+            return
+        try:
+            self._width_timer.start()
+        except RuntimeError:
+            pass   # Qt teardown
+
+    def _save_command_width(self) -> bool:
+        """The debounce target: write the live width into `~/.sshmap/config.json`."""
+        return save_command_width(self.command_width())
 
     def reload(self):
         """Re-read the store and rebuild the tree (show / record / import / a language switch)."""

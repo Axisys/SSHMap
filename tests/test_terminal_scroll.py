@@ -454,7 +454,9 @@ def pixel(img, x, y):
 
 scr3 = TerminalScreen(columns=20, lines=5)
 scr3.feed(b"X")   # the cursor — on the empty cell (0,1)
-wb = TerminalWidget(scr3, FakeThread())
+# v1.6.2: this section asserts the PHASE render of the historical BLOCK (the whole cell in
+# CURSOR_COLOR), so the shape is requested explicitly — the shipped default is the thin bar.
+wb = TerminalWidget(scr3, FakeThread(), cursor_style="block")
 cw, chh = wb.cell_size
 wb.resize(cw * 20, chh * 5)
 

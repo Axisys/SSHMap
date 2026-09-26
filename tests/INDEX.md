@@ -194,6 +194,7 @@ of the file itself.
 | `test_terminal_selection_menu.py` | — | v1.2.7 — Terminal: double/triple-click selection + context menu (ROADMAP v1.2.7). |
 | `test_terminal_split.py` | — | v1.3.3.5 — Terminal split: a second pane under the sessions (ROADMAP v1.3.3.5). |
 | `test_terminal_tabs.py` | — | v1.2.1 — Multiple SSH sessions as tabs in one terminal window (ROADMAP v1.2.1). |
+| `test_terminal_truth.py` | — | v1.6.2 — the terminal that stops lying: a dead session, the DEC graphics, the column, the cursor. |
 | `test_theme.py` | — | v1.1.5 → v1.4.3 — the central theme `ui/theme.py`: the `Theme` object, LIGHT, the accent hue. |
 | `test_theme_contrast.py` | — | v1.5rc1 — the CONTRAST GATE: the LIGHT palette, the two accent roles and the numbers that pin them. |
 | `test_ui_density.py` | — | v1.4.5 — UI density & first run (ROADMAP v1.4.5): the compact sidebar grid, the first-run |

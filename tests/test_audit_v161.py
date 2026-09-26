@@ -622,8 +622,9 @@ check("N22: an empty cpu_model adds no line (the empty-field rule)",
 print("== §11 the release state — v1.6.1 added NO i18n key ==")
 # ════════════════════════════════════════════════════════════════════════════
 
-check("§11 the hardening batch itself added no key (the pin is the SHIPPED one — v1.6's 778)",
-      EXPECTED_I18N_KEYS == 778, str(EXPECTED_I18N_KEYS))
+check("§11 the hardening batch itself added no key (the pin is the SHIPPED one — v1.6's 778"
+      " plus the four of v1.6.2)",
+      EXPECTED_I18N_KEYS == 782, str(EXPECTED_I18N_KEYS))
 check_release_state(ROOT)
 _langs = load_i18n_langs(ROOT)
 check_i18n_parity(_langs)

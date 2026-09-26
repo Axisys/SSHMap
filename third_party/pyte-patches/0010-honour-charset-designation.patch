@@ -1,0 +1,74 @@
+Subject: [sshmap fork 0010] the G0/G1 charset designation is honoured in UTF-8 mode (the VT100 special graphics / ACS)
+
+Provenance: sshmap (v1.6.2, ROADMAP task 2) — the colleagues' `mc` report, reproduced on the vendored
+            fork first: `printf '\x1b(0q\x1b(B'` left the literal `q` in the grid (measured through
+            `TerminalScreen.feed` + `snapshot()`: cell 0 is `'q'`), where xterm paints a horizontal
+            line. The cause is stated twice in `pyte/streams.py` itself: `if self.use_utf8: continue`
+            before the `define_charset` dispatch of `ESC ( x` / `ESC ) x`, and the same guard for
+            SI/SO. The rationale (http://www.cl.cam.ac.uk/~mgk25/unicode.html#term) holds for an
+            ISO-2022 ENCODING switch, which is why upstream skips the whole G0/G1 machinery in UTF-8
+            mode — but the VT100 special graphics designation is not an encoding switch: it asks the
+            terminal to MAP the ASCII letters of a frame onto box-drawing code points, and xterm does
+            exactly that in a UTF-8 locale. The tables are already vendored and complete
+            (`pyte/charsets.py`: `MAPS["0"] = VT100_MAP`, `MAPS["B"] = LAT1_MAP`), and
+            `Screen.draw()` already applies the selected map (`data.translate(...)`) — only the
+            designation never arrived.
+            Refused alternative: mapping the ACS letters inside OUR canvas instead of in the
+            emulator (a second glyph table next to the grid, disagreeing with what `pyte` holds and
+            with the `wcswidth` the cells are laid out by); the vendored fork is the ONE owner of
+            the emulation, so the fix travels the §4.7 road (patch + MANIFEST).
+            Deviation from upstream that this patch accepts and DECLARES: xterm resets the
+            designation on a soft reset and on the alternate-screen give-back, which pyte does not
+            model at all (`define_charset` has no savepoint of its own) — unchanged here, the state
+            stays per screen like every other charset attribute of `Screen`.
+Base:       pyte 0.8.2 (PyPI sdist, sha256 in MANIFEST.md), pyte/streams.py (after patches 0001-0009;
+            patch 0006 was the last one to touch this file).
+Policy:     keep until upstream makes the designation independent of `use_utf8` (it is the same
+            "input is Unicode-only" assumption in 0.8.3.dev); `ESC ( B` / `ESC ( 0` keep their
+            upstream meaning in a non-UTF-8 stream, `select_other_charset` (`ESC % @` / `ESC % G`)
+            and the UTF-8 DECODING of `ByteStream.feed` are untouched.
+Applied:    2026-10-03, sshmap v1.6.2.
+
+diff --git a/pyte/streams.py b/pyte/streams.py
+index c94da87..ea24b66 100644
+--- a/pyte/streams.py
++++ b/pyte/streams.py
+@@ -286,23 +286,27 @@ class Stream:
+                         self.select_other_charset((yield None))
+                     elif char in "()":
+                         code = yield None
+-                        if self.use_utf8:
+-                            continue
+-
+-                        # See http://www.cl.cam.ac.uk/~mgk25/unicode.html#term
+-                        # for the why on the UTF-8 restriction.
++                        # sshmap fork (patch 0010): the G0/G1 designation is HONOURED in UTF-8
++                        # mode too. Upstream skips it here (`if self.use_utf8: continue`) and again
++                        # for SI/SO below, on the UTF-8 rationale of
++                        # http://www.cl.cam.ac.uk/~mgk25/unicode.html#term — but a program that
++                        # draws its frames with the VT100 special graphics (`ESC ( 0`; the tables
++                        # are vendored in pyte/charsets.py) is not asking for an ISO-2022 encoding
++                        # switch: it asks the terminal to MAP the ASCII letters of its frame to
++                        # box-drawing code points, which is exactly what xterm does in a UTF-8
++                        # locale. With the guard in place the cell held the literal letter (`q`),
++                        # so every ACS frame arrived as letters. `ESC ( B` restores the identity map.
+                         listener.define_charset(code, mode=char)
+                     else:
+                         escape_dispatch[char]()
+                     continue    # Don't go to CSI.
+ 
+             if char in basic:
+-                # Ignore shifts in UTF-8 mode. See
+-                # http://www.cl.cam.ac.uk/~mgk25/unicode.html#term for
+-                # the why on UTF-8 restriction.
+-                if (char == ctrl.SI or char == ctrl.SO) and self.use_utf8:
+-                    continue
+-
++                # sshmap fork (patch 0010): SI/SO really select G0/G1 — in UTF-8 mode as well
++                # (see the designation branch above). A bare 0x0E/0x0F can never be part of a
++                # UTF-8 sequence (every continuation byte is >= 0x80), so the shift is
++                # unambiguous, and without it a program that designates its ACS frame on G1
++                # (`ESC ) 0` + SO) still got the letters.
+                 basic_dispatch[char]()
+             elif char == CSI_C1:
+                 # All parameters are unsigned, positive decimal integers, with

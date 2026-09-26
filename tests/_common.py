@@ -259,8 +259,14 @@ def clear_cfg(*extra_paths: str) -> None:
 # in 12 i18n files + the APP_VERSION/requirements pins in 7 release-state sections).
 # The misses of the keys themselves against the code are caught by check_i18n_keys.py.
 # ─────────────────────────────────────────────────────────────────────────────
-EXPECTED_APP_VERSION = "1.6.1"  # the current release (a sentinel: it catches "a bump to the wrong version")
-EXPECTED_I18N_KEYS = 778        # the parity of the TRANSLATION keys (v1.6.1 — "the review batch: the shipped
+EXPECTED_APP_VERSION = "1.6.2"  # the current release (a sentinel: it catches "a bump to the wrong version")
+EXPECTED_I18N_KEYS = 782        # the parity of the TRANSLATION keys (v1.6.2 — "the terminal that stops
+                                # lying: a dead session, the DEC graphics and a forgotten column": the
+                                # dead-session status line REUSES `terminal.session_closed` and the
+                                # column width is a config number, so the only new keys are the four of
+                                # the cursor style (`settings.terminal.cursor` + its three values) —
+                                # 778 + 4.
+                                # (v1.6.1 — "the review batch: the shipped
                                 # facts, the guards and the leftovers": a HARDENING slot, the v1.5rc5 shape —
                                 # it adds, renames and deletes NO key, and not one language file is touched:
                                 # the six no-i18n fallback literals follow `en.json` on the CODE side and the

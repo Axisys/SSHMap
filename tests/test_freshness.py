@@ -727,11 +727,11 @@ print("== §4 the release state ==")
 # ════════════════════════════════════════════════════════════════════════════
 
 check("§4 the version pin is the version this file describes",
-      EXPECTED_APP_VERSION == "1.6.1" and _version.APP_VERSION == "1.6.1",
+      EXPECTED_APP_VERSION == "1.6.2" and _version.APP_VERSION == "1.6.2",
       f"{EXPECTED_APP_VERSION} / {_version.APP_VERSION}")
 check("§4 the i18n pin counts the SHIPPED release (661 + 20 of v1.5.3 + 11 of v1.5.4"
-      " + 14 of v1.5.5 + 2 of v1.5.6 + 29 of v1.5.7)",
-      EXPECTED_I18N_KEYS == 778, str(EXPECTED_I18N_KEYS))
+      " + 14 of v1.5.5 + 2 of v1.5.6 + 29 of v1.5.7 + 4 of v1.6.2)",
+      EXPECTED_I18N_KEYS == 782, str(EXPECTED_I18N_KEYS))
 check("§4 the 20 new keys are present and non-empty in every language",
       all(str(LANGS[c].get(k, "")).strip() for k in NEW_KEYS for c in LANGS)
       and len(NEW_KEYS) == 20,
@@ -757,8 +757,8 @@ from ui.settings_dialog import SettingsDialog  # noqa: E402
 
 _dlg = SettingsDialog(None)
 _keys = _dlg.collect()
-check("§4 the settings hub still collects exactly 22 keys (the cap is a performance key)",
-      len(_keys) == 22 and "theme" in _keys and "info_max_parallel" not in _keys,
+check("§4 the settings hub collects exactly 23 keys (the cap is a performance key)",
+      len(_keys) == 23 and "theme" in _keys and "info_max_parallel" not in _keys,
       str(sorted(_keys)))
 _dlg.close()
 _win._dirty = False

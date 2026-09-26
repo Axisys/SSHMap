@@ -187,9 +187,15 @@ check("the limit 8 → the clear on the overflow (the first entry is evicted)",
 print("== paint (offscreen) ==")
 
 
-def render_widget(screen):
-    """A widget → QPixmap → QImage + the sizes of the cell."""
-    w = TerminalWidget(screen)
+def render_widget(screen, cursor_style=None):
+    """A widget → QPixmap → QImage + the sizes of the cell.
+
+    `cursor_style` (v1.6.2): the cursor SHAPE of the canvas. The application's default is the
+    thin bar now, so the checks that assert the historical BLOCK painting ask for `"block"`
+    explicitly — the shape is an INPUT of the canvas, not an accident of the default.
+    """
+    w = (TerminalWidget(screen) if cursor_style is None
+         else TerminalWidget(screen, cursor_style=cursor_style))
     cw, chh = w.cell_size
     w.resize(cw * 20, chh * 5)
     img = w.grab().toImage()
@@ -274,9 +280,10 @@ _wd, img_d, cw, chh = render_widget(scr_def)
 check("the default text — the ink of the default_fg", ink_count(img_d, cw, chh, 0, 0, D["default_fg"]) >= 5)
 
 # the block cursor via the swap: after "abc" the cursor is at (3,0) — the empty cell is filled
+# (v1.6.2: the BLOCK is requested explicitly — the application's default shape is the thin bar)
 scr_c = TerminalScreen(columns=20, lines=5)
 scr_c.feed(b"abc")
-_wc, img_c, cw, chh = render_widget(scr_c)
+_wc, img_c, cw, chh = render_widget(scr_c, cursor_style="block")
 cur_rgb = hex_rgb(TerminalWidget.CURSOR_COLOR)
 got_cur = pixel(img_c, 3 * cw + cw // 2, chh // 2)
 check("the block cursor: the cell is painted with the cursor color", close_enough(got_cur, cur_rgb, tol=16),
@@ -285,7 +292,7 @@ check("the block cursor: the cell is painted with the cursor color", close_enoug
 # the cursor over a glyph: the cell corner — the cursor color, the glyph is repainted with the background color
 scr_c3 = TerminalScreen(columns=20, lines=5)
 scr_c3.feed(b"a\x1b[1;1H")   # the cursor over 'a'
-_wc3, img_c3, cw, chh = render_widget(scr_c3)
+_wc3, img_c3, cw, chh = render_widget(scr_c3, cursor_style="block")
 corner = pixel(img_c3, 1, 1)
 check("the cursor over the glyph: the corner of the cell — the cursor color", close_enough(corner, cur_rgb, tol=8),
       f"got={corner}")
@@ -295,7 +302,7 @@ check("the cursor over the glyph: the glyph is repainted with the background col
 # cursor.hidden (ESC[?25l) — the block is NOT drawn
 scr_h = TerminalScreen(columns=20, lines=5)
 scr_h.feed(b"\x1b[?25labcd")   # hidden, the cursor at (4,0)
-_wh, img_h, cw, chh = render_widget(scr_h)
+_wh, img_h, cw, chh = render_widget(scr_h, cursor_style="block")
 got_h = pixel(img_h, 4 * cw + cw // 2, chh // 2)
 check("cursor.hidden: the block is NOT in the cell of the cursor", not close_enough(got_h, cur_rgb, tol=16),
       f"got={got_h}")

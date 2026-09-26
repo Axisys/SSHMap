@@ -20,7 +20,10 @@ merge-write); all keys are optional, defaults = current behavior:
                      default 4; v1.3.3.8: the spin is 1..32 — the VALIDATOR's range)
                       + v1.2.2: terminal_mode ("windows" default | "tabs" — the dock on the map)
                       + v1.3.3.8: terminal_wheel ("scrollback" default | "off" — the
-                      mouse wheel; the LAST key that had no UI at all);
+                      mouse wheel; the LAST key that had no UI at all)
+                      + v1.6.2: terminal_cursor_style ("bar" default — the thin blinking
+                      line of Windows Terminal | "block" | "underline"; the first NEW
+                      UI-facing key since terminal_wheel, so collect() goes 22 → 23);
   * Statuses:         status_interval_sec / status_probe_timeout_sec (v1.1; defaults
                      30 s / 3.0 s — v1.0 behavior, services/status_checker.py);
   * Autosave:         autosave_enabled / autosave_interval_sec / backup_count (v0.9.7);
@@ -1046,6 +1049,21 @@ class SettingsDialog(QDialog):
         self._lbl_wheel = QLabel(_t("settings.terminal.wheel"))
         form.addRow(self._lbl_wheel, self.wheel_combo)
 
+        # v1.6.2 (ROADMAP task 4): the cursor SHAPE — the first new UI-facing key since
+        # terminal_wheel. "bar" (the DEFAULT: the thin blinking line of Windows Terminal) |
+        # "block" (the historical full-cell slab) | "underline". The canvas reads the key on
+        # session creation (load_terminal_settings → TerminalWidget(cursor_style=…)) and the
+        # window re-applies it to the OPEN sessions on OK, exactly like the font.
+        self.cursor_combo = QComboBox()
+        self.cursor_combo.addItem(_t("settings.terminal.cursor.bar"), "bar")
+        self.cursor_combo.addItem(_t("settings.terminal.cursor.block"), "block")
+        self.cursor_combo.addItem(_t("settings.terminal.cursor.underline"), "underline")
+        idx = next((i for i in range(self.cursor_combo.count())
+                    if self.cursor_combo.itemData(i) == cfg["cursor"]), 0)
+        self.cursor_combo.setCurrentIndex(idx)
+        self._lbl_cursor = QLabel(_t("settings.terminal.cursor"))
+        form.addRow(self._lbl_cursor, self.cursor_combo)
+
         self._register_form_rows(tab, form)   # v1.5rc4: the searchable rows of this tab
         self.tabs.addTab(tab, _t("settings.tab.terminal"))
 
@@ -1826,6 +1844,9 @@ class SettingsDialog(QDialog):
         carrying the whole appearance choice — and `i18n.save_config` merges at
         the TOP level, so `_on_accept` re-merges the stored object (a mode change
         must not drop the accent of a foreign version).
+        v1.6.2 (ROADMAP task 4): +1 key — terminal_cursor_style ("bar"|"block"|
+        "underline" of the "Terminal" tab; the combo gives fixed ids, so the value
+        is valid by construction). 22 → 23 UI-facing keys.
         """
         return {
             "external_terminal": self.ext_term_combo.currentData() or "auto",
@@ -1837,6 +1858,8 @@ class SettingsDialog(QDialog):
             "terminal_close_behavior": self.close_behavior_combo.currentData() or "close",
             # v1.3.3.8 (ROADMAP task 4): the mouse-wheel mode
             "terminal_wheel": self.wheel_combo.currentData() or "scrollback",
+            # v1.6.2 (ROADMAP task 4): the cursor shape — the 23rd UI-facing key
+            "terminal_cursor_style": self.cursor_combo.currentData() or "bar",
             # v1.4.3 (ROADMAP task 6): the appearance — the mode + the accent hue,
             # stored as the colour the user actually picked (the hue is derived
             # back). v1.5rc1: +`motion` — the "Reduce motion" switch of the same
@@ -1988,6 +2011,18 @@ class SettingsDialog(QDialog):
             }.get(wid)
             if key:
                 self.wheel_combo.setItemText(i, _t(key))
+
+        # v1.6.2 (ROADMAP task 4): the cursor-shape combo
+        self._lbl_cursor.setText(_t("settings.terminal.cursor"))
+        for i in range(self.cursor_combo.count()):
+            sid = self.cursor_combo.itemData(i)
+            key = {
+                "bar": "settings.terminal.cursor.bar",
+                "block": "settings.terminal.cursor.block",
+                "underline": "settings.terminal.cursor.underline",
+            }.get(sid)
+            if key:
+                self.cursor_combo.setItemText(i, _t(key))
 
         self._lbl_status_interval.setText(_t("settings.statuses.interval"))
         self._lbl_probe_timeout.setText(_t("settings.statuses.timeout"))

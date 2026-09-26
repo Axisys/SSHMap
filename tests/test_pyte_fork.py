@@ -11,8 +11,8 @@ unchanged; this file adds the PROVENANCE CHECKS on top of them:
 
   * the sha256 of every file of third_party/pyte/ == the tables of MANIFEST.md (two tables:
     the pristine files == the upstream PyPI sdist 0.8.2; the post-patch — the expected hashes
-    after the patches 0001–0009); the drift "and forgot what was changed" is caught here;
-    the two patched files are screens.py (0001–0005, 0007–0009) and streams.py (0006);
+    after the patches 0001–0010); the drift "and forgot what was changed" is caught here;
+    the two patched files are screens.py (0001–0005, 0007–0009) and streams.py (0006, 0010);
   * the manifest of the patches: the files are in place, the names by the convention NNNN-slug.patch, the headers
     with the provenance (the upstream issue/PR, the audit report, the date) and the attribution (0003 — the
     author of PR #212, dwgx; the code of pyte is LGPL-3.0 — the attribution is mandatory); the patch files
@@ -26,7 +26,8 @@ unchanged; this file adds the PROVENANCE CHECKS on top of them:
     character by character, including the fg/bg); and one probe per defect of v1.5.7.1 (§3.5–§3.9):
     a grapheme cluster lands whole (the tail is not dropped), no final of the CSI table raises on a
     malformed sequence, an unknown erase mode is a no-op, DECOM without a region neither raises nor
-    goes silent, and a resize keeps the cursor — and the following text — inside the screen.
+    goes silent, a resize keeps the cursor — and the following text — inside the screen, and the G0/G1
+    designation of the VT100 special graphics really reaches the grid (patch 0010).
 
 Run: python tests/test_pyte_fork.py   (from the project root) or python tests/run_all.py
 """
@@ -56,6 +57,7 @@ EXPECTED_PATCHES = (
     "0007-erase-unknown-mode-noop.patch",
     "0008-decom-guard.patch",
     "0009-resize-cursor-clamp.patch",
+    "0010-honour-charset-designation.patch",
 )
 SDIST_SHA256 = "5af970e843fa96a97149d64e170c984721f20e52227a2f57f0a54207f08f083f"  # PyPI pyte-0.8.2.tar.gz
 
@@ -127,8 +129,8 @@ for name in actual_files:
         break
 check("the sha256 of every third_party/pyte/ file == the post-patch table", hash_ok, detail)
 
-# The unpatched files are identical in both tables; patches 0001–0009 touch TWO files:
-# screens.py (0001–0005, 0007–0009) and streams.py (0006).
+# The unpatched files are identical in both tables; patches 0001–0010 touch TWO files:
+# screens.py (0001–0005, 0007–0009) and streams.py (0006, 0010).
 untouched = [n for n in actual_files if pristine_tbl.get(n) == postpatch_tbl.get(n)]
 changed = [n for n in actual_files if pristine_tbl.get(n) != postpatch_tbl.get(n)]
 check("the unpatched files: the same hash in both tables (9 of 11)",
@@ -148,7 +150,7 @@ print("== patch manifest ==")
 
 actual_patches = sorted(
     n for n in os.listdir(PATCHDIR) if n.endswith(".patch"))
-check("patches 0001–0009 are in place, no extras", actual_patches == list(EXPECTED_PATCHES),
+check("patches 0001–0010 are in place, no extras", actual_patches == list(EXPECTED_PATCHES),
       str(actual_patches))
 check("the names follow the NNNN-slug.patch convention",
       all(re.fullmatch(r"\d{4}-[a-z0-9][a-z0-9-]*\.patch", n) for n in actual_patches),
@@ -168,6 +170,7 @@ PATCH_PROVENANCE = (
     (EXPECTED_PATCHES[6], "pyte/screens.py", ("BUG-C",)),
     (EXPECTED_PATCHES[7], "pyte/screens.py", ("BUG-D",)),
     (EXPECTED_PATCHES[8], "pyte/screens.py", ("BUG-E",)),
+    (EXPECTED_PATCHES[9], "pyte/streams.py", ("use_utf8", "ACS")),
 )
 check("every patch is covered by the provenance table (a new patch cannot skip it)",
       [n for n, _, _ in PATCH_PROVENANCE] == list(EXPECTED_PATCHES),
@@ -380,6 +383,35 @@ check("resize: the cursor x is inside the shrunk width", _cols.cursor.x < 4, str
 pyte.ByteStream(_cols).feed(b"Z")
 check("resize: the text after a width shrink is VISIBLE",
       "Z" in "\n".join(_cols.display), repr(_cols.display[:1]))
+
+# 3.10 The G0/G1 designation is honoured in UTF-8 mode (patch 0010). A program that draws its frame
+#      with the VT100 special graphics designates the map and then sends the ASCII LETTERS of the
+#      frame — the terminal must translate them (xterm paints `q` as a horizontal line). Before the
+#      patch the `if self.use_utf8: continue` guard skipped the designation, so every ACS frame
+#      arrived as its letters (the colleagues' `mc` report; AUDIT_PENDING.md N34).
+_acs = pyte.HistoryScreen(20, 3)
+_acs_stream = pyte.ByteStream(_acs)
+_acs_stream.feed(b"\x1b(0q")
+check("charset: `ESC ( 0` + `q` → the box drawing `\u2500` (the VT100 special graphics)",
+      lines(_acs)[0] == "\u2500", repr(lines(_acs)[0]))
+check("charset: the CELL holds the box character, not the designated letter",
+      _acs.buffer[0][0].data == "\u2500", repr(_acs.buffer[0][0].data))
+_acs_stream.feed(b"\x1b(Bq")
+check("charset: `ESC ( B` puts the identity map back → a literal `q`",
+      lines(_acs)[0] == "\u2500q", repr(lines(_acs)[0]))
+_acs_g1 = pyte.HistoryScreen(20, 3)
+_g1_stream = pyte.ByteStream(_acs_g1)
+_g1_stream.feed(b"\x1b)0\x0eq")            # designate G1 + SO
+check("charset: G1 (`ESC ) 0` + SO — honoured by the patch too) draws the same box character",
+      lines(_acs_g1)[0] == "\u2500", repr(lines(_acs_g1)[0]))
+_g1_stream.feed(b"\x0fq")                  # SI — back to G0 (the identity map)
+check("charset: SI selects G0 again → a literal `q`", lines(_acs_g1)[0] == "\u2500q",
+      repr(lines(_acs_g1)[0]))
+_acs_frame = pyte.HistoryScreen(10, 3)
+pyte.ByteStream(_acs_frame).feed(b"\x1b(0lqqqk\x1b(B\r\nx   x")
+check("charset: a whole ACS frame arrives as box drawing (the mc panel separator)",
+      lines(_acs_frame)[:2] == ["\u250c\u2500\u2500\u2500\u2510", "x   x"],
+      repr(lines(_acs_frame)[:2]))
 
 
 # ════════════════════════════════════════════════════════════

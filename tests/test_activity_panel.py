@@ -541,12 +541,13 @@ print("== §5 the release state and the 'no new contract' audit ==")
 
 check_release_state(ROOT)
 check("§5 EXPECTED_APP_VERSION is the shipped release (v1.5.2 was the second patch on 1.5;"
-      " the pin quotes the CURRENT one — v1.6.1 — like every topical file)",
-      EXPECTED_APP_VERSION == "1.6.1"
+      " the pin quotes the CURRENT one — v1.6.2 — like every topical file)",
+      EXPECTED_APP_VERSION == "1.6.2"
       and re.fullmatch(r"1\.6(\.\d+)?", EXPECTED_APP_VERSION) is not None)
 check("§5 the i18n pin counts the shipped release (v1.5.2's 661 + v1.5.3's twenty"
-      " + v1.5.4's eleven + v1.5.5's fourteen + v1.5.6's two + v1.5.7's twenty-nine)",
-      EXPECTED_I18N_KEYS == 778, str(EXPECTED_I18N_KEYS))
+      " + v1.5.4's eleven + v1.5.5's fourteen + v1.5.6's two + v1.5.7's twenty-nine"
+      " + v1.6's forty-one + v1.6.2's four)",
+      EXPECTED_I18N_KEYS == 782, str(EXPECTED_I18N_KEYS))
 check_i18n_parity(_langs)
 check_i18n_format(_langs)
 
@@ -588,8 +589,8 @@ check("§5 ...and it is a CHECKABLE View item (the owner of the persisted state)
 from ui.settings_dialog import SettingsDialog  # noqa: E402
 
 _hub = SettingsDialog(None)
-check("§5 the new config key is UI STATE, not a preference (the hub still collects 22)",
-      len(_hub.collect()) == 22 and "ui_activity_panel" not in _hub.collect(),
+check("§5 the new config key is UI STATE, not a preference (the hub collects 23)",
+      len(_hub.collect()) == 23 and "ui_activity_panel" not in _hub.collect(),
       str(sorted(_hub.collect()))[:120])
 _hub.close()
 import dataclasses  # noqa: E402
@@ -605,7 +606,7 @@ check("§5 no new dependency (the four pinned ones and nothing else)",
                         _req, re.M))
 check("§5 VERSION_FORMAT did NOT move (the project schema is unchanged)",
       __import__("version").VERSION_FORMAT == "0.9"
-      and __import__("version").APP_VERSION == "1.6.1")
+      and __import__("version").APP_VERSION == "1.6.2")
 check("§5 the durable record stays the FILE — the ring is the second, memory-only home",
       "LOG_FILE" in _src("modules", "logger.py")
       and "MAX_LOG_SIZE_MB" in _src("modules", "logger.py")

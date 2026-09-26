@@ -443,8 +443,8 @@ _dlg_w2 = SD.SettingsDialog(_mw)
 check("it prefills from the config (\"off\")",
       _dlg_w2.wheel_combo.currentData() == "off", str(_dlg_w2.wheel_combo.currentData()))
 _hub_keys = _dlg_w2.collect()
-check("collect() carries terminal_wheel (the 21st key — the hub has no config-only key left)",
-      _hub_keys.get("terminal_wheel") == "off" and len(_hub_keys) == 22,
+check("collect() carries terminal_wheel (23 keys since v1.6.2 added the cursor shape)",
+      _hub_keys.get("terminal_wheel") == "off" and len(_hub_keys) == 23,
       f"{len(_hub_keys)} keys: {sorted(_hub_keys)}")
 _dlg_w2._on_accept()
 check("OK writes terminal_wheel into config.json",

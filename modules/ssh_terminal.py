@@ -23,9 +23,9 @@ except ImportError:
     from modules.terminal_screen import TerminalScreen, DEFAULT_HISTORY_LINES
 
 try:
-    from .terminal_widget import TerminalWidget
+    from .terminal_widget import TerminalWidget, CURSOR_STYLE_DEFAULT, CURSOR_STYLES
 except ImportError:
-    from modules.terminal_widget import TerminalWidget
+    from modules.terminal_widget import TerminalWidget, CURSOR_STYLE_DEFAULT, CURSOR_STYLES
 
 try:
     from .host_key_policy import SshKnownHostsPolicy
@@ -109,6 +109,20 @@ def get_translator():
     return _t_cache
 
 
+# ── v1.6.2 (ROADMAP task 1): the session that says it ended ───────────────────
+# `TERMINAL_KEEPALIVE_SEC` is the interval of the SSH-level keepalive (`Transport.
+# set_keepalive`): one declared constant, deliberately NOT a config key — the value
+# that keeps a NAT/firewall idle mapping alive is a protocol fact, not a taste. 30 s
+# is below every common idle timeout (60 s and up) and is what OpenSSH's own
+# ServerAliveInterval ships with.
+# WHY IT MATTERS HERE (measured on paramiko 5.0, `transport.py`/`packet.py`): the
+# keepalive is the ONLY writer that touches an otherwise silent socket, and paramiko's
+# transport thread turns any resulting socket error into `_unlink()` of EVERY channel
+# plus `active = False` (`Transport.run`'s `finally`). So the keepalive is what makes a
+# peer that vanished without a FIN visible to the recv loop below at all — without it
+# `recv_ready()` answers False forever and the loop sleeps until the process dies.
+TERMINAL_KEEPALIVE_SEC = 30
+
 # ── v1.0 final (ROADMAP task 9): terminal_* keys from ~/.sshmap/config.json ────
 # All keys are OPTIONAL, defaults = the current behaviour (a config without
 # the keys looks exactly like RC4): palette "default", the system monospace
@@ -128,12 +142,14 @@ def load_terminal_settings():
        "close_behavior": str,     # v1.1: "close" (default) | "ask" — close behaviour
        "max_open": int,           # v1.1.1: limit of own open terminals (default 4)
        "wheel": str,              # v1.1.2RC3 (U3): "scrollback" (default) | "off" — the wheel
+       "cursor": str,             # v1.6.2 (task 4): "block" | "bar" (default) | "underline"
        "mode": str}               # v1.2.2: "windows" (default) | "tabs" — display mode
     Invalid values (a foreign type, out of range) → default. Never raises.
     """
     defaults = {"palette": None, "font_family": "", "font_size": None,
                 "history_lines": DEFAULT_HISTORY_LINES, "close_behavior": "close",
-                "max_open": 4, "wheel": "scrollback", "mode": "windows"}
+                "max_open": 4, "wheel": "scrollback", "mode": "windows",
+                "cursor": CURSOR_STYLE_DEFAULT}
     try:
         from i18n import load_config
     except Exception:
@@ -175,6 +191,14 @@ def load_terminal_settings():
     v = cfg.get("terminal_wheel")
     if isinstance(v, str) and v.strip().lower() in ("scrollback", "off"):
         defaults["wheel"] = v.strip().lower()   # corrupt/foreign → "scrollback" (default)
+
+    # v1.6.2 (ROADMAP task 4): the cursor SHAPE — "bar" (the default: the thin blinking line
+    # of Windows Terminal) | "block" (the historical full-cell slab) | "underline". Read on
+    # session creation like the palette and the font; the shape set and its default live in
+    # modules/terminal_widget.py (the ONE declaration the canvas paints from).
+    v = cfg.get("terminal_cursor_style")
+    if isinstance(v, str) and v.strip().lower() in CURSOR_STYLES:
+        defaults["cursor"] = v.strip().lower()   # corrupt/foreign → the declared default
 
     # v1.2.2 (ROADMAP task 1): terminal display mode — "windows" (default,
     # current behaviour: separate SSHTerminalWindow windows) | "tabs"
@@ -353,6 +377,18 @@ class SSHTerminalThread(QThread):
             self.client = client
             self.channel = client.invoke_shell(term='xterm', width=120, height=32)
             self.channel.settimeout(0.2)
+            # v1.6.2 (ROADMAP task 1): the SSH-level keepalive — see TERMINAL_KEEPALIVE_SEC.
+            # A transport that cannot take it (a fake in a test, a future paramiko) must NOT
+            # cost the session: the failure is a log line, never an error signal.
+            try:
+                client.get_transport().set_keepalive(TERMINAL_KEEPALIVE_SEC)
+            except Exception as keepalive_error:  # noqa: BLE001
+                try:
+                    from modules.logger import get_logger as _gl
+                    _gl("modules.ssh_terminal").warning(
+                        f"Keepalive could not be enabled for {self.host}: {keepalive_error}")
+                except Exception:  # noqa: BLE001 — the logger must never break a session
+                    pass
             # v1.0RC4: channel ready — the window may send the first command (Quick Launch)
             self.connected_signal.emit()
             self.status_signal.emit(t("terminal.session_opened"))
@@ -363,13 +399,26 @@ class SSHTerminalThread(QThread):
                 self.status_signal.emit(note if not note.startswith("[")
                                         else f"New host key accepted ({policy.last_fingerprint})")
 
+            # v1.6.2 (ROADMAP task 1): the loop ends on THREE facts now, and each of them is
+            # a real end of the session: `channel.closed` (the transport died — what the
+            # keepalive above turns a silently dead TCP into), `recv() == b""` (EOF: the peer
+            # closed the stream) and `eof_received` / `exit_status_ready()` (the peer said
+            # goodbye in the protocol). The EOF branch is also the anti-spin guard: a discarded
+            # `b""` made `recv_ready()` True forever, so the loop called `recv()` in a hot loop
+            # (measured: 7 534 475 calls in 1.5 s) and never reached `closed_signal`.
+            # Whatever ends it, `finally` still emits `closed_signal`, and the session's own
+            # `_on_closed` writes the ONE status line of that fact (`terminal.session_closed`).
             while self.running and self.channel and not self.channel.closed:
                 try:
                     if self.channel.recv_ready():
                         # v0.8: raw bytes with no ANSI stripping — pyte (TerminalScreen) parses them
                         data = self.channel.recv(4096)
-                        if data:
-                            self.output_signal.emit(data)
+                        if not data:
+                            break            # EOF — the peer closed the stream
+                        self.output_signal.emit(data)
+                    elif (getattr(self.channel, "eof_received", False)
+                          or self.channel.exit_status_ready()):
+                        break                # the peer announced the end of the channel
                     else:
                         self.msleep(30)
                 except TimeoutError:

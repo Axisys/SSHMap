@@ -4363,6 +4363,15 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
                 except (RuntimeError, AttributeError):
                     pass  # Qt teardown / a session without a widget — skip it
 
+        # v1.6.2 (ROADMAP task 4): the cursor shape of the ALREADY OPEN sessions — the second
+        # live terminal setting (the font loop above is the twin: same walk, same silence on
+        # a session that is already gone).
+        for s in list(getattr(self, "_terminal_windows", [])):
+            try:
+                s.widget.set_cursor_style(term_cfg["cursor"])
+            except (RuntimeError, AttributeError):
+                pass  # Qt teardown / a session without a widget — skip it
+
         # v1.1.1 (item 6): the "type on plaque" option — redraw the scene's connection labels
         try:
             for arrow in list(getattr(self.scene, "_arrows", [])):

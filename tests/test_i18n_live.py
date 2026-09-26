@@ -785,7 +785,7 @@ print("== §9 the release state ==")
 # ════════════════════════════════════════════════════════════════════════════
 
 check("EXPECTED_APP_VERSION is the version this test file describes",
-      EXPECTED_APP_VERSION == "1.6.1", EXPECTED_APP_VERSION)
+      EXPECTED_APP_VERSION == "1.6.2", EXPECTED_APP_VERSION)
 check("the pin counts the keys of the SHIPPED release (v1.5.2 added THIRTEEN — all the CHROME "
       "of the activity panel — v1.5.3 added TWENTY in three families: the age of the "
       "collected facts (`node.info.collected_now` plus the minutes/hours/days steps), the "
@@ -800,8 +800,8 @@ check("the pin counts the keys of the SHIPPED release (v1.5.2 added THIRTEEN —
       "`History` tab, the panel's chrome (the filter, the three columns, the empty / "
       "no-matches / counts lines, the `last_unknown` marker) and the six context-menu items "
       "with their import reports and refusal lines; the numbers and the behaviour of a "
-      "release cost no key, so 661 + 20 + 11 + 14 + 2 + 29 + 41 = 778)",
-      EXPECTED_I18N_KEYS == 778, str(EXPECTED_I18N_KEYS))
+      "release cost no key, so 661 + 20 + 11 + 14 + 2 + 29 + 41 + 4 = 782)",
+      EXPECTED_I18N_KEYS == 782, str(EXPECTED_I18N_KEYS))
 check_release_state(ROOT)
 for _code in i18n_lang_codes(ROOT):
     check(f"i18n/{_code}.json carries the v1.5 node.status.emulated marker",

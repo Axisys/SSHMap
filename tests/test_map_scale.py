@@ -238,10 +238,10 @@ check("density: switching back restores the expanded card (same size as before)"
       str((_rich._current_width, _rich._current_height)))
 
 _static = SettingsDialog(None)
-check("density: the 'Appearance' tab offers the choice and collect() keeps the 22 config keys",
+check("density: the 'Appearance' tab offers the choice and collect() carries the hub's 23 keys",
       _static.density_combo.count() == 2
       and _static.density_combo.currentData() == "normal"
-      and len(_static.collect()) == 22
+      and len(_static.collect()) == 23
       and _static.collect()["theme"]["density"] == "normal")
 _static.deleteLater()
 close_window(_win2)
@@ -555,9 +555,9 @@ check("i18n: the placeholders of the new sentences survive every language",
           and "{file}" in _langs[c]["status.connections_exported"] for c in _langs))
 check_i18n_parity(_langs)
 check_i18n_format(_langs)
-check("the release is v1.6.1 with 778 keys and 59 actions",
-      __import__("version").APP_VERSION == "1.6.1"
-      and __import__("_common").EXPECTED_I18N_KEYS == 778
+check("the release is v1.6.2 with 782 keys and 59 actions",
+      __import__("version").APP_VERSION == "1.6.2"
+      and __import__("_common").EXPECTED_I18N_KEYS == 782
       and len(HR.HOTKEY_ACTIONS) == 59 and len(HR.empty_default_action_ids()) == 36,
       f"{__import__('version').APP_VERSION}"
       f" / {__import__('_common').EXPECTED_I18N_KEYS}"

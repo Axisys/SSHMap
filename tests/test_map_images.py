@@ -378,13 +378,13 @@ print("== §4 the release state and the 'no new contract' audit ==")
 
 check_release_state(ROOT)
 check("§4 EXPECTED_APP_VERSION is the shipped release (v1.5.1 was the first patch on 1.5;"
-      " the pin quotes the CURRENT one — v1.6.1)",
-      EXPECTED_APP_VERSION == "1.6.1"
+      " the pin quotes the CURRENT one — v1.6.2)",
+      EXPECTED_APP_VERSION == "1.6.2"
       and re.fullmatch(r"1\.6(\.\d+)?", EXPECTED_APP_VERSION) is not None)
 check("§4 the i18n pin moved by exactly FOUR keys in v1.5.1 (two labels + two reports), by "
       "v1.5.2's thirteen, by v1.5.3's twenty, by v1.5.4's eleven, by v1.5.5's fourteen"
-      " and by v1.5.6's two and v1.5.7's twenty-nine on top",
-      EXPECTED_I18N_KEYS == 778, str(EXPECTED_I18N_KEYS))
+      " and by v1.5.6's two, v1.5.7's twenty-nine and v1.6.2's four on top",
+      EXPECTED_I18N_KEYS == 782, str(EXPECTED_I18N_KEYS))
 check_i18n_parity(_langs)
 check_i18n_format(_langs)
 
@@ -413,8 +413,8 @@ check("§4 the two actions live in the File family (the Hotkeys tab's grouping d
       HR.action_family("file.copy_map") == "file" and HR.action_family("file.docs_frame") == "file")
 
 _hub = SettingsDialog(None)
-check("§4 no new config key (the hub still collects 22)",
-      len(_hub.collect()) == 22, str(len(_hub.collect())))
+check("§4 no new config key from this section (the hub collects 23)",
+      len(_hub.collect()) == 23, str(len(_hub.collect())))
 _hub.close()
 check("§4 no new theme field (the palette is the v1.5rc1 one)",
       len(dataclasses.fields(theme.Theme)) == 60)
@@ -426,6 +426,6 @@ check("§4 no new dependency (the four pinned ones and nothing else)",
                         _req, re.M))
 check("§4 VERSION_FORMAT did NOT move (the project schema is unchanged)",
       __import__("version").VERSION_FORMAT == "0.9"
-      and __import__("version").APP_VERSION == "1.6.1")
+      and __import__("version").APP_VERSION == "1.6.2")
 
 finish()

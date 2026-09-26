@@ -743,7 +743,7 @@ try:
           str(_dominant(_theme_image)) if not _theme_image.isNull() else "no image")
     check("§6 ...and the choice is remembered for the next export of the session",
           win._export_use_current_theme is True)
-    check("§6 the remembered choice is NOT persisted (the hub keeps its 22 keys)",
+    check("§6 the remembered choice is NOT persisted (the hub keeps its own 23 keys)",
           "export" not in {k for k in __import__("i18n").load_config()})
 
     # A cancelled dialog writes nothing.

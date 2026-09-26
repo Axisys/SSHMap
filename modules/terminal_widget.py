@@ -383,6 +383,58 @@ def word_units(row_chars):
     return units
 
 
+# ── v1.6.2 (ROADMAP task 4): the cursor SHAPES (pure geometry, no Qt) ────────
+# The cursor was a full-cell block. It is one of three DECLARED shapes now, and the
+# default is the thin blink line of Windows Terminal.
+CURSOR_STYLE_BLOCK = "block"          # the historical painting: the whole cell, glyph swapped
+CURSOR_STYLE_BAR = "bar"              # a thin vertical line at the LEFT edge of the cell
+CURSOR_STYLE_UNDERLINE = "underline"  # a thin horizontal line at the BOTTOM edge of the cell
+CURSOR_STYLES = (CURSOR_STYLE_BLOCK, CURSOR_STYLE_BAR, CURSOR_STYLE_UNDERLINE)
+
+#: The shape a canvas uses when nothing else says otherwise (the `terminal_cursor_style`
+#: default of `modules/ssh_terminal.py` refers to THIS constant, so the two cannot drift).
+CURSOR_STYLE_DEFAULT = CURSOR_STYLE_BAR
+
+#: The thickness of the two line shapes, in device pixels (the cell's own height/width for
+#: the other dimension). 2 px is the Windows Terminal look at the usual 100 % scaling; the
+#: clamp inside `cursor_shape_rect()` keeps the mark visible on a narrow cell.
+CURSOR_BAR_WIDTH = 2
+CURSOR_UNDERLINE_HEIGHT = 2
+
+
+def resolve_cursor_style(style) -> str:
+    """A configured (or foreign) value → one of `CURSOR_STYLES`.
+
+    A missing / empty / unknown / non-string value answers `CURSOR_STYLE_DEFAULT`: the
+    `terminal_wheel` / `resolution` rule — a broken setting is the default, never an error.
+    Pure, no Qt.
+    """
+    if isinstance(style, str) and style.strip().lower() in CURSOR_STYLES:
+        return style.strip().lower()
+    return CURSOR_STYLE_DEFAULT
+
+
+def cursor_shape_rect(style, x, y, width, height):
+    """The rectangle the cursor is painted in, for a cell of `width × height` at `(x, y)`.
+
+    Pure (no Qt, no widget) — the topical test reads the geometry HERE and the canvas only
+    paints what this answers; it returns `(x, y, w, h)` in whole pixels. `block` is the whole
+    cell; `bar` is `CURSOR_BAR_WIDTH` wide against the LEFT edge and the full height;
+    `underline` is `CURSOR_UNDERLINE_HEIGHT` tall against the BOTTOM edge and the full width;
+    any other value is the DECLARED default. The line shapes CLAMP to the cell (never 0 px:
+    a cursor that vanishes is a worse lie than a thick one).
+    """
+    style = resolve_cursor_style(style)
+    width, height = max(1, int(width)), max(1, int(height))
+    if style == CURSOR_STYLE_BLOCK:
+        return (int(x), int(y), width, height)
+    if style == CURSOR_STYLE_UNDERLINE:
+        line = max(1, min(int(CURSOR_UNDERLINE_HEIGHT), height))
+        return (int(x), int(y) + height - line, width, line)
+    line = max(1, min(int(CURSOR_BAR_WIDTH), width))
+    return (int(x), int(y), line, height)
+
+
 # xterm sequences for F1–F12 (the table from draft TERMINAL.md §6/phase 1):
 # F1–F4 — SS3 (\x1bOP…\x1bOS), F5–F12 — CSI (\x1b[15~ … \x1b[24~).
 _F_KEY_SEQUENCES = {
@@ -418,7 +470,10 @@ class TerminalWidget(QWidget):
     """
 
     FORMAT_CACHE_LIMIT = 512      # the format cache limit (TERMINAL.md §5.1)
-    CURSOR_COLOR = "#e2e8f0"      # the block cursor: the default text color (the classic look)
+    CURSOR_COLOR = "#e2e8f0"      # the cursor ink: the default text color (the classic look)
+    # v1.6.2 (ROADMAP task 4): the cursor SHAPE. `CURSOR_STYLES` / `CURSOR_STYLE_DEFAULT` and
+    # the geometry live at module level (`resolve_cursor_style()` / `cursor_shape_rect()`), so
+    # the topical test reads them without a widget; the class only carries the ACTIVE value.
     SELECTION_COLOR = (59, 130, 246, 90)   # v1.0RC2: the selection overlay (RGBA, alpha≈35%)
     BLINK_INTERVAL_MS = 530       # v1.0RC3: the cursor blink period (ROADMAP task 8)
     DOUBLE_CLICK_MS = 500         # v1.2.7: the double/triple-click interval (the test hook)
@@ -432,7 +487,8 @@ class TerminalWidget(QWidget):
 
     def __init__(self, tscreen, terminal_thread=None, parent=None,
                  palette_name="default", format_cache_limit=FORMAT_CACHE_LIMIT,
-                 wheel_mode="scrollback", multi_hub=None):
+                 wheel_mode="scrollback", multi_hub=None,
+                 cursor_style=CURSOR_STYLE_DEFAULT):
         super().__init__(parent)
         self.tscreen = tscreen
         self.terminal_thread = terminal_thread
@@ -445,6 +501,10 @@ class TerminalWidget(QWidget):
         # v1.2.13: if a TUI enabled mouse tracking (DECSET 1000/1002/1003), the wheel
         # goes to the PTY as an SGR/X10 report — the passthrough takes precedence over "off".
         self._wheel_mode = wheel_mode if wheel_mode in ("scrollback", "off") else "scrollback"
+        # v1.6.2 (ROADMAP task 4): the cursor shape from the terminal_cursor_style config —
+        # "block" (the historical slab) | "bar" (the default: the thin blinking line) |
+        # "underline". An unknown value → the declared default (resolve_cursor_style()).
+        self._cursor_style = resolve_cursor_style(cursor_style)
         self._palette_name = palette_name if palette_name in PALETTES else "default"
         self._palette = dict(PALETTES[self._palette_name])
         self._format_cache_limit = int(format_cache_limit)
@@ -561,6 +621,21 @@ class TerminalWidget(QWidget):
         self._update_metrics()
         self._format_cache.clear()
         self.update()
+
+    # ── v1.6.2 (ROADMAP task 4): the cursor shape ───────────────────────────
+    def cursor_style(self) -> str:
+        """The ACTIVE shape — one of `CURSOR_STYLES`."""
+        return self._cursor_style
+
+    def set_cursor_style(self, style) -> str:
+        """Apply a shape (`terminal_cursor_style`); an unknown value → the declared default.
+
+        The blink phase and the hide rule are untouched — only the geometry of the mark
+        changes — so the canvas only needs a repaint.
+        """
+        self._cursor_style = resolve_cursor_style(style)
+        self.update()
+        return self._cursor_style
 
     def sizeHint(self):
         from PySide6.QtCore import QSize
@@ -688,8 +763,9 @@ class TerminalWidget(QWidget):
                                      brush_current if is_current else brush_other)
             stats["find_matches"] = sum(len(v) for v in find_rows.values())
 
-        # The block cursor via swap (TERMINAL.md §3.13): fill the cell with the cursor color
-        # + redraw the glyph with the background color; NOT drawn when screen.cursor.hidden
+        # The cursor (TERMINAL.md §3.13; v1.6.2 (ROADMAP task 4): the SHAPE is declared — the
+        # block fills the cell and swaps the glyph, the bar and the underline paint a thin line
+        # and leave the text alone). NOT drawn when screen.cursor.hidden
         # (ESC[?25l/h — vim hides the cursor, fact #8) or in the "invisible" phase of the blink
         # (v1.0RC3). When scrolling up into the history pyte hides the cursor itself
         # (after_event: hidden = not (position == size and DECTCEM)).
@@ -697,9 +773,12 @@ class TerminalWidget(QWidget):
                 and 0 <= cy < len(rows) and 0 <= cx < len(rows[cy])):
             ch = rows[cy][cx]
             cell_x, cell_y = cx * self._cell_w, cy * self._cell_h
-            painter.fillRect(cell_x, cell_y, self._cell_w, self._cell_h,
-                             QBrush(self._cursor_color))
-            if ch.data and ch.data != " ":
+            cur_x, cur_y, cur_w, cur_h = cursor_shape_rect(
+                self._cursor_style, cell_x, cell_y, self._cell_w, self._cell_h)
+            painter.fillRect(cur_x, cur_y, cur_w, cur_h, QBrush(self._cursor_color))
+            # the glyph is swapped ONLY under the block: it is the shape that covers the cell,
+            # and a bar over the first pixel of a letter must not repaint that letter.
+            if self._cursor_style == CURSOR_STYLE_BLOCK and ch.data and ch.data != " ":
                 fg, bg = self._resolved_colors(ch)
                 _, _, font = self._format_for(
                     fg, bg, bool(ch.bold), bool(ch.italics),

@@ -400,11 +400,11 @@ dlg2.close_behavior_combo.setCurrentIndex(1)  # ask
 dlg2.status_interval_spin.setValue(60)
 dlg2.probe_timeout_spin.setValue(4.5)
 c = dlg2.collect()
-check("collect(): exactly 22 config.json keys (21 + theme, v1.4.3)",
+check("collect(): exactly 23 config.json keys (+ terminal_cursor_style, v1.6.2)",
       set(c) == {"external_terminal", "terminal_mode", "terminal_palette",
                  "terminal_font_size",
                  "terminal_history_lines", "terminal_close_behavior",
-                 "terminal_wheel",
+                 "terminal_wheel", "terminal_cursor_style",
                  "status_interval_sec", "status_probe_timeout_sec", "status_max_parallel",
                  "autosave_enabled", "autosave_interval_sec", "backup_count",
                  "ui_font_family", "ui_font_size", "terminal_font",
@@ -423,7 +423,7 @@ applied = []
 dlg2.applied.connect(lambda: applied.append(1))
 dlg2._on_accept()
 cfg = read_cfg()
-check("OK: all the 22 keys are written into config.json",
+check("OK: all the 23 keys are written into config.json",
       cfg is not None and all(k in cfg for k in c), str(cfg))
 check("OK: the merge — the foreign keys are kept (language/terminal_font)",
       cfg.get("language") == "ru" and cfg.get("terminal_font") == "Consolas", str(cfg))

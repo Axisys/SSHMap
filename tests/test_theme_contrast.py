@@ -546,10 +546,10 @@ finally:
 check("§7 choosing `auto` emits the platform's instance live (a stubbed LIGHT here)",
       _emitted_auto and _emitted_auto[-1].canvas_bg == theme.LIGHT.canvas_bg,
       str([getattr(e, "canvas_bg", e) for e in _emitted_auto]))
-check("§7 collect() keeps the appearance as ONE nested key (the hub stays 22 keys)",
+check("§7 collect() keeps the appearance as ONE nested key (the hub is at 23 keys)",
       _dlg.collect()["theme"] == {"mode": "auto", "accent": _dlg._accent_hex, "motion": True,
                                   "density": "normal"}
-      and len(_dlg.collect()) == 22,
+      and len(_dlg.collect()) == 23,
       str(_dlg.collect()["theme"]))
 from ui import motion as motion_mod  # noqa: E402
 _was_motion = motion_mod.motion_enabled()

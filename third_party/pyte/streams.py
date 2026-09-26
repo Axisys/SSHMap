@@ -286,23 +286,27 @@ class Stream:
                         self.select_other_charset((yield None))
                     elif char in "()":
                         code = yield None
-                        if self.use_utf8:
-                            continue
-
-                        # See http://www.cl.cam.ac.uk/~mgk25/unicode.html#term
-                        # for the why on the UTF-8 restriction.
+                        # sshmap fork (patch 0010): the G0/G1 designation is HONOURED in UTF-8
+                        # mode too. Upstream skips it here (`if self.use_utf8: continue`) and again
+                        # for SI/SO below, on the UTF-8 rationale of
+                        # http://www.cl.cam.ac.uk/~mgk25/unicode.html#term — but a program that
+                        # draws its frames with the VT100 special graphics (`ESC ( 0`; the tables
+                        # are vendored in pyte/charsets.py) is not asking for an ISO-2022 encoding
+                        # switch: it asks the terminal to MAP the ASCII letters of its frame to
+                        # box-drawing code points, which is exactly what xterm does in a UTF-8
+                        # locale. With the guard in place the cell held the literal letter (`q`),
+                        # so every ACS frame arrived as letters. `ESC ( B` restores the identity map.
                         listener.define_charset(code, mode=char)
                     else:
                         escape_dispatch[char]()
                     continue    # Don't go to CSI.
 
             if char in basic:
-                # Ignore shifts in UTF-8 mode. See
-                # http://www.cl.cam.ac.uk/~mgk25/unicode.html#term for
-                # the why on UTF-8 restriction.
-                if (char == ctrl.SI or char == ctrl.SO) and self.use_utf8:
-                    continue
-
+                # sshmap fork (patch 0010): SI/SO really select G0/G1 — in UTF-8 mode as well
+                # (see the designation branch above). A bare 0x0E/0x0F can never be part of a
+                # UTF-8 sequence (every continuation byte is >= 0x80), so the shift is
+                # unambiguous, and without it a program that designates its ACS frame on G1
+                # (`ESC ) 0` + SO) still got the letters.
                 basic_dispatch[char]()
             elif char == CSI_C1:
                 # All parameters are unsigned, positive decimal integers, with
