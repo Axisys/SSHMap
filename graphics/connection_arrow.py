@@ -178,12 +178,46 @@ def edge_point(rect: QRectF, center: QPointF, toward: QPointF) -> QPointF:
     return QPointF(center.x() + dx * t, center.y() + dy * t)
 
 
-def build_curve(p0: QPointF, p3: QPointF):
+# ── v1.6 (ROADMAP task 3): SEVERAL links between the SAME pair of nodes ──────────
+# Two cards can carry more than one relation (a second path of a different type, a
+# direction each way). Every link of one endpoint pair gets an INDEX inside that pair
+# (owned by `MapScene.refresh_connection_offsets()`), and the index moves the curve
+# along its own NORMAL — the endpoints stay on the card edges, only the middle of the
+# arc travels. `PAIR_OFFSET_STEP` is the declared step of ONE index in scene px; the
+# step is added to the natural bend, so the first link keeps the historical curve
+# (`pair_offset_steps(0) == 0.0`) and a project saved before this version renders
+# byte-identically.
+PAIR_OFFSET_STEP = 28.0
+
+
+def pair_offset_steps(index) -> float:
+    """The SIGNED number of steps a link of this index takes along the normal.
+
+    ``0, +1, −1, +2, −2, …`` — the fan alternates around the untouched first link, so
+    a pair that gains a third and a fourth relation grows evenly on both sides instead
+    of drifting away in one direction. Pure (the topical gate measures it without a
+    scene), and index 0 is exactly the historical curve.
+    """
+    try:
+        value = int(index)
+    except (TypeError, ValueError):
+        return 0.0
+    if value <= 0:
+        return 0.0
+    step = (value + 1) // 2
+    return float(step if value % 2 else -step)
+
+
+def build_curve(p0: QPointF, p3: QPointF, extra_bend: float = 0.0):
     """A cubic Bezier curve from p0 to p3 with a symmetric bend.
 
     Returns (path, c1, c2). The bend grows with distance, but is bounded;
     the direction is chosen perpendicular to the p0→p3 segment, so A→B and B→A
     bend to opposite sides — bidirectional connections do not overlap.
+
+    ``extra_bend`` (v1.6, ROADMAP task 3) is the displacement of ONE parallel link of
+    the same endpoint pair: a signed value in scene px added to the natural bend. The
+    default 0.0 reproduces the historical curve exactly.
     """
     path = QPainterPath()
     path.moveTo(p0)
@@ -195,7 +229,7 @@ def build_curve(p0: QPointF, p3: QPointF):
         return path, QPointF(p0), QPointF(p3)
     nx = -dy / seg_len   # normal (a +90° rotation): for B→A it points the opposite way
     ny = dx / seg_len
-    bend = min(48.0, max(12.0, seg_len * 0.15))
+    bend = min(48.0, max(12.0, seg_len * 0.15)) + float(extra_bend or 0.0)
     qx = (p0.x() + p3.x()) / 2.0 + nx * bend
     qy = (p0.y() + p3.y()) / 2.0 + ny * bend
     # A quadratic Bezier with control point q → the exact cubic representation:
@@ -242,6 +276,11 @@ class ConnectionArrow(QGraphicsPathItem):
         # v1.2.6: bidirectional connection — arrowheads on BOTH ends of the curve
         # (two-way data exchange); standard mode — the target end only.
         self.bidirectional = bool(bidirectional)
+        # v1.6 (ROADMAP task 3): the INDEX of this link inside its endpoint pair — a
+        # second relation between the same two cards bends aside instead of hiding under
+        # the first one. The scene owns the numbering (`refresh_connection_offsets()`);
+        # the arrow only reads it when it computes its path, so `contains()` follows.
+        self.pair_index = 0
         # UI polish: curve control points for the extended hit-testing zone (contains());
         # None until the first successful update_position() — contains() is in basic mode then.
         self._curve_pts = None
@@ -350,6 +389,34 @@ class ConnectionArrow(QGraphicsPathItem):
 
     # ── Geometry (v0.7): Bezier + edge-to-edge ───────────────────
 
+    # ── v1.6 (ROADMAP task 3): the parallel-link offset ───────────────────
+
+    def offset_steps(self) -> float:
+        """The SIGNED steps of this link along the normal (`pair_offset_steps`)."""
+        return pair_offset_steps(self.pair_index)
+
+    def offset_px(self) -> float:
+        """The extra bend of this link in scene px (0.0 for the first link of a pair)."""
+        return self.offset_steps() * PAIR_OFFSET_STEP
+
+    def set_pair_index(self, index) -> bool:
+        """Set the index inside the endpoint pair (True when the path really moved).
+
+        Idempotent, and a no-op on the geometry when the value does not change — the
+        scene calls it for every link after any add/remove, so a stable map costs
+        nothing. `update_position()` is the ONE place the offset reaches the path (the
+        hit zone of `contains()` reads the same stored control points).
+        """
+        try:
+            value = max(0, int(index))
+        except (TypeError, ValueError):
+            value = 0
+        if value == self.pair_index:
+            return False
+        self.pair_index = value
+        self.update_position()
+        return True
+
     def _compute_geometry(self):
         """Returns (path, p0, p3, c1, c2), or None in the degenerate case.
 
@@ -370,7 +437,7 @@ class ConnectionArrow(QGraphicsPathItem):
 
         p0 = edge_point(src_rect, src_center, tgt_center)
         p3 = edge_point(tgt_rect, tgt_center, src_center)
-        path, c1, c2 = build_curve(p0, p3)
+        path, c1, c2 = build_curve(p0, p3, self.offset_px())
         return path, p0, p3, c1, c2
 
     def update_position(self):

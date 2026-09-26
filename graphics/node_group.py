@@ -185,6 +185,107 @@ def status_caption(summary, translate=None) -> str:
     return " · ".join(parts)
 
 
+# ── v1.6 (ROADMAP task 6): the auto-arrangement of a group's members ─────────────
+# The geometry is a PURE function (the `sidebar.list_sort_key()` precedent): the layout
+# of a group is measured without a widget, so the topical gate can pin every mode and
+# the window only has to turn the answer into ONE undo command. The three modes are the
+# plan's: a vertical line, a horizontal line, and rows whose COUNT the user types.
+ARRANGE_VERTICAL = "vertical"
+ARRANGE_HORIZONTAL = "horizontal"
+ARRANGE_ROWS = "rows"
+ARRANGE_MODES = (ARRANGE_VERTICAL, ARRANGE_HORIZONTAL, ARRANGE_ROWS)
+#: The air between two cards of an arrangement (scene px) — the same order of magnitude
+#: as the group's own MEMBER_MARGIN / BADGE_GAP, so an arranged group still reads as one.
+ARRANGE_GAP = 24.0
+
+
+def resolve_arrange_mode(value) -> str:
+    """A stored/dialog mode id → one of ``ARRANGE_MODES`` (a broken value = vertical)."""
+    text = str(value or "").strip().lower()
+    return text if text in ARRANGE_MODES else ARRANGE_VERTICAL
+
+
+def arrange_positions(items, mode: str, per_line: int = 0,
+                      gap: float = ARRANGE_GAP, origin=None) -> list:
+    """The target positions of an arrangement — PURE (no Qt item, no scene).
+
+    ``items`` is an iterable of ``(key, x, y, width, height)`` — the KEY is whatever the
+    caller wants back (a node id in the application), the rest is the card's geometry in
+    scene coordinates. The result is a list of ``(key, x, y)`` in the SAME order, i.e.
+    the reading order the caller handed over (the group's grid order: alias, then id).
+
+    The three modes:
+
+      * ``vertical``   — one column at the left edge of the bounding box;
+      * ``horizontal`` — one row at the top edge;
+      * ``rows``       — ``per_line`` cards per row (a count below 1 means 1), the rows
+                         starting at the left edge, the row height = the TALLEST card of
+                         that row (an arrangement must not overlap cards of different
+                         heights, and the compact density lets them differ).
+
+    The anchor is the top-left corner of the members' own bounding box unless the caller
+    passes ``origin``; the frame of the group is deliberately NOT part of the arithmetic
+    — the arrangement MOVES cards and never resizes the group (the declared boundary of
+    the task), and the geometric membership rule decides who stays inside.
+    """
+    cells = []
+    for item in items or ():
+        try:
+            key, x, y, width, height = item[0], float(item[1]), float(item[2]), \
+                float(item[3]), float(item[4])
+        except (TypeError, ValueError, IndexError):
+            continue  # a broken entry is skipped, the rest of the group still arranges
+        cells.append((key, float(x), float(y), max(width, 1.0), max(height, 1.0)))
+    if not cells:
+        return []
+    if origin is None:
+        base_x = min(cell[1] for cell in cells)
+        base_y = min(cell[2] for cell in cells)
+    else:
+        try:
+            base_x, base_y = float(origin[0]), float(origin[1])
+        except (TypeError, ValueError, IndexError):
+            base_x = min(cell[1] for cell in cells)
+            base_y = min(cell[2] for cell in cells)
+
+    step = max(float(gap if gap is not None else ARRANGE_GAP), 0.0)
+    resolved = resolve_arrange_mode(mode)
+    positions = []
+    if resolved == ARRANGE_VERTICAL:
+        y = base_y
+        for key, _x, _y, _w, height in cells:
+            positions.append((key, base_x, y))
+            y += height + step
+        return positions
+    if resolved == ARRANGE_HORIZONTAL:
+        x = base_x
+        for key, _x, _y, width, _h in cells:
+            positions.append((key, x, base_y))
+            x += width + step
+        return positions
+    # rows
+    try:
+        columns = max(int(per_line or 0), 1)
+    except (TypeError, ValueError):
+        columns = 1
+    x = base_x
+    y = base_y
+    row_height = 0.0
+    column = 0
+    for key, _x, _y, width, height in cells:
+        positions.append((key, x, y))
+        row_height = max(row_height, height)
+        column += 1
+        if column >= columns:
+            x = base_x
+            y += row_height + step
+            row_height = 0.0
+            column = 0
+        else:
+            x += width + step
+    return positions
+
+
 class NodeGroup(QGraphicsObject):
     """A cluster/folder on the map: a frame + a title, drag/resize, server membership.
 

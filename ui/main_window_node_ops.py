@@ -31,6 +31,7 @@ v1.5.3 (ROADMAP task 3): the cluster also owns "why is it offline?" —
 registry of live reports is ``self._diagnose_threads`` (keyed by server id, so
 "the same node twice" is refused while a different node is fine).
 """
+from PySide6.QtCore import QPointF
 from PySide6.QtWidgets import QDialog, QMessageBox, QApplication
 
 try:
@@ -42,6 +43,23 @@ try:  # v1.1.4: the common seam for monkeypatching the facade module's globals (
     from .mixin_support import host_attr
 except ImportError:
     from mixin_support import host_attr
+
+try:  # v1.6 (ROADMAP task 1): the PURE half of the bulk edit (states → values)
+    from ..dialogs.bulk_edit_dialog import changes_for
+except ImportError:
+    try:
+        from dialogs.bulk_edit_dialog import changes_for
+    except ImportError:  # a stripped build — the bulk edit reports itself unavailable
+        changes_for = None
+
+try:  # v1.6 (ROADMAP task 6): the PURE geometry of a group arrangement
+    from ..graphics.node_group import NodeGroup as _NodeGroup, arrange_positions
+except ImportError:
+    try:
+        from graphics.node_group import NodeGroup as _NodeGroup, arrange_positions
+    except ImportError:
+        _NodeGroup = None
+        arrange_positions = None
 
 
 def _is_scene_point(value) -> bool:
@@ -759,6 +777,196 @@ class NodeOpsMixin:
         self._mark_dirty()  # ← unsaved changes
         return True
 
+    def _bulk_edit_selection(self) -> bool:
+        """v1.6 (ROADMAP task 1): edit tags / comment / quick launch for the selection.
+
+        The multi-selection sibling of "properties": the dialog is TRI-STATE (a field left
+        at "leave unchanged" is never written), and the whole apply is ONE command
+        (`CmdEditSelected`), so Ctrl+Z restores every card of the batch at once.
+
+        The action (`edit.selected`) lives in the Edit menu AND in the multi-selection part
+        of the map's context menu, so the keyboard can reach it (§4.9 — an EMPTY default).
+        Returns True when a command really landed.
+        """
+        nodes = self.selected_nodes()
+        if not nodes:
+            QMessageBox.information(self, self.t("msg.info_title"),
+                                    self.t("msg.select_server_edit"))
+            return False
+        dlg_cls = host_attr(self, "BulkEditDialog")
+        if dlg_cls is None:
+            return False
+        dlg = None
+        try:
+            dlg = dlg_cls(len(nodes), self)
+            if dlg.exec() != QDialog.Accepted:
+                return False
+            changes = dlg.changes()
+        except Exception as e:  # noqa: BLE001 — a broken dialog must not crash the window
+            if self.log:
+                self.log.warning(f"Bulk edit dialog failed: {e}")
+            return False
+        finally:
+            if dlg is not None:
+                getattr(dlg, "deleteLater", lambda: None)()
+
+        if changes_for is None:
+            return False
+
+        edits = []
+        for node in nodes:
+            try:
+                if node.scene() is None:
+                    continue
+                pair = changes_for(node.data, changes)
+            except (AttributeError, RuntimeError):
+                continue
+            if pair is not None:
+                edits.append((node, pair[0], pair[1]))
+        if not edits:
+            # Every card already carries the values — an empty stack entry would be a lie.
+            self.statusBar().showMessage(
+                self.t("status.bulk_unchanged") if self._i18n_available
+                else "Nothing to change — the selection already has these values")
+            return False
+        from modules.undo_commands import CmdEditSelected
+        self._push_command(CmdEditSelected(self, edits))
+        self.statusBar().showMessage(
+            self.t("status.bulk_edited", count=len(edits)) if self._i18n_available
+            else f"Updated {len(edits)} servers")
+        self._mark_dirty()  # ← unsaved changes
+        if self.log:
+            self.log.info("Bulk edit applied", extra={"count": len(edits)})
+        return True
+
+    def _arrange_group(self, group, mode: str = "", per_line: int = 0) -> bool:
+        """v1.6 (ROADMAP task 6): line a group's members up in ONE undo step.
+
+        The layout is the pure `graphics.node_group.arrange_positions()`; this method only
+        reads the live geometry, pushes ONE `CmdArrangeGroup` and reports. Two declared
+        boundaries:
+
+          * the arrangement MOVES cards and never resizes the group — the geometric
+            membership of `MapScene.resync_group_members()` keeps deciding who is inside;
+          * a FOLDED group is REFUSED with a status line: its members are drawn on the
+            strip, so there is no honest layout to compute there.
+        """
+        if group is None:
+            return False
+        try:
+            folded = bool(group.is_collapsed())
+        except (AttributeError, RuntimeError):
+            return False
+        if folded:
+            self.statusBar().showMessage(
+                self.t("status.group_folded") if self._i18n_available
+                else "The group is folded — unfold it to arrange its members")
+            return False
+
+        if arrange_positions is None or _NodeGroup is None:
+            return False
+
+        members = [m for m in group.get_members()
+                   if getattr(m, "data", None) is not None and m.scene() is not None]
+        if len(members) < 2:
+            self.statusBar().showMessage(
+                self.t("status.arrange_none") if self._i18n_available
+                else "Nothing to arrange — the group needs at least two members")
+            return False
+        # The group's own reading order (the badge grid's): the arrangement must not
+        # depend on where the cards happened to lie.
+        members.sort(key=_NodeGroup._grid_sort_key)
+
+        items = []
+        for member in members:
+            try:
+                rect = member.card_rect()
+                items.append((member.data.id, member.pos().x(), member.pos().y(),
+                              rect.width(), rect.height()))
+            except (AttributeError, RuntimeError):
+                continue
+        targets = arrange_positions(items, mode, per_line)
+        if not targets:
+            return False
+
+        by_id = {m.data.id: m for m in members}
+        moves = []
+        for node_id, x, y in targets:
+            member = by_id.get(node_id)
+            if member is None:
+                continue
+            try:
+                old = QPointF(member.pos())
+            except RuntimeError:
+                continue
+            new = QPointF(float(x), float(y))
+            if (new - old).manhattanLength() > 0.5:
+                moves.append((member, old, new))
+        if not moves:
+            return False
+
+        from modules.undo_commands import CmdArrangeGroup
+        self._push_command(CmdArrangeGroup(self, group, moves))
+        try:
+            name = group.name or ""
+        except (AttributeError, RuntimeError):
+            name = ""
+        self.statusBar().showMessage(
+            self.t("status.group_arranged", count=len(moves), name=name)
+            if self._i18n_available else f"Arranged {len(moves)} members")
+        self._mark_dirty()  # ← unsaved changes
+        return True
+
+    def _ask_arrange_group(self, group) -> bool:
+        """The group's "Arrange…" entry point: ask the mode, then apply it (v1.6, task 6).
+
+        The ONE entry point of both surfaces (the group's context menu and the Edit menu):
+        it answers the folded refusal itself (before asking anything), opens the dialog for
+        the mode/count and hands the answer to `_arrange_group()`.
+        """
+        if group is None:
+            return False
+        try:
+            if bool(group.is_collapsed()):
+                return self._arrange_group(group)   # the refusal path (one status line)
+            count = len(group.get_members())
+        except (AttributeError, RuntimeError):
+            return False
+        dlg_cls = host_attr(self, "ArrangeGroupDialog")
+        if dlg_cls is None:
+            return False
+        dlg = None
+        try:
+            dlg = dlg_cls(count, self)
+            if dlg.exec() != QDialog.Accepted:
+                return False
+            mode, per_line = dlg.mode(), dlg.per_line()
+        except Exception as e:  # noqa: BLE001 — a broken dialog must not crash the window
+            if self.log:
+                self.log.warning(f"Arrange dialog failed: {e}")
+            return False
+        finally:
+            if dlg is not None:
+                getattr(dlg, "deleteLater", lambda: None)()
+        return self._arrange_group(group, mode, per_line)
+
+    def _arrange_selected_group(self) -> bool:
+        """The Edit-menu / hotkey path: arrange the GROUP of the current selection.
+
+        Read from the scene (`get_selected_group()`), so the mouse needs no context menu —
+        and a selection without a group is reported instead of silently doing nothing.
+        """
+        try:
+            group = self.scene.get_selected_group()
+        except (AttributeError, RuntimeError):
+            group = None
+        if group is None:
+            self.statusBar().showMessage(
+                self.t("status.arrange_no_group") if self._i18n_available
+                else "Select a group on the map first")
+            return False
+        return self._ask_arrange_group(group)
+
     def _copy_text_to_clipboard(self, text, message_key: str = "status.copied_to_clipboard",
                                 **kw) -> bool:
         """Put TEXT on the clipboard and report it — the ONE text-clipboard helper (v1.5.5).
@@ -927,13 +1135,15 @@ class NodeOpsMixin:
         if reply != QMessageBox.Yes:
             return False
         # v0.8.3: deleting the connection — an undo command
+        # v1.6 (ROADMAP task 3): the command is PINNED to the arrow the user picked — a
+        # pair may carry several parallel links, and the direction alone cannot name one.
         from modules.undo_commands import CmdAddRemoveConnection
         src_id = arrow.source.data.id
         tgt_id = arrow.target.data.id
         lbl = arrow.label_text
         ctype = arrow.connection_type
         self._push_command(CmdAddRemoveConnection(self, self.scene, src_id, tgt_id,
-                                                  lbl, ctype, "remove"))
+                                                  lbl, ctype, "remove", arrow=arrow))
         self.statusBar().showMessage(self.t("status.connection_deleted"))
         self._update_counts_label()  # UI polish: the connection counter in the status bar
         self._mark_dirty()  # ← unsaved changes

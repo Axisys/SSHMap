@@ -11,11 +11,11 @@ except ImportError:
 try:
     from .ui import theme_qss
     from .ui.settings_dialog import (load_theme_settings, theme_from_settings,
-                                     apply_motion_setting)
+                                     apply_motion_setting, apply_density_setting)
 except ImportError:
     from ui import theme_qss
     from ui.settings_dialog import (load_theme_settings, theme_from_settings,
-                                    apply_motion_setting)
+                                    apply_motion_setting, apply_density_setting)
 
 
 def main():
@@ -60,6 +60,9 @@ def main():
         # v1.5rc1 (ROADMAP task 6): the "Reduce motion" flag of the same key,
         # installed BEFORE the window exists so no gesture can start un-flagged.
         apply_motion_setting(_saved_theme)
+        # v1.6 (ROADMAP task 2): the card density of the same nested key — installed
+        # before the first card is built, so no card is ever born in the other mode.
+        apply_density_setting(_saved_theme)
 
         win = MainWindow()
         win.show()

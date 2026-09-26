@@ -475,16 +475,19 @@ check("§7 without the platform hint the answer is DARK (the pre-v1.5rc1 behavio
       theme.system_color_scheme())
 
 from ui.settings_dialog import (SettingsDialog, load_theme_settings, theme_from_settings,  # noqa: E402
-                                motion_from_settings, apply_motion_setting)
+                                motion_from_settings, apply_motion_setting, density_from_settings,
+                                apply_density_setting)
 
 clear_cfg()
-check("§7 no `theme` key → dark + the default accent + the motion ON",
-      load_theme_settings() == {"mode": "dark", "accent": "#38bdf8", "motion": True}
+check("§7 no `theme` key → dark + the default accent + the motion ON + the normal card",
+      load_theme_settings() == {"mode": "dark", "accent": "#38bdf8", "motion": True,
+                                "density": "normal"}
       and theme_from_settings(load_theme_settings()) is theme.DARK,
       str(load_theme_settings()))
 write_cfg({"theme": {"mode": "auto", "accent": "#38bdf8", "motion": False}})
 check("§7 the round trip: `auto` + the motion flag come back unchanged",
-      load_theme_settings() == {"mode": "auto", "accent": "#38bdf8", "motion": False},
+      load_theme_settings() == {"mode": "auto", "accent": "#38bdf8", "motion": False,
+                                "density": "normal"},
       str(load_theme_settings()))
 try:
     theme.system_color_scheme = lambda: theme.MODE_LIGHT
@@ -495,7 +498,8 @@ check("§7 ...and the stored `auto` resolves to the platform's LIGHT (not to dar
       _stored_auto.canvas_bg == theme.LIGHT.canvas_bg, _stored_auto.canvas_bg)
 write_cfg({"theme": {"mode": "night", "accent": "#zzzzzz", "motion": "false"}})
 check("§7 a foreign mode, a broken accent and a STRING motion → the defaults (never a crash)",
-      load_theme_settings() == {"mode": "dark", "accent": "#38bdf8", "motion": True},
+      load_theme_settings() == {"mode": "dark", "accent": "#38bdf8", "motion": True,
+                                "density": "normal"},
       str(load_theme_settings()))
 check("§7 motion_from_settings: only a real boolean counts, a broken value means ON",
       motion_from_settings({"motion": False}) is False
@@ -507,6 +511,15 @@ check("§7 motion_from_settings: only a real boolean counts, a broken value mean
 check("§7 apply_motion_setting installs the flag into ui/motion.py",
       apply_motion_setting({"motion": False}) is False
       and apply_motion_setting({"motion": True}) is True)
+# v1.6 (ROADMAP task 2): the card density rides the same nested key — validated the same
+# way and installed into ui/theme.py, so a rejected dialog can put it back.
+check("§7 density_from_settings / apply_density_setting: a real id counts, a broken one is 'normal'",
+      density_from_settings({"density": "compact"}) == "compact"
+      and density_from_settings({"density": "huge"}) == "normal"
+      and density_from_settings(None) == "normal"
+      and apply_density_setting({"density": "compact"}) == "compact"
+      and theme.card_density() == "compact"
+      and apply_density_setting({"density": "normal"}) == "normal")
 clear_cfg()
 
 try:
@@ -534,7 +547,8 @@ check("§7 choosing `auto` emits the platform's instance live (a stubbed LIGHT h
       _emitted_auto and _emitted_auto[-1].canvas_bg == theme.LIGHT.canvas_bg,
       str([getattr(e, "canvas_bg", e) for e in _emitted_auto]))
 check("§7 collect() keeps the appearance as ONE nested key (the hub stays 22 keys)",
-      _dlg.collect()["theme"] == {"mode": "auto", "accent": _dlg._accent_hex, "motion": True}
+      _dlg.collect()["theme"] == {"mode": "auto", "accent": _dlg._accent_hex, "motion": True,
+                                  "density": "normal"}
       and len(_dlg.collect()) == 22,
       str(_dlg.collect()["theme"]))
 from ui import motion as motion_mod  # noqa: E402
@@ -546,6 +560,16 @@ _dlg.reject()
 check("§7 ...and Cancel() puts the flag back the way the dialog found it",
       motion_mod.motion_enabled() == _was_motion,
       f"{motion_mod.motion_enabled()} vs {_was_motion}")
+# v1.6 (ROADMAP task 2): the card density of the same tab is LIVE too — the combo installs
+# it at once and `reject()` restores the value the dialog opened with.
+_dlg.density_combo.setCurrentIndex(
+    next(i for i in range(_dlg.density_combo.count())
+         if _dlg.density_combo.itemData(i) == "compact"))
+check("§7 ...the density combo applies LIVE (the mode is installed at once)",
+      theme.card_density() == "compact", theme.card_density())
+_dlg.reject()
+check("§7 ...and Cancel() restores the card density the dialog opened with",
+      theme.card_density() == "normal", theme.card_density())
 _dlg.close()
 motion_mod.set_motion_enabled(True)
 

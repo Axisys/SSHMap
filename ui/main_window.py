@@ -27,12 +27,18 @@ try:
     from ..dialogs.ssh_config_import_dialog import SshConfigImportDialog
     # v1.5rc2: the export palette question (the print-friendly default + its opt-out)
     from ..dialogs.export_options_dialog import ExportOptionsDialog
+    # v1.6 (ROADMAP tasks 1/6): the bulk edit of the selection and the group arrangement —
+    # both are used by the mixin through host_attr (the MW.<name> test seam).
+    from ..dialogs.bulk_edit_dialog import BulkEditDialog
+    from ..dialogs.arrange_group_dialog import ArrangeGroupDialog
 except ImportError:
     from dialogs.add_server_dialog import AddServerDialog
     from dialogs.connection_dialog import ConnectionDialog
     from dialogs.ssh_connect_dialog import SSHConnectDialog
     from dialogs.ssh_config_import_dialog import SshConfigImportDialog
     from dialogs.export_options_dialog import ExportOptionsDialog
+    from dialogs.bulk_edit_dialog import BulkEditDialog
+    from dialogs.arrange_group_dialog import ArrangeGroupDialog
 
 # v1.1.4: AddServerDialog/ConnectionDialog/SSHConnectDialog/SSHTerminalWindow/_ext_term —
 # TEST SUBSTITUTION POINTS (MW.<name> = Fake): methods moved to mixins
@@ -84,6 +90,14 @@ try:  # v0.9.9.4: sidebar cluster (tree, tag filter, status markers, context men
 except ImportError:
     from sidebar import SidebarPanel
     from sidebar import list_delimiter, list_table_text
+
+try:  # v1.6 (ROADMAP task 5): the connection report — the rows the pure writer consumes
+    from ..storage.export_connections import connection_report_rows
+except ImportError:
+    try:
+        from storage.export_connections import connection_report_rows
+    except ImportError:  # flat layout without storage/ — the export reports itself unavailable
+        connection_report_rows = None
 
 try:  # v1.5rc3 (ROADMAP task 2): the status bar that can offer an Undo
     from .status_bar import UndoStatusBar
@@ -288,17 +302,21 @@ STATUS_FILTER_ORDER = ("online", "warn", "offline")
 # is therefore not exposed by PySide6 — the value is the documented one.
 _WIDGET_MAX_WIDTH = 16777215
 
-# ── v1.4.6 (ROADMAP follow-up): the four VIEW toggles of the toolbar ──────────
+# ── v1.4.6 (ROADMAP follow-up): the VIEW toggles of the toolbar ───────────────
 # (action id, icon name, i18n key, the literal fallback of the key) — ONE group at the
 # right end of the toolbar, in the order the surfaces sit in the window: the sidebar, the
-# map (whose collapsedness is the LIST mode), the minimap and the legend. Every button is
-# a MIRROR of its checkable "View" item — the menu item owns the hotkey and the state
-# (the v1.3.3.3 "ambiguous shortcut" rule), the button owns the click.
+# map (whose collapsedness is the LIST mode), the minimap, the legend and the activity
+# panel. Every button is a MIRROR of its checkable "View" item — the menu item owns the
+# hotkey and the state (the v1.3.3.3 "ambiguous shortcut" rule), the button owns the click.
+# v1.6 (ROADMAP task 7): the ACTIVITY switch joins the cluster — the deliverable is the
+# CLUSTER, not one button: a new panel joins it by naming its action, with no second
+# mechanism (the bookmark panel of the backlog is the next one).
 _VIEW_TOOLBAR_ITEMS = (
     ("view.toggle_sidebar", "sidebar_panel", "view.toggle_sidebar", "Sidebar"),
     ("view.toggle_map", "map_panel", "view.toggle_map", "Map"),
     ("view.toggle_minimap", "minimap", "view.toggle_minimap", "Minimap"),
     ("view.toggle_legend", "legend", "view.toggle_legend", "Legend"),
+    ("view.toggle_activity", "activity", "view.toggle_activity", "Activity"),
 )
 
 # action id → the MainWindow attribute holding the OWNER QAction (the wiring in
@@ -309,6 +327,7 @@ _VIEW_TOOLBAR_ACTIONS = {
     "view.toggle_map": "act_show_map",
     "view.toggle_minimap": "act_show_minimap",
     "view.toggle_legend": "act_show_legend",
+    "view.toggle_activity": "act_show_activity",
 }
 
 
@@ -495,13 +514,14 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         if theme_qss is not None:
             try:
                 from ui.settings_dialog import (load_theme_settings, theme_from_settings,
-                                                apply_motion_setting)
+                                                apply_motion_setting, apply_density_setting)
             except ImportError:  # flat launch from the project root
                 try:
                     from settings_dialog import (load_theme_settings, theme_from_settings,
-                                                 apply_motion_setting)
+                                                 apply_motion_setting, apply_density_setting)
                 except ImportError:
                     load_theme_settings = theme_from_settings = apply_motion_setting = None
+                    apply_density_setting = None
             if load_theme_settings is not None:
                 try:
                     _saved_theme = load_theme_settings()
@@ -511,6 +531,10 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
                     # installed here as well, because a MainWindow built directly
                     # (a test, an embedder) never goes through main.py.
                     apply_motion_setting(_saved_theme)
+                    # v1.6 (ROADMAP task 2): the card density of the same key — a window
+                    # built directly must come up in the user's card mode too.
+                    if apply_density_setting is not None:
+                        apply_density_setting(_saved_theme)
                 except Exception as e:  # noqa: BLE001 — the look must not break startup
                     print(f"[theme] the saved theme was not applied: {e}", flush=True)
         # v1.5rc1 (ROADMAP task 6): in the "Auto (system)" mode the window follows
@@ -2215,7 +2239,7 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         # hotkey assigned to their action (before, Ctrl+Shift+A worked in the menu
         # and silently not on the toolbar button of the same action).
         #
-        # ── v1.5rc4 (ROADMAP task 2): the PINNED set of the toolbar ────────────
+        # v1.5rc4 (ROADMAP task 2): the PINNED set of the toolbar ────────────
         # The toolbar stopped repeating what the SIDEBAR and the PALETTE already own
         # (the pinned decision of the release — "the kept set is pinned at the start"):
         #
@@ -2226,10 +2250,11 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         #     menu and in the palette.
         #
         # What remains is the pinned keep-set: the three file verbs, "Center" / "Fit",
-        # undo/redo and the FOUR view toggles (the panel switches have no other
-        # one-click surface). The first five are OVERFLOWABLE — on a narrow window they
-        # move into the "»" menu instead of being squeezed (the second pinned decision:
-        # overflow, not wrapping); undo/redo and the toggles never move.
+        # undo/redo and the FIVE view toggles (the panel switches have no other
+        # one-click surface; v1.6 adds the activity panel to the group). The first five
+        # are OVERFLOWABLE — on a narrow window they move into the "»" menu instead of
+        # being squeezed (the second pinned decision: overflow, not wrapping); undo/redo
+        # and the toggles never move.
         _fallback = {
             "file.new_project": "New Project", "file.open": "Open...", "file.save": "Save",
             "view.center_map": "Center map", "view.fit_map": "Fit Map to Content",
@@ -2329,6 +2354,9 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         self._minimap_toolbar_btn = self._view_toolbar_buttons["view.toggle_minimap"]
         self._sidebar_toolbar_btn = self._view_toolbar_buttons["view.toggle_sidebar"]
         self._map_toolbar_btn = self._view_toolbar_buttons["view.toggle_map"]
+        # v1.6 (ROADMAP task 7): the activity panel's button — the fifth member of the
+        # cluster (the attribute survives for the same reason as the four above).
+        self._activity_toolbar_btn = self._view_toolbar_buttons["view.toggle_activity"]
 
         # ── v1.5rc4 (ROADMAP task 2): the "»" OVERFLOW menu ────────────────────
         # Not Qt's own toolbar extension: that one is a popup of ICONS with no labels,
@@ -2802,6 +2830,20 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         edit_menu.addSeparator()
         self._add_menu_action(edit_menu, "edit.connect_selected", self._connect_selected_nodes,
                               "edit.connect_selected")
+        # v1.6 (ROADMAP task 1): the BULK EDIT of the selection — tags / comment / quick
+        # launch in ONE undo step. A permanent Edit-menu item, like the multi-selection
+        # pair above: a context menu is rebuilt on every right click, so its QAction
+        # cannot carry a configurable sequence. Enabled by `_sync_selection_state()`.
+        self.act_bulk_edit = self._add_menu_action(
+            edit_menu, "edit.bulk_edit", self._bulk_edit_selection, "edit.selected")
+        self.act_bulk_edit.setEnabled(False)   # nothing is selected at construction time
+        # v1.6 (ROADMAP task 6): the auto-arrangement of a GROUP's members. It sits next
+        # to the group verbs of the context menu; the id keeps the `edit.` prefix so
+        # `action_family()` files it under Edit in the "Hotkeys" tab (a `group.…` prefix
+        # would fall back instead of joining the table).
+        self.act_arrange_group = self._add_menu_action(
+            edit_menu, "ctx.arrange_group", self._arrange_selected_group, "edit.arrange_group")
+        self.act_arrange_group.setEnabled(False)   # no group is selected at construction
         self._add_menu_action(edit_menu, "edit.delete_selected", self._delete_selected_nodes,
                               "edit.delete_selected")
         # v1.3.3.3 (task 5): the on-demand status round — a permanent Edit-menu item
@@ -2864,6 +2906,14 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
             export_menu, "file.copy_list", self._copy_list_table, "file.copy_list")
         self.act_export_list = self._add_menu_action(
             export_menu, "file.export_list", self._export_list_table, "file.export_list")
+        # v1.6 (ROADMAP task 5): the SECOND report of the DATA family — "who talks to
+        # whom" as a table (one row per arrow: two endpoints, the declared type, the
+        # direction and the bidirectional flag). It rides the SAME pure RFC-4180 writer
+        # the inventory report uses (`ui/sidebar.list_table_text`), so a label carrying a
+        # comma, a quote or a line break cannot leave the application two different ways.
+        self.act_export_connections = self._add_menu_action(
+            export_menu, "file.export_connections", self._export_connections_table,
+            "file.export_connections")
 
         # Profile menu
         profile_menu = menubar.addMenu(self.t("menu.profile") if self._i18n_available else "Profile")
@@ -2950,18 +3000,20 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         self._wire_view_toolbar_button("view.toggle_legend", self.act_show_legend)
         # v1.5.2 (ROADMAP task 3): the ACTIVITY panel — the same "created manually +
         # toggled(bool)" pattern and the same registry rule (an EMPTY default:
-        # assignable, no key taken from anyone). It is deliberately the ONLY panel
-        # toggle WITHOUT a toolbar mirror: the v1.5rc4 toolbar overflow policy measures
-        # the live buttons, and a fifth view toggle would crowd the strip for a surface
-        # that is opened to READ, not to glance at (it has a menu item, a hotkey slot and
-        # the command palette instead).
+        # assignable, no key taken from anyone). v1.6 (ROADMAP task 7): it JOINS the
+        # toolbar's view cluster — the panel switches became the deliverable of that
+        # task, and the activity history is a surface a user glances at as often as the
+        # legend (the cluster is wired in `_setup_toolbar`, which runs before this
+        # method — the pair is joined here like the four toggles above).
         self.act_show_activity = view_menu.addAction(
             self.t("view.toggle_activity") if self._i18n_available else "Activity panel")
         self.act_show_activity.setCheckable(True)
         self.act_show_activity.setChecked(bool(getattr(self, "_activity_enabled", False)))
+        set_action_icon(self.act_show_activity, "activity")
         self.act_show_activity.toggled.connect(self._toggle_activity)
         self._register_i18n(self.act_show_activity, "view.toggle_activity")
         self._register_hotkey_target("view.toggle_activity", self.act_show_activity)
+        self._wire_view_toolbar_button("view.toggle_activity", self.act_show_activity)
         # v1.2.4.1 (task 2): corner collapse buttons — the same QAction (toggle()).
         # v1.2.4.1-fix (QA request): the icon — a "◇" diamond on both panels, both
         # at the bottom right (the sidebar's bottom row / the map's right BOTTOM corner — the top is
@@ -4225,18 +4277,23 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         # installed here as well (`apply_motion_setting` reads `theme.motion`).
         try:
             from ui.settings_dialog import (load_theme_settings, theme_from_settings,
-                                            apply_motion_setting)
+                                            apply_motion_setting, apply_density_setting)
         except ImportError:  # flat launch from the project root
             try:
                 from settings_dialog import (load_theme_settings, theme_from_settings,
-                                             apply_motion_setting)
+                                             apply_motion_setting, apply_density_setting)
             except ImportError:
                 load_theme_settings = theme_from_settings = apply_motion_setting = None
+                apply_density_setting = None
         if load_theme_settings is not None:
             try:
                 _saved_theme = load_theme_settings()
                 self.apply_theme(theme_from_settings(_saved_theme))
                 apply_motion_setting(_saved_theme)
+                # v1.6 (ROADMAP task 2): the card density rides the same nested key —
+                # installed before the repaint walk below so the cards follow it there.
+                if apply_density_setting is not None:
+                    apply_density_setting(_saved_theme)
             except Exception as e:  # noqa: BLE001 — the look must not break applying
                 if self.log:
                     self.log.warning(f"Apply theme settings failed: {e}")
@@ -4429,11 +4486,40 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
                 if item.data(0, Qt.UserRole) == selected_id:
                     self.tree.setCurrentItem(item)
                     break
+            # v1.6 (ROADMAP tasks 1/6): the two selection-driven Edit items follow what is
+            # selected — "Bulk edit" needs a card, "Arrange group members" needs a group.
+            self._sync_bulk_actions()
         except RuntimeError:
             # PySide6/Qt teardown on process exit: the scene's C++ object is already
             # destroyed, yet the selectionChanged signal reached a live Python slot.
             # A normal state — silently ignore it (otherwise a traceback in the console).
             pass
+
+    def _sync_bulk_actions(self):
+        """Enable the two selection-driven v1.6 Edit items (the `act_backups` pattern).
+
+        "Bulk edit selection…" is offered while at least one CARD is selected (a bulk of
+        one is a legitimate edit and is what the keyboard path reaches), "Arrange group
+        members…" while a GROUP is selected — the same method the context-menu rows call,
+        so the two surfaces can never disagree about what is reachable. Never raises: a
+        selection change can arrive during Qt teardown.
+        """
+        try:
+            nodes = self.selected_nodes()
+        except (AttributeError, RuntimeError):
+            nodes = []
+        try:
+            group = self.scene.get_selected_group()
+        except (AttributeError, RuntimeError):
+            group = None
+        for action, enabled in ((getattr(self, "act_bulk_edit", None), bool(nodes)),
+                                (getattr(self, "act_arrange_group", None), group is not None)):
+            if action is None:
+                continue
+            try:
+                action.setEnabled(bool(enabled))
+            except RuntimeError:
+                pass  # Qt teardown — the QAction is already destroyed
 
     def _show_properties(self):
         node = self.scene.get_selected_node()
@@ -4641,13 +4727,34 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
     # ── v0.9.1: export the map to an image + a background image ────
 
     def _connect_background_signals(self, bg):
-        """Wire the background's signals to the dirty marker (undo — NOT needed:
-        the background geometry is stored in JSON but does not enter the undo stack)."""
+        """Wire the background's signals: the dirty marker + the undo commands (v1.6, task 4).
+
+        The incremental `moved`/`resized` signals keep the project dirty during the
+        gesture; the COMPLETED `moveCommitted`/`resizeCommitted` ones push the ONE command
+        of the gesture (the group's own wiring, `_connect_group_signals`). Before v1.6 the
+        background geometry was the last mouse-driven object outside the undo stack.
+        """
         try:
             bg.moved.connect(lambda *_a: self._mark_dirty())
             bg.resized.connect(lambda *_a: self._mark_dirty())
+            bg.moveCommitted.connect(
+                lambda op, np, b=bg: self._commit_background_move(b, op, np))
+            bg.resizeCommitted.connect(
+                lambda w0, h0, w1, h1, b=bg: self._commit_background_resize(b, w0, h0, w1, h1))
         except Exception:  # noqa: BLE001
             pass
+
+    def _commit_background_move(self, background, old_pos, new_pos):
+        """v1.6 (ROADMAP task 4): a background-move gesture finished -> CmdMoveBackground."""
+        from modules.undo_commands import CmdMoveBackground
+        self._push_command(CmdMoveBackground(self, background, old_pos, new_pos))
+        self._mark_dirty()
+
+    def _commit_background_resize(self, background, w0, h0, w1, h1):
+        """v1.6 (ROADMAP task 4): a background resize finished -> CmdResizeBackground."""
+        from modules.undo_commands import CmdResizeBackground
+        self._push_command(CmdResizeBackground(self, background, (w0, h0), (w1, h1)))
+        self._mark_dirty()
 
     # ── v1.5rc2 (ROADMAP task 3): the PRINT-FRIENDLY export palette ───────────────
 
@@ -4886,6 +4993,53 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
             self.statusBar().showMessage(self.t("status.list_empty"))
         except Exception:  # noqa: BLE001 — a hint must not break the action
             pass
+
+    def _export_connections_table(self):
+        """Export the map's CONNECTIONS as CSV or TSV (v1.6, ROADMAP task 5).
+
+        The second DATA report, built on the SAME pure writer as the inventory export
+        (`list_table_text()`): the rows come from `storage/export_connections.py`, the
+        delimiter and the file dialog follow the sibling above, and the file is UTF-8 with
+        a BOM for the same reason (aliases and labels in the user's own alphabet, opened by
+        Excel). A map without a single connection reports that instead of writing a header.
+        """
+        try:
+            arrows = list(self.scene.arrows())
+        except (AttributeError, RuntimeError):
+            arrows = []
+        if connection_report_rows is None:
+            return
+        rows = connection_report_rows(arrows, self.t if self._i18n_available else None)
+        if not rows:
+            self.statusBar().showMessage(
+                self.t("status.connections_empty") if self._i18n_available
+                else "Nothing to report — the map has no connections")
+            return
+        path, selected_filter = QFileDialog.getSaveFileName(
+            self, self.t("file.export_connections"), "",
+            "CSV — Comma Separated Values (*.csv);;TSV — Tab Separated Values (*.tsv)")
+        if not path:
+            return
+        fmt = "tsv" if "TSV" in (selected_filter or "") else "csv"
+        lowered = str(path).lower()
+        if lowered.endswith(".tsv"):
+            fmt = "tsv"
+        elif lowered.endswith(".csv"):
+            fmt = "csv"
+        else:
+            path += f".{fmt}"
+        try:
+            with open(path, "w", encoding="utf-8-sig", newline="") as f:
+                f.write(list_table_text(rows, list_delimiter(fmt)))
+            self.statusBar().showMessage(
+                self.t("status.connections_exported", file=os.path.basename(path)))
+            if self.log:
+                self.log.info("Connection list exported",
+                              extra={"file": path, "format": fmt, "rows": len(rows) - 1})
+        except Exception as e:  # noqa: BLE001 — a GUI action must not crash the app
+            QMessageBox.critical(
+                self, self.t("msg.error_title"),
+                self.t("msg.export_failed", error=str(e)))
 
     def _copy_list_table(self):
         """Copy the VISIBLE server table to the clipboard as TSV (v1.5.5, ROADMAP task 2).

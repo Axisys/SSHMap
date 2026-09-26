@@ -448,9 +448,12 @@ class CmdAddRemoveConnection(_MapCommand):
 
     def __init__(self, win, scene, source_id: str, target_id: str,
                  label: str, ctype: str, mode: str = "add",
-                 bidirectional: bool = False):
+                 bidirectional: bool = False, arrow=None):
         # v1.2.6: bidirectional is at the tail of the signature (after mode)
         # so that old positional calls (mode as the 7th argument) don't break.
+        # v1.6 (ROADMAP task 3): `arrow` (optional, keyword-only in practice) pins the
+        # EXACT link a "remove" command owns — a pair may carry several parallel links
+        # now, so the direction alone no longer identifies one.
         super().__init__(win, "Add connection" if mode == "add" else "Delete connection")
         self._scene = scene
         self._src = source_id
@@ -459,17 +462,39 @@ class CmdAddRemoveConnection(_MapCommand):
         self._ctype = ctype
         self._mode = mode
         self._bidir = bool(bidirectional)
+        self._arrow = arrow
 
     def _find_arrow(self):
-        for a in self._scene.arrows():
+        """The arrow this command owns — the pinned one, else the LAST match (v1.6, task 3).
+
+        A pair of cards may carry SEVERAL links now (the parallel-link offset of v1.6), so
+        a forward scan would undo somebody else's arrow: a "remove" command pins the link
+        it was built from, and the add/undo path takes the last match — the one this
+        command appended. Before the change there could be at most one match per
+        direction, so both rules are a strict refinement, never a behaviour change.
+        """
+        pinned = self._arrow
+        if pinned is not None:
+            try:
+                if pinned in self._scene.arrows():
+                    return pinned
+            except RuntimeError:
+                pass  # Qt teardown — the pinned arrow is gone; fall back to the scan
+        for a in reversed(self._scene.arrows()):
             if (a.source.data.id == self._src and a.target.data.id == self._tgt):
                 return a
         return None
 
+    def _set_arrow(self, arrow):
+        """Remember the link a redo/undo really created (the remove path's pin)."""
+        if arrow is not None:
+            self._arrow = arrow
+
     def redo(self):
         if self._mode == "add":
-            self._scene.add_connection(self._src, self._tgt, self._label, self._ctype,
-                                       bidirectional=self._bidir)
+            arrow = self._scene.add_connection(self._src, self._tgt, self._label,
+                                               self._ctype, bidirectional=self._bidir)
+            self._set_arrow(arrow)
         else:
             arrow = self._find_arrow()
             if arrow is not None:
@@ -482,8 +507,9 @@ class CmdAddRemoveConnection(_MapCommand):
             if arrow is not None:
                 self._scene.remove_connection(arrow)
         else:
-            self._scene.add_connection(self._src, self._tgt, self._label, self._ctype,
-                                       bidirectional=self._bidir)
+            arrow = self._scene.add_connection(self._src, self._tgt, self._label,
+                                               self._ctype, bidirectional=self._bidir)
+            self._set_arrow(arrow)
         self._refresh()
 
 
@@ -779,3 +805,139 @@ class CmdEditNodeData(_MapCommand):
     def undo(self):
         self._apply(self._old)
         self._refresh()
+
+
+# ── v1.6 (ROADMAP task 1): CmdEditSelected — ONE undo step for a whole selection ──
+
+class CmdEditSelected(_MapCommand):
+    """Bulk edit of the selection: tags / comment / quick launch in ONE command (v1.6).
+
+    The `CmdAddRemoveNodeBatch` pattern — per-node BEFORE and AFTER values, one entry in
+    the stack, so Ctrl+Z puts every card back byte for byte. The command owns the three
+    fields of the bulk dialog and nothing else: a property edited elsewhere while the
+    dialog was open (a status probe, a collected fact) is NOT captured and NOT restored.
+
+    A field the user left at "leave unchanged" never reaches this command — the dialog
+    hands over the COMPLETE before/after triple of the values it really changes
+    (`dialogs/bulk_edit_dialog.bulk_change_values()` is the pure half).
+
+    NOT destructive: `DESTRUCTIVE_MODES` stays empty, so no "Undo" affordance is armed —
+    an edit loses nothing that a Ctrl+Z from the menu cannot reach.
+    """
+
+    def __init__(self, win, edits):
+        """edits — an iterable of (node, old_values, new_values) dicts.
+
+        A values dict carries the three keys of the bulk dialog: "tags" (a list),
+        "comment" (a string) and "quick_launch" (a list of entry dicts).
+        """
+        super().__init__(win, f"Edit {len(list(edits))} servers")
+        self._edits = [(node, _values_copy(old), _values_copy(new))
+                       for node, old, new in list(edits)]
+
+    def _apply(self, use_old: bool):
+        for node, old, new in self._edits:
+            values = old if use_old else new
+            try:
+                if node.scene() is None:
+                    continue  # Qt teardown / the card left the map — nothing to apply
+                node.data.tags = list(values.get("tags") or [])
+                node.data.comment = str(values.get("comment") or "")
+                node.data.quick_launch = copy.deepcopy(list(values.get("quick_launch") or []))
+                node.update_appearance()
+                # tags reach the card through two channels (the icon tone and the chip) —
+                # the same pair `CmdEditNodeData` refreshes
+                node.refresh_tags()
+            except (RuntimeError, AttributeError):
+                continue  # one broken card must not stop the rest of the batch
+
+    def redo(self):
+        self._apply(False)
+        self._refresh()
+
+    def undo(self):
+        self._apply(True)
+        self._refresh()
+
+
+def _values_copy(values) -> dict:
+    """A deep-enough copy of a bulk-edit value dict (the quick-launch list included)."""
+    source = values if isinstance(values, dict) else {}
+    return {
+        "tags": list(source.get("tags") or []),
+        "comment": str(source.get("comment") or ""),
+        "quick_launch": copy.deepcopy(list(source.get("quick_launch") or [])),
+    }
+
+
+# ── v1.6 (ROADMAP task 4): the background image joins the undo stack ─────────────
+
+class CmdMoveBackground(_MapCommand):
+    """A finished background MOVE gesture (v1.6, ROADMAP task 4).
+
+    The last mouse-driven object outside the stack: the image used to only mark the
+    project dirty, so Ctrl+Z after dragging a floor plan rolled back something else.
+    The `CmdMoveNode` pattern — the item reports the finished gesture (the old and the
+    new position as QPointF) and the window pushes ONE command per gesture.
+    """
+
+    def __init__(self, win, background, old_pos: QPointF, new_pos: QPointF):
+        super().__init__(win, "Move background")
+        self._background = background
+        self._old = QPointF(old_pos)
+        self._new = QPointF(new_pos)
+
+    def _apply(self, pos: QPointF):
+        try:
+            if self._background.scene() is not None:
+                self._background.setPos(pos)
+        except RuntimeError:
+            pass  # Qt teardown — the item was destroyed, nothing to apply
+
+    def redo(self):
+        self._apply(self._new)
+
+    def undo(self):
+        self._apply(self._old)
+
+
+class CmdResizeBackground(_MapCommand):
+    """A finished background RESIZE gesture (v1.6, ROADMAP task 4) — the `CmdResizeGroup` pair."""
+
+    def __init__(self, win, background, old_size, new_size):
+        super().__init__(win, "Resize background")
+        self._background = background
+        self._old = tuple(old_size)   # (w, h)
+        self._new = tuple(new_size)
+
+    def _apply(self, size):
+        try:
+            if self._background.scene() is not None:
+                self._background.set_bg_size(size[0], size[1])
+        except RuntimeError:
+            pass
+
+    def redo(self):
+        self._apply(self._new)
+
+    def undo(self):
+        self._apply(self._old)
+
+
+# ── v1.6 (ROADMAP task 6): CmdArrangeGroup — a group's members in one gesture ────
+
+class CmdArrangeGroup(CmdMoveNodes):
+    """The auto-arrangement of a group's members (v1.6, ROADMAP task 6).
+
+    The `CmdMoveNodes` pattern with its own name: the positions before/after of every
+    member, ONE entry in the stack, so Ctrl+Z returns every card to where it was — the
+    arrangement is a MOVE of cards and never a resize of the group frame (the geometric
+    membership of `MapScene.resync_group_members()` keeps deciding who is inside).
+
+    NOT destructive: an arrangement loses nothing, so `offers_undo()` stays False.
+    """
+
+    def __init__(self, win, group, moves):
+        super().__init__(win, moves)
+        self.setText(f"Arrange {len(self._moves)} members")
+        self._group = group

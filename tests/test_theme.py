@@ -371,14 +371,14 @@ from ui.settings_dialog import (SettingsDialog, accent_swatches,  # noqa: E402
 
 clear_cfg()
 check("§6 no `theme` key → DARK + the default accent + the motion ON (the defaults ARE the behaviour)",
-      load_theme_settings() == {"mode": "dark", "accent": "#38bdf8", "motion": True}
+      load_theme_settings() == {"mode": "dark", "accent": "#38bdf8", "motion": True, "density": "normal"}
       and theme_from_settings(load_theme_settings()) is theme.DARK,
       str(load_theme_settings()))
 
 write_cfg({"theme": {"mode": "light", "accent": "#b838f8"}})
 _stored = load_theme_settings()
 check("§6 the round trip: a saved light theme + a custom accent come back unchanged",
-      _stored == {"mode": "light", "accent": "#b838f8", "motion": True}, str(_stored))
+      _stored == {"mode": "light", "accent": "#b838f8", "motion": True, "density": "normal"}, str(_stored))
 _instance = theme_from_settings(_stored)
 check("§6 ...and become the LIGHT instance with that hue (the hex is a hue in disguise)",
       _instance.canvas_bg == theme.LIGHT.canvas_bg
@@ -388,23 +388,23 @@ check("§6 ...and become the LIGHT instance with that hue (the hex is a hue in d
 
 write_cfg({"theme": "not-an-object"})
 check("§6 a broken `theme` value (a string) → the defaults, and the app still starts",
-      load_theme_settings() == {"mode": "dark", "accent": "#38bdf8", "motion": True})
+      load_theme_settings() == {"mode": "dark", "accent": "#38bdf8", "motion": True, "density": "normal"})
 write_cfg({"theme": {"mode": 42, "accent": "#zzzzzz"}})
 check("§6 a foreign mode + an invalid colour → the defaults (per value, never a crash)",
-      load_theme_settings() == {"mode": "dark", "accent": "#38bdf8", "motion": True},
+      load_theme_settings() == {"mode": "dark", "accent": "#38bdf8", "motion": True, "density": "normal"},
       str(load_theme_settings()))
 write_cfg({"theme": {"mode": "LIGHT", "accent": "38BDF8"}})
 check("§6 the mode is case-insensitive and a missing '#' is tolerated",
-      load_theme_settings() == {"mode": "light", "accent": "#38bdf8", "motion": True},
+      load_theme_settings() == {"mode": "light", "accent": "#38bdf8", "motion": True, "density": "normal"},
       str(load_theme_settings()))
 # v1.5rc1: the third mode + the motion flag of the same nested key.
 write_cfg({"theme": {"mode": "auto", "accent": "#38bdf8", "motion": False}})
 check("§6 v1.5rc1: 'auto' is a valid mode and a real `motion` boolean round-trips",
-      load_theme_settings() == {"mode": "auto", "accent": "#38bdf8", "motion": False},
+      load_theme_settings() == {"mode": "auto", "accent": "#38bdf8", "motion": False, "density": "normal"},
       str(load_theme_settings()))
 write_cfg({"theme": {"mode": "dark", "accent": "#38bdf8", "motion": "yes"}})
 check("§6 v1.5rc1: a broken motion value → the motion ON (today's behaviour)",
-      load_theme_settings() == {"mode": "dark", "accent": "#38bdf8", "motion": True},
+      load_theme_settings() == {"mode": "dark", "accent": "#38bdf8", "motion": True, "density": "normal"},
       str(load_theme_settings()))
 clear_cfg()
 
@@ -434,7 +434,8 @@ check("§6 the swatch carries its colour in the QSS (the user sees the accent be
       theme.accent_hex() in dlg._swatch_buttons["sky"][0].styleSheet(),
       dlg._swatch_buttons["sky"][0].styleSheet())
 check("§6 collect() carries the theme as ONE nested key (the appearance choice)",
-      dlg.collect()["theme"] == {"mode": "dark", "accent": "#38bdf8", "motion": True}
+      dlg.collect()["theme"] == {"mode": "dark", "accent": "#38bdf8", "motion": True,
+                                 "density": "normal"}
       and len(dlg.collect()) == 22,
       str(sorted(dlg.collect())))
 
@@ -476,7 +477,8 @@ check("§6 an unusable hex is REFUSED — the field returns to the last valid co
       f"field={dlg.accent_hex_edit.text()!r} stored={dlg._accent_hex!r} "
       f"accent={_before.accent} hue={_before.hue()}")
 check("§6 collect() now describes the tab's choice (light + the user's own colour)",
-      dlg.collect()["theme"] == {"mode": "light", "accent": dlg._accent_hex, "motion": True}
+      dlg.collect()["theme"] == {"mode": "light", "accent": dlg._accent_hex, "motion": True,
+                                 "density": "normal"}
       and theme.hex_hue(dlg.collect()["theme"]["accent"]) == _before.hue(),
       str(dlg.collect()["theme"]))
 dlg.close()

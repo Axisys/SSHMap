@@ -457,6 +457,24 @@ def _draw_legend(p):
         p.drawPath(line)
 
 
+def _draw_activity(p):
+    """v1.6 (ROADMAP task 7): the ACTIVITY panel — a log of rows with a leading mark.
+
+    The legend's rhythm without the swatches: three rows, each a small DOT and a line,
+    and the newest row (the TOP one) carries a longer line — the history reads
+    newest-first, so the glyph says "a list that grows at the top". Drawn in the same
+    stroke as the rest of the set, so it stays readable at menu size (16 px).
+    """
+    for index, y in enumerate((5.0, 10.0, 15.0)):
+        dot = QPainterPath()
+        dot.addEllipse(QPointF(4.6, float(y)), 1.3, 1.3)
+        p.drawPath(dot)
+        line = QPainterPath()
+        line.moveTo(8.6, float(y))
+        line.lineTo(16.6 if index == 0 else 14.6, float(y))
+        p.drawPath(line)
+
+
 _DRAWERS = {
     "new": _draw_new,
     "open": _draw_open,
@@ -478,6 +496,9 @@ _DRAWERS = {
     "minimap": _draw_minimap,
     # v1.4.5 (ROADMAP task 4): the legend panel (the View menu item + the toolbar button)
     "legend": _draw_legend,
+    # v1.6 (ROADMAP task 7): the ACTIVITY panel — the fifth view toggle, which joins the
+    # toolbar cluster with its own glyph (the View menu item + the toolbar button).
+    "activity": _draw_activity,
     # v1.3.3.3 (task 2): the zoom pair of the View menu (project-drawn, no image files)
     "zoom_in": _draw_zoom_in,
     "zoom_out": _draw_zoom_out,

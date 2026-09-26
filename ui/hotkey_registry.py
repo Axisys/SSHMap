@@ -135,11 +135,24 @@ HOTKEY_ACTIONS: Dict[str, dict] = {
     # default like their export siblings: assignable, no key taken from anyone.
     "file.copy_list":       {"label": "file.copy_list",       "default": ""},
     "file.export_list":     {"label": "file.export_list",     "default": ""},
+    # v1.6 (ROADMAP task 5): "Export Connections…" — the second DATA report ("who talks to
+    # whom", one row per arrow), on the same pure RFC-4180 writer as the inventory report.
+    # An EMPTY default like its report sibling.
+    "file.export_connections": {"label": "file.export_connections", "default": ""},
     "file.backups":         {"label": "file.backups",         "default": ""},
     "file.restore_autosave": {"label": "file.restore_autosave", "default": ""},
     "file.exit":            {"label": "file.exit",            "default": ""},
     "edit.connect_selected": {"label": "edit.connect_selected", "default": ""},
     "edit.delete_selected": {"label": "edit.delete_selected", "default": ""},
+    # v1.6 (ROADMAP task 1): "Bulk edit selection…" — tags / comment / quick launch for
+    # the whole selection in ONE undo step. An EMPTY default like its multi-selection
+    # neighbours, so the keyboard can reach an action that only lived in a context menu.
+    "edit.selected":        {"label": "edit.bulk_edit",       "default": ""},
+    # v1.6 (ROADMAP task 6): "Arrange group members…" — the members of a group line up in
+    # one gesture. The id keeps an EXISTING family prefix (`edit.`) on purpose:
+    # `action_family()` derives the "Hotkeys" tab's family from the prefix, and a
+    # `group.…` id would fall back instead of joining the table.
+    "edit.arrange_group":   {"label": "ctx.arrange_group",    "default": ""},
     "view.center_map":      {"label": "view.center_map",      "default": ""},
     # v1.5rc4 (ROADMAP task 6): "Focus the map" — the ONE new registry action of the
     # release ("at most ONE"): it hands the keyboard to the map canvas, which then walks

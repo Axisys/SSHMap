@@ -1321,6 +1321,17 @@ class MapView(QGraphicsView):
                         if hasattr(w, "_delete_selected_nodes"):
                             w._delete_selected_nodes()
                     act_delmulti.triggered.connect(_del_sel)
+                # v1.6 (ROADMAP task 1): the BULK EDIT of the selection — right next to
+                # "connect selected" / "delete selected", the two neighbours the plan
+                # names. The window owns the dialog and the ONE undo command; the row
+                # only reports the gesture (and the Edit menu carries the same slot).
+                if hasattr(win, "_bulk_edit_selection"):
+                    act_bulk = menu.addAction(_t("edit.bulk_edit"))
+                    def _bulk_sel(checked=False):  # checked — a bool from triggered
+                        w = self.window()
+                        if hasattr(w, "_bulk_edit_selection"):
+                            w._bulk_edit_selection()
+                    act_bulk.triggered.connect(_bulk_sel)
 
         # ── v0.7.3: arrow (connection) context menu ───────────────
         if arrow is not None and node is None:
@@ -1416,6 +1427,16 @@ class MapView(QGraphicsView):
                     if hasattr(w, "_toggle_group_collapsed"):
                         w._toggle_group_collapsed(g)
                 act_fold.triggered.connect(_fold)
+                # v1.6 (ROADMAP task 6): the auto-arrangement — next to Rename / Fold /
+                # Delete, the third verb of a group. The mode question belongs to the
+                # window (`_ask_arrange_group`), which also answers the folded refusal.
+                if hasattr(win, "_ask_arrange_group"):
+                    act_arrange = menu.addAction(_t("ctx.arrange_group"))
+                    def _arrange(checked=False, g=win_grp):  # checked — a bool from triggered
+                        w = self.window()
+                        if hasattr(w, "_ask_arrange_group"):
+                            w._ask_arrange_group(g)
+                    act_arrange.triggered.connect(_arrange)
                 act_dg = menu.addAction(_t("ctx.delete_group"))
                 def _del_grp(checked=False, g=win_grp):  # v0.8.1: checked — a bool from triggered
                     w = self.window()

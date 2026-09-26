@@ -136,6 +136,7 @@ of the file itself.
 | `test_main_window_split.py` | — | v1.1.4: main_window.py hygiene — split into mixins (ROADMAP v1.1.4 acceptance). |
 | `test_map_bigpicture.py` | — | v1.4.2 — The big-picture map level: the minimap, the cached card drop-shadow, the group fold. |
 | `test_map_images.py` | — | v1.5.1 — map images: "Copy Map as Image" and the fixed-frame documentation poster. |
+| `test_map_scale.py` | — | v1.6 — the map at scale: bulk editing, density, arrangement and the connections out. |
 | `test_map_search.py` | — | Regression v0.9.8 — map search (Ctrl+F). |
 | `test_menu_actions_regression.py` | — | v1.2.4-fix — REGRESSION: the real click path on checkable menu items (QAction.trigger()). |
 | `test_motion.py` | — | v1.4.4 — Motion: the standards, the camera flights, the node scale-in, the hover focus/dim. |

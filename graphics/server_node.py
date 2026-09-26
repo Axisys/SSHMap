@@ -307,6 +307,11 @@ class ServerNode(QGraphicsItemGroup):
         self.data = data
         self._current_width = self.MIN_NODE_WIDTH
         self._current_height = self.MIN_NODE_HEIGHT  
+        # v1.6 (ROADMAP task 2): the card density this card was laid out with — the
+        # LIVE value of `ui/theme.py`, kept per item so `refresh_theme()` can see that
+        # the switch moved and re-lay the card out (a value captured once is a bug in
+        # this system; the re-read in `sync_density()` is the fix).
+        self._density = theme.card_density()
         
         self._selected = False
         self._hover = False
@@ -656,7 +661,7 @@ class ServerNode(QGraphicsItemGroup):
         whose single line has no second row — hides the chip and paints exactly like a
         pre-v1.5 card.
         """
-        text = "" if getattr(self.data, "collapsed", False) \
+        text = "" if (getattr(self.data, "collapsed", False) or self._is_compact()) \
             else env_tag(getattr(self.data, "tags", None))
         right = float(width) - self.BADGE_RIGHT_INSET - float(reserved or 0.0)
         if reserved:
@@ -719,7 +724,12 @@ class ServerNode(QGraphicsItemGroup):
         rebuilds those values; `MainWindow.apply_theme()` reaches every card
         through the scene. The status/SSH dots return to their current STATE
         (idle grey, or the status colour that is showing), never to a stale one.
+
+        v1.6 (ROADMAP task 2): the CARD DENSITY rides the same walk — `sync_density()`
+        re-lays the card out when the mode moved, before the brushes are re-applied
+        (so a card switched to `compact` repaints in one pass).
         """
+        self.sync_density()
         self._bg.setBrush(QBrush(self.COLOR_BG))
         self._pulse.setPen(QPen(self.STATUS_COLORS.get("offline", self.COLOR_BORDER), 3))
         self._icon.setPen(QPen(self.COLOR_BORDER, 2))
@@ -1027,6 +1037,12 @@ class ServerNode(QGraphicsItemGroup):
         if getattr(self.data, "collapsed", False):
             self._update_appearance_collapsed()
             return
+        # v1.6 (ROADMAP task 2): the compact density — the alias, the host and the marks,
+        # no info plaque and no tag chip. A per-node COLLAPSE wins over the density: it is
+        # the user's own single-card choice (a view state, §4.2).
+        if self._is_compact():
+            self._update_appearance_compact()
+            return
         self._show_expanded()
         alias_text = self.data.alias or "Unnamed"
         host_text = f"@{self.data.host}"
@@ -1182,6 +1198,115 @@ class ServerNode(QGraphicsItemGroup):
         # Restore the original (large) alias font after the collapsed line.
         if hasattr(self, "_alias_font_expanded"):
             self._alias.setFont(QFont(self._alias_font_expanded))
+
+    # ── v1.6 (ROADMAP task 2): the CARD DENSITY ─────────────────────────────────
+
+    def _is_compact(self) -> bool:
+        """Is the ACTIVE card density the compact one? (read live, never cached)"""
+        try:
+            return theme.card_density() == theme.DENSITY_COMPACT
+        except Exception:  # noqa: BLE001 — an unknown density means the historical card
+            return False
+
+    def density(self) -> str:
+        """The density this card is laid out with (the topical gate's seam)."""
+        return self._density
+
+    def sync_density(self) -> bool:
+        """Re-lay the card out when the ACTIVE density changed (v1.6, task 2).
+
+        Returns True when it really rebuilt. Called from `refresh_theme()` — the ONE walk
+        a density switch travels (`MainWindow.apply_theme()` → `MapScene.refresh_theme()`
+        → every card), which is why the settings hub applies the choice through the
+        ordinary theme signal instead of a private mechanism.
+        """
+        try:
+            current = theme.card_density()
+        except Exception:  # noqa: BLE001
+            return False
+        if current == self._density:
+            return False
+        self._density = current
+        self.update_appearance()
+        return True
+
+    def is_compact_layout(self) -> bool:
+        """True while the card is really painted in the compact layout (not collapsed)."""
+        return bool(not getattr(self.data, "collapsed", False) and self._is_compact())
+
+    def _clamp_width(self, width) -> int:
+        """The card width inside [MIN_NODE_WIDTH, MAX_NODE_WIDTH] (ONE clamp for both modes)."""
+        return min(max(int(width), self.MIN_NODE_WIDTH), int(self.MAX_NODE_WIDTH))
+
+    def _show_compact(self):
+        """The compact layout's item visibility and base positions (v1.6).
+
+        The info plaque disappears (the field is not painted at all), the host stays under
+        the alias and the two text items return to the expanded positions and font — the
+        compact card is an EXPANDED card without the info block and without the tag chip,
+        never a collapsed one (the alias and the host stay on their own lines).
+        """
+        self._info.hide()
+        self._info_bg.hide()
+        self._host_label.show()
+        self._alias.setPos(55, 18)
+        self._icon.setPos(0, 0)
+        self._glyph.setPos(0, 0)
+        if hasattr(self, "_alias_font_expanded"):
+            self._alias.setFont(QFont(self._alias_font_expanded))
+
+    def _update_appearance_compact(self):
+        """The COMPACT card: alias, host and the status marks — no info plaque (v1.6, task 2).
+
+        Why it is a mode of its own instead of "hide two items": the WIDTH of a card is
+        computed from its content (the longest info line stretches it), so a dense map
+        needs the info block to leave the measurement as well as the paint. The measured
+        HEIGHT formula of the expanded card (`58 + info + 12`) holds here with an EMPTY
+        info block — one `58 + 0 + 12` against the same `MIN_NODE_HEIGHT` floor — and the
+        FREE BAND rule is untouched: a badge never enters the height.
+        """
+        self._show_compact()
+        self._info_tip_full = ""
+        self._apply_info_tooltip()
+
+        alias_text = self.data.alias or "Unnamed"
+        host_text = f"@{self.data.host}"
+        fm_alias = QFontMetrics(self._alias.font())
+        fm_host = QFontMetrics(self._host_label.font())
+        self._alias.setPlainText(alias_text)
+        self._host_label.setPlainText(host_text)
+        overhead = max(0.0, self._alias.boundingRect().width()
+                       - fm_alias.horizontalAdvance(alias_text))
+        alias_right = self._alias.pos().x() + self._alias.boundingRect().width()
+        host_right = self._host_label.pos().x() + self._host_label.boundingRect().width()
+        width = self._clamp_width(max(alias_right, host_right) + 24)
+        label_max = max(int(width - self.LABEL_X - self.DOT_ZONE_LEFT - self.ELIDE_GAP - overhead), 1)
+
+        if fm_alias.horizontalAdvance(alias_text) > label_max:
+            self._alias.setPlainText(
+                fm_alias.elidedText(alias_text, Qt.TextElideMode.ElideRight, label_max))
+            self._alias.setToolTip(alias_text)
+        else:
+            self._alias.setToolTip("")
+        if fm_host.horizontalAdvance(host_text) > label_max:
+            self._host_label.setPlainText(
+                fm_host.elidedText(host_text, Qt.TextElideMode.ElideRight, label_max))
+            self._host_label.setToolTip(host_text)
+        else:
+            self._host_label.setToolTip("")
+
+        needed_height = 58 + 0 + 12          # the SAME formula with an empty info block
+        self._set_geometry(width, max(int(needed_height), self.MIN_NODE_HEIGHT))
+
+        self._status_dot.setPos(self._current_width - 46, 23)
+        self._ssh_status.setPos(self._current_width - 24, 23)
+        self._chevron.setPath(self._chevron_path(down=False))
+        # The EMULATED marker stays (honesty is not a density), the tag chip is hidden
+        # by `_apply_env_badge()` itself — one rule, wherever the badges are re-placed.
+        self._apply_badges()
+        self._apply_visual_state()
+        if self.scene():
+            self.scene().update_connections_for_node(self)
 
     def _set_geometry(self, width: int, height: int):
         """Geometry change shared by both modes (prepareGeometryChange before resizing)."""

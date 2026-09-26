@@ -114,6 +114,50 @@ MODE_LIGHT = "light"
 MODE_AUTO = "auto"
 MODES = (MODE_DARK, MODE_LIGHT, MODE_AUTO)
 
+# ── The CARD DENSITY (v1.6, ROADMAP task 2) ───────────────────────────────────
+# The SECOND non-colour flag of the nested ``theme`` config object (the `motion`
+# precedent): how much of a server card the map paints. It is NOT a Theme field —
+# nothing here is a colour — but the VALUE is read live like every other datum of
+# this section, so a switch reaches the cards through the ordinary refresh walk.
+#
+#   * ``normal``  — the historical card: alias, host, the info plaque and the two
+#                   badges. The DEFAULT, and a project renders byte-identically to
+#                   the pre-v1.6 build with it.
+#   * ``compact`` — the dense card of a map at scale: the alias, the host and the
+#                   status marks stay, the info plaque and the environment chip
+#                   collapse. The measured height formula (``58 + info + 12``, floored
+#                   by ``ServerNode.MIN_NODE_HEIGHT``) and the FREE BAND rules hold in
+#                   BOTH modes — a badge never enters the height.
+DENSITY_NORMAL = "normal"
+DENSITY_COMPACT = "compact"
+DENSITIES = (DENSITY_NORMAL, DENSITY_COMPACT)
+
+#: The ACTIVE density — module state, set by the "Appearance" tab and applied at startup
+#: (`apply_density_setting`). Read through `card_density()`, never imported as a value.
+_CARD_DENSITY = DENSITY_NORMAL
+
+
+def resolve_density(value) -> str:
+    """A stored density value → one of ``DENSITIES`` (a broken value = ``normal``).
+
+    PURE validation: the config is hand-editable, so an unknown string, a number or
+    ``None`` means the historical card, never an error.
+    """
+    text = str(value or "").strip().lower()
+    return text if text in DENSITIES else DENSITY_NORMAL
+
+
+def card_density() -> str:
+    """The ACTIVE card density (``normal`` | ``compact``) — read by the cards."""
+    return _CARD_DENSITY
+
+
+def set_card_density(value) -> str:
+    """Install the density and return the value that is now active (never raises)."""
+    global _CARD_DENSITY
+    _CARD_DENSITY = resolve_density(value)
+    return _CARD_DENSITY
+
 # The EXPORT palettes (v1.5rc2, ROADMAP task 3). An export is a different medium
 # from the screen: it must not print a dark page, so the DEFAULT is `print` — the
 # LIGHT instance (a white page with the high-contrast lines) — and `theme` is the

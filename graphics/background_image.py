@@ -41,6 +41,12 @@ class BackgroundImage(QGraphicsObject):
     # Signals for MainWindow (project dirty marker)
     moved = Signal()
     resized = Signal()
+    # v1.6 (ROADMAP task 4): the COMPLETED gestures — the undo commands' seam (the
+    # NodeGroup.moveCommitted/resizeCommitted pattern). `moved`/`resized` fire during the
+    # gesture (incremental steps, the dirty marker) and these fire ONCE per release with
+    # the geometry the gesture started from, which is what a QUndoCommand needs.
+    moveCommitted = Signal(object, object)   # (the old position as a QPointF, the new one)
+    resizeCommitted = Signal(float, float, float, float)  # (w0, h0, w1, h1)
 
     def __init__(self, path: str, x: float = 0.0, y: float = 0.0,
                  width: float = None, height: float = None):
@@ -60,6 +66,9 @@ class BackgroundImage(QGraphicsObject):
         self._drag_mode = None
         self._drag_start_scene = None
         self._size_start = None
+        # v1.6 (ROADMAP task 4): the geometry the CURRENT gesture started from — the undo
+        # commands are built from it on release (NodeGroup._gesture_start_pos).
+        self._gesture_start_pos = None
 
         self.setFlag(QGraphicsItem.ItemIsSelectable, True)
         self.setAcceptHoverEvents(True)
@@ -142,6 +151,9 @@ class BackgroundImage(QGraphicsObject):
             else:
                 self._drag_mode = "move"
             self._drag_start_scene = scene_pos
+            # v1.6 (ROADMAP task 4): snapshot the geometry the gesture starts from — the
+            # moveCommitted/resizeCommitted signals carry the BEFORE side of the undo entry.
+            self._gesture_start_pos = QPointF(self.pos())
             event.accept()  # do NOT pass it to the scene — ScrollHandDrag would steal the gesture
             return
         super().mousePressEvent(event)
@@ -169,9 +181,27 @@ class BackgroundImage(QGraphicsObject):
         super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event):
-        self._drag_mode = None
-        self._drag_start_scene = None
-        self._size_start = None
+        if event.button() == Qt.MouseButton.LeftButton and self._drag_mode:
+            mode = self._drag_mode
+            start_pos = self._gesture_start_pos
+            start_size = self._size_start
+            self._drag_mode = None
+            self._drag_start_scene = None
+            self._size_start = None
+            self._gesture_start_pos = None
+            # v1.6 (ROADMAP task 4): the gesture is complete → the window's undo command.
+            # Emitted only on a real geometry change (otherwise an empty stack entry).
+            try:
+                if mode == "move" and start_pos is not None:
+                    end_pos = QPointF(self.pos())
+                    if (end_pos - start_pos).manhattanLength() > 0.5:
+                        self.moveCommitted.emit(start_pos, end_pos)
+                elif mode == "resize" and start_size is not None:
+                    if abs(self._width - start_size[0]) + abs(self._height - start_size[1]) > 0.5:
+                        self.resizeCommitted.emit(start_size[0], start_size[1],
+                                                  self._width, self._height)
+            except Exception:  # noqa: BLE001 — the undo signal must not kill the release
+                pass
         super().mouseReleaseEvent(event)
 
     def mouseDoubleClickEvent(self, event):

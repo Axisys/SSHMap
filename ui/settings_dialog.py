@@ -238,18 +238,21 @@ def accent_swatches():
 
 
 def load_theme_settings() -> dict:
-    """The validated `theme` key: {"mode", "accent", "motion"} (v1.4.3; +motion in v1.5rc1).
+    """The validated `theme` key: {"mode", "accent", "motion", "density"} (v1.4.3).
 
     ``mode`` is one of ``theme.MODES`` — ``dark`` (the default), ``light`` or
     ``auto`` (v1.5rc1: the platform's own colour scheme decides, and the window
     follows a live ``colorSchemeChanged``). ``motion`` is the "Reduce motion"
-    switch of the same tab.
+    switch of the same tab. ``density`` (v1.6) is the card density of the map —
+    ``normal`` (the historical card) or ``compact`` — validated by
+    ``theme.resolve_density``.
 
     Broken / missing / foreign values fall back to the dark theme, the default
-    accent and the motion ON — the config is hand-editable, so every read is
-    defensive. Never raises.
+    accent, the motion ON and the normal card — the config is hand-editable, so every
+    read is defensive. Never raises.
     """
-    result = {"mode": theme.MODE_DARK, "accent": theme.accent_hex(), "motion": True}
+    result = {"mode": theme.MODE_DARK, "accent": theme.accent_hex(), "motion": True,
+              "density": theme.DENSITY_NORMAL}
     try:
         from i18n import load_config
     except Exception:
@@ -276,7 +279,33 @@ def load_theme_settings() -> dict:
         result["motion"] = motion
     elif motion is not None:
         _log_dialog(f"theme.motion {motion!r} is not a boolean — keeping the motion on")
+    # v1.6 (ROADMAP task 2): the card density — a foreign value is the historical card.
+    density = raw.get("density")
+    resolved = theme.resolve_density(density)
+    if density is not None and resolved != str(density).strip().lower():
+        _log_dialog(f"theme.density {density!r} is not one of {theme.DENSITIES} — using 'normal'")
+    result["density"] = resolved
     return result
+
+
+def density_from_settings(settings) -> str:
+    """The card density of a stored `theme` dict (v1.6) — a broken value is ``normal``."""
+    if isinstance(settings, dict):
+        return theme.resolve_density(settings.get("density"))
+    return theme.DENSITY_NORMAL
+
+
+def apply_density_setting(settings) -> str:
+    """Install the card density of a `theme` dict into `ui/theme.py` (v1.6).
+
+    The `apply_motion_setting` sibling: the module holds the ACTIVE value (the cards
+    read it on every `update_appearance()`), so the settings hub can apply the choice
+    live and a rejected dialog can put it back. Returns the value now active; never raises.
+    """
+    try:
+        return theme.set_card_density(density_from_settings(settings))
+    except Exception:  # noqa: BLE001 — the switch is cosmetic, never break a startup
+        return theme.DENSITY_NORMAL
 
 
 def motion_from_settings(settings) -> bool:
@@ -342,6 +371,10 @@ class SettingsDialog(QDialog):
         # v1.5rc1: the motion flag the dialog OPENED with — the "Reduce motion"
         # box is live too, so Cancel has to restore it (the theme's own rule).
         self._initial_motion = load_theme_settings()["motion"]
+        # v1.6 (ROADMAP task 2): the card density the dialog opened with — the combo is
+        # live as well, so `reject()` restores it together with the theme and the motion.
+        self._initial_density = load_theme_settings()["density"]
+        self._density = self._initial_density
 
         # ── v1.5rc4 (ROADMAP task 3): the settings search ─────────────────────
         # ONE field above the tabs filters the ROWS and the PAGES by their TRANSLATED
@@ -706,6 +739,25 @@ class SettingsDialog(QDialog):
         self.motion_chk.toggled.connect(self._on_motion_toggled)
         layout.addWidget(self.motion_chk)
 
+        # ── v1.6 (ROADMAP task 2): the CARD DENSITY ───────────────────────────
+        # The second non-colour flag of the nested `theme` object (the motion
+        # precedent): `normal` is the historical card, `compact` hides the info
+        # plaque and the tag chip of every card on the map. LIVE, like the mode and
+        # the motion switch — the cards follow through the ordinary refresh walk.
+        density_row = QHBoxLayout()
+        self._lbl_theme_density = QLabel(_t("settings.appearance.density"))
+        self.density_combo = QComboBox()
+        for density_id, key in ((theme.DENSITY_NORMAL, "settings.appearance.density.normal"),
+                                (theme.DENSITY_COMPACT, "settings.appearance.density.compact")):
+            self.density_combo.addItem(_t(key), density_id)
+        _d_idx = next((i for i in range(self.density_combo.count())
+                       if self.density_combo.itemData(i) == current["density"]), 0)
+        self.density_combo.setCurrentIndex(_d_idx)
+        self.density_combo.setToolTip(_t("settings.appearance.density.tooltip"))
+        density_row.addWidget(self._lbl_theme_density)
+        density_row.addWidget(self.density_combo, 1)
+        layout.addLayout(density_row)
+
         # ── the accent swatches ───────────────────────────────────────────────
         self._lbl_theme_accent = QLabel(_t("settings.appearance.accent"))
         layout.addWidget(self._lbl_theme_accent)
@@ -749,6 +801,7 @@ class SettingsDialog(QDialog):
         # (the "Language" tab precedent: otherwise the construction echo would
         # apply the theme onto itself).
         self.theme_mode_combo.currentIndexChanged.connect(self._on_theme_changed)
+        self.density_combo.currentIndexChanged.connect(self._on_density_changed)
         self._mark_current_swatch()
 
         # ── v1.5rc4 (ROADMAP task 3): the searchable rows of this tab ─────────
@@ -758,6 +811,8 @@ class SettingsDialog(QDialog):
         self._register_search_entry(tab, self._lbl_theme_mode,
                                     [self._lbl_theme_mode, self.theme_mode_combo])
         self._register_search_entry(tab, self.motion_chk, [self.motion_chk])
+        self._register_search_entry(
+            tab, self._lbl_theme_density, [self._lbl_theme_density, self.density_combo])
         self._register_search_entry(
             tab, self._lbl_theme_accent,
             [self._lbl_theme_accent] + [btn for btn, _hex in self._swatch_buttons.values()])
@@ -872,6 +927,24 @@ class SettingsDialog(QDialog):
             self.theme_changed.emit(self._current_theme())
         except RuntimeError:
             pass  # Qt teardown
+
+    def _on_density_changed(self, *_args):
+        """The card-density combo moved (v1.6, ROADMAP task 2) — applied LIVE.
+
+        The density is module state (`theme.set_card_density`) rather than a Theme
+        field, so it is installed here and the cards follow through the ordinary
+        refresh walk the emitted `theme_changed` triggers (the `_on_motion_toggled`
+        pattern, one level down). Never raises: the switch is cosmetic.
+        """
+        try:
+            self._density = self.density_combo.currentData() or theme.DENSITY_NORMAL
+        except (AttributeError, RuntimeError):
+            return  # Qt teardown / a dialog built without the tab
+        try:
+            theme.set_card_density(self._density)
+        except Exception:  # noqa: BLE001 — a cosmetic switch must not break the dialog
+            return
+        self._emit_theme()
 
     # ── "Terminal" tab (v1.0 keys + the new close behavior) ─────────────
 
@@ -1705,6 +1778,22 @@ class SettingsDialog(QDialog):
                 self._motion_enabled = bool(self._initial_motion)
         except (AttributeError, RuntimeError):
             pass  # Qt teardown / a dialog built without the tab
+        # v1.6 (ROADMAP task 2): the card density is live too — restore it (the theme
+        # walk that `theme_changed` triggers repaints the cards back).
+        try:
+            if str(getattr(self, "_density", "")) != str(self._initial_density):
+                combo = getattr(self, "density_combo", None)
+                if combo is not None:
+                    idx = next((i for i in range(combo.count())
+                                if combo.itemData(i) == self._initial_density), -1)
+                    if idx >= 0:
+                        combo.blockSignals(True)
+                        combo.setCurrentIndex(idx)
+                        combo.blockSignals(False)
+                theme.set_card_density(self._initial_density)
+                self._density = self._initial_density
+        except (AttributeError, RuntimeError):
+            pass  # Qt teardown / a dialog built without the tab
         super().reject()
 
     # ── Collecting values (config.json keys; language is NOT included — it is immediate) ───────
@@ -1755,7 +1844,11 @@ class SettingsDialog(QDialog):
             # collect() key count is unchanged).
             "theme": {"mode": self.theme_mode_combo.currentData() or theme.MODE_DARK,
                       "accent": self._accent_hex,
-                      "motion": bool(self._motion_enabled)},
+                      "motion": bool(self._motion_enabled),
+                      # v1.6 (ROADMAP task 2): the card density — a fourth VALUE of the
+                      # SAME nested key, so the hub's collect() key count stays 22.
+                      "density": (self.density_combo.currentData()
+                                  or theme.DENSITY_NORMAL)},
             "status_interval_sec": int(self.status_interval_spin.value()),
             "status_probe_timeout_sec": float(self.probe_timeout_spin.value()),
             # v1.1.2 final (task 2): the cap on parallel probes per round

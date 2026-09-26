@@ -299,6 +299,10 @@ class MapScene(QGraphicsScene):
                 self.removeItem(a)
                 getattr(a, 'deleteLater', lambda: None)()  # v0.9.3 fix: we drop the C++ object (otherwise a leak until the end of the session)
                 self._arrows.remove(a)
+            if arrows_to_remove:
+                # v1.6 (ROADMAP task 3): the pairs that lost a link renumber (the fan
+                # follows, exactly as in remove_connection()).
+                self.refresh_connection_offsets()
             # v1.2.4 (D7): a safety net — the attached notes are detached, the lines are removed
             # (a no-op if the window already pushed the detach commands; protects the fallback
             # paths without a window)
@@ -312,25 +316,82 @@ class MapScene(QGraphicsScene):
     def add_connection(self, source_id: str, target_id: str, label: str = "",
                        ctype: str = DEFAULT_CONNECTION_TYPE,
                        bidirectional: bool = False) -> Optional[ConnectionArrow]:
-        # v1.2.6: bidirectional — arrowheads on both ends (optional; the default
-        # False — a standard one-way arrow, as before v1.2.6).
+        """Create a connection between two nodes (None — an unknown endpoint).
+
+        v1.2.6: bidirectional — arrowheads on both ends (optional; the default
+        False — a standard one-way arrow, as before v1.2.6).
+
+        **v1.6 (ROADMAP task 3): a SECOND link between the same pair is CREATED, not
+        refused.** The old guard (`has_connection` per direction) dropped it in silence:
+        the caller saw no arrow and no error, and the same gesture in the reverse
+        direction worked — the colleagues' "between some servers it connects, between
+        others it does not". The parallel link is now visible instead: every link of one
+        endpoint pair takes its INDEX inside that pair and bends aside along the normal
+        (`refresh_connection_offsets()` is the ONE owner of the numbering). The pair is
+        UNORDERED — a second link of any direction of the same two cards joins the group.
+        """
         if source_id not in self._nodes or target_id not in self._nodes:
             return None
-        if self.has_connection(source_id, target_id):
-            return None  # we do not create a duplicate connection
         src = self._nodes[source_id]
         tgt = self._nodes[target_id]
         arrow = ConnectionArrow(src, tgt, label, ctype, bidirectional=bidirectional)
         self.addItem(arrow)
         self._arrows.append(arrow)
+        self.refresh_connection_offsets()
         return arrow
 
     def has_connection(self, source_id: str, target_id: str) -> bool:
-        """Check whether a connection between the nodes already exists (in the same direction)."""
+        """Is there a connection between the nodes in the same direction (at least one)?"""
         for a in self._arrows:
             if a.source.data.id == source_id and a.target.data.id == target_id:
                 return True
         return False
+
+    # ── v1.6 (ROADMAP task 3): the parallel links of ONE endpoint pair ──────────
+
+    @staticmethod
+    def connection_pair_key(source_id, target_id) -> tuple:
+        """The UNORDERED endpoint pair of a link — the key of its offset group.
+
+        Pure and public: the numbering (and the topical gate) read the same definition,
+        and a scene never has to care which end the user drew from.
+        """
+        first, second = str(source_id), str(target_id)
+        return (first, second) if first <= second else (second, first)
+
+    def refresh_connection_offsets(self) -> int:
+        """Give every arrow its index inside its endpoint pair (v1.6, task 3).
+
+        The ONE owner of the numbering: called whenever the set of links changes (a link
+        added or removed, a card removed with its links), so an application path can
+        never leave two arcs on top of each other. The order inside a pair is the scene's
+        own link order (the order they were added), which keeps the FIRST link on the
+        historical curve and makes the fan deterministic across a save/load round trip.
+
+        Returns the number of arrows whose path really moved (the topological gate's seam).
+        """
+        groups: Dict[tuple, list] = {}
+        for arrow in self._arrows:
+            try:
+                key = self.connection_pair_key(arrow.source.data.id, arrow.target.data.id)
+            except (AttributeError, RuntimeError):
+                continue  # Qt teardown / a duck-typed arrow — it keeps its index
+            groups.setdefault(key, []).append(arrow)
+        moved = 0
+        for arrows in groups.values():
+            for index, arrow in enumerate(arrows):
+                try:
+                    if arrow.set_pair_index(index):
+                        moved += 1
+                except (AttributeError, RuntimeError):
+                    continue
+        return moved
+
+    def pair_arrows(self, source_id, target_id) -> List[ConnectionArrow]:
+        """Every link between this endpoint pair, in the offset order (v1.6, task 3)."""
+        key = self.connection_pair_key(source_id, target_id)
+        return [a for a in self._arrows
+                if self.connection_pair_key(a.source.data.id, a.target.data.id) == key]
 
     # ── v0.7.3: removing a connection ─────────────────────────────────
 
@@ -344,6 +405,9 @@ class MapScene(QGraphicsScene):
             self.removeItem(arrow)
             getattr(arrow, 'deleteLater', lambda: None)()  # v0.9.3 fix: the C++ object must not live until the scene's death (deleteLater is available on QObject subclasses)
             self._arrows.remove(arrow)
+            # v1.6 (ROADMAP task 3): the surviving links of the pair close the gap the
+            # removed one leaves (the fan is renumbered in ONE place).
+            self.refresh_connection_offsets()
             return True
         return False
 

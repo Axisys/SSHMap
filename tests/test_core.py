@@ -1,7 +1,7 @@
 """Suite core (former smoke_test.py §1–5): compile, i18n, models, ANSI, profiles/keyring.
 
 A part of the suite split out of smoke_test.py v0.6–v0.9.2 (see INDEX.md).
-Checks the key items of the former AUDIT.md (the decoding — in CHANGELOG.md): the compilation of all the modules, the i18n parity en/ru/zh
+Checks the key items of the former AUDIT.md (the decoding — in the changelog family): the compilation of all the modules, the i18n parity en/ru/zh
 + the fallback to the English, models.server (the robustness of the from_dict / the to_dict without the password),
 the ANSI clearing of the terminal, the profiles without the passwords in the JSON + the semantics of the keyring update(None).
 

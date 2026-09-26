@@ -1,7 +1,7 @@
 """Headless project save/load + keyring passwords (former smoke_test.py §6 "main window").
 
 A part of the suite split out of smoke_test.py v0.6–v0.9.2 (see INDEX.md).
-The critical items of the former AUDIT.md (the decoding — in CHANGELOG.md): the save/load round-trip of the project in an offscreen MainWindow,
+The critical items of the former AUDIT.md (the decoding — in the changelog family): the save/load round-trip of the project in an offscreen MainWindow,
 the [*] dirty marker, the password → keyring on save (audit #1), the key_path in the JSON (audit #5),
 the [*] reset after the save (audit #7), the key_path restoration on load (audit #5),
 the protection against the duplicated A→B connection (audit #43).
@@ -89,10 +89,16 @@ for s in raw["servers"]:
 loaded1 = win2.scene._nodes.get("snode001")
 check("reload: key_path restored via server_data_from_dict", loaded1 is not None and loaded1.data.key_path == r"C:\keys\web.pem")
 
-# duplicate connection protection (audit #43 / docs task 3)
+# v1.6 (ROADMAP task 3): a SECOND link between the same pair is CREATED, not refused in
+# silence — the parallel-link offset keeps the two arcs apart (the old check asserted the
+# silent refusal, which is exactly the "sometimes it connects, sometimes not" report).
 a = win2.scene.add_connection("snode001", "snode002", "l1")
 b = win2.scene.add_connection("snode001", "snode002", "dup")
-check("duplicate A->B rejected by scene", a is not None and b is None)
-check("has_connection detects dup", win2.scene.has_connection("snode001", "snode002"))
+check("a second A->B link is created (and bends aside instead of hiding under the first)",
+      a is not None and b is not None and b is not a
+      and b.pair_index == 1 and b.offset_px() != 0.0
+      and a.path().pointAtPercent(0.5) != b.path().pointAtPercent(0.5),
+      f"{a.pair_index} / {b.pair_index}")
+check("has_connection detects the pair", win2.scene.has_connection("snode001", "snode002"))
 
 finish()

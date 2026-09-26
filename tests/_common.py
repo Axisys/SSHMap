@@ -259,10 +259,26 @@ def clear_cfg(*extra_paths: str) -> None:
 # in 12 i18n files + the APP_VERSION/requirements pins in 7 release-state sections).
 # The misses of the keys themselves against the code are caught by check_i18n_keys.py.
 # ─────────────────────────────────────────────────────────────────────────────
-EXPECTED_APP_VERSION = "1.5.7.1"  # the current release (a sentinel: it catches "a bump to the wrong version")
-EXPECTED_I18N_KEYS = 737        # the parity of the TRANSLATION keys (v1.5.7 — "the command history: a
-                                # third tab of the session, one history per server": the version that
-                                # CLOSES the 1.5 line; v1.5.7.1 adds no key — the pyte defect sweep).
+EXPECTED_APP_VERSION = "1.6"  # the current release (a sentinel: it catches "a bump to the wrong version")
+EXPECTED_I18N_KEYS = 778        # the parity of the TRANSLATION keys (v1.6 — "the map at scale: bulk
+                                # editing, density, arrangement and the connections out": the release
+                                # that OPENED the 1.6 line. +41 keys × en/ru/zh/de in four families:
+                                # the BULK EDIT dialog (`bulk.*` — the title with its count, the hint that
+                                # states the tri-state rule, the three field labels, the three states and
+                                # the tags hint, plus `edit.bulk_edit` and its two reports); the GROUP
+                                # ARRANGEMENT (`ctx.arrange_group`, the dialog's title/hint/three modes and
+                                # its declared boundary note, plus the four status sentences — arranged,
+                                # nothing to arrange, folded, no group); the CONNECTION REPORT
+                                # (`file.export_connections`, the eight column captions, the two words of
+                                # the bidirectional cell and its two reports); and the CARD DENSITY of the
+                                # "Appearance" tab (the label, the two values and the tooltip). The
+                                # geometry of the parallel links, the arrangement function, the offset
+                                # index, the four new undo commands, the pure tri-state conversion and the
+                                # RFC-4180 writer the connection report reuses are BEHAVIOUR and numbers —
+                                # no keys, no new colour field, no new dependency.
+                                # (v1.5.7 — "the command history: a third tab of the session, one
+                                # history per server": the version that CLOSES the 1.5 line;
+                                # v1.5.7.1 adds no key — the pyte defect sweep).
                                 # +29 keys × en/ru/zh/de, all in one family: the TAB itself
                                 # (`terminal.tab_history` — deliberately NOT an `sftp.*` key, because
                                 # the tab is not SFTP), the chrome of the panel

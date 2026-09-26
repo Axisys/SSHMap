@@ -348,9 +348,11 @@ win.act_show_minimap.setChecked(True)
 app.processEvents()
 check("§1b the menu item drives the button back (blocked signals, no loop)",
       mini.isVisible() and win._minimap_toolbar_btn.isChecked())
-check("§1b the toolbar group holds the FOUR view toggles in the panel order",
+check("§1b the toolbar group holds the FIVE view toggles in the panel order "
+      "(v1.6 adds the activity panel)",
       list(win._view_toolbar_buttons) == ["view.toggle_sidebar", "view.toggle_map",
-                                          "view.toggle_minimap", "view.toggle_legend"]
+                                          "view.toggle_minimap", "view.toggle_legend",
+                                          "view.toggle_activity"]
       and win._sidebar_toolbar_btn.shortcut().isEmpty()
       and win._map_toolbar_btn.shortcut().isEmpty(),
       str(list(win._view_toolbar_buttons)))

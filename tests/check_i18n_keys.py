@@ -23,7 +23,7 @@ Three parts (all must be clean for exit code 0):
      parity, in every other language.
 
 Run:  python tests/check_i18n_keys.py   (exit code 0 = all the keys are in place)
-Catches the class of the bugs of the former AUDIT.md #9 ("the raw keys in the UI"; the decoding of the items — in CHANGELOG.md).
+Catches the class of the bugs of the former AUDIT.md #9 ("the raw keys in the UI"; the decoding of the items — in the changelog family).
 """
 import os
 import re

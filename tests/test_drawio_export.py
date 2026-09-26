@@ -7,7 +7,7 @@ Checks (DOCUMENTATION.md v0.9.5 #6):
   3. The coordinates of the members of the groups are recalculated relative to the parent.
 
 v1.3.3.7 (ROADMAP task 4): the structure counting is done INLINE here — the module's
-`load_drawio_structure()` was deleted as production-dead (see CHANGELOG.md, v1.3.3.7),
+`load_drawio_structure()` was deleted as production-dead (see `CHANGELOG_HISTORY_V1338.md`, v1.3.3.7),
 so `count_structure()` below is the same `ET.iter("mxCell")` scan the helper used.
 
 Run: python tests/test_drawio_export.py   (from the project root) or python tests/run_all.py

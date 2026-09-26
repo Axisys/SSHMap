@@ -378,13 +378,13 @@ print("== §4 the release state and the 'no new contract' audit ==")
 
 check_release_state(ROOT)
 check("§4 EXPECTED_APP_VERSION is the shipped release (v1.5.1 was the first patch on 1.5;"
-      " the pin quotes the CURRENT one — v1.5.7.1)",
-      EXPECTED_APP_VERSION == "1.5.7.1"
-      and re.fullmatch(r"1\.5\.7(\.\d+)?", EXPECTED_APP_VERSION) is not None)
+      " the pin quotes the CURRENT one — v1.6)",
+      EXPECTED_APP_VERSION == "1.6"
+      and re.fullmatch(r"1\.6(\.\d+)?", EXPECTED_APP_VERSION) is not None)
 check("§4 the i18n pin moved by exactly FOUR keys in v1.5.1 (two labels + two reports), by "
       "v1.5.2's thirteen, by v1.5.3's twenty, by v1.5.4's eleven, by v1.5.5's fourteen"
       " and by v1.5.6's two and v1.5.7's twenty-nine on top",
-      EXPECTED_I18N_KEYS == 737, str(EXPECTED_I18N_KEYS))
+      EXPECTED_I18N_KEYS == 778, str(EXPECTED_I18N_KEYS))
 check_i18n_parity(_langs)
 check_i18n_format(_langs)
 
@@ -405,7 +405,7 @@ check("§4 the two new actions are registered with an EMPTY default (assignable,
       and {"file.copy_map", "file.docs_frame"} <= set(HR.empty_default_action_ids()))
 check("§4 the registry grew 49 -> 51 in v1.5.1 (+v1.5.2's View item -> 52, +the v1.5.3 pair -> 54,"
       " +the v1.5.5 inventory pair -> 56) and the empty-default set 26 -> 28 (-> 29, -> 31, -> 33)",
-      len(HR.HOTKEY_ACTIONS) == 56 and len(HR.empty_default_action_ids()) == 33,
+      len(HR.HOTKEY_ACTIONS) == 59 and len(HR.empty_default_action_ids()) == 36,
       f"{len(HR.HOTKEY_ACTIONS)} / {len(HR.empty_default_action_ids())}")
 check("§4 every registry action is still bound to a real object in a live window",
       all(len(targets) > 0 for targets in make_main()._hotkey_targets.values()))
@@ -426,6 +426,6 @@ check("§4 no new dependency (the four pinned ones and nothing else)",
                         _req, re.M))
 check("§4 VERSION_FORMAT did NOT move (the project schema is unchanged)",
       __import__("version").VERSION_FORMAT == "0.9"
-      and __import__("version").APP_VERSION == "1.5.7.1")
+      and __import__("version").APP_VERSION == "1.6")
 
 finish()

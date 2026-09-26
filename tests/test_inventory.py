@@ -757,7 +757,7 @@ check("no new theme field (60 in both palettes)",
 check("no schema change (VERSION_FORMAT stays 0.9)",
       _version.VERSION_FORMAT == "0.9")
 check("the registry grew by EXACTLY the two inventory actions",
-      len(HR.HOTKEY_ACTIONS) == 56 and len(HR.empty_default_action_ids()) == 33)
+      len(HR.HOTKEY_ACTIONS) == 59 and len(HR.empty_default_action_ids()) == 36)
 check("no new dependency (the four pinned ones and nothing else)",
       all(f"{d}>=" in open(os.path.join(ROOT, "requirements.txt"), encoding="utf-8").read()
           for d in ("PySide6", "paramiko", "keyring", "wcwidth")))

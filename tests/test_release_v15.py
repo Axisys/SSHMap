@@ -159,9 +159,9 @@ check("§2 the saved position is cleared with the NULL sentinel (a merge write c
       and MW.MainWindow._saved_position({"x": None, "y": None}) is None
       and MW.MainWindow._saved_position(["a", "b"]) is None)
 check("§2 it costs NO new menu entry, action or hotkey (the rejected \"Reset positions\"; "
-      "the 56 of v1.5.5 are the inventory pair)",
+      "the 56 of v1.5.5 are the inventory pair and the 59 of v1.6 the bulk-edit/arrangement/report trio)",
       not any("reset_panel" in a or "reset.position" in a for a in HR.HOTKEY_ACTIONS)
-      and len(HR.HOTKEY_ACTIONS) == 56)
+      and len(HR.HOTKEY_ACTIONS) == 59)
 
 win = make_main()
 _legend = win.legend
@@ -281,14 +281,14 @@ print("== §4 the release state & the \"no new contract\" audit ==")
 check_release_state(ROOT)
 check("§4 the pin quotes the SHIPPED version (v1.5.7 — the release that closes the 1.5 "
       "line this file describes)",
-      EXPECTED_APP_VERSION == "1.5.7.1" and re.fullmatch(r"1\.5\.7(\.\d+)?", EXPECTED_APP_VERSION) is not None)
+      EXPECTED_APP_VERSION == "1.6" and re.fullmatch(r"1\.6(\.\d+)?", EXPECTED_APP_VERSION) is not None)
 check("§4 the i18n pin moved on by the closing release's ONE key, v1.5.1's four, v1.5.2's "
       "thirteen (the activity panel's chrome), v1.5.3's twenty (the freshness family), "
       "v1.5.4's eleven (the aggregate, the lens and the filter plaque), v1.5.5's fourteen "
       "(the inventory columns, the age captions and the report), v1.5.6's two (the Export "
       "menu and the third first-run door) and v1.5.7's twenty-nine (the command-history tab, "
       "the panel chrome and the six menu items) on top",
-      EXPECTED_I18N_KEYS == 737)
+      EXPECTED_I18N_KEYS == 778)
 check_i18n_parity(_langs)
 check_i18n_format(_langs)
 check("§4 every language carries the marker key with a non-empty value",
@@ -317,7 +317,7 @@ _hub.close()
 check("§4 no new action and no new empty default of THIS release (the registry grew with "
       "the two v1.5.1 File actions, the v1.5.2 View item, the v1.5.3 freshness pair and the "
       "v1.5.5 inventory pair after it)",
-      len(HR.HOTKEY_ACTIONS) == 56 and len(HR.empty_default_action_ids()) == 33)
+      len(HR.HOTKEY_ACTIONS) == 59 and len(HR.empty_default_action_ids()) == 36)
 check("§4 no new theme field (the palette is the v1.5rc1 one)",
       len(dataclasses.fields(theme.Theme)) == 60)
 _deps = {"PySide6", "paramiko", "keyring", "wcwidth"}
@@ -327,8 +327,8 @@ check("§4 no new dependency (the four pinned ones and nothing else)",
       and not re.search(r"^\s*(?!PySide6|paramiko|keyring|wcwidth|#)[A-Za-z][\w.-]*\s*[><=]",
                         _req, re.M))
 check("§4 the version constants agree everywhere (version.py ↔ pyproject ↔ requirements)",
-      __import__("version").APP_VERSION == "1.5.7.1"
-      and '"1.5.7.1"' in _src("version.py") and 'version = "1.5.7.1"' in _src("pyproject.toml"))
+      __import__("version").APP_VERSION == "1.6"
+      and '"1.6"' in _src("version.py") and 'version = "1.6"' in _src("pyproject.toml"))
 check("§4 VERSION_FORMAT did NOT move (the project schema is unchanged)",
       __import__("version").VERSION_FORMAT == "0.9")
 
