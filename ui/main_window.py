@@ -336,6 +336,9 @@ _VIEW_TOOLBAR_ITEMS = (
     ("view.toggle_map", "map_panel", "view.toggle_map", "Map / List"),
     ("view.toggle_minimap", "minimap", "view.toggle_minimap", "Minimap"),
     ("view.toggle_legend", "legend", "view.toggle_legend", "Legend"),
+    # v1.6.7 (ROADMAP task 4): the BOOKMARKS panel — the sixth member of the cluster, next
+    # to the legend because both are floating panels over the canvas.
+    ("view.toggle_bookmarks", "bookmarks", "view.toggle_bookmarks", "Bookmarks"),
     ("view.toggle_activity", "activity", "view.toggle_activity", "Activity panel"),
 )
 
@@ -347,6 +350,7 @@ _VIEW_TOOLBAR_ACTIONS = {
     "view.toggle_map": "act_show_map",
     "view.toggle_minimap": "act_show_minimap",
     "view.toggle_legend": "act_show_legend",
+    "view.toggle_bookmarks": "act_show_bookmarks",
     "view.toggle_activity": "act_show_activity",
 }
 
@@ -682,6 +686,16 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         # only renders it, so a window that is closed and reopened loses no history.
         self._activity_enabled = MainWindow._read_activity_visible()
         self.activity_panel = None
+
+        # ── v1.6.7 (ROADMAP task 4): the bookmarks panel ────────────
+        # The saved visibility is read BEFORE `_setup_menubar` builds the checkable View
+        # item (the ui_activity_panel rule: the menu item is the OWNER of the state, the
+        # panel is created in `_setup_ui` and follows it). The store behind the panel is the
+        # module-level singleton of `modules/bookmarks.py` — the LIST is application-level
+        # and lives outside every project.
+        self._bookmarks_enabled = MainWindow._read_bookmarks_visible()
+        self._bookmarks_pos = None
+        self.bookmark_panel = None
 
         # ── v1.4rc1 (plugin foundation, rc series): the plugin registry ─────
         # The manager is created HERE because the "Plugins" menu is built from it; the
@@ -1293,11 +1307,13 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
             except Exception:  # noqa: BLE001
                 pass
         # The floating panels are children of the view but owned here: the map search
-        # bar (v0.9.8), the minimap (v1.4.2), the legend (v1.4.5) and the first-run
-        # empty state (v1.4.5) — all repaint from the live theme.
+        # bar (v0.9.8), the minimap (v1.4.2), the legend (v1.4.5), the first-run
+        # empty state (v1.4.5) and the bookmarks panel (v1.6.7) — all repaint from the
+        # live theme.
         for widget in (getattr(self, "map_search", None), getattr(self, "legend", None),
                        getattr(self, "empty_state", None),
-                       getattr(self, "filter_plaque", None)):
+                       getattr(self, "filter_plaque", None),
+                       getattr(self, "bookmark_panel", None)):
             hook = getattr(widget, "refresh_theme", None)
             if callable(hook):
                 try:
@@ -1571,6 +1587,15 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
                 _legend.retranslate()
             except RuntimeError:
                 pass  # Qt teardown — the panel is already destroyed
+        # v1.6.7 (ROADMAP task 4): the bookmarks panel (its title band, the filter's
+        # placeholder, the button and the two sentences of an empty / filtered list).
+        _bookmarks = getattr(self, "bookmark_panel", None)
+        if _bookmarks is not None:
+            try:
+                _bookmarks.retranslate()
+                self._position_bookmarks_panel()   # the captions changed width — re-place it
+            except RuntimeError:
+                pass  # Qt teardown — the panel is already destroyed
         # v1.5.4 (ROADMAP task 3): the active-filter plaque — it BUILDS its captions from
         # the live filter state, so a re-text is one call (the values never move).
         _plaque = getattr(self, "filter_plaque", None)
@@ -1836,6 +1861,11 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         # the exports). Created after the legend, because it yields its corner to no one
         # and simply joins the floating-panel priority resolver below.
         self._setup_filter_plaque()
+
+        # v1.6.7 (ROADMAP task 4): the BOOKMARKS panel — the fourth floating panel of the
+        # same family (a child of the view, out of the exports). Created AFTER the plaque,
+        # because its default corner (LEFT|TOP) yields to the plaque by stepping below it.
+        self._setup_bookmarks_panel()
 
         # Status bar
         if self._i18n_available:
@@ -2438,6 +2468,9 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         # v1.6 (ROADMAP task 7): the activity panel's button — the fifth member of the
         # cluster (the attribute survives for the same reason as the four above).
         self._activity_toolbar_btn = self._view_toolbar_buttons["view.toggle_activity"]
+        # v1.6.7 (ROADMAP task 4): the bookmarks panel's button — the sixth member of the
+        # cluster (the attribute survives for the same reason as the five above).
+        self._bookmarks_toolbar_btn = self._view_toolbar_buttons["view.toggle_bookmarks"]
 
         # ── v1.5rc4 (ROADMAP task 2): the "»" OVERFLOW menu ────────────────────
         # Not Qt's own toolbar extension: that one is a popup of ICONS with no labels,
@@ -3079,6 +3112,20 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         self._register_i18n(self.act_show_legend, "view.toggle_legend")
         self._register_hotkey_target("view.toggle_legend", self.act_show_legend)
         self._wire_view_toolbar_button("view.toggle_legend", self.act_show_legend)
+        # v1.6.7 (ROADMAP task 4): the BOOKMARKS panel — the same "created manually +
+        # toggled(bool)" pattern and the same registry rule (an EMPTY default: assignable,
+        # no key taken from anyone). The panel is already built by `_setup_ui` (which runs
+        # BEFORE this method) and its saved visibility was read in the constructor, so the
+        # item simply joins that state; the toolbar mirror is created in `_setup_toolbar`.
+        self.act_show_bookmarks = view_menu.addAction(
+            self.t("view.toggle_bookmarks") if self._i18n_available else "Bookmarks")
+        self.act_show_bookmarks.setCheckable(True)
+        self.act_show_bookmarks.setChecked(bool(getattr(self, "_bookmarks_enabled", False)))
+        set_action_icon(self.act_show_bookmarks, "bookmarks")
+        self.act_show_bookmarks.toggled.connect(self._toggle_bookmarks)
+        self._register_i18n(self.act_show_bookmarks, "view.toggle_bookmarks")
+        self._register_hotkey_target("view.toggle_bookmarks", self.act_show_bookmarks)
+        self._wire_view_toolbar_button("view.toggle_bookmarks", self.act_show_bookmarks)
         # v1.5.2 (ROADMAP task 3): the ACTIVITY panel — the same "created manually +
         # toggled(bool)" pattern and the same registry rule (an EMPTY default:
         # assignable, no key taken from anyone). v1.6 (ROADMAP task 7): it JOINS the
@@ -4145,12 +4192,14 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
 
         The view's own coordinates (every panel is a child of `MapView`), in the order the
         priority rule cares about: the first-run hint first (it is the temporary one), then
-        the search bar, the minimap, the legend and — since v1.5.4 — the filter plaque (a
-        panel that only exists while a filter dims the map). A panel that is hidden —
-        including the legend suppressed by the priority rule itself — contributes nothing.
+        the search bar, the minimap, the legend — the bookmarks panel since v1.6.7 — and the
+        filter plaque (a panel that only exists while a filter dims the map). A panel that is
+        hidden — including the legend suppressed by the priority rule itself — contributes
+        nothing.
         """
         rects = []
-        for name in ("empty_state", "map_search", "minimap", "legend", "filter_plaque"):
+        for name in ("empty_state", "map_search", "minimap", "legend", "bookmark_panel",
+                     "filter_plaque"):
             panel = getattr(self, name, None)
             if panel is None:
                 continue
@@ -6312,14 +6361,18 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         self._save_activity_config({"ui_activity_panel": visible})
 
     def _on_activity_hidden(self):
-        """The panel was closed by the user (its X): make the View item tell the truth.
+        """The panel was closed by the user (its X): make the View item and its button tell the truth.
 
         The item OWNS the state, so the close is mirrored into it with BLOCKED signals
         (no `toggled` loop back into `set_visible`) and persisted — the next start
-        opens the window only if it was left open.
+        opens the window only if it was left open. Because the signals are BLOCKED, the
+        toolbar MIRROR never hears about the new state and has to be resynced EXPLICITLY
+        (`_sync_view_toolbar()`), or it keeps showing "open" while the window is gone and a
+        click on it flips the wrong way — the same resync `_reject_collapse_both()` needs.
         """
-        action = getattr(self, "act_show_activity", None)
         self._activity_enabled = False
+        self._save_activity_config({"ui_activity_panel": False})
+        action = getattr(self, "act_show_activity", None)
         if action is None:
             return
         try:
@@ -6331,7 +6384,209 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
                     action.blockSignals(False)
         except RuntimeError:
             return  # Qt teardown — the action is already destroyed
-        self._save_activity_config({"ui_activity_panel": False})
+        self._sync_view_toolbar("view.toggle_activity", False)
+
+    # ── v1.6.7 (ROADMAP task 4): the bookmarks panel ─────────────────────────────
+    # The application-level list of the links the team uses (a wiki, a dashboard, a
+    # hypervisor's console, the ticket queue). The STORE is `modules/bookmarks.py` (ONE
+    # `~/.sshmap/bookmarks.json`, outside every project); the PANEL is
+    # `ui/bookmark_panel.py`; the EDITOR is `dialogs/bookmark_edit_dialog.py`; and the
+    # OPENER is the quick launch's own URL path (`SshMixin._quick_launch_url`) handed to the
+    # panel as a callback, so the browser, its failure sentence and its status line keep ONE
+    # home. The window owns nothing but the visibility key, the saved position and the fold —
+    # the legend / minimap precedent.
+
+    #: The inset of the DEFAULT (top-left) position — the plaque's own margin. The plaque
+    #: owns the corner and the panel STEPS BELOW it instead of fighting for the pixels (the
+    #: "yield, never cover" rule of the floating-panel family).
+    BOOKMARKS_MARGIN = 12
+
+    @staticmethod
+    def _read_bookmarks_visible() -> bool:
+        """`ui_bookmarks_panel` from config.json → the saved visibility (default OFF).
+
+        OFF by default: the panel is a place a user OPENS to look a link up, not chrome a
+        first run must carry (the `ui_activity_panel` rule), and the toolbar button plus the
+        View item are its doors. A broken value costs the default — never the panel.
+        """
+        try:
+            from i18n import load_config
+            cfg = load_config()
+        except Exception:  # noqa: BLE001 — without a config the default (hidden) stands
+            return False
+        raw = cfg.get("ui_bookmarks_panel")
+        return bool(raw) if isinstance(raw, bool) else False
+
+    @staticmethod
+    def _read_bookmarks_settings():
+        """`ui_bookmarks*` from config.json → (visible, collapsed, position|None).
+
+        Every broken value falls back to its default (hidden, unfolded, the top-left corner)
+        — a hand-edited config must never cost the panel or put it off-screen
+        (`_position_bookmarks_panel` clamps a saved position into the view anyway).
+        """
+        visible, collapsed, position = MainWindow._read_bookmarks_visible(), False, None
+        try:
+            from i18n import load_config
+            cfg = load_config()
+        except Exception:  # noqa: BLE001 — without a config the panel is simply off
+            return visible, collapsed, position
+        if isinstance(cfg.get("ui_bookmarks_collapsed"), bool):
+            collapsed = bool(cfg["ui_bookmarks_collapsed"])
+        position = MainWindow._saved_position(cfg.get("ui_bookmarks_position"))
+        return visible, collapsed, position
+
+    def _save_bookmarks_config(self, data: dict) -> None:
+        """Merge-write the panel's own UI state (the `ui_legend` pattern)."""
+        try:
+            from i18n import save_config
+            save_config(dict(data))
+        except Exception:  # noqa: BLE001 — a cosmetic state must not break the toggle
+            pass
+
+    def _setup_bookmarks_panel(self):
+        """Create the panel, apply the saved state and wire its persistence.
+
+        Visibility, the folded state and the position live in `~/.sshmap/config.json`
+        (`ui_bookmarks_panel`, `ui_bookmarks_collapsed`, `ui_bookmarks_position`) — UI state
+        written by its owner, part of the SAME family as `ui_legend*` / `ui_minimap*`, so
+        the settings hub's `collect()` does not move.
+        """
+        try:
+            from ui.bookmark_panel import BookmarkPanel
+        except ImportError:  # flat layout: the ui/ directory itself is on sys.path
+            try:
+                from bookmark_panel import BookmarkPanel
+            except ImportError:  # a stripped build — no panel, the map works as before
+                return
+        try:
+            panel = BookmarkPanel(self.view, opener=self._quick_launch_url)
+        except Exception as e:  # noqa: BLE001 — a panel must not break the startup
+            if self.log:
+                self.log.warning(f"Bookmarks panel unavailable: {e}")
+            return
+        panel.moved.connect(self._on_bookmarks_moved)
+        panel.collapsed_changed.connect(self._on_bookmarks_collapsed_changed)
+        panel.manage_requested.connect(self._open_bookmarks_dialog)
+        self.view.resized.connect(self._position_bookmarks_panel)
+        visible, collapsed, position = self._read_bookmarks_settings()
+        self._bookmarks_enabled = visible
+        self._bookmarks_pos = position
+        panel.set_collapsed(collapsed, persist=False)
+        panel.setVisible(visible)
+        self.bookmark_panel = panel
+        self._position_bookmarks_panel()
+
+    def _position_bookmarks_panel(self):
+        """Place the panel: the saved position (clamped) or the top-left corner.
+
+        The plaque owns the very corner (LEFT|TOP), so the default STEPS BELOW it while the
+        plaque is on screen — the same yield the plaque performs for the search bar.
+        """
+        panel = getattr(self, "bookmark_panel", None)
+        view = getattr(self, "view", None)
+        if panel is None or view is None:
+            return
+        try:
+            w, h = view.width(), view.height()
+            if w <= 0 or h <= 0:
+                return
+            position = getattr(self, "_bookmarks_pos", None)
+            if position is None:
+                x = self.BOOKMARKS_MARGIN
+                y = self.BOOKMARKS_MARGIN
+                plaque = getattr(self, "filter_plaque", None)
+                if plaque is not None and plaque.isVisible():
+                    geometry = plaque.geometry()
+                    if geometry.right() >= x:
+                        y = geometry.bottom() + self.BOOKMARKS_MARGIN
+            else:
+                x = min(max(int(position.x()), 0), max(w - panel.width(), 0))
+                y = min(max(int(position.y()), 0), max(h - panel.height(), 0))
+            panel.move(int(x), int(y))
+            if panel.isVisible():
+                panel.raise_()
+        except RuntimeError:
+            pass  # Qt teardown — the widget is already destroyed
+
+    def _toggle_bookmarks(self, checked: bool):
+        """Show/hide the bookmarks panel + persist `ui_bookmarks_panel` (a merge write)."""
+        panel = getattr(self, "bookmark_panel", None)
+        if panel is None:
+            return
+        visible = bool(checked)
+        try:
+            if visible:
+                panel.reload()          # a panel that appears reads the file it shows
+            panel.setVisible(visible)
+            if visible:
+                self._position_bookmarks_panel()
+        except RuntimeError:
+            return  # Qt teardown — the panel is already destroyed
+        self._bookmarks_enabled = visible
+        self._save_bookmarks_config({"ui_bookmarks_panel": visible})
+
+    def _on_bookmarks_moved(self, position):
+        """The user dragged the panel: remember where (a merge write of the position).
+
+        A drop within `SNAP_PX` of an anchored edge (LEFT|TOP) instead RE-ANCHORS it — the
+        saved position is cleared with the `{"x": null, "y": null}` sentinel and the
+        documented corner (plus the plaque yield) comes back by itself.
+        """
+        try:
+            pos = QPoint(int(position.x()), int(position.y()))
+        except (TypeError, ValueError, AttributeError):
+            return
+        if self._snap_panel(getattr(self, "bookmark_panel", None), pos, "lt"):
+            self._bookmarks_pos = None
+            self._save_bookmarks_config({"ui_bookmarks_position": {"x": None, "y": None}})
+            self._position_bookmarks_panel()
+            return
+        self._bookmarks_pos = pos
+        self._save_bookmarks_config({"ui_bookmarks_position": {"x": pos.x(), "y": pos.y()}})
+
+    def _on_bookmarks_collapsed_changed(self, collapsed: bool):
+        """The panel was folded/unfolded: persist it and re-place (its height changed)."""
+        self._save_bookmarks_config({"ui_bookmarks_collapsed": bool(collapsed)})
+        self._position_bookmarks_panel()
+
+    def _open_bookmarks_dialog(self):
+        """The panel's "Edit bookmarks…" door — the editor dialog owns add/edit/reorder.
+
+        The dialog WRITES through the same store the panel reads (`accept()` →
+        `BookmarkStore.save_urls()`, which keeps every foreign entry of the file), and the
+        panel RELOADS afterwards — the panel never edits the file itself. The status line
+        reports what really happened, including the failure.
+        """
+        panel = getattr(self, "bookmark_panel", None)
+        try:
+            from ..dialogs.bookmark_edit_dialog import BookmarkEditDialog
+        except ImportError:
+            from dialogs.bookmark_edit_dialog import BookmarkEditDialog
+        store = panel.store() if panel is not None else None
+        try:
+            dlg = BookmarkEditDialog(self, store=store)
+        except Exception as e:  # noqa: BLE001 — a dialog failure must not break the panel
+            if self.log:
+                self.log.exception(f"Bookmarks editor failed: {e}")
+            return
+        if dlg.exec() != QDialog.Accepted:
+            return
+        if panel is not None:
+            try:
+                panel.reload()
+            except RuntimeError:
+                pass  # Qt teardown — the panel is already destroyed
+        try:
+            if dlg.save_failed:
+                self.statusBar().showMessage(self.t("status.bookmarks_save_failed"), 6000)
+            else:
+                self.statusBar().showMessage(
+                    self.t("status.bookmarks_saved", count=len(dlg.get_entries())), 4000)
+        except Exception:  # noqa: BLE001 — a status line is cosmetic
+            pass
+        if self.log:
+            self.log.info("Bookmarks updated", extra={"bookmarks": len(dlg.get_entries())})
 
     def _wire_view_toolbar_button(self, action_id: str, action) -> None:
         """v1.4.6: keep a toolbar VIEW toggle in step with its checkable menu item.

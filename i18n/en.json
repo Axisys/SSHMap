@@ -810,5 +810,22 @@
   "server.disk_mount_tooltip": "Left: the path to measure (empty means /opt). Right: what the collection found — the mount point df reported, its free space and its capacity. Empty means nothing was measured: a network share is not reported as capacity.",
   "node.disk_mount": "DISK {mount}: {free} free of {size}",
   "status.disk_mount_network": "Data mount {mount} on {alias} is a network filesystem ({type}) — a share is not reported as capacity",
-  "status.disk_mount_missing": "Data mount {mount} was not found on {alias} — nothing was measured"
+  "status.disk_mount_missing": "Data mount {mount} was not found on {alias} — nothing was measured",
+  "view.toggle_bookmarks": "Bookmarks",
+  "bookmarks.title": "Bookmarks",
+  "bookmarks.tooltip": "Team links: click a row to open it in the browser",
+  "bookmarks.filter_placeholder": "Filter bookmarks…",
+  "bookmarks.empty": "No bookmarks yet — use “Edit bookmarks…” below to add one.",
+  "bookmarks.no_matches": "No bookmark matches the filter.",
+  "bookmarks.manage": "Edit bookmarks…",
+  "bookmarks.manage_tooltip": "Add, edit, reorder or remove the links of this list",
+  "dialog.bookmarks": "Bookmarks",
+  "dialog.bookmarks_desc": "The links the team uses — a wiki, a dashboard, a console. Stored in ~/.sshmap/bookmarks.json, outside every project.",
+  "bookmarks.col_name": "Name",
+  "bookmarks.col_url": "URL",
+  "bookmarks.add": "Add",
+  "bookmarks.remove": "Remove",
+  "bookmarks.url_hint": "https://wiki.example.com",
+  "status.bookmarks_saved": "Bookmarks saved: {count}",
+  "status.bookmarks_save_failed": "Bookmarks were not saved — see the log"
 }

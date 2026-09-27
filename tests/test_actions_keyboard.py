@@ -148,7 +148,7 @@ class _FakeChecker:
 print("== 1. the registry is complete ==")
 
 ids = HR.action_ids()
-check("registry: 59 actions — the v1.3.2 set + Save As + the zoom family + the empty defaults "
+check("registry: 60 actions — the v1.3.2 set + Save As + the zoom family + the empty defaults "
       "(v1.3.3.7: +file.export_svg; v1.4rc1: +plugins.reload; v1.4rc3: +plugins.run_on_nodes; "
       "v1.4.1: +file.import_ssh_config; v1.4.2: +view.toggle_minimap; "
       "v1.4.5: +view.toggle_legend; v1.5rc3: +help.cheatsheet (F1) and +help.example; "
@@ -158,7 +158,7 @@ check("registry: 59 actions — the v1.3.2 set + Save As + the zoom family + the
       "v1.5.5: +file.copy_list and +file.export_list — the inventory report pair, both EMPTY defaults; "
       "v1.6: +edit.selected, +edit.arrange_group and +file.export_connections — the bulk edit / "
       "arrangement / connection report trio, all EMPTY defaults)",
-      len(ids) == 59 and len(set(ids)) == 59, str(len(ids)))
+      len(ids) == 60 and len(set(ids)) == 60, str(len(ids)))
 check("registry: the 4 new SEQUENCED actions carry exactly the promised defaults",
       {a: HR.default_sequence(a) for a in NEW_DEFAULT_ACTIONS} == NEW_DEFAULT_ACTIONS,
       str({a: HR.default_sequence(a) for a in NEW_DEFAULT_ACTIONS}))
@@ -249,7 +249,7 @@ check("runtime audit: every action_id the menu passes is a registry action", not
 # the dynamic ones (multi_input is installed by the mode, palette.open is a QShortcut) and
 # the CHECKABLE View items, which must be connected to toggled(bool) — see above.
 _MANUAL_IDS = {"view.multi_input", "palette.open", "view.toggle_minimap", "view.toggle_legend",
-               "view.toggle_activity"}
+               "view.toggle_bookmarks", "view.toggle_activity"}
 check("runtime audit: the menubar covers the whole registry (every action has a menu item)",
       set(ids) <= {a for _k, a in _recorded} | _MANUAL_IDS,
       str(sorted(set(ids) - {a for _k, a in _recorded} - _MANUAL_IDS)))

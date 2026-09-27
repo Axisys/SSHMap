@@ -45,6 +45,7 @@ import modules.activity_log as AL  # noqa: E402
 import modules.plugin_manager as PM  # noqa: E402
 import ui.main_window as MW  # noqa: E402
 import ui.hotkey_registry as HR  # noqa: E402
+from ui.icons import draw_icon  # noqa: E402
 from modules.logger import get_logger  # noqa: E402
 from modules.sftp_worker import SftpWorker, task_log_line  # noqa: E402
 from services.status_checker import StatusChecker, round_summary  # noqa: E402
@@ -438,7 +439,7 @@ check("§4 it is a NON-MODAL window — never a fifth floating panel (the placem
 _resolver = _src("ui", "main_window.py")
 _open = _resolver.index("def _overlay_panel_rects")
 check("§4 ...so it never joins the floating-panel priority resolver (only the VIEW children)",
-      'for name in ("empty_state", "map_search", "minimap", "legend", "filter_plaque")'
+      'for name in ("empty_state", "map_search", "minimap", "legend", "bookmark_panel",'
       in _resolver[_open:_open + 900] and panel.parent() is not win.view)
 check("§4 it owns retranslate() (the v1.3.3.1 container invariant)",
       callable(getattr(panel, "retranslate", None)))
@@ -446,6 +447,53 @@ check("§4 the activity switch JOINS the toolbar's view cluster (v1.6, ROADMAP t
       "cluster is the deliverable, and every panel toggle is a member of it)",
       MW._VIEW_TOOLBAR_ACTIONS.get("view.toggle_activity") == "act_show_activity"
       and "view.toggle_activity" in win._view_toolbar_buttons)
+
+
+# The switch wears its OWN glyph: the panel FRAME with the initial "A" inside it. The row
+# glyph it shared with the legend made the two buttons read as the same one at toolbar size,
+# so the contrast is asserted on the PAINTED PIXELS (gotcha #17: a QIcon is a value).
+_ICON_PX = 20
+
+
+def _icon_image(name):
+    """The painted 20×20 image of an icon drawer (a FRESH draw — no cache in the way)."""
+    return draw_icon(name).pixmap(_ICON_PX, _ICON_PX).toImage()
+
+
+def _ink(image, x, y, r=0):
+    """Is any pixel of the ±r box at (x, y) inked? The glyphs are strokes on transparency."""
+    for dx in range(-r, r + 1):
+        for dy in range(-r, r + 1):
+            px, py = x + dx, y + dy
+            if (0 <= px < image.width() and 0 <= py < image.height()
+                    and image.pixelColor(px, py).alpha() > 0):
+                return True
+    return False
+
+
+def _mask(image):
+    return tuple(image.pixelColor(x, y).alpha() > 0
+                 for y in range(image.height()) for x in range(image.width()))
+
+
+_icon_activity = _icon_image("activity")
+_icon_legend = _icon_image("legend")
+_icon_map = _icon_image("map_panel")
+_FRAME_SAMPLES = ((3, 10), (10, 4), (10, 16), (16, 10))
+check("§4 the activity switch has a glyph of its own (never the legend's row mark again)",
+      not draw_icon("activity").isNull() and _mask(_icon_activity) != _mask(_icon_legend)
+      and _mask(_icon_activity) != _mask(_icon_map))
+check("§4 ...and it wears the panel FRAME the family shares (the same square as Map/List)",
+      all(_ink(_icon_activity, x, y, r=1) and _ink(_icon_map, x, y, r=1)
+          for x, y in _FRAME_SAMPLES),
+      f"{[(pt, _ink(_icon_activity, *pt, r=1)) for pt in _FRAME_SAMPLES]}")
+check("§4 ...with the letter A inside it (apex, both feet and the crossbar are inked)",
+      _ink(_icon_activity, 10, 6) and _ink(_icon_activity, 7, 13)
+      and _ink(_icon_activity, 13, 13) and _ink(_icon_activity, 10, 11))
+check("§4 ...and the top corners of the interior stay EMPTY (an A, not a filled block)",
+      not _ink(_icon_activity, 7, 6) and not _ink(_icon_activity, 13, 6),
+      f"left={_ink(_icon_activity, 7, 6)} right={_ink(_icon_activity, 13, 6)}")
+
 check("§4 it is hidden by default and the config key is read, not assumed",
       win.act_show_activity.isChecked() is False and panel.is_shown() is False
       and read_cfg({}).get("ui_activity_panel") in (None, False))
@@ -525,11 +573,20 @@ check("§4 closing the window hides it (the history survives) and unchecks the V
       panel.is_shown() is False and win.act_show_activity.isChecked() is False
       and win._activity_enabled is False
       and read_cfg({}).get("ui_activity_panel") is False, str(read_cfg({})))
-check("§4 ...and the same instance comes back with the history intact",
-      (win.act_show_activity.setChecked(True), app.processEvents(),
-       panel.is_shown()
+check("§4 ...and the TOOLBAR MIRROR follows the close too (a BLOCKED signal is resynced)",
+      win._activity_toolbar_btn.isChecked() is False,
+      f"item={win.act_show_activity.isChecked()} btn={win._activity_toolbar_btn.isChecked()}")
+check("§4 ...so the next click on the BUTTON opens the window again (the history intact)",
+      (win._activity_toolbar_btn.setChecked(True), app.processEvents(),
+       panel.is_shown() and win.act_show_activity.isChecked()
        and "a line that stays English" in [r[3] for r in panel.rows_text()])[-1],
       str(panel.rows_text()[:2]))
+panel.close()
+app.processEvents()
+check("§4 a second close leaves the item AND the button unchecked (no lying checkmark)",
+      panel.is_shown() is False and win.act_show_activity.isChecked() is False
+      and win._activity_toolbar_btn.isChecked() is False
+      and read_cfg({}).get("ui_activity_panel") is False, str(read_cfg({})))
 win.act_show_activity.setChecked(False)
 win._dirty = False
 win.close()
@@ -541,14 +598,14 @@ print("== §5 the release state and the 'no new contract' audit ==")
 
 check_release_state(ROOT)
 check("§5 EXPECTED_APP_VERSION is the shipped release (v1.5.2 was the second patch on 1.5;"
-      " the pin quotes the CURRENT one — v1.6.6 — like every topical file)",
-      EXPECTED_APP_VERSION == "1.6.6"
+      " the pin quotes the CURRENT one — v1.6.7 — like every topical file)",
+      EXPECTED_APP_VERSION == "1.6.7"
       and re.fullmatch(r"1\.6(\.\d+)?", EXPECTED_APP_VERSION) is not None)
 check("§5 the i18n pin counts the shipped release (v1.5.2's 661 + v1.5.3's twenty"
       " + v1.5.4's eleven + v1.5.5's fourteen + v1.5.6's two + v1.5.7's twenty-nine"
       " + v1.6's forty-one + v1.6.2's four + v1.6.3's four + v1.6.4's three"
-      " + v1.6.5's eleven + v1.6.6's eleven)",
-      EXPECTED_I18N_KEYS == 811, str(EXPECTED_I18N_KEYS))
+      " + v1.6.5's eleven + v1.6.6's eleven + v1.6.7's seventeen)",
+      EXPECTED_I18N_KEYS == 828, str(EXPECTED_I18N_KEYS))
 check_i18n_parity(_langs)
 check_i18n_format(_langs)
 
@@ -573,9 +630,9 @@ check("§5 the ONE new action is registered with an EMPTY default (assignable, n
       and "view.toggle_activity" in HR.empty_default_action_ids()
       and HR.action_family("view.toggle_activity") == "view")
 check("§5 the registry grew 51 -> 52 in v1.5.2 (and 52 -> 54 with the v1.5.3 pair,"
-      " 54 -> 56 with the v1.5.5 inventory pair, -> 59 with the v1.6 trio) and the empty-default "
-      "set 28 -> 29 (-> 31, -> 33, -> 36)",
-      len(HR.HOTKEY_ACTIONS) == 59 and len(HR.empty_default_action_ids()) == 36,
+      " 54 -> 56 with the v1.5.5 inventory pair, -> 59 with the v1.6 trio, -> 60 with v1.6.7) and the empty-default "
+      "set 28 -> 29 (-> 31, -> 33, -> 36, -> 37)",
+      len(HR.HOTKEY_ACTIONS) == 60 and len(HR.empty_default_action_ids()) == 37,
       f"{len(HR.HOTKEY_ACTIONS)} / {len(HR.empty_default_action_ids())}")
 
 _win = make_main()
@@ -607,7 +664,7 @@ check("§5 no new dependency (the four pinned ones and nothing else)",
                         _req, re.M))
 check("§5 VERSION_FORMAT did NOT move (the project schema is unchanged)",
       __import__("version").VERSION_FORMAT == "0.9"
-      and __import__("version").APP_VERSION == "1.6.6")
+      and __import__("version").APP_VERSION == "1.6.7")
 check("§5 the durable record stays the FILE — the ring is the second, memory-only home",
       "LOG_FILE" in _src("modules", "logger.py")
       and "MAX_LOG_SIZE_MB" in _src("modules", "logger.py")

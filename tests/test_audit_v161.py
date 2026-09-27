@@ -482,9 +482,9 @@ _menu = _win.createPopupMenu()
 _rows = [(a.text(), a.isSeparator()) for a in _menu.actions()]
 check("N19: OUR menu lists no blank row (a separator is not a row)",
       [t for t, sep in _rows if not sep and not t.strip()] == [], str(_rows))
-check("N19: ...and it carries the FIVE panel switches of the toolbar cluster",
+check("N19: ...and it carries the SIX panel switches of the toolbar cluster",
       [a.text() for a in _win._panel_switch_actions()] ==
-      ["Sidebar / Map", "Map / List", "Minimap", "Legend", "Activity panel"],
+      ["Sidebar / Map", "Map / List", "Minimap", "Legend", "Bookmarks", "Activity panel"],
       str([a.text() for a in _win._panel_switch_actions()]))
 check("N19: the panel rows and the dock row are really IN the menu",
       all(a in _menu.actions() for a in _win._panel_switch_actions()))
@@ -624,8 +624,8 @@ print("== §11 the release state — v1.6.1 added NO i18n key ==")
 
 check("§11 the hardening batch itself added no key (the pin is the SHIPPED one — v1.6's 778"
       " plus the four of v1.6.2, the four of v1.6.3, the three of v1.6.4 and the eleven"
-      " of v1.6.5 and the eleven of v1.6.6)",
-      EXPECTED_I18N_KEYS == 811, str(EXPECTED_I18N_KEYS))
+      " of v1.6.5, the eleven of v1.6.6 and the seventeen of v1.6.7)",
+      EXPECTED_I18N_KEYS == 828, str(EXPECTED_I18N_KEYS))
 check_release_state(ROOT)
 _langs = load_i18n_langs(ROOT)
 check_i18n_parity(_langs)

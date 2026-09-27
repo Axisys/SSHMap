@@ -810,5 +810,22 @@
   "server.disk_mount_tooltip": "Links: der zu messende Pfad (leer bedeutet /opt). Rechts: was die Erfassung gefunden hat — der von df gemeldete Einhängepunkt, freier Platz und Kapazität. Leer bedeutet, dass nichts gemessen wurde: eine Netzwerkfreigabe zählt nicht als Kapazität.",
   "node.disk_mount": "DISK {mount}: {free} frei von {size}",
   "status.disk_mount_network": "Daten-Mount {mount} auf {alias} ist ein Netzwerk-Dateisystem ({type}) — eine Freigabe zählt nicht als Kapazität",
-  "status.disk_mount_missing": "Daten-Mount {mount} wurde auf {alias} nicht gefunden — nichts gemessen"
+  "status.disk_mount_missing": "Daten-Mount {mount} wurde auf {alias} nicht gefunden — nichts gemessen",
+  "view.toggle_bookmarks": "Lesezeichen",
+  "bookmarks.title": "Lesezeichen",
+  "bookmarks.tooltip": "Team-Links: eine Zeile anklicken, um sie im Browser zu öffnen",
+  "bookmarks.filter_placeholder": "Lesezeichen filtern…",
+  "bookmarks.empty": "Noch keine Lesezeichen — unten „Lesezeichen bearbeiten…“ benutzen.",
+  "bookmarks.no_matches": "Kein Lesezeichen passt zum Filter.",
+  "bookmarks.manage": "Lesezeichen bearbeiten…",
+  "bookmarks.manage_tooltip": "Die Links dieser Liste hinzufügen, ändern, umsortieren oder entfernen",
+  "dialog.bookmarks": "Lesezeichen",
+  "dialog.bookmarks_desc": "Die Links, die das Team nutzt — ein Wiki, ein Dashboard, eine Konsole. Gespeichert in ~/.sshmap/bookmarks.json, außerhalb jedes Projekts.",
+  "bookmarks.col_name": "Name",
+  "bookmarks.col_url": "URL",
+  "bookmarks.add": "Hinzufügen",
+  "bookmarks.remove": "Entfernen",
+  "bookmarks.url_hint": "https://wiki.example.com",
+  "status.bookmarks_saved": "Lesezeichen gespeichert: {count}",
+  "status.bookmarks_save_failed": "Lesezeichen wurden nicht gespeichert — siehe Log"
 }

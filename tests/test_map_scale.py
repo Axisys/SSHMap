@@ -510,10 +510,11 @@ check("toolbar: the ACTIVITY panel has a mirror in the view cluster (the fifth m
 check("toolbar: the mirror carries NO sequence of its own (the menu item owns the hotkey)",
       _btn.shortcut().toString() == ""
       and _win7.act_show_activity in _win7._hotkey_targets["view.toggle_activity"])
-check("toolbar: every panel of the cluster is present (sidebar / map / minimap / legend / activity)",
+check("toolbar: every panel of the cluster is present "
+      "(sidebar / map / minimap / legend / bookmarks / activity)",
       set(_win7._view_toolbar_buttons) == {"view.toggle_sidebar", "view.toggle_map",
                                            "view.toggle_minimap", "view.toggle_legend",
-                                           "view.toggle_activity"},
+                                           "view.toggle_bookmarks", "view.toggle_activity"},
       str(sorted(_win7._view_toolbar_buttons)))
 
 _before_state = _win7.act_show_activity.isChecked()
@@ -555,10 +556,10 @@ check("i18n: the placeholders of the new sentences survive every language",
           and "{file}" in _langs[c]["status.connections_exported"] for c in _langs))
 check_i18n_parity(_langs)
 check_i18n_format(_langs)
-check("the release is v1.6.6 with 811 keys and 59 actions",
-      __import__("version").APP_VERSION == "1.6.6"
-      and __import__("_common").EXPECTED_I18N_KEYS == 811
-      and len(HR.HOTKEY_ACTIONS) == 59 and len(HR.empty_default_action_ids()) == 36,
+check("the release is v1.6.7 with 828 keys and 60 actions",
+      __import__("version").APP_VERSION == "1.6.7"
+      and __import__("_common").EXPECTED_I18N_KEYS == 828
+      and len(HR.HOTKEY_ACTIONS) == 60 and len(HR.empty_default_action_ids()) == 37,
       f"{__import__('version').APP_VERSION}"
       f" / {__import__('_common').EXPECTED_I18N_KEYS}"
       f" / {len(HR.HOTKEY_ACTIONS)} / {len(HR.empty_default_action_ids())}")

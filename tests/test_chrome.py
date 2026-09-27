@@ -210,15 +210,15 @@ check("§2 the toolbar stopped repeating the sidebar and the palette (the de-dup
       not any(text in _texts for text in _dropped),
       f"texts={_texts}")
 
-check("§2 the keep-set: 3 file verbs + Center + Fit, undo/redo and the five view toggles",
-      len(_buttons) == 3 + 2 + 2 + 5
+check("§2 the keep-set: 3 file verbs + Center + Fit, undo/redo and the six view toggles",
+      len(_buttons) == 3 + 2 + 2 + 6
       and all(i18n.t(k) in _texts for k in ("file.new_project", "file.open", "file.save",
                                            "view.center_map", "view.fit_map",
                                            "edit.undo", "edit.redo"))
       and all(text in _texts for text in
               (i18n.t("view.toggle_sidebar"), i18n.t("view.toggle_map"),
                i18n.t("view.toggle_minimap"), i18n.t("view.toggle_legend"),
-               i18n.t("view.toggle_activity"))),
+               i18n.t("view.toggle_bookmarks"), i18n.t("view.toggle_activity"))),
       f"{len(_buttons)} buttons: {_texts}")
 
 check("§2 the dropped actions are still reachable (the menus and the palette own them)",
@@ -390,7 +390,7 @@ check("§4 the counts header is the LIVE table, not the registry",
       dlg._lbl_hotkeys_counts.text()
       == i18n.t("settings.hotkeys.counts", with_key=_with,
                 assignable=len(_counts) - _with)
-      and _with == 23 and len(_counts) - _with == 36,
+      and _with == 23 and len(_counts) - _with == 37,
       f"{_with} with a key, {len(_counts) - _with} assignable")
 
 check("§4 the assignment hint is shown next to the older 'clear to disable' one",
@@ -708,8 +708,8 @@ check(f"§8 the {len(_NEW_KEYS)} keys of v1.5rc4 are present and non-empty in ev
 check(f"§8 the pin moved 630 → {EXPECTED_I18N_KEYS} (13 keys of v1.5rc4, +1 of v1.5, +4 of v1.5.1,"
       f" +13 of v1.5.2, +20 of v1.5.3, +11 of v1.5.4, +14 of v1.5.5, +2 of v1.5.6,"
       f" +29 of v1.5.7, +41 of v1.6, +4 of v1.6.2, +4 of v1.6.3, +3 of v1.6.4,"
-      f" +11 of v1.6.5 +11 of v1.6.6)",
-      EXPECTED_I18N_KEYS == 811)
+      f" +11 of v1.6.5 +11 of v1.6.6 +17 of v1.6.7)",
+      EXPECTED_I18N_KEYS == 828)
 
 check("§8 the family map of the registry is complete (every action has a home)",
       all(HR.action_family(a) in HR.family_order() for a in HR.action_ids())
@@ -717,9 +717,9 @@ check("§8 the family map of the registry is complete (every action has a home)"
 
 check("§8 the registry grew by the panel/map toggles, the v1.5.3 freshness pair "
       "and the v1.5.5 inventory pair",
-      len(HR.action_ids()) == 59
+      len(HR.action_ids()) == 60
       and HR.default_sequence("view.focus_map") == ""
-      and len(HR.empty_default_action_ids()) == 36)
+      and len(HR.empty_default_action_ids()) == 37)
 
 _hub = SettingsDialog(None)
 check("§8 the hub's collect() carries 23 config.json keys (this section adds none)",

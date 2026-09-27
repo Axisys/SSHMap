@@ -259,8 +259,18 @@ def clear_cfg(*extra_paths: str) -> None:
 # in 12 i18n files + the APP_VERSION/requirements pins in 7 release-state sections).
 # The misses of the keys themselves against the code are caught by check_i18n_keys.py.
 # ─────────────────────────────────────────────────────────────────────────────
-EXPECTED_APP_VERSION = "1.6.6"  # the current release (a sentinel: it catches "a bump to the wrong version")
-EXPECTED_I18N_KEYS = 811        # the parity of the TRANSLATION keys (v1.6.6 — "the measurement you
+EXPECTED_APP_VERSION = "1.6.7"  # the current release (a sentinel: it catches "a bump to the wrong version")
+EXPECTED_I18N_KEYS = 828        # the parity of the TRANSLATION keys (v1.6.7 — "the bookmarks: one
+                                # application-level place for the links the team uses": the STORE
+                                # (`~/.sshmap/bookmarks.json`, the sanitizer of the project reused,
+                                # the merge-write), the PANEL (the fold, the filter, the saved
+                                # position and the ONE opener) and the EDITOR are BEHAVIOUR, and the
+                                # SEVENTEEN new keys are the panel's chrome (its switch, its title,
+                                # its tooltip, the filter placeholder, the empty / no-match
+                                # sentences and the editor button with its tooltip), the editor
+                                # dialog (its title, the description, the two column captions, Add,
+                                # Remove and the URL hint) and the two reports of a save — 811 + 17.
+                                # (v1.6.6 — "the measurement you
                                 # asked for: the status round you start, and the data mount that holds
                                 # the capacity": the manual-only cadence and the two-mount disk read
                                 # are BEHAVIOUR and numbers (a sentinel value, a horizon, a row parser

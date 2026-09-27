@@ -458,21 +458,42 @@ def _draw_legend(p):
 
 
 def _draw_activity(p):
-    """v1.6 (ROADMAP task 7): the ACTIVITY panel — a log of rows with a leading mark.
+    """v1.6 (ROADMAP task 7): the ACTIVITY panel — the initial "A" inside the panel FRAME.
 
-    The legend's rhythm without the swatches: three rows, each a small DOT and a line,
-    and the newest row (the TOP one) carries a longer line — the history reads
-    newest-first, so the glyph says "a list that grows at the top". Drawn in the same
-    stroke as the rest of the set, so it stays readable at menu size (16 px).
+    The frame is the one the panel family wears (`sidebar_panel` / `map_panel` / `minimap`):
+    the same rounded 14×13 square. The interior carries the INITIAL of the surface rather
+    than a miniature of it — an activity log has no miniature to draw, and the row glyph it
+    shared with the legend made the two switches read as the same button at toolbar size.
+    The letter is drawn as strokes (the set is vector-only, no `drawText`): two diagonals
+    that meet at the apex plus the crossbar, sized to stay inside the frame's stroke.
     """
-    for index, y in enumerate((5.0, 10.0, 15.0)):
-        dot = QPainterPath()
-        dot.addEllipse(QPointF(4.6, float(y)), 1.3, 1.3)
-        p.drawPath(dot)
-        line = QPainterPath()
-        line.moveTo(8.6, float(y))
-        line.lineTo(16.6 if index == 0 else 14.6, float(y))
-        p.drawPath(line)
+    frame = QPainterPath()
+    frame.addRoundedRect(QRectF(3.0, 3.5, 14.0, 13.0), 1.8, 1.8)
+    p.drawPath(frame)
+    letter = QPainterPath()
+    letter.moveTo(10.0, 6.2)
+    letter.lineTo(6.6, 14.2)
+    letter.moveTo(10.0, 6.2)
+    letter.lineTo(13.4, 14.2)
+    letter.moveTo(7.85, 11.1)
+    letter.lineTo(12.15, 11.1)
+    p.drawPath(letter)
+
+
+def _draw_bookmarks(p):
+    """v1.6.7: the BOOKMARKS panel — a bookmark RIBBON (the View item / the toolbar button).
+
+    The ribbon is the one glyph that means "a saved link" in every browser, so the switch of
+    the panel needs a caption nowhere: two straight sides, the notch at the bottom.
+    """
+    path = QPainterPath()
+    path.moveTo(6.0, 3.4)
+    path.lineTo(14.0, 3.4)
+    path.lineTo(14.0, 16.8)
+    path.lineTo(10.0, 13.2)
+    path.lineTo(6.0, 16.8)
+    path.closeSubpath()
+    p.drawPath(path)
 
 
 _DRAWERS = {
@@ -496,9 +517,12 @@ _DRAWERS = {
     "minimap": _draw_minimap,
     # v1.4.5 (ROADMAP task 4): the legend panel (the View menu item + the toolbar button)
     "legend": _draw_legend,
-    # v1.6 (ROADMAP task 7): the ACTIVITY panel — the fifth view toggle, which joins the
+    # v1.6 (ROADMAP task 7): the ACTIVITY panel — the sixth view toggle, which joins the
     # toolbar cluster with its own glyph (the View menu item + the toolbar button).
     "activity": _draw_activity,
+    # v1.6.7 (ROADMAP task 4): the BOOKMARKS panel — the sixth view toggle of the cluster
+    # (the View menu item + the toolbar button), with its own ribbon glyph.
+    "bookmarks": _draw_bookmarks,
     # v1.3.3.3 (task 2): the zoom pair of the View menu (project-drawn, no image files)
     "zoom_in": _draw_zoom_in,
     "zoom_out": _draw_zoom_out,

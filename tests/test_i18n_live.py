@@ -785,7 +785,7 @@ print("== §9 the release state ==")
 # ════════════════════════════════════════════════════════════════════════════
 
 check("EXPECTED_APP_VERSION is the version this test file describes",
-      EXPECTED_APP_VERSION == "1.6.6", EXPECTED_APP_VERSION)
+      EXPECTED_APP_VERSION == "1.6.7", EXPECTED_APP_VERSION)
 check("the pin counts the keys of the SHIPPED release (v1.5.2 added THIRTEEN — all the CHROME "
       "of the activity panel — v1.5.3 added TWENTY in three families: the age of the "
       "collected facts (`node.info.collected_now` plus the minutes/hours/days steps), the "
@@ -807,8 +807,12 @@ check("the pin counts the keys of the SHIPPED release (v1.5.2 added THIRTEEN —
       "unmanaged card — its two dialog checkboxes with their tooltips, the band mark "
       "and the card tooltip, the one caption the inventory table and the info plaque "
       "share, the two lines of a MANUAL reachability check and the gate's refusal "
-      "sentence with the status-bar line that carries it),",
-      EXPECTED_I18N_KEYS == 811, str(EXPECTED_I18N_KEYS))
+      "sentence with the status-bar line that carries it), and v1.6.7 adds SEVENTEEN: "
+      "the bookmarks panel (its switch, its title, its tooltip, the filter placeholder, "
+      "the empty and the no-match sentences and the editor button with its tooltip), the "
+      "editor dialog (its title, the description, the two column captions, Add, Remove "
+      "and the URL hint) and the two reports of a save — 811 + 17 = 828)",
+      EXPECTED_I18N_KEYS == 828, str(EXPECTED_I18N_KEYS))
 check_release_state(ROOT)
 for _code in i18n_lang_codes(ROOT):
     check(f"i18n/{_code}.json carries the v1.5 node.status.emulated marker",

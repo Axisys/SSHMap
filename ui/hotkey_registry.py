@@ -174,6 +174,11 @@ HOTKEY_ACTIONS: Dict[str, dict] = {
     # would crowd the strip for a window that is opened to READ, not to glance at.
     # Assignable, no key out of the box.
     "view.toggle_activity": {"label": "view.toggle_activity", "default": ""},
+    # v1.6.7 (ROADMAP task 4): the BOOKMARKS panel — the application-level list of the links
+    # the team uses (a wiki, a dashboard, a console). The same family as the other panel
+    # toggles (a checkable View item with a toolbar mirror) and the same registry rule: an
+    # EMPTY default — assignable in "Hotkeys", no key taken from anyone.
+    "view.toggle_bookmarks": {"label": "view.toggle_bookmarks", "default": ""},
     "view.set_background":  {"label": "view.set_background",  "default": ""},
     "view.remove_background": {"label": "view.remove_background", "default": ""},
     "profile.manage":       {"label": "profile.manage",       "default": ""},

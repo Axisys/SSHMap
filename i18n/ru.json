@@ -810,5 +810,22 @@
   "server.disk_mount_tooltip": "Слева — путь для измерения (пусто = /opt). Справа — что нашёл сбор: точка монтирования, которую сообщил df, свободное место и объём. Пусто означает, что ничего не измерено: сетевая шара не считается ёмкостью.",
   "node.disk_mount": "DISK {mount}: свободно {free} из {size}",
   "status.disk_mount_network": "Точка данных {mount} на {alias} — сетевая файловая система ({type}); шара не считается ёмкостью",
-  "status.disk_mount_missing": "Точка данных {mount} не найдена на {alias} — ничего не измерено"
+  "status.disk_mount_missing": "Точка данных {mount} не найдена на {alias} — ничего не измерено",
+  "view.toggle_bookmarks": "Закладки",
+  "bookmarks.title": "Закладки",
+  "bookmarks.tooltip": "Ссылки команды: щёлкните строку, чтобы открыть её в браузере",
+  "bookmarks.filter_placeholder": "Фильтр закладок…",
+  "bookmarks.empty": "Закладок пока нет — нажмите «Изменить закладки…» ниже, чтобы добавить.",
+  "bookmarks.no_matches": "Ни одна закладка не подходит под фильтр.",
+  "bookmarks.manage": "Изменить закладки…",
+  "bookmarks.manage_tooltip": "Добавить, изменить, переставить или удалить ссылки этого списка",
+  "dialog.bookmarks": "Закладки",
+  "dialog.bookmarks_desc": "Ссылки, которыми пользуется команда — вики, панель мониторинга, консоль. Хранятся в ~/.sshmap/bookmarks.json, вне проекта.",
+  "bookmarks.col_name": "Название",
+  "bookmarks.col_url": "Ссылка",
+  "bookmarks.add": "Добавить",
+  "bookmarks.remove": "Удалить",
+  "bookmarks.url_hint": "https://wiki.example.com",
+  "status.bookmarks_saved": "Закладки сохранены: {count}",
+  "status.bookmarks_save_failed": "Закладки не сохранены — см. журнал"
 }

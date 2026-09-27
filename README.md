@@ -21,6 +21,7 @@ generated from that example map only, by `python tests/_gen_docs_image.py`.*
 - A group can be lined up in one gesture (a vertical line, a horizontal line, or rows of N cards) — the arrangement moves cards and is one undo step; the group frame itself is never resized.
 - Several connections between the same two servers are drawn as parallel arcs (a second link bends aside instead of hiding under the first), and a drag of the background image comes back with Ctrl+Z.
 - Minimap, legend and an **Export** menu that holds everything which leaves the application: "Copy Map as Image", PNG, JPEG, PDF, SVG and `.drawio` — print-friendly by default (a light page with high-contrast lines), with "use the current theme" as a one-click opt-out. "Save Documentation Image…" writes a fixed 1600×900 @2× poster of the map, and the two data reports (below) sit in the same menu.
+- **Bookmarks**: one place for the links the team uses — a wiki, a dashboard, a hypervisor's console. The panel lists every entry as a name with its address under it, filters as you type, opens a link in your browser on a double click or Enter, and remembers its state between runs; "Edit bookmarks…" adds, edits in place, reorders and removes entries. The list lives in `~/.sshmap/bookmarks.json`, outside every project — a shared map never carries another machine's links.
 
 ### Statuses, facts & diagnostics
 - `online` / `warn` / `offline` from parallel SSH probes (TCP + banner) off the GUI thread; a status carries its age and turns grey once it is stale — the status itself never changes, and "Check statuses now" runs a round on demand. The cadence has a third setting, **manual only** (`status_interval_sec = 0`, or the checkbox in the Status Checks tab): nothing is probed on its own — not at startup, not when a project is opened — while the on-demand round keeps working; the age of a status is then the only signal, and a status older than a day is marked stale.
@@ -54,7 +55,7 @@ generated from that example map only, by `python tests/_gen_docs_image.py`.*
 - Dark, light and Auto (system) themes, an accent colour picked as a hue, and a "Reduce motion" switch; the light palette is measured against the surface each tone is drawn on and gated by contrast tests.
 - Meaning never lives in a colour alone: each connection type has its own line style, each status its own shape (dot / ring / triangle), and the legend samples both.
 - Motion that can be interrupted: camera flights, a scale-in on add, hover focus on a connection — the wheel or a drag always wins.
-- Command palette on Ctrl+K, a searchable settings hub (8 tabs), and every one of the 59 global actions assignable in the Hotkeys tab; `?` or F1 opens the shortcut list. The map also works from the keyboard alone (Tab/arrows/Enter).
+- Command palette on Ctrl+K, a searchable settings hub (8 tabs), and every one of the 60 global actions assignable in the Hotkeys tab; `?` or F1 opens the shortcut list. The map also works from the keyboard alone (Tab/arrows/Enter).
 
 ### Projects & data
 - One JSON project file (`.json` / `.sshmap`), a recent-files list, a project dropped onto the window, autosave with a ring of backups, and rollback — an unreadable file offers its newest autosave or backup instead of a dead end.
@@ -128,6 +129,7 @@ survive a restart. The external terminal is an OS `ssh` process: the password is
 - Plugins run inside the application's process: a plugin with a broken C extension can take it down — install plugins you trust.
 - A host key change and an unreadable project are reported, never repaired silently; recovery means an autosave or backup slot.
 - The command history is a plain-text file per server under `~/.sshmap/history/`. Its entries are the commands the application sent or the ones you imported, so they can contain secrets (a token or a password passed as an argument); the file is never written into a project, never exported and never logged. Passwords typed into a shell are not recorded — only what the app itself sends is. A sent command that matches one of the declared secret shapes is marked in the list (the padlock and its tooltip) and is still kept: the mark is a warning, not a redaction, so the file itself stays plain text.
+- The bookmarks list is the same kind of local file — plain JSON in `~/.sshmap/bookmarks.json`, never written into a project and never exported. A link may carry a token in its query string, so treat the file the way you treat the command history: it holds what you put there, and opening an entry hands the address to your browser.
 - **Manual only means no automatic traffic at all** (`status_interval_sec = 0` in `~/.sshmap/config.json`, or the checkbox in the Status Checks tab): no round starts at launch or when a project is opened, so nothing is checked unless you ask. The age of a status is then the only signal — a green card is not refreshed behind your back, and a status older than a day is marked stale. "Check statuses now" and the card's own menu keep probing.
 - The data mount of a card is a path YOU give (`/opt` by default) and the card reports the mount point the server's `df` really answered for it — which is `/` when that path has no filesystem of its own, so a data directory on the root is shown as the root, not as a mount of its own. A mount on a network filesystem (`nfs`, `cifs`, `smb`, `sshfs`) is deliberately **not** reported as capacity: a share is somebody else's disk, and the refusal is a line in the status bar and the activity history rather than a number. `disk`, the column of the list view, stays the ROOT's capacity.
 - `terminal_scroll` (a `~/.sshmap/config.json` key, no settings row) defaults to `"live"`: new output pulls the view back to the bottom. Set it to `"pin"` if you would rather keep reading history while a build talks — then typing or pasting returns you to the live line.
@@ -193,7 +195,7 @@ PySide6 / Qt 6 gotchas worth knowing before writing UI code:
 | `dialogs/` | Add/edit dialogs, connect, profiles, backups, imports, export options |
 | `ui/` | Main window and mixins, sidebar, theme, palette, panels, settings, hotkeys, icons |
 | `i18n/` | `en` (reference), `ru`, `zh`, `de` — one JSON file per language |
-| `tests/` | 111 test files, the parallel runner and the harness — map in `tests/INDEX.md` |
+| `tests/` | 112 test files, the parallel runner and the harness — map in `tests/INDEX.md` |
 | `examples/plugins/` | Two working example plugins, not installed and never auto-discovered |
 | `third_party/pyte/`, `third_party/pyte-patches/` | The managed pyte 0.8.2 fork: sdist plus explicit patches, provenance in the patches' `MANIFEST.md` |
 | `docs/` | The map image above, rendered from the example map |

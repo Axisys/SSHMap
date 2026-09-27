@@ -810,5 +810,22 @@
   "server.disk_mount_tooltip": "左侧是要测量的路径（留空表示 /opt）。右侧是采集结果——df 实际报告的挂载点、可用空间与容量。留空表示未测量：网络共享不计入容量。",
   "node.disk_mount": "DISK {mount}：可用 {free} / 共 {size}",
   "status.disk_mount_network": "{alias} 的数据挂载点 {mount} 是网络文件系统（{type}）——共享不计入容量",
-  "status.disk_mount_missing": "在 {alias} 上未找到数据挂载点 {mount}——未进行任何测量"
+  "status.disk_mount_missing": "在 {alias} 上未找到数据挂载点 {mount}——未进行任何测量",
+  "view.toggle_bookmarks": "书签",
+  "bookmarks.title": "书签",
+  "bookmarks.tooltip": "团队链接：单击一行即可在浏览器中打开",
+  "bookmarks.filter_placeholder": "筛选书签…",
+  "bookmarks.empty": "还没有书签——用下方的“编辑书签…”添加一个。",
+  "bookmarks.no_matches": "没有书签符合该筛选条件。",
+  "bookmarks.manage": "编辑书签…",
+  "bookmarks.manage_tooltip": "添加、编辑、重排或删除此列表中的链接",
+  "dialog.bookmarks": "书签",
+  "dialog.bookmarks_desc": "团队使用的链接——维基、监控面板、控制台。保存在 ~/.sshmap/bookmarks.json 中，不属于任何项目。",
+  "bookmarks.col_name": "名称",
+  "bookmarks.col_url": "链接",
+  "bookmarks.add": "添加",
+  "bookmarks.remove": "删除",
+  "bookmarks.url_hint": "https://wiki.example.com",
+  "status.bookmarks_saved": "书签已保存：{count}",
+  "status.bookmarks_save_failed": "书签未保存——请查看日志"
 }
