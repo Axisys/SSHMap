@@ -41,6 +41,14 @@ try:
 except ImportError:
     from modules.terminal_page import TerminalSessionPage
 
+# v1.7rc1 (ROADMAP v1.7rc1, task 3): the Files Commander control of the tab-bar corner —
+# the SAME widget the standalone terminal window uses (the dock has no split button, so
+# its corner holds the commander button alone).
+try:
+    from .sftp_tab import CommanderCorner
+except ImportError:
+    from modules.sftp_tab import CommanderCorner
+
 # v1.6.4 (ROADMAP task 4): the ACTIVITY mark of an inactive session — the SAME renderer the
 # terminal window uses (the page module owns it, both containers call it).
 try:
@@ -114,6 +122,14 @@ class TerminalDockContent(QWidget):
         self.session_tabs.setTabsClosable(True)
         self.session_tabs.tabCloseRequested.connect(self._on_tab_close_requested)
         self.session_tabs.currentChanged.connect(self._on_current_tab_changed)
+
+        # v1.7rc1 (ROADMAP v1.7rc1, task 3): the Files Commander control in the corner of the
+        # dock's tab bar. The dock has no split pane, so a session here always has its Files
+        # tab and the control is enabled whenever a session is on screen; the mode is the
+        # SESSION's (`SftpTab.commander`), kept in step by `_sync_commander()`.
+        self.commander = CommanderCorner(self)
+        self.commander.act.toggled.connect(self._on_commander_toggled)
+        self.session_tabs.setCornerWidget(self.commander, Qt.Corner.TopRightCorner)
 
         # v1.3 (ROADMAP v1.3): the "Terminal Macros" panel to the left of the tabs —
         # the same one as in SSHTerminalWindow (QSplitter [cmdlib_panel |
@@ -212,6 +228,10 @@ class TerminalDockContent(QWidget):
         # v1.6.4 (ROADMAP task 4): the activity mark's TOOLTIP is translated text — re-render
         # the tabs so an inactive session's sentence follows the language switch.
         refresh_session_activity(self)
+        # v1.7rc1: the Files Commander control of the corner (its label and its tooltip).
+        commander = getattr(self, "commander", None)
+        if commander is not None:
+            commander.retranslate()
         # v1.3.3.1: the "Terminal macros" panel belongs to the CONTAINER (the dock
         # owns one, the window owns another), so it is re-texted here.
         cmdlib = getattr(self, "cmdlib_panel", None)
@@ -266,6 +286,50 @@ class TerminalDockContent(QWidget):
         if self.session_tabs.count() == 0:
             self.last_tab_closed.emit()
 
+    # ── v1.7rc1 (ROADMAP v1.7rc1, task 3): the Files Commander of the ACTIVE session ──
+
+    def _commander_tab(self):
+        """The Files tab of the VISIBLE session (None — no session on screen)."""
+        page = self._bridged_page
+        return getattr(page, "sftp_tab", None)
+
+    def _on_commander_toggled(self, on: bool):
+        """The corner control asked for the two-pane view of the visible session."""
+        tab = self._commander_tab()
+        ok = False
+        if tab is not None:
+            try:
+                ok = bool(tab.set_commander(bool(on)))
+            except (RuntimeError, AttributeError):
+                ok = False
+        if ok and on:
+            page = self._bridged_page
+            hook = getattr(page, "show_files_tab", None)
+            if callable(hook):
+                try:
+                    hook()   # the panes live in the Files tab — bring them on screen
+                except RuntimeError:
+                    pass  # Qt teardown — the page is already destroyed
+        if not ok:
+            self._sync_commander(force_off=True)
+
+    def _sync_commander(self, force_off: bool = False):
+        """Show the visible session's mode in the corner control (the ONE place).
+
+        The action's signals are blocked while the state is written, so a tab switch
+        re-shows a session's own mode without re-entering the slot that owns it. Never
+        raises — a re-text or a close race must not break the container.
+        """
+        corner = getattr(self, "commander", None)
+        if corner is None:
+            return
+        tab = None if force_off else self._commander_tab()
+        try:
+            corner.set_enabled(tab is not None)
+            corner.set_state(bool(tab is not None and tab.commander))
+        except RuntimeError:
+            pass  # Qt teardown — the corner is gone
+
     def _on_tab_close_requested(self, index: int):
         """The X on a tab (setTabsClosable) → close_page."""
         try:
@@ -313,6 +377,7 @@ class TerminalDockContent(QWidget):
                 pass  # the slot was not connected / the C++ object deleted — nothing to do
         self._bridged_page = page
         if page is None:
+            self._sync_commander()
             return
         # v1.6.4 (ROADMAP task 4): the visible session has no "new output" to announce.
         clear = getattr(page, "set_activity", None)
@@ -337,6 +402,8 @@ class TerminalDockContent(QWidget):
                 self.sftp_progress.hide()
         except RuntimeError:
             pass  # C++ object already deleted (close race)
+        # v1.7rc1: the corner control follows the visible session (its own mode, its label).
+        self._sync_commander()
 
     # ── v1.6.4 (ROADMAP task 4): the activity mark of an inactive session ────
 

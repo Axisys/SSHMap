@@ -324,6 +324,14 @@ class FakeSftpClient:
         # was already cleared — the case where the `.part` file is the only copy.
         self.rename_fail_after = None
         self._rename_calls = 0
+        # v1.7rc2: the OPTIONAL OpenSSH `copy-data@openssh.com` extension. FALSE by
+        # default — a plain server, so the CHUNKED STREAM (the contract's path) is what
+        # the scenarios exercise unless a test turns the fast path on.
+        self.copy_data_ok = False
+        # v1.7rc2: a rename BETWEEN two directories is refused (the classic EXDEV: the
+        # two paths live on different filesystems) — the honest-failure scenario of the
+        # cross-directory move. A rename INSIDE one directory is unaffected.
+        self.cross_device = False
 
     def _pause(self):
         if self._chunk_delay:
@@ -410,10 +418,16 @@ class FakeSftpClient:
         self._move(oldpath, newpath)
 
     def _move(self, oldpath, newpath):
-        """Move a file, or a directory WITH its subtree (the target is overwritten)."""
+        """Move a file, or a directory WITH its subtree (the target is overwritten).
+
+        v1.7rc2: with `cross_device` on, a move BETWEEN two directories raises (the
+        server's EXDEV) — the cross-directory move then has to answer a sentence.
+        """
         fs = self._fs
         old = _norm(oldpath)
         new = _norm(newpath)
+        if self.cross_device and posixpath.dirname(old) != posixpath.dirname(new):
+            raise IOError("Cross-device link")
         if old in fs.files:
             if new in fs.files:
                 del fs.files[new]
@@ -434,6 +448,40 @@ class FakeSftpClient:
                 fs.mtimes[new] = fs.mtimes.pop(old)
             return
         raise IOError("No such file")
+
+    # ── v1.7rc2: the raw extended request + the OpenSSH copy-data extension ──
+
+    def _request(self, request_kind, *args):
+        """The RAW SFTP request of `paramiko.SFTPClient._request` (the v1.7rc2 seam).
+
+        paramiko does NOT wrap `copy-data@openssh.com`, so the worker sends it as an
+        extended request (`CMD_EXTENDED` = 200 + the extension name + the two paths).
+        `copy_data_ok=False` (the default) answers the way a server that does not know
+        the extension does — an error, which makes the worker fall back to the stream.
+        """
+        self._pause()
+        name = args[0] if args else ""
+        if request_kind != 200 or name != "copy-data@openssh.com":
+            raise IOError("Operation unsupported")
+        if not self.copy_data_ok:
+            raise IOError("Operation unsupported")
+        self._copy_data(args[1], args[2])
+
+    def _copy_data(self, source, target):
+        """The server-side copy of the extension: the bytes land under `target` directly."""
+        fs = self._fs
+        src = _norm(source)
+        dst = _norm(target)
+        if src not in fs.files:
+            raise IOError("No such file")
+        parent = posixpath.dirname(dst)
+        if parent not in fs.dirs:
+            raise IOError("No such file")
+        if dst in fs.deny_write or parent in fs.deny_dirs:
+            raise PermissionError("Permission denied")
+        fs.files[dst] = bytearray(fs.files[src])
+        if src in fs.mtimes:
+            fs.mtimes[dst] = fs.mtimes[src]
 
     def stat(self, path):
         """v1.6.3: the address bar's resolution check — a directory, a file, or nothing.

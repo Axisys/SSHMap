@@ -171,6 +171,9 @@ of the file itself.
 | `test_selection_sync.py` | — | Regression v0.9.9.1 — selection sync without blockSignals (reentry guard). |
 | `test_settings_dialog.py` | — | v1.1 — Settings dialog (hub): the release's themed test. |
 | `test_settings_options.py` | — | v1.1.1 — Small options around the hub: the release's themed test (ROADMAP v1.1.1). |
+| `test_sftp_commander.py` | — | v1.7rc2 — Files Commander, step 2: the copy and the move across the panes (ROADMAP v1.7rc2). |
+| `test_sftp_commander_contract.py` | — | v1.7 — Files Commander, the closing release: the CLAUSE AUDIT of the frozen contract |
+| `test_sftp_commander_keys.py` | — | v1.7rc3 — Files Commander, step 3: the mc/far walk, the hint row and the preview of the other pane |
 | `test_sftp_dnd.py` | — | v1.2.8 — D&D of files from Windows Explorer into the SFTP tab (ROADMAP v1.2.8). |
 | `test_sftp_ops.py` | — | v1.3.3.2 — SFTP as a file manager: the operations + a transfer that does not lose data. |
 | `test_sftp_syntax.py` | — | v1.4.7 — Syntax highlighting in the SFTP viewer (numbers, JSON/XML/YAML, ROADMAP v1.4.7). |

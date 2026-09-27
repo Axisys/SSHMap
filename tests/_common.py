@@ -259,8 +259,38 @@ def clear_cfg(*extra_paths: str) -> None:
 # in 12 i18n files + the APP_VERSION/requirements pins in 7 release-state sections).
 # The misses of the keys themselves against the code are caught by check_i18n_keys.py.
 # ─────────────────────────────────────────────────────────────────────────────
-EXPECTED_APP_VERSION = "1.6.8"  # the current release (a sentinel: it catches "a bump to the wrong version")
-EXPECTED_I18N_KEYS = 841        # the parity of the TRANSLATION keys (v1.6.8 — "the last mile,
+EXPECTED_APP_VERSION = "1.7"     # the current release (a sentinel: it catches "a bump to the wrong version")
+EXPECTED_I18N_KEYS = 863        # the parity of the TRANSLATION keys. The 1.7 line shipped them in
+                                # its rc series and the closing release adds NONE (it audits the frozen
+                                # contract and writes the documents), so the pin still counts the last
+                                # release that moved it:
+                                # (v1.7rc3 — "Files Commander,
+                                # step 3: the mc/far walk, the hints row of the second pane and the
+                                # preview that opens in the other pane": the
+                                # pane toggle with the mark/open keys, the walk over a listing, the
+                                # button row the RIGHT pane spends on its key hints and the
+                                # Esc-closable preview of the two-pane view are BEHAVIOUR, and
+                                # the NINE new keys are the five `sftp.hint.*` labels of the hint row,
+                                # the pane toggle and the two non-QAction keys of the walk (the mark and
+                                # the open) plus the one sentence that answers a second preview opened
+                                # while the other pane is previewing — 854 + 9.
+                                # (v1.7rc2 — "Files Commander,
+                                # step 2: the copy and the move across the panes": the two worker kinds
+                                # (`queue_copy` / `queue_move`, the recursive tree walk and the OpenSSH
+                                # copy-data fast path), the pane batch with its conflict policy and the
+                                # ONE closing report are BEHAVIOUR, and the EIGHT keys are the copy's
+                                # status line, the "no second pane" sentence, the batch-start line, the
+                                # two closing reports (copy / move), the partial-tree report, the refused
+                                # cross-directory move and the tree-over-its-bound sentence — 846 + 8.
+                                # (v1.7rc1 — "Files Commander,
+                                # step 1: the frozen contract and the two panes over the shipped
+                                # operations": the pane model, the container/pane split, the
+                                # ACTIVE pane and the pane-scoped key map are BEHAVIOUR, and the
+                                # FIVE new keys are the corner action with its tooltip, the one
+                                # sentence the mode reports when it opens (the active-pane rule),
+                                # and the two answers of the pane-scoped keys (the reserved F5
+                                # copy and "select a row first") — 841 + 5.
+                                # (v1.6.8 — "the last mile,
                                 # closing the line: the gesture the map already had, and the
                                 # problem set it already knew": the "Connect to…" row, the
                                 # searchable node pickers and the ATTENTION report are
@@ -967,6 +997,28 @@ def check_i18n_format(langs):
         not problems,
         "; ".join(f"{c}: {p[0]} (+{len(p) - 1} more)" for c, p in sorted(problems.items()))
         + (" | warnings: " + " | ".join(warnings) if warnings else ""))
+
+
+def releases_at_least(value, release=None):
+    """True while `value` (default: the SHIPPED `EXPECTED_APP_VERSION`) is `release` or a LATER one.
+
+    A topical test file describes the release it was written for, but `EXPECTED_APP_VERSION` is the
+    LIVE pin (the whole suite is re-pointed at every release), so an equality against it breaks by
+    definition the moment the next release ships. The version tuple is compared component by component
+    (`rcN` counts as `N`), and a file may therefore state "this release or later" — the properties it
+    really guards (the parity pin, the behaviour) stay exact, and only the sentinel moves on. The
+    two-argument form (`releases_at_least(APP_VERSION, "1.7rc2")`) also lets a file check the value
+    `version.py` really carries.
+    """
+    if release is None:
+        release = value
+        value = EXPECTED_APP_VERSION
+
+    def parts(text):
+        digits = [int(n) for n in re.findall(r"\d+", str(text or ""))]
+        return tuple(digits + [0] * (4 - len(digits)))[:4] if digits else (0, 0, 0, 0)
+
+    return parts(value) >= parts(release)
 
 
 def check_release_state(root):

@@ -36,7 +36,8 @@ import webbrowser
 
 from _common import (bootstrap, check, finish, load_i18n_langs, check_i18n_parity,
                      check_i18n_format, check_release_state, clear_cfg, merge_cfg, read_cfg,
-                     write_cfg, EXPECTED_APP_VERSION, EXPECTED_I18N_KEYS)
+                     write_cfg, EXPECTED_APP_VERSION, EXPECTED_I18N_KEYS,
+                     releases_at_least)
 
 ROOT, WORK = bootstrap()  # BEFORE the app module imports (the HOME isolation inside)
 
@@ -620,10 +621,10 @@ check("§6 the reused keys the editor reports with are the quick-launch ones (no
            "msg.ql_no_browser")))
 check_i18n_parity(langs)
 check_i18n_format(langs)
-check("§6 the pin counts the SHIPPED release (811 + the 17 keys of v1.6.7 + the 13 of v1.6.8)",
-      EXPECTED_I18N_KEYS == 811 + 17 + 13, str(EXPECTED_I18N_KEYS))
+check("§6 the pin counts the SHIPPED release (811 + the 17 keys of v1.6.7 + the 13 of v1.6.8 + the 5 of v1.7rc1 + the 8 of v1.7rc2 + the 9 of v1.7rc3)",
+      EXPECTED_I18N_KEYS == 811 + 17 + 13 + 5 + 8 + 9, str(EXPECTED_I18N_KEYS))
 check("§6 EXPECTED_APP_VERSION is the release this file describes",
-      EXPECTED_APP_VERSION == "1.6.8", EXPECTED_APP_VERSION)
+      releases_at_least(EXPECTED_APP_VERSION, "1.7"), EXPECTED_APP_VERSION)
 check_release_state(ROOT)
 check("§6 nothing about the bookmarks touches the PROJECT format (VERSION_FORMAT stays 0.9)",
       __import__("version").VERSION_FORMAT == "0.9"

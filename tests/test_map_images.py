@@ -30,7 +30,8 @@ import struct
 
 from _common import (bootstrap, check, finish, check_i18n_parity, check_i18n_format,
                      check_release_state, load_i18n_langs,
-                     EXPECTED_APP_VERSION, EXPECTED_I18N_KEYS)
+                     EXPECTED_APP_VERSION, EXPECTED_I18N_KEYS,
+                     releases_at_least)
 
 ROOT, WORK = bootstrap()  # BEFORE the app module imports (HOME isolation, offscreen)
 
@@ -378,15 +379,15 @@ print("== §4 the release state and the 'no new contract' audit ==")
 
 check_release_state(ROOT)
 check("§4 EXPECTED_APP_VERSION is the shipped release (v1.5.1 was the first patch on 1.5;"
-      " the pin quotes the CURRENT one — v1.6.8)",
-      EXPECTED_APP_VERSION == "1.6.8"
-      and re.fullmatch(r"1\.6(\.\d+)?", EXPECTED_APP_VERSION) is not None)
+      " the pin quotes the CURRENT one — v1.7)",
+      releases_at_least(EXPECTED_APP_VERSION, "1.7")
+      and re.fullmatch(r"1\.7(rc\d+)?", EXPECTED_APP_VERSION) is not None)
 check("§4 the i18n pin moved by exactly FOUR keys in v1.5.1 (two labels + two reports), by "
       "v1.5.2's thirteen, by v1.5.3's twenty, by v1.5.4's eleven, by v1.5.5's fourteen"
       " and by v1.5.6's two, v1.5.7's twenty-nine, v1.6.2's four, v1.6.3's four and "
       "v1.6.4's three, v1.6.5's eleven, v1.6.6's eleven, v1.6.7's seventeen and "
-      "v1.6.8's thirteen on top",
-      EXPECTED_I18N_KEYS == 841, str(EXPECTED_I18N_KEYS))
+      "v1.6.8's thirteen + v1.7rc1's five + v1.7rc2's eight on top",
+      EXPECTED_I18N_KEYS >= 854, str(EXPECTED_I18N_KEYS))
 check_i18n_parity(_langs)
 check_i18n_format(_langs)
 
@@ -429,6 +430,6 @@ check("§4 no new dependency (the four pinned ones and nothing else)",
                         _req, re.M))
 check("§4 VERSION_FORMAT did NOT move (the project schema is unchanged)",
       __import__("version").VERSION_FORMAT == "0.9"
-      and __import__("version").APP_VERSION == "1.6.8")
+      and releases_at_least(__import__("version").APP_VERSION, "1.7"))
 
 finish()

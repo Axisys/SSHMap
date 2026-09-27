@@ -127,7 +127,8 @@ check("ONE checkable action terminal.split drives the tab-bar BUTTON",
       win_a.act_split.isCheckable() and win_a.act_split.isChecked() is False
       and win_a.act_split.text() == i18n.t("terminal.split")
       and win_a.act_split.toolTip() == i18n.t("terminal.split_tooltip")
-      and win_a.session_tabs.cornerWidget(Qt.Corner.TopRightCorner) is win_a.btn_split)
+      and win_a.session_tabs.cornerWidget(Qt.Corner.TopRightCorner) is win_a.commander
+      and win_a.commander.isAncestorOf(win_a.btn_split))
 check("the button is a REAL QPushButton in the RIGHT corner (not a toolbar label)",
       isinstance(win_a.btn_split, QPushButton)
       and win_a.btn_split.isCheckable() and win_a.btn_split.isChecked() is False

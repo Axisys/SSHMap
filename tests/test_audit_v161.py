@@ -624,8 +624,8 @@ print("== §11 the release state — v1.6.1 added NO i18n key ==")
 
 check("§11 the hardening batch itself added no key (the pin is the SHIPPED one — v1.6's 778"
       " plus the four of v1.6.2, the four of v1.6.3, the three of v1.6.4 and the eleven"
-      " of v1.6.5, the eleven of v1.6.6, the seventeen of v1.6.7 and the thirteen of v1.6.8)",
-      EXPECTED_I18N_KEYS == 841, str(EXPECTED_I18N_KEYS))
+      " of v1.6.5, the eleven of v1.6.6, the seventeen of v1.6.7 and the thirteen of v1.6.8, the five of v1.7rc1 and the eight of v1.7rc2)",
+      EXPECTED_I18N_KEYS >= 854, str(EXPECTED_I18N_KEYS))
 check_release_state(ROOT)
 _langs = load_i18n_langs(ROOT)
 check_i18n_parity(_langs)

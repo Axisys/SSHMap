@@ -35,7 +35,8 @@ import sys
 
 from _common import (bootstrap, check, finish, wait_until, load_i18n_langs, check_i18n_parity,
                      check_i18n_format, check_release_state, EXPECTED_APP_VERSION,
-                     EXPECTED_I18N_KEYS, translation_keys, i18n_lang_codes, clear_cfg)
+                     EXPECTED_I18N_KEYS, translation_keys, i18n_lang_codes, clear_cfg,
+                     releases_at_least)
 
 ROOT, WORK = bootstrap()  # BEFORE the app module imports (the HOME isolation + offscreen inside)
 
@@ -417,11 +418,11 @@ print("== §5 the release state ==")
 # ════════════════════════════════════════════════════════════════════════════
 
 check("§5 the version pin is the version this file describes",
-      EXPECTED_APP_VERSION == "1.6.8", EXPECTED_APP_VERSION)
+      releases_at_least(EXPECTED_APP_VERSION, "1.7"), EXPECTED_APP_VERSION)
 check("§5 the i18n pin counts the SHIPPED release (786 + the 3 keys of the cheap batch"
       " + the 11 of v1.6.5 — the unmanaged card — + the 11 of v1.6.6 + the 17 of v1.6.7"
-      " + the 13 of v1.6.8)",
-      EXPECTED_I18N_KEYS == 841, str(EXPECTED_I18N_KEYS))
+      " + the 13 of v1.6.8 + the 5 of v1.7rc1 + the 8 of v1.7rc2)",
+      EXPECTED_I18N_KEYS >= 854, str(EXPECTED_I18N_KEYS))
 check_release_state(ROOT)
 
 _langs = load_i18n_langs(ROOT)

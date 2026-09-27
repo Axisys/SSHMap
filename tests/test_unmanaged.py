@@ -41,7 +41,8 @@ import sys
 
 from _common import (bootstrap, check, finish, check_i18n_parity, check_i18n_format,
                      check_release_state, load_i18n_langs, i18n_lang_codes,
-                     EXPECTED_APP_VERSION, EXPECTED_I18N_KEYS)
+                     EXPECTED_APP_VERSION, EXPECTED_I18N_KEYS,
+                     releases_at_least)
 
 ROOT, WORK = bootstrap()  # BEFORE the app module imports (the HOME isolation + offscreen)
 
@@ -800,11 +801,17 @@ app.processEvents()
 
 check_release_state(ROOT)
 check("§8 the pins of this file are the release it describes",
-      EXPECTED_APP_VERSION == "1.6.8", EXPECTED_APP_VERSION)
+      releases_at_least(EXPECTED_APP_VERSION, "1.7"), EXPECTED_APP_VERSION)
 check("§8 the i18n pin moved by the ELEVEN keys of this release and by the ELEVEN "
       "of v1.6.6 (789 + 11 + 11), v1.6.7 adds 17: the bookmarks panel and its editor, and "
-      "v1.6.8 adds 13: the connect row, the hint, the picker and the attention report",
-      EXPECTED_I18N_KEYS == 811 + 17 + 13 == 841, str(EXPECTED_I18N_KEYS))
+      "v1.6.8 adds 13: the connect row, the hint, the picker and the attention report, "
+      "and v1.7rc1 adds 5: the Files Commander action with its tooltip, the sentence "
+      "the mode reports when it opens and the two answers of the pane-scoped keys; "
+      "v1.7rc2 adds 8: the copy status line, the no-second-pane sentence, the batch "
+      "start, the two closing reports, the partial-tree report, the refused move and "
+      "the tree-over-its-bound sentence, and v1.7rc3 adds 9: the hint row, the walk and the "
+      "preview that opens in the other pane",
+      EXPECTED_I18N_KEYS == 811 + 17 + 13 + 5 + 8 + 9, str(EXPECTED_I18N_KEYS))
 _missing = {code: [k for k in NEW_KEYS if not str(data.get(k) or "").strip()]
             for code, data in LANGS.items()}
 check(f"§8 the {len(NEW_KEYS)} keys of v1.6.5 are present and non-empty in every language",

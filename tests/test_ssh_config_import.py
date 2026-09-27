@@ -19,7 +19,8 @@ import os
 import sys
 
 from _common import (bootstrap, check, finish, check_i18n_parity, check_release_state,
-                     load_i18n_langs, i18n_lang_codes, translation_keys, wait_until)
+                     load_i18n_langs, i18n_lang_codes, translation_keys, wait_until,
+                     releases_at_least)
 
 ROOT, WORK = bootstrap()  # HOME isolation + offscreen Qt — BEFORE the app imports
 
@@ -667,7 +668,7 @@ print("== §9 the release state ==")
 from _common import EXPECTED_APP_VERSION, EXPECTED_I18N_KEYS  # noqa: E402
 
 check("§9 the version pin is the version this test file describes",
-      EXPECTED_APP_VERSION == "1.6.8", EXPECTED_APP_VERSION)
+      releases_at_least(EXPECTED_APP_VERSION, "1.7"), EXPECTED_APP_VERSION)
 check("§9 the key pin counts the SHIPPED release (545 + 21 of v1.4.1 + 4 of v1.4.2 + 16 of v1.4.3"
       " — v1.4.4 adds none: motion is behaviour only; v1.4.5 adds 17: the panel/grid UI;"
       " v1.4.6 adds 9: the sidebar.list.* column headers + the minimap title band;"
@@ -686,8 +687,13 @@ check("§9 the key pin counts the SHIPPED release (545 + 21 of v1.4.1 + 4 of v1.
       "the description, the two column captions, Add, Remove and the URL hint) and the two "
       "reports of a save; v1.6.8 adds 13: the connect row, the first screen's Shift+drag "
       "sentence, the picker's no-match answer, the attention report's action and its five "
-      "column captions with the word \"stale\" and the three sentences it reports with)",
-      EXPECTED_I18N_KEYS == 841, str(EXPECTED_I18N_KEYS))
+      "column captions with the word \"stale\" and the three sentences it reports with; "
+      "v1.7rc1 adds 5: the Files Commander action with its tooltip, the sentence the "
+      "mode reports when it opens and the two answers of the pane-scoped keys; "
+      "v1.7rc2 adds 8: the copy status line, the no-second-pane sentence, the batch "
+      "start, the two closing reports, the partial-tree report, the refused move and "
+      "the tree-over-its-bound sentence)",
+      EXPECTED_I18N_KEYS >= 854, str(EXPECTED_I18N_KEYS))
 check_i18n_parity(load_i18n_langs(ROOT))
 check_release_state(ROOT)
 for _code in i18n_lang_codes(ROOT):

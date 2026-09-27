@@ -441,7 +441,15 @@ class TerminalSessionPage(QWidget):
     # v1.3.3.2: the file operations (OP_KINDS — mkdir/rename/delete) are outside
     # this set on purpose: no bytes, no bar, and the tab owns both the success and
     # the error message.
-    _SFTP_PROGRESS_KINDS = ("upload", "download", "read")
+    # v1.7rc2: a remote→remote COPY is a real transfer (bytes, a total from stat, the
+    # rate/ETA meter), so it joins this set; a MOVE is a rename and stays outside it
+    # (nothing to measure — the tab reports the batch).
+    _SFTP_PROGRESS_KINDS = ("upload", "download", "read", "copy")
+
+    # v1.7rc2: the i18n key that NAMES a transfer in flight — one mapping for the start
+    # line and for the indeterminate-progress line, so a new kind cannot half-land.
+    _SFTP_KIND_KEYS = {"upload": "sftp.uploading", "download": "sftp.downloading",
+                       "read": "sftp.viewer.reading", "copy": "sftp.copying"}
 
     # ── Host bridge (window/dock): the page does not know where messages go ─
     status_message = Signal(str, int)   # (text, timeout_ms); 0 — sticky (no timeout)
@@ -1704,6 +1712,23 @@ class TerminalSessionPage(QWidget):
         """A tab message (a file selection and the like) → the status_message bridge (5 s)."""
         self.status_message.emit(msg, 5000)
 
+    def show_files_tab(self) -> bool:
+        """v1.7rc1 (ROADMAP v1.7rc1, task 3): bring the "Files" tab to the front.
+
+        The door the Files Commander control opens: turning the two-pane view ON while the
+        session shows the CANVAS would build panes nobody can see, so the container asks the
+        page for the tab — and the ordinary `_on_tab_changed` path opens the SFTP channel
+        lazily on the way. False when this page has no Files tab at all (a split pane is
+        built `with_sftp=False`), which is exactly the "the action is disabled there" rule.
+        """
+        if self.sftp_tab is None:
+            return False
+        try:
+            self.tabs.setCurrentWidget(self.sftp_tab)
+        except RuntimeError:
+            return False  # Qt teardown — the C++ object is already gone
+        return True
+
     def _on_connected_for_sftp(self):
         """connected_signal: the user may already be sitting on "Files"."""
         try:
@@ -1712,17 +1737,20 @@ class TerminalSessionPage(QWidget):
         except RuntimeError:
             pass  # the C++ object was already destroyed (a close race)
 
+    def _transfer_kind_text(self, kind: str, label: str) -> str:
+        """The status line naming a transfer in flight (v1.7rc2: ONE mapping for the
+        start line and the indeterminate-progress line — `sftp.uploading` /
+        `sftp.downloading` / `sftp.viewer.reading` / `sftp.copying`)."""
+        key = self._SFTP_KIND_KEYS.get(kind, "sftp.downloading")
+        return get_translator()(key, name=label)
+
     def _on_sftp_task_started(self, task_id: int, kind: str, label: str):
         t = get_translator()
         self._sftp_tasks[task_id] = (kind, label)
         if kind in self._SFTP_PROGRESS_KINDS:
             self._sftp_busy += 1
             self.progress_busy.emit()   # v1.1.x: setRange(0,0)+setValue(0)+show()
-            if kind == "read":          # v1.3.1: the viewer's read (SFTP tab)
-                self.status_message.emit(t("sftp.viewer.reading", name=label), 0)
-            else:
-                key = "sftp.uploading" if kind == "upload" else "sftp.downloading"
-                self.status_message.emit(t(key, name=label), 0)
+            self.status_message.emit(self._transfer_kind_text(kind, label), 0)
         elif kind in OP_KINDS:
             pass   # v1.3.3.2: a file operation — the SFTP tab reports it itself
         else:  # list — without a progress bar
@@ -1745,11 +1773,7 @@ class TerminalSessionPage(QWidget):
                 text = f"{text} · {detail}"
         else:  # total unknown — name only (an indeterminate bar)
             self.progress_update.emit(done, 0)
-            if kind == "read":
-                text = t("sftp.viewer.reading", name=label)
-            else:
-                key = "sftp.uploading" if kind == "upload" else "sftp.downloading"
-                text = t(key, name=label)
+            text = self._transfer_kind_text(kind, label)
         self.status_message.emit(text, 0)
 
     def _transfer_detail(self, task_id: int, done: int, total: int) -> str:

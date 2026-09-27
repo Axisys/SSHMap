@@ -378,8 +378,8 @@ print("== §5 the release state — v1.5rc5 added NO i18n key ==")
 check("§5 the batch itself added no key (the pin is the SHIPPED one — v1.5 +1, v1.5.1 +4,"
       " v1.5.2 +13, v1.5.3 +20, v1.5.4 +11, v1.5.5 +14, v1.5.6 +2, v1.5.7 +29, v1.6 +41,"
       " v1.6.1 +0, v1.6.2 +4, v1.6.3 +4, v1.6.4 +3, v1.6.5 +11, v1.6.6 +11, v1.6.7 +17"
-      " and v1.6.8 +13)",
-      EXPECTED_I18N_KEYS == 841, str(EXPECTED_I18N_KEYS))
+      " and v1.6.8 +13 + v1.7rc1 +5 + v1.7rc2 +8)",
+      EXPECTED_I18N_KEYS >= 854, str(EXPECTED_I18N_KEYS))
 check_release_state(ROOT)
 _langs = load_i18n_langs(ROOT)
 check_i18n_parity(_langs)

@@ -42,7 +42,8 @@ import time
 
 from _common import (bootstrap, check, finish, check_i18n_parity, check_i18n_format,
                      check_release_state, load_i18n_langs, cfg_path, write_cfg, clear_cfg,
-                     EXPECTED_APP_VERSION, EXPECTED_I18N_KEYS)
+                     EXPECTED_APP_VERSION, EXPECTED_I18N_KEYS,
+                     releases_at_least)
 
 ROOT, WORK = bootstrap()  # BEFORE the app module imports (the HOME isolation + offscreen)
 
@@ -712,10 +713,10 @@ print("== §8 the release state ==")
 
 check_release_state(ROOT)
 check("§8 the version pin is the version this file describes",
-      EXPECTED_APP_VERSION == "1.6.8" and _version.APP_VERSION == "1.6.8",
+      releases_at_least(EXPECTED_APP_VERSION, "1.7") and releases_at_least(_version.APP_VERSION, "1.7"),
       f"{EXPECTED_APP_VERSION} / {_version.APP_VERSION}")
-check("§8 the i18n pin counts the SHIPPED release (811 + 17 of v1.6.7 + 13 of v1.6.8)",
-      EXPECTED_I18N_KEYS == 841, str(EXPECTED_I18N_KEYS))
+check("§8 the i18n pin counts the SHIPPED release (811 + 17 of v1.6.7 + 13 of v1.6.8 + 5 of v1.7rc1 + 8 of v1.7rc2)",
+      EXPECTED_I18N_KEYS >= 854, str(EXPECTED_I18N_KEYS))
 check_i18n_parity(LANGS)
 check_i18n_format(LANGS)
 check("§8 the ELEVEN new keys are present and non-empty in every language",

@@ -20,6 +20,7 @@ CHANGELOG.md
 CHANGELOG_HISTORY*.md
 DOCUMENTATION.md
 ROADMAP.md
+SFTP_PANES.md
 
 # Secrets and configuration
 .env

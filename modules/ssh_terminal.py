@@ -44,9 +44,9 @@ except ImportError:
     from modules.sftp_worker import SftpWorker, register_orphan_sftp_worker
 
 try:
-    from .sftp_tab import SftpTab, format_size
+    from .sftp_tab import CommanderCorner, SftpTab, format_size
 except ImportError:
-    from modules.sftp_tab import SftpTab, format_size
+    from modules.sftp_tab import CommanderCorner, SftpTab, format_size
 
 # v1.2 (ROADMAP v1.2): the session was moved to a reusable page — the window
 # became a thin wrapper. terminal_page does NOT import ssh_terminal at module
@@ -680,7 +680,14 @@ class SSHTerminalWindow(QMainWindow):
         self.btn_split.clicked.connect(self._on_split_button_clicked)
         # The right corner of the session tab bar: the natural place of a per-session
         # action (the left side belongs to the command panel).
-        self.session_tabs.setCornerWidget(self.btn_split, Qt.Corner.TopRightCorner)
+        # v1.7rc1 (ROADMAP v1.7rc1, task 3): a tab bar has ONE corner widget, so the corner
+        # is a small container holding BOTH per-session controls — the split button and the
+        # Files Commander action (the `SftpTab` two-pane view of the ACTIVE session). The
+        # control is a VIEW of the session's state: `_sync_commander()` re-reads it whenever
+        # the active session changes, so switching tabs never moves a mode between sessions.
+        self.commander = CommanderCorner(self, split_button=self.btn_split)
+        self.commander.act.toggled.connect(self._on_commander_toggled)
+        self.session_tabs.setCornerWidget(self.commander, Qt.Corner.TopRightCorner)
 
         # v1.2 (`windows` mode): the "status bar" is bridged into the window's status
         # bar — sticky text + SFTP progress (a permanent widget on the right, hidden
@@ -786,6 +793,10 @@ class SSHTerminalWindow(QMainWindow):
                 btn.setToolTip(t("terminal.split_tooltip"))
             except RuntimeError:
                 pass  # Qt teardown — the button is already destroyed
+        # v1.7rc1: the Files Commander control of the same corner (its label and tooltip).
+        commander = getattr(self, "commander", None)
+        if commander is not None:
+            commander.retranslate()
         try:
             for i in range(self.session_tabs.count()):
                 self.session_tabs.setTabToolTip(i, t("terminal.tab_close_tooltip"))
@@ -1283,6 +1294,74 @@ class SSHTerminalWindow(QMainWindow):
         except RuntimeError:
             pass  # teardown — the action is gone
 
+    # ── v1.7rc1 (ROADMAP v1.7rc1, task 3): the Files Commander of the ACTIVE session ──
+    #
+    # The two-pane view lives on the PAGE (`page.sftp_tab`, the `SftpTab` container), while
+    # the control that drives it is the tab bar's — one corner widget for the whole window.
+    # The window therefore keeps them in step in ONE place (`_sync_commander`, called from
+    # the bridge that already knows which session is on screen) and routes the control's
+    # click into the active session's own `set_commander()`.
+
+    def _commander_tab(self):
+        """The Files tab of the ACTIVE session (None — no session / no SFTP channel).
+
+        The BRIDGED page is the session on screen (it already follows the FOCUSED split pane,
+        §4.3), so the corner control and the mode it drives always speak about the same
+        session — the `self.page` fallback covers the moment before the first bridge.
+
+        A SPLIT PANE is built `with_sftp=False`, so its `sftp_tab` is None and the action
+        is DISABLED there: a second Files tab inside a command line makes no sense.
+        """
+        page = self._bridged_page or self.page
+        return getattr(page, "sftp_tab", None)
+
+    def _on_commander_toggled(self, on: bool):
+        """The corner control asked for the two-pane view of the ACTIVE session."""
+        tab = self._commander_tab()
+        ok = False
+        if tab is not None:
+            try:
+                ok = bool(tab.set_commander(bool(on)))
+            except (RuntimeError, AttributeError):
+                ok = False
+        if ok and on:
+            # v1.7rc1: the panes are built inside the Files tab — the door brings them on
+            # screen (and opens the SFTP channel lazily on the way).
+            self._show_files_tab()
+        if not ok:
+            # no session to serve / the second pane could not be created — the checkmark
+            # goes back (the `set_split_enabled()` discipline: never a pressed button over
+            # a state that is not there).
+            self._sync_commander(force_off=True)
+
+    def _show_files_tab(self):
+        """Ask the ACTIVE session to show its Files tab (a page without one answers False)."""
+        page = self.page
+        hook = getattr(page, "show_files_tab", None)
+        if callable(hook):
+            try:
+                hook()
+            except RuntimeError:
+                pass  # Qt teardown — the page is already destroyed
+
+    def _sync_commander(self, force_off: bool = False):
+        """Show the ACTIVE session's mode in the corner control (the ONE place).
+
+        The action's signals stay BLOCKED while the state is written, so a tab switch
+        re-shows the mode without re-entering the slot that owns it (the
+        `_set_split_action_checked` discipline) — and a mode belongs to its own session,
+        never to the window.
+        """
+        corner = getattr(self, "commander", None)
+        if corner is None:
+            return
+        tab = None if force_off else self._commander_tab()
+        try:
+            corner.set_enabled(tab is not None)
+            corner.set_state(bool(tab is not None and tab.commander))
+        except RuntimeError:
+            pass  # teardown — the corner is gone
+
     def _split_min_height(self) -> int:
         """v1.3.3.5 (ROADMAP task 3a): the size floor of the bottom pane, in PIXELS.
 
@@ -1425,6 +1504,22 @@ class SSHTerminalWindow(QMainWindow):
             SPLIT_CONFIG_BOOL: bool(getattr(self, "_split_on", False)),
             SPLIT_CONFIG_RATIO: round(float(self._split_ratio), 4),
         }
+        # v1.7rc1 (ROADMAP v1.7rc1, task 5): the Files Commander state/ratio of the ACTIVE
+        # session ride along in the very same write — ONE save_config() per window, exactly
+        # like the split's two keys above (the `extra` convention of window_geometry). While
+        # the keyboard sits in the SPLIT PANE the bridged page has no Files tab, so the mode
+        # of the ACTIVE TAB is written instead: the window remembers a session's state.
+        tab = self._commander_tab()
+        if tab is None:
+            try:
+                tab = getattr(self.session_tabs.currentWidget(), "sftp_tab", None)
+            except RuntimeError:
+                tab = None
+        if tab is not None:
+            try:
+                tab.commander_extra_config(payload)
+            except (RuntimeError, AttributeError):
+                pass  # a page without the container / a teardown race — the split keys stay
         if isinstance(extra, dict):
             extra.update(payload)
             return extra
@@ -1535,6 +1630,9 @@ class SSHTerminalWindow(QMainWindow):
                 self._sftp_progress.hide()
         except RuntimeError:
             pass  # the C++ object was already destroyed (a close race)
+        # v1.7rc1: the corner control follows the bridged (visible) session — the mode, the
+        # label and the enabled state are the ACTIVE session's, never the window's.
+        self._sync_commander()
 
     # ── v1.2: bridge "page status bar → window status bar" (look = v1.1.x) ───
 

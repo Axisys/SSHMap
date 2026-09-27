@@ -67,6 +67,37 @@ operation reports task_error, and the QUEUE DOES NOT DIE (the v1.1.3 rule). A
 directory delete is NOT recursive (rmdir — a non-empty directory reports the server's
 error); recursive transfers are out of the version.
 
+v1.7rc2 (ROADMAP v1.7rc2, tasks 1–3): the copy and the move — the two RESERVED kinds of
+the Files Commander contract (`SFTP_PANES.md` §2). `queue_copy(source, target_dir, name="")`
+copies a FILE or a whole DIRECTORY TREE remote→remote, and `queue_move(...)` moves one
+across directories:
+
+  * **A file is ALWAYS atomic** — the SAME `<target>.part` + commit discipline as the
+    upload (`_commit_upload`), so a cancelled or failed copy leaves the destination
+    byte-identical and a directory copy is additive: nothing that was already in the
+    destination is ever deleted;
+  * **a tree is copied by a BOUNDED walk** (`MAX_TREE_ENTRIES` / `MAX_TREE_DEPTH`, refused
+    with a machine payload before anything moves), directories created before their
+    contents, the cancellation checked between chunks AND between entries, and the bytes of
+    the whole tree reported as ONE progress line;
+  * **a partially transferred tree is REPORTED, never silent** (`_SftpPartial` carries the
+    number of files already published and the path where the walk stopped) and never rolled
+    back — the files that landed are real;
+  * **a move is ONE atomic rename** (`posix-rename@openssh.com` when the server has it), or
+    a walk of renames when the destination directory already exists; a server that refuses
+    a rename with both endpoints present answers `MOVE_ERROR_REFUSED` — the honest sentence
+    that names the fallback (copy + delete), never a traceback;
+  * **the OpenSSH `copy-data` extension is an OPTIONAL fast path** (`_try_copy_data`,
+    detected once per session): the chunked stream is the contract and produces the
+    identical result, so a server without the extension costs one log line;
+  * symlinks are NOT followed (SFTP v3 cannot read a link target): a link to a file is
+    copied as that file's content, a link to a directory is refused by the server.
+
+The queue_copy / queue_move task_error messages are MACHINE PAYLOADS (`task_payload()` —
+a JSON object with a `code` and its fields, the READ_ERROR_* pattern generalised), which
+the SFTP tab renders as translated sentences; `task_log_line()` records their human
+one-line rendering in `sshmap.log` and in the activity panel.
+
 v1.5.2 (ROADMAP task 2): the worker logged NOTHING — a failed transfer existed only as a
 progress line that vanished with the tab. Every task of the TRANSFER / FILE-MANAGER
 family (upload, download, mkdir, rename, delete) now leaves ONE record when it finishes,
@@ -79,6 +110,7 @@ a credential: this module never holds a password.
 The queue_* methods are intended to be called from the GUI thread (the task id
 counter is not synchronized — all calls come from a single thread).
 """
+import json
 import logging
 import os
 import posixpath
@@ -114,21 +146,103 @@ KIND_MKDIR = "mkdir"        # v1.3.3.2: the file operations (ROADMAP task 1)
 KIND_RENAME = "rename"
 KIND_DELETE = "delete"
 KIND_NORMALIZE = "normalize"   # v1.6.3: the address bar's path resolution (the server's own)
+KIND_COPY = "copy"          # v1.7rc2: the remote→remote copy (a file, or a whole tree)
+KIND_MOVE = "move"          # v1.7rc2: the cross-directory move (a file, or a whole tree)
 
 # The operation kinds (no bytes, no progress bar): the page's status line stays
 # silent about them — the SFTP tab reports their outcome itself (its message signal).
-OP_KINDS = (KIND_MKDIR, KIND_RENAME, KIND_DELETE)
+OP_KINDS = (KIND_MKDIR, KIND_RENAME, KIND_DELETE, KIND_COPY, KIND_MOVE)
 
 # ── v1.5.2 (ROADMAP task 2): the logged family of the activity history ────────
 # The TRANSFER and FILE-MANAGER kinds are logged; `list` (navigation) and `read` (the
 # viewer opening a file) are not — see the module docstring. The set is declared once,
 # so a new kind cannot be forgotten silently: it either joins this tuple or it is a
 # navigation kind by an explicit decision.
-LOGGED_KINDS = (KIND_UPLOAD, KIND_DOWNLOAD, KIND_MKDIR, KIND_RENAME, KIND_DELETE)
+LOGGED_KINDS = (KIND_UPLOAD, KIND_DOWNLOAD, KIND_MKDIR, KIND_RENAME, KIND_DELETE,
+                KIND_COPY, KIND_MOVE)
 
 OUTCOME_DONE = "done"
 OUTCOME_FAILED = "failed"
 OUTCOME_CANCELLED = "cancelled"
+
+# ── v1.7rc2 (ROADMAP v1.7rc2): the copy / move family ────────────────────────
+# The OpenSSH `copy-data@openssh.com` extension copies a file ON THE SERVER (not a
+# byte crosses the wire). paramiko does NOT wrap it, so it is ONE raw extended
+# request on the client; a server that does not know the extension answers an error
+# and the chunked stream below runs instead. The optional path writes the SAME
+# provisional `<target>.part` name and goes through the SAME commit, so a server
+# with the extension and one without produce the identical result.
+COPY_DATA_EXTENSION = "copy-data@openssh.com"
+SFTP_CMD_EXTENDED = 200     # paramiko's CMD_EXTENDED (paramiko/sftp.py, SFTP v3)
+
+# The bounds of ONE recursive operation — the "bounded walk" of the contract: the
+# walk is depth-first and every entry costs a round trip, so a tree over the bound is
+# refused with a sentence BEFORE anything is transferred instead of half-copying it.
+MAX_TREE_ENTRIES = 5000
+MAX_TREE_DEPTH = 32
+
+# task_error payloads of the copy/move family: a MACHINE code with its fields, which
+# the tab turns into a translated sentence (the READ_ERROR_* pattern, with the numbers
+# the sentence needs). JSON, because a remote path may contain any separator.
+PARTIAL_CODE = "partial"                # a TREE stopped in the middle (its counters ride along)
+MOVE_ERROR_REFUSED = "move_refused"     # the server refused a cross-directory rename
+TREE_ERROR_TOO_BIG = "tree_too_big"     # the walk hit MAX_TREE_ENTRIES / MAX_TREE_DEPTH
+
+
+def task_payload(code: str, **fields) -> str:
+    """A task_error payload of the v1.7rc2 family: JSON with the machine `code` (+ fields).
+
+    The worker never composes a UI sentence (§ the module docstring): it names the
+    MACHINE reason and the numbers, and the SFTP tab renders the translated line. A field
+    whose value is None is dropped, so a payload carries only what it really knows.
+    """
+    data = {"code": str(code)}
+    for key, value in fields.items():
+        if value is not None:
+            data[key] = value
+    try:
+        return json.dumps(data, ensure_ascii=False)
+    except (TypeError, ValueError):   # a non-serializable field must not break a task
+        return json.dumps({"code": str(code)})
+
+
+def parse_task_payload(message, code: str = ""):
+    """`task_payload()` → the dict; None — a plain message, or another code.
+
+    PURE and total: any non-JSON text (a server error, an exception's `str`) answers None,
+    so a caller can safely try it on every task_error.
+    """
+    try:
+        data = json.loads(message)
+    except (TypeError, ValueError):
+        return None
+    if not isinstance(data, dict) or not data.get("code"):
+        return None
+    if code and data.get("code") != code:
+        return None
+    return data
+
+
+def payload_log_text(message: str) -> str:
+    """The ONE-LINE human rendering of a payload (the activity record); "" otherwise.
+
+    A log is read by a person: the record of a failed tree copy says how far it got and
+    where it stopped instead of printing the JSON. PURE, and the only place that knows how
+    to spell a payload — `task_log_line()` calls it.
+    """
+    data = parse_task_payload(message)
+    if not data:
+        return ""
+    code = data.get("code")
+    if code == PARTIAL_CODE:
+        return ("partially done: %s file(s) transferred, failed at %s: %s"
+                % (data.get("copied", 0), data.get("path", "?"), data.get("error", "?")))
+    if code == MOVE_ERROR_REFUSED:
+        return "the server refused the move: %s" % (data.get("error", "?"),)
+    if code == TREE_ERROR_TOO_BIG:
+        return "the tree exceeds the declared bound (%s entries / depth %s)" % (
+            data.get("limit", MAX_TREE_ENTRIES), data.get("depth", MAX_TREE_DEPTH))
+    return json.dumps(data, ensure_ascii=False)
 
 
 def task_log_line(kind: str, label: str, outcome: str = OUTCOME_DONE, error: str = "",
@@ -142,12 +256,18 @@ def task_log_line(kind: str, label: str, outcome: str = OUTCOME_DONE, error: str
     yet and falls back to the label. A NAVIGATION kind (`list`, `read`) answers an empty
     line: it is not part of the history by the module's own decision. The text carries a
     remote path — never a credential, because this module never holds one.
+
+    v1.7rc2: a copy/move failure whose `error` is a machine PAYLOAD (a partially
+    transferred tree, a refused cross-directory rename, a tree over its bound) is recorded
+    as the ONE-LINE human rendering of that payload (`payload_log_text`) — the record says
+    how far the operation got instead of printing JSON.
     """
     if str(kind) not in LOGGED_KINDS:
         return "", logging.INFO
     text = str(detail or label or "")
     if outcome == OUTCOME_FAILED:
-        return f"SFTP {kind} failed: {text} — {error}", logging.ERROR
+        note = payload_log_text(error)
+        return f"SFTP {kind} failed: {text} — {note or error}", logging.ERROR
     if outcome == OUTCOME_CANCELLED:
         return f"SFTP {kind} cancelled: {text}", logging.INFO
     return f"SFTP {kind} finished: {text}", logging.INFO
@@ -248,6 +368,60 @@ class _SftpReadTooLarge(_SftpReadError):
     code = READ_ERROR_TOO_LARGE
 
 
+class _SftpPayloadError(Exception):
+    """Internal base of the v1.7rc2 family: `str(e)` is a machine PAYLOAD, not a sentence.
+
+    The task_error message of a copy/move failure is either a plain server error or ONE of
+    these payloads; the SFTP tab parses it (`parse_task_payload`) and renders a translated
+    sentence, so the worker stays free of UI strings (§ the module docstring).
+    """
+    code = ""
+
+    def __init__(self, payload: str):
+        super().__init__(str(payload))
+
+    def __str__(self):
+        return str(self.args[0]) if self.args else self.code
+
+
+class _SftpPartial(_SftpPayloadError):
+    """Internal: a TREE operation stopped in the middle (v1.7rc2).
+
+    The files already published STAY (each of them landed through the atomic single-file
+    path): a partially transferred tree is REPORTED, never silent and never rolled back —
+    rolling a tree back would delete entries that may have been there before the copy.
+    The payload carries how many files were done and where the walk stopped.
+    """
+    code = PARTIAL_CODE
+
+    def __init__(self, copied: int, path: str, error: str):
+        super().__init__(task_payload(PARTIAL_CODE, copied=int(copied), path=str(path),
+                                      error=str(error)))
+
+
+class _SftpMoveRefused(_SftpPayloadError):
+    """Internal: the server refused a cross-directory rename (v1.7rc2).
+
+    Raised only when BOTH endpoints are really there — i.e. the refusal is not "one of
+    them is missing": the classic cause is two different filesystems (`EXDEV`), which no
+    SFTP v3 rename can cross. The payload names the server's own error; the tab renders
+    the honest sentence that names the fallback (copy + delete).
+    """
+    code = MOVE_ERROR_REFUSED
+
+    def __init__(self, error: str):
+        super().__init__(task_payload(MOVE_ERROR_REFUSED, error=str(error)))
+
+
+class _SftpTreeTooBig(_SftpPayloadError):
+    """Internal: the walk hit its declared bound (v1.7rc2) — refused BEFORE any transfer."""
+    code = TREE_ERROR_TOO_BIG
+
+    def __init__(self):
+        super().__init__(task_payload(TREE_ERROR_TOO_BIG, limit=MAX_TREE_ENTRIES,
+                                      depth=MAX_TREE_DEPTH))
+
+
 class _SftpTask:
     """A queue task. remote_path/local_path — the semantics depend on kind:
 
@@ -261,6 +435,9 @@ class _SftpTask:
       mkdir    : remote_path = the directory to create
       rename   : remote_path = the current path, remote_path2 = the new path
       delete   : remote_path = the path, is_dir = a directory (rmdir, not remove)
+      copy     : remote_path = the SOURCE, remote_path2 = the destination path
+                 (v1.7rc2; total_size is filled by the walk/stat INSIDE the worker)
+      move     : remote_path = the SOURCE, remote_path2 = the destination path (v1.7rc2)
     """
     __slots__ = ("id", "kind", "label", "remote_path", "remote_path2",
                  "local_path", "total_size", "detail", "is_dir")
@@ -323,6 +500,11 @@ class SftpWorker(QThread):
         self._stop_event = threading.Event()
         self._cancel_event = threading.Event()
         self._next_id = 1
+        # v1.7rc2: the verdict of the OPTIONAL copy-data@openssh.com feature detection —
+        # None = not tried yet, True = the server copied a file this way, False = refused.
+        # It is remembered for the life of the worker (one session), so a server without
+        # the extension costs ONE refused request and one log line, not one per file.
+        self._copy_data_ok = None
 
     # ── Public API (GUI thread) ──────────────────────────────────────────
 
@@ -407,6 +589,45 @@ class SftpWorker(QThread):
             self._next_id, KIND_READ, posixpath.basename(remote_path),
             remote_path=remote_path, total_size=int(total_size or 0),
             detail=remote_path))
+
+    def queue_copy(self, source: str, target_dir: str, name: str = "") -> Optional[int]:
+        """v1.7rc2 (ROADMAP v1.7rc2, task 1): copy a remote FILE or a whole DIRECTORY TREE.
+
+        The destination is `target_dir/name`, `name` defaulting to the source's basename.
+        A FILE is streamed through the 32 KB chunk loop into `<target>.part` and published
+        by the SAME commit the upload uses (`posix-rename@openssh.com`, or the v3 rename
+        with the destination cleared first) — the destination is UNTOUCHED until the very
+        last operation, so a cancelled or failed copy leaves it byte-identical. The OpenSSH
+        `copy-data` extension is an OPTIONAL fast path (`_try_copy_data`): it writes the
+        same provisional name and goes through the same commit, and a server that does not
+        answer it is simply streamed. A DIRECTORY is copied RECURSIVELY (the frozen
+        addition of rc2 to `SFTP_PANES.md`): a bounded walk, every file atomic, directories
+        created as needed and an existing destination directory MERGED INTO — nothing
+        inside it is ever deleted. The task's `total_size` is filled INSIDE the worker
+        (one `stat` for a file, the sum of the walk for a tree): the GUI thread never
+        touches the network.
+        """
+        target = posixpath.join(target_dir or "/", name or posixpath.basename(source))
+        return self._queue_task(_SftpTask(
+            self._next_id, KIND_COPY, posixpath.basename(source),
+            remote_path=source, remote_path2=target, detail=target))
+
+    def queue_move(self, source: str, target_dir: str, name: str = "") -> Optional[int]:
+        """v1.7rc2 (ROADMAP task 2): move a remote file/directory ACROSS directories.
+
+        `SSH_FXP_RENAME` is atomic on ONE filesystem, so a file — and a whole directory
+        whose destination does not exist yet — moves in ONE operation. A directory whose
+        destination ALREADY exists is moved ENTRY BY ENTRY (a walk of renames; the protocol
+        cannot merge two directories in one call), and the emptied source directories are
+        removed at the end. A server that refuses the rename although both endpoints exist
+        answers the machine code `MOVE_ERROR_REFUSED` — the honest sentence that names the
+        fallback (copy + delete), never a traceback. The same-directory rename stays the
+        shipped `queue_rename`.
+        """
+        target = posixpath.join(target_dir or "/", name or posixpath.basename(source))
+        return self._queue_task(_SftpTask(
+            self._next_id, KIND_MOVE, posixpath.basename(source),
+            remote_path=source, remote_path2=target, detail=target))
 
     def queue_normalize(self, remote_path: str, base_dir: str = "") -> Optional[int]:
         """v1.6.3 (ROADMAP task 4): resolve a typed path THROUGH THE SERVER.
@@ -521,6 +742,10 @@ class SftpWorker(QThread):
                         self._do_rename(task)
                     elif task.kind == KIND_DELETE:
                         self._do_delete(task)
+                    elif task.kind == KIND_COPY:
+                        self._do_copy(task)
+                    elif task.kind == KIND_MOVE:
+                        self._do_move(task)
                     else:
                         self._do_download(task)
                     self._emit(self.task_done, task.id, task.detail)
@@ -652,6 +877,11 @@ class SftpWorker(QThread):
         is already gone — so the provisional file is the ONLY copy of the new bytes
         and is KEPT (the caller is told through `_UploadCommitError.temp_kept`),
         with its path named in the message.
+
+        v1.7rc2: a remote→remote COPY publishes through THIS method as well — the
+        provisional name and the commit are ONE discipline for the upload and the copy,
+        so "the destination is untouched until the last operation" cannot drift between
+        the two directions.
         """
         posix_rename = getattr(self._sftp, "posix_rename", None)
         if posix_rename is not None:
@@ -737,6 +967,346 @@ class SftpWorker(QThread):
             return True
         except Exception:
             return False
+
+    def _remote_rmdir_quiet(self, path: str) -> bool:
+        """Best-effort removal of an EMPTY remote directory (v1.7rc2).
+
+        The cleanup of a tree MOVE: a directory that still holds something (a file whose
+        rename failed, a file that appeared meanwhile) simply STAYS — the leftover is
+        visible in the listing, which is more honest than a silent delete of a non-empty
+        directory (the protocol refuses it anyway).
+        """
+        try:
+            self._sftp.rmdir(path)
+            return True
+        except Exception:
+            return False
+
+    # ── v1.7rc2 (ROADMAP v1.7rc2): the copy / move family ────────────────
+
+    def _stat_entry(self, path: str, quiet: bool = False):
+        """The SFTPAttributes of ONE remote path (None when `quiet` and unreadable).
+
+        The address bar's `stat` pattern (v1.6.3): the server answers whether the path is
+        a file, a directory or nothing at all. `quiet` is for a QUESTION ("is it there?"),
+        the default for an OPERATION ("the task must report the server's error").
+        """
+        stat_fn = getattr(self._sftp, "stat", None)
+        if stat_fn is None:
+            if quiet:
+                return None
+            raise IOError("this client cannot stat %s" % (path,))
+        try:
+            return stat_fn(path)
+        except Exception:
+            if quiet:
+                return None
+            raise
+
+    @staticmethod
+    def _is_dir(info) -> bool:
+        """The SFTPAttributes → "a directory" (a broken/missing mode is not one)."""
+        try:
+            return stat.S_ISDIR(int(getattr(info, "st_mode", 0) or 0))
+        except (TypeError, ValueError):
+            return False
+
+    def _dir_ok(self, path: str) -> bool:
+        """Is `path` a directory on the server right now? (never raises)"""
+        return self._is_dir(self._stat_entry(path, quiet=True))
+
+    def _ensure_dir(self, path: str) -> bool:
+        """Create a directory that is not there yet; False when it already IS one.
+
+        ONE round trip for a new directory (the mkdir), two for an existing one (the
+        refused mkdir is explained by a `stat`). The SFTP protocol has NO `mkdir -p`, so a
+        refused mkdir whose PARENT is missing creates the parent first and retries ONCE —
+        a destination root that does not exist yet is an ordinary copy target, not an error.
+        A path that exists and is not a directory raises: the caller must never write into
+        a file's path as if it were a container.
+        """
+        try:
+            self._sftp.mkdir(path)
+            return True
+        except Exception as e:
+            if self._dir_ok(path):
+                return False   # the merge case — the destination directory is kept
+            parent = posixpath.dirname(path) or "/"
+            if parent != path and not self._dir_ok(parent):
+                self._ensure_dir(parent)
+                try:
+                    self._sftp.mkdir(path)
+                    return True
+                except Exception as e2:
+                    if self._dir_ok(path):
+                        return False
+                    raise IOError("cannot create the directory %s: %s"
+                                  % (path, e2)) from e2
+            raise IOError("cannot create the directory %s: %s" % (path, e)) from e
+
+    def _try_copy_data(self, source: str, temp: str) -> bool:
+        """The OPTIONAL OpenSSH `copy-data@openssh.com` fast path (v1.7rc2).
+
+        True — the SERVER copied `source` onto the provisional `temp` in ONE request.
+        False — the client exposes no raw request, the server does not know the extension,
+        or it refused this particular copy: the caller then STREAMS the bytes, and the
+        result is identical (the same `.part`, the same commit) — "the fallback is the
+        contract, the extension is an optimisation". The verdict is remembered for the
+        session, so a server without the extension costs ONE refused request and ONE log
+        line instead of one per file.
+        """
+        if self._copy_data_ok is False:
+            return False
+        request = getattr(self._sftp, "_request", None)
+        if request is None:
+            self._copy_data_ok = False
+            self._log_copy_data_fallback("the client exposes no raw SFTP request")
+            return False
+        try:
+            # paramiko does not wrap the extension: CMD_EXTENDED + the name + the two paths.
+            request(SFTP_CMD_EXTENDED, COPY_DATA_EXTENSION, source, temp)
+        except Exception as e:   # noqa: BLE001 — an unknown extension is the normal case
+            self._copy_data_ok = False
+            self._log_copy_data_fallback(e)
+            return False
+        self._copy_data_ok = True
+        return True
+
+    @staticmethod
+    def _log_copy_data_fallback(reason):
+        """ONE record when the optional fast path is skipped (the acceptance of v1.7rc2).
+
+        Skipping the extension is not a defect — the stream is the contract — so the line
+        is INFO and it never carries a credential (a path may appear in `reason`).
+        """
+        try:
+            log.info("SFTP copy-data@openssh.com is not used (%s) — the chunked stream "
+                     "produces the same result", reason)
+        except Exception:   # noqa: BLE001 — the record is a side channel
+            pass
+
+    def _do_copy(self, task: _SftpTask):
+        """v1.7rc2: copy ONE row — a file, or a whole directory tree."""
+        source, target = task.remote_path, task.remote_path2
+        info = self._stat_entry(source)          # a missing source → task_error
+        if self._is_dir(info):
+            self._copy_tree(task, source, target)
+        else:
+            size = int(getattr(info, "st_size", 0) or 0)
+            task.total_size = size
+            self._copy_file(task, source, target, size=size, total=size)
+
+    def _copy_file(self, task: _SftpTask, source: str, target: str,
+                   size: int = 0, done_base: int = 0, total: int = 0) -> int:
+        """ONE file, ATOMICALLY: `<target>.part`, then the shipped commit (v1.7rc2).
+
+        Returns the number of bytes copied. The destination is untouched until the very
+        last operation: a cancelled or failed copy drops the provisional file (except the
+        v1.5rc5/N2 case where the commit already cleared the destination — there the
+        provisional file IS the new data and is kept, `_UploadCommitError.temp_kept`).
+        `size` is the file's own size; `done_base`/`total` carry the counters of the WHOLE
+        operation, so a recursive copy reports ONE monotone progress line.
+        """
+        size = int(size or 0)
+        total = int(total or 0) or size
+        temp = target + PART_SUFFIX
+        remote_fh = None
+        committed = False
+        keep_temp = False
+        written = 0
+        try:
+            self._check_cancel()
+            if self._try_copy_data(source, temp):
+                written = size
+                self._emit(self.progress, task.id, done_base + written, total)
+            else:
+                # A refused fast path may have left a stub behind — the stream starts from
+                # a clean provisional name (open("wb") truncates, but a DIRECTORY named
+                # `<target>.part` would not be truncatable at all).
+                self._remote_remove_quiet(temp)
+                src_fh = self._sftp.open(source, "rb")
+                try:
+                    remote_fh = self._sftp.open(temp, "wb")
+                    while True:
+                        self._check_cancel()
+                        chunk = src_fh.read(CHUNK_SIZE)
+                        if not chunk:
+                            break
+                        remote_fh.write(chunk)
+                        written += len(chunk)
+                        self._emit(self.progress, task.id, done_base + written, total)
+                finally:
+                    try:
+                        src_fh.close()
+                    except Exception:   # noqa: BLE001 — the write path owns the outcome
+                        pass
+                remote_fh.close()          # close the handle BEFORE the rename
+                remote_fh = None
+            self._commit_upload(temp, target)
+            committed = True
+            return written
+        except _UploadCommitError as e:
+            # The commit failed AFTER the destination was cleared: the `.part` file is the
+            # only surviving copy of the new bytes, so it must not be cleaned up.
+            keep_temp = e.temp_kept
+            raise
+        finally:
+            if remote_fh is not None:
+                try:
+                    remote_fh.close()
+                except Exception:   # noqa: BLE001 — a cleanup must never mask the error
+                    pass
+            if not committed and not keep_temp:
+                self._remote_remove_quiet(temp)   # cancel/failure: no litter, no loss
+
+    def _walk_tree(self, root: str) -> list:
+        """The BOUNDED depth-first walk of one remote tree (v1.7rc2) → pre-order entries.
+
+        Answers `[(path, is_dir, size)]` with a directory ALWAYS before its contents, so a
+        copy can create the parent first. Every entry counts against MAX_TREE_ENTRIES and
+        the nesting against MAX_TREE_DEPTH: a tree over a bound raises `_SftpTreeTooBig`
+        BEFORE anything is transferred (better one sentence than a half-copied tree). The
+        cancellation is checked on every directory, so a Cancel during a huge walk stops
+        it. Symlinks are deliberately NOT followed — the SFTP v3 protocol cannot read a
+        link target, so a link to a file is copied as that file's CONTENT and a link to a
+        directory is refused by the server (a declared limitation of the Commander).
+        """
+        entries: list = []
+        self._walk_into(root, 0, entries)
+        return entries
+
+    def _walk_into(self, path: str, depth: int, entries: list):
+        """One level of `_walk_tree()` — the recursion with the declared bounds."""
+        self._check_cancel()
+        if depth > MAX_TREE_DEPTH:
+            raise _SftpTreeTooBig()
+        for attr in sorted(self._sftp.listdir_attr(path),
+                           key=lambda a: str(getattr(a, "filename", ""))):
+            name = str(getattr(attr, "filename", ""))
+            if name in ("", ".", ".."):
+                continue
+            full = posixpath.join(path, name)
+            is_dir = self._is_dir(attr)
+            entries.append((full, is_dir,
+                            0 if is_dir else int(getattr(attr, "st_size", 0) or 0)))
+            if len(entries) > MAX_TREE_ENTRIES:
+                raise _SftpTreeTooBig()
+            if is_dir:
+                self._walk_into(full, depth + 1, entries)
+
+    def _copy_tree(self, task: _SftpTask, source: str, target: str):
+        """The RECURSIVE copy of one directory (v1.7rc2 — the frozen addition to rc2).
+
+        A bounded walk, every FILE published atomically through `_copy_file`, directories
+        created BEFORE their contents. An existing destination directory is MERGED INTO —
+        nothing inside it is ever deleted, so a copy is additive by construction — and a
+        failure stops the walk with the counters of what was already done (`_SftpPartial`:
+        "a partially copied tree is reported, never silent"). The bytes of the whole tree
+        are ONE progress line.
+        """
+        entries = self._walk_tree(source)
+        task.total_size = sum(size for _path, is_dir, size in entries if not is_dir)
+        total = task.total_size
+        self._ensure_dir(target)
+        done = 0
+        copied = 0
+        for path, is_dir, _size in entries:
+            self._check_cancel()
+            dest = posixpath.join(target, posixpath.relpath(path, source))
+            if is_dir:
+                self._ensure_dir(dest)
+                continue
+            try:
+                done += self._copy_file(task, path, dest, size=_size, done_base=done,
+                                        total=total)
+            except _SftpCancelled:
+                raise
+            except _UploadCommitError as e:
+                raise _SftpPartial(copied, path, payload_log_text(str(e)) or str(e)) from e
+            except Exception as e:   # noqa: BLE001 — one unreadable file must not hide the rest
+                raise _SftpPartial(copied, path, str(e)) from e
+            copied += 1
+
+    def _do_move(self, task: _SftpTask):
+        """v1.7rc2 (ROADMAP task 2): the cross-directory move.
+
+        A file — and a whole directory whose destination does not exist yet — moves in ONE
+        atomic rename. A directory whose destination ALREADY exists is moved entry by entry
+        (`_move_tree`): the protocol cannot merge two directories in a single call.
+        """
+        source, target = task.remote_path, task.remote_path2
+        info = self._stat_entry(source)          # a missing source → task_error
+        if self._is_dir(info) and self._dir_ok(target):
+            task.total_size = 1
+            self._move_tree(task, source, target)
+            return
+        task.total_size = int(getattr(info, "st_size", 0) or 0)
+        self._rename_into_place(source, target)
+
+    def _rename_into_place(self, source: str, target: str):
+        """Publish a MOVE overwriting an existing destination, or refuse honestly (v1.7rc2).
+
+        `posix-rename@openssh.com` is the atomic overwrite (the upload commit's rule); a
+        server without it gets the SFTP v3 rename, which REFUSES an existing destination.
+        The upload commit's "clear the destination and retry" fallback is deliberately NOT
+        used here: a move cannot restore a destination it has cleared, so a move is either
+        ATOMIC or it is refused with the machine code `MOVE_ERROR_REFUSED` — the sentence
+        that names the fallback (copy + delete) for the user to run by hand.
+        """
+        first = None
+        posix_rename = getattr(self._sftp, "posix_rename", None)
+        if posix_rename is not None:
+            try:
+                posix_rename(source, target)
+                return
+            except Exception as e:   # noqa: BLE001 — unknown extension OR a real refusal
+                first = e
+        try:
+            self._sftp.rename(source, target)
+            return
+        except Exception as e:       # noqa: BLE001 — the refusal to classify below
+            if first is None:
+                first = e
+        # Both endpoints really there + a refusal = the cross-device case (no SFTP v3 rename
+        # can cross two filesystems). A MISSING endpoint keeps the server's own error.
+        if self._dir_ok(posixpath.dirname(target) or "/") \
+                and self._stat_entry(source, quiet=True) is not None:
+            raise _SftpMoveRefused(str(first)) from first
+        raise first
+
+    def _move_tree(self, task: _SftpTask, source: str, target: str):
+        """The RECURSIVE move into an EXISTING destination directory (v1.7rc2).
+
+        The same bounded walk and the same cancel points as the copy: every FILE is renamed
+        atomically into place, every DIRECTORY is created on the target when missing, and
+        the SOURCE directories are removed at the end, deepest first — a directory that
+        still holds something simply STAYS (the leftover is visible in the listing). A
+        failure stops the walk with the counters already done (`_SftpPartial`).
+        """
+        entries = self._walk_tree(source)
+        task.total_size = len(entries)
+        total = max(1, len(entries))
+        self._ensure_dir(target)
+        moved = 0
+        dirs = []
+        for index, (path, is_dir, _size) in enumerate(entries):
+            self._check_cancel()
+            dest = posixpath.join(target, posixpath.relpath(path, source))
+            self._emit(self.progress, task.id, index + 1, total)
+            if is_dir:
+                dirs.append(path)
+                self._ensure_dir(dest)
+                continue
+            try:
+                self._rename_into_place(path, dest)
+            except _SftpCancelled:
+                raise
+            except Exception as e:   # noqa: BLE001 — one refusal must not hide the rest
+                raise _SftpPartial(moved, path, payload_log_text(str(e)) or str(e)) from e
+            moved += 1
+        for path in sorted(dirs, key=len, reverse=True):
+            self._remote_rmdir_quiet(path)
+        self._remote_rmdir_quiet(source)
 
     def _expand_home(self, path: str) -> str:
         """A `~/`-relative path → an absolute one, resolved ON THIS THREAD (v1.5.7).

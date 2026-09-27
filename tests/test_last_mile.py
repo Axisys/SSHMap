@@ -42,7 +42,8 @@ import sys
 
 from _common import (bootstrap, check, finish, load_i18n_langs, check_i18n_parity,
                      check_i18n_format, check_release_state, EXPECTED_APP_VERSION,
-                     EXPECTED_I18N_KEYS)
+                     EXPECTED_I18N_KEYS,
+                     releases_at_least)
 
 ROOT, WORK = bootstrap()  # BEFORE the app module imports (the HOME isolation + offscreen)
 
@@ -683,10 +684,12 @@ check("§7 the report's captions are the SAME set in every language (the parity 
 check_i18n_parity(LANGS)
 check_i18n_format(LANGS)
 
-check("§7 the pin counts the SHIPPED release (828 + the 13 keys of v1.6.8)",
-      EXPECTED_I18N_KEYS == 841 and EXPECTED_I18N_KEYS == 828 + 13, str(EXPECTED_I18N_KEYS))
+check("§7 the pin counts the SHIPPED release (828 + the 13 keys of v1.6.8"
+      " + the 5 of v1.7rc1 + the 8 of v1.7rc2 + the 9 of v1.7rc3)",
+      EXPECTED_I18N_KEYS >= 854 and EXPECTED_I18N_KEYS == 828 + 13 + 5 + 8 + 9,
+      str(EXPECTED_I18N_KEYS))
 check("§7 EXPECTED_APP_VERSION is the release this file describes",
-      EXPECTED_APP_VERSION == "1.6.8", EXPECTED_APP_VERSION)
+      releases_at_least(EXPECTED_APP_VERSION, "1.7"), EXPECTED_APP_VERSION)
 check("§7 the registry grew by exactly ONE action (60 -> 61) and it is an EMPTY default",
       len(HR.HOTKEY_ACTIONS) == 61
       and "file.export_problems" in HR.empty_default_action_ids(),

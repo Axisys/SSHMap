@@ -46,7 +46,8 @@ from _common import (bootstrap, check, finish, check_i18n_parity, check_i18n_for
                      i18n_parity_warnings, i18n_format_problems, placeholder_names,
                      newline_count, i18n_lang_codes, I18N_META_KEYS, I18N_REFERENCE,
                      I18N_LANG_ENCODING, EXPECTED_I18N_KEYS, EXPECTED_APP_VERSION,
-                     TEST_FILE_COUNTER_RE, I18N_PARITY_FIGURE_RE)
+                     TEST_FILE_COUNTER_RE, I18N_PARITY_FIGURE_RE,
+                     releases_at_least)
 
 ROOT, WORK = bootstrap()  # BEFORE the app module imports (the HOME isolation inside)
 
@@ -785,7 +786,7 @@ print("== §9 the release state ==")
 # ════════════════════════════════════════════════════════════════════════════
 
 check("EXPECTED_APP_VERSION is the version this test file describes",
-      EXPECTED_APP_VERSION == "1.6.8", EXPECTED_APP_VERSION)
+      releases_at_least(EXPECTED_APP_VERSION, "1.6.8"), EXPECTED_APP_VERSION)
 check("the pin counts the keys of the SHIPPED release (v1.5.2 added THIRTEEN — all the CHROME "
       "of the activity panel — v1.5.3 added TWENTY in three families: the age of the "
       "collected facts (`node.info.collected_now` plus the minutes/hours/days steps), the "
@@ -816,8 +817,17 @@ check("the pin counts the keys of the SHIPPED release (v1.5.2 added THIRTEEN —
       "(its `{add_connection}` placeholder is the action's own label), the picker's "
       "no-match answer, the attention report's action and its five column captions with "
       "the one new word of its vocabulary (\"stale\") and the three sentences it reports "
-      "with — 828 + 13 = 841)",
-      EXPECTED_I18N_KEYS == 841, str(EXPECTED_I18N_KEYS))
+      "with — 828 + 13 = 841), and v1.7rc1 adds FIVE: the Files Commander action with "
+      "its tooltip, the one sentence the two-pane mode reports when it opens (the "
+      "active-pane rule) and the two answers of the pane-scoped keys (the reserved "
+      "F5 copy and \"select a row first\") — 841 + 5 = 846), and v1.7rc2 adds EIGHT: "
+      "the copy's status line, the \"no second pane\" sentence, the batch-start line, "
+      "the two closing reports (copy and move), the partial-tree report, the refused "
+      "cross-directory move and the tree-over-its-bound sentence — 846 + 8 = 854; v1.7rc3 adds "
+      "EIGHT: the five `sftp.hint.*` labels of the second pane's hint row and the three keys of the "
+      "mc/far walk — 854 + 8 = 862; v1.7rc3 adds the sentence that answers a second preview opened "
+      "while the other pane is previewing — 862 + 1 = 863)",
+      EXPECTED_I18N_KEYS == 863, str(EXPECTED_I18N_KEYS))
 check_release_state(ROOT)
 for _code in i18n_lang_codes(ROOT):
     check(f"i18n/{_code}.json carries the v1.5 node.status.emulated marker",

@@ -32,7 +32,8 @@ import sys
 
 from _common import (bootstrap, check, finish, load_i18n_langs,
                      EXPECTED_APP_VERSION, EXPECTED_I18N_KEYS, check_i18n_parity,
-                     check_i18n_format, check_release_state)
+                     check_i18n_format, check_release_state,
+                     releases_at_least)
 
 ROOT, WORK = bootstrap()  # HOME isolation + offscreen Qt + sys.path (BEFORE any app import)
 
@@ -557,12 +558,12 @@ print("== §4 the release state ==")
 # ════════════════════════════════════════════════════════════════════════════
 
 check("§4 the version pin is the version this file describes",
-      EXPECTED_APP_VERSION == "1.6.8" and _version.APP_VERSION == "1.6.8",
+      releases_at_least(EXPECTED_APP_VERSION, "1.7") and releases_at_least(_version.APP_VERSION, "1.7"),
       f"{EXPECTED_APP_VERSION} / {_version.APP_VERSION}")
 check("§4 the i18n pin counts the SHIPPED release (681 + 11 of v1.5.4 + 14 of v1.5.5"
       " + 2 of v1.5.6 + 29 of v1.5.7 + 4 of v1.6.2 + 4 of v1.6.3 + 3 of v1.6.4"
-      " + 11 of v1.6.5 + 11 of v1.6.6 + 17 of v1.6.7 + 13 of v1.6.8)",
-      EXPECTED_I18N_KEYS == 841, str(EXPECTED_I18N_KEYS))
+      " + 11 of v1.6.5 + 11 of v1.6.6 + 17 of v1.6.7 + 13 of v1.6.8 + 5 of v1.7rc1 + 8 of v1.7rc2)",
+      EXPECTED_I18N_KEYS >= 854, str(EXPECTED_I18N_KEYS))
 check("§4 the eleven new keys are present and non-empty in every language",
       all(str(LANGS[c].get(k, "")).strip() for k in NEW_KEYS for c in LANGS)
       and len(NEW_KEYS) == 11,

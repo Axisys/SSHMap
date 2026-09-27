@@ -43,7 +43,8 @@ import threading
 
 from _common import (bootstrap, check, finish, wait_until, check_release_state,
                      EXPECTED_APP_VERSION, EXPECTED_I18N_KEYS, i18n_lang_codes,
-                     load_i18n_langs, translation_keys)
+                     load_i18n_langs, translation_keys,
+                     releases_at_least)
 
 ROOT, WORK = bootstrap()  # BEFORE the app module imports (HOME isolation + offscreen)
 
@@ -598,11 +599,11 @@ print("== §9 the release state ==")
 # ════════════════════════════════════════════════════════════════════════════
 
 check("EXPECTED_APP_VERSION is the version this test file describes",
-      EXPECTED_APP_VERSION == "1.6.8", EXPECTED_APP_VERSION)
+      releases_at_least(EXPECTED_APP_VERSION, "1.7"), EXPECTED_APP_VERSION)
 check("the pin counts the shipped keys (+29 of v1.5.7: the tab, the panel chrome, the seven menu items "
       "with their reports and refusals, + the marked secret of v1.6.4) — "
-      "708 + 29 + 41 + 4 + 4 + 3 + 11 + 11 + 17 + 13 = 841",
-      EXPECTED_I18N_KEYS == 841, str(EXPECTED_I18N_KEYS))
+      "708 + 29 + 41 + 4 + 4 + 3 + 11 + 11 + 17 + 13 + 5 + 8 = 854 (+9 of v1.7rc3 = 863)",
+      EXPECTED_I18N_KEYS == 863, str(EXPECTED_I18N_KEYS))
 check_release_state(ROOT)
 
 _langs = load_i18n_langs(ROOT)

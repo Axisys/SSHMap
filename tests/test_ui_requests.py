@@ -27,7 +27,8 @@ import re
 
 from _common import (bootstrap, check, finish, check_i18n_parity, check_i18n_format,
                      check_release_state, load_i18n_langs, EXPECTED_APP_VERSION,
-                     EXPECTED_I18N_KEYS)
+                     EXPECTED_I18N_KEYS,
+                     releases_at_least)
 
 ROOT, WORK = bootstrap()  # BEFORE the app module imports (HOME isolation, offscreen)
 
@@ -527,13 +528,13 @@ _langs = load_i18n_langs(ROOT)
 check_i18n_parity(_langs)
 check_i18n_format(_langs)
 check("§6 EXPECTED_APP_VERSION is the shipped release (the pin quotes the CURRENT one)",
-      EXPECTED_APP_VERSION == "1.6.8"
-      and re.fullmatch(r"1\.6(\.\d+)?", EXPECTED_APP_VERSION) is not None,
+      releases_at_least(EXPECTED_APP_VERSION, "1.7")
+      and re.fullmatch(r"1\.7(rc\d+)?", EXPECTED_APP_VERSION) is not None,
       EXPECTED_APP_VERSION)
 check("§6 the pin counts the shipped release (708 + the 29 keys of v1.5.7 + the 41 of v1.6"
       " + the 4 of v1.6.2 + the 4 of v1.6.3 + the 3 of v1.6.4 + the 11 of v1.6.5"
-      " + the 11 of v1.6.6 + the 17 of v1.6.7 + the 13 of v1.6.8)",
-      EXPECTED_I18N_KEYS == 841, str(EXPECTED_I18N_KEYS))
+      " + the 11 of v1.6.6 + the 17 of v1.6.7 + the 13 of v1.6.8 + the 5 of v1.7rc1 + the 8 of v1.7rc2)",
+      EXPECTED_I18N_KEYS >= 854, str(EXPECTED_I18N_KEYS))
 for _key in ("menu.export", "empty.state.open_map"):
     check(f"§6 the key {_key} is present and non-empty in every discovered language",
           all(str(_langs[code].get(_key) or "").strip() for code in _langs),

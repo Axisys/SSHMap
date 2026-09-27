@@ -256,8 +256,9 @@ check("mkdir created the directory on the 'server'", "/home/fresh" in fs1.dirs,
 check("mkdir's task_done detail is the new path",
       log1.of_kind("done", tid_mk)[0][2] == "/home/fresh",
       f"got={log1.of_kind('done', tid_mk)}")
-check("the operation kinds are the documented ones",
-      OP_KINDS == (KIND_MKDIR, KIND_RENAME, KIND_DELETE) == ("mkdir", "rename", "delete"),
+check("the operation kinds are the documented ones (v1.7rc2 added the copy/move family)",
+      OP_KINDS == (KIND_MKDIR, KIND_RENAME, KIND_DELETE, "copy", "move")
+      == ("mkdir", "rename", "delete", "copy", "move"),
       f"got={OP_KINDS}")
 
 tid_ls = worker1.queue_list("/home")
