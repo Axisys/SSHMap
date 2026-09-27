@@ -259,8 +259,20 @@ def clear_cfg(*extra_paths: str) -> None:
 # in 12 i18n files + the APP_VERSION/requirements pins in 7 release-state sections).
 # The misses of the keys themselves against the code are caught by check_i18n_keys.py.
 # ─────────────────────────────────────────────────────────────────────────────
-EXPECTED_APP_VERSION = "1.6.7"  # the current release (a sentinel: it catches "a bump to the wrong version")
-EXPECTED_I18N_KEYS = 828        # the parity of the TRANSLATION keys (v1.6.7 — "the bookmarks: one
+EXPECTED_APP_VERSION = "1.6.8"  # the current release (a sentinel: it catches "a bump to the wrong version")
+EXPECTED_I18N_KEYS = 841        # the parity of the TRANSLATION keys (v1.6.8 — "the last mile,
+                                # closing the line: the gesture the map already had, and the
+                                # problem set it already knew": the "Connect to…" row, the
+                                # searchable node pickers and the ATTENTION report are
+                                # BEHAVIOUR (no key beyond their own captions), and the
+                                # THIRTEEN new keys are the row's label, the first screen's
+                                # sentence about the Shift+drag gesture (its `{add_connection}`
+                                # placeholder is the action's own live label), the picker's
+                                # no-match answer, the report's action and its five column
+                                # captions with the one new word of its vocabulary ("stale")
+                                # and the three sentences it reports with (the saved file, the
+                                # empty map and the all-clear map) — 828 + 13.
+                                # (v1.6.7 — "the bookmarks: one
                                 # application-level place for the links the team uses": the STORE
                                 # (`~/.sshmap/bookmarks.json`, the sanitizer of the project reused,
                                 # the merge-write), the PANEL (the fold, the filter, the saved

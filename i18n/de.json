@@ -827,5 +827,18 @@
   "bookmarks.remove": "Entfernen",
   "bookmarks.url_hint": "https://wiki.example.com",
   "status.bookmarks_saved": "Lesezeichen gespeichert: {count}",
-  "status.bookmarks_save_failed": "Lesezeichen wurden nicht gespeichert — siehe Log"
+  "status.bookmarks_save_failed": "Lesezeichen wurden nicht gespeichert — siehe Log",
+  "ctx.connect_to": "Verbinden mit…",
+  "empty.state.connect_hint": "Um zwei Server zu verbinden, Shift halten und von einer Karte zur anderen ziehen — oder {add_connection} verwenden.",
+  "connection.no_match": "Kein Server passt zu „{query}“ — die Auswahl bleibt {name}.",
+  "file.export_problems": "Probleme exportieren...",
+  "report.problems.alias": "Alias",
+  "report.problems.host": "Host (IP)",
+  "report.problems.status": "Status",
+  "report.problems.reason": "Grund",
+  "report.problems.checked": "Geprüft",
+  "report.problems.stale": "veraltet",
+  "status.problems_exported": "Problemliste gespeichert: {file}",
+  "status.problems_no_nodes": "Nichts zu berichten — die Karte hat keine Server",
+  "status.problems_none": "Nichts zu berichten — kein Server braucht Aufmerksamkeit"
 }

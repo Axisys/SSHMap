@@ -827,5 +827,18 @@
   "bookmarks.remove": "Удалить",
   "bookmarks.url_hint": "https://wiki.example.com",
   "status.bookmarks_saved": "Закладки сохранены: {count}",
-  "status.bookmarks_save_failed": "Закладки не сохранены — см. журнал"
+  "status.bookmarks_save_failed": "Закладки не сохранены — см. журнал",
+  "ctx.connect_to": "Подключить к…",
+  "empty.state.connect_hint": "Чтобы связать два сервера, зажмите Shift и протяните от карточки к карточке — или используйте «{add_connection}».",
+  "connection.no_match": "Ни один сервер не подходит под «{query}» — выбор остаётся: {name}.",
+  "file.export_problems": "Экспорт проблем...",
+  "report.problems.alias": "Псевдоним",
+  "report.problems.host": "Хост (IP)",
+  "report.problems.status": "Статус",
+  "report.problems.reason": "Причина",
+  "report.problems.checked": "Проверен",
+  "report.problems.stale": "устарел",
+  "status.problems_exported": "Список проблем сохранён: {file}",
+  "status.problems_no_nodes": "Нечего выгружать — на карте нет серверов",
+  "status.problems_none": "Нечего выгружать — ни один сервер не требует внимания"
 }

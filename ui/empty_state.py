@@ -106,6 +106,23 @@ def palette_hotkey() -> str:
     return configured or default_sequence("palette.open") or "Ctrl+K"
 
 
+def connect_hint_text() -> str:
+    """The "how do I draw a connection?" sentence (v1.6.8, ROADMAP task 2) — ONE composer.
+
+    The gesture (`Shift`+drag from a card) shipped long ago and opens the connection
+    dialog PRE-FILLED, yet the colleagues who asked for "drawing connections" never
+    found it: the undiscoverability WAS the defect. The sentence therefore names the
+    gesture AND the menu row, and its `{add_connection}` placeholder is the REAL label
+    of the registry action (`edit.add_connection`) — the v1.4.5 rule that made the
+    import hint read the live File-menu strings instead of a copy of them.
+
+    BOTH surfaces read THIS function: the first screen's hint (`EmptyStateOverlay`) and
+    the tooltip of the Edit-menu action (`MainWindow._connect_hint_text()`), so the two
+    cannot drift into two truths about one gesture.
+    """
+    return _t("empty.state.connect_hint", add_connection=_t("edit.add_connection"))
+
+
 class EmptyStateOverlay(QWidget):
     """The first-run hint card (a transparent child of `MapView`).
 
@@ -203,13 +220,24 @@ class EmptyStateOverlay(QWidget):
                   import_ssh=_t("file.import_ssh_config"))
 
     def palette_text(self) -> str:
-        """v1.5rc3 (ROADMAP task 4): the SECOND line — the palette and the cheat-sheet.
+        """v1.5rc3 (ROADMAP task 4): the palette and the cheat-sheet line.
 
         The key is read from the action registry at call time (`palette_hotkey()`), so
         a rebound palette is named by its real sequence; the `?` half is the map's own
         key (see `MainWindow.keyPressEvent`), not a registry action.
         """
         return _t("empty.state.palette_hint", hotkey=palette_hotkey())
+
+    def connect_text(self) -> str:
+        """v1.6.8 (ROADMAP task 2): the connection gesture, named where it is discovered.
+
+        The SAME composer the Edit-menu action's tooltip uses (`connect_hint_text()`), so
+        the first screen and the menu cannot tell the gesture two ways. It is NOT a
+        per-card tooltip: that would ride every card of every map for a one-time
+        discovery problem, and the card tooltip is already the ONE composer of a status,
+        an age, a plugin detail and two reports.
+        """
+        return connect_hint_text()
 
     def retranslate(self):
         """Re-read the strings (language switch)."""
@@ -269,9 +297,11 @@ class EmptyStateOverlay(QWidget):
         """
         title_fm = QFontMetrics(self._title_font)
         hint_fm = QFontMetrics(self._hint_font)
-        lines = (self.title_text(), self.hint_text(), self.palette_text())
+        lines = (self.title_text(), self.hint_text(), self.connect_text(),
+                 self.palette_text())
         max_text_w = max(fm.horizontalAdvance(line) for fm, line in
-                         ((title_fm, lines[0]), (hint_fm, lines[1]), (hint_fm, lines[2])))
+                         ((title_fm, lines[0]), (hint_fm, lines[1]), (hint_fm, lines[2]),
+                          (hint_fm, lines[3])))
         buttons = self.buttons()
         widths = [max(btn.sizeHint().width(), self.BUTTON_MIN_W) for btn in buttons]
         gaps = self.GAP * (len(buttons) - 1)
@@ -283,8 +313,8 @@ class EmptyStateOverlay(QWidget):
         # sentences then elide rather than the card overflowing the canvas.
         width = min(width, max(int(view_w) - 16, 160))
         height = (self.PADDING_Y + self.ICON + self.GAP + title_fm.height() + 4
-                  + hint_fm.height() + 2 + hint_fm.height() + self.GAP
-                  + self.BUTTON_H + self.PADDING_Y)
+                  + hint_fm.height() + 2 + hint_fm.height() + 2 + hint_fm.height()
+                  + self.GAP + self.BUTTON_H + self.PADDING_Y)
         x = max(0, (int(view_w) - width) // 2)
         y = max(0, int(int(view_h) * 0.42) - height // 2)
         self.setGeometry(int(x), int(y), int(width), int(height))
@@ -347,7 +377,7 @@ class EmptyStateOverlay(QWidget):
             painter.setFont(self._hint_font)
             painter.setPen(QPen(QColor(theme.TEXT_MUTED)))
             text_w = max(w - 2.0 * self.PADDING_X, 1.0)
-            for line in (self.hint_text(), self.palette_text()):
+            for line in (self.hint_text(), self.connect_text(), self.palette_text()):
                 painter.drawText(QRectF(self.PADDING_X, float(y), text_w, float(hint_fm.height())),
                                  int(Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignVCenter),
                                  hint_fm.elidedText(line, Qt.TextElideMode.ElideRight,

@@ -1260,6 +1260,21 @@ class MapView(QGraphicsView):
                     w._connect_ssh_external(n)
                 act_ext.triggered.connect(_ssh_ext)
                 _gate_row(act_ext, "external", win_node, "ctx.ssh_external")
+            # v1.6.8 (ROADMAP task 1): "Connect to…" — the ROW the discovered gesture
+            # needed. Shift+dragging from a card has created connections since v0.7 and
+            # opens the dialog PRE-FILLED, yet the colleagues who asked for "drawing
+            # connections" never found it: the undiscoverability WAS the defect. This row
+            # is ONE more entry point of the SAME call (`_add_connection(default_source_id
+            # =…)`, `mouseReleaseEvent` above), so there is no new dialog, no new command
+            # and no new undo path. It is NOT gated for an unmanaged card: drawing a link
+            # needs no login on that host (`ui/unmanaged.py` is deliberately untouched).
+            if hasattr(win, "_add_connection"):
+                act_conn_to = menu.addAction(_t("ctx.connect_to"))
+                def _connect_to(checked=False, n=win_node):  # checked — a bool from triggered
+                    w = self.window()
+                    w._select_node(n)
+                    w._add_connection(default_source_id=n.data.id)
+                act_conn_to.triggered.connect(_connect_to)
             if hasattr(win, "_edit_node"):
                 act_edit = menu.addAction(_t("ctx.edit_server"))
                 act_edit.triggered.connect(lambda _=False, n=win_node: self.window()._edit_node(n))

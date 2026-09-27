@@ -92,6 +92,11 @@ except ImportError:
 CONTEXT_MENU_ITEMS = (
     ("ssh", "ctx.ssh_connect"),
     ("external", "ctx.ssh_external"),
+    # v1.6.8 (ROADMAP task 1): "Connect to…" — the row that makes the map's drawing
+    # gesture reachable. It sits with the two SSH rows because all three answer "connect
+    # this server to something"; it is NOT a login verb (it only fills a dialog), so it
+    # is deliberately absent from `ui/unmanaged.GATED_ACTIONS`.
+    ("connect_to", "ctx.connect_to"),
     None,  # separator
     ("edit", "ctx.edit_server"),
     None,

@@ -1,4 +1,4 @@
-from typing import List, Dict, Optional, TYPE_CHECKING
+from typing import List, Dict, Optional, Callable, TYPE_CHECKING
 
 try:
     from ..graphics.server_node import ServerNode
@@ -13,9 +13,30 @@ except ImportError:
 if TYPE_CHECKING:  # the `arrow` parameter of EditConnectionDialog (no runtime import needed)
     from graphics.connection_arrow import ConnectionArrow
 
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QDialog, QFormLayout, QComboBox, QLineEdit, QDialogButtonBox, QCheckBox,
+    QDialog, QFormLayout, QComboBox, QCompleter, QLabel, QLineEdit, QDialogButtonBox,
+    QCheckBox,
 )
+
+
+def _live_nodes(nodes: List[ServerNode], provider: Optional[Callable] = None) -> List[ServerNode]:
+    """The nodes the pickers offer: the LIVE scene when a provider was handed in.
+
+    v1.6.8 (ROADMAP task 3): the searchable pickers are fed "through a callback (the
+    module + callbacks pattern: the dialog knows no scene)" — the window passes
+    ``nodes_provider``, a zero-argument callable that reads the scene, and this dialog
+    never learns what a scene is. A provider that fails or answers nothing leaves the
+    list the caller already passed, so a dialog can never open with an EMPTY picker
+    because of a broken callback.
+    """
+    if not callable(provider):
+        return list(nodes or ())
+    try:
+        live = list(provider() or ())
+    except Exception:  # noqa: BLE001 — a broken provider must not empty the dialog
+        live = []
+    return live or list(nodes or ())
 
 
 class _LabelLineEdit(QLineEdit):
@@ -72,17 +93,61 @@ class _LabelLineEdit(QLineEdit):
         self._guarding = False
 
 
+def match_index(texts: List[str], query: str) -> int:
+    """The index a settled query MEANS (v1.6.8) — the ONE search rule of the pickers (PURE).
+
+    Three tiers, in order:
+
+      1. an EXACT text wins (`"web-1 (10.0.0.1)"` typed or picked) — never ambiguous;
+      2. otherwise the FIRST case-insensitive SUBSTRING match, on the alias OR the host,
+         because that is exactly the filter the popup itself applies (`MatchContains`):
+         a fragment a user typed means the server it names, and the scene's order makes
+         the answer deterministic;
+      3. otherwise ``-1`` — nothing carries the query, and the caller keeps the previous
+         selection and says so.
+
+    A blank query answers ``-1`` as well: an empty field is not a query.
+    """
+    text = str(query or "")
+    if not text.strip():
+        return -1
+    for i, candidate in enumerate(texts):
+        if str(candidate) == text:
+            return i
+    needle = text.casefold()
+    for i, candidate in enumerate(texts):
+        if needle in str(candidate).casefold():
+            return i
+    return -1
+
+
 class ConnectionDialog(QDialog):
     """Dialog for creating a connection between two nodes.
 
     v0.7: added connection type selection (QComboBox) and source/target prefill
     capability — used by the "drag" mode from MapView.
+
+    v1.6.8 (ROADMAP task 3): **the two pickers can be TYPED into.** The two fields stay
+    the DISPLAY of the selection (`self.source` / `self.target` keep their contract —
+    `currentData()` is still the node id the command writes), and the CHOOSING becomes
+    searchable: ONE `QCompleter` per field over the item text, which is
+    `"<alias> (<host>)"`, so a query matches the **alias OR the host** as a
+    case-insensitive SUBSTRING (`Qt.MatchContains` — the `SftpTab` address bar's
+    completer is the shipped precedent). Typing the first character opens the popup.
+
+    **A query that matches nothing never empties the picker.** The last VALID index is
+    remembered while the user types, and settling the field on a text no node carries
+    restores that selection and REPORTS the fact in one sentence
+    (`connection.no_match`) — the row `_no_match_label`, hidden until it happens. An
+    empty picker would leave the dialog with no source at all, which is precisely the
+    state a search field must never be able to produce.
     """
 
     def __init__(self, nodes: List[ServerNode], parent=None,
                  default_source_id: Optional[str] = None,
                  default_target_id: Optional[str] = None,
-                 default_type: str = DEFAULT_CONNECTION_TYPE):
+                 default_type: str = DEFAULT_CONNECTION_TYPE,
+                 nodes_provider: Optional[Callable] = None):
         super().__init__(parent)
 
         # ── i18n support ────────────────────────────────
@@ -102,6 +167,11 @@ class ConnectionDialog(QDialog):
 
         self.setMinimumWidth(300)
         layout = QFormLayout(self)
+
+        #: The last index the user really CHOSE, per field (v1.6.8). An editable combo
+        #: drops `currentIndex` to -1 while a partial query is typed, so the previous
+        #: selection is remembered HERE — it is what a no-match query restores.
+        self._last_valid: Dict[str, int] = {"source": 0, "target": 0}
 
         self.source = QComboBox()
         self.target = QComboBox()
@@ -123,8 +193,10 @@ class ConnectionDialog(QDialog):
         self.bidirectional_check = QCheckBox(
             self.t("connection.bidirectional") if self._i18n_available else "Bidirectional")
 
+        # v1.6.8 (ROADMAP task 3): the node list comes from the LIVE scene through the
+        # caller's callback; the fallback is the list it passed in.
         self._node_map: Dict[str, ServerNode] = {}
-        for n in nodes:
+        for n in _live_nodes(nodes, nodes_provider):
             text = f"{n.data.alias} ({n.data.host})"
             self._node_map[n.data.id] = n
             self.source.addItem(text, n.data.id)
@@ -139,6 +211,18 @@ class ConnectionDialog(QDialog):
             idx = self.target.findData(default_target_id)
             if idx >= 0:
                 self.target.setCurrentIndex(idx)
+        else:
+            # v1.6.8: "Connect to…" (the map/sidebar row) hands in the SOURCE alone, and
+            # the target used to stay on item 0 — which IS the source for the first card,
+            # so the dialog opened on its own refusal (`validation.self_connection`). The
+            # default target is the first node that is NOT the chosen source; an explicit
+            # `default_target_id` (the drag path) still wins untouched.
+            source_id = self.source.currentData()
+            if source_id is not None and self.target.currentData() == source_id:
+                idx = next((i for i in range(self.target.count())
+                            if self.target.itemData(i) != source_id), -1)
+                if idx >= 0:
+                    self.target.setCurrentIndex(idx)
 
         # Default type (or from old projects / drag mode)
         type_idx = self.type_combo.findData(
@@ -146,8 +230,19 @@ class ConnectionDialog(QDialog):
         if type_idx >= 0:
             self.type_combo.setCurrentIndex(type_idx)
 
+        # v1.6.8: the search of the two pickers — installed AFTER the prefill, so the
+        # remembered "last valid index" starts on the dialog's real opening selection.
+        self._install_search(self.source, "source")
+        self._install_search(self.target, "target")
+
+        # The no-match answer, in its own row: hidden until a query keeps nothing.
+        self.no_match_label = QLabel("")
+        self.no_match_label.setWordWrap(True)
+        self.no_match_label.hide()
+
         layout.addRow(self.t("connection.from") if self._i18n_available else "From:", self.source)
         layout.addRow(self.t("connection.to") if self._i18n_available else "To:", self.target)
+        layout.addRow(self.no_match_label)
         layout.addRow(self.t("connection.label") if self._i18n_available else "Label:", self.label)
         layout.addRow(
             self.t("connection.type_label") if self._i18n_available else "Connection type:",
@@ -161,11 +256,106 @@ class ConnectionDialog(QDialog):
         btns.rejected.connect(self.reject)
         layout.addRow(btns)
 
+    # ── v1.6.8 (ROADMAP task 3): the searchable pickers ──────────────────────────
+
+    def _install_search(self, combo: QComboBox, kind: str) -> None:
+        """Make ONE picker typeable: a `QCompleter` over `alias` AND `host`.
+
+        The completion model IS the combo's own model — the item text carries the alias
+        and the host in the dialog's declared format, so ONE string serves both keys and
+        there is no second list to keep in sync. `MatchContains` + `CaseInsensitive` is
+        the substring rule the plan fixes (the SftpTab precedent), and the popup opens on
+        the FIRST keystroke because that is `PopupCompletion`'s own behaviour.
+        """
+        combo.setEditable(True)
+        combo.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
+        completer = QCompleter(combo.model(), combo)
+        completer.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
+        completer.setFilterMode(Qt.MatchFlag.MatchContains)
+        completer.setCompletionMode(QCompleter.CompletionMode.PopupCompletion)
+        combo.setCompleter(completer)
+        # The chosen completion is a real CHOICE — it settles the field at once. The
+        # `[str]` overload is named explicitly: PySide6 also exposes the QModelIndex
+        # form, and an untyped lambda would leave Qt to guess which one it is.
+        completer.activated[str].connect(
+            lambda text, c=combo: self._choose_text(c, text))
+        # Every index the user really lands on is remembered (a typed partial query makes
+        # Qt report -1 — that is the state the no-match answer must survive).
+        combo.currentIndexChanged.connect(
+            lambda idx, k=kind: self._remember_index(k, idx))
+        combo.lineEdit().editingFinished.connect(lambda c=combo: self.settle_picker(c))
+        self._remember_index(kind, combo.currentIndex())
+
+    def _remember_index(self, kind: str, index: int) -> None:
+        """Remember the last REAL selection of a picker (`-1` is a typed query)."""
+        if index is not None and int(index) >= 0:
+            self._last_valid[kind] = int(index)
+
+    def _kind_of(self, combo: QComboBox) -> str:
+        """Which of the two pickers this is (the `_last_valid` key)."""
+        return "target" if combo is self.target else "source"
+
+    def _choose_text(self, combo: QComboBox, text: str) -> None:
+        """A completion was activated: select the node it names (`-1` — nothing)."""
+        idx = match_index(self._texts(combo), text)
+        if idx >= 0:
+            combo.setCurrentIndex(idx)
+            self._hide_no_match()
+
+    @staticmethod
+    def _texts(combo: QComboBox) -> List[str]:
+        """The item texts of ONE picker (the model the search reads and the test drives)."""
+        return [combo.itemText(i) for i in range(combo.count())]
+
+    def settle_picker(self, combo: QComboBox) -> None:
+        """Resolve what is in a picker: a real node, or the PREVIOUS one + a sentence.
+
+        Called when the field is left (Enter or focus out) and from `get_connection()`,
+        so a typed query can never reach the command as `None`: the pure `match_index()`
+        resolves it (exact, then the first substring match), and a query NOTHING carries
+        restores the last valid selection and says so — the dialog's own answer, never an
+        empty picker.
+        """
+        kind = self._kind_of(combo)
+        text = combo.currentText()
+        idx = match_index(self._texts(combo), text)
+        if idx >= 0:
+            combo.setCurrentIndex(idx)
+            self._remember_index(kind, idx)
+            self._hide_no_match()
+            return
+        kept = int(self._last_valid.get(kind, 0) or 0)
+        if 0 <= kept < combo.count():
+            combo.setCurrentIndex(kept)
+        if str(text or "").strip():
+            # An EMPTY field is not a query — the display simply returns to the last real
+            # selection and there is nothing to report.
+            self._report_no_match(text, combo.itemText(kept) if kept >= 0 else "")
+
+    def _report_no_match(self, query: str, kept: str) -> None:
+        """Say that a query kept the previous selection (ONE sentence, `{query}`/`{name}`)."""
+        try:
+            self.no_match_label.setText(self.t("connection.no_match", query=query, name=kept))
+            self.no_match_label.show()
+        except RuntimeError:
+            pass  # Qt teardown — the dialog is already gone
+
+    def _hide_no_match(self) -> None:
+        try:
+            self.no_match_label.hide()
+        except RuntimeError:
+            pass  # Qt teardown
+
     def get_connection(self):
         """Returns (source_id, target_id, label, connection_type, bidirectional).
 
         v1.2.6: the 5th element — bidirectional mode (bool); before v1.2.6 it had 4 elements.
+
+        v1.6.8: the two pickers are SETTLED first, so a half-typed query can never leave
+        the dialog as `None` — the answer is the same node the OK button displays.
         """
+        self.settle_picker(self.source)
+        self.settle_picker(self.target)
         return (
             self.source.currentData(),
             self.target.currentData(),

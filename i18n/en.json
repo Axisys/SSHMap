@@ -827,5 +827,18 @@
   "bookmarks.remove": "Remove",
   "bookmarks.url_hint": "https://wiki.example.com",
   "status.bookmarks_saved": "Bookmarks saved: {count}",
-  "status.bookmarks_save_failed": "Bookmarks were not saved — see the log"
+  "status.bookmarks_save_failed": "Bookmarks were not saved — see the log",
+  "ctx.connect_to": "Connect to…",
+  "empty.state.connect_hint": "To link two servers, hold Shift and drag from one card to another — or use {add_connection}.",
+  "connection.no_match": "No server matches “{query}” — the selection stays {name}.",
+  "file.export_problems": "Export Problems...",
+  "report.problems.alias": "Alias",
+  "report.problems.host": "Host (IP)",
+  "report.problems.status": "Status",
+  "report.problems.reason": "Reason",
+  "report.problems.checked": "Checked",
+  "report.problems.stale": "stale",
+  "status.problems_exported": "Problems list saved: {file}",
+  "status.problems_no_nodes": "Nothing to report — the map has no servers",
+  "status.problems_none": "Nothing to report — no server needs attention"
 }

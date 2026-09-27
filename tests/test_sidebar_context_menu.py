@@ -101,6 +101,9 @@ try:
                      # v1.5.3 (ROADMAP task 3): "why is it offline?" — the reachability report
                      "ctx.diagnose",
                      "ctx.reveal_on_map", "ctx.delete_server"]
+    # v1.6.8 (ROADMAP task 1): "Connect to…" — the row of the drawing gesture, in the
+    # SSH group (all three answer "connect this server to something").
+    _sidebar_keys.insert(2, "ctx.connect_to")
     check("all sidebar menu keys exist in every language",
           all(k in langs[c] for k in _sidebar_keys for c in ("en", "ru", "zh", "de")))
 
@@ -114,10 +117,11 @@ try:
         n_sep = sum(1 for a in actions if a.isSeparator())
         # v1.0RC4: the first item — the "Quick launch" submenu (sb6a has no items →
         # in it only "Configure…"), then a separator and the ROADMAP actions
-        # (v1.3.3.3: +"Check statuses now"; v1.5.3: +"Why is it offline?" → 12 items).
+        # (v1.3.3.3: +"Check statuses now"; v1.5.3: +"Why is it offline?";
+        # v1.6.8: +"Connect to…" → 13 items).
         expected_order = [it("ctx.quick_launch")] + [it(k) for k in _sidebar_keys]
-        check("menu has the Quick Launch submenu + the 11 ROADMAP actions",
-              len(non_sep) == 12, f"got {len(non_sep)}: {non_sep}")
+        check("menu has the Quick Launch submenu + the 12 ROADMAP actions",
+              len(non_sep) == 13, f"got {len(non_sep)}: {non_sep}")
         check("action order: quick launch FIRST, then ROADMAP (ssh → … → diagnose → delete)",
               non_sep == expected_order, f"got={non_sep} want={expected_order}")
         check("menu grouped by 5 separators (4 ROADMAP + 1 after Quick Launch)",

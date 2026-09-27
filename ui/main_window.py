@@ -119,6 +119,14 @@ except ImportError:
     except ImportError:  # flat layout without storage/ — the export reports itself unavailable
         connection_report_rows = None
 
+try:  # v1.6.8 (ROADMAP task 4): the ATTENTION report — the sibling of the connection one
+    from ..storage.export_problems import problem_nodes, problem_report_rows
+except ImportError:
+    try:
+        from storage.export_problems import problem_nodes, problem_report_rows
+    except ImportError:  # flat layout without storage/ — the export reports itself unavailable
+        problem_nodes = problem_report_rows = None
+
 try:  # v1.5rc3 (ROADMAP task 2): the status bar that can offer an Undo
     from .status_bar import UndoStatusBar
     # v1.5rc4 (ROADMAP task 1): the status-bar overflow policy — the ONE pure decision
@@ -1698,6 +1706,11 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
                 # then act" — as in the original _on_sidebar_context_menu closures.
                 "ssh": lambda n: (self._select_node(n), self._connect_ssh_to_selected()),
                 "external": lambda n: (self._select_node(n), self._connect_ssh_external(n)),
+                # v1.6.8 (ROADMAP task 1): "Connect to…" — the row's own node is the
+                # SOURCE of the connection the dialog will create, and the dialog is the
+                # SAME one the Shift+drag gesture opens (`_add_connection`, pre-filled).
+                "connect_to": lambda n: (self._select_node(n),
+                                         self._add_connection(default_source_id=n.data.id)),
                 "edit": lambda n: self._edit_node(n),
                 "copy_ip": lambda n: self._copy_node_info(n, "ip"),
                 "copy_hostname": lambda n: self._copy_node_info(n, "hostname"),
@@ -2932,7 +2945,12 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         edit_menu.addSeparator()
         self._add_menu_action(edit_menu, "edit.add_server", self._add_server, "edit.add_server")
         self._add_menu_action(edit_menu, "edit.add_group", self._add_group_at, "edit.add_group")  # v0.8.1: node groups
-        self._add_menu_action(edit_menu, "edit.add_connection", self._add_connection, "edit.add_connection")
+        self.act_add_connection = self._add_menu_action(
+            edit_menu, "edit.add_connection", self._add_connection, "edit.add_connection")
+        # v1.6.8 (ROADMAP task 2): the action NAMES the gesture. The tooltip carries the
+        # SAME sentence the first screen's hint shows — ONE key, ONE composer
+        # (`empty_state.connect_hint_text()`), so the two surfaces cannot drift apart.
+        self.act_add_connection.setToolTip(self._connect_hint_text())
         self._add_menu_action(edit_menu, "edit.properties", self._show_properties, "edit.properties")
         # v0.9.2: hotkeys for frequent actions on the selected node
         self._add_menu_action(edit_menu, "ctx.ssh_connect", self._connect_ssh_to_selected, "node.ssh_connect")
@@ -3028,6 +3046,15 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         self.act_export_connections = self._add_menu_action(
             export_menu, "file.export_connections", self._export_connections_table,
             "file.export_connections")
+        # v1.6.8 (ROADMAP task 5): the THIRD report of the DATA family — the servers that
+        # need attention (`storage/export_problems.py`, the DECLARED predicate of v1.5.4).
+        # It is the connection report's SIBLING, not a filter of the inventory: the lens
+        # dims the CANVAS (v1.5.4) and the inventory export is EXACTLY what is on screen
+        # (v1.5.5), so a report over a third subject keeps both promises. One registry
+        # action with an EMPTY default, riding the same writer and the same format question.
+        self.act_export_problems = self._add_menu_action(
+            export_menu, "file.export_problems", self._export_problems_table,
+            "file.export_problems")
 
         # Profile menu
         profile_menu = menubar.addMenu(self.t("menu.profile") if self._i18n_available else "Profile")
@@ -5219,6 +5246,63 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
                 self, self.t("msg.error_title"),
                 self.t("msg.export_failed", error=str(e)))
 
+    def _export_problems_table(self):
+        """Export the servers that NEED ATTENTION as CSV or TSV (v1.6.8, ROADMAP task 5).
+
+        The THIRD DATA report, and the answer to a question the map can only dim: the
+        "problems only" lens highlights the cards that need a look, but that set cannot
+        leave the application — the lens is a MAP view (v1.5.4) and the inventory export
+        is EXACTLY what is on screen (v1.5.5). This report reads the SCENE through the
+        DECLARED predicate (`storage/export_problems.py` → `node_group.is_in_trouble()`),
+        so the file and the dimmed map always hold the SAME servers.
+
+        Two empty answers are deliberately DIFFERENT sentences: a map with no servers at
+        all, and a map where nothing needs attention. Neither writes a file — a report is
+        a set of rows, and a header over nothing is not one.
+        """
+        try:
+            nodes = list(self.scene.nodes())
+        except (AttributeError, RuntimeError):
+            nodes = []
+        if problem_report_rows is None:
+            return
+        if not nodes:
+            self.statusBar().showMessage(
+                self.t("status.problems_no_nodes") if self._i18n_available
+                else "Nothing to report — the map has no servers")
+            return
+        rows = problem_report_rows(nodes, self.t if self._i18n_available else None)
+        if not rows:
+            self.statusBar().showMessage(
+                self.t("status.problems_none") if self._i18n_available
+                else "Nothing to report — no server needs attention")
+            return
+        path, selected_filter = QFileDialog.getSaveFileName(
+            self, self.t("file.export_problems"), "",
+            "CSV — Comma Separated Values (*.csv);;TSV — Tab Separated Values (*.tsv)")
+        if not path:
+            return
+        fmt = "tsv" if "TSV" in (selected_filter or "") else "csv"
+        lowered = str(path).lower()
+        if lowered.endswith(".tsv"):
+            fmt = "tsv"
+        elif lowered.endswith(".csv"):
+            fmt = "csv"
+        else:
+            path += f".{fmt}"
+        try:
+            with open(path, "w", encoding="utf-8-sig", newline="") as f:
+                f.write(list_table_text(rows, list_delimiter(fmt)))
+            self.statusBar().showMessage(
+                self.t("status.problems_exported", file=os.path.basename(path)))
+            if self.log:
+                self.log.info("Attention list exported",
+                              extra={"file": path, "format": fmt, "rows": len(rows) - 1})
+        except Exception as e:  # noqa: BLE001 — a GUI action must not crash the app
+            QMessageBox.critical(
+                self, self.t("msg.error_title"),
+                self.t("msg.export_failed", error=str(e)))
+
     def _copy_list_table(self):
         """Copy the VISIBLE server table to the clipboard as TSV (v1.5.5, ROADMAP task 2).
 
@@ -5977,6 +6061,28 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
             pass  # Qt teardown — the view is gone
 
     # ── v1.4.5 (ROADMAP task 2): the first-run empty state ───────────────────────
+
+    def _connect_hint_text(self) -> str:
+        """The "how do I draw a connection?" sentence (v1.6.8, ROADMAP task 2).
+
+        The connection gesture shipped in v0.7 and nobody found it, so the FIRST screen
+        names it AND the "Add Connection" action carries the same words as its tooltip.
+        ONE composer, ONE i18n key (`empty.state.connect_hint`, whose `{add_connection}`
+        placeholder is filled with the action's own live label — the v1.4.5 rule): the
+        hint and the tooltip are literally the same function, so they cannot drift.
+        A stripped build without `ui/empty_state.py` answers "" and the tooltip stays empty.
+        """
+        try:
+            from ui.empty_state import connect_hint_text
+        except ImportError:  # flat launch from the project root
+            try:
+                from empty_state import connect_hint_text
+            except ImportError:
+                return ""
+        try:
+            return connect_hint_text()
+        except Exception:  # noqa: BLE001 — a hint must never break the menu construction
+            return ""
 
     def _setup_empty_state(self):
         """Create the hint card over the canvas + its ONE button (a child of the view).

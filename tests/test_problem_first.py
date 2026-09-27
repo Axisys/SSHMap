@@ -403,8 +403,10 @@ check("§2 a second click resets the lens, and the map comes back whole",
       and _unchecked.opacity() == 1.0)
 check("§2 the lens is TRANSIENT — still no config key after two toggles",
       not [k for k in read_cfg() if "problem" in k.lower()], str(sorted(read_cfg())))
-check("§2 the lens takes NO registry action and NO hotkey (it is a status-bar control)",
-      not [a for a in HR.action_ids() if "problem" in a])
+check("§2 the lens takes NO registry action and NO hotkey (it is a status-bar control; the "
+      "v1.6.8 attention REPORT is a different subject and does have one)",
+      not [a for a in HR.action_ids() if "problem" in a and not a.startswith("file.")]
+      and "file.export_problems" in HR.action_ids())
 
 for _key in ("statusbar.problems", "statusbar.problems.tooltip", "statusbar.problems.active"):
     check(f"§2 i18n/en carries {_key}", _key in LANGS["en"])
@@ -555,12 +557,12 @@ print("== §4 the release state ==")
 # ════════════════════════════════════════════════════════════════════════════
 
 check("§4 the version pin is the version this file describes",
-      EXPECTED_APP_VERSION == "1.6.7" and _version.APP_VERSION == "1.6.7",
+      EXPECTED_APP_VERSION == "1.6.8" and _version.APP_VERSION == "1.6.8",
       f"{EXPECTED_APP_VERSION} / {_version.APP_VERSION}")
 check("§4 the i18n pin counts the SHIPPED release (681 + 11 of v1.5.4 + 14 of v1.5.5"
       " + 2 of v1.5.6 + 29 of v1.5.7 + 4 of v1.6.2 + 4 of v1.6.3 + 3 of v1.6.4"
-      " + 11 of v1.6.5 + 11 of v1.6.6 + 17 of v1.6.7)",
-      EXPECTED_I18N_KEYS == 828, str(EXPECTED_I18N_KEYS))
+      " + 11 of v1.6.5 + 11 of v1.6.6 + 17 of v1.6.7 + 13 of v1.6.8)",
+      EXPECTED_I18N_KEYS == 841, str(EXPECTED_I18N_KEYS))
 check("§4 the eleven new keys are present and non-empty in every language",
       all(str(LANGS[c].get(k, "")).strip() for k in NEW_KEYS for c in LANGS)
       and len(NEW_KEYS) == 11,
@@ -572,9 +574,10 @@ check("§4 the placeholders of the new keys match en in every language",
 check("§4 the eleven keys of THIS release stayed in the pin (the later releases only add)",
       EXPECTED_I18N_KEYS >= 681 + len(NEW_KEYS)
       and all(k in LANGS["en"] for k in NEW_KEYS))
-check("§4 no new registry action (the lens and the plaque are controls, not menu items; the "
-      "v1.5.5 inventory pair takes the registry to 56 / 33)",
-      len(HR.HOTKEY_ACTIONS) == 60 and len(HR.empty_default_action_ids()) == 37,
+check("§4 no new registry action of THIS release (the lens and the plaque are controls, not "
+      "menu items; the v1.5.5 inventory pair took the registry to 56 / 33 and the later "
+      "releases to 61 / 38)",
+      len(HR.HOTKEY_ACTIONS) == 61 and len(HR.empty_default_action_ids()) == 38,
       f"{len(HR.HOTKEY_ACTIONS)} / {len(HR.empty_default_action_ids())}")
 check("§4 no new colour field (the release reuses the status tones and the declared shapes)",
       len(dataclasses.fields(theme.DARK)) == 60

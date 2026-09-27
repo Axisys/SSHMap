@@ -139,6 +139,11 @@ HOTKEY_ACTIONS: Dict[str, dict] = {
     # whom", one row per arrow), on the same pure RFC-4180 writer as the inventory report.
     # An EMPTY default like its report sibling.
     "file.export_connections": {"label": "file.export_connections", "default": ""},
+    # v1.6.8 (ROADMAP task 5): "Export Problems…" — the THIRD DATA report, over the cards
+    # that need attention (`storage/export_problems.py`, the v1.5.4 predicate). It is the
+    # connection report's sibling and rides the same writer and the same format question.
+    # An EMPTY default like every other export: assignable, no key taken from anyone.
+    "file.export_problems": {"label": "file.export_problems", "default": ""},
     "file.backups":         {"label": "file.backups",         "default": ""},
     "file.restore_autosave": {"label": "file.restore_autosave", "default": ""},
     "file.exit":            {"label": "file.exit",            "default": ""},

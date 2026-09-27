@@ -827,5 +827,18 @@
   "bookmarks.remove": "删除",
   "bookmarks.url_hint": "https://wiki.example.com",
   "status.bookmarks_saved": "书签已保存：{count}",
-  "status.bookmarks_save_failed": "书签未保存——请查看日志"
+  "status.bookmarks_save_failed": "书签未保存——请查看日志",
+  "ctx.connect_to": "连接到…",
+  "empty.state.connect_hint": "要连接两台服务器，按住 Shift 并从一张卡片拖到另一张——或使用「{add_connection}」。",
+  "connection.no_match": "没有服务器匹配「{query}」——保留原选择：{name}。",
+  "file.export_problems": "导出问题...",
+  "report.problems.alias": "别名",
+  "report.problems.host": "主机 (IP)",
+  "report.problems.status": "状态",
+  "report.problems.reason": "原因",
+  "report.problems.checked": "检测时间",
+  "report.problems.stale": "已过期",
+  "status.problems_exported": "问题列表已保存：{file}",
+  "status.problems_no_nodes": "无内容可报告 — 图上没有服务器",
+  "status.problems_none": "无内容可报告 — 没有服务器需要关注"
 }

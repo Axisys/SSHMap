@@ -15,6 +15,7 @@ generated from that example map only, by `python tests/_gen_docs_image.py`.*
 
 ### Map & canvas
 - Server cards with a status, six typed connections (`ssh`, `vpn`, `http`, `database`, `nfs`, `kubernetes`), free and pinned sticky notes, groups and a background image (drag and resize it) — on an infinite zoomable canvas (0.1–5.0).
+- Draw a connection two ways: hold `Shift` and drag from one card to another, or pick **"Connect to…"** in a card's right-click menu (both open the same dialog with the source filled in). The dialog's From/To pickers can be typed into — type part of a name or of an address and pick the server from the list.
 - A group can be folded into a grid of badges (undoable) and answers for its members: its frame carries the worst member status as a shape plus the counts (`Offline 2 · Warn 1`).
 - Multi-selection (Ctrl+click, rubber band), group drag, "connect selected" / "delete selected"; **bulk edit** of the selected cards (tags, comment, quick launch in one undo step, each field "leave unchanged" by default); per-server quick launch (URL → browser, command → first line of the SSH session); tags with a sidebar filter — the primary tag colours the card's icon and is written on the card, so the environment is never a colour alone.
 - A card density switch (Comfortable / Compact) in the settings hub: the compact card keeps the alias, the host and the status marks and drops the information block and the environment chip — for a map of hundreds of nodes.
@@ -50,6 +51,7 @@ generated from that example map only, by `python tests/_gen_docs_image.py`.*
 - Sort by any column — the key follows the data, not the text (`512 MB` before `8 GB`, `10.9.0.1` before `10.10.0.1`, an empty cell last).
 - Take it with you: "Copy List as TSV" and "Export List…" (CSV or TSV, UTF-8 with a BOM) in the **Export** menu write exactly the columns and rows you see, in the order you sorted them.
 - "Export Connections…" writes the other half of the map — one row per link with both endpoints, the declared type, the direction and the bidirectional flag, in the same CSV/TSV form.
+- "Export Problems…" writes the servers that need a look — the same set the "problems only" dim highlights (warn, offline or a stale measurement), with the status, the reason and the age of the check, in the same CSV/TSV form. A map with nothing to report says so instead of writing an empty file.
 
 ### Look, motion & keyboard
 - Dark, light and Auto (system) themes, an accent colour picked as a hue, and a "Reduce motion" switch; the light palette is measured against the surface each tone is drawn on and gated by contrast tests.
@@ -195,7 +197,7 @@ PySide6 / Qt 6 gotchas worth knowing before writing UI code:
 | `dialogs/` | Add/edit dialogs, connect, profiles, backups, imports, export options |
 | `ui/` | Main window and mixins, sidebar, theme, palette, panels, settings, hotkeys, icons |
 | `i18n/` | `en` (reference), `ru`, `zh`, `de` — one JSON file per language |
-| `tests/` | 112 test files, the parallel runner and the harness — map in `tests/INDEX.md` |
+| `tests/` | 113 test files, the parallel runner and the harness — map in `tests/INDEX.md` |
 | `examples/plugins/` | Two working example plugins, not installed and never auto-discovered |
 | `third_party/pyte/`, `third_party/pyte-patches/` | The managed pyte 0.8.2 fork: sdist plus explicit patches, provenance in the patches' `MANIFEST.md` |
 | `docs/` | The map image above, rendered from the example map |

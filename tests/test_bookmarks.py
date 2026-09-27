@@ -342,8 +342,9 @@ check("§3 the registry carries the action with an EMPTY default (assignable, no
 check("§3 the action joins the VIEW family of the Hotkeys tab (derived from its id)",
       HR.action_family("view.toggle_bookmarks") == "view"
       and "view.toggle_bookmarks" in HR.actions_by_family()["view"])
-check("§3 it is the SIXTIETH action and the THIRTY-SEVENTH with an empty default",
-      len(HR.HOTKEY_ACTIONS) == 60 and len(HR.empty_default_action_ids()) == 37,
+check("§3 it was the SIXTIETH action and the THIRTY-SEVENTH with an empty default"
+      " (v1.6.8 adds the attention report, the sixty-first)",
+      len(HR.HOTKEY_ACTIONS) == 61 and len(HR.empty_default_action_ids()) == 38,
       f"{len(HR.HOTKEY_ACTIONS)} / {len(HR.empty_default_action_ids())}")
 
 check("§3 the checkable View item exists, is registered and mirrors the saved state",
@@ -619,10 +620,10 @@ check("§6 the reused keys the editor reports with are the quick-launch ones (no
            "msg.ql_no_browser")))
 check_i18n_parity(langs)
 check_i18n_format(langs)
-check("§6 the pin counts the SHIPPED release (811 + the 17 keys of v1.6.7)",
-      EXPECTED_I18N_KEYS == 811 + 17, str(EXPECTED_I18N_KEYS))
+check("§6 the pin counts the SHIPPED release (811 + the 17 keys of v1.6.7 + the 13 of v1.6.8)",
+      EXPECTED_I18N_KEYS == 811 + 17 + 13, str(EXPECTED_I18N_KEYS))
 check("§6 EXPECTED_APP_VERSION is the release this file describes",
-      EXPECTED_APP_VERSION == "1.6.7", EXPECTED_APP_VERSION)
+      EXPECTED_APP_VERSION == "1.6.8", EXPECTED_APP_VERSION)
 check_release_state(ROOT)
 check("§6 nothing about the bookmarks touches the PROJECT format (VERSION_FORMAT stays 0.9)",
       __import__("version").VERSION_FORMAT == "0.9"

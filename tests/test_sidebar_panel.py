@@ -191,7 +191,8 @@ check("fill_context_menu: action order + i18n labels per CONTEXT_MENU_ITEMS",
       [a.text() for a in _actions] == _expected, str([a.text() for a in _actions]))
 check("fill_context_menu: the v1.3.3.3 'Check statuses now' entry is present",
       _t("ctx.check_status") in [a.text() for a in _actions], str([a.text() for a in _actions]))
-_actions[3].trigger()  # ctx.copy_ip
+_copy_ip_action = next(a for a in _actions if a.text() == _t("ctx.copy_ip"))
+_copy_ip_action.trigger()  # ctx.copy_ip
 check("context menu action triggers its callback with the node", _calls == ["copy_ip"], str(_calls))
 
 # ══ v1.0RC4: the "Quick launch" submenu as the first item (ql_entry/ql_configure) ══

@@ -712,10 +712,10 @@ print("== §8 the release state ==")
 
 check_release_state(ROOT)
 check("§8 the version pin is the version this file describes",
-      EXPECTED_APP_VERSION == "1.6.7" and _version.APP_VERSION == "1.6.7",
+      EXPECTED_APP_VERSION == "1.6.8" and _version.APP_VERSION == "1.6.8",
       f"{EXPECTED_APP_VERSION} / {_version.APP_VERSION}")
-check("§8 the i18n pin counts the SHIPPED release (811 + 17 of v1.6.7)",
-      EXPECTED_I18N_KEYS == 828, str(EXPECTED_I18N_KEYS))
+check("§8 the i18n pin counts the SHIPPED release (811 + 17 of v1.6.7 + 13 of v1.6.8)",
+      EXPECTED_I18N_KEYS == 841, str(EXPECTED_I18N_KEYS))
 check_i18n_parity(LANGS)
 check_i18n_format(LANGS)
 check("§8 the ELEVEN new keys are present and non-empty in every language",
@@ -729,8 +729,8 @@ check("§8 the placeholders of the new keys match en in every language",
 check("§8 the card's measured line carries the three placeholders it renders",
       {"mount", "free", "size"}
       <= {m for m in re.findall(r"\{([A-Za-z_][A-Za-z0-9_]*)\}", LANGS["en"]["node.disk_mount"])})
-check("§8 the registry did NOT move (an ordinary version, not a feature one)",
-      len(HR.HOTKEY_ACTIONS) == 60 and len(HR.empty_default_action_ids()) == 37,
+check("§8 the registry moved only by the closing release's ONE export action",
+      len(HR.HOTKEY_ACTIONS) == 61 and len(HR.empty_default_action_ids()) == 38,
       f"{len(HR.HOTKEY_ACTIONS)}/{len(HR.empty_default_action_ids())}")
 check("§8 the settings hub still collects 23 keys (the sentinel is a VALUE, not a new row)",
       len(SettingsDialog(None).collect()) == 23)
