@@ -136,7 +136,10 @@ check("the button is a REAL QPushButton in the RIGHT corner (not a toolbar label
       and win_a.btn_split.toolTip() == i18n.t("terminal.split_tooltip")
       and win_a.session_tabs.cornerWidget(Qt.Corner.TopLeftCorner) is None)
 check("... and the context-menu item is the SAME action (one action, two views)",
-      win_a._build_context_menu().actions() == [win_a.act_split])
+      # v1.7.1: the window's context menu also carries the Files panel toggle
+      # (`terminal.files_panel`) — the check reads the SPLIT item's identity, not the
+      # whole list (the menu is the container of every per-window layout switch).
+      win_a.act_split in win_a._build_context_menu().actions())
 check("no keyboard shortcut is attached (deliberately not in this version)",
       win_a.act_split.shortcut().isEmpty())
 check("the registry holds ONE session (no pane yet) and the node's dot is lit",

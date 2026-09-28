@@ -259,11 +259,26 @@ def clear_cfg(*extra_paths: str) -> None:
 # in 12 i18n files + the APP_VERSION/requirements pins in 7 release-state sections).
 # The misses of the keys themselves against the code are caught by check_i18n_keys.py.
 # ─────────────────────────────────────────────────────────────────────────────
-EXPECTED_APP_VERSION = "1.7"     # the current release (a sentinel: it catches "a bump to the wrong version")
-EXPECTED_I18N_KEYS = 863        # the parity of the TRANSLATION keys. The 1.7 line shipped them in
-                                # its rc series and the closing release adds NONE (it audits the frozen
-                                # contract and writes the documents), so the pin still counts the last
+EXPECTED_APP_VERSION = "1.7.1.1"  # the current release (a sentinel: it catches "a bump to the wrong version")
+EXPECTED_I18N_KEYS = 870        # the parity of the TRANSLATION keys. The 1.7 line shipped them in
+                                # its rc series and its closing release added NONE (it audits the frozen
+                                # contract and writes the documents), so the pin counts the last
                                 # release that moved it:
+                                # (v1.7.1.1 — "the Files
+                                # panel is a SETTING, not a corner button": removing the third corner
+                                # control and reading the mode from `terminal_files_mode` at window
+                                # construction are BEHAVIOUR, and the THREE new keys are the settings
+                                # hub's row of the "Terminal" tab with its two values (the tab and the
+                                # panel) — 867 + 3. The panel's own strings and the per-window
+                                # context-menu item keep the four keys of v1.7.1.)
+                                # (v1.7.1 — "the Files tree as a
+                                # right-hand panel of a standalone terminal window": the panel, the
+                                # per-session stack, the re-parenting of the Files widget, the fold and
+                                # the mutual exclusion with the Files Commander are BEHAVIOUR, and the
+                                # FOUR new keys are the panel toggle of the corner with its tooltip and
+                                # the two tooltips of its fold — 863 + 4. The panel's own header reuses
+                                # `sftp.tab_files`, the title of the tab it replaces, so there is no
+                                # second spelling of "Files".)
                                 # (v1.7rc3 — "Files Commander,
                                 # step 3: the mc/far walk, the hints row of the second pane and the
                                 # preview that opens in the other pane": the

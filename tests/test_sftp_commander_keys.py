@@ -747,10 +747,11 @@ i18n.set_language("en")
 
 check_release_state(ROOT)
 check("the version pin is the release this file describes",
-      re.fullmatch(r"1\.7(?:rc\d+)?", EXPECTED_APP_VERSION) is not None,
+      re.fullmatch(r"1\.7(?:rc\d+|(?:\.\d+){1,2})?", EXPECTED_APP_VERSION) is not None,
       EXPECTED_APP_VERSION)
-check("the i18n pin counts the SHIPPED release (854 + the 9 keys of v1.7rc3)",
-      EXPECTED_I18N_KEYS == 854 + 9 == 863, str(EXPECTED_I18N_KEYS))
+check("the i18n pin counts the SHIPPED release (854 + the 9 keys of v1.7rc3"
+      " + the 4 of the v1.7.1 Files panel + the 3 of the v1.7.1.1 Files display mode)",
+      EXPECTED_I18N_KEYS == 854 + 9 + 4 + 3, str(EXPECTED_I18N_KEYS))
 check("VERSION_FORMAT did NOT move (the project schema is unchanged)",
       __import__("version").VERSION_FORMAT == "0.9")
 check("no new dependency was added for the walk (the four pinned ones)",

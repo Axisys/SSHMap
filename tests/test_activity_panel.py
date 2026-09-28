@@ -599,9 +599,9 @@ print("== §5 the release state and the 'no new contract' audit ==")
 
 check_release_state(ROOT)
 check("§5 EXPECTED_APP_VERSION is the shipped release (v1.5.2 was the second patch on 1.5;"
-      " the pin quotes the CURRENT one — v1.7 — like every topical file)",
+      " the pin quotes the CURRENT one — the 1.7 line, its feature follow-up included)",
       releases_at_least(EXPECTED_APP_VERSION, "1.7")
-      and re.fullmatch(r"1\.7(rc\d+)?", EXPECTED_APP_VERSION) is not None)
+      and re.fullmatch(r"1\.7(?:rc\d+|(?:\.\d+){1,2})?", EXPECTED_APP_VERSION) is not None)
 check("§5 the i18n pin counts the shipped release (v1.5.2's 661 + v1.5.3's twenty"
       " + v1.5.4's eleven + v1.5.5's fourteen + v1.5.6's two + v1.5.7's twenty-nine"
       " + v1.6's forty-one + v1.6.2's four + v1.6.3's four + v1.6.4's three"
@@ -651,7 +651,7 @@ from ui.settings_dialog import SettingsDialog  # noqa: E402
 
 _hub = SettingsDialog(None)
 check("§5 the new config key is UI STATE, not a preference (the hub collects 23)",
-      len(_hub.collect()) == 23 and "ui_activity_panel" not in _hub.collect(),
+      len(_hub.collect()) == 24 and "ui_activity_panel" not in _hub.collect(),
       str(sorted(_hub.collect()))[:120])
 _hub.close()
 import dataclasses  # noqa: E402

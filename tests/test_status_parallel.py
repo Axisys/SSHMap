@@ -290,7 +290,7 @@ check("retranslate: the label is translated (not the raw key)",
       dlg2._lbl_max_parallel.text())
 c = dlg2.collect()
 check("collect(): exactly 23 keys (+ terminal_cursor_style, v1.6.2)",
-      len(c) == 23 and "status_max_parallel" in c and "terminal_mode" in c
+      len(c) == 24 and "status_max_parallel" in c and "terminal_mode" in c
       and "terminal_wheel" in c and "theme" in c,
       str(sorted(c)))
 check("collect(): status_max_parallel = the int from the spinbox",

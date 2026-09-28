@@ -826,8 +826,11 @@ check("the pin counts the keys of the SHIPPED release (v1.5.2 added THIRTEEN —
       "cross-directory move and the tree-over-its-bound sentence — 846 + 8 = 854; v1.7rc3 adds "
       "EIGHT: the five `sftp.hint.*` labels of the second pane's hint row and the three keys of the "
       "mc/far walk — 854 + 8 = 862; v1.7rc3 adds the sentence that answers a second preview opened "
-      "while the other pane is previewing — 862 + 1 = 863)",
-      EXPECTED_I18N_KEYS == 863, str(EXPECTED_I18N_KEYS))
+      "while the other pane is previewing — 862 + 1 = 863; v1.7.1 adds FOUR: the Files panel toggle "
+      "of the terminal window, its tooltip and the two tooltips of the panel's fold — 863 + 4 = 867; "
+      "v1.7.1.1 moves that mode into the settings hub and adds THREE: the row of the Files display "
+      "mode and its two values (the tab and the panel) — 867 + 3 = 870)",
+      EXPECTED_I18N_KEYS == 863 + 4 + 3, str(EXPECTED_I18N_KEYS))
 check_release_state(ROOT)
 for _code in i18n_lang_codes(ROOT):
     check(f"i18n/{_code}.json carries the v1.5 node.status.emulated marker",

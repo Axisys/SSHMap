@@ -274,13 +274,15 @@ clear_commands()
 wA = make_window("structA")
 check("the window: the central widget is a QSplitter (v1.3)", isinstance(wA.centralWidget(), QSplitter))
 spA = wA.centralWidget()
-check("splitter: [cmdlib_panel | QSplitter(session_tabs | split_host)] (v1.3.3.5: the terminal split)",
-      spA.widget(0) is wA.cmdlib_panel and spA.count() == 2
+check("splitter: [cmdlib_panel | QSplitter(session_tabs | split_host) | files_panel] (v1.3.3.5:"
+      " the terminal split; v1.7.1: the Files panel is the third column of the same splitter)",
+      spA.widget(0) is wA.cmdlib_panel and spA.count() == 3
       and spA.widget(1) is wA._v_splitter
+      and spA.widget(2) is wA.files_panel
       and wA._v_splitter.widget(0) is wA.session_tabs
       and wA._v_splitter.widget(1) is wA.split_host)
-check("setCollapsible(False) on both sides (the panel cannot be lost)",
-      not spA.isCollapsible(0) and not spA.isCollapsible(1))
+check("setCollapsible(False) on every side (a panel cannot be lost)",
+      not spA.isCollapsible(0) and not spA.isCollapsible(1) and not spA.isCollapsible(2))
 check("by default: the panel is expanded (no key; the strip is hidden, the body is visible)",
       wA.cmdlib_panel.is_collapsed() is False
       and not wA.cmdlib_panel._strip.isVisible() and wA.cmdlib_panel._body.isVisible())

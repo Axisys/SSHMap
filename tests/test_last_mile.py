@@ -685,8 +685,9 @@ check_i18n_parity(LANGS)
 check_i18n_format(LANGS)
 
 check("§7 the pin counts the SHIPPED release (828 + the 13 keys of v1.6.8"
-      " + the 5 of v1.7rc1 + the 8 of v1.7rc2 + the 9 of v1.7rc3)",
-      EXPECTED_I18N_KEYS >= 854 and EXPECTED_I18N_KEYS == 828 + 13 + 5 + 8 + 9,
+      " + the 5 of v1.7rc1 + the 8 of v1.7rc2 + the 9 of v1.7rc3 + the 4 of v1.7.1"
+      " + the 3 of v1.7.1.1)",
+      EXPECTED_I18N_KEYS >= 854 and EXPECTED_I18N_KEYS == 828 + 13 + 5 + 8 + 9 + 4 + 3,
       str(EXPECTED_I18N_KEYS))
 check("§7 EXPECTED_APP_VERSION is the release this file describes",
       releases_at_least(EXPECTED_APP_VERSION, "1.7"), EXPECTED_APP_VERSION)

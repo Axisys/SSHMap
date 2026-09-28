@@ -734,7 +734,7 @@ check("§8 the registry moved only by the closing release's ONE export action",
       len(HR.HOTKEY_ACTIONS) == 61 and len(HR.empty_default_action_ids()) == 38,
       f"{len(HR.HOTKEY_ACTIONS)}/{len(HR.empty_default_action_ids())}")
 check("§8 the settings hub still collects 23 keys (the sentinel is a VALUE, not a new row)",
-      len(SettingsDialog(None).collect()) == 23)
+      len(SettingsDialog(None).collect()) == 24)
 check("§8 no new dependency (requirements.txt keeps its four)",
       len([ln for ln in open(os.path.join(ROOT, "requirements.txt"), encoding="utf-8")
            if ln.strip() and not ln.startswith("#")]) == 4

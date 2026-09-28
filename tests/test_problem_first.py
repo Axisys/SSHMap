@@ -597,7 +597,7 @@ from ui.settings_dialog import SettingsDialog  # noqa: E402
 _dlg = SettingsDialog(None)
 _keys = _dlg.collect()
 check("§4 the settings hub collects exactly 23 keys (this section adds no option)",
-      len(_keys) == 23 and "theme" in _keys
+      len(_keys) == 24 and "theme" in _keys
       and not [k for k in _keys if "problem" in k or "filter" in k],
       str(sorted(_keys)))
 _dlg.close()

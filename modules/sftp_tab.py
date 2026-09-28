@@ -2818,7 +2818,12 @@ class CommanderCorner(QWidget):
     The control belongs to the CONTAINER (the corner is the tab bar's), while the STATE is
     the SESSION's (each `SftpTab` knows whether it shows two panes): the container calls
     `set_state()` whenever the active session changes, and the action is DISABLED while the
-    active session has no Files tab (a split pane). Never raises — the corner is chrome.
+    active session has no Files tab (a split pane). The corner holds exactly TWO controls —
+    the split button and this one — and the Files panel of the WINDOW is NOT a third: since
+    v1.7.1.1 that mode is a SETTING (`terminal_files_mode`, the settings hub's "Files display
+    mode"), so the pair keeps the floor the window's own minimum width is built on and this
+    action is disabled only while the panel is on for another reason (the panel mode is
+    single-pane). Never raises — the corner is chrome.
     """
 
     def __init__(self, parent=None, split_button=None):

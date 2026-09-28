@@ -274,11 +274,64 @@ def _diamond_icon(size: int = 20):
     return icon
 
 
+def hand_over_splitter_width(splitter, index: int, want: int) -> bool:
+    """Give member `index` the width `want` and hand the delta to the OTHER members.
+
+    v1.5rc5 (N8) wrote this arithmetic for the collapsed command panel; v1.7.1 makes it the
+    ONE arithmetic of a collapsible SIDE PANEL, because the terminal window has two of them
+    (the command library on the left, the Files tree of `modules/ssh_terminal.py` on the
+    right) and a collapsed member may not simply be left at its old size: visibility and the
+    `setMaximumWidth` cap alone left the freed pixels dead, so the panel's neighbours never
+    received them (measured: 365 px in the dock).
+
+    The shares of the other members are kept in PROPORTION, so a three-member splitter
+    (`[commands | terminal | files]`) hands the delta to the two columns that are really
+    there instead of dropping it into the member the caller never named — `setSizes()` with a
+    SHORT list zeroes the members it does not mention (measured on Qt 6.11: `setSizes([24, 500])`
+    on a three-member splitter gives `[41, 851, 0]`), which is exactly the bug a mirrored copy
+    of the two-member arithmetic would have shipped. Returns True when a `setSizes()` call was
+    made — False for a member that is not in the splitter / a splitter that is not laid out.
+    Never raises: every Qt call is guarded (the caller may be under teardown).
+    """
+    try:
+        count = int(splitter.count())
+        sizes = list(splitter.sizes())
+    except (RuntimeError, AttributeError, TypeError):
+        return False
+    if count < 2 or len(sizes) != count or not (0 <= index < count):
+        return False
+    others = [i for i in range(count) if i != index]
+    if not others:
+        return False
+    wanted = max(0, int(want))
+    rest_total = max(sum(sizes) - wanted, 0)
+    rest_now = sum(max(0, sizes[i]) for i in others)
+    new = [0] * count
+    new[index] = wanted
+    for i in others:
+        share = (rest_total * max(0, sizes[i]) / rest_now) if rest_now > 0 \
+            else rest_total / len(others)
+        new[i] = int(share)
+    # The rounding of the proportional shares may leave a few pixels unassigned — they go to
+    # the LAST other member, so the caller's `want` is exact and no column silently shrinks.
+    new[others[-1]] += max(0, sum(sizes) - sum(new))
+    try:
+        splitter.setSizes(new)
+    except RuntimeError:
+        return False   # Qt teardown — the splitter is already destroyed
+    return True
+
+
 # The upper bound of a QWidget's width. QWIDGETSIZE_MAX is a C macro in qwidget.h and is
 # therefore not exposed by PySide6 — the documented value (`ui/main_window._WIDGET_MAX_WIDTH`,
 # duplicated here because `modules/*` must not import `ui/main_window`; the same reason the
 # "◇" diamond and the collapse strip are local).
 _WIDGET_MAX_WIDTH = 16777215
+
+#: The documented lower bound of the splitter divider next to an EXPANDED panel — the width
+#: the body takes back when the collapsed strip is released (v1.7.1: named, because the Files
+#: panel of the terminal window mirrors this bound and the two must not drift).
+PANEL_BODY_MIN_WIDTH = 86
 
 
 class _CollapseStrip(QWidget):
@@ -985,36 +1038,38 @@ class CommandLibraryPanel(QWidget):
 
         Collapsed — the panel is capped to the strip and the OTHER member receives the
         delta; expanded — the cap is released and the width remembered before the collapse
-        is restored. A splitter without exactly two members is left alone (both containers
-        build a two-member one), and every Qt call is guarded: the panel may already be
-        under teardown.
+        is restored. The hand-over itself is the SHARED `hand_over_splitter_width()` (v1.7.1:
+        the terminal window's Files panel is the second collapsible side panel, and a
+        three-member splitter `[commands | terminal | files]` must not lose the delta into a
+        member the old two-member arithmetic never named). Every Qt call is guarded: the panel
+        may already be under teardown.
         """
         splitter = self._host_splitter()
         if splitter is None:
             return
         try:
             sizes = list(splitter.sizes())
-            laid_out = len(sizes) >= 2 and sum(sizes) > 0
+            index = splitter.indexOf(self)
+            laid_out = index >= 0 and len(sizes) >= 2 and sum(sizes) > 0
             if collapsed:
                 # Remember the width to come back to, then hand it over. The hidden body's
                 # own 86 px minimum would fight the cap, so it is capped too.
-                if sizes and sizes[0] > _CollapseStrip.STRIP_WIDTH:
-                    self._expanded_width = sizes[0]
+                if laid_out and sizes[index] > _CollapseStrip.STRIP_WIDTH:
+                    self._expanded_width = sizes[index]
                 self._body.setMinimumWidth(0)
                 self.setMaximumWidth(_CollapseStrip.STRIP_WIDTH)
                 self.setMinimumWidth(_CollapseStrip.STRIP_WIDTH)
                 if laid_out:
-                    rest = max(sum(sizes) - _CollapseStrip.STRIP_WIDTH, 0)
-                    splitter.setSizes([_CollapseStrip.STRIP_WIDTH, rest])
+                    hand_over_splitter_width(splitter, index, _CollapseStrip.STRIP_WIDTH)
             else:
                 self.setMaximumWidth(_WIDGET_MAX_WIDTH)
                 self.setMinimumWidth(0)
-                self._body.setMinimumWidth(86)   # the documented lower bound of the divider
+                self._body.setMinimumWidth(PANEL_BODY_MIN_WIDTH)   # the divider's lower bound
                 if laid_out:
                     want = int(getattr(self, "_expanded_width", 0) or 0)
                     if want <= 0:
-                        want = max(self.sizeHint().width(), 86)
+                        want = max(self.sizeHint().width(), PANEL_BODY_MIN_WIDTH)
                     want = min(want, max(sum(sizes) - 1, _CollapseStrip.STRIP_WIDTH))
-                    splitter.setSizes([want, max(sum(sizes) - want, 0)])
+                    hand_over_splitter_width(splitter, index, want)
         except RuntimeError:
             pass  # Qt teardown — the splitter is already destroyed

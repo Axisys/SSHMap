@@ -388,13 +388,16 @@ write_cfg({"terminal_palette": "dracula", "terminal_font_size": 14,
            "status_probe_timeout_sec": 5.0, "autosave_enabled": False,
            "autosave_interval_sec": 120, "backup_count": 3,
            "language": "ru", "terminal_font": "Consolas",
-           "terminal_mode": "tabs"})   # v1.2.2
+           "terminal_mode": "tabs",                    # v1.2.2
+           "terminal_files_mode": "panel"})            # v1.7.1.1
 dlg2 = SettingsDialog(None)
 check("'Terminal' reflects the config (dracula / 14 pt / 250 lines)",
       dlg2.palette_combo.currentData() == "dracula" and dlg2.font_size_spin.value() == 14
       and dlg2.history_spin.value() == 250)
 check("'Terminal' reflects the terminal_mode (tabs, v1.2.2)",
       dlg2.mode_combo.currentData() == "tabs", str(dlg2.mode_combo.currentData()))
+check("'Terminal' reflects the Files display mode (panel, v1.7.1.1)",
+      dlg2.files_mode_combo.currentData() == "panel", str(dlg2.files_mode_combo.currentData()))
 check("'Status Checks' reflect the config (90 s / 5.0 s)",
       dlg2.status_interval_spin.value() == 90
       and abs(dlg2.probe_timeout_spin.value() - 5.0) < 1e-6)
@@ -402,19 +405,20 @@ check("'Autosave' reflects the config (off / 120 s / 3 backups)",
       not dlg2.autosave_enabled_chk.isChecked() and dlg2.autosave_interval_spin.value() == 120
       and dlg2.backup_count_spin.value() == 3)
 
-# collect(): exactly 21 config.json keys (10 in v1.1 + 7 in v1.1.1 + 1 in v1.1.2 final
+# collect(): exactly 24 config.json keys (10 in v1.1 + 7 in v1.1.1 + 1 in v1.1.2 final
 # + 1 in v1.2.2 — terminal_mode + 1 in v1.3.2 — hotkeys + 1 in v1.3.3.8 —
-# terminal_wheel, which closes the "config-only key" category), the types are correct
+# terminal_wheel, which closes the "config-only key" category + 1 in v1.6.2 —
+# terminal_cursor_style + 1 in v1.7.1.1 — terminal_files_mode), the types are correct
 # (language is NOT included — it is immediate)
 dlg2.close_behavior_combo.setCurrentIndex(1)  # ask
 dlg2.status_interval_spin.setValue(60)
 dlg2.probe_timeout_spin.setValue(4.5)
 c = dlg2.collect()
-check("collect(): exactly 23 config.json keys (+ terminal_cursor_style, v1.6.2)",
+check("collect(): exactly 24 config.json keys (+ terminal_files_mode, v1.7.1.1)",
       set(c) == {"external_terminal", "terminal_mode", "terminal_palette",
                  "terminal_font_size",
                  "terminal_history_lines", "terminal_close_behavior",
-                 "terminal_wheel", "terminal_cursor_style",
+                 "terminal_wheel", "terminal_cursor_style", "terminal_files_mode",
                  "status_interval_sec", "status_probe_timeout_sec", "status_max_parallel",
                  "autosave_enabled", "autosave_interval_sec", "backup_count",
                  "ui_font_family", "ui_font_size", "terminal_font",
@@ -433,7 +437,7 @@ applied = []
 dlg2.applied.connect(lambda: applied.append(1))
 dlg2._on_accept()
 cfg = read_cfg()
-check("OK: all the 23 keys are written into config.json",
+check("OK: all the 24 keys are written into config.json",
       cfg is not None and all(k in cfg for k in c), str(cfg))
 check("OK: the merge — the foreign keys are kept (language/terminal_font)",
       cfg.get("language") == "ru" and cfg.get("terminal_font") == "Consolas", str(cfg))

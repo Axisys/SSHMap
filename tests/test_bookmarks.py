@@ -372,7 +372,7 @@ check("§3 the toolbar's right-click menu lists the switch (the declaration, not
       win.act_show_bookmarks in win._panel_switch_actions())
 _hub = SettingsDialog(None)
 check("§3 the settings hub collects the SAME 23 config keys (UI state is owner-written)",
-      len(_hub.collect()) == 23
+      len(_hub.collect()) == 24
       and not any("bookmark" in key for key in _hub.collect()),
       str(sorted(_hub.collect()))[:120])
 _hub.close()
@@ -621,8 +621,8 @@ check("§6 the reused keys the editor reports with are the quick-launch ones (no
            "msg.ql_no_browser")))
 check_i18n_parity(langs)
 check_i18n_format(langs)
-check("§6 the pin counts the SHIPPED release (811 + the 17 keys of v1.6.7 + the 13 of v1.6.8 + the 5 of v1.7rc1 + the 8 of v1.7rc2 + the 9 of v1.7rc3)",
-      EXPECTED_I18N_KEYS == 811 + 17 + 13 + 5 + 8 + 9, str(EXPECTED_I18N_KEYS))
+check("§6 the pin counts the SHIPPED release (811 + the 17 keys of v1.6.7 + the 13 of v1.6.8 + the 5 of v1.7rc1 + the 8 of v1.7rc2 + the 9 of v1.7rc3 + the 4 of v1.7.1 + the 3 of v1.7.1.1)",
+      EXPECTED_I18N_KEYS == 811 + 17 + 13 + 5 + 8 + 9 + 4 + 3, str(EXPECTED_I18N_KEYS))
 check("§6 EXPECTED_APP_VERSION is the release this file describes",
       releases_at_least(EXPECTED_APP_VERSION, "1.7"), EXPECTED_APP_VERSION)
 check_release_state(ROOT)

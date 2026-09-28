@@ -44,9 +44,9 @@ except ImportError:
     from modules.sftp_worker import SftpWorker, register_orphan_sftp_worker
 
 try:
-    from .sftp_tab import CommanderCorner, SftpTab, format_size
+    from .sftp_tab import COMMANDER_CONFIG_BOOL, CommanderCorner, SftpTab, format_size
 except ImportError:
-    from modules.sftp_tab import CommanderCorner, SftpTab, format_size
+    from modules.sftp_tab import COMMANDER_CONFIG_BOOL, CommanderCorner, SftpTab, format_size
 
 # v1.2 (ROADMAP v1.2): the session was moved to a reusable page — the window
 # became a thin wrapper. terminal_page does NOT import ssh_terminal at module
@@ -84,15 +84,17 @@ except ImportError:
 # the left of the session tabs. command_library does not import ssh_terminal
 # (no cycle).
 try:
-    from .command_library import CommandLibraryPanel
+    from .command_library import (CommandLibraryPanel, PANEL_BODY_MIN_WIDTH, _CollapseStrip,
+                                  _WIDGET_MAX_WIDTH, _diamond_icon, hand_over_splitter_width)
 except ImportError:
-    from modules.command_library import CommandLibraryPanel
+    from command_library import (CommandLibraryPanel, PANEL_BODY_MIN_WIDTH, _CollapseStrip,
+                                 _WIDGET_MAX_WIDTH, _diamond_icon, hand_over_splitter_width)
 
 from PySide6.QtCore import Qt, QThread, Signal, QEvent, QTimer
 from PySide6.QtGui import QAction
 from PySide6.QtWidgets import (
-    QApplication, QMainWindow, QMessageBox, QTabWidget, QProgressBar, QSplitter,
-    QPushButton, QWidget, QVBoxLayout, QMenu, QLabel,
+    QApplication, QMainWindow, QMessageBox, QStackedWidget, QTabWidget, QProgressBar,
+    QSplitter, QPushButton, QToolButton, QWidget, QHBoxLayout, QVBoxLayout, QMenu, QLabel,
 )
 
 try:  # v1.4.3 (ROADMAP task 4): the ONE QSS registry (the status texts below)
@@ -294,6 +296,418 @@ def load_split_settings():
         if ratio == ratio and ratio not in (float("inf"), float("-inf")):  # not NaN/inf
             defaults["ratio"] = max(SPLIT_RATIO_MIN, min(SPLIT_RATIO_MAX, ratio))
     return defaults
+
+
+# ── v1.7.1 (ROADMAP v1.7.1): the FILES PANEL — the right half of the window ────
+# In `terminal_mode = "windows"` a wide screen shows `[commands | terminal | files]` at
+# once instead of switching to the Files TAB: the session's Files widget is re-parented
+# from its tab strip into a right-hand panel with ONE stack page per session, and the tab
+# strip of that session becomes `Terminal | History`.
+#
+# v1.7.1.1 (ROADMAP v1.7.1.1): the panel is a SETTING, not a fourth control of the session
+# tab bar's corner. The corner keeps the shipped pair (Split + Files Commander) and the
+# question "tab or panel?" is asked in the settings hub's "Terminal" tab, beside the
+# terminal display mode — ONE `terminal_files_mode` key per application:
+#   * `terminal_files_mode`      — "tab" (the shipped Files tab) | "panel" (the right-hand
+#                                  panel): how a NEW terminal window OPENS. Owner-written by
+#                                  the settings hub, read at window construction
+#   * `ui_files_panel`           — LEGACY, READ ONLY: the pre-1.7.1.1 per-window mode key,
+#                                  honoured as the MIGRATION source when the new key is
+#                                  absent (and never written again)
+#   * `ui_files_panel_collapsed` — bool — the panel was folded to its strip; UI STATE, still
+#                                  written by the window in its single geometry write
+FILES_MODE_CONFIG_KEY = "terminal_files_mode"              # str — "tab" | "panel"
+FILES_PANEL_MIGRATION_BOOL = "ui_files_panel"              # LEGACY (read-only migration source)
+FILES_PANEL_CONFIG_COLLAPSED = "ui_files_panel_collapsed"  # bool — the panel was folded
+
+#: The accepted values of `terminal_files_mode`, the DEFAULT first (`resolve_files_mode()`).
+FILES_MODES = ("tab", "panel")
+FILES_MODE_DEFAULT = "tab"
+
+#: The width the panel opens with (px) the FIRST time in a window: the collapse remembers
+#: what the user dragged afterwards. Deliberately NOT a config key — task 3 of the version
+#: gives the mode exactly TWO `ui_*` keys, and a width the user can drag is not worth a third.
+FILES_PANEL_WIDTH_DEFAULT = 320
+
+#: The horizontal floor of the CANVAS while the panel is on, in CELLS — the mirror of
+#: `SPLIT_MIN_ROWS` (the vertical floor of the split pane): the narrowest canvas the panel
+#: may squeeze the terminal into, built from the live cell metrics (`widget.cell_size[0]`),
+#: never from a magic pixel number. 20 columns is a QUARTER of the classic 80-column line —
+#: a floor that still shows a command line and its output, and one that leaves the default
+#: 800 px window room for the command panel (86 px) and the panel itself (200 px).
+FILES_PANEL_MIN_COLS = 20
+
+#: The floor of the panel itself (px) while the mode is on — the `COMMANDER_MIN_PANE_PX`
+#: rule (Qt gotcha #13 forbids `setMaximum*` on a splitter member, so it is installed as
+#: `setMinimumWidth` and dropped again when the mode goes off).
+FILES_PANEL_MIN_PX = 200
+
+
+def resolve_files_mode(cfg: dict = None) -> str:
+    """v1.7.1.1: the Files display mode of a terminal window — "tab" | "panel".
+
+    The validation is the `load_terminal_settings()` rule (`terminal_mode`, `terminal_wheel`):
+    a missing key, a foreign type (a number where a string is expected) and an unknown value
+    all answer the DEFAULT `"tab"` — the shipped Files-tab look — so a broken config can never
+    move a session's Files tree out of its tab strip.
+
+    MIGRATION (read ONCE, never written): the pre-1.7.1.1 window wrote its own per-window mode
+    as the `ui_files_panel` bool. When `terminal_files_mode` is ABSENT and that legacy value is
+    a real JSON bool, it decides the answer — a user who had the panel on keeps it across the
+    upgrade instead of silently losing the layout. A real `terminal_files_mode` always wins.
+
+    `cfg` — a mapping to read (defaults to `i18n.load_config()`); a broken config store
+    answers the DEFAULT. Never raises.
+    """
+    if cfg is None:
+        try:
+            from i18n import load_config
+        except Exception:  # noqa: BLE001 — a build without i18n keeps the default
+            return FILES_MODE_DEFAULT
+        try:
+            cfg = load_config()
+        except Exception:  # noqa: BLE001 — a broken config store must not break the window
+            return FILES_MODE_DEFAULT
+    if not isinstance(cfg, dict):
+        return FILES_MODE_DEFAULT
+
+    v = cfg.get(FILES_MODE_CONFIG_KEY)
+    if isinstance(v, str):
+        value = v.strip().lower()
+        if value in FILES_MODES:
+            return value                     # a real key wins, legacy or not
+    elif v is not None:
+        return FILES_MODE_DEFAULT            # a foreign TYPE is a broken key, not a legacy one
+
+    legacy = cfg.get(FILES_PANEL_MIGRATION_BOOL)
+    if isinstance(legacy, bool):
+        return "panel" if legacy else FILES_MODE_DEFAULT
+    return FILES_MODE_DEFAULT
+
+
+def load_files_panel_settings():
+    """v1.7.1.1: the Files display mode + the fold of a NEW terminal window.
+
+    The `load_split_settings()` / `load_commander_settings()` shape (§4.3): both keys are
+    optional and a foreign value answers the DEFAULT — a broken config must never move a
+    session's Files tree out of its tab strip. The mode itself is `resolve_files_mode()`
+    (the ONE reader, migration included). Never raises.
+    Returns `{"mode": str, "collapsed": bool}`.
+    """
+    defaults = {"mode": FILES_MODE_DEFAULT, "collapsed": False}
+    try:
+        from i18n import load_config
+    except Exception:  # noqa: BLE001 — a build without i18n keeps the defaults
+        return dict(defaults)
+    try:
+        cfg = load_config()
+    except Exception:  # noqa: BLE001 — a broken config store must not break the window
+        return dict(defaults)
+    if not isinstance(cfg, dict):
+        return dict(defaults)
+
+    defaults["mode"] = resolve_files_mode(cfg)
+    v = cfg.get(FILES_PANEL_CONFIG_COLLAPSED)
+    if isinstance(v, bool):
+        defaults["collapsed"] = v
+    return defaults
+
+
+class _FilesPanel(QWidget):
+    """v1.7.1 (ROADMAP v1.7.1): the right-hand FILES panel of the terminal window.
+
+    The mirrored `CommandLibraryPanel`: a `_CollapseStrip` (24 px) plus a body, both members
+    of ONE layout so the hidden one costs 0 px, and ONE owner-written config key for the
+    fold. The body carries the panel's header (the tab's own title + the fold button) and a
+    `QStackedWidget` with **ONE page per session** — the session's OWN Files widget, moved
+    here by the window (`attach_page()`) while the mode is on.
+
+    The panel owns the STACK and its chrome; it owns neither a session nor a listing. Every
+    page-level read survives the move because the page keeps `page.sftp_tab`
+    (`TerminalSessionPage.detach_files_tab()` / `attach_files_tab()`), and the panel never
+    touches an SftpTab.
+    """
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setObjectName("terminalFilesPanel")
+        t = get_translator()
+        self._collapsed = False
+        self._expanded_width = 0
+        #: The width the OPEN panel asks for. It starts at the declared default, follows the
+        #: divider the USER dragged (`_on_splitter_moved()`) and survives a fold and a close.
+        #: Deliberately NOT a config key: the panel owns ONE `ui_*` key (the fold) and the
+        #: MODE is the settings hub's `terminal_files_mode` (v1.7.1.1) — a width the user can
+        #: drag is not worth a second one.
+        self._panel_width = FILES_PANEL_WIDTH_DEFAULT
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+
+        # The folded state: the thin strip (a click anywhere — expand), the same widget the
+        # left panel uses — ONE strip for both side panels of the application.
+        self._strip = _CollapseStrip(self)
+        self._strip.expand_requested.connect(lambda: self.set_collapsed(False))
+        self._strip.setToolTip(t("terminal.files_panel_expand_tooltip"))
+        layout.addWidget(self._strip)
+
+        self._body = QWidget(self)
+        self._body.setMinimumWidth(PANEL_BODY_MIN_WIDTH)
+        bl = QVBoxLayout(self._body)
+        bl.setContentsMargins(6, 6, 6, 6)
+        bl.setSpacing(4)
+
+        head = QHBoxLayout()
+        # The panel is the Files view of the ACTIVE session, so its header names exactly what
+        # the tab it replaced was called (`sftp.tab_files`) — no second spelling of "Files".
+        self._title = QLabel(t("sftp.tab_files"))
+        tf = self._title.font()
+        tf.setBold(True)
+        self._title.setFont(tf)
+        self._collapse_btn = QToolButton()
+        self._collapse_btn.setIcon(_diamond_icon())
+        self._collapse_btn.setToolTip(t("terminal.files_panel_collapse_tooltip"))
+        self._collapse_btn.clicked.connect(lambda: self.set_collapsed(True))
+        head.addWidget(self._title, 1)
+        head.addWidget(self._collapse_btn)
+        bl.addLayout(head)
+
+        # ONE page per SESSION (not per pane): the window re-parents a session's own Files
+        # widget here when the mode is on and hands it back when the mode goes off.
+        self.stack = QStackedWidget()
+        bl.addWidget(self.stack, 1)
+        layout.addWidget(self._body)
+
+        # The stored fold. Applied without a write-back; the splitter arithmetic is a no-op
+        # at construction time (the panel is not in a QSplitter yet) and is re-applied by the
+        # window when the mode really opens.
+        self.set_collapsed(bool(load_files_panel_settings()["collapsed"]), persist=False)
+
+    # ── the sessions' pages ──────────────────────────────────────────────
+
+    def attach_page(self, page, widget=None) -> bool:
+        """Put ONE session's Files widget into the stack (`widget` — its `sftp_tab`).
+
+        Idempotent: a widget that is already a page of the stack is only re-added when it
+        came from another parent (a session re-created after a reconnect). Never raises.
+        """
+        widget = widget if widget is not None else getattr(page, "sftp_tab", None)
+        if widget is None:
+            return False
+        try:
+            if self.stack.indexOf(widget) < 0:
+                self.stack.addWidget(widget)
+            self.stack.setCurrentWidget(widget)
+        except RuntimeError:
+            return False   # Qt teardown — the stack is already gone
+        return True
+
+    def detach_page(self, page) -> bool:
+        """Take ONE session's Files widget OUT of the stack (the page takes it back).
+
+        The widget is not deleted and not re-parented: `QStackedWidget.removeWidget()` drops
+        the PAGE. The caller either re-inserts it into the session's tab strip
+        (`TerminalSessionPage.attach_files_tab()`) or it dies with the session. Never raises.
+        """
+        widget = getattr(page, "sftp_tab", None)
+        if widget is None:
+            return False
+        try:
+            if self.stack.indexOf(widget) < 0:
+                return False
+            self.stack.removeWidget(widget)
+        except RuntimeError:
+            return False   # Qt teardown
+        return True
+
+    def pages(self) -> list:
+        """The Files widgets currently carried by the stack (for the teardown walks)."""
+        try:
+            return [self.stack.widget(i) for i in range(self.stack.count())]
+        except RuntimeError:
+            return []
+
+    def set_current(self, page) -> bool:
+        """Show the widget of `page` (the session the tab strip just switched to).
+
+        The stack follows `session_tabs.currentChanged` — a tab switch must show THAT
+        session's own tree, with its own browsed directory and its own viewer, which is the
+        whole reason the panel is a stack of per-session pages instead of one shared tree.
+        False — the page has no widget here (a split pane, a page without the SFTP tab).
+        """
+        widget = getattr(page, "sftp_tab", None)
+        if widget is None:
+            return False
+        try:
+            if self.stack.indexOf(widget) < 0:
+                return False
+            self.stack.setCurrentWidget(widget)
+        except RuntimeError:
+            return False   # Qt teardown
+        return True
+
+    # ── the fold (state — the single key ui_files_panel_collapsed) ────────
+
+    def is_collapsed(self) -> bool:
+        return self._collapsed
+
+    def set_collapsed(self, on: bool, persist: bool = True):
+        """Fold/unfold the panel; the state — ONE config key, written by its OWNER.
+
+        The `CommandLibraryPanel.set_collapsed()` twin, including the v1.5rc5 hand-over of
+        the freed space: visibility and the `setMaximumWidth` cap alone left the width dead.
+        """
+        self._collapsed = bool(on)
+        try:
+            t = get_translator()
+            self._strip.setVisible(bool(on))
+            self._body.setVisible(not on)
+            if on:
+                self._strip.setToolTip(t("terminal.files_panel_expand_tooltip"))
+            else:
+                self._collapse_btn.setToolTip(t("terminal.files_panel_collapse_tooltip"))
+        except RuntimeError:
+            return   # the C++ object is already deleted (a close race)
+        self.apply_width()
+        if persist:
+            try:
+                from i18n import save_config
+                save_config({FILES_PANEL_CONFIG_COLLAPSED: bool(on)})
+            except Exception:  # noqa: BLE001 — a read-only HOME keeps the fold for the session
+                pass
+
+    def apply_width(self, want: int = None) -> bool:
+        """Hand the panel its width (the fold's cap or the open width). False — no splitter.
+
+        `want` (px) is the width the OPEN panel asks for; None means "the width this panel
+        remembers" — the declared default the first time in a window, the user's divider drag
+        afterwards. A folded panel always asks for its strip.
+        """
+        if self._collapsed:
+            return self._apply_panel_width(True)
+        if want is None:
+            want = int(getattr(self, "_panel_width", 0) or 0) or FILES_PANEL_WIDTH_DEFAULT
+        return self._apply_panel_width(False, want=want)
+
+    def _host_splitter(self):
+        """The QSplitter this panel is a member of (its parent after `addWidget`).
+
+        The FIRST call also wires the divider watch (`splitterMoved`), which is how the panel
+        learns the width the USER dragged — the splitter is known only after `addWidget()`, so
+        the connection cannot live in `__init__`.
+        """
+        try:
+            parent = self.parentWidget()
+        except RuntimeError:
+            return None
+        if not isinstance(parent, QSplitter):
+            return None
+        if getattr(self, "_splitter_watch", None) is not parent:
+            try:
+                parent.splitterMoved.connect(self._on_splitter_moved)
+            except (RuntimeError, TypeError):
+                pass   # Qt teardown / a foreign splitter — the width memory simply stands still
+            self._splitter_watch = parent
+        return parent
+
+    def _on_splitter_moved(self, _pos=None, _index=None):
+        """The USER dragged a divider: the panel's live width becomes the one to come back to.
+
+        It is the ONLY honest signal for it — a width read straight after `show()` is Qt's
+        layout answer (the panel's minimum), and writing THAT into the memory would make the
+        panel open at 200 px instead of the declared width.
+        """
+        if self._collapsed:
+            return   # the strip's 24 px are not a width anybody chose
+        try:
+            width = int(self.width())
+        except RuntimeError:
+            return   # Qt teardown
+        if width > _CollapseStrip.STRIP_WIDTH:
+            self._panel_width = width
+
+    def remember_width(self) -> int:
+        """Remember the CURRENT width as the one to open with (the mode is going off)."""
+        if not self._collapsed:
+            self._on_splitter_moved()
+        return int(getattr(self, "_panel_width", 0) or 0)
+
+    def _apply_panel_width(self, collapsed: bool, want: int = None) -> bool:
+        """The width cap of a folded panel + the hand-over of the freed space.
+
+        The EXACT mirror of the left panel's arithmetic, sharing its ONE implementation
+        (`hand_over_splitter_width`): the panel here is the LAST member of
+        `[commands | terminal | files]`, so the delta goes to the two columns on its left.
+        Never raises.
+        """
+        splitter = self._host_splitter()
+        if splitter is None:
+            return False
+        try:
+            sizes = list(splitter.sizes())
+            index = splitter.indexOf(self)
+            laid_out = index >= 0 and len(sizes) >= 2 and sum(sizes) > 0
+            if collapsed:
+                if laid_out and sizes[index] > _CollapseStrip.STRIP_WIDTH:
+                    self._expanded_width = sizes[index]
+                self._body.setMinimumWidth(0)
+                self.setMaximumWidth(_CollapseStrip.STRIP_WIDTH)
+                self.setMinimumWidth(_CollapseStrip.STRIP_WIDTH)
+                if not laid_out:
+                    return False
+                return hand_over_splitter_width(splitter, index, _CollapseStrip.STRIP_WIDTH)
+            self.setMaximumWidth(_WIDGET_MAX_WIDTH)
+            self._body.setMinimumWidth(PANEL_BODY_MIN_WIDTH)
+            if not laid_out:
+                return False
+            target = int(want or 0)
+            if target <= 0:
+                target = max(self.sizeHint().width(), PANEL_BODY_MIN_WIDTH)
+            target = min(target, max(sum(sizes) - 1, _CollapseStrip.STRIP_WIDTH))
+            # The floor is asked for only as far as the width really allows: a window too
+            # narrow for both floors keeps a smaller panel instead of an unsatisfiable pair.
+            self.setMinimumWidth(min(FILES_PANEL_MIN_PX, target))
+            self._expanded_width = target
+            self._panel_width = target   # the width the OPEN panel comes back to
+            return hand_over_splitter_width(splitter, index, target)
+        except RuntimeError:
+            return False   # Qt teardown — the splitter is already destroyed
+
+    # ── live i18n / theme (the container rule) ───────────────────────────
+
+    def retranslate(self):
+        """Re-text the panel's own chrome (`sftp.tab_files` + the two fold tooltips)."""
+        try:
+            self._title.setText(get_translator()("sftp.tab_files"))
+            self._collapse_btn.setToolTip(get_translator()("terminal.files_panel_collapse_tooltip"))
+            self._strip.setToolTip(get_translator()("terminal.files_panel_expand_tooltip"))
+        except RuntimeError:
+            pass   # Qt teardown — the panel is already destroyed
+
+    def refresh_theme(self):
+        """Re-apply the theme to the hand-painted strip and the fold button (a VALUE)."""
+        for widget in (getattr(self, "_strip", None), getattr(self, "_collapse_btn", None)):
+            if widget is None:
+                continue
+            try:
+                widget.update()
+            except RuntimeError:
+                continue
+
+    def release_floors(self):
+        """Drop the panel's own floors — the mode is OFF (a hidden member pins nothing).
+
+        The mirror of the window's `_reset_files_panel_floors()` for the panel's OWN
+        `setMinimumWidth`/`setMaximumWidth` pair (Qt gotcha #13: a maximum that lives past
+        its state breaks the size accounting of a later hide/show).
+        """
+        try:
+            self.setMinimumWidth(0)
+            self.setMaximumWidth(_WIDGET_MAX_WIDTH)
+            self._body.setMinimumWidth(PANEL_BODY_MIN_WIDTH)
+        except RuntimeError:
+            pass   # Qt teardown
 
 
 # ANSI escape sequences:
@@ -652,10 +1066,24 @@ class SSHTerminalWindow(QMainWindow):
         splitter = QSplitter(Qt.Orientation.Horizontal)
         splitter.addWidget(self.cmdlib_panel)
         splitter.addWidget(self._v_splitter)
+        # v1.7.1 (ROADMAP v1.7.1): the FILES PANEL — the third column of the same splitter,
+        # the mirrored RIGHT half of the command panel. It carries the ACTIVE session's Files
+        # tree (`_FilesPanel.stack`, one page per session) instead of a Files TAB, and it is
+        # hidden while the mode is off (a hidden splitter member costs no geometry, exactly
+        # like `split_host`). The state/keys are read BEFORE the first session is added.
+        self._files_config = load_files_panel_settings()
+        self._files_panel_on = False
+        #: tab (SftpTab) → the two-pane view it had when the panel forced the mode OFF
+        #: (the MUTUAL EXCLUSION: the panel is single-pane, the state is KEPT and restored).
+        self._commander_kept = {}
+        self.files_panel = _FilesPanel(self)
+        splitter.addWidget(self.files_panel)
         # setCollapsible AFTER addWidget (Qt: an out-of-range index otherwise):
         # the panel cannot be "lost" by dragging the splitter to zero.
         splitter.setCollapsible(0, False)
         splitter.setCollapsible(1, False)
+        splitter.setCollapsible(2, False)
+        self.files_panel.hide()
         self.setCentralWidget(splitter)
 
         # v1.3.3.5 (ROADMAP task 1): ONE checkable action drives BOTH surfaces — the
@@ -685,6 +1113,14 @@ class SSHTerminalWindow(QMainWindow):
         # Files Commander action (the `SftpTab` two-pane view of the ACTIVE session). The
         # control is a VIEW of the session's state: `_sync_commander()` re-reads it whenever
         # the active session changes, so switching tabs never moves a mode between sessions.
+        # v1.7.1.1: the Files panel is NOT a fourth control any more. A layout preference
+        # belongs to the settings hub ("Terminal" → Files display mode) and the corner keeps
+        # the shipped PAIR — the third LABEL was what raised the window's own minimum width,
+        # so removing it hands the corner back its declared two-button floor.
+        self.act_files_panel = QAction(t("terminal.files_panel"), self)
+        self.act_files_panel.setCheckable(True)
+        self.act_files_panel.setToolTip(t("terminal.files_panel_tooltip"))
+        self.act_files_panel.toggled.connect(self.set_files_panel_enabled)
         self.commander = CommanderCorner(self, split_button=self.btn_split)
         self.commander.act.toggled.connect(self._on_commander_toggled)
         self.session_tabs.setCornerWidget(self.commander, Qt.Corner.TopRightCorner)
@@ -736,6 +1172,17 @@ class SSHTerminalWindow(QMainWindow):
         # the PARENT at that moment — see _session_sink().
         if self._split_config["split"]:
             self.act_split.setChecked(True)
+
+        # v1.7.1.1 (ROADMAP v1.7.1.1): the OPENING Files display mode of this window. It is
+        # the setting's job to decide how a window opens (the `terminal_mode` convention:
+        # "applied to new windows; open ones live on as-is"), so the key is read HERE and the
+        # mode is installed through the ONE action (`toggled` → `set_files_panel_enabled`),
+        # exactly like the restored split above. The fold rides along. A live toggle of the
+        # window's own context-menu item is a per-window override and is deliberately NOT
+        # written back — `ui_files_panel` survives only as the migration source.
+        self.files_panel.set_collapsed(self._files_config["collapsed"], persist=False)
+        if self._files_config["mode"] == "panel":
+            self.act_files_panel.setChecked(True)
 
     # ── v1.3.3.1 (ROADMAP task 1): live i18n — re-text on a language switch ──
 
@@ -793,6 +1240,22 @@ class SSHTerminalWindow(QMainWindow):
                 btn.setToolTip(t("terminal.split_tooltip"))
             except RuntimeError:
                 pass  # Qt teardown — the button is already destroyed
+        # v1.7.1.1: the Files panel switch — ONE label and ONE tooltip, and ONE view left:
+        # the window's context-menu item (the corner button is gone; the mode lives in the
+        # settings hub). The panel's own chrome re-texts itself below.
+        act_panel = getattr(self, "act_files_panel", None)
+        if act_panel is not None:
+            try:
+                act_panel.setText(t("terminal.files_panel"))
+                act_panel.setToolTip(t("terminal.files_panel_tooltip"))
+            except RuntimeError:
+                pass  # Qt teardown — the action is already destroyed
+        files_panel = getattr(self, "files_panel", None)
+        if files_panel is not None:
+            try:
+                files_panel.retranslate()
+            except RuntimeError:
+                pass  # Qt teardown — the panel is already destroyed
         # v1.7rc1: the Files Commander control of the same corner (its label and tooltip).
         commander = getattr(self, "commander", None)
         if commander is not None:
@@ -870,6 +1333,15 @@ class SSHTerminalWindow(QMainWindow):
         # v1.6.4 (ROADMAP task 4): the activity mark is a PIXMAP — a VALUE (§4.6): re-render it
         # in the new theme tone instead of leaving the old colour on the tab.
         refresh_session_activity(self)
+        # v1.7.1: the Files panel's hand-painted chrome (its strip and its fold button).
+        files_panel = getattr(self, "files_panel", None)
+        if files_panel is not None:
+            hook = getattr(files_panel, "refresh_theme", None)
+            if callable(hook):
+                try:
+                    hook()
+                except RuntimeError:
+                    pass  # Qt teardown — the panel is already destroyed
         try:
             self.update()
         except RuntimeError:
@@ -932,6 +1404,10 @@ class SSHTerminalWindow(QMainWindow):
         # tooltip of a fresh tab — through the ONE renderer, so a later mark can never change
         # the width of this tab.
         render_session_activity(self.session_tabs, page, t)
+        # v1.7.1: a session born while the Files panel is ON joins the stack — its Files tab
+        # is taken away here and comes back the moment the mode goes off (ONE attach path).
+        if self._files_panel_on:
+            self._attach_files_panel_page(page)
         return page
 
     def close_page(self, page):
@@ -955,6 +1431,13 @@ class SSHTerminalWindow(QMainWindow):
                 return  # "ask" + Cancel — the tab stays open
         except RuntimeError:
             pass  # the C++ object was already destroyed — close without asking (as before)
+        # v1.7.1: a session in the Files panel gives its widget BACK before it dies (AFTER the
+        # "ask" gate — a cancelled close must leave the panel exactly as the user sees it).
+        # The widget's parent is the panel's stack while the mode is on, so without this the
+        # Files tree would outlive the session it belongs to (an orphan page in the stack),
+        # and the remembered two-pane state of a session nobody can reach any more goes with it.
+        self._release_files_panel_page(page)
+        self._commander_kept.pop(getattr(page, "sftp_tab", None), None)
         try:
             page.shutdown()
         except Exception:  # noqa: BLE001 — teardown robustness
@@ -1317,6 +1800,12 @@ class SSHTerminalWindow(QMainWindow):
 
     def _on_commander_toggled(self, on: bool):
         """The corner control asked for the two-pane view of the ACTIVE session."""
+        if self.files_panel_on:
+            # v1.7.1: the Files panel is single-pane, so the control is DISABLED while it is
+            # on — this is a stale signal; the session's state is never touched (the kept
+            # state is the window's and comes back when the panel goes off).
+            self._sync_commander()
+            return
         tab = self._commander_tab()
         ok = False
         if tab is not None:
@@ -1357,10 +1846,303 @@ class SSHTerminalWindow(QMainWindow):
             return
         tab = None if force_off else self._commander_tab()
         try:
-            corner.set_enabled(tab is not None)
+            # v1.7.1: the Files panel is SINGLE-PANE, so the two-pane view of the ACTIVE
+            # session is DISABLED while the panel is on (its state is KEPT — see
+            # `_keep_commander_state()` — and comes back the moment the mode goes off).
+            corner.set_enabled(tab is not None and not self._files_panel_on)
             corner.set_state(bool(tab is not None and tab.commander))
         except RuntimeError:
             pass  # teardown — the corner is gone
+
+    # ── v1.7.1 (ROADMAP v1.7.1): the FILES PANEL — the right-hand tree of the window ──
+    #
+    # `[commands | terminal | files]` at once: the ACTIVE session's Files widget is
+    # RE-PARENTED from its own tab strip into the panel's stack (one page per session), and
+    # the session's tab strip becomes `Terminal | History`. ONE owner per concern:
+    #   * the OPENING MODE — `terminal_files_mode` (`resolve_files_mode()`), read ONCE per
+    #     window: "tab" (the shipped look) | "panel". It is a SETTING of the settings hub's
+    #     "Terminal" tab (v1.7.1.1), applied to NEW windows exactly like `terminal_mode`;
+    #   * the SWITCH of a LIVE window — `act_files_panel` (`terminal.files_panel`): the
+    #     window's context-menu item is its ONE view, the checkmark IS the state, so the
+    #     checkmark and the layout can never diverge (the `act_split` pattern). A live toggle
+    #     is an override of this window only and is NOT persisted;
+    #   * the LAYOUT — the top-level `QSplitter [cmdlib_panel | session area | files_panel]`;
+    #     the panel is hidden while the mode is off, so the shipped look costs nothing;
+    #   * the PANEL — `_FilesPanel`: the fold (its own `ui_files_panel_collapsed` key), the
+    #     stack and the header; it never touches an `SftpTab`;
+    #   * the SESSION — the page keeps `page.sftp_tab` as the OWNER and only LOSES THE TAB
+    #     (`TerminalSessionPage.detach_files_tab()` / `attach_files_tab()`), which is what
+    #     keeps every page-level read, the viewer and the browsed directory alive across the
+    #     switch (a window-level tree bound to the active session would re-list `/` on every
+    #     tab switch and cancel a read — the ROADMAP refuses that shape);
+    #   * the LAZY CHANNEL — the panel mode has no `Files` tab to switch to, so the page
+    #     opens its SFTP channel from `connected_signal` (`set_files_panel(True)`);
+    #   * the PERSISTENCE (~/.sshmap/config.json) — `ui_files_panel_collapsed` alone (UI
+    #     state, merged into the window's single geometry write). The MODE is the settings
+    #     hub's key now; the legacy `ui_files_panel` is read once as the migration source.
+    #
+    # `terminal_mode = "tabs"` IGNORES the mode: the dock content has no window chrome and
+    # shares the map's width (it builds no panel and reads no key), so the two settings are
+    # simply independent. The SPLIT PANE is unaffected too: it is built `with_sftp=False`, has
+    # no Files tab at all and is never a page of the stack.
+
+    def _tab_pages(self) -> list:
+        """Every live session that CARRIES A TAB (the split pane is deliberately not one)."""
+        try:
+            pages = [self.session_tabs.widget(i) for i in range(self.session_tabs.count())]
+        except RuntimeError:
+            pages = []   # the C++ object was already destroyed (a close race)
+        return [p for p in pages if p is not None]
+
+    @property
+    def files_panel_on(self) -> bool:
+        """Is the Files tree shown in the right-hand panel (and therefore out of the tabs)?"""
+        return bool(getattr(self, "_files_panel_on", False))
+
+    def set_files_panel_enabled(self, on: bool):
+        """v1.7.1: the ONE switch of the Files panel — called from `act_files_panel.toggled`.
+
+        ON — the panel is shown, every session's Files widget moves into its stack, the
+        two-pane view of each session is forced OFF and REMEMBERED, the canvas gets its
+        column floor and the panel its opening width.
+        OFF — every widget goes back to the tab it came from, the remembered two-pane states
+        are restored and both floors are dropped (the shipped look, exactly).
+        Idempotent and teardown-safe.
+        """
+        on = bool(on)
+        if on == self._files_panel_on:
+            self._set_files_panel_action_checked(on)
+            return
+        if on:
+            self._open_files_panel()
+        else:
+            self._close_files_panel()
+        self._set_files_panel_action_checked(self._files_panel_on)
+
+    def _open_files_panel(self):
+        """Show the panel and move every session's Files widget into it. Never raises."""
+        pages = [p for p in self._tab_pages() if getattr(p, "sftp_tab", None) is not None]
+        if not pages:
+            self._files_panel_on = False   # nothing to serve — the checkmark goes back
+            return
+        self._files_panel_on = True
+        self._keep_commander_state()
+        for page in pages:
+            self._attach_files_panel_page(page)
+        try:
+            self.files_panel.set_collapsed(self.files_panel.is_collapsed(), persist=False)
+            self.files_panel.show()
+        except RuntimeError:
+            return   # Qt teardown — the panel is already gone
+        self._refresh_files_panel_current()
+        self._apply_files_panel_sizes()
+        # the layout of a just-shown member settles after the event cycle (the page's own
+        # singleShot(0) grid sync is the same pattern) — a second pass on the real sizes.
+        try:
+            QTimer.singleShot(0, self._apply_files_panel_sizes)
+        except RuntimeError:
+            pass
+        self._sync_commander()
+
+    def _close_files_panel(self):
+        """Hide the panel and hand every Files widget back to its own session. Never raises."""
+        # the width the user is looking at becomes the one the next open comes back to.
+        try:
+            self.files_panel.remember_width()
+        except RuntimeError:
+            pass
+        self._files_panel_on = False
+        for page in self._tab_pages():
+            self._release_files_panel_page(page)
+        self.files_panel.release_floors()
+        try:
+            self.files_panel.hide()
+        except RuntimeError:
+            pass
+        self._reset_files_panel_floors()
+        self._restore_commander_state()
+        self._sync_commander()
+
+    def _attach_files_panel_page(self, page) -> bool:
+        """Move ONE session's Files widget into the panel (the tab goes away with it)."""
+        hook = getattr(page, "detach_files_tab", None)
+        widget = None
+        if callable(hook):
+            try:
+                widget = hook()
+            except (RuntimeError, AttributeError):
+                widget = None   # Qt teardown / a page without the hook — nothing moved
+        if widget is None:
+            return False
+        try:
+            self.files_panel.attach_page(page, widget)
+        except RuntimeError:
+            return False
+        # the PAGE's own half: the flag decides the lazy channel open (there is no Files tab
+        # left to switch to), so it is set for a page whose widget really moved.
+        setter = getattr(page, "set_files_panel", None)
+        if callable(setter):
+            try:
+                setter(True)
+            except (RuntimeError, AttributeError):
+                pass
+        return True
+
+    def _release_files_panel_page(self, page) -> bool:
+        """Hand ONE session's Files widget back to its own tab strip (idempotent).
+
+        Safe to call with the mode already OFF (the `close_page` path does): a widget the
+        stack does not carry is not touched at all, so the tab is never inserted twice. The
+        KEPT two-pane state is deliberately NOT dropped here — a mode that goes off RESTORES
+        it (`_restore_commander_state()`), and only a session that really dies forgets it
+        (`close_page` pops its entry).
+        """
+        try:
+            moved = self.files_panel.detach_page(page)
+        except RuntimeError:
+            moved = False
+        if not moved:
+            return False
+        setter = getattr(page, "set_files_panel", None)
+        if callable(setter):
+            try:
+                setter(False)
+            except RuntimeError:
+                pass
+        hook = getattr(page, "attach_files_tab", None)
+        if callable(hook):
+            try:
+                hook()
+            except RuntimeError:
+                pass   # Qt teardown — the widget dies with the page either way
+        return True
+
+    def _refresh_files_panel_current(self) -> bool:
+        """Show the ACTIVE tab's own tree — the stack follows `session_tabs.currentChanged`."""
+        if not self._files_panel_on:
+            return False
+        try:
+            page = self.session_tabs.currentWidget()
+        except RuntimeError:
+            return False
+        try:
+            return bool(self.files_panel.set_current(page))
+        except RuntimeError:
+            return False
+
+    # ── v1.7.1: the mutual exclusion with the Files Commander ────────────
+
+    def _keep_commander_state(self):
+        """Force the two-pane view OFF and REMEMBER it — the panel mode is single-pane.
+
+        The state is kept (NOT discarded), so switching the panel off restores exactly the
+        two-pane view the session had; `_save_split_state()` writes the KEPT state, so closing
+        the window with the panel on does not cost the user the mode either.
+        """
+        for page in self._tab_pages():
+            tab = getattr(page, "sftp_tab", None)
+            if tab is None:
+                continue
+            try:
+                if tab.commander:
+                    self._commander_kept[tab] = True
+                    tab.set_commander(False)
+            except (RuntimeError, AttributeError):
+                continue   # Qt teardown — that session is already gone
+
+    def _restore_commander_state(self):
+        """Give every session back the two-pane view the panel took away. Never raises."""
+        kept = dict(self._commander_kept)
+        self._commander_kept = {}
+        for tab, want in kept.items():
+            if not want:
+                continue
+            try:
+                tab.set_commander(True)
+            except (RuntimeError, AttributeError):
+                continue   # Qt teardown — that session is already gone
+
+    # ── v1.7.1: the geometry of the mode (the mirror of the split's floors) ──
+
+    def _files_panel_min_width(self) -> int:
+        """The CANVAS floor of the mode, in PIXELS — `FILES_PANEL_MIN_COLS` live cells.
+
+        Built, not guessed (the `_split_min_height()` rule): the cell width comes from the
+        session's own metrics, so a narrow window keeps the columns it really needs instead
+        of squeezing the terminal into an unreadable strip.
+        """
+        col_w = 8
+        try:
+            col_w = max(1, int(self.page.widget.cell_size[0]))
+        except (RuntimeError, AttributeError, TypeError, IndexError):
+            col_w = 8   # a dying C++ object / a page without a canvas — a sane default
+        return int(col_w * FILES_PANEL_MIN_COLS)
+
+    def _apply_files_panel_floors(self):
+        """Install the column floor of the canvas and the width floor of the panel.
+
+        A FOLDED panel keeps the strip's own 24 px (its cap must win): the floor of an open
+        panel is applied by `_FilesPanel._apply_panel_width(False)`, so raising it here would
+        make the minimum beat the collapsed maximum (Qt: `minimumWidth` wins) and leave a
+        200 px "strip" behind.
+        """
+        floor = self._files_panel_min_width()
+        try:
+            self._v_splitter.setMinimumWidth(floor)
+        except RuntimeError:
+            return   # C++ teardown — nothing to floor
+        for page in self._all_pages():
+            try:
+                page.widget.setMinimumWidth(floor)
+            except (RuntimeError, AttributeError):
+                continue   # Qt teardown / a page without a canvas
+        try:
+            collapsed = bool(self.files_panel.is_collapsed())
+            self.files_panel.setMinimumWidth(0 if collapsed else FILES_PANEL_MIN_PX)
+        except RuntimeError:
+            pass
+
+    def _reset_files_panel_floors(self):
+        """Drop both floors (the mode is off — the shipped window minimum comes back)."""
+        try:
+            self._v_splitter.setMinimumWidth(0)
+        except RuntimeError:
+            pass
+        for page in self._all_pages():
+            try:
+                page.widget.setMinimumWidth(0)
+            except (RuntimeError, AttributeError):
+                continue   # Qt teardown / a page without a canvas
+
+    def _apply_files_panel_sizes(self):
+        """Give the panel its width (the fold's cap, or the width it remembers)."""
+        if not self._files_panel_on:
+            return
+        try:
+            self.files_panel.apply_width()
+        except RuntimeError:
+            return   # C++ teardown — nothing to size
+        self._apply_files_panel_floors()
+
+    # ── v1.7.1: the action and its checkmark (the compat mirroring) ──────
+
+    def _set_files_panel_action_checked(self, checked: bool):
+        """Set the checkmark WITHOUT re-entering the slot (the `btn_split` discipline).
+
+        v1.7.1.1: the checkmark is the ONLY view of the state left — the corner button is
+        gone, so there is nothing to mirror. Kept as the ONE write path, because the switch
+        itself (`set_files_panel_enabled`) corrects the action when it could not do what it
+        was asked (no session to serve, a teardown race).
+        """
+        checked = bool(checked)
+        act = getattr(self, "act_files_panel", None)
+        if act is not None:
+            try:
+                act.blockSignals(True)
+                act.setChecked(checked)
+                act.blockSignals(False)
+            except RuntimeError:
+                pass   # teardown — the action is gone
 
     def _split_min_height(self) -> int:
         """v1.3.3.5 (ROADMAP task 3a): the size floor of the bottom pane, in PIXELS.
@@ -1503,6 +2285,11 @@ class SSHTerminalWindow(QMainWindow):
         payload = {
             SPLIT_CONFIG_BOOL: bool(getattr(self, "_split_on", False)),
             SPLIT_CONFIG_RATIO: round(float(self._split_ratio), 4),
+            # v1.7.1.1 (ROADMAP v1.7.1.1): the panel's FOLD is the only Files-panel state the
+            # window still owns (UI state, the `ui_cmdlib_collapsed` rule). The MODE is the
+            # settings hub's `terminal_files_mode` and is NOT written back: a live toggle of
+            # the context-menu item must not silently rewrite the application's preference.
+            FILES_PANEL_CONFIG_COLLAPSED: bool(self.files_panel.is_collapsed()),
         }
         # v1.7rc1 (ROADMAP v1.7rc1, task 5): the Files Commander state/ratio of the ACTIVE
         # session ride along in the very same write — ONE save_config() per window, exactly
@@ -1520,6 +2307,10 @@ class SSHTerminalWindow(QMainWindow):
                 tab.commander_extra_config(payload)
             except (RuntimeError, AttributeError):
                 pass  # a page without the container / a teardown race — the split keys stay
+            # v1.7.1: with the Files panel ON the live mode is forced OFF, so the KEPT state
+            # is what the user really had — a close must not cost them the two-pane view.
+            if self._commander_kept.get(tab):
+                payload[COMMANDER_CONFIG_BOOL] = True
         if isinstance(extra, dict):
             extra.update(payload)
             return extra
@@ -1547,6 +2338,12 @@ class SSHTerminalWindow(QMainWindow):
         act = getattr(self, "act_split", None)
         if act is not None:
             menu.addAction(act)
+        # v1.7.1.1: the per-WINDOW Files panel switch — the ONLY surface of the switch left
+        # besides the settings hub's "Files display mode" key: a live override of this window
+        # that is not persisted. The corner button is gone.
+        act_panel = getattr(self, "act_files_panel", None)
+        if act_panel is not None:
+            menu.addAction(act_panel)
         return menu
 
     def contextMenuEvent(self, event):
@@ -1567,6 +2364,11 @@ class SSHTerminalWindow(QMainWindow):
                     if 0 <= index < self.session_tabs.count() else None)
         except RuntimeError:
             page = None  # the C++ object was already destroyed (a close race)
+        # v1.7.1: the Files panel follows the TAB STRIP (not the focus): the right-hand tree
+        # is the tree of the session whose tab is current, with its own browsed directory and
+        # its own viewer. Done BEFORE the split-pane branch below — a pane that holds the
+        # keyboard must not freeze the tree of the tab the user just switched to.
+        self._refresh_files_panel_current()
         # v1.3.3.5: the ACTIVE TAB is the fallback — while the keyboard focus sits in
         # the split pane, switching tabs does not steal the bridge from it.
         if self.focused_split_pane() is not None:

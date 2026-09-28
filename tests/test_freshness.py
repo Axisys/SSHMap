@@ -762,7 +762,7 @@ from ui.settings_dialog import SettingsDialog  # noqa: E402
 _dlg = SettingsDialog(None)
 _keys = _dlg.collect()
 check("§4 the settings hub collects exactly 23 keys (the cap is a performance key)",
-      len(_keys) == 23 and "theme" in _keys and "info_max_parallel" not in _keys,
+      len(_keys) == 24 and "theme" in _keys and "info_max_parallel" not in _keys,
       str(sorted(_keys)))
 _dlg.close()
 _win._dirty = False

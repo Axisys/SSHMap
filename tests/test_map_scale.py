@@ -241,7 +241,7 @@ _static = SettingsDialog(None)
 check("density: the 'Appearance' tab offers the choice and collect() carries the hub's 23 keys",
       _static.density_combo.count() == 2
       and _static.density_combo.currentData() == "normal"
-      and len(_static.collect()) == 23
+      and len(_static.collect()) == 24
       and _static.collect()["theme"]["density"] == "normal")
 _static.deleteLater()
 close_window(_win2)

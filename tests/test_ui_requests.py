@@ -529,7 +529,7 @@ check_i18n_parity(_langs)
 check_i18n_format(_langs)
 check("§6 EXPECTED_APP_VERSION is the shipped release (the pin quotes the CURRENT one)",
       releases_at_least(EXPECTED_APP_VERSION, "1.7")
-      and re.fullmatch(r"1\.7(rc\d+)?", EXPECTED_APP_VERSION) is not None,
+      and re.fullmatch(r"1\.7(?:rc\d+|(?:\.\d+){1,2})?", EXPECTED_APP_VERSION) is not None,
       EXPECTED_APP_VERSION)
 check("§6 the pin counts the shipped release (708 + the 29 keys of v1.5.7 + the 41 of v1.6"
       " + the 4 of v1.6.2 + the 4 of v1.6.3 + the 3 of v1.6.4 + the 11 of v1.6.5"
@@ -545,7 +545,7 @@ check("§6 no new colour field (60 in both themes — the tone is an existing ta
       and theme.THEME.tag_colors["staging"] == theme.THEME.status_warn)
 _hub = SettingsDialog(make_main())
 check("§6 no new config key from this section (the settings hub collects 23)",
-      len(_hub.collect()) == 23
+      len(_hub.collect()) == 24
       and not any("export" in k or "empty_state" in k for k in _hub.collect()),
       str(sorted(_hub.collect()))[:120])
 _hub.close()

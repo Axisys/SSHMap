@@ -23,7 +23,11 @@ merge-write); all keys are optional, defaults = current behavior:
                       mouse wheel; the LAST key that had no UI at all)
                       + v1.6.2: terminal_cursor_style ("bar" default — the thin blinking
                       line of Windows Terminal | "block" | "underline"; the first NEW
-                      UI-facing key since terminal_wheel, so collect() goes 22 → 23);
+                      UI-facing key since terminal_wheel, so collect() goes 22 → 23)
+                      + v1.7.1.1: terminal_files_mode ("tab" default — the shipped
+                      `Terminal | Files | History` strip | "panel" — the Files tree in the
+                      right-hand panel beside the shell; the mode a NEW terminal window
+                      OPENS with, so collect() goes 23 → 24);
   * Statuses:         status_interval_sec / status_probe_timeout_sec (v1.1; defaults
                      30 s / 3.0 s — v1.0 behavior, services/status_checker.py);
   * Autosave:         autosave_enabled / autosave_interval_sec / backup_count (v0.9.7);
@@ -953,9 +957,9 @@ class SettingsDialog(QDialog):
 
     def _build_terminal_tab(self):
         try:
-            from ..modules.ssh_terminal import load_terminal_settings
+            from ..modules.ssh_terminal import load_terminal_settings, resolve_files_mode
         except ImportError:
-            from modules.ssh_terminal import load_terminal_settings
+            from modules.ssh_terminal import load_terminal_settings, resolve_files_mode
         cfg = load_terminal_settings()
 
         tab = QWidget()
@@ -973,6 +977,23 @@ class SettingsDialog(QDialog):
         self.mode_combo.setCurrentIndex(idx)
         self._lbl_mode = QLabel(_t("settings.terminal.mode"))
         form.addRow(self._lbl_mode, self.mode_combo)
+
+        # v1.7.1.1 (ROADMAP v1.7.1.1): the FILES display mode — WHERE the session's Files
+        # tree lives, asked right beside the terminal display mode because it is the same
+        # kind of question (a layout preference, not a per-window control): "tab" (the
+        # default — the shipped `Terminal | Files | History` strip) | "panel" (the
+        # right-hand panel beside the shell, `[commands | terminal | files]` at once).
+        # Read at window construction like the mode above: a NEW terminal window opens with
+        # it and open windows keep the layout they have (`terminal_mode`'s rule).
+        self.files_mode_combo = QComboBox()
+        self.files_mode_combo.addItem(_t("settings.terminal.files_mode.tab"), "tab")
+        self.files_mode_combo.addItem(_t("settings.terminal.files_mode.panel"), "panel")
+        cur_files_mode = resolve_files_mode()
+        idx = next((i for i in range(self.files_mode_combo.count())
+                    if self.files_mode_combo.itemData(i) == cur_files_mode), 0)
+        self.files_mode_combo.setCurrentIndex(idx)
+        self._lbl_files_mode = QLabel(_t("settings.terminal.files_mode"))
+        form.addRow(self._lbl_files_mode, self.files_mode_combo)
 
         self.palette_combo = QComboBox()
         self.palette_combo.addItem(_t("settings.terminal.palette.default"), "default")
@@ -1893,11 +1914,19 @@ class SettingsDialog(QDialog):
         v1.6.2 (ROADMAP task 4): +1 key — terminal_cursor_style ("bar"|"block"|
         "underline" of the "Terminal" tab; the combo gives fixed ids, so the value
         is valid by construction). 22 → 23 UI-facing keys.
+        v1.7.1.1 (ROADMAP v1.7.1.1): +1 key — terminal_files_mode ("tab"|"panel"
+        of the same "Terminal" tab, the row below the display mode; the combo gives
+        fixed ids). It owns the Files panel's MODE, which the terminal window used
+        to write for itself as the legacy `ui_files_panel` (read once as the
+        migration source, never written again). 23 → 24 UI-facing keys.
         """
         return {
             "external_terminal": self.ext_term_combo.currentData() or "auto",
             # v1.2.2 (task 4): the terminal display mode
             "terminal_mode": self.mode_combo.currentData() or "windows",
+            # v1.7.1.1 (ROADMAP v1.7.1.1): where the Files tree lives — "tab" | "panel";
+            # the 24th UI-facing key, and the ONE owner of the Files panel's MODE
+            "terminal_files_mode": self.files_mode_combo.currentData() or "tab",
             "terminal_palette": self.palette_combo.currentData() or "default",
             "terminal_font_size": int(self.font_size_spin.value()),
             "terminal_history_lines": int(self.history_spin.value()),
@@ -2026,6 +2055,17 @@ class SettingsDialog(QDialog):
             }.get(mid)
             if key:
                 self.mode_combo.setItemText(i, _t(key))
+
+        # v1.7.1.1: the Files display mode (the same tab, the row right below)
+        self._lbl_files_mode.setText(_t("settings.terminal.files_mode"))
+        for i in range(self.files_mode_combo.count()):
+            fid = self.files_mode_combo.itemData(i)
+            key = {
+                "tab": "settings.terminal.files_mode.tab",
+                "panel": "settings.terminal.files_mode.panel",
+            }.get(fid)
+            if key:
+                self.files_mode_combo.setItemText(i, _t(key))
 
         self._lbl_palette.setText(_t("settings.terminal.palette"))
         for i in range(self.palette_combo.count()):

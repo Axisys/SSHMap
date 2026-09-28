@@ -485,13 +485,13 @@ check("§8 the contract stays FROZEN: it is not a changelog (no release narrativ
 
 check_release_state(ROOT)
 check("§8 the version pin is the release this file describes",
-      EXPECTED_APP_VERSION == "1.7", EXPECTED_APP_VERSION)
+      releases_at_least(EXPECTED_APP_VERSION, "1.7"), EXPECTED_APP_VERSION)
 check("§8 ...and the line's release model is the ROADMAP one: a BASE release plus a follow-up",
       releases_at_least("1.7.0.1", "1.7") and releases_at_least("1.7.1", "1.7")
-      and EXPECTED_APP_VERSION == "1.7",
+      and releases_at_least(EXPECTED_APP_VERSION, "1.7"),
       EXPECTED_APP_VERSION)
-check("§8 the i18n pin did NOT move (the closing release adds no key)",
-      EXPECTED_I18N_KEYS == 863, str(EXPECTED_I18N_KEYS))
+check("§8 the i18n pin counts the closing release and nothing of its own (the audit adds no key)",
+      EXPECTED_I18N_KEYS >= 863, str(EXPECTED_I18N_KEYS))
 check("§8 VERSION_FORMAT stays `0.9` (the Commander stores its state in config.json)",
       __import__("version").VERSION_FORMAT == "0.9")
 check("§8 no new dependency was added (the four pinned ones)",

@@ -577,6 +577,11 @@ class TerminalSessionPage(QWidget):
         # `page.tabs` still exists (ONE tab — the canvas; the multi-input badge of a
         # pane lands on it) and `page.sftp_tab` is None (every reader is guarded below).
         self._with_sftp = bool(with_sftp)
+        # v1.7.1 (ROADMAP v1.7.1): the window may show this session's Files tree in a
+        # right-hand panel instead of the Files TAB (`detach_files_tab()` /
+        # `set_files_panel()`); the flag also decides the LAZY channel open, because the panel
+        # mode has no tab switch to trigger it.
+        self._files_panel_on = False
         self.tabs = QTabWidget()
         self.tabs.addTab(self.widget, t("sftp.tab_terminal"))
         self.sftp_tab = SftpTab() if self._with_sftp else None
@@ -1720,8 +1725,10 @@ class TerminalSessionPage(QWidget):
         page for the tab — and the ordinary `_on_tab_changed` path opens the SFTP channel
         lazily on the way. False when this page has no Files tab at all (a split pane is
         built `with_sftp=False`), which is exactly the "the action is disabled there" rule.
+        v1.7.1: False too while the window shows the Files tree in its right-hand PANEL — the
+        page has no Files tab then (`detach_files_tab()`) and nothing to bring to the front.
         """
-        if self.sftp_tab is None:
+        if self.sftp_tab is None or getattr(self, "_files_panel_on", False):
             return False
         try:
             self.tabs.setCurrentWidget(self.sftp_tab)
@@ -1729,10 +1736,84 @@ class TerminalSessionPage(QWidget):
             return False  # Qt teardown — the C++ object is already gone
         return True
 
-    def _on_connected_for_sftp(self):
-        """connected_signal: the user may already be sitting on "Files"."""
+    # ── v1.7.1 (ROADMAP v1.7.1): the Files tree as a panel of the WINDOW ────
+    #
+    # The window may show this session's Files widget in a right-hand panel of its own
+    # (`modules/ssh_terminal.py`): the widget is RE-PARENTED from the session's tab strip
+    # into the window's `QStackedWidget`, one page per session. The PAGE keeps its owner
+    # (`page.sftp_tab` never changes) and only the TAB is taken away — which is why every
+    # page-level read, the lazy channel open and the teardown keep working unchanged.
+
+    def detach_files_tab(self):
+        """Hand the Files widget over to a host panel: remove the TAB, return the WIDGET.
+
+        None when this page has no Files tab (a split pane) or the panel is already off the
+        strip. The widget keeps its parent until the caller re-parents it into the stack —
+        `QTabWidget.removeWidget()` drops the TAB, never the object.
+        """
+        tab = getattr(self, "sftp_tab", None)
+        if tab is None:
+            return None
         try:
-            if self.tabs.currentWidget() is self.sftp_tab:
+            index = self.tabs.indexOf(tab)
+            if index < 0:
+                return None
+            self.tabs.removeTab(index)
+        except RuntimeError:
+            return None  # Qt teardown — the strip is already gone
+        return tab
+
+    def attach_files_tab(self) -> bool:
+        """Take the Files widget back from a host panel: re-insert the TAB it lost.
+
+        The position is the SHIPPED one (`Terminal | Files | History`, index 1), so the
+        panel being switched off restores the exact strip the session had before it — the
+        page's own tab order is not the host's business. Idempotent and teardown-safe.
+        """
+        tab = getattr(self, "sftp_tab", None)
+        if tab is None:
+            return False
+        try:
+            if self.tabs.indexOf(tab) >= 0:
+                return True
+            self.tabs.insertTab(1, tab, get_translator()("sftp.tab_files"))
+        except RuntimeError:
+            return False  # Qt teardown — the strip is already gone
+        return True
+
+    def set_files_panel(self, on: bool) -> bool:
+        """The window shows (on) or hides this session's Files tree in its right panel.
+
+        The ONE consequence the PAGE owns: the SFTP channel must be open even though the
+        user never switched to a Files tab — a switch to the tab was the lazy-open trigger
+        (`_on_tab_changed`) and the panel mode has no such tab, so the panel would otherwise
+        sit in `sftp.waiting_connection` for the whole session. The channel is therefore
+        opened HERE when the transport is already alive, and `_on_connected_for_sftp()` opens
+        it for a session that is still connecting. Never raises.
+        """
+        on = bool(on)
+        self._files_panel_on = on
+        if not on:
+            return self._files_panel_on
+        try:
+            self._ensure_sftp()
+        except RuntimeError:
+            pass  # Qt teardown — the session is already going away
+        return self._files_panel_on
+
+    @property
+    def files_panel_on(self) -> bool:
+        """Is this session's Files tree shown in a host panel (and therefore not in a tab)?"""
+        return bool(getattr(self, "_files_panel_on", False))
+
+    def _on_connected_for_sftp(self):
+        """connected_signal: open the channel the session is really going to need.
+
+        Two triggers ask for it — the user was already sitting on "Files", or v1.7.1 shows
+        the tree in the window's right-hand PANEL (where there is no Files tab to switch to).
+        """
+        try:
+            if self._files_panel_on or self.tabs.currentWidget() is self.sftp_tab:
                 self._ensure_sftp()
         except RuntimeError:
             pass  # the C++ object was already destroyed (a close race)

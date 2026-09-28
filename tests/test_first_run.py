@@ -765,7 +765,7 @@ check(f"§7 the i18n pin is the shipped one ({EXPECTED_I18N_KEYS})",
           for c in _langs), str({c: len(_langs[c]) for c in sorted(_langs)}))
 _hub = SettingsDialog(make_main())
 check("§7 this version adds no config key beyond the terminal cursor shape (the hub collects 23)",
-      len(_hub.collect()) == 23, str(sorted(_hub.collect())))
+      len(_hub.collect()) == 24, str(sorted(_hub.collect())))
 _hub.close()
 
 finish()
