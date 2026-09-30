@@ -44,23 +44,16 @@ def _t(key: str, **kw) -> str:
         return key
 
 
-# ── v1.5 (ROADMAP): the ENVIRONMENT badge — the declared vocabulary ────────────────
-# The card carries its tags as a tone the SAME card already uses for availability
-# (`Theme.tag_colors`: `prod` → `status_offline`, `staging` → `status_warn`, `dev` →
-# `status_online`) and an arbitrary tag gets a `crc32` colour from `tag_palette`. That is
-# meaning in a colour alone — rule 2 of the 1.5 line — so v1.5 added the second channel:
-# the tag as TEXT in a chip, with the colour kept as a redundant tint.
-#
-# The COLOUR channel is the card's ICON — the brush of the circle the `_glyph` sits in — and
-# the TEXT channel is the chip in the free band ABOVE the alias (the `y ≈ 2..17` band the
-# measured layout leaves empty in both layouts): the chip keeps its own row, so it never
-# competes with the name for one.
-#
-# The vocabulary is DECLARED here and its ORDER IS THE PRECEDENCE: a card tagged
-# `["dev", "prod"]` is production, whatever order the user typed the tags in. `staging`
-# is the name `Theme.tag_colors` uses; `stage` is accepted as its short form. A card whose
-# tags carry none of these words still gets a header — `env_tag()` then falls back to the
-# first tag the user wrote, and `tag_color()` gives it the `crc32` palette colour.
+#: The separator of the device LIST a card carries in ONE tooltip line
+#: ("sda 9.7 gb · sdb 100 gb"), so the entries the store keeps are rendered as one line here.
+_DEVICE_SEP = " · "
+
+
+# ── the ENVIRONMENT badge — the declared vocabulary ────────────────────────────────
+# A tag is carried as TEXT in a chip (the second channel) with the colour as a redundant
+# tint: the COLOUR channel is the icon's circle brush, the TEXT one the free band above
+# the alias. The ORDER here IS THE PRECEDENCE (`["dev", "prod"]` is production);
+# `staging` is the `Theme.tag_colors` name, `stage` its short form, `env_tag()` the reader.
 ENV_TAGS = ("prod", "staging", "stage", "dev", "test")
 
 
@@ -92,14 +85,11 @@ def env_tag(tags) -> str:
     return first
 
 
-# ── v1.4.2 (ROADMAP task 3): the card drop-shadow — ONE cached pixmap per SIZE ──────
-# The v1.2.5 shadow was a single QGraphicsPathItem: a hard-edged strip that extended the
-# card only DOWNWARD (SHADOW_BOTTOM = 3), so sceneBoundingRect() could double as the
-# arrow/note anchor. The v1.4.2 halo covers all four sides, and a per-item
-# QGraphicsDropShadowEffect is FORBIDDEN here — every effect is a separate render layer,
-# and the pain at 500 nodes was pinned by the v1.2.10 audit. The soft falloff is painted
-# ONCE per distinct card size into a QPixmap and shared by every card of that size
-# (a bounded LRU — 500 cards have a handful of distinct widths/heights).
+# ── the card drop-shadow — ONE cached pixmap per SIZE ────────────────────────────────
+# A per-item QGraphicsDropShadowEffect is FORBIDDEN here: every effect is a separate render layer
+# and the pain at 500 nodes is measured. The soft falloff is therefore painted ONCE per distinct
+# card size into a QPixmap and shared by every card of that size (a bounded LRU — 500 cards have a
+# handful of distinct widths); the halo covers all four sides, unlike the older downward strip.
 SHADOW_BLUR = 9.0          # the halo's thickness on every side, in scene px
 SHADOW_DY = 3.0            # the shadow sits a little lower than the card
 SHADOW_LAYERS = 9          # the "blur" = N inflated rounded rects with a low alpha each
@@ -179,8 +169,8 @@ class ServerNode(QGraphicsItemGroup):
     DOT_ZONE_LEFT = 46.0      # left edge of the status dot: W - 46 (see update_appearance)
     ELIDE_GAP = 4.0           # gap from the end of the text to the dots
     #: The alias is the card's headline and the ONE line a user reads from a distance, so it
-    #: is a bold UI face (v1.5.6: 10 pt — a size STEP DOWN from the 11 pt the card used to
-    #: carry, which buys roughly 10% more characters of the name before the elide).
+    #: is a bold UI face, one size STEP DOWN from the card's 11 pt — which buys
+    #: roughly 10% more characters of the name before the elide).
     ALIAS_FONT_SIZE = 10
     # UI polish v0.9.x: the server icon is a bit large in both modes — we scale
     # circle+glyph to 70% (40 px -> 28 px) around the center of the original circle (30, 30).
@@ -196,14 +186,11 @@ class ServerNode(QGraphicsItemGroup):
     # status colour, and this box is the size the v1.4.x round dot already had.
     STATUS_DOT_SIZE = 14
 
-    # UI polish: card corner radius and the drop-shadow.
-    # v1.4.2 (ROADMAP task 3): the shadow is a CACHED PIXMAP HALO (see _shadow_pixmap):
-    # it extends the card on all four sides, so boundingRect() is inflated by
-    # SHADOW_BLUR everywhere (+ SHADOW_DY at the bottom — the shadow sits lower).
-    # SHADOW_BOTTOM is kept as the DERIVED total ("how much taller the boundingRect is
-    # than the card", 2*BLUR + DY) — the v0.8.4 collapse checks and the suite read it.
-    # The ANCHORS (arrows, pinned notes, group membership) no longer come from the
-    # boundingRect: they use card_rect()/card_rect_scene() (task 4).
+    # The card corner radius and the drop-shadow: the shadow is a CACHED PIXMAP HALO
+    # (see `_shadow_pixmap`) that extends the card on all four sides, so `boundingRect()` is inflated by
+    # SHADOW_BLUR everywhere (+ SHADOW_DY at the bottom — the shadow sits lower). SHADOW_BOTTOM is kept
+    # as the DERIVED total ("how much taller the boundingRect is than the card") — the collapse checks
+    # and the suite read it. The ANCHORS use `card_rect()`/`card_rect_scene()`, never boundingRect().
     CORNER_RADIUS = theme.RADIUS_NODE
     SHADOW_BLUR = SHADOW_BLUR
     SHADOW_DY = SHADOW_DY
@@ -246,20 +233,18 @@ class ServerNode(QGraphicsItemGroup):
     TAG_PALETTE = theme.ThemeMap("tag_palette", as_list=True)
     TAG_COLORS = theme.ThemeMap("tag_colors")
 
-    # ── v1.5 (ROADMAP): the two optional badges of the card ────────────────────────
-    # THE FREE BAND — the top of the card carries both optional badges, and it is measured:
-    # the alias sits at (55, 18), the host at (55, 36), the info plaque at (10, 58), the
-    # status/SSH marks at (W-46, 23) / (W-24, 23) and the chevron's centre at (W-16, 23) —
-    # so the band `y ≈ 2..17 × x = 55..W-10` is empty in the expanded layout, and neither
-    # the height formula (`58 + info + 12`) nor `MIN_NODE_HEIGHT` changes because of a badge.
+    # ── the two optional badges of the card ────────────────────────
+    # THE FREE BAND — the top of the card carries both optional badges, and it is measured: the alias sits
+    # at (55, 18), the host at (55, 36), the info plaque at (10, 58), the status/SSH marks at (W-46, 23) /
+    # (W-24, 23) and the chevron's centre at (W-16, 23) — so the band `y ≈ 2..17 × x = 55..W-10` is empty
+    # in the expanded layout, and neither the height formula nor `MIN_NODE_HEIGHT` moves for a badge.
     ENV_BADGE_Y = 2.0              # the top of the band (above the alias)
     ENV_BADGE_FONT_SIZE = 7
-    # The EMULATED marker shares the SAME band, right-aligned — the measured geometry left no
-    # other home: the status/SSH marks really sit at y = 46..60 (the item's `y = 23` PLUS the
-    # path's own +23) over the info plaque's top-right corner, so the band is the one place
-    # where a marker cannot cover another channel (and it works in the collapsed layout too,
-    # whose marks are raised to y = 16..30). `_apply_badges()` places this badge FIRST and the
-    # environment chip elides into the room that is left, so the two can never collide.
+    # The EMULATED marker shares the SAME band, right-aligned — the measured geometry left no other home:
+    # the status/SSH marks really sit at y = 46..60 (the item's `y = 23` PLUS the path's own +23) over the
+    # info plaque's top-right corner, so the band is the one place where a marker cannot cover another
+    # channel (and it works in the collapsed layout too, whose marks are raised to y = 16..30).
+    # `_apply_badges()` places this badge FIRST and the environment chip elides into the room that is left.
     DEMO_BADGE_FONT_SIZE = 6
     # v1.6.5 (ROADMAP task 2): the "NO SSH" chip of an UNMANAGED card. It is the SAME
     # channel as the emulated marker — WORDS on a neutral `dot_idle` frame — because a card
@@ -285,17 +270,11 @@ class ServerNode(QGraphicsItemGroup):
     #: drawing ("pro…" yes, "p…" no) — the font-independent half of `BADGE_MIN_SPAN`.
     BADGE_MIN_CHARS = 3
 
-    # ── v1.5.3 (ROADMAP task 1): the AGE of the collected facts ───────────────────
-    # The v1.5rc3 mechanism applied to the SECOND family of measured data. A status is a
-    # fact with a timestamp (the checker owns WHEN and the threshold); the collected
-    # hardware facts carry their own timestamp INSIDE the data (`info_collected_at`, the
-    # collection path writes it) and their own horizon here — the manager of the two halves
-    # is the same: the mark is painted in the IDLE tone, the tooltip names the age, and the
-    # stored VALUE is never touched.
-    # The threshold is deliberately NOT the status one: `max(2 × interval, 90 s)` answers
-    # "did I miss a probe round", while hardware rarely moves — a week is the point where a
-    # "DISK: 468.4 gb" line stops being a measurement and becomes a memory. The mark is a
-    # LABEL: an old fact keeps its value, its card and its size.
+    # ── the AGE of the collected facts ────────────────────────────────────────────
+    # The status-freshness mechanism applied to the SECOND family of measured data: the
+    # facts carry their own timestamp INSIDE the data (`info_collected_at`, written by the
+    # collection path) and their own horizon here. The mark is a LABEL painted in the IDLE
+    # tone — the tooltip names the age, the stored VALUE is never touched (`DOCUMENTATION.md` §46).
     INFO_STALE_AFTER_SEC = 7 * 24 * 3600.0   # one week
 
 
@@ -343,12 +322,11 @@ class ServerNode(QGraphicsItemGroup):
         # is always MARKED as emulated, never carries a freshness line (it is not the
         # result of a probe) and can only be produced by the demo's own declaration.
         self._status_emulated = False
-        # v1.5.3 (ROADMAP task 1): the age of the COLLECTED FACTS. `_info_at` mirrors
-        # `data.info_collected_at` (the window feeds it after a collection and the freshness
-        # tick re-reads it), `_info_stale` is the mark, `_info_tip_full` keeps the full
-        # multi-line info text so the plaque tooltip can compose it with the age line.
-        # Independent of the status freshness above: a card can have a fresh status and
-        # year-old hardware lines, or the other way round.
+        # The age of the COLLECTED FACTS. `_info_at` mirrors `data.info_collected_at` (the window feeds it
+        # after a collection and the freshness tick re-reads it), `_info_stale` is the mark, `_info_tip_full`
+        # keeps the full multi-line info text so the plaque tooltip can compose it with the age line.
+        # Independent of the status freshness: a card can have a fresh status and year-old hardware lines,
+        # or the other way round.
         self._info_at = 0.0
         self._info_stale = False
         self._info_tip_full = ""
@@ -414,12 +392,10 @@ class ServerNode(QGraphicsItemGroup):
         self._pulse.setZValue(-0.5)
         self._pulse.hide()
 
-        # Icon: circle + vector "server" glyph (UI polish: emoji removed —
-        # Segoe UI Emoji renders monochrome/squares on Linux and pixelates on zoom;
-        # QPainterPath is cross-platform and crisp at any scale).
-        # v1.5.6 (ROADMAP task 3): the circle's BRUSH is the card's environment tone —
-        # the primary tag's colour (`_apply_env_icon()`); a card without tags keeps the
-        # neutral `NODE_ICON_BG` it always had.
+        # Icon: a circle + a vector "server" glyph — an emoji renders monochrome/squares on Linux and
+        # pixelates on zoom, while a QPainterPath is cross-platform and crisp at any scale. The circle's
+        # BRUSH is the card's environment tone — the primary tag's colour (`_apply_env_icon()`); a card
+        # without tags keeps the neutral `NODE_ICON_BG` it always had.
         self._icon = QGraphicsEllipseItem(10, 10, 40, 40, self)
         self._icon.setPen(QPen(self.COLOR_BORDER, 2))
         self._apply_env_icon()
@@ -481,8 +457,8 @@ class ServerNode(QGraphicsItemGroup):
         self._host_label.setDefaultTextColor(QColor(theme.DOT_IDLE))
         self._host_label.setPos(55, 36)
 
-        # UI polish: the decorative "SSH button" (🔒) was removed — it wasn't clickable and
-        # was misleading; SSH connection is via double-click / RMB menu.
+        # UI polish: no decorative "SSH button" (a lock glyph was not clickable and
+        # misleading); SSH connection is via double-click / RMB menu.
 
         # v0.8.4 (former DESIGN.md §D): collapse chevron in the top-right corner.
         # Position/geometry are set in update_appearance() for the current mode.
@@ -1057,6 +1033,35 @@ class ServerNode(QGraphicsItemGroup):
 
     # ── v1.6.6 (ROADMAP task 7): the DATA mount of the collected facts ───────────
 
+    def _disk_line(self) -> str:
+        """The `DISK` info line — the chosen DEVICE's figure, or the plain figure (v1.7.1.2).
+
+        `disk` stays a PURE size string in the model (`"100 gb"`), because the inventory's
+        `list_sort_key()` parses that field WHOLE — so the device NAME is composed into the
+        line HERE and never stored into the figure. A card with no choice renders
+        `DISK: 9.8 gb` byte for byte as it did before; a card whose chosen device was not in
+        the last listing has no figure at all and therefore claims no line.
+        """
+        figure = str(getattr(self.data, "disk", "") or "")
+        device = str(getattr(self.data, "disk_device", "") or "").strip()
+        if device and figure:
+            return f"DISK: {device.upper()} {figure}"
+        return f"DISK: {figure}" if figure else ""
+
+    def _disk_devices_text(self) -> str:
+        """The discovered devices as ONE tooltip line — `""` when nothing was listed.
+
+        The list is what `lsblk -d` answered, so the tooltip can name every candidate the
+        user may pick while the card itself keeps ONE line and the measured `58 + info + 12`
+        height (no second line, no elision pressure).
+        """
+        devices = [str(entry).strip()
+                   for entry in (getattr(self.data, "disk_devices", None) or [])
+                   if str(entry).strip()]
+        if not devices:
+            return ""
+        return _t("node.disk_devices", devices=_DEVICE_SEP.join(devices))
+
     def _disk_mount_line(self) -> str:
         """The info line of the MEASURED data mount (v1.6.6) — `""` when there is none.
 
@@ -1078,8 +1083,9 @@ class ServerNode(QGraphicsItemGroup):
         """Compose the plaque tooltip: the full text (when it was elided) + the age line.
 
         The plaque's tooltip is the one place that already answers "what is written here"
-        (the elided full line), so the age joins it instead of opening a second home; a
-        non-elided, undated plaque keeps an empty tooltip exactly as before v1.5.3.
+        (the elided full line), so the age joins it instead of opening a second home, and the
+        discovered DEVICE list joins it too (v1.7.1.2) rather than growing a card line; a
+        non-elided, undated plaque with no device list keeps its empty tooltip.
         """
         lines = []
         if self._info_tip_full:
@@ -1087,6 +1093,9 @@ class ServerNode(QGraphicsItemGroup):
         age = self.info_freshness_text()
         if age:
             lines.append(age)
+        devices = self._disk_devices_text()
+        if devices:
+            lines.append(devices)
         try:
             self._info.setToolTip("\n".join(lines))
         except RuntimeError:
@@ -1190,41 +1199,38 @@ class ServerNode(QGraphicsItemGroup):
         host_text = f"@{self.data.host}"
 
         info_lines = []
-        # v1.6.5 (ROADMAP task 2): an UNMANAGED card has NO hardware lines BY CONSTRUCTION
-        # — nothing was ever collected from a box this user does not administer, so the OS /
-        # CPU / RAM / DISK family is not painted at all. What IDENTIFIES the neighbour stays:
-        # its address and the COMMENT (the "what is this box for" line, which is exactly what
-        # a documented appliance has). The measured height formula (`58 + info + 12`) and the
-        # `MIN_NODE_HEIGHT` floor are untouched — they follow the lines that remain.
+        # An UNMANAGED card has NO hardware lines BY CONSTRUCTION — nothing was ever collected from a box
+        # this user does not administer, so the OS / CPU / RAM / DISK family is not painted at all. What
+        # IDENTIFIES the neighbour stays: its address and the COMMENT (the "what is this box for" line).
+        # The measured height formula (`58 + info + 12`) and the `MIN_NODE_HEIGHT` floor are untouched —
+        # they follow the lines that remain (`AGENTS.md` §4.21).
         unmanaged = self.unmanaged
         if not unmanaged:
-            # v0.9: OS on its OWN line (main source — auto-collection, but the field is editable)
-            # v1.6.1 (ROADMAP task 10): the CPU MODEL used to ride this line as `f"{os} · {model}"`,
-            # and the line is elided to the card width — at the measured 360 px cap the OS name
-            # alone already overflows, so the model never reached the card at all (it survived in
-            # the tooltip only). The OS line carries the OS; the line that already owns the CPU
-            # fact is built from `cpu` and `cpu_model` in that order under the empty-field rule
-            # (an empty field adds no line), so the NUMBER of info lines — and with it the
-            # measured `58 + info + 12` height — does not move.
+            # The OS line carries the OS ALONE: the CPU model does not ride it (`f"{os} · {model}"` was
+            # elided away — the line is elided to the card width and at the measured 360 px cap the OS
+            # name alone already overflows, so the model never reached the card). The line that already
+            # owns the CPU fact is built from `cpu` and `cpu_model` in that order under the empty-field
+            # rule (an empty field adds no line), so the line count and the measured height do not move.
             if getattr(self.data, "os_name", ""):
                 info_lines.append(self.data.os_name)
             cpu_text = " · ".join(
                 part for part in (self.data.cpu, getattr(self.data, "cpu_model", "")) if part)
             if cpu_text: info_lines.append(f"CPU: {cpu_text}")
             if self.data.ram: info_lines.append(f"RAM: {self.data.ram}")
-            if self.data.disk: info_lines.append(f"DISK: {self.data.disk}")
-            # v1.6.6 (ROADMAP task 7): the DATA mount — the SECOND filesystem, and the one the
-            # capacity question is usually about. ONE more info line, built from the measured
-            # pair, so the measured height formula (`58 + info + 12`) follows the line count
-            # exactly as it always has; the info freshness of v1.5.3 covers it for free (it is a
-            # collected fact with the same date) and the COMPACT density drops it with the rest
-            # of the block. `LIST_COLUMNS` is untouched: the data mount is not an inventory
-            # column.
+            # The capacity line — the chosen DEVICE's figure when the card names one, the plain
+            # figure otherwise; the name is composed here, never stored into `disk` (v1.7.1.2).
+            disk_line = self._disk_line()
+            if disk_line: info_lines.append(disk_line)
+            # The DATA mount — the SECOND filesystem, and the one the capacity question is usually about.
+            # ONE more info line, built from the measured pair, so the measured height formula
+            # (`58 + info + 12`) follows the line count exactly as it always has; the info freshness
+            # covers it for free (it is a collected fact with the same date) and the COMPACT density drops
+            # it with the rest of the block. `LIST_COLUMNS` is untouched: not an inventory column.
             disk_mount_line = self._disk_mount_line()
             if disk_mount_line: info_lines.append(disk_mount_line)
         if self.data.ip: info_lines.append(f"IP: {self.data.ip}")
         if self.data.ssh_port != 22: info_lines.append(f"SSH:{self.data.ssh_port}")
-        # UI polish: the emoji prefix on the comment was removed (consistent style without emoji)
+        # UI polish: no emoji prefix on the comment (a consistent style without emoji)
         if self.data.comment: info_lines.append(self.data.comment)
 
         fm_alias = QFontMetrics(self._alias.font())
@@ -1816,7 +1822,7 @@ class ServerNode(QGraphicsItemGroup):
                     item.setOpacity(float(v))
                     self.update()
                 except RuntimeError:
-                    pass  # Qt teardown: the node was removed during the pulse, the C++ item is gone
+                    pass  # Qt teardown: the node is gone (deleted during the pulse)
 
             def _on_finished(item=self._pulse):
                 try:

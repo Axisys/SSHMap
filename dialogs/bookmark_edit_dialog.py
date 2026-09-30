@@ -1,27 +1,16 @@
 # -*- coding: utf-8 -*-
-"""v1.6.7 (ROADMAP v1.6.7): the bookmarks editor — its OWN dialog.
+"""The bookmarks editor — its OWN dialog (AGENTS.md §4.23; DOCUMENTATION.md §57).
 
-The quick-launch editor (`dialogs/quick_launch_dialog.py`) is PER SERVER and would have to
-ignore a server argument here, so the two share the entry SHAPE and the opener and nothing
-else. This one edits the APPLICATION-LEVEL list of `modules/bookmarks.py`: add, edit,
-remove and reorder in place, writing ONLY `"type": "url"` entries through the store.
+The quick-launch editor is PER SERVER and would have to ignore a server argument here, so the two share
+the entry SHAPE and the opener and nothing else. This one edits the APPLICATION-LEVEL list of
+`modules/bookmarks.py`: add, edit in place, remove and reorder, writing ONLY `"type": "url"` entries
+through the store.
 
-Pinned decisions (ROADMAP v1.6.7):
-
-  * **The editor writes the URL subset and nothing else.** `BookmarkStore.save_urls()` keeps
-    every foreign entry (a hand-edited or plugin-written `command`) exactly where it is, so
-    the editor can never drop one by not showing it.
-  * **The message boxes are module attributes taken at CALL time** (the quick-launch
-    precedent): a test monkeypatches `BED.QMessageBox.warning` and no modal ever opens.
-  * **The validation sentences are the EXISTING quick-launch keys** (`validation.ql_*`) —
-    the two editors validate the very same shape, and one rule with two wordings would be
-    two rules.
-  * **Import/export is deliberately NOT part of it**: the file is plain JSON under
-    `~/.sshmap/`, and the ask is about USING links, not about moving them.
-
-Dialog pattern — the same as `QuickLaunchDialog`: i18n through a try-import with an English
-fallback, `get_entries()` returns the list after `accept()`.
-"""
+Pinned: the editor writes the URL subset and nothing else — `BookmarkStore.save_urls()` keeps every
+foreign entry (a hand-edited or plugin-written `command`) exactly where it is, so the editor can never
+drop one merely by not showing it; the message boxes are module attributes taken at CALL time (the
+quick-launch precedent), so a test monkeypatches `BED.QMessageBox.warning` and no modal ever opens; the
+validation sentences are the EXISTING quick-launch keys (`validation.ql_*`), because the two editors validate the very same shape and one rule with two wordings would be two rules; and import/export is deliberately NOT part of it — the file is plain JSON under `~/.sshmap/` and the ask is about USING links, not moving them. The dialog pattern matches `QuickLaunchDialog`: i18n through a try-import with an English fallback, and `get_entries()` returns the list after `accept()`."""
 
 from typing import List, Optional
 

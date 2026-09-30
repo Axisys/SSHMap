@@ -1,64 +1,25 @@
 # -*- coding: utf-8 -*-
-"""v1.3.2 (ROADMAP v1.3.2, task 1): the action registry of the configurable hotkeys.
+"""The action registry of the configurable hotkeys — the SINGLE SOURCE OF TRUTH for the global
+keyboard shortcuts (AGENTS.md §4.9, DOCUMENTATION.md §31).
 
-SINGLE SOURCE OF TRUTH for the global keyboard shortcuts of the main window: menu
-QActions and QShortcuts are created WITHOUT a literal sequence and receive it from
-here — ``MainWindow._apply_hotkeys()`` at startup (after the UI construction) and
-live after the settings dialog's OK (``QAction.setShortcut`` / ``QShortcut.setKey``),
-without a restart. No literal ``"Ctrl+…"`` is scattered across the modules any more.
-
-The registry is one declarative list ``{action_id: {...}}``:
-
-* ``label``   — the i18n key of the action's NAME. It REUSES the existing menu keys
-                (no new strings for the settings table); the value is a key, not a
-                literal.
-* ``default`` — the sequence of v1.3.1.1 (the behavior documented for this version).
-                v1.3.3.3: an EMPTY default is a first-class value — see below.
-* ``alt``     — optional extra sequences that follow the DEFAULT only (the legacy
-                redo alias Ctrl+Y): they are dropped as soon as the user picks a
-                sequence of their own for that action.
-* ``dynamic`` — the sequence is installed ONLY in a certain mode (multi-input F12,
-                v1.2.3 / v1.2.4-fix): ``apply_to()`` skips such actions, the mode
-                implementation owns them (``SshMixin._sync_multi_shortcut``).
-
-**The empty default (v1.3.3.3, ROADMAP task 3).** The registry is the single source of
-truth for the ACTIONS, not only for the sequences that happened to exist in v1.3.1.1:
-EVERY global action of the menus/sidebar/palette has an entry here. An action whose
-``default`` is ``""`` simply has NO hotkey out of the box — it behaves exactly as
-before (the menu item exists, the keyboard cannot reach it) — but it becomes
-ASSIGNABLE in the "Hotkeys" tab. This is what closes "the action exists but the
-keyboard cannot reach it": the audit in ``tests/test_actions_keyboard.py`` requires
-every global action to be registered (no orphans), and a new global action = one line
-here + ``MainWindow._register_hotkey_target()`` at creation.
-
-Storage — the ``hotkeys`` key of ``~/.sshmap/config.json`` (dict action_id → "Ctrl+K",
-merge-write via ``i18n.save_config``; the key itself is optional). Rules:
-
-* a missing action_id → the default sequence (which may be "" = no hotkey);
-* an unknown action_id → ignored (a downgrade / a rename must not break the config);
-* a broken value (not a string / an unparsable sequence) → the default + a log line;
-* an empty string → the action's hotkey is DISABLED (the action itself stays available
-  from the menu) — the documented way to turn a hotkey off.
-
-Sequences are canonicalized through ``QKeySequence`` (PortableText): the stored form,
-the dialog's form and the compared form are always the same string (``"Delete"`` and
-``"Del"`` are one sequence).
-
-**Scope boundary** (pinned in DOCUMENTATION.md): the terminal canvas's OWN keys
-(F1–F12, Ctrl+C/D/Z, arrows — xterm protocol territory) are NOT configurable; they
-belong to the wire protocol, not to the application's action map.
-"""
+One declarative list `{action_id: {...}}`: `label` (the i18n key of the action's NAME — it reuses the
+existing menu keys), `default` (the shipped sequence; an EMPTY `""` is first-class: the action has no
+hotkey out of the box but is ASSIGNABLE in the "Hotkeys" tab), `alt` (extra sequences that follow the
+default only — the legacy redo `Ctrl+Y`) and `dynamic` (only in a mode: multi-input F12; `apply_to()` skips).
+`MainWindow._apply_hotkeys()` installs the sequences at startup and live after the settings OK;
+storage is the `hotkeys` key of `~/.sshmap/config.json` (missing → the default, unknown → ignored,
+broken → the default + a log line, `""` → the hotkey DISABLED); sequences are canonicalized through
+`QKeySequence` (PortableText), so "Delete" and "Del" are ONE. The canvas's OWN keys (F1–F12, Ctrl+C/D/Z,
+arrows — xterm protocol) are NOT configurable."""
 
 from typing import Dict, List, Optional, Sequence
 
 from PySide6.QtGui import QKeySequence, QShortcut
 
 # ── The registry (declaration order = the order of the settings table's rows) ──────
-# v1.3.3.3: 30 actions — the 18 of v1.3.2 (each with the sequence it had) + 4 NEW
-# defaults (file.save_as Ctrl+Shift+S, view.reset_zoom Ctrl+0, view.zoom_in Ctrl+=,
-# view.zoom_out Ctrl+-) + 8 more that had no shortcut and now have an EMPTY default
-# (assignable, no behavior change). `test_actions_keyboard.py` keeps the count and the
-# completeness honest.
+# `test_actions_keyboard.py` keeps the count and the completeness honest. An action may ship with an
+# EMPTY default (assignable, no behaviour change) — the counts and the shipped figures live in
+# `AGENTS.md` §4.9, which is their owner.
 HOTKEY_ACTIONS: Dict[str, dict] = {
     # File
     "file.new":             {"label": "file.new_project",    "default": "Ctrl+N"},
@@ -127,11 +88,10 @@ HOTKEY_ACTIONS: Dict[str, dict] = {
     # the canvas background. A POSTER of the map (a scene render: the floating panels and
     # the chrome are children of the view, so they are deliberately not in the image).
     "file.docs_frame":      {"label": "file.docs_frame",      "default": ""},
-    # v1.5.5 (ROADMAP tasks 2/3): the inventory REPORT of the LIST mode — "Copy List as
-    # TSV" (the visible table straight to the clipboard) and "Export List…" (CSV or TSV
-    # through the ordinary save dialog). Both are File-menu items and both act on what is
-    # ON SCREEN (the columns, the rows the filters kept, the sort the user picked), so the
-    # window enables them only while the table exists (the map is collapsed). An EMPTY
+    # The inventory REPORT of the LIST mode — "Copy List as TSV" (the visible table straight to the
+    # clipboard) and "Export List…" (CSV or TSV through the ordinary save dialog). Both are File-menu
+    # items and both act on what is ON SCREEN (the columns, the rows the filters kept, the sort the user
+    # picked), so the window enables them only while the table exists (the map is collapsed). An EMPTY
     # default like their export siblings: assignable, no key taken from anyone.
     "file.copy_list":       {"label": "file.copy_list",       "default": ""},
     "file.export_list":     {"label": "file.export_list",     "default": ""},
@@ -189,13 +149,11 @@ HOTKEY_ACTIONS: Dict[str, dict] = {
     "profile.manage":       {"label": "profile.manage",       "default": ""},
     "help.open_logs":       {"label": "help.open_logs",       "default": ""},
     "help.about":           {"label": "about.open",           "default": ""},
-    # v1.5rc3 (ROADMAP tasks 1/4): the two new Help entries. "Keyboard shortcuts" — the
-    # registry-derived cheat-sheet Help → About already renders — is the ONE action of
-    # this release that ships with a key: F1 is the platform's own "help" key and it is
-    # free (the terminal canvas owns F1–F12 only while IT has the focus, which is the
-    # xterm-protocol boundary of §4.9, not a conflict). The `?` key that opens the same
-    # window lives on the MAP (`MainWindow.keyPressEvent`) — a bare printable key must
-    # never become a window shortcut, or it would steal "?" from every text field.
+    # The two Help entries. "Keyboard shortcuts" — the registry-derived cheat-sheet that Help → About
+    # already renders — is the ONE action here that ships with a key: F1 is the platform's own "help"
+    # key and it is free (the terminal canvas owns F1–F12 only while IT has the focus — the
+    # xterm-protocol boundary of §4.9, not a conflict). The `?` key that opens the same window lives
+    # on the MAP (`MainWindow.keyPressEvent`): a bare printable key must never become a shortcut.
     "help.cheatsheet":      {"label": "help.cheatsheet",      "default": "F1"},
     "help.example":         {"label": "example.open",         "default": ""},
     # v1.4rc1 (plugin foundation): "Reload plugins" — a re-discovery of the plugin
@@ -212,15 +170,11 @@ HOTKEY_ACTIONS: Dict[str, dict] = {
 EMPTY_DEFAULT_ACTIONS = tuple(aid for aid, spec in HOTKEY_ACTIONS.items()
                               if not str(spec.get("default", "")).strip())
 
-# ── v1.5rc4 (ROADMAP task 4): the FAMILIES of the actions ─────────────────────
-# The "Hotkeys" tab groups its rows by family so a 52-row table stops being one long
-# wall. The families are the application's OWN areas (the same six the plan pins) and
-# they are derived from the action ID — NOT declared a second time per action, so a new
-# action joins its family by being named `<family>.<something>` and cannot be forgotten.
-# The two prefixes that do not spell a family are mapped deliberately:
-#   * `palette.` — the command palette is a global overlay over the map (the View family);
-#   * `profile.` — a profile is edited server data (the Edit family).
-# `actions_by_family()` is the SINGLE source of the tab's row order (and of its counts).
+# ── the FAMILIES of the actions ──────────────────────────────────────────────
+# The "Hotkeys" tab groups its rows by family so a 52-row table stops being one long wall. The
+# families are derived from the action ID — NOT declared a second time per action, so a new
+# action joins its family by being named `<family>.<something>`. The two prefixes that do not
+# spell a family: `palette.` → View, `profile.` → Edit. `actions_by_family()` is the ONE source.
 FAMILY_ORDER = ("file", "edit", "view", "node", "plugins", "help")
 
 _FAMILY_PREFIXES = (

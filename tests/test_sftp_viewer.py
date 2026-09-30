@@ -1,42 +1,12 @@
 # -*- coding: utf-8 -*-
 """v1.3.1 — File viewer in the SFTP tab (text ≤ 1 MB over SFTP, ROADMAP v1.3.1).
 
-The release theme: the read-only preview inside the existing SFTP tab (stage 3 of the
-file chain; stage 4 "editing" is rejected). Everything is checked WITHOUT the network:
-the fake in-memory SFTP of tests/_fakes.py, extended locally by a client that journals
-open() calls TOGETHER WITH THE THREAD they happened on (the acceptance requires that the
-reading happens on the worker thread — never on the GUI thread).
-
-The sections:
-  1. The worker's "read" task: a text file ≤ 1 MB → read_ready with the exact bytes,
-     the progress signals in order (monotonically growing, the last == the size),
-     task_done after read_ready.
-  2. Refusals: a file over MAX_READ_BYTES with a KNOWN size (not opened at all),
-     an unknown size (the guard trips mid-read), a known-binary extension (not
-     opened), a null byte in the first chunk — all as task_error with the machine
-     codes; the queue survives them.
-  3. The pure helpers: classify_extension (text/binary/unknown + the lists),
-     decode_text (UTF-8, the BOM, the Latin-1 fallback).
-  4. The tab offscreen: a double click on a file → a "read" task of the worker queue
-     (opened on the worker thread, not the GUI thread) → the preview panel [tree |
-     viewer] with the content and the header (path + size); another file replaces the
-     content; × hides it; a repeated double click reopens it; a directory still
-     navigates; two rapid double clicks end on the LAST file (the staleness filter).
-     v1.3.3.2: the NEW context menu of the file operations does not shadow the
-     double-click preview (it opens no panel and queues no read).
-  5. The refusals and the "no preview" markers in the listing: the translated
-     messages, no panel, nothing opened — and the row marks (v1.3.1.1): the pure
-     helper preview_block_reason (a session fact → the certain size → the extension
-     guess), the recoloured file glyph + the tooltip of a marked row, a directory
-     never marked, the mark learned from a REAL refusal (a null byte inside a
-     .txt — invisible to the extension), the mark surviving a re-listing and the
-     facts dropped with the transport.
-  6. Encodings: the Latin-1 fallback + the note in the header; a UTF-8 BOM is stripped.
-  7. Teardown: page.shutdown() closes the preview (ROADMAP task 4) + set_worker(None).
-  8. i18n (7 sftp.viewer.* keys × en/ru/zh, parity 446 → 453) + the release state.
-
-Run:  python tests/test_sftp_viewer.py   (from the project root) or python tests/run_all.py
-"""
+The release theme: the read-only preview inside the existing SFTP tab (stage 3 of the file chain; stage
+4 "editing" is rejected). Everything is checked WITHOUT the network — the fake in-memory SFTP of
+tests/_fakes.py, extended by a client that journals `open()` calls with the THREAD they ran on.
+§1 the worker's "read" task and its progress order; §2 the refusals (over MAX_READ_BYTES, an unknown
+size, a binary extension, a null byte) and the queue surviving them; §3 `classify_extension` / `decode_text`;
+§4–§5 the tab offscreen, its staleness filter and the markers; §6–§8 the encodings, the teardown, i18n."""
 import os
 import sys
 import threading

@@ -1,59 +1,12 @@
 # -*- coding: utf-8 -*-
-"""v1.1.2RC3 — Terminal windows (ROADMAP v1.1.2RC3, AUDIT §4/§5).
+"""Terminal windows: the DECCKM arrows, the split pane and the window-level bridges.
 
-Section 1 — U3 "the arrows do not work in mc" (implemented early, before the RC3 release):
-the root cause is confirmed — the full-screen TUIs (mc/vim/htop) on the start send
-smkx \x1b[?1h (DECCKM, Application Cursor Keys Mode) and further EXPECT the arrows in
-the SS3 form (\\x1bOA…\\x1bOD), not in the CSI (\\x1b[A…). The old handler went hard
-CSI — mc did not understand them ("they do not work"), and in the bash under mc the same bytes paged
-the history (the symptom from the users' remarks). The fix: TerminalWidget chooses
-the sequence by tscreen.application_cursor_keys() (the arrows + Home/End;
-PageUp/PageDown/Delete are DECCKM-independent — always CSI ~).
+Offscreen, NO network (the fake threads). Pins the SS3 arrows a full-screen TUI asks for
+(DECCKM), the split pane as a session in the registry, the status/plumbing bridges that follow
+the FOCUSED pane, and the bounded teardown of both.
+Contract — `AGENTS.md` §4.3; mechanism — `DOCUMENTATION.md` §14/§14g.
 
-The verified fact of pyte 0.8.2 (a run on the installed version): the private modes
-are stored in screen.mode with a 5-bit left shift (set_mode(private=True):
-mode << 5) — DECCKM is **32**, not 1; the canonical check from the internet
-"1 in screen.mode" never fires. By default DECAWM is enabled
-(7<<5=224, the auto-wrap) and DECTCEM (25<<5=800, the cursor is visible). pyte.modes in 0.8.2
-has no the DECCKM constant.
-
-Sections 2–4 — U3 the keyboard/thread safety (CSI by default, SS3 on DECCKM,
-the feed from the SSH thread in parallel with the read of the mode).
-
-Section 5 — N7: the selection reset when the new output auto-returns the scrollback to the live.
-The detection: the pyte HistoryScreen.before_event() on ANY event except prev/next_page
-snaps the position back to size (the auto-return), and feed() — the only path
-that changes the position without a manual scroll; hence pos_before != pos_after ⇔ the auto-return
-happened → widget.clear_selection(). The rationale: the selection coordinates (row, col)
-are fixed in the release on the HISTORICAL screen, and after the return they point to
-OTHER cells of the live screen — Ctrl+C would copy a foreign text. Without the new output /
-without an active selection the behavior of a plain click and Ctrl+C is unchanged (the
-regressions are checked: the selection with the live output lives; the Ctrl+C with the selection copies, without —
-\x03).
-
-Section 6 — U3 the rest: the wheel passthrough via the config terminal_wheel
-("scrollback" the default | "off"). pyte 0.8.2 does not track the mouse modes DECSET
-1000/1002/1006, therefore the full SGR passthrough of the wheel into the full-screen TUI is deferred
-to v1.2+ (a blind forwarding would pollute the shell without a mouse mode). "off": the wheelEvent
-ignores the event — the local scrollback is not scrolled by the wheel, nothing goes
-into the PTY; the scrollback stays on Ctrl+Shift+PageUp/PageDown. The key is only the config
-(the decision of ROADMAP v1.1.2RC3: without the UI in the settings dialog, the i18n parity 375
-is unchanged; with v1.1.2 final the parity 377 — see tests/test_status_parallel.py).
-
-Section 7 — U2: the save/restore of the window sizes (modules/window_geometry.py):
-on the close saveGeometry()/saveState() → base64 → ~/.sshmap/config.json
-(ui_window_geometry_main / ui_window_geometry_terminal), on the start of MainWindow and
-the creation of a terminal window — the restore. A broken value / no key → a no-op + the default
-size; both functions never raise (teardown-safe). The offscreen virtual screen
-800×800: the test sizes ≤ 700×500, the SIZE is compared (the position drifts +5 on
-the simulated menubar), the default of a fresh QMainWindow — 640×480, hence the round-trip
-is checked with a non-default 700×500.
-
-Section 8 — the release state: APP_VERSION == "1.1.3" (the pin updated to the final of the series),
-the pyproject/requirements pins.
-
-Run:  python tests/test_rc3_terminal_window.py   (from the project root) or python tests/run_all.py
-"""
+Run: python tests/test_rc3_terminal_window.py   (from the project root) or python tests/run_all.py"""
 import json
 import os
 import sys

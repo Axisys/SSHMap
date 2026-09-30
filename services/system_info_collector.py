@@ -1,35 +1,16 @@
 # -*- coding: utf-8 -*-
-"""v0.9: Automatic collection of Linux server info over SSH (CPU/RAM/DISK/OS).
+"""Automatic collection of Linux server info over SSH — CPU / RAM / DISK / OS (§24, §46).
+ONE batch of commands through a single `exec_command()` of the existing paramiko stack, marked with
+section markers and parsed section by section — deliberately NOT tied to the `StatusChecker` (that one
+makes lightweight TCP probes WITHOUT authentication, so credentials must never reach it).
+`SystemInfoCollector(data, password=…)` emits `info_ready(server_id, info_dict)` /
+`info_failed(server_id, error_text)`; `info_dict` carries `os_name`, `cpu_model`, `cpu_cores`,
+`ram_gb`, `disk_gb` and the DEVICE list `disk_devices` beside the DATA-mount family `disk_path` /
+`disk_free` / `disk_size` / `disk_note`.
 
-One batch of commands through a single exec_command() of the existing paramiko
-stack — the output is marked with section markers (--MARKER--) and parsed
-section by section.
-
-NOT tied to the StatusChecker: that one does lightweight TCP probes without
-authentication; credential data must not be passed to it (roadmap v0.9, task 5).
-
-Usage:
-    collector = SystemInfoCollector(server_data, password="...")
-    collector.info_ready.connect(on_ready)    # (server_id, info_dict)
-    collector.info_failed.connect(on_fail)    # (server_id, error_text)
-    collector.start()
-
-info_dict contains only the successfully parsed keys:
-    os_name, cpu_model, cpu_cores, ram_gb, disk_gb
-    + v1.6.6: disk_path, disk_free, disk_size, disk_note (the DATA mount)
-
-v1.6.6 (ROADMAP task 4): the DISK section reads TWO mount points in ONE `df` — the ROOT (the
-figure `disk` has always carried) and the node's **data mount** (`ServerData.disk_mount`, the
-REQUEST; `""` means the DECLARED default `DISK_MOUNT_DEFAULT` = `/opt`). A server whose
-capacity lives on a separate logical volume used to report the root's small number and hide
-the filesystem that really holds the data; now both rows are read and `resolve_disk_answer()`
-answers with the MOUNT POINT `df` really reported, so a host without a data mount answers `/`
-instead of claiming one. A share is refused BY NAME: `NETWORK_FS_TYPES` is the DECLARED
-classifier and a data mount on one of those filesystems is never reported as capacity — the
-pair is left EMPTY and `disk_note` names what was found, which the window turns into a
-sentence in the collection's own report (status bar + activity history). A path that does not
-exist yields no row (and the shell's own `present`/`absent` token says so), never an error.
-"""
+Two REQUEST/ANSWER pairs beside the root: the data MOUNT (`disk_mount`, `""` ⇒ `DISK_MOUNT_DEFAULT`) is
+answered by the mount point `df` reported (a share refused BY NAME), the DEVICE choice (`disk_device`)
+by that device's `lsblk -d` capacity — a name the listing does not hold is REPORTED, never a guess."""
 
 from typing import Dict
 
@@ -49,12 +30,10 @@ log = get_logger(__name__)
 
 
 # ── Collection batch: one exec_command, output marked with markers ──────────
-# v1.6.6 (ROADMAP task 4): the DISK section reads the ROOT and the node's DATA MOUNT in ONE
-# `df` (both paths as arguments, the 5 columns of `--output`), and the DISKMOUNT section
-# carries the shell's own answer to "does that path exist at all" — a nonexistent path makes
-# `df` print NOTHING for it, which is indistinguishable from "it lives on the root" without
-# that token. `__DISK_MOUNT__` is the ONE placeholder, replaced by `build_info_batch()` with a
-# single-quoted shell word (a path is user input and never reaches the remote shell unquoted).
+# The DISK section reads the ROOT and the node's DATA MOUNT in ONE `df` (both paths as arguments, the
+# 5 columns of `--output`), the DISKS section lists the physical devices (`lsblk -d`, no user input)
+# and the DISKMOUNT section answers "does that path exist": a nonexistent path makes `df` print
+# NOTHING. `__DISK_MOUNT__` becomes ONE single-quoted word — user input never reaches the shell bare.
 DISK_MOUNT_TOKEN = "__DISK_MOUNT__"
 INFO_BATCH = r"""
 echo ---OS---
@@ -68,6 +47,8 @@ free -b 2>/dev/null | awk '/Mem:/{print $2}'
 grep MemTotal /proc/meminfo 2>/dev/null
 echo ---DISK---
 df -B1 --output=source,fstype,size,avail,target / __DISK_MOUNT__ 2>/dev/null
+echo ---DISKS---
+lsblk -d -n -b -o NAME,SIZE,TYPE 2>/dev/null
 echo ---DISKMOUNT---
 [ -e __DISK_MOUNT__ ] && echo present || echo absent
 echo ---END---
@@ -78,6 +59,7 @@ _SECTION_OS = "---OS---"
 _SECTION_CPU = "---CPU---"
 _SECTION_RAM = "---RAM---"
 _SECTION_DISK = "---DISK---"
+_SECTION_DISKS = "---DISKS---"
 _SECTION_DISKMOUNT = "---DISKMOUNT---"
 _SECTION_END = "---END---"
 
@@ -94,7 +76,14 @@ NETWORK_FS_TYPES = ("nfs", "nfs4", "cifs", "smbfs", "fuse.sshfs")
 DISK_REFUSAL_NONE = ""
 DISK_REFUSAL_MISSING = "missing"     # the requested path yielded no row / does not exist
 DISK_REFUSAL_NETWORK = "network"     # the mount is a share — refused by name
+DISK_REFUSAL_DEVICE = "device"       # the named DEVICE is not in the `lsblk` listing
 DISK_NOTE_MISSING = "missing"        # the note the parser writes for a path that is not there
+DISK_NOTE_DEVICE_MISSING = "device-missing"   # the note the collector writes for a vanished device
+
+#: The `lsblk` TYPE that declares a PHYSICAL disk: `sda`, `nvme0n1`, `vda`, `xvda`, `mmcblk0` carry
+#: it, while `loop`, `rom`, `dm-*` and `md*` carry their own — so the filter is a declaration about
+#: the DEVICE, never about the shape of its name.
+DISK_TYPE_PHYSICAL = "disk"
 
 
 def sh_quote(text: str) -> str:
@@ -331,9 +320,10 @@ def resolve_disk_answer(rows, present: bool = True) -> dict:
 
 
 def disk_refusal_kind(note) -> str:
-    """The KIND of a data-mount refusal, from the note the parser wrote (PURE, v1.6.6).
+    """The KIND of a refusal, from the note the parser wrote (PURE, v1.6.6).
 
     `""` — nothing was refused; `DISK_REFUSAL_MISSING` — the requested path is not there;
+    `DISK_REFUSAL_DEVICE` — the DEVICE the card is about is not in the `lsblk` listing;
     `DISK_REFUSAL_NETWORK` — the mount is a share, and the note itself NAMES the filesystem
     type that made it one (which is what "refused by name" means). The window composes the
     sentence from this kind; the collector logs it in English.
@@ -343,21 +333,118 @@ def disk_refusal_kind(note) -> str:
         return DISK_REFUSAL_NONE
     if text == DISK_NOTE_MISSING:
         return DISK_REFUSAL_MISSING
+    if text == DISK_NOTE_DEVICE_MISSING:
+        return DISK_REFUSAL_DEVICE
     return DISK_REFUSAL_NETWORK if is_network_fs(text) else DISK_REFUSAL_NONE
 
 
-def parse_info_output(output: str) -> Dict[str, str]:
+# ── The DEVICE choice beside the root (`lsblk -d -n -b -o NAME,SIZE,TYPE`) ──
+
+def parse_lsblk_report(text: str) -> list:
+    """The rows of ONE `lsblk -d -n -b -o NAME,SIZE,TYPE` run (PURE).
+
+    Returns `[(name, size, type), …]` with the size as an int and both strings exactly as
+    `lsblk` printed them (the NAME is never normalised — it is the kernel's own spelling).
+    A section marker, an empty line and every unparsable line are DROPPED, so an `lsblk`
+    that is absent, too old or refused (BusyBox, a minimal container) yields `[]` — a
+    degradation, never an error. `-d` keeps ONE row per device (no partitions, no holders)
+    and `-n` drops the header the parser would otherwise have to skip.
+    """
+    rows = []
+    for line in text.splitlines():
+        s = _clean_text(line)
+        if not s or s.startswith("---"):
+            continue
+        parts = s.split(None, 2)
+        if len(parts) < 3:
+            continue
+        name, size_raw, dev_type = parts[0], parts[1], parts[2]
+        if not size_raw.isdigit():
+            continue
+        rows.append((name, int(size_raw), dev_type))
+    return rows
+
+
+def physical_disks(rows) -> list:
+    """The PHYSICAL devices of an `lsblk` report — `TYPE == "disk"` (PURE).
+
+    A loop device, a CD-ROM (`rom`), an LVM volume (`dm-*`), a software array (`md*`) and
+    every other holder carry their OWN type and are dropped, while a new bus, a new name or
+    a new kernel changes nothing: the TYPE is the DECLARATION and the name is not. Answers
+    `[(name, size_bytes), …]` and skips a malformed row instead of raising.
+    """
+    out = []
+    for row in rows or ():
+        try:
+            name, size, dev_type = row
+        except (TypeError, ValueError):
+            continue
+        if str(dev_type).strip().lower() != DISK_TYPE_PHYSICAL:
+            continue
+        try:
+            size = int(size)
+        except (TypeError, ValueError):
+            continue
+        name = str(name).strip()
+        if name:
+            out.append((name, size))
+    return out
+
+
+def device_label(name, size) -> str:
+    """The ONE label of a device — `"sda 9.7 gb"` (PURE).
+
+    The stored LIST, the dialog's combo and the card's tooltip render a device through this
+    function, so the three surfaces cannot drift apart. A capacity that cannot be formatted
+    (a real zero) leaves the bare name, because a device of unknown size is better named
+    than mislabelled.
+    """
+    figure = bytes_to_gb(size)
+    text = str("" if name is None else name).strip()
+    return f"{text} {figure}".strip() if figure else text
+
+
+def device_labels(rows) -> list:
+    """The stored LIST of the physical devices — `["sda 9.7 gb", "sdb 100 gb"]` (PURE)."""
+    return [device_label(name, size) for name, size in physical_disks(rows)]
+
+
+def resolve_disk_device(devices, requested) -> dict:
+    """The ANSWER of the DEVICE choice, from the devices `lsblk` listed (PURE).
+
+    Returns `{"name", "size", "note"}`. `name` is the REQUEST as the model holds it and is
+    EMPTY when the node names no device at all — then the root's `df` figure is the figure
+    `disk` carries, exactly as it did before the choice existed (the feature is per-card and
+    opt-in). A request the listing HOLDS answers that device's capacity; a request it does
+    not hold answers `DISK_NOTE_DEVICE_MISSING` and NO figure — device names are not stable
+    (`sdb` becomes `sdc` when a disk is added), so a miss is REPORTED and a card never
+    silently shows the number of a disk the user did not name. The match is by NAME and
+    case-insensitive: `lsblk` spells the names lower-case, a user may not.
+    """
+    name = str("" if requested is None else requested).strip()
+    if not name:
+        return {"name": "", "size": "", "note": ""}
+    wanted = name.lower()
+    for dev_name, size in physical_disks(devices):
+        if dev_name.lower() == wanted:
+            return {"name": name, "size": bytes_to_gb(size), "note": ""}
+    return {"name": name, "size": "", "note": DISK_NOTE_DEVICE_MISSING}
+
+
+def parse_info_output(output: str, disk_device: str = "") -> Dict[str, object]:
     """Parse the whole batch output by markers → a dict of finished values.
 
     Only non-empty values go into the dict; the field format matches the model
-    (cpu_cores — as a string, ram/disk — "N gb").
+    (cpu_cores — as a string, ram/disk — "N gb"). `disk_device` is the node's own
+    REQUEST — the device name the card is about — because the answer depends on it.
     """
     sections = {}
     current = None
     for line in output.splitlines():
         line = line.rstrip("\r")
         s = line.strip()
-        if s in (_SECTION_OS, _SECTION_CPU, _SECTION_RAM, _SECTION_DISK, _SECTION_DISKMOUNT):
+        if s in (_SECTION_OS, _SECTION_CPU, _SECTION_RAM, _SECTION_DISK, _SECTION_DISKS,
+                 _SECTION_DISKMOUNT):
             current = s
             sections[current] = []
         elif s == _SECTION_END:
@@ -365,7 +452,7 @@ def parse_info_output(output: str) -> Dict[str, str]:
         elif current is not None:
             sections[current].append(line)
 
-    result: Dict[str, str] = {}
+    result: dict = {}
 
     os_name = parse_os_release("\n".join(sections.get(_SECTION_OS, [])))
     if os_name:
@@ -387,12 +474,11 @@ def parse_info_output(output: str) -> Dict[str, str]:
     if disk_gb:
         result["disk_gb"] = disk_gb
 
-    # v1.6.6 (ROADMAP task 4): the TWO-mount read. The ROOT keeps the figure it ships
-    # (`disk_gb`, whose number the inventory's sort key parses) and the DATA-mount pair is
-    # the answer to the question the release is about. The family is emitted as ONE unit —
-    # path / free / size / note — so the ONE write path can tell "measured" (an answer or a
-    # NAMED refusal) from "the collection said nothing about a data mount at all" (a legacy
-    # batch, an old fixture): the first WRITES the pair, the second leaves it alone.
+    # The TWO-mount read. The ROOT keeps the figure it ships (`disk_gb`, whose number the inventory's
+    # sort key parses) and the DATA-mount pair is the answer the release is about. The family is emitted
+    # as ONE unit — path / free / size / note — so the ONE write path can tell "measured" (an answer or a
+    # NAMED refusal) from "the collection said nothing about a data mount at all" (a legacy batch, an old
+    # fixture): the first WRITES the pair, the second leaves it alone.
     disk_text = "\n".join(sections.get(_SECTION_DISK, []))
     rows = parse_disk_report(disk_text)
     if rows:
@@ -407,6 +493,23 @@ def parse_info_output(output: str) -> Dict[str, str]:
         result["disk_free"] = answer["free"]
         result["disk_size"] = answer["size"]
         result["disk_note"] = answer["note"]
+
+    # The DEVICE choice. The section is present in every batch this code builds, so a collection
+    # that carries it ANSWERS the request — with a capacity or with a REPORTED miss — while an
+    # output without it (a legacy batch, a fixture written before the section existed) says
+    # NOTHING about a device and leaves the stored figure and list exactly where they are.
+    if _SECTION_DISKS in sections:
+        device_rows = parse_lsblk_report("\n".join(sections[_SECTION_DISKS]))
+        labels = device_labels(device_rows)
+        if labels:
+            result["disk_devices"] = labels
+        choice = resolve_disk_device(device_rows, disk_device)
+        if choice["name"]:
+            result["disk_device_note"] = choice["note"]
+            if choice["size"]:
+                result["disk_gb"] = choice["size"]
+            elif "disk_gb" in result:
+                del result["disk_gb"]   # the named device vanished: no figure is invented
 
     return result
 
@@ -492,24 +595,25 @@ class SystemInfoCollector(QThread):
                     err.strip()[:200] or "no info batch markers in output "
                     "(non-Linux host?)")
 
-            info = parse_info_output(output)
+            info = parse_info_output(output, getattr(self.data, "disk_device", ""))
             if not info:
                 raise RuntimeError("empty system info parsed")
-            # v1.6.6 (ROADMAP task 4): a refused data mount is NOT silence — it travels as a
-            # sentence in the collection's own report. The English line below reaches the log
-            # file AND the activity ring (the v1.5.2 tap); the window composes the translated
-            # status-bar sentence from the same note. A share is named by its filesystem type.
+            # An unanswered REQUEST is NOT silence — it travels as a sentence in the collection's own
+            # report. The English line below reaches the log file AND the activity ring (the v1.5.2
+            # tap); the window composes the translated status-bar sentence from the same note. A
+            # share is named by its filesystem type, a vanished device by its own name.
             self._log_disk_note(info)
             self.info_ready.emit(sid, info)
         except Exception as e:  # noqa: BLE001 — any error → a signal, not a crash
             self.info_failed.emit(sid, str(e))
 
     def _log_disk_note(self, info: dict) -> None:
-        """Write the ONE English line of a refused data mount (v1.6.6; never raises).
+        """Write the ONE English line of an unanswered REQUEST (never raises).
 
         Log lines are never translated (the activity panel's own rule), so this is the one
-        place the refusal is spelled out for the history; the card's status-bar sentence is the
-        window's half of the same fact, composed from the same note.
+        place a refusal is spelled out for the history: the data MOUNT that is a share or is
+        not there, and the DEVICE the listing does not hold. The card's status-bar sentence is
+        the window's half of the same fact, composed from the same note by ONE classifier.
         """
         try:
             note = str((info or {}).get("disk_note") or "")
@@ -522,6 +626,10 @@ class SystemInfoCollector(QThread):
             elif kind == DISK_REFUSAL_MISSING:
                 log.info("Data mount %s was not found on %s — nothing was measured",
                          resolve_disk_mount(getattr(self.data, "disk_mount", "")),
+                         self.data.host)
+            if disk_refusal_kind((info or {}).get("disk_device_note")) == DISK_REFUSAL_DEVICE:
+                log.info("Device %s was not found on %s — nothing was measured",
+                         str(getattr(self.data, "disk_device", "") or "").strip(),
                          self.data.host)
         except Exception:  # noqa: BLE001 — a report is a side channel
             pass

@@ -172,12 +172,11 @@ class AddServerDialog(QDialog):
         layout.addRow(self.t("server.alias"), self.alias)
         layout.addRow(self.t("server.host"), self.host)
 
-        # v1.6.5 (ROADMAP tasks 1/5): the KIND of the card and its ONE opt-in.
-        # "Unmanaged server (no SSH access)": the card describes a box this user does not
-        # administer, so the credential fields below are disabled AND cleared, the keyring
-        # is never written for it and no SSH verb reaches it (the gate of `ui/unmanaged.py`).
-        # The second box is the reachability check — DEFAULT OFF, and meaningful only while
-        # the first one is ticked (with it off no network call happens for the card at all).
+        # The KIND of the card and its ONE opt-in. "Unmanaged server (no SSH access)": the card describes a
+        # box this user does not administer, so the credential fields below are disabled AND cleared, the
+        # keyring is never written for it and no SSH verb reaches it (the gate of `ui/unmanaged.py`). The
+        # second box is the reachability check — DEFAULT OFF, and meaningful only while the first one is
+        # ticked (with it off no network call happens for the card at all).
         self.unmanaged = QCheckBox(
             self.t("dialog.unmanaged") if self._i18n_available
             else "Unmanaged server (no SSH access)")
@@ -219,14 +218,11 @@ class AddServerDialog(QDialog):
         self.tags_edit.setPlaceholderText(
             self.t("server.tags_hint") if self._i18n_available else "prod, staging, dev")
 
-        # v1.6.6 (ROADMAP task 6): the DATA mount of the collected facts — ONE row, in which the
-        # REQUEST (an editable path, its placeholder naming the declared default `/opt`) is
-        # followed by the MEASURED ANSWER `df` really reported (the mount point, the free figure
-        # and the capacity). The three answer fields stay EDITABLE like `ram` / `disk` — the
-        # "collected fields are editable" precedent — and a REFUSED mount leaves them empty, so
-        # the dialog shows exactly what was measured and never a figure the collection declined
-        # to report. The arrow is the visual half of the request/answer distinction the model
-        # keeps (`disk_mount` vs `disk_path`).
+        # The DATA mount of the collected facts — ONE row in which the REQUEST (an editable path whose
+        # placeholder names the declared default `/opt`) is followed by the MEASURED ANSWER `df` really
+        # reported (the mount point, the free figure and the capacity). The three answer fields stay
+        # EDITABLE like `ram` / `disk`, and a REFUSED mount leaves them empty, so the dialog shows
+        # exactly what was measured. The arrow is the visual half of `disk_mount` vs `disk_path`.
         self.disk_mount = QLineEdit()
         self.disk_mount.setPlaceholderText(
             self.t("server.disk_mount_hint") if self._i18n_available else "/opt (default)")
@@ -255,10 +251,38 @@ class AddServerDialog(QDialog):
                  "found — the mount point df reported, its free space and its capacity. Empty "
                  "means nothing was measured: a network share is not reported as capacity.")
 
+        # The DISK row: the DEVICE this card is about — a REQUEST — beside the measured ANSWER, the
+        # `disk_mount` precedent one level DOWN. The combo offers the devices the last collection
+        # read and stays EDITABLE (a name that collection did not see can still be typed), and the
+        # arrow is the visual half of "the choice wins over the number on the right".
+        self.disk_device = QComboBox()
+        self.disk_device.setEditable(True)
+        self.disk_device.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
+        _device_hint = (self.t("server.disk_device_hint") if self._i18n_available
+                        else "device (sda) — the choice wins")
+        self.disk_device.setPlaceholderText(_device_hint)
+        if self.disk_device.lineEdit() is not None:
+            # An EDITABLE combo paints its own line edit, which carries its own placeholder.
+            self.disk_device.lineEdit().setPlaceholderText(_device_hint)
+        self.disk_device.setToolTip(
+            self.t("server.disk_device_tooltip") if self._i18n_available
+            else "Left: the device this card is about — pick one the last collection found or "
+                 "type a name. A chosen device WINS over the number on the right: the collection "
+                 "overwrites it with that device's capacity. Empty means the root's own figure, "
+                 "as before.")
+        self._disk_device_arrow = QLabel("→")
+        self.disk_device_row = QWidget()
+        device_hbox = QHBoxLayout(self.disk_device_row)
+        device_hbox.setContentsMargins(0, 0, 0, 0)
+        device_hbox.setSpacing(4)
+        device_hbox.addWidget(self.disk_device, 3)
+        device_hbox.addWidget(self._disk_device_arrow)
+        device_hbox.addWidget(self.disk, 3)
+
         layout.addRow(self.t("server.os"), self.os_name)
         layout.addRow(self.t("server.cpu"), self.cpu)
         layout.addRow(self.t("server.ram"), self.ram)
-        layout.addRow(self.t("server.disk"), self.disk)
+        layout.addRow(self.t("server.disk"), self.disk_device_row)
         layout.addRow(self.t("server.disk_mount"), self.disk_mount_row)
         layout.addRow(self.t("server.ip"), self.ip)
         layout.addRow(self.t("server.comment"), self.comment)
@@ -470,6 +494,12 @@ class AddServerDialog(QDialog):
         self.disk_path.setText(getattr(d, "disk_path", "") or "")
         self.disk_free.setText(getattr(d, "disk_free", "") or "")
         self.disk_size.setText(getattr(d, "disk_size", "") or "")
+        # v1.7.1.2 (ROADMAP task 4): the device row — the LIST the last collection read becomes the
+        # combo's items and the stored REQUEST its text (an unmatched name is typed, not invented).
+        self.disk_device.clear()
+        for _label in (getattr(d, "disk_devices", None) or []):
+            self.disk_device.addItem(str(_label))
+        self.disk_device.setCurrentText(getattr(d, "disk_device", "") or "")
 
         # v1.6.5 (ROADMAP tasks 1/5): the kind of the card. The box is set BEFORE the state
         # is applied (a programmatic setChecked fires `toggled`, which would stash and clear
@@ -509,7 +539,7 @@ class AddServerDialog(QDialog):
             ssh_port=22 if unmanaged else self.port.value(),
             x=self._data.x if self._data else 0,
             y=self._data.y if self._data else 0,
-            # v1.0-fix (audit #1): collapsed was not passed earlier — in a new ServerData
+            # collapsed was not passed earlier — in a new ServerData
             # it was always False, and any edit via "Properties" (even without changing
             # a single field) silently expanded a collapsed node.
             collapsed=self._data.collapsed if self._data else False,
@@ -526,6 +556,11 @@ class AddServerDialog(QDialog):
             disk_path=self.disk_path.text().strip(),
             disk_free=self.disk_free.text().strip(),
             disk_size=self.disk_size.text().strip(),
+            # v1.7.1.2 (ROADMAP task 4/6): the device REQUEST and the LIST the collection read.
+            # The choice is the NAME alone — a combo row reads "sdb 100 gb", and the first word of
+            # a device label is the name, so the figure the user sees never enters the model.
+            disk_device=self._device_name(),
+            disk_devices=[self.disk_device.itemText(i) for i in range(self.disk_device.count())],
             ip=self.ip.text(),
             comment=self.comment.text(),
             tags=self._parse_tags(),  # v0.9.4
@@ -533,6 +568,17 @@ class AddServerDialog(QDialog):
             unmanaged=unmanaged,  # v1.6.5
             unmanaged_ping=bool(unmanaged and self.unmanaged_ping.isChecked()),  # v1.6.5
         )
+
+    def _device_name(self) -> str:
+        """The device NAME this row asks for — `""` when the row is empty (v1.7.1.2).
+
+        The combo's entries are the device LABELS the collection stored ("sdb 100 gb"), while
+        the model keeps the NAME alone, so the first whitespace-separated word of the text is
+        the request — a device name never contains a space, and a name typed by hand is its
+        own first word.
+        """
+        text = self.disk_device.currentText().strip()
+        return text.split()[0] if text else ""
 
     def _parse_tags(self) -> list:
         """v0.9.4: "prod, web" string → ['prod', 'web'] (duplicates/empties removed)."""

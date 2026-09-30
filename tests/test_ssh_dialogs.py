@@ -50,7 +50,7 @@ class _FakeWorker:
     test_only = False
 cdlg._ssh_worker = _FakeWorker()
 
-# v0.9.5.6: the success-info window is REMOVED — we patch information() and make sure
+# v0.9.5.6: no success-info window — we patch information() and make sure
 # that _on_worker_success does not invoke it (otherwise there would be an extra clickable block)
 _info_calls = []
 _orig_info = MW.QMessageBox.information

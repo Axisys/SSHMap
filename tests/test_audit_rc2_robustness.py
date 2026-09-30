@@ -1,34 +1,12 @@
 # -*- coding: utf-8 -*-
-"""v1.2.10rc2 — Audit: robustness and code hygiene (AUDIT.md manual #5, auto #7, manual #6).
+"""v1.2.10rc2 — Audit: robustness and code hygiene (the manual #5/#6 and auto #7 findings).
 
-The thematic test of the release (ROADMAP v1.2.10rc2; offscreen/headless — without the network):
-
-§1 server_data_from_dict with an int id (manual #5e): an explicit "id": 123 in the JSON → str("123");
-   a missing/empty id — generated as before (the regression); a string id
-   passes unchanged.
-
-§2 PingThread with the host "-x" (manual #5d): subprocess.run is NOT called (the mock),
-   the signal finished_ping(False, …) — the Windows ping does not support "--", and such
-   a host is an invalid DNS name anyway; the guard fires BEFORE the process start.
-   The regression: a regular host starts the subprocess as before.
-
-§3 The late worker signals on the destroyed dialog (manual #5c): closeEvent detached
-   the worker via setParent(None) (line 497), the C++ object of the dialog is destroyed — the late
-   success/error WITHOUT a RuntimeError (the guard in the slot); the worker finishes the connection,
-   the late emit is handled by the event loop without a crash.
-
-§4 delete_password with the fake keyring.errors WITHOUT a PasswordDeleteError (manual #6):
-   the generic handler, returns False, without a crash; the class is in place → True (the same
-   behavior as before the fix); NoKeyringError → True (the regression). The explicit `import keyring`
-   in _try_init (auto #7) — a source check.
-
-§5 the file_dups phantom (manual #5b) + the comment to ANSI_ESCAPE_RE (manual #5a):
-   the source checks (the code of ANSI_ESCAPE_RE is unchanged — protected by the convention).
-
-§6 The release state + the i18n parity (427 — no NEW keys).
-
-Run:  python tests/test_audit_rc2_robustness.py   (from the project root) or python tests/run_all.py
-"""
+The thematic test of the release, offscreen and without the network:
+§1 `server_data_from_dict` with an int id (an explicit `"id": 123` → `"123"`; a missing id generated as
+before; a string id unchanged); §2 `PingThread` with the host `-x` — `subprocess.run` is NOT called and
+`finished_ping(False, …)` is emitted, because the Windows ping does not support `--` and such a host is
+an invalid DNS name anyway (the guard fires BEFORE the process starts); §3 the late worker signals on a
+DESTROYED dialog (no `RuntimeError`; the late emit is handled by the event loop); §4 `delete_password` with a fake `keyring.errors` without `PasswordDeleteError` (the generic handler, `False`, no crash) plus the explicit `import keyring` source check; §5 the `file_dups` phantom and the protected `ANSI_ESCAPE_RE`; §6 the release state and the i18n parity (no NEW keys)."""
 import os
 import re
 import sys

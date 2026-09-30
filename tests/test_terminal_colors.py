@@ -1,22 +1,12 @@
 # -*- coding: utf-8 -*-
 """v1.0RC1 — the color engine + per-cell canvas (ROADMAP v1.0RC1).
 
-  * resolve_color (headless, no widgets): brown/brightbrown → yellow/br_yellow
-    (SGR 33/93), the hex passthrough of 256-color and truecolor, the pyte typo
-    'bfightmagenta' (SGR 4;105), the default fallback, the structure of the palettes (black…white + br_*);
-  * E2E through pyte: SGR 33/93/38;5;196/38;2;… → Char.fg/bg → resolve_color
-    (the bash `ls --color` path of the Acceptance v1.0RC1);
-  * the format cache (fg,bg,attributes) → (QPen,QBrush,QFont): a hit by a single key,
-    the limit → clear (TERMINAL.md §5.1);
-  * the run rendering (offscreen): split_row_runs (a pure function: the runs/the wide glyphs/
-    the stubs), the pixel colors of the cells (SGR 31/33/93, 41, 256, truecolor),
-    the block cursor via the swap + cursor.hidden (ESC[?25l/h), the drawText counter
-    (the runs, not the per-character render);
-  * the integration: SSHTerminalWindow → TerminalWidget; v1.2.9: TerminalScreen.render()
-    (the HTML path) removed — the absence check of the dead code.
-
-Run:  python tests/test_terminal_colors.py   (from the project root) or python tests/run_all.py
-"""
+`resolve_color` (headless, no widgets) maps brown/brightbrown to yellow/br_yellow (SGR 33/93), passes the
+256-colour and truecolor hexes through, handles the pyte typo 'bfightmagenta' (SGR 4;105), falls back to
+the default and declares the palettes (black…white plus br_*). E2E through pyte: SGR 33/93/38;5;196/38;2;…
+reaches `Char.fg`/`bg` and then `resolve_color` — the bash `ls --color` path of the acceptance.
+The format cache `(fg,bg,attributes) → (QPen,QBrush,QFont)` hits on a single key and clears at its limit
+(`DOCUMENTATION.md` §14a). The run rendering offscreen covers `split_row_runs` (a pure function: the runs, the wide glyphs, the stubs), the pixel colours of the cells, the block cursor (the swap plus `cursor.hidden` from `ESC[?25l/h`) and the `drawText` counter, which counts the RUNS and not the characters. The integration goes `SSHTerminalWindow` → `TerminalWidget`, and the removed `TerminalScreen.render()` HTML path is asserted ABSENT (the dead-code check)."""
 import re
 import sys
 
@@ -37,13 +27,13 @@ from modules.terminal_widget import TerminalWidget, split_row_runs, is_wide_char
 
 
 def make_char(data=" ", fg="default", bg="default", bold=False):
-    """A pyte Char with explicit fields (fact #1: the field is italics, not italic)."""
+    """A pyte Char with explicit fields (the pyte field is `italics`, not `italic` — MANIFEST.md)."""
     return Char(data=data, fg=fg, bg=bg, bold=bold, italics=False,
                 underscore=False, strikethrough=False, reverse=False, blink=False)
 
 
 # ════════════════════════════════════════════════════════════
-# 1. The color engine (headless) — TERMINAL.md §5.1
+# 1. The color engine (headless) — DOCUMENTATION.md §12
 # ════════════════════════════════════════════════════════════
 print("== resolve_color (headless) ==")
 D = PALETTES["default"]
@@ -161,7 +151,7 @@ check("is_wide_char('M')", is_wide_char("M") is False)
 check("is_wide_char('')", is_wide_char("") is False)
 
 # ════════════════════════════════════════════════════════════
-# 4. The format cache (TERMINAL.md §5.1): a hit, a difference, the limit → clear
+# 4. The format cache (DOCUMENTATION.md §14a): a hit, a difference, the limit → clear
 # ════════════════════════════════════════════════════════════
 print("== format cache ==")
 w = TerminalWidget(TerminalScreen(columns=20, lines=5))

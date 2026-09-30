@@ -1,29 +1,11 @@
 """v1.2.4: attaching notes to servers + a special line (the v1.2.4 release theme).
 
-The thematic test of the new release (see INDEX.md):
-  * §1 The format and the serialization: "server_id" in to_dict() is written only if set;
-    _do_save → JSON; the backward-compat of the old files; a broken reference → a free note;
-  * §2 The mechanics of the scene: the anchor (the top-right corner of the node + 12,12), the anchor line
-    (the DashLine #eedd9f — the color of the body of the sticker, z=-1, the ends — edge_point), the movement of the node
-    (the one-step lag exactly as with the arrows — the itemChange BEFORE the apply of the position; the exact
-    match on the next step), v1.2.4-fix: the offset of the anchor — the attached note
-    can be moved (dragUpdated → the line follows live, the node leads the note with the preserved
-    offset), the collapse/expand, the detach, the cleanups remove_server/clear_all;
-  * §3 Undo/Redo: the attach/detach round-trip via win.undo_stack; the LIFO chain
-    "the detach + the removal of the server"; the dead C++ object (audit #8) — the resolution by id;
-  * §4 The context menu: a free note → the submenu with all the nodes / the direct item
-    over the node; an attached one → the detach; "Delete the note" in place (the synthetic
-    QContextMenuEvent + the capture pattern of test_groups.py);
-  * §5 The drag & drop E2E (QTest, the full pipeline view→scene→item): the drag onto a node = the attach,
-    v1.2.4-fix: the shift of the attached one = THE MOVE without the detach (the line follows,
-    the offset is preserved), the drag onto another node = the re-attach (one command),
-    the click without the movement — a no-op;
-  * §6 The Save/Load round-trip: the attachment is restored, v1.2.4-fix: the saved
-    position of the attached note is trusted (the offset from the anchor is computed from it);
-  * §7 The i18n parity (417 keys) + the release state v1.2.4.
-
-Run: python tests/test_note_attach.py   (from the project root) or python tests/run_all.py
-"""
+The release's thematic test, offscreen (`INDEX.md` maps it).
+§1 the format and the serialization: `"server_id"` is written only when set, `_do_save` → JSON, the
+backward compatibility of an old file, and a broken reference degrading to a free note; §2 the scene
+mechanics: the anchor (the node's top-right corner + 12,12), the anchor LINE (the dashed `#eedd9f`, the
+sticker's own body colour, `z = -1`, the ends at `edge_point`), the node's movement (the one-step lag the
+arrows have, because `itemChange` runs BEFORE the position is applied), the preserved offset (a `dragUpdated` line follows live, the node leads the note), the collapse/expand, the detach and the `remove_server` / `clear_all` cleanups; §3 undo/redo: the attach/detach round trip through `win.undo_stack`, the LIFO chain "detach + remove the server", and the dead C++ object resolved by id; §4 the context menu (a free note → the submenu or the direct item over the node, an attached one → the detach, "Delete the note" in place); §5 the drag & drop E2E through the real pipeline (the drag onto a node attaches, moving the note keeps the offset without detaching, another node re-attaches in one command, a click without movement is a no-op); §6 the save/load round trip (the saved position of an attached note is trusted); §7 the i18n parity and the release state."""
 import sys
 
 from _common import bootstrap, check, finish, viewport_point as _vp, \
@@ -138,7 +120,7 @@ line = win_x.scene._note_anchor_lines.get(note_x.note_id)
 check("§2 anchor line exists in _note_anchor_lines", line is not None)
 pen = line.pen()
 # setDashPattern([4,3]) switches the style to CustomDashLine — visually the same dash;
-# the color = the body of the sticker (v1.2.4-fix: a muted #eedd9f)
+# the color = the body of the sticker (a muted #eedd9f)
 check("§2 line pen: dashed, #eedd9f, width 1.2",
       pen.style() in (_Qt.PenStyle.DashLine, _Qt.PenStyle.CustomDashLine)
       and pen.color().name().lower() == "#eedd9f"
@@ -181,7 +163,7 @@ check("§2 next setPos: note exactly at previous geometry anchor",
       _at((note_x.pos().x(), note_x.pos().y()), (r_mid.right() + 12.0, r_mid.top() + 12.0)),
       f"note=({note_x.pos().x()}, {note_x.pos().y()})")
 
-# v1.2.4-fix: an attached note can be moved — dragUpdated recomputes the offset
+# an attached note can be moved — dragUpdated recomputes the offset
 # (relative to the CURRENT node geometry), the anchor line follows live; the node leads on
 # the note WITH the offset preserved
 r_off0 = n_x.card_rect_scene()   # the node geometry at the moment of the drag
@@ -499,7 +481,7 @@ check("§5 E2E: CmdAttachNote is the last undo command",
       top >= 1 and win_e.undo_stack.text(top) == "Attach note",
       f"count={win_e.undo_stack.count()} text={win_e.undo_stack.text(top)!r}")
 
-# Drag 2 (v1.2.4-fix): moving an attached note = a MOVE without detaching;
+# Drag 2 : moving an attached note = a MOVE without detaching;
 # a release outside the nodes — the note stays attached at the release position, the line
 # it follows live, the offset is preserved, no undo command appears
 count2 = win_e.undo_stack.count()
@@ -523,7 +505,7 @@ check("§5 E2E: no undo command for a plain move",
       win_e.undo_stack.count() == count2,
       f"count={win_e.undo_stack.count()} was={count2}")
 
-# Drag 3 (v1.2.4-fix): attached → a drag onto ANOTHER node = re-attach: ONE
+# Drag 3 : attached → a drag onto ANOTHER node = re-attach: ONE
 # the Attach note command (server_id is overwritten), the note "settles" into the anchor of the new
 win_e._attach_note_to_node(note_e, n_f)   # [Attach note] — a note at n_f
 press3 = _QP(note_e.pos().x() + 100, note_e.pos().y() + 50)   # the body (not over n_f)
@@ -563,7 +545,7 @@ win_s._connect_note_signals(note_s_free)
 note_s_att = win_s.scene.add_note(text="att-s", x=600.0, y=300.0)
 win_s._connect_note_signals(note_s_att)
 win_s.scene.attach_note_to_node(note_s_att, n_s)
-# v1.2.4-fix: we move an attached note (a drag without detaching) — the saved
+# we move an attached note (a drag without detaching) — the saved
 # the position is NO LONGER equal to the anchor; on load it is trusted (the offset is computed from it)
 note_s_att.prepareGeometryChange()
 note_s_att.setPos(note_s_att.pos().x() + 60.0, note_s_att.pos().y() - 35.0)
@@ -586,7 +568,7 @@ a2x, a2y = _anchor(n_s2)
 check("§6 reload: note re-attached to its server",
       att2 is not None and att2.server_id == n_s.data.id,
       f"server_id={getattr(att2, 'server_id', 'MISSING')}")
-# v1.2.4-fix: the saved x/y is trusted (the note can be moved) — NOT a jump to the corner
+# the saved x/y is trusted (the note can be moved) — NOT a jump to the corner
 check("§6 reload: saved position trusted (not snapped to corner)",
       att2 is not None
       and abs(att2.pos().x() - n6[att2.note_id]["x"]) < 0.5
@@ -604,7 +586,7 @@ check("§6 reload: free note unchanged (position + no server_id)",
       and abs(free2.pos().y() - n6[note_s_free.note_id]["y"]) < 0.5,
       f"pos=({free2.pos().x() if free2 else '?'}, {free2.pos().y() if free2 else '?'})")
 
-# v1.2.4-fix: the saved x/y of an attached note is trusted as-is (even unusual)
+# the saved x/y of an attached note is trusted as-is (even unusual)
 # — the position is primary (the user moved it), the attachment and the line are restored,
 # the offset is computed from this position relative to the node's anchor
 j6b = json.loads(json.dumps(j6))

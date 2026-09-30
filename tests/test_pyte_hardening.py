@@ -1,34 +1,12 @@
 # -*- coding: utf-8 -*-
 """v1.5.7.1 — Terminal: the pyte fork takes the five defects of the dependency audit.
 
-The topical test of the release (ROADMAP v1.5.7.1; the audit — PYTE82_AUDIT.md, the raise-review
-section; the ledger entries — AUDIT_PENDING.md N26–N30, which LEAVE the ledger with this release,
-their probes becoming the checks below). The theme is the vendored emulator, so every probe runs
-through the APPLICATION's own seam — `TerminalScreen.feed()` / `SshmapHistoryScreen` — or through
-the canvas contract that reads the same grid (`modules.terminal_widget.char_width()`); nothing here
-needs Qt, the network or a PTY.
-
-  * §1 patch 0005 — a grapheme cluster: an emoji sequence (ZWJ, VS16), a keycap and the marks whose
-    canonical combining class is 0 (Thai Mn, Devanagari Mc) land WHOLE; before the patch `draw()`
-    `break`ed out of the whole data string on the first zero-width code point and dropped the rest
-    of the chunk in silence (no exception, no log line — N26);
-  * §2 patch 0006 — a malformed CSI: NO final of the fork's CSI table raises for a surplus
-    parameter or a stray private marker, the tail of the chunk survives, and the public sequences
-    (DECSTBM, CUP, EL) keep their behaviour (N27);
-  * §3 patch 0007 — an erase mode the handler does not know (`ESC[3K`, `ESC[4J`) is a no-op that
-    marks nothing for redraw, while `0K`/`1K`/`2K`/`3J` and the `ED 3` scrollback reset do not
-    move (N28);
-  * §4 patch 0008 — DECOM without a scrolling region: VPA and the DSR report neither raise out of
-    `feed()` nor go silent (the DSR ANSWERS), and the arithmetic with a region is unchanged (N29);
-  * §5 patch 0009 — a resize keeps the cursor inside the new geometry, so the next text is visible
-    (a row shrink used to swallow the first line, a width shrink the first character — N30);
-  * §6 the CANVAS half of patch 0005: `char_width()` measures a multi-code-point cell with
-    `wcswidth` (the same table the grid uses) and a single code point with `wcwidth`, so a run after
-    a cluster starts where the grid put it — the CJK layout of v1.2.9 is untouched;
-  * §7 the release state (§9 of AGENTS.md) — the version pins and the i18n parity.
-
-Run: python tests/test_pyte_hardening.py   (from the project root) or python tests/run_all.py
-"""
+The topical test of the release: the ledger entries (`AUDIT_PENDING.md` N26–N30) LEAVE the ledger here,
+their probes becoming these checks, and every probe runs through the APPLICATION's own seam
+(`TerminalScreen.feed()` / `SshmapHistoryScreen`) or the canvas contract that reads the same grid
+(`modules.terminal_widget.char_width()`); nothing needs Qt, the network or a PTY.
+§1 patch 0005 — a grapheme cluster (ZWJ, VS16, a keycap, the marks with combining class 0) lands WHOLE;
+§2 patch 0006 — no final of the CSI table raises for a surplus parameter or a stray private marker, and the chunk tail survives; §3 patch 0007 — an unknown erase mode is a no-op while the known ones do not move; §4 patch 0008 — DECOM without a region neither raises nor goes silent; §5 patch 0009 — a resize keeps the cursor inside the new geometry; §6 the canvas half of 0005 (`char_width()`); §7 the release."""
 from _common import (bootstrap, check, finish, load_i18n_langs, check_i18n_parity,
                      check_release_state)
 
@@ -65,7 +43,7 @@ KEYCAP_1 = "1\ufe0f\u20e3"                         # 1️⃣ — the Me mark is 
 print("== §1 patch 0005 — a grapheme cluster lands whole (N26: the silent truncation) ==")
 # ════════════════════════════════════════════════════════════════════════════
 
-# The defect: everything after the sequence used to be dropped. The trailing "B" is the witness.
+# The defect: everything after the sequence was dropped. The trailing "B" is the witness.
 for _text, _what in ((f"A{HEART_VS16}B", "a heart + VS16"),
                      (f"A{ZWJ_FAMILY}B", "a ZWJ family emoji"),
                      (f"A{KEYCAP_1}B", "a keycap (Me, class 0)"),
@@ -142,7 +120,7 @@ for _seq in (b"\x1b[1;2A", b"\x1b[?0A", b"\x1b[1;2;3H", b"\x1b[0;0@"):
 check("§2 the same four malformed sequences raise nothing through TerminalScreen.feed",
       not _app_crashes, str(_app_crashes))
 
-# The point of the whole class: the tail of the CHUNK survives (the TypeError used to abort
+# The point of the whole class: the tail of the CHUNK survives (the TypeError would otherwise abort
 # feed() and with it everything the read carried after the sequence).
 _t = app(40, 5)
 _t.feed(b"\x1b[1;2A" + b"after the malformed CSI")
@@ -265,7 +243,7 @@ check("§4 without DECOM the DSR answer is absolute (3;2R)", _answers == ["\x1b[
 print("== §5 patch 0009 — a resize keeps the cursor (and the next text) inside (N30) ==")
 # ════════════════════════════════════════════════════════════════════════════
 
-# The row shrink: the first line printed afterwards used to land on a phantom row.
+# The row shrink: the first line printed afterwards lands on a real row, never a phantom one.
 _t = app(120, 32)
 _t.feed(b"".join(b"line %d\r\n" % n for n in range(20)))
 _before_y = _t.screen.cursor.y
@@ -277,7 +255,7 @@ _t.feed(b"VISIBLE\r\n")
 check("§5 the first text after a row shrink is VISIBLE (was: swallowed)",
       any("VISIBLE" in line for line in lines(_t.screen)), repr(lines(_t.screen)[:4]))
 
-# The width shrink: the first character used to be lost and the line broken.
+# The width shrink: the first character must survive and the line stay whole.
 _t = app(120, 32)
 _t.feed(b"x" * 100)
 _before_x = _t.screen.cursor.x

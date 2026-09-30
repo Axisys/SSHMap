@@ -90,7 +90,7 @@ def save_profiles(profiles: List[Profile]) -> None:
         d = asdict(p)
         d.pop("password", None)  # the password lives only in the keyring, not in the JSON
         data.append(d)
-    # v0.9.4-fix: atomic write (tmp + fsync + os.replace) — like in storage/project.py;
+    # atomic write (tmp + fsync + os.replace) — like in storage/project.py;
     # a crash mid-way through a direct open/write corrupted the entire profiles file.
     tmp_path = _profiles_path() + ".tmp"
     with open(tmp_path, "w", encoding="utf-8") as f:

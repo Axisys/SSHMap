@@ -1,16 +1,11 @@
 """Regression v0.9.8 — map search (Ctrl+F).
 
-ROADMAP v0.9.8:
-  #1 Ctrl+F → the search bar over the canvas: the highlighting of the matching nodes
-     (alias/host/ip/comment) — ServerNode.set_search_match (the frame #38bdf8,
-     the priority below the selection) + the counter "k / N".
-  #2 Enter/Shift+Enter — the walk through the results with the centering and
-     the accent frame (reveal_flash — the pulse pattern of set_status), the wrap-around.
-  #3 the non-matching nodes are dimmed (set_dimmed, DIM_OPACITY) — the matches are read
-     instantly; the tag filter and the search combine with AND (the semantics of the sidebar).
-
-Run:  python tests/test_map_search.py   (from the project root) or python tests/run_all.py
-"""
+Ctrl+F opens the search bar over the canvas and highlights the matching nodes (alias / host / ip / comment)
+through `ServerNode.set_search_match()` — the accent frame, which sits BELOW the selection in priority —
+plus the "k / N" counter. Enter and Shift+Enter walk the results with the centring and the accent flash
+(`reveal_flash`, the pulse pattern of `set_status`) and wrap around. The non-matching nodes are dimmed
+(`set_dimmed`, `DIM_OPACITY`), so the matches are read instantly, and the tag filter combines with the
+search by AND, the same semantics the sidebar uses."""
 import os, sys, tempfile, traceback
 
 from _common import bootstrap, check, finish, wait_until, load_i18n_langs, check_i18n_parity
@@ -28,12 +23,11 @@ from i18n import t as it, set_language as _set_lang
 from models.server import ServerData
 import ui.main_window as MW
 
-# The language: since v1.1.1 the default is en (ROADMAP item 2), but the test starts with ru —
-# the sidebar width depends on the buttons' minSizeHint ("Add server" is 280 px in ru,
-# 232 px in en), and the QSplitter distribution is fixed at the first layout: we set ru
-# explicitly BEFORE the window is created, for determinism. The geometric baseline (the panel center x)
-# since v1.2.4.1 it is computed DYNAMICALLY from the actual viewport — the view lives in
-# container [strip | view], and a direct resize(view) is no longer ignored by the splitter.
+# The language: the default is en, but the test starts with ru for determinism — the sidebar width
+# depends on the buttons' minSizeHint ("Add server" is 280 px in ru, 232 px in en) and the QSplitter
+# distribution is fixed at the first layout, so ru is set explicitly BEFORE the window is created. The
+# geometric baseline (the panel center x) is computed DYNAMICALLY from the actual viewport: the view
+# lives in the container [strip | view] and a direct resize(view) reaches the layout.
 _set_lang("ru")
 
 win = MW.MainWindow()
@@ -129,14 +123,11 @@ check("status bar shows the navigation hint",
       win.statusBar().currentMessage() == it("hint.map_search"),
       f"msg={win.statusBar().currentMessage()!r}")
 
-# ══ v0.9.9.1 fix: on a window resize the panel returns to the center (MapView.resized) ══
-# Before v0.9.9.1, connect of view.resized fell into an AttributeError and was swallowed by try/except —
-# after the window narrowing the panel stayed at the old x (240 instead of ~40 at vp 500).
-# v1.2.4.1: the baseline is DYNAMIC (the view in the container [strip | view]: a direct
-# resize(view) is honoured by the container layout, viewport = view − the scrollbar; in v1.2.4
-# splitter ignored the resize, and x=240@vp900 was an artifact of a 1200px window). The invariant
-# the same: the panel at the top center of the actual viewport (the same formula as in
-# MainWindow._position_map_search_bar).
+# ══ on a window resize the panel returns to the center (MapView.resized) ══
+# An AttributeError in the connect is swallowed by the caller's try/except, so a resize that moves
+# nothing leaves the panel at the old x unseen. The baseline is DYNAMIC (the view in the container
+# [strip | view]: a direct resize(view) is honoured by the container layout, viewport = view − the
+# scrollbar). The invariant: the panel at the top center of the ACTUAL viewport, MainWindow's formula.
 print("== resize reposition (v0.9.9.1 fix) ==")
 vp_before = view.viewport().width()
 w_before = min(bar.PREFERRED_WIDTH, max(vp_before - 16, bar.MIN_WIDTH))

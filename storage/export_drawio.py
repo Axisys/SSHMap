@@ -1,54 +1,16 @@
 # -*- coding: utf-8 -*-
-"""Export the map to the draw.io format (.drawio) — v0.9.5, label completed in v1.3.3.7.
+"""Export the map to draw.io (.drawio) — an mxGraph XML serializer over `xml.etree.ElementTree`.
 
-An mxGraph XML serializer via xml.etree.ElementTree, no new dependencies.
+Nodes become mxCell vertices (geometry, the alias/host/OS/CPU/RAM text, the tag line and the
+comment — `_node_label()`); connections become edges with their type colour; notes, groups and
+the background image become their own cells and layers.
 
-What is exported:
-  - ServerNode      → an mxCell vertex (geometry + alias/host/OS/CPU/RAM text
-                      + the tag line + the comment — see _node_label());
-
-  - ConnectionArrow → an mxCell edge source→target with a label and the connection type color;
-  - StickyNote      → a vertex with the shape=note style;
-  - NodeGroup       → a container (container=1), members — child cells
-    with coordinates recomputed relative to the parent (membership is geometric:
-    we subtract the group's position);
-  - background image → a separate bottom layer (shape=image).
-
-drawio layers (order in the XML = z-order, bottom ones first):
-  layer-background → layer-groups → layer-map.
-
-CRITICAL FORMAT REQUIREMENT (confirmed by the mxModelCodec.draw.io code,
-decodeRoot: the iteration goes over the direct children of <root>):
-  ALL mxCell — direct children of the <root> element, a flat sequence.
-  Hierarchy (layers, group containers) is expressed ONLY via the parent attribute.
-  Cells nested in the XML inside another mxCell (e.g. inside
-  "layer-map") are SILENTLY DROPPED by the draw.io import — the diagram
-  opens empty. (This was the cause of the broken mynet_01..03 exports.)
-
-The file opens in draw.io / diagrams.net / the VS Code plugin as an ordinary
-diagram and remains an editable infrastructure scheme.
-
-DECISIONS pinned here so the next reader does not "fix" them (v1.3.3.7):
-  * The vertex text carries the map's DATA — the tag line (`[tag1, tag2]`, the shape
-    the sidebar row uses) and the comment included, so a `.drawio` export says the
-    same as the PNG/JPEG/PDF ones (which render the live scene). Tag COLOURS are NOT
-    replicated: drawio rich-text styling (`html=1` + `<font>`/`<span>` markup) is a
-    separate rabbit hole, the label carries the text.
-  * `status` (online/warn/offline) is deliberately NOT exported. It is a RUNTIME fact —
-    the result of the last SSH probe — not project data, so writing it would make two
-    exports of one unchanged project differ. Same decision in DOCUMENTATION.md §28.
-
-v1.5rc2 (ROADMAP task 3) — the EXPORT PALETTE and the second channel:
-  * `export_scene_to_drawio(scene, path, palette=…)` renders PRINT-FRIENDLY by
-    default (`ui/theme.py PALETTE_PRINT`): a white card, the LIGHT instance's STRONG
-    accent as the outline and the six LIGHT arrow colours — the same decision and the
-    same source as the PNG/PDF/SVG exports, so the formats agree. `PALETTE_THEME`
-    keeps the current look (the format's own dark palette, deliberately outside the
-    UI theme — see DOCUMENTATION.md §3, "out of theme scope").
-  * Every EDGE carries the DECLARED dash pattern of its type
-    (`theme.ARROW_TYPE_STYLES` through `edge_dash_attributes()`), so the six types
-    stay apart in the file without relying on their colour.
-"""
+CRITICAL: EVERY mxCell is a DIRECT child of <root> — a flat sequence; the hierarchy (layers,
+group containers) lives ONLY in the `parent` attribute, because draw.io SILENTLY DROPS a cell
+nested inside another mxCell and the diagram opens empty.
+Two DECISIONS not to "fix": the vertex text carries the map's DATA (tags and comment included)
+but Tag COLOURS are NOT replicated; `status` is deliberately NOT exported, because it is a
+RUNTIME fact (the last probe's result) — two exports of one unchanged project would differ (§28)."""
 
 from __future__ import annotations
 
@@ -384,7 +346,7 @@ class DrawioExporter:
     # ── output ────────────────────────────────────────────────────────
     def to_xml_bytes(self, root_el: Optional[ET.Element] = None) -> bytes:
         """Serialize the model to XML bytes. root_el — the ready tree from build()
-        (v1.0-fix audit #7: the export counts cells on the same tree, without building twice);
+        (the export counts cells on the same tree, without building twice);
         without the argument — it builds it itself."""
         if root_el is None:
             root_el = self.build()
@@ -410,7 +372,7 @@ def type_color_safe(ctype: str, colors: Optional[dict] = None) -> str:
 def export_scene_to_drawio(scene, path: str, palette=PALETTE_PRINT) -> int:
     """Export the scene to a .drawio file. Returns the number of cells (diagnostics).
 
-    v1.0-fix (audit #7): earlier _cell_seq was returned — it was incremented only
+    earlier _cell_seq was returned — it was incremented only
     for groups and nodes without data.id, i.e. the "cells" log actually counted groups. Now —
     the real number of mxCell in the file (including structural ones: the root "0"/"1" and the 3 layers).
 
@@ -426,12 +388,7 @@ def export_scene_to_drawio(scene, path: str, palette=PALETTE_PRINT) -> int:
         fh.write(data)
     return cells
 
-# v1.3.3.7 (ROADMAP task 4) — the fate of `load_drawio_structure()` is decided: DELETED.
-# The helper counted vertices/edges/notes/containers of "our own" files and was
-# production-dead since v0.9.5 (its only caller was tests/test_drawio_export.py), while
-# NO version of ROADMAP.md owns the drawio IMPORT. A parser without a consumer is not
-# import groundwork but dead weight that silently rots — the decision and its reason are
-# in CHANGELOG.md (v1.3.3.7). The test's structure counting now scans the XML inline
-# with the same `ET.iter("mxCell")` pattern, so the round-trip check lost nothing.
-# Bringing the IMPORT back = one version section in ROADMAP.md + the parser written
-# against the reader's needs (which cannot be guessed today), not a resurrected counter.
+# The drawio IMPORT has no parser and no ROADMAP owner: `load_drawio_structure()` is DELETED
+# (v1.3.3.7 — the counter the round-trip test used is gone, and the decision with its reason is in
+# CHANGELOG.md); bringing the import back starts with a version section in ROADMAP.md and the
+# round-trip test counts the XML inline.

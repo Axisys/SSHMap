@@ -61,13 +61,11 @@ class MapScene(QGraphicsScene):
     NOTE_ANCHOR_OFFSET_X = 12.0
     NOTE_ANCHOR_OFFSET_Y = 12.0
 
-    # ── v1.5.1 (ROADMAP task 2): the FIXED frame of the documentation poster ───────
-    # `render_to_pixmap` fits the CONTENT (`itemsBoundingRect` + padding), so the size of
-    # its result is a property of the map; a documentation image must instead be the SAME
-    # size for every map (the README, an issue report and a slide all want one frame).
-    # The frame is declared in LOGICAL pixels and rendered at `DOCS_FRAME_SCALE` (2×, the
-    # scale every raster export already uses), i.e. 3200×1800 px out of the factory.
-    # 1600×900 is 16:9 — the ratio of every screen the picture is looked at on.
+    # ── the FIXED frame of the documentation poster ───────
+    # `render_to_pixmap` fits the CONTENT (`itemsBoundingRect` + padding), so the size of its result is a
+    # property of the map; a documentation image must instead be the SAME size for every map (the README,
+    # an issue report and a slide all want one frame). The frame is declared in LOGICAL pixels and
+    # rendered at `DOCS_FRAME_SCALE` (2×): 3200×1800 px out of the factory, a 16:9 ratio.
     DOCS_FRAME_W = 1600.0
     DOCS_FRAME_H = 900.0
     DOCS_FRAME_SCALE = 2.0
@@ -89,12 +87,11 @@ class MapScene(QGraphicsScene):
         self._groups: List[NodeGroup] = []
         # v0.9.1: the background image (a building diagram / a data-center floor plan) — at most one.
         self._background: Optional[BackgroundImage] = None
-        # UI polish: an adaptive grid — the base step is 20 px in scene coordinates; when
-        # zoomed OUT (scale < 1) the step doubles until the on-screen interval returns to
-        # the base one. Invariant: the on-screen interval is always ∈ [16, 32) px — the
-        # density is constant, and at zoom >= 1 the grid is as before (exactly 20 px).
-        # Without the adaptation at zoom 0.1 about 5× more lines were drawn on each axis
-        # (a slowdown + visual noise).
+        # An adaptive grid: the base step is 20 px in scene coordinates; when zoomed OUT (scale < 1) the
+        # step doubles until the on-screen interval returns to the base one. Invariant: the on-screen
+        # interval is always ∈ [16, 32) px — the density is constant, and at zoom >= 1 the grid is exactly
+        # 20 px. Without the adaptation at zoom 0.1 about 5× more lines were drawn on each axis (a
+        # slowdown + visual noise).
         self._grid_size = 20
         self._grid_min_screen_px = float(self._grid_size) * 0.8   # 16 px
         self._grid_major_every = 5
@@ -485,7 +482,7 @@ class MapScene(QGraphicsScene):
         note = StickyNote(text=text, x=x, y=y, width=width, height=height, note_id=note_id)
         self.addItem(note)
         self._notes.append(note)
-        # v1.2.4-fix: the live drag geometry — the anchor line of an attached note follows
+        # the live drag geometry — the anchor line of an attached note follows
         # it (for a free one the signal does nothing: on_note_drag_updated is a no-op)
         try:
             note.dragUpdated.connect(self.on_note_drag_updated)
@@ -522,7 +519,7 @@ class MapScene(QGraphicsScene):
         top-right corner + a 12 px offset, anchor_offset is reset.
         keep_position=True (loading from a file / undo of a detach): the stored position
         is trusted — anchor_offset is computed from it relative to the anchor, the note
-        does not jump into the corner (v1.2.4-fix: an attached note can be moved).
+        does not jump into the corner (an attached note can be moved).
         Idempotent by id match; False — if the arguments are not on this scene.
 
         v1.4.2 (ROADMAP task 4): the anchor is the node's CARD rect
@@ -556,7 +553,7 @@ class MapScene(QGraphicsScene):
         return True
 
     def on_note_drag_updated(self, note=None):
-        """v1.2.4-fix: the note is moved/resized with the mouse (dragUpdated) — an attached
+        """the note is moved/resized with the mouse (dragUpdated) — an attached
         one stays attached: the offset from the anchor is recomputed, the anchor line
         follows live. A free note / no living node — a no-op.
         v1.4.2: the anchor rect is the node's CARD (`card_rect_scene()` — task 4)."""
@@ -577,7 +574,7 @@ class MapScene(QGraphicsScene):
     def update_note_anchor_for_node(self, node):
         """v1.2.4: recompute the positions of the notes attached to the node (the
         update_connections_for_node pattern). Public — for direct attach/detach/load calls.
-        v1.2.4-fix: the note follows while keeping its anchor_offset (after a manual
+        the note follows while keeping its anchor_offset (after a manual
         shift it does not "jump back" into the node's corner)."""
         for note in self.notes_attached_to(node.data.id):
             try:
@@ -589,7 +586,7 @@ class MapScene(QGraphicsScene):
 
     def _place_note_at_anchor(self, note, node):
         """The note position = the node anchor (the card's top-right corner + a 12 px
-        offset, D2) + the note's anchor_offset (v1.2.4-fix: it can be moved — the
+        offset, D2) + the note's anchor_offset (it can be moved — the
         offset is kept). v1.4.2: the anchor rect is `card_rect_scene()` (task 4)."""
         r = node.card_rect_scene()
         ox, oy = getattr(note, "anchor_offset", (0.0, 0.0))
@@ -1079,7 +1076,7 @@ class MapScene(QGraphicsScene):
         return os.path.getsize(path)
 
     # ── v0.9.9.7: PDF export of the map (on top of render_to_pixmap) ───────────────
-    # v1.3.3.7-fix: the geometry constants of that export (see render_to_pdf).
+    # the geometry constants of that export (see render_to_pdf).
     PDF_PAGE_LONG_SIDE_PT = 1200.0     # the page's long side ≈ 42 cm — the map fills the page
     PDF_RESOLUTION_DPI = 300           # the PAINT DEVICE unit (QPdfWriter defaults to 1200 dpi!)
     PDF_RASTER_DPI = 150               # the floor density of the embedded map image
@@ -1097,7 +1094,7 @@ class MapScene(QGraphicsScene):
         so the page is PRINT-FRIENDLY by default (a DARK window prints the LIGHT page
         with the high-contrast lines) and `theme.PALETTE_THEME` keeps the current look.
 
-        **v1.3.3.7-fix — the two geometry defects of the v0.9.9.7 implementation** (found
+        **The two geometry defects of the v0.9.9.7 implementation** (found
         while verifying the export set; the old code produced a ~72 pt thumbnail in the
         corner of an 870×1200 pt page):
           * `QPdfWriter` paints in DEVICE PIXELS (`resolution()`, 1200 dpi by default),
@@ -1179,7 +1176,7 @@ class MapScene(QGraphicsScene):
         try:
             painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
             # The target is the device's OWN rect (device pixels at device.resolution()),
-            # never the page size in points — that confusion was the v1.3.3.7-fix bug.
+            # never the page size in points.
             painter.drawPixmap(
                 QRectF(0.0, 0.0, float(device.width()), float(device.height())),
                 pixmap, QRectF(pixmap.rect()))

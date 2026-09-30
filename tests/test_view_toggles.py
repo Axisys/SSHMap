@@ -1,56 +1,11 @@
 # -*- coding: utf-8 -*-
-"""v1.2.4.1 — Collapsing the sidebar and the map into a thin line (buttons + menu, ROADMAP v1.2.4.1).
+"""Collapsing the sidebar and the map into a thin line (buttons + menu).
 
-The thematic test of the release (the "new thematic file" convention): offscreen, without the network
-(the status probes are instantly offline; the terminal sessions — on the fake threads).
+Offscreen, NO network. Pins the two collapse controls, the prohibition of collapsing BOTH
+panels, the minimum-width floor that keeps a strip from being stretched, and the language/theme
+re-render of the buttons. Contract — `AGENTS.md` §4.12/§4.14.
 
-§1 The structure: QSplitter[container_sidebar | container_map]; setCollapsible(0/1)=False
-   (the handle does not reach zero); the strips _CollapseStrip 18px (hidden in the expanded
-   state); the corner buttons with the rhombus "◇" (the bottom row of the SidebarPanel / the overlay in the right
-   BOTTOM corner of MapView — the top is reserved for the minimap, v1.2.4.1-fix); the items
-   of the "View" menu act_show_sidebar/act_show_map — the checkable with the pair of icons.
-
-§2 The sidebar — THREE paths: the corner button (the click), the click on the strip (QTest.mouseClick),
-   the menu item (trigger() — PySide6 6.11: the click inverts the checked itself and emits).
-   Each path: the panel hide()/show(), the strip in its place, the check of the item = the state,
-   the persistence in config.json.
-
-§3 The map — the same three paths (the overlay button + the repositioning by resizeEvent — the right
-   bottom corner, the strip, the menu).
-
-§4 The prohibition of the double collapsing (v1.2.4.1-fix, the QA request): both the panels
-   must not be collapsed SIMULTANEOUSLY (a window-"shell" of two strips is not allowed,
-   even with the open dock). The first panel is collapsed; the attempt to collapse the second — all
-   three paths (the menu/the button/setChecked) are rejected: the panel stays expanded, the check
-   does not diverge from the mechanics, the status hint; after the expansion of the first the second is
-   collapsed again.
-
-§5 The guard no-op on the collapsed map: fit_to_content/_center_view/reveal-a-node/the navigation
-   of the search (Enter/Shift+Enter) — without exceptions and without the auto-show of the map; the selection and
-   the statuses work in the background (scene-based), the dots appear on the expansion.
-
-§6 The PNG/PDF/drawio export on the collapsed map: the files are created (the scene renders,
-   the view is not needed). v1.5rc2: the print-palette question of the export commands is
-   stubbed here (the dialog and the palette decision are the subject of tests/test_encoding.py).
-
-§7 terminal_mode="tabs": the map is collapsed → the dock "Terminals" lives, the session types,
-   the tear-off of the dock into a window and back work (the QDockWidget is independent of the splitter).
-
-§8 The persistence: ui_sidebar_collapsed/ui_map_collapsed in config.json (the merge write —
-   the foreign keys are not reset); a new window applies the state on the start AFTER
-   restoreState(); a manual write of BOTH the keys True (the old config) — on the start
-   only the sidebar is applied, the map stays expanded (the invariant §4); a partial
-   expansion writes only its own key.
-
-§9 The splitter handle does not reach zero: setSizes([0, …]) is clamped by the minimumWidth
-   of the container (160/240).
-
-§10 The i18n parity (421 = 417 + 3 + 1: view.toggle_map + the tooltips of the strips +
-    status.collapse_both_forbidden) + the release state (the pin _common.py; the version
-    is unchanged — v1.2.4.1-fix).
-
-Run: python tests/test_view_toggles.py   (from the project root) or python tests/run_all.py
-"""
+Run: python tests/test_view_toggles.py   (from the project root) or python tests/run_all.py"""
 import json
 import os
 import sys
@@ -138,7 +93,7 @@ check("the sidebar's corner button: a QToolButton in the panel's bottom row (the
       win.sidebar.collapse_btn.parentWidget() is win.sidebar)
 check("the map's corner button: an overlay on MapView (a child of view)",
       win._map_collapse_btn.parentWidget() is win.view)
-# v1.2.4.1-fix: the icon — a "◇" rhombus by both panels; the map button — in the bottom RIGHT corner
+# the icon — a "◇" rhombus by both panels; the map button — in the bottom RIGHT corner
 check("the corner buttons: the rhombus icon is set (not null)",
       not win.sidebar.collapse_btn.icon().isNull()
       and not win._map_collapse_btn.icon().isNull())
@@ -316,7 +271,7 @@ check("both mirrors agree with their items again",
       and win._map_toolbar_btn.isChecked() == win.act_show_map.isChecked() is True)
 
 # ════════════════════════════════════════════════════════════
-# 4. Forbidding double collapsing (v1.2.4.1-fix, a QA request)
+# 4. Forbidding double collapsing (a QA request)
 # ════════════════════════════════════════════════════════════
 print("== 4. both collapsed is forbidden ==")
 
@@ -583,7 +538,7 @@ print("== 10. i18n parity + release state ==")
 
 langs = load_i18n_langs(ROOT)
 new_keys = ["view.toggle_map", "view.strip_sidebar_tooltip", "view.strip_map_tooltip",
-            "status.collapse_both_forbidden"]  # +1 — v1.2.4.1-fix (forbidding double collapsing)
+            "status.collapse_both_forbidden"]  # +1 — (forbidding double collapsing)
 missing = [k for k in new_keys
            if any(not langs[c].get(k, "").strip() for c in ("en", "ru", "zh"))]
 check("the 4 v1.2.4.1 (+fix) keys are present and non-empty in en/ru/zh", not missing, str(missing))

@@ -26,7 +26,7 @@ from PySide6.QtWidgets import QMenu, QMessageBox
 class QuestionStub:
     """A `QMessageBox.question` replacement: records every call and answers it.
 
-    Twelve test files used to declare their own `_fake_question()` plus an
+    Twelve test files would declare their own `_fake_question()` plus an
     `_orig_question = …` save/restore pair — and the variants disagreed on WHAT
     they recorded (the title alone, a `("question", title, text)` tuple) and on
     WHERE the answer came from (a constant, a one-element list flipped between

@@ -1,29 +1,12 @@
 # -*- coding: utf-8 -*-
 """v1.4.2 — The big-picture map level: the minimap, the cached card drop-shadow, the group fold.
 
-Checks (ROADMAP v1.4.2; offscreen, no network, isolated HOME):
-  §1 the minimap (`ui/minimap.py`): the panel over the canvas (never a scene item), the
-     cached layer + its debounce, the fit transform, the status colours, the viewport
-     frame, the two-way synchronization (a click/drag asks for the right scene point and
-     the window centers the view there), the top-right placement and the "below the
-     search bar" rule, the toggle + `ui_minimap` in config.json (a round-trip; a broken
-     value → the default), the registry action, i18n;
-  §2 the cached drop-shadow: a QGraphicsPixmapItem fed by ONE pixmap per card SIZE (a
-     cache hit), a size change misses, the cache is bounded, the halo is inside
-     boundingRect() while `card_rect()` is the card, the item is mouse-transparent, no
-     QGraphicsDropShadowEffect anywhere, the SVG export hides the halos and restores them;
-  §3 the anchors (`card_rect_scene()`): the arrow tips on the card on all four sides, the
-     pinned-note anchor + the anchor line, the group membership by the CARD centre,
-     `set_group_size` scaling by the card, `fit_to_content` still framing the halo;
-  §4 the group fold: the chevron ASKS (collapseRequested) and the window pushes ONE undo
-     command, the badges/grid/frame re-fit, the membership survives, a folded group drags
-     as a whole and re-lays out on resize, expand restores everything (including after a
-     group move), the JSON round-trip (keys written only while folded; an old file loads
-     unfolded; a reloaded folded group unfolds in place), a node captured while folded;
-  §5 i18n parity (+4 keys × en/ru/zh/de) + the release state.
-
-Run: python tests/test_map_bigpicture.py   (from the project root) or python tests/run_all.py
-"""
+Offscreen, no network, isolated HOME.
+§1 the minimap (`ui/minimap.py`): the panel over the canvas (never a scene item), its cached layer and
+debounce, the fit transform, the status colours, the viewport frame, the two-way synchronization (a
+click or drag asks for the right scene point and the window centres there), the placement rules, the
+toggle with `ui_minimap` in config.json, the registry action and i18n; §2 the cached drop-shadow: a
+QGraphicsPixmapItem fed by ONE pixmap per card SIZE (a cache hit; a size change misses), a bounded cache, the halo inside `boundingRect()` while `card_rect()` stays the card, no `QGraphicsDropShadowEffect` anywhere, and the SVG export hiding the halos and restoring them; §3 the anchors (`card_rect_scene()`): the arrow tips on the card on all four sides, the pinned-note anchor and its line, the group membership by the CARD centre, `set_group_size` scaling by the card, `fit_to_content` still framing the halo; §4 the group fold: the chevron ASKS and the window pushes ONE undo command, the badges/grid/frame re-fit, the membership survives, a folded group drags as a whole and re-lays out on resize, expand restores everything, and the JSON round trip writes the keys only while folded (an old file loads unfolded); §5 the i18n parity and the release state."""
 import json
 import os
 import sys

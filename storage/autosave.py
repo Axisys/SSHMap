@@ -1,31 +1,16 @@
 # -*- coding: utf-8 -*-
-"""v0.9.7: autosave + a ring buffer of project backups (ROADMAP v0.9.7).
+"""Autosave and a ring buffer of project backups — the safety net against corruption or a lost edit
+(AGENTS.md §6; `DOCUMENTATION.md`, "Project format").
 
-Goal — a safety net against JSON corruption / accidental loss of edits:
+Three halves. AUTOSAVE writes a full project serialization (the `save_project` format, and NO passwords —
+`server_data_to_dict` strips them) to `~/.sshmap/autosave/<key>.json` on a timer (the interval from
+`config.json`, 60 s by default), only when the project is dirty and a file is open. BACKUPS keep a ring of
+N files (10 by default) in `~/.sshmap/backups/`: every manual save shifts the pre-save version into slot
+`001`, older slots move +1 and the overflow beyond N is deleted. RESTORE copies a backup or an autosave
+back into the project file atomically.
 
-  * autosave — a full project serialization (same format as save_project;
-    NO passwords in it: server_data_to_dict strips them) is written to
-    ``~/.sshmap/autosave/<key>.json`` on a timer (interval from config, default 60 s),
-    only when dirty and only if a project file is open;
-  * backups — a ring buffer of N files (default 10) in ``~/.sshmap/backups/``:
-    on every manual save of this file the pre-save version is shifted into
-    slot 001, older slots move to +1, overflow beyond N is deleted;
-  * restore — an atomic copy of the backup/autosave back into the project file.
-
-Layout (same ~/.sshmap root as config.json / known_hosts / logs):
-
-    ~/.sshmap/autosave/<key>.json        — the project's last autosave
-    ~/.sshmap/backups/<key>_001.json     — the newest backup (previous version of the file)
-    ...
-    ~/.sshmap/backups/<key>_NNN.json     — the oldest retained backup
-
-``<key>`` = sha1[:16] of the normalized absolute project file path: stable
-across sessions, distinguishes files with the same name in different directories.
-
-A module without Qt dependencies — tested with plain python / offscreen (the
-storage/project.py pattern). All functions are "quiet": a corrupted/missing file
-neither breaks startup nor saving — they return None/[] or log.
-"""
+The layout is the `~/.sshmap` root of `config.json` / `known_hosts` / `logs`:
+`autosave/<key>.json` (the last autosave) and `backups/<key>_001.json … <key>_NNN.json` (newest first), where `<key>` is `sha1[:16]` of the normalized absolute project path — stable across sessions and able to tell two same-named files in different directories apart. No Qt: tested with plain python or offscreen (the `storage/project.py` pattern). Every function is quiet — a corrupted or missing file neither breaks startup nor saving (it returns `None` / `[]` or logs)."""
 import hashlib
 import json
 import os
@@ -38,12 +23,11 @@ _CONFIG_DIR = os.path.join(os.path.expanduser("~"), ".sshmap")
 AUTOSAVE_DIR = os.path.join(_CONFIG_DIR, "autosave")
 BACKUPS_DIR = os.path.join(_CONFIG_DIR, "backups")
 
-# ROADMAP v0.9.7: interval is configurable, default ~60 s; a ring buffer of N files,
-# default 10. Config — the existing ~/.sshmap/config.json (load_config from i18n):
+# The interval is configurable (default ~60 s) and the backups are a ring buffer of N files
+# (default 10). Config — the existing `~/.sshmap/config.json` (`load_config` from i18n):
 #   autosave_enabled       bool, default True
 #   autosave_interval_sec  int,  default 60
 #   backup_count           int,  default 10
-# A settings dialog for these keys will appear in v1.1 (ROADMAP).
 DEFAULT_AUTOSAVE_ENABLED = True
 DEFAULT_AUTOSAVE_INTERVAL_SEC = 60
 DEFAULT_BACKUP_COUNT = 10
@@ -253,7 +237,7 @@ def rotate_backups(project_path: str, max_count: int = DEFAULT_BACKUP_COUNT) -> 
         if os.path.isfile(src):
             _atomic_copy(src, backup_path_for(project_path, slot))
     # Leftovers beyond the new max_count (N reduced in the config).
-    # v1.0-fix (audit #5): we scan up to the hard limit _MAX_BACKUPS, not a fixed
+    # we scan up to the hard limit _MAX_BACKUPS, not a fixed
     # window of 63 slots — earlier when backup_count was reduced (e.g. 100 → 1) slots beyond
     # max_count+63 remained on disk forever.
     for slot in range(max_count + 1, _MAX_BACKUPS + 1):

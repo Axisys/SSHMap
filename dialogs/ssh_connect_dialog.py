@@ -27,7 +27,7 @@ from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QLabel, QFormLayout, QLineEdit, QSpinBox,
     QPushButton, QHBoxLayout, QFileDialog, QMessageBox, QComboBox,
 )
-from PySide6.QtCore import QCoreApplication, QEventLoop as _QEL  # v0.9.4-fix: non-blocking close
+from PySide6.QtCore import QCoreApplication, QEventLoop as _QEL  # non-blocking close
 
 
 class SSHConnectDialog(QDialog):
@@ -369,13 +369,11 @@ class SSHConnectDialog(QDialog):
         key_path = self.key_path_edit.text().strip()
         port = self.port_edit.value()
 
-        # Remember the entered user/key/port in the server data, as the
-        # regular connection does after success — so the context menu and the next launch
-        # use the up-to-date values.
-        # v1.0-fix (audit #2): via the undo stack + dirty marker (MainWindow helper),
-        # not by writing directly to node.data: earlier Ctrl+Z didn't roll back, on close
-        # without Ctrl+S the changes were lost without a "save?" dialog, and the card
-        # didn't redraw the SSH:<port> line.
+        # Remember the entered user/key/port in the server data, as the regular connection does after
+        # success — so the context menu and the next launch use the up-to-date values. It goes through the
+        # undo stack + dirty marker (the MainWindow helper), never a direct write to `node.data`: a direct
+        # write could not be rolled back by Ctrl+Z, was lost on close without Ctrl+S (no "save?" dialog)
+        # and left the card showing a stale `SSH:<port>` line.
         win = self.parent()
         if win is not None and hasattr(win, "_apply_ssh_dialog_fields"):
             win._apply_ssh_dialog_fields(self.server_data.id, user, key_path, port)
@@ -417,29 +415,27 @@ class SSHConnectDialog(QDialog):
                                       f"{self.t('ssh.test_ok')}\n\n{message}")
                 return
 
-            # v1.1.2RC1 (N1): direct writes to server_data REMOVED — earlier the dialog itself
-            # wrote user/key_path/ssh_port (that's the same object as node.data), and
-            # _apply_ssh_dialog_fields() in MainWindow compared old/new already equal →
-            # CmdEditNodeData wasn't pushed, Ctrl+Z didn't roll back the login/key/port change.
-            # Now the only path is the MainWindow helper AFTER accept():
-            # _run_ssh_connect() → _apply_ssh_dialog_fields() (undo stack + dirty).
+            # No direct writes to `server_data`: the dialog would otherwise write user/key_path/ssh_port
+            # (the same object as `node.data`), and `_apply_ssh_dialog_fields()` in MainWindow compared
+            # old/new already equal → `CmdEditNodeData` was not pushed and Ctrl+Z did not roll back the
+            # login/key/port change. The only path is the MainWindow helper AFTER `accept()`:
+            # `_run_ssh_connect()` → `_apply_ssh_dialog_fields()` (undo stack + dirty).
 
             # Save password to keyring if it was provided via UI (not profile)
             password_from_ui = self.password_edit.text()
             if password_from_ui and self.server_data.id:
                 try:
-                    # BUGFIX v0.9.5.6: dual import (relative + flat) —
-                    # when launched as "python main.py" the dialogs package is top-level, and
-                    # "from ..services" raised ImportError, which the outer
-                    # except Exception caught → a false "keyring save failed" + a warning
-                    # to the user (the connection still went through). The fallback — like all
-                    # the other imports in this file.
+                    # Dual import (relative + flat): launched as "python main.py" the dialogs package is
+                    # top-level and "from ..services" raises ImportError, which the outer
+                    # `except Exception` catches → a false "keyring save failed" + a warning to the user
+                    # (the connection still went through). The fallback matches every other import in this
+                    # file.
                     try:
                         from ..services.credential_manager import get_credential_manager
                     except ImportError:
                         from services.credential_manager import get_credential_manager
                     cm = get_credential_manager()
-                    # v0.9.4-fix: the result is checked — aligned with _do_save, where
+                    # the result is checked — aligned with _do_save, where
                     # silent password loss is warned about. save_password returns
                     # False when the keyring is unavailable (NoKeyringError etc. are caught there).
                     saved_ok = bool(cm.save_password(self.server_data.id, password_from_ui))
@@ -457,7 +453,7 @@ class SSHConnectDialog(QDialog):
                         self.t("msg.error_title"),
                         self.t("msg.credentials_save_failed", alias=self.server_data.alias))
 
-            # v0.9.5.6: the "Success / SSH connection established" window REMOVED — an extra
+            # v0.9.5.6: no "Success / SSH connection established" window — an extra
             # click was annoying; the confirmation of the connection is the terminal window itself,
             # and the details are already in status_label (message) and the MainWindow status bar.
             self.accept()
@@ -489,7 +485,7 @@ class SSHConnectDialog(QDialog):
         """
         worker = getattr(self, "_ssh_worker", None)
         if worker is not None:
-            # v0.9.4-fix: earlier wait(30000) froze the GUI for up to 30 s on close
+            # earlier wait(30000) froze the GUI for up to 30 s on close
             # of the window during a connection. The worker's internal network timeouts
             # (socket 5 s / paramiko 15 s) guarantee quick completion, so
             # we wait at most 2 s with event processing (the GUI stays responsive),

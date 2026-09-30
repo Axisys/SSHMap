@@ -2,35 +2,11 @@
 """v1.3rc1 — Terminal: the managed pyte fork (vendored 0.8.2 + patch manifest).
 v1.5.7.1 — the dependency audit's five patches (0005–0009) join the manifest and its smoke.
 
-(ROADMAP v1.3rc1, the PYTE82_AUDIT.md "The application: the 'controlled fork' variant" +
-the section "The decision"; v1.5.7.1 — its raise-review section.)
-
-The test of the provenance of the fork in third_party/pyte/. Zero behavioral conversion —
-the existing terminal tests (test_pyte_compat / test_alt_screen / …) are green
-unchanged; this file adds the PROVENANCE CHECKS on top of them:
-
-  * the sha256 of every file of third_party/pyte/ == the tables of MANIFEST.md (two tables:
-    the pristine files == the upstream PyPI sdist 0.8.2; the post-patch — the expected hashes
-    after the patches 0001–0010); the drift "and forgot what was changed" is caught here;
-    the two patched files are screens.py (0001–0005, 0007–0009) and streams.py (0006, 0010);
-  * the manifest of the patches: the files are in place, the names by the convention NNNN-slug.patch, the headers
-    with the provenance (the upstream issue/PR, the audit report, the date) and the attribution (0003 — the
-    author of PR #212, dwgx; the code of pyte is LGPL-3.0 — the attribution is mandatory); the patch files
-    are UTF-8 (a cp1251-piped `git diff` produces mojibake in their non-ASCII comments);
-  * the behavioral smoke of the fork itself (headless, without Qt): the private SGR does not crash;
-    a private CSI with a NON-mode final byte (`\\x1b[?r` — XTRESTORE, sent by ncurses/mc on exit —
-    and the private DSR) is ignored while the public DECSTBM keeps working (patch 0004) +
-    the tail of the chunk is preserved (b'AB\\x1b[?4mCD\\r\\n' → "ABCD"); the LNM is the default
-    (b'ab\\ncd' → ["ab", "cd"], after the explicit \\x1b[20l — the shift x=2); the alt-screen
-    round-trip (\\x1b[?1049h…\\x1b[?1049l → the grid is equal to before the enter
-    character by character, including the fg/bg); and one probe per defect of v1.5.7.1 (§3.5–§3.9):
-    a grapheme cluster lands whole (the tail is not dropped), no final of the CSI table raises on a
-    malformed sequence, an unknown erase mode is a no-op, DECOM without a region neither raises nor
-    goes silent, a resize keeps the cursor — and the following text — inside the screen, and the G0/G1
-    designation of the VT100 special graphics really reaches the grid (patch 0010).
-
-Run: python tests/test_pyte_fork.py   (from the project root) or python tests/run_all.py
-"""
+The PROVENANCE checks of `third_party/pyte/` (the fork policy is `AGENTS.md` §4.7, the deep dive is
+`PYTE82_AUDIT.md`): the sha256 of every file against the two tables of `MANIFEST.md` (pristine = the
+upstream PyPI sdist 0.8.2, post-patch = after 0001–0010), so "patched it and forgot what changed" is
+caught; the manifest itself (the `NNNN-slug.patch` convention, the provenance headers, the mandatory
+LGPL-3.0 attribution, UTF-8 so a cp1251-piped `git diff` cannot produce mojibake); and the behavioral smoke of the fork, headless: a private SGR does not crash, a private CSI with a non-mode final byte is ignored while the public DECSTBM keeps working and the chunk tail survives, the LNM default, the alt-screen round trip character by character, a grapheme cluster landing whole, no final of the CSI table raising on a malformed sequence, an unknown erase mode as a no-op, DECOM without a region, a resize keeping the cursor inside the screen, and the G0/G1 graphics designation reaching the grid."""
 import hashlib
 import os
 import re
@@ -282,12 +258,11 @@ check("the PUBLIC `CSI 1;5r` still sets the scrolling region (vim/less splits)",
       _marg.margins is not None
       and (_marg.margins.top, _marg.margins.bottom) == (0, 4), str(_marg.margins))
 
-# 3.5 Grapheme clusters (patch 0005). An emoji sequence used to TRUNCATE the chunk in silence:
-#     draw() `break`s out of the whole data string on a zero-width code point that is not a
-#     combining mark (ZWJ U+200D, VS16 U+FE0F), so everything after it in the same feed() was
-#     dropped with no exception and no log line (AUDIT_PENDING.md N26). The fork's cluster rule
-#     also attaches the marks whose canonical combining class is 0 (Thai, Devanagari, the keycap's
-#     U+20E3) — upstream leaves those as zero-width clusters and still loses the tail on them.
+# 3.5 Grapheme clusters (patch 0005). An emoji sequence would otherwise TRUNCATE the chunk in silence:
+#     `draw()` `break`s out of the whole data string on a zero-width code point that is not a combining
+#     mark (ZWJ U+200D, VS16 U+FE0F), so everything after it in the same feed() was dropped with no
+#     exception and no log line. The fork's cluster rule also attaches the marks whose canonical
+#     combining class is 0 (Thai, Devanagari, the keycap's U+20E3).
 for _text, _what in (("A\u2764\ufe0fB", "a heart + VS16"),
                      ("A\U0001f469\u200d\U0001f469B", "a ZWJ sequence"),
                      ("A1\ufe0f\u20e3B", "a keycap (its U+20E3 is Me — the M-extend rule)"),
@@ -366,7 +341,7 @@ pyte.ByteStream(_vpa_reg).feed(b"\x1b[2;4r\x1b[?6h\x1b[2d")
 check("DECOM WITH a region: the VPA arithmetic is unchanged (line 2 of the region → y=2)",
       _vpa_reg.cursor.y == 2, str(_vpa_reg.cursor.y))
 
-# 3.9 A resize clamps the cursor into the new geometry (patch 0009): the clamp used to run against
+# 3.9 A resize clamps the cursor into the new geometry (patch 0009): the clamp would otherwise run against
 #     the OLD bounds (or not at all), so the next draw() wrote an off-screen cell that display()
 #     never showed — silent data loss (AUDIT_PENDING.md N30).
 _rows = pyte.HistoryScreen(20, 10)

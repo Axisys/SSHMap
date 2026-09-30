@@ -1,56 +1,16 @@
 # -*- coding: utf-8 -*-
-"""v1.4.2 (ROADMAP task 1): the minimap — the big-picture level of the map.
+"""The minimap — the big-picture panel over the canvas (DOCUMENTATION.md §34).
 
-A small panel floating over the canvas (a CHILD of `MapView`, outside the layout — the
-`MapSearchBar` pattern: it is never a scene item, so it stays out of the exports, out of
-a rubber-band selection and out of `itemsBoundingRect`). It draws the whole scheme at
-fit scale — nodes as blocks coloured by status, notes, the group frames, the background
-image — plus a frame around the part of the map the view is currently showing, and it
-moves the view when clicked or dragged.
+A CHILD of `MapView`, outside the layout (the `MapSearchBar` pattern), so it stays out of the
+exports, out of a rubber-band selection and out of `itemsBoundingRect`. It draws the whole scheme
+at fit scale — nodes by status, notes, the group frames, the background image — plus the visible
+frame, and it moves the view when clicked or dragged.
 
-The pinned constraints (decision 2026-09-11):
-  * **no text** and no arrows — the panel is a SHAPE, not a second sidebar. **v1.4.6
-    narrows this to the map AREA:** the panel now carries a vertical TITLE BAND
-    (`minimap.title`, "Minimap", rotated — the one word that names the panel, the
-    `legend.title` precedent), and that band is also its collapse affordance;
-  * **cheap rendering** — the scene is walked ONCE per change burst (a restart-guarded
-    200 ms debounce) into a flat `[(QRectF, QColor)]` layer; a paint only applies ONE
-    transform and draws those rects. There are no per-node QGraphicsItems (the v1.2.10
-    audit: 500 cards must not cost 500 extra items);
-  * **two-way synchronization** — the viewport frame follows `resized` / `zoomChanged` /
-    both scrollbars, and a click/drag emits `center_requested(QPointF)`. The widget owns
-    no camera logic: `MainWindow` decides where the view goes (the same split as the
-    search bar, which owns no search logic).
-
-**v1.4.6 — the vertical band and the side collapse.** The panel is
-`[map area | title band]`; a click on the band folds the panel sideways to the RIGHT
-(the map area disappears, the band stays — the LegendWidget gesture rotated by 90°,
-so the two floating panels are collapsed the same way: by clicking their title). The
-state is the `ui_minimap_collapsed` key, written by the WINDOW (the widget only reports
-the change on `collapsed_changed`, and the window re-places the panel because its width
-changed — it is anchored to the right edge). v1.5rc5 (N6): the anchor holds with a SAVED
-position too — `MainWindow._position_minimap()` shifts that x by the width delta, so a
-fold of a MOVED panel keeps the band on the right edge and the unfold round trip is
-lossless (before, the saved top-left was used verbatim and the band jumped
-`BODY_WIDTH` = 200 px to the left).
-
-**v1.4.6, part two — the panel is MOVABLE (the legend's drag, disambiguated by a HOLD).**
-The body of the minimap already owns two gestures the mouse cannot tell apart at press
-time: a click/drag PANS the camera (v1.4.2) and a drag should MOVE the panel (the legend
-does it with a plain drag in its body). The pinned resolution is a **long press**: hold
-the left button for `MOVE_HOLD_MS` (400 ms) without moving and the panel enters MOVE
-mode — the cursor turns into `SizeAllCursor`, the frame lights up in the accent colour,
-and every move drags the PANEL (clamped inside the view) instead of the camera; the
-release reports `moved(QPoint)` so the WINDOW can persist `ui_minimap_position` (the
-`ui_legend_position` precedent). Everything else stays exactly as it was:
-  * a press that MOVES already (`MOVE_THRESHOLD_PX`) is a camera pan at once — no wait;
-  * a short press-and-release is the v1.4.2 click (the view jumps to that point);
-  * the title band keeps its own gesture (a click folds/unfolds), so a folded strip is
-    unfolded first and moved after — the band is never a drag handle.
-
-The module is i18n-light: the tooltip and the band title, resolved at construction and
-in `retranslate()`.
-"""
+Pinned: no text and no arrows (the vertical TITLE BAND `minimap.title` names the panel and is its
+collapse affordance); cheap rendering (the scene is walked ONCE per change burst into a flat
+`[(QRectF, QColor)]` layer, never per-node items); two-way synchronization (`resized` / `zoomChanged`
+/ the scrollbars move the frame, a click emits `center_requested`).
+The widget owns no camera logic and no persistence: it reports `collapsed_changed` / `moved`."""
 
 from PySide6.QtCore import Qt, QPoint, QPointF, QRectF, QTimer, Signal
 from PySide6.QtGui import (QBrush, QColor, QFont, QFontMetrics, QPainter, QPainterPath,

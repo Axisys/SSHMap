@@ -1,21 +1,16 @@
 # -*- coding: utf-8 -*-
-"""v1.4.1 (ROADMAP v1.4.1, task 2): the "Import from ~/.ssh/config" picker.
+"""The "Import from ~/.ssh/config" picker (AGENTS.md §4.4; DOCUMENTATION.md §27).
 
-Data-driven, like `BackupsDialog`: the caller (`MainWindow._import_servers_from_ssh_config`)
-passes what `services/ssh_config_importer.py` parsed and receives the CHECKED
-records back through `selected_hosts()` — the dialog imports nothing itself and
-holds no state of its own beyond the checkboxes. Every row starts checked, so
-"import the whole config" is one OK; the "Import" button is disabled while
-nothing is checked (there is no import to confirm).
+Data-driven like the backups dialog: the caller (`MainWindow._import_servers_from_ssh_config`) passes what
+`services/ssh_config_importer.py` parsed and receives the CHECKED records back through `selected_hosts()`,
+so the dialog imports nothing itself and holds no state beyond its checkboxes. Every row starts checked, so
+"import the whole config" is one OK, and the "Import" button is DISABLED while nothing is checked (there is
+no import to confirm).
 
-The report under the tree shows what the parse DROPPED:
-  • `skipped` — not imported at all (a wildcard pattern, a `Match` block, an
-    unreadable `Include`, a host the map already knows);
-  • `notes`   — imported, but a directive was dropped (`ProxyJump`/`ProxyCommand`,
-    an extra `IdentityFile`).
-Both are hidden while empty, so a clean config shows the table and nothing else.
-The reason CODES are the parser's; the translation lives here (`_REASON_KEYS`).
-"""
+The report under the tree shows what the parse DROPPED: `skipped` (not imported at all — a wildcard pattern,
+a `Match` block, an unreadable `Include`, a host the map already knows) and `notes` (imported, but a
+directive was dropped — `ProxyJump`/`ProxyCommand`, an extra `IdentityFile`). Both are hidden while empty, so
+a clean config shows the table and nothing else; the reason CODES are the parser's and the translation lives here (`_REASON_KEYS`)."""
 
 try:
     from ..i18n import t

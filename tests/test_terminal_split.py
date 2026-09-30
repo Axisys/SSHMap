@@ -1,39 +1,12 @@
 # -*- coding: utf-8 -*-
 """v1.3.3.5 — Terminal split: a second pane under the sessions (ROADMAP v1.3.3.5).
 
-The topical test of the release v1.3.3.5 (the "new thematic file" convention): offscreen,
-ALL without the network — the fake threads with the same API as SSHTerminalThread
-(the test seam ST.SSHTerminalThread), a fake channel that records its own traffic.
-
-§1 The layout and the action: the split is OFF by default (the single-pane look of
-   v1.3.3.4 is preserved — the host is hidden and costs no geometry); the central widget
-   is `[cmdlib_panel | QSplitter(Vertical)[session_tabs | split_host]]`; ONE checkable
-   action (`terminal.split`) drives the toolbar button AND the window's context-menu item.
-§2 The pane's birth: the action creates a REAL TerminalSessionPage — a DIFFERENT object
-   with the same `server_data.id`, its own SSHTerminalThread, the same node credentials
-   and NO Quick Launch command; the host is shown, the default ratio is ≈25%, the pane
-   is not a tab, and it joins the MainWindow session registry with the split marker.
-§3 Input isolation: a byte typed into one pane reaches only its own channel.
-§4 The geometry rules: the divider drag becomes the ratio, a window resize keeps the
-   proportion, the minimum-height floor keeps ≥ SPLIT_MIN_ROWS rows in the pane, and the
-   pane's PTY resize goes through the debounce exactly once per settled geometry.
-§5 Focus and the bridges: `win.page` and the status bar follow the FOCUSED pane, the
-   command library sends to the focused pane, and multi-input marks the pane (frame on
-   the host + badge on its inner Terminal tab) and broadcasts into it. **v1.4.7
-   follow-up:** no session draws a status line and a single-tab page hides its tab
-   strip, so the pane's live state is the SECOND text of the window's status bar
-   (`Split Terminal  <state>`), shown with the pane and dropped when it closes.
-§6 The registry rules (ROADMAP task 2): the terminal_max_open limit and
-   `_find_terminal_window_for` ignore the pane, while the green dot and the multi-input
-   provider count it.
-§7 The teardown paths: turning the split off, the pane's own error path, the window
-   close and the session-limit path all run the single idempotent `page.shutdown()`.
-§8 Persistence: the split state and the ratio survive save→load (one merged geometry
-   write), a broken value falls back to the default.
-§9 The i18n (a language switch re-texts the new action) + the release state.
-
-Run:  python tests/test_terminal_split.py   (from the project root) or python tests/run_all.py
-"""
+The topical test of the release: offscreen, no network (the fake threads of `ST.SSHTerminalThread`).
+§1 the layout and ONE checkable action (`terminal.split`); §2 the pane's birth (a REAL
+`TerminalSessionPage`, same node, own thread, no Quick Launch, ~25%, the split marker in the registry);
+§3 input isolation; §4 the geometry rules (ratio, resize, `SPLIT_MIN_ROWS`, ONE PTY debounce per
+settled geometry); §5 focus and bridges (the status bar follows the FOCUSED pane and its state is the
+window's SECOND text); §6 the registry rules (the limit ignores the pane, the dot counts it); §7 the teardown paths run the one `page.shutdown()`; §8 the persistence; §9 i18n and the release state."""
 import json
 import os
 import sys
@@ -184,7 +157,7 @@ check("the pane is bound to its host and carries the split marker",
       and top_a._is_split_pane is False)
 check("the pane joined the MainWindow session registry (green dot / multi-input)",
       len(mw._terminal_windows) == 2 and pane_a in mw._terminal_windows)
-# ── v1.3.3.5-fix: the pane is a COMMAND LINE — no SFTP tab, no SFTP channel ──────
+# ── the pane is a COMMAND LINE — no SFTP tab, no SFTP channel ──────
 check("a TAB keeps its SFTP and History tabs (with_sftp=True is untouched)",
       top_a.sftp_tab is not None and top_a.history_tab is not None
       and top_a.tabs.count() == 3

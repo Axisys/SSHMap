@@ -1,163 +1,25 @@
 # -*- coding: utf-8 -*-
-"""v1.0RC1: TerminalWidget — the cell-based canvas of the terminal (QWidget + QPainter).
+"""The cell-based terminal canvas — QWidget + QPainter over the pyte screen (`modules/terminal_screen.py`).
 
-Replaces the HTML rendering (QPlainTextEdit + TerminalScreen.render(), deprecated since v1.0RC1):
-paintEvent draws **runs** of identical formatting (not per-character drawText),
-colors — via resolve_color() from modules/terminal_screen.py (TERMINAL.md §5.1,
-verified pyte 0.8.2 facts: brown/brightbrown, hex passthrough of the 256 colors and
-truecolor, the 'bfightmagenta' typo).
-
-The cursor — a block via swap (TERMINAL.md §3.13): fill the cell with the cursor color +
-redraw the glyph with the background color (NOT an XOR inversion — on colored cells it
-gives "soapy" tints); honors screen.cursor.hidden (ESC[?25l/h — vim hides the cursor).
-Wide glyphs (CJK): double width, the "placeholder" (data == '') is skipped
-(TERMINAL.md fact #11; v1.2.9: the full wcwidth(3) — the same wcwidth package table
-that pyte 0.8.2 itself uses for grid layout, instead of the
-east_asian_width W/F heuristic of v1.0RC1).
-
-The format cache (fg,bg,attributes) → (QPen,QBrush,QFont) with a size limit
-(512 entries, cleared on overflow — TERMINAL.md §5.1); reverse is reduced to
-an fg/bg swap BEFORE the key, so visually identical cells land in one cache entry.
-
-v1.0RC2 — the keyboard (the full table) + mouse selection/copy:
-* keyboard: F1–F12 (xterm sequences), PageUp/PageDown, Home/End/Delete
-  (the semantics of the old SSHTerminalTextEdit preserved), explicit Ctrl+C→\\x03 /
-  Ctrl+D→\\x04 without a selection, the Ctrl+V bracketed paste (carried over from v0.9.4),
-  the AltModifier guard (AltGr does not go out as control codes — TERMINAL.md §3.12);
-* selection: LMB press/move/release → anchor/end in (row, col); the pure function
-  selection_cells() (TERMINAL.md §5.2, the regression for draft error #4 —
-  the coordinates are ALWAYS (row, col), not (col, row)); Ctrl+C with a selection copies
-  to the clipboard (the v0.9.3 semantics preserved), without a selection — SIGINT;
-* highlighting — a semi-transparent overlay over the selected cells (the glyphs are visible).
-
-Threading: paintEvent and snapshot() — the GUI thread; feed() from the SSH thread under the lock
-v1.0RC3 — scrollback + dirty rendering:
-* the mouse wheel and Ctrl+Shift+PageUp/PageDown → tscreen.scroll_up()/scroll_down()
-  (pyte.HistoryScreen, TERMINAL.md §5.4); the "Ctrl+Shift → scroll" interception sits
-  BEFORE the bare PageUp/PageDown check — those remain a forward to the shell
-  (\\x1b[5~/\\x1b[6~, the v1.0RC2 semantics: less/man paging, the Windows
-  Terminal/GNOME/xterm convention); the auto-return to the live line on new output is
-  built into pyte (before_event) and only needs update() from _on_output;
-* the cursor blink — a dedicated QTimer (BLINK_INTERVAL_MS), stopped when
-  the window is hidden (hideEvent); the canvas repaints on the dirty flag:
-  _on_output → widget.update() directly, no 30 FPS timer needed.
-
-Threading: paintEvent and snapshot() — the GUI thread; feed() from the SSH thread under the lock
-v1.1.2RC3 — the arrows according to the DECCKM state (AUDIT U3: "the arrows do not work in mc"):
-the arrows and Home/End are sent as SS3 (\x1bOA…\x1bOD, \x1bOH/\x1bOF) when the application
-enabled Application Cursor Keys Mode (smkx \x1b[?1h — mc/vim/htop do this
-at startup), and as CSI (\x1b[A…\x1b[D, \x1b[H/\x1b[F) in normal mode. The state
-is read from tscreen.application_cursor_keys() (pyte 0.8.2: DECCKM = 32 in
-screen.mode — private modes are stored with the <<5 shift; the canonical check
-"1 in screen.mode" does not work). + wheel: the wheel_mode parameter from the
-terminal_wheel config — "scrollback" (the default) | "off" (the wheel does not scroll the local
-scrollback, event.ignore); v1.2.13: if a TUI enabled mouse tracking (DECSET
-1000/1002/1003), the wheel goes to the PTY as an SGR/X10 report — the passthrough takes precedence over "off".
-
-v1.2.7 — selection by double/triple-click + the context menu (RMB):
-* a double-click — select the WORD on the line (word_units() — a pure function:
-  a word = the maximal run of non-space cells; the placeholder of a wide CJK glyph
-  belongs to the word), a triple-click — the whole LINE (0..columns-1); the clicks are counted
-  by the widget itself (the cell + the DOUBLE_CLICK_MS interval) — QMouseEvent in PySide6 carries
-  no click-count, and the synthetic test events do not have one either; a drag after a
-  double/triple-click extends the selection from the FAR end of the word/line
-  (_click_sel_end), an LMB release with count>=2 does NOT wipe the selection;
-* RMB — the context menu (contextMenuEvent → _build_context_menu(), the test
-  seam): Copy (enabled only with a selection, the same path copy_selection()),
-  Paste into the PTY (the same bracketed paste as Ctrl+V: a single
-  \x1b[200~…\x1b[201~ block via _send — the multi-input duplicates it just like a key),
-  Select All (select_all() — the whole visible grid); the labels — the i18n keys
-  terminal.menu.* × en/ru/zh (get_translator, the cache following the ssh_terminal.py pattern).
-
-v1.2.12 — the alternate screen (PYTE82_AUDIT.md batch B): while tscreen.in_alt_screen()
-(a TUI owns the grid — vim/htop/mc/less), the mouse wheel and Ctrl+Shift+PageUp/PageDown
-do NOT scroll the history (the no-op gate).
-
-v1.2.13 — the wheel in a fullscreen TUI (PYTE82_AUDIT.md batch C): if
-tscreen.mouse_tracking() (DECSET 1000/1002/1003) — the wheel goes to the PTY as an
-xterm mouse report: SGR (\x1b[<64;{col};{row}M, with 1006; up=64/down=65) or X10
-(\x1b[M + [96|97, 32+col, 32+row]; the coordinates are clamped to the grid and to the protocol
-limit of 223). Sending — DIRECTLY to terminal_thread.send_data(), NOT through _send(): the coordinates
-are session-local, the multi-input must not broadcast them. The alt screen without tracking
-stays a no-op (v1.2.12); the passthrough takes precedence over wheel_mode="off".
-
-Threading: paintEvent and snapshot() — the GUI thread; feed() from the SSH thread under the lock
-of TerminalScreen — a race in the middle of a frame is excluded.
-
-v1.3.3.4 (ROADMAP "Terminal: working with the output") — the canvas learns to work
-with what it shows:
-* SEARCH IN THE SCROLLBACK (task 1): Ctrl+Shift+F opens the floating find panel
-  (modules/terminal_find_bar.py — the map_search_bar pattern), a case-insensitive
-  LITERAL search (re.escape — regex search is explicitly NOT in this version) over
-  the visible grid AND the history. The document comes from TerminalScreen.text_lines()
-  (history.top → buffer → history.bottom: the same line sequence at any scroll
-  position, so a match index is stable) and TerminalScreen.scroll_to_line() brings
-  the target line into view with pyte's own pages. Enter/Shift+Enter walk the
-  matches with wraparound, the panel shows "k / N", Esc closes the panel and
-  RESTORES the history position the search started from. The key lives in this
-  widget (the terminal's own keys are the xterm protocol — §14a scope boundary:
-  nothing is added to the hotkey registry) and while the panel has the keyboard no
-  byte can reach the PTY;
-* CLEAR THE SCROLLBACK / RESET THE SCREEN (task 2): two LOCAL context-menu actions
-  (TerminalScreen.clear_history() / reset_local()) — not one byte goes to the
-  channel;
-* SAVE TRANSCRIPT… (task 3): a checkable context-menu item (terminal.menu.save_transcript)
-  opens a file dialog and starts a TEE of the session output — the page calls
-  write_transcript(data) on the same bytes it feeds to pyte, so the file holds the
-  raw stream (exactly the fed bytes, the `script(1)` semantics; ANSI included).
-  stop_transcript() is safe to call twice — the page closes it from its idempotent
-  shutdown() and no write ever raises into the session teardown;
-* EXCLUDING A SESSION FROM MULTI-INPUT (task 5): the checkable terminal.multi_exclude
-  item sets the in-memory per-session flag `multi_excluded`; MultiInputHub.broadcast()
-  skips such a session and the container badge shows it (terminal.multi_excluded_badge).
-  The state is deliberately NOT persisted (a session is short-lived) and the mode's
-  own rules (F12, the registry entry, the plaque counter) are unchanged.
-
-v1.5.7.1 (pyte fork patch 0005) — the CELL width is `wcswidth`: a cell may hold a whole
-grapheme cluster now (a ZWJ emoji, a base + mark, an NFC-merged pair), and `wcswidth` is not a
-per-code-point sum — it knows the emoji ZWJ sequences (a family emoji is TWO cells there and
-FOUR in the sum). `char_width()` reads `wcswidth` for a multi-code-point cell and `wcwidth` for a
-single one, i.e. the SAME table `Screen.draw()` lays the grid out with; a mismatch here shifts
-every run after the cluster (split_row_runs() and the run painter both read this function).
-
-v1.6.3 (ROADMAP tasks 1–3) — the canvas at the cell:
-* THE GLYPH GRID (task 1): the text of a run is painted GLYPH BY GLYPH at
-  `(start_col + k) * cell_w` (the pen used to advance with the FONT's own widths while the
-  grid reserves `ceil(advance("M"))` per cell — a font that is not integral drifted every
-  glyph after the first, a wandering column in a box-drawing TUI), `_update_metrics()`
-  turns kerning OFF (a kerned pair is drawn closer than the two cells it occupies) and the
-  PURE `font_grid_problems(metrics, sample)` is the gate over a declared sample: it answers
-  `(label, advance, cell_w, drift_px, drift_cells)` per offending glyph, RED on a
-  non-integral metrics object and GREEN on the shipped font. `grid_metrics()` is its live
-  data source — run it with the user's `terminal_font` and the question closes either way.
-  `run_glyphs()` maps a run's text back to its CELLS (a cell may hold a cluster);
-* THE MOUSE FAMILY (task 2): the wheel encoder grew into the ONE `_send_mouse(button, col,
-  row, press)` — a press, a release and a motion reach the PTY while
-  `TerminalScreen.mouse_tracking_mode()` says the application asked for them (1000/1002/1003
-  × 1006/1015 encodings, motion = the button + 32, 1003 = any motion, 1002 = motion while a
-  button is held). A press while the application owns the mouse does NOT start a local
-  selection, and the bytes always go to `terminal_thread.send_data()` DIRECTLY (never
-  `_send()` / the multi-input broadcast — the coordinates are session-local, the v1.2.13 rule);
-* `Shift` = THE LOCAL OVERRIDE (task 3): held, the tracking is bypassed and the local
-  selection/scrollback wins — the ONE hatch out of a TUI that went away without its own
-  disable. The ACCEPTED COST is written down, not hidden: the tracked bits of a crashed TUI
-  stay in `screen.mode` (xterm clears nothing either, and clearing them on the alternate
-  screen's leave would be a divergence written into the vendored emulator), so after such a
-  crash the plain wheel keeps reporting to a dead application until the user presses `Shift`
-  or reconnects. The mitigation is the `Shift` override plus the existing keyboard hatch
-  (Ctrl+Shift+PageUp/PageDown).
-"""
+EVERY GLYPH IS PAINTED AT ITS OWN CELL: a run's text goes glyph by glyph at `(start_col + k) * cell_w`
+(never one `drawText` per run — the pen would follow the FONT's widths while the grid reserves a ceil
+per cell), the glyph-to-cell mapping is the PURE `run_glyphs()`, and `font_grid_problems()` is the gate
+over `grid_metrics()`. The cursor GEOMETRY is the PURE `cursor_shape_rect()` over the DECLARED
+`CURSOR_STYLES` (`resolve_cursor_style()` reads the config); `FORMAT_CACHE_LIMIT` caps the format cache.
+The MOUSE FAMILY is ONE encoder (`_send_mouse()`) behind ONE predicate (`_mouse_reports_to_pty()`), with
+`Shift` as the local override. The canvas OWNS its keys: `_CLAIMED_KEYS` / `_owns_shortcut()` answer
+`ShortcutOverride`, so a shell keeps its `Ctrl`/F-keys while the map keeps the map's. `feed()` runs under
+the screen's lock, painting on the GUI thread; mechanism — `DOCUMENTATION.md` §14a and §64."""
 
 import math
 import re
 import time
 
-# v1.2.9 (ROADMAP "terminal hygiene"): the full wcwidth(3) — the SAME library
-# that pyte 0.8.2 itself uses for grid layout (pyte.screens: `from wcwidth import
-# wcwidth`); a hard dependency of pyte, so it is always present when pyte is.
-# v1.5.7.1 (pyte fork patch 0005): the grid measures a CELL with `wcswidth` now — a cell may hold
-# a grapheme cluster (a ZWJ emoji, a base + mark), and `wcswidth` is not a per-code-point sum: it
-# knows the emoji ZWJ sequences, so the canvas must read the same table as `Screen.draw()`.
+# The full `wcwidth(3)` — the SAME library pyte 0.8.2 itself uses for grid layout
+# (`pyte.screens`: `from wcwidth import wcwidth`); a hard dependency of pyte, so it is always present
+# when pyte is. Since the fork's patch 0005 the grid measures a CELL with `wcswidth`: a cell may hold a
+# grapheme cluster (a ZWJ emoji, a base + mark) and `wcswidth` is not a per-code-point sum — it knows
+# the emoji ZWJ sequences, so the canvas must read the same table as `Screen.draw()`.
 try:
     from wcwidth import wcswidth as _wcswidth, wcwidth as _wcwidth
 except ImportError as e:  # pragma: no cover
@@ -206,7 +68,7 @@ except ImportError:
     except ImportError:  # a stripped build — the canvas simply has no ring
         _focus_ring_mod = None
 
-# v1.2.4-fix (multi-input diagnostics): the app logger (lazy, the get_translator
+# the app logger (lazy, the get_translator
 # pattern) — a DEBUG line per broadcast in _send. Without setup_logging
 # no records are emitted (the 'sshmap' namespace has no handlers) — safe for tests.
 _log_cache = {"log": None}
@@ -277,8 +139,8 @@ from PySide6.QtWidgets import QApplication, QFileDialog, QMenu, QSizePolicy, QWi
 def _fmt_key(ch):
     """The cell formatting key — the raw pyte Char attributes (without the palette).
 
-    The italic field in pyte 0.8.2 is named **italics** (not italic — TERMINAL.md
-    fact #1, draft error #1). A run is the maximal sequence of cells with the
+    The italic field in pyte 0.8.2 is named **italics** (not italic — the field itself:
+    `third_party/pyte-patches/MANIFEST.md`). A run is the maximal sequence of cells with the
     same key; resolve_color() is a pure function of (fg, bg, palette), so the
     colors are consistent within a run.
     """
@@ -324,13 +186,11 @@ def is_wide_char(data: str) -> bool:
     return char_width(data) == 2
 
 
-# ── v1.6.3 (ROADMAP task 1): the GLYPH GRID ─────────────────────────────────
-# A run used to be painted with ONE drawText at the run's starting x, so the pen
-# advanced with the FONT's own glyph widths while the grid reserves
-# `ceil(advance("M"))` per cell: the correctness of every row rested on an invariant
-# nobody checked, and `terminal_font` is free text. The canvas now draws the text of a
-# run GLYPH BY GLYPH at `(start_col + k) * cell_w`, and `font_grid_problems()` is the
-# gate that answers whether a given font really lands on that grid.
+# ── the GLYPH GRID ──────────────────────────────────────────────────────────
+# A run is painted GLYPH BY GLYPH: with ONE `drawText` at the run's starting x the pen would advance
+# with the FONT's own glyph widths while the grid reserves `ceil(advance("M"))` per cell — the
+# correctness of every row rests on an invariant nobody checked, and `terminal_font` is free text. The
+# canvas draws at `(start_col + k) * cell_w`, and `font_grid_problems()` is the gate of that grid.
 FONT_GRID_SAMPLE = ("M", "i", "W", " ", "\u2500", "\u2502", "\u250c", "\u253c",
                     "\u2588", "\u2591", "\u30b3")
 #: The run length the drift of `font_grid_problems()` is expressed over (cells).
@@ -434,7 +294,7 @@ def split_row_runs(row):
     placeholder is skipped). Placeholders (data == '') do not belong to any run.
 
     Unit-tested without a GUI (tests/test_terminal_colors.py) — the regression for the
-    draft errors #13/#14 from TERMINAL.md §3 (the XOR cursor, the CJK glyph overlap).
+    two pre-1.0 defects (the XOR cursor, the CJK glyph overlap).
     """
     runs = []
     n = len(row)
@@ -459,7 +319,7 @@ def split_row_runs(row):
 
 
 def selection_cells(start, end, columns):
-    """The cells of the rectangular selection in (row, col) coordinates (TERMINAL.md §5.2).
+    """The cells of the rectangular selection in (row, col) coordinates (DOCUMENTATION.md §14a).
 
     start/end — (row, col) of the beginning and the end of the selection, THE ORDER
     DOES NOT MATTER (a drag in any direction); columns — the grid width (the middle
@@ -468,7 +328,7 @@ def selection_cells(start, end, columns):
     A pure function — unit-tested without a GUI (tests/test_terminal_input.py).
 
     The coordinates are ALWAYS (row, col): tuple comparison = LINE-MAJOR order.
-    The regression for draft error #4 (TERMINAL.md §3): there (col, row) was stored
+    The regression for the pre-1.0 (col, row) mistake: there (col, row) was stored
     and compared as tuples — a column-major order, any selection spanning 2+ lines
     highlighted/copied the WRONG cells. The columns are clamped to [0, columns-1]
     (the rows — the caller's responsibility: the mouse is clamped via _cell_at).
@@ -494,7 +354,7 @@ def word_units(row_chars):
     characters (data.isspace()); punctuation BELONGS to the word ("foo,bar" — one
     word, as in xterm/Windows Terminal). The placeholder of a wide CJK glyph
     (data == '') belongs to the WORD: in pyte 0.8.2 a wide glyph occupies its cell
-    + the following placeholder (TERMINAL.md fact #11), so "a中b" — one word
+    + the following placeholder (MANIFEST.md), so "a中b" — one word
     over 4 cells, not two. A pure function — unit-tested without a GUI
     (tests/test_terminal_selection_menu.py).
     """
@@ -581,7 +441,7 @@ def cursor_shape_rect(style, x, y, width, height):
     return (int(x), int(y), line, height)
 
 
-# xterm sequences for F1–F12 (the table from draft TERMINAL.md §6/phase 1):
+# xterm sequences for F1–F12 (the xterm table: DOCUMENTATION.md §14a):
 # F1–F4 — SS3 (\x1bOP…\x1bOS), F5–F12 — CSI (\x1b[15~ … \x1b[24~).
 _F_KEY_SEQUENCES = {
     Qt.Key.Key_F1: b"\x1bOP",
@@ -605,7 +465,7 @@ class TerminalWidget(QWidget):
     v1.2.3 — multi-input: the broadcast of the input to all open sessions;
     v1.2.7 — double/triple-click (word/line) + the right-click context menu;
     v1.2.13 — the wheel in a TUI: SGR/X10 passthrough when mouse tracking is on;
-    v1.2.9-fix — Tab/Shift+Tab are intercepted in event(): the Qt 6 focus-change
+    Tab/Shift+Tab are intercepted in event(): the Qt 6 focus-change
     mechanism does not pass them to keyPressEvent, without the interception the focus
     left the terminal for the window buttons and \\t never reached the shell).
 
@@ -615,7 +475,7 @@ class TerminalWidget(QWidget):
     default hub (get_hub()); an explicit instance — a test seam for isolation.
     """
 
-    FORMAT_CACHE_LIMIT = 512      # the format cache limit (TERMINAL.md §5.1)
+    FORMAT_CACHE_LIMIT = 512      # the format cache limit (DOCUMENTATION.md §14a)
     CURSOR_COLOR = "#e2e8f0"      # the cursor ink: the default text color (the classic look)
     # v1.6.2 (ROADMAP task 4): the cursor SHAPE. `CURSOR_STYLES` / `CURSOR_STYLE_DEFAULT` and
     # the geometry live at module level (`resolve_cursor_style()` / `cursor_shape_rect()`), so
@@ -676,12 +536,11 @@ class TerminalWidget(QWidget):
         self._sel_anchor = None
         self._sel_active = None
 
-        # v1.2.7: the double/triple-click accounting — by the widget itself (QMouseEvent in PySide6
-        # carries no click-count; the synthetic test events do not have one either):
-        # _click_count increments on a press in the same cell within DOUBLE_CLICK_MS,
-        # otherwise it resets to 1. _click_sel_end — the "pinned" end for
-        # the drag after a double/triple-click (the far end of the word/line);
-        # None — the plain v1.0RC2 press/drag.
+        # The double/triple-click accounting — by the widget itself (a QMouseEvent in PySide6 carries no
+        # click-count, and the synthetic test events have none either): `_click_count` increments on a press
+        # in the same cell within `DOUBLE_CLICK_MS`, otherwise it resets to 1. `_click_sel_end` — the
+        # "pinned" end for the drag after a double/triple-click (the far end of the word/line); `None` —
+        # the plain press/drag.
         self._click_count = 0
         self._last_click_cell = None
         self._last_click_ms = 0.0
@@ -696,12 +555,11 @@ class TerminalWidget(QWidget):
         self._blink_timer.setInterval(self.BLINK_INTERVAL_MS)
         self._blink_timer.timeout.connect(self._toggle_cursor_blink)
 
-        # v1.3.3.4 (ROADMAP task 1): the find bar. The panel is created LAZILY
-        # (a session that never searches pays nothing — hide() on a child of the
-        # canvas costs 0 px); _find_matches — list[(doc_index, col, length)] over
-        # TerminalScreen.text_lines(); _find_current — the index in that list (-1 =
-        # nothing to navigate); _find_saved_position — the history position captured
-        # on open, restored by Esc ("Esc restores the state").
+        # The find bar. The panel is created LAZILY (a session that never searches pays nothing — `hide()`
+        # on a child of the canvas costs 0 px); `_find_matches` — `list[(doc_index, col, length)]` over
+        # `TerminalScreen.text_lines()`; `_find_current` — the index in that list (-1 = nothing to
+        # navigate); `_find_saved_position` — the history position captured on open, restored by Esc
+        # ("Esc restores the state").
         self._find_bar = None
         self._find_query = ""
         self._find_matches = []
@@ -847,7 +705,7 @@ class TerminalWidget(QWidget):
         from PySide6.QtCore import QSize
         return QSize(self._cell_w * 80, self._cell_h * 24)
 
-    # ── format cache (TERMINAL.md §5.1) ───────────────────
+    # ── format cache (DOCUMENTATION.md §14a) ───────────────────
     def _format_for(self, fg_hex, bg_hex, bold, italics, underscore, strikethrough):
         """(fg,bg,attributes) → (QPen,QBrush,QFont); a size-limited cache.
 
@@ -898,7 +756,7 @@ class TerminalWidget(QWidget):
         rows, cx, cy, hidden = self.tscreen.snapshot()
         stats = {"rows": 0, "runs": 0, "draw_text_calls": 0, "selection_cells": 0}
 
-        # WA_OpaquePaintEvent: the full background (as in TERMINAL.md §5.3)
+        # WA_OpaquePaintEvent: the full background (the canvas paints every pixel itself)
         painter.fillRect(self.rect(), QBrush(self._bg_color))
 
         for y, row in enumerate(rows):
@@ -908,12 +766,11 @@ class TerminalWidget(QWidget):
                 ch0 = row[x]
                 fg, bg = self._resolved_colors(ch0)
                 has_ink = bool(text.strip())
-                # v1.2.10rc3 (a cosmetic audit bug): a whitespace-only run without ink —
-                # a fillRect is still needed when the resolved bg ≠ the base fill: a TUI application
-                # can explicitly paint an empty line with spaces in its own color (the
-                # mc/mcedit viewer area — in a real xterm it is uniformly gray; in the pyte grid
-                # such cells carry bg=<color>). The old assumption "the background is already filled"
-                # was true only for the spaces with the default background.
+                # A whitespace-only run still needs a `fillRect` when the resolved bg ≠ the base fill: a TUI
+                # can explicitly paint an empty line with spaces in its own colour (the mc/mcedit viewer
+                # area — in a real xterm it is uniformly gray; in the pyte grid such cells carry
+                # bg=<color>). The assumption "the background is already filled" holds only for the spaces
+                # with the default background.
                 if not has_ink and bg == self._palette["default_bg"]:
                     continue  # spaces with the default background — the base fill already covers them
                 pen, brush, font = self._format_for(
@@ -931,13 +788,11 @@ class TerminalWidget(QWidget):
                 painter.fillRect(cell_x, cell_y, run_cells * self._cell_w,
                                  self._cell_h, brush)
                 if has_ink:
-                    # v1.6.3 (ROADMAP task 1): GLYPH BY GLYPH at its own cell. The pen used to
-                    # advance with the FONT's widths for the whole run while the grid reserves
-                    # ceil(advance("M")) per cell, so a font whose glyph advances differ from the
-                    # cell shifted everything after the first such glyph — a wandering column in
-                    # a box-drawing TUI (the `mc` report). The batched fillRect per run and the
-                    # per-run font/pen switch are unchanged; a WIDE glyph is one cell pair drawn
-                    # in one call (the font itself draws it wide).
+                    # GLYPH BY GLYPH at its own cell. ONE `drawText` per run would advance the pen with
+                    # the FONT's widths while the grid reserves `ceil(advance("M"))` per cell, so a font
+                    # whose glyph advances differ from the cell shifted everything after the first such
+                    # glyph — a wandering column in a box-drawing TUI. The batched `fillRect` per run and
+                    # the per-run font/pen switch are unchanged; a WIDE glyph is one cell pair, one call.
                     for k, glyph in enumerate(glyphs):
                         painter.drawText((x + k) * self._cell_w,
                                          cell_y + self._ascent, glyph)
@@ -981,12 +836,11 @@ class TerminalWidget(QWidget):
                                      brush_current if is_current else brush_other)
             stats["find_matches"] = sum(len(v) for v in find_rows.values())
 
-        # The cursor (TERMINAL.md §3.13; v1.6.2 (ROADMAP task 4): the SHAPE is declared — the
-        # block fills the cell and swaps the glyph, the bar and the underline paint a thin line
-        # and leave the text alone). NOT drawn when screen.cursor.hidden
-        # (ESC[?25l/h — vim hides the cursor, fact #8) or in the "invisible" phase of the blink
-        # (v1.0RC3). When scrolling up into the history pyte hides the cursor itself
-        # (after_event: hidden = not (position == size and DECTCEM)).
+        # The cursor (`DOCUMENTATION.md` §64): the SHAPE is declared — the block fills the cell and swaps
+        # the glyph, while the bar and the underline paint a thin line and leave the text alone. It is NOT
+        # drawn when `screen.cursor.hidden` (`ESC[?25l/h` — vim hides it) or in the "invisible" phase of
+        # the blink. When scrolling up into the history pyte hides the cursor itself (`after_event`:
+        # hidden = not (position == size and DECTCEM)).
         if (not hidden and self._cursor_visible and rows
                 and 0 <= cy < len(rows) and 0 <= cx < len(rows[cy])):
             ch = rows[cy][cx]
@@ -1039,9 +893,9 @@ class TerminalWidget(QWidget):
         rows, _cx, _cy, _hidden = self.tscreen.snapshot()
         return "\n".join("".join(ch.data for ch in row) for row in rows)
 
-    # ── v1.2.9-fix: Tab/Shift+Tab — Qt 6 intercepts BEFORE keyPressEvent ────
+    # ── Tab/Shift+Tab — Qt 6 intercepts BEFORE keyPressEvent ────
     def event(self, e):
-        """v1.2.9-fix (a bug since v1.0RC2, caught in the field): Tab/Shift+Tab left
+        """Tab/Shift+Tab left
         the terminal for the window buttons/tabs; \\t never reached the shell — the bash
         autocompletion did not fire, the mc panels did not switch.
 
@@ -1060,7 +914,7 @@ class TerminalWidget(QWidget):
         — also not intercepted (input disabled = the guard at the top of keyPressEvent).
         All the other events pass through super().event(e) unchanged.
 
-        v1.3.3.4-fix (a real defect found while checking the find key): the canvas must
+        the canvas must
         OWN its keys whenever it has the focus — the §14a boundary is only true if Qt
         actually delivers them. In `terminal_mode = "tabs"` the session lives INSIDE the
         main window, whose window-level QActions claim Ctrl+F (map search), Ctrl+Shift+F
@@ -1092,13 +946,11 @@ class TerminalWidget(QWidget):
                     return True
         return super().event(e)
 
-    # ── v1.3.3.4-fix: the key family the canvas claims from window-level QActions ──
-    # Every Ctrl+… combination (the xterm control codes — Ctrl+C/D/Z/V, the canvas's
-    # own Ctrl+Shift+F / Ctrl+Shift+PgUp/PgDn) plus the function keys (the xterm table,
-    # F12 = the multi-input exit) and Delete (\\x1b[3~). A plain letter cannot collide
-    # with a QAction sequence (all of §4.9's defaults carry Ctrl/Shift/Alt), so typing
-    # is deliberately NOT claimed, and neither are the Alt-only combinations (the
-    # menubar mnemonics stay reachable while a session has the focus).
+    # ── the key family the canvas claims from window-level QActions ──
+    # Every Ctrl+… combination (the xterm control codes — Ctrl+C/D/Z/V, the canvas's own Ctrl+Shift+F /
+    # Ctrl+Shift+PgUp/PgDn), the function keys (F12 = the multi-input exit) and Delete (`\x1b[3~`). A
+    # plain letter cannot collide with a QAction sequence (all of §4.9's defaults carry Ctrl/Shift/Alt),
+    # so typing is deliberately NOT claimed, nor are the Alt-only combinations (the menubar mnemonics).
     _CLAIMED_KEYS = frozenset({
         Qt.Key.Key_Delete,
         Qt.Key.Key_F1, Qt.Key.Key_F2, Qt.Key.Key_F3, Qt.Key.Key_F4,
@@ -1120,7 +972,7 @@ class TerminalWidget(QWidget):
         """The full keyboard table (v1.0RC2, ROADMAP task 4; v1.0RC3 — the scrollback).
 
         * F1–F12 — the xterm sequences (_F_KEY_SEQUENCES);
-        * Ctrl+Shift+PageUp/PageDown → SCROLLBACK (v1.0RC3, TERMINAL.md §5.4): the
+        * Ctrl+Shift+PageUp/PageDown → SCROLLBACK (DOCUMENTATION.md §14a): the
           interception sits BEFORE the bare PageUp/PageDown check — otherwise the
           fall-through from the Ctrl branch sends \\x1b[5~/\\x1b[6~ to the shell
           (the trap from ROADMAP v1.0RC3 task 7);
@@ -1139,11 +991,11 @@ class TerminalWidget(QWidget):
         * Ctrl+C: with a selection — a copy to the clipboard (the v0.9.3 semantics),
           without a selection — \\x03 (SIGINT; acceptance: "Ctrl+C kills top");
         * Ctrl+D → \\x04, Ctrl+Z → \\x1a, Ctrl+V — the bracketed paste (v0.9.4);
-        * Tab → \\t / Shift+Tab → \\x1b[Z (v1.2.9-fix): on the real events they are
+        * Tab → \\t / Shift+Tab → \\x1b[Z : on the real events they are
           intercepted EARLIER — in event() (the Qt 6 focus-change mechanism does not pass
           them to keyPressEvent; without this the focus left for the window buttons and
           \\t never reached the shell);
-        * the AltGr guard (TERMINAL.md §3.12): the Ctrl+Alt combinations (on Windows
+        * the AltGr guard (DOCUMENTATION.md §14a): the Ctrl+Alt combinations (on Windows
           AltGr = Ctrl+Alt) do NOT go out as control codes — ignored;
         * F12 in multi-input mode (v1.2.3, ROADMAP task 3) — the EXIT from the mode,
           not a shell key: the RC2 mapping F12→\\x1b[24~ is suspended (the key does
@@ -1156,12 +1008,12 @@ class TerminalWidget(QWidget):
         mod = event.modifiers()
 
         if mod & Qt.KeyboardModifier.ControlModifier:
-            # the AltGr guard (TERMINAL.md §3.12): the Ctrl+Alt combinations (on Windows
+            # the AltGr guard (DOCUMENTATION.md §14a): the Ctrl+Alt combinations (on Windows
             # AltGr = Ctrl+Alt) must not go out as control codes.
             if mod & Qt.KeyboardModifier.AltModifier:
                 event.ignore()
                 return
-            # v1.0RC3: Ctrl+Shift+PageUp/PageDown → the scrollback (TERMINAL.md §5.4).
+            # v1.0RC3: Ctrl+Shift+PageUp/PageDown → the scrollback (DOCUMENTATION.md §14a).
             # The interception BEFORE the bare PageUp/PageDown below — without it the
             # fall-through sends \x1b[5~/\x1b[6~ to the shell (the ROADMAP v1.0RC3 task 7 trap).
             if key in (Qt.Key.Key_PageUp, Qt.Key.Key_PageDown) \
@@ -1346,7 +1198,7 @@ class TerminalWidget(QWidget):
         if hub is not None and hub.active:
             try:
                 sent = hub.broadcast(data, source_widget=self)
-                # v1.2.4-fix (diagnostics): a DEBUG line per broadcast —
+                # a DEBUG line per broadcast —
                 # the log shows how many sessions actually received the bytes (0 →
                 # an empty registry/dead threads; N>0 → the bytes went to all the live ones).
                 _log = _get_app_log()
@@ -1406,7 +1258,7 @@ class TerminalWidget(QWidget):
                 pass
         return True
 
-    # ── v1.0RC3: scrollback (wheel + Ctrl+Shift+PgUp/PgDn, TERMINAL.md §5.4) ──
+    # ── v1.0RC3: scrollback (wheel + Ctrl+Shift+PgUp/PgDn, DOCUMENTATION.md §14a) ──
     def scroll_page_up(self):
         """One page of the history up (Ctrl+Shift+PageUp / the wheel up).
 
@@ -1433,8 +1285,8 @@ class TerminalWidget(QWidget):
         wheel needs no call: scrolling DOWN to the bottom reaches the live line by itself and
         the pin has nothing left to hold.
 
-        An active selection is dropped with the move — exactly the v1.1.2RC3 (N7) reasoning
-        that the page's output guard used to apply: the (row, col) coordinates were pinned on
+        An active selection is dropped with the move — the v1.1.2RC3 (N7) reasoning
+        the page's output guard applies: the (row, col) coordinates are pinned on
         the HISTORICAL grid, and Ctrl+C after the return would copy other cells. False — the
         mode is off or the view is already live (the "live" mode pays one attribute read).
         """
@@ -1530,12 +1382,11 @@ class TerminalWidget(QWidget):
         self._send_mouse(self.MOUSE_WHEEL_UP if up else self.MOUSE_WHEEL_DOWN,
                          col, row, True)
 
-    # ── v1.6.3 (ROADMAP task 2): the mouse family ─────────────────────────
-    # The canvas tracked the xterm mouse modes already (v1.2.13) and answered only the
-    # WHEEL: a press, a drag and a release were eaten by the local selection with nothing
-    # sent, so a TUI that asked for the mouse received half of the protocol. The encoder
-    # is ONE method now (`_send_mouse`), and the decision "report to the application or
-    # work locally" is ONE predicate (`_mouse_reports_to_pty`).
+    # ── the mouse family ─────────────────────────
+    # The canvas tracked the xterm mouse modes already and answered only the WHEEL: a press, a drag and a
+    # release were eaten by the local selection with nothing sent, so a TUI that asked for the mouse
+    # received half of the protocol. The encoder is ONE method now (`_send_mouse`), and the decision
+    # "report to the application or work locally" is ONE predicate (`_mouse_reports_to_pty`).
 
     MOUSE_BUTTON_LEFT = 0
     MOUSE_BUTTON_MIDDLE = 1
@@ -2394,7 +2245,7 @@ class TerminalWidget(QWidget):
             event.ignore()
             return
         try:
-            # v1.2.7-fix (manual testing): QContextMenuEvent.globalPos() already
+            # QContextMenuEvent.globalPos() already
             # returns a QPoint (unlike QMouseEvent.globalPosition() → a QPointF) —
             # the extra .toPoint() raised an AttributeError that the old except
             # swallowed silently: "the right-click does nothing" without a single visible

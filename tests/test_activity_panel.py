@@ -1,26 +1,12 @@
 # -*- coding: utf-8 -*-
 """v1.5.2 — the activity panel: the history the interface never kept.
 
-The second patch ON the released 1.5, and the release that gives the application a
-MEMORY of what happened. A status-bar line lived for a few seconds, and a probe round, an
-import, an SFTP failure or a plugin error left nothing behind at all; `sshmap.log` was the
-durable record, but it is a file nobody reads while working.
-
-  * **§1 the ring** — `modules/activity_log.py`: the bound (200), the order, the repeat
-    counter, the clear, and the "nothing is persisted" rule (memory only).
-  * **§2 the two thin taps** — ONE `logging.Handler` (installed by `modules/logger.py`)
-    and ONE connection to the status bar (`messageChanged` + `UndoStatusBar.offer_shown`).
-    No emitter is rewired for the panel's sake.
-  * **§3 the five families** — a probe round, an import, an SFTP task, a plugin error and a
-    theme/language fallback each produce at least ONE record (the ROADMAP task 2 acceptance),
-    and no secret can enter a record.
-  * **§4 the surface** — `ui/activity_panel.py`: newest first, the level filter (the pure
-    `matches_level` policy), Clear, the retranslate of the CHROME only, the ONE new
-    `config.json` key, and the rule that it is HISTORY and never a second status bar.
-  * **§5 the release state** — the pins, the keys, and the "no new contract" audit.
-
-Run: python tests/test_activity_panel.py   (from the project root) or python tests/run_all.py
-"""
+The release that gives the application a MEMORY of what happened: a status-bar line lived for a few seconds
+and a probe round, an import, an SFTP failure or a plugin error left nothing behind, while `sshmap.log`
+was a durable record nobody reads while working.
+§1 the ring (`modules/activity_log.py`) — the bound, the order, the repeat counter, the clear and the
+"nothing is persisted" rule; §2 the two thin taps — ONE `logging.Handler` installed by `modules/logger.py`
+and ONE connection to the status bar (`messageChanged` plus `UndoStatusBar.offer_shown`), with no emitter rewired for the panel's sake; §3 the five families — a probe round, an import, an SFTP task, a plugin error and a theme/language fallback each produce at least ONE record, and no secret can enter a record; §4 the surface (`ui/activity_panel.py`) — newest first, the level filter over the pure `matches_level` policy, Clear, the retranslate of the CHROME only, the ONE new `config.json` key, and the rule that this is HISTORY and never a second status bar; §5 the release state, the keys and the "no new contract" audit."""
 import json
 import logging
 import os

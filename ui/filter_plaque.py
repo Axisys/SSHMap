@@ -1,35 +1,16 @@
 # -*- coding: utf-8 -*-
-"""v1.5.4 (ROADMAP task 3): the ACTIVE-FILTER plaque — a floating panel that NAMES the filters.
+"""The ACTIVE-FILTER plaque — a floating panel that NAMES the filters (DOCUMENTATION.md §47).
 
-The problem this panel closes is the silent one: the map search (Ctrl+F), the tag filter,
-the status filter of the status bar and the "problems only" lens all DIM the map, and a
-dimmed card looks exactly like a card that is not there any more. A forgotten filter used
-to be indistinguishable from deleted servers — the same class the 1.5 line keeps treating
-("the interface must say its own state").
+It closes a SILENT problem: the map search (Ctrl+F), the tag filter, the status filter of the status bar
+and the "problems only" lens all DIM the map, and a dimmed card looks exactly like a card that is not
+there any more — a forgotten filter would be indistinguishable from deleted servers.
 
-The plaque is a WIDGET over the scene (`MapView`'s child), never a scene item — the
-v1.4.2/v1.4.5 rule — so it stays out of the exports, out of a rubber-band selection, out
-of `itemsBoundingRect()` and out of "fit to content". It joins the v1.5rc4 floating-panel
-priority resolver (`MainWindow._overlay_panel_rects()`), which is what keeps the map
-collapse diamond from landing under it.
-
-It owns NO filter logic, exactly like the search bar and the legend: the window reports
-the ACTIVE filters (`set_state`) and receives one `clear_requested(kind)` per row — the
-window decides what clearing means (it already owns every one of those states). The
-plaque appears only while at least one filter is active; every row carries ONE ×.
-
-Pinned decisions of the release:
-
-  * **transient by construction** — the widget holds live UI state only and writes no
-    `config.json` key: a restart must not hide servers for no visible reason (the v1.4.5
-    status-filter rule);
-  * **one × per row, and only its own filter** — the × clears the search query, the tag
-    pick, the status filter or the lens, never "all filters at once" (a user who wants
-    everything gone clicks the four ×, or the search panel's own close);
-  * **the words are i18n, the values are data** — the query and the tag are printed as
-    the user typed them, the captions come from `filter.plaque.*` and the status word
-    from the EXISTING `legend.status.*` (no fourth spelling of online/warn/offline).
-"""
+The plaque is a WIDGET over the scene (`MapView`'s child), never a scene item (the v1.4.2/v1.4.5 rule),
+so it stays out of the exports, out of a rubber-band selection, out of `itemsBoundingRect()` and out of
+"fit to content"; it joins the floating-panel priority resolver, which keeps the collapse diamond from
+landing under it. It owns NO filter logic (like the search bar and the legend): the window reports the
+ACTIVE filters (`set_state`) and receives one `clear_requested(kind)` per row.
+ Pinned: transient by construction (live UI state only, no `config.json` key — a restart must not hide servers for no visible reason); one × per row and only ITS OWN filter (never "clear everything"); the words are i18n and the values are data (the status word comes from the existing `legend.status.*`)."""
 
 from PySide6.QtCore import Qt, QRectF, Signal
 from PySide6.QtGui import QBrush, QColor, QFont, QFontMetrics, QPainter, QPainterPath, QPen

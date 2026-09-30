@@ -1,17 +1,13 @@
 # -*- coding: utf-8 -*-
-"""v1.0RC4: "Quick launch" configuration dialog for a single server.
+"""The "Quick launch" configuration dialog for a single server (AGENTS.md §4.14).
 
-Quick launch entries — a list of links/commands attached to the server
-(models/server.py: ServerData.quick_launch). From there they end up in the
-context menu (right-click on a sidebar row and on a map node) as the
-"Quick launch" submenu.
+Quick-launch entries are a list of links and commands attached to a server (`ServerData.quick_launch`), and
+they end up in the context menu of a sidebar row and of a map node as the "Quick launch" submenu.
+A `type="url"` entry opens its value in the default browser; a `type="command"` entry is sent as the first
+command into the server's SSH terminal.
 
-  * type="url"     — value opens in the default browser (webbrowser);
-  * type="command" — value is sent as the first command to the server's SSH terminal.
-
-Dialog pattern — same as AddServerDialog: i18n via try-import with an English
-fallback; get_entries() returns a list of dicts after accept().
-"""
+The dialog pattern matches `AddServerDialog`: i18n through a try-import with an English fallback, and
+`get_entries()` returns the list of dicts after `accept()`."""
 from typing import List, Optional
 
 try:
@@ -135,12 +131,10 @@ class QuickLaunchDialog(QDialog):
         layout.addLayout(add_row)
 
         # ── Edit / Remove / reorder + OK/Cancel ──────────────────────────
-        # v1.6.1 (ROADMAP task 9): the editor could only ADD and REMOVE, so a typo cost the
-        # entry and the order of the launched menu could not be changed at all. Edit (and a
-        # double click on a row) loads the entry back into the fields and REPLACES it in
-        # place; the two arrows move the selected entry inside the list — the table is the
-        # single source of the order. The arrows are SYMBOLS on purpose: the release adds no
-        # i18n key, and a reorder is not a translated word.
+        # The editor could only ADD and REMOVE, so a typo cost the entry and the order of the launched
+        # menu could not be changed at all. Edit (and a double click on a row) loads the entry back into
+        # the fields and REPLACES it in place; the two arrows move the selected entry inside the list —
+        # the table is the single source of the order. The arrows are SYMBOLS on purpose (no i18n key).
         btn_edit = QPushButton(
             self._tr("terminal.cmdlib.edit") if self._i18n_available else "Edit")
         btn_edit.clicked.connect(self._edit_selected)

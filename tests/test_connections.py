@@ -138,12 +138,11 @@ res = cdlg.get_connection()
 check("get_connection returns 5-tuple with valid type + bidir flag",
       len(res) == 5 and res[3] in CONNECTION_TYPES and res[4] is False, str(res))
 
-# The drag mode: Shift+LMB on a node → movement → release over another node.
-# The modal dialog is replaced with a fake (offscreen), the whole MapView→MainWindow path is checked.
-# The B→A direction: the A→B connection ("legacy") already exists, a duplicate in the same direction will be rejected.
-# IMPORTANT (Qt 6.11): manual QMouseEvents do NOT trigger the QGraphicsView internal processing
-# (verified empirically on PySide6 and PyQt6) — we send input via QTest.mousePress/move/release,
-# which generates events the standard Qt way (the viewport→view routing).
+# The drag mode: Shift+LMB on a node → movement → release over another node. The modal dialog is
+# replaced with a fake (offscreen) and the whole MapView→MainWindow path is checked. The B→A direction:
+# the A→B connection ("legacy") already exists, so a duplicate in the same direction is rejected.
+# IMPORTANT (Qt 6.11): manual QMouseEvents do NOT trigger the QGraphicsView internal processing —
+# input is sent via QTest.mousePress/move/release, which generates events the standard Qt way.
 from PySide6.QtCore import Qt as _Qt, QPoint as _QPt
 from PySide6.QtTest import QTest as _QTest
 

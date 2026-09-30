@@ -1,35 +1,12 @@
 # -*- coding: utf-8 -*-
-"""v1.4rc1 — Plugin foundation, part 1: discovery and manager (ROADMAP v1.4rc1, the rc series).
+"""v1.4rc1 — Plugin foundation, part 1: discovery and manager (ROADMAP v1.4rc1).
 
-The FIRST rc of the 1.4 line implements the frozen API v1 contract (PLUGINS.md) up to
-discovery: two sources (the standard entry-point group `sshmap.plugins/v1` and the user
-folder `~/.sshmap/plugins/*.py`), a MANIFEST check (`name`/`version`/`api_version`, the
-optional `description`), three states (`loaded`/`disabled`/`error`), the enable/disable
-switch in `plugins` of `~/.sshmap/config.json`, the `Plugins` menu (+ `Reload`) and the
-status-bar reports. The HOOKS are validated and recorded from here on, but NOT called —
-that is rc2/rc3.
-
-Sections:
-  §1 the folder source: discovery, the MANIFEST fields, a `_`-prefixed file, sys.modules;
-  §2 the MANIFEST check: no manifest / not a dict / no name / no version / a foreign
-     api_version / an optional description — each a state, never an exception;
-  §3 a broken plugin is not fatal: the app and the OTHER plugins live on, the log gets
-     a record (the ROADMAP wording), a broken entry point raises nothing;
-  §4 the entry-point source (monkeypatched importlib.metadata.entry_points) + the name
-     conflict rule (the packaged plugin wins, the local file is skipped with a log line);
-  §5 enable/disable: the default, the persisted switch, a broken/unknown config value,
-     a fresh manager honouring the file, foreign config keys surviving;
-  §6 reload: a new file appears, a CHANGED file is really re-read (no import cache),
-     a removed file disappears, the round event carries the count;
-  §7 the window: the "Plugins" menu (position, the rows, the error row, the empty
-     placeholder, no duplicate rows after a rebuild), the toggle, "Reload" as a registry
-     action, the status-bar lines, the menu title following a language switch;
-  §8 the wiring: main.py runs the discovery after MainWindow and before app.exec();
-  §9 the frozen contract: PLUGINS.md pins the group name / API version / the folder;
-  §10 i18n parity + format, the new keys, the release state (the pins of _common.py).
-
-Run: python tests/test_plugins.py   (from the project root) or python tests/run_all.py
-"""
+The first rc implements the frozen API v1 contract (`PLUGINS.md`) up to discovery: two sources (the
+entry-point group `sshmap.plugins/v1` and the user folder `~/.sshmap/plugins/*.py`), the MANIFEST check
+(`name` / `version` / `api_version` plus the optional `description`), three states
+(`loaded` / `disabled` / `error`), the switch in `plugins` of `~/.sshmap/config.json`, the "Plugins" menu
+with `Reload` and the status-bar reports. The HOOKS are validated and recorded here, but NOT called.
+§1 the folder source; §2 the manifest check (each fault a STATE, never an exception); §3 a broken plugin is not fatal; §4 the entry-point source and the name-conflict rule (the packaged plugin wins); §5 enable/disable and its persistence; §6 reload (a CHANGED file is really re-read, no import cache); §7 the window's "Plugins" menu; §8 the `main.py` wiring; §9 the frozen contract; §10 i18n and the release."""
 import importlib
 import importlib.metadata
 import json

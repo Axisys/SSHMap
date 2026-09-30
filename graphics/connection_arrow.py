@@ -73,16 +73,11 @@ def label_display_text(ctype: str, label: str) -> str:
     return f"{type_name} · {text}" if text else type_name
 
 
-# ── Connection types (v0.7): id → base arrow color ────────────────
-# SSH keeps the v0.6 green and remains the default type —
-# old projects without the "type" field load as SSH connections.
-# v1.2.5: colors — the central theme (ui/theme.py); CONNECTION_TYPES — the same
-# dict (declaration order = combobox order in the connection dialog).
-# v1.4.3 (ROADMAP task 5): a LIVE map — reading it, iterating it or asking for a
-# key resolves the ACTIVE theme, so the arrows follow a theme switch without
-# keeping a stale snapshot (the pre-v1.4.3 module constant was captured at
-# import time and could never move). `==` compares by value; `is` no longer
-# holds (the acceptance test asserts the VALUES, not the identity).
+# ── Connection types: id → base arrow colour ────────────────
+# SSH is the default type (a project without the "type" field loads as SSH) and
+# `CONNECTION_TYPES` declares them in the dialog's combobox order. The map is LIVE —
+# reading it, iterating it or asking for a key resolves the ACTIVE theme, so the arrows
+# follow a theme switch (no import-time snapshot); `==` compares by value, `is` does not (§5).
 class _LiveConnectionTypes:
     """``{type_id: colour}`` of the ACTIVE theme, with the old dict's API."""
 
@@ -178,15 +173,11 @@ def edge_point(rect: QRectF, center: QPointF, toward: QPointF) -> QPointF:
     return QPointF(center.x() + dx * t, center.y() + dy * t)
 
 
-# ── v1.6 (ROADMAP task 3): SEVERAL links between the SAME pair of nodes ──────────
-# Two cards can carry more than one relation (a second path of a different type, a
-# direction each way). Every link of one endpoint pair gets an INDEX inside that pair
-# (owned by `MapScene.refresh_connection_offsets()`), and the index moves the curve
-# along its own NORMAL — the endpoints stay on the card edges, only the middle of the
-# arc travels. `PAIR_OFFSET_STEP` is the declared step of ONE index in scene px; the
-# step is added to the natural bend, so the first link keeps the historical curve
-# (`pair_offset_steps(0) == 0.0`) and a project saved before this version renders
-# byte-identically.
+# ── SEVERAL links between the SAME pair of nodes (`DOCUMENTATION.md` §50) ─────
+# Every link of one endpoint pair gets an INDEX inside that pair (owned by
+# `MapScene.refresh_connection_offsets()`), and the index moves the curve along its own NORMAL:
+# the endpoints stay on the card edges, only the middle of the arc travels. `PAIR_OFFSET_STEP` is
+# the declared step of ONE index, added to the natural bend (`pair_offset_steps(0) == 0.0`).
 PAIR_OFFSET_STEP = 28.0
 
 
@@ -477,13 +468,11 @@ class ConnectionArrow(QGraphicsPathItem):
         head_path.closeSubpath()
         self._arrow_head.setPath(head_path)
 
-        # v1.2.6: bidirectional mode — the second arrowhead at the start of the curve (p0).
-        # Orientation AGAINST the direction of travel: the tip exactly on the boundary of
-        # the source node, the wings — on the side of the curve (hence "+" instead of "-"
-        # as with the target arrowhead): the arrowhead points AT its own node, and both
-        # ends give ←——→. With "-" the triangle pointed toward the target and its body
-        # went under the node (the arrows have zValue -2) — visually the second arrowhead
-        # was invisible. Standard mode — an empty path (the item is invisible).
+        # Bidirectional mode — the second arrowhead at the start of the curve (p0). Orientation AGAINST
+        # the direction of travel: the tip exactly on the boundary of the source node and the wings on the
+        # side of the curve (hence "+" instead of "-"), so the arrowhead points AT its own node and both
+        # ends give ←——→. With "-" the triangle pointed toward the target and its body went under the node
+        # (the arrows have zValue -2) — visually invisible. Standard mode: an empty path.
         if self.bidirectional:
             sx = c1.x() - p0.x()
             sy = c1.y() - p0.y()

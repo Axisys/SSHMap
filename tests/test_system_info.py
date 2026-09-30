@@ -1,18 +1,11 @@
-"""Auto-fill of server data v0.9: services/system_info_collector.py (former smoke_test).
+"""Auto-fill of server data v0.9: `services/system_info_collector.py` (a former smoke-test part).
 
-A part of the suite split out of smoke_test.py v0.6–v0.9.2 (see INDEX.md).
-  * the parsers of the pure functions: parse_info_output (the batch ---OS---/---CPU---/---RAM---/---DISK---),
-    the PRETTY_NAME/lsb_release fallback, the single quotes, the meminfo kB→bytes fallback,
-    the empty/junk inputs without a crash; bytes_to_gb ("8 gb", zero/negative → '');
-  * INFO_BATCH contains all the sections + the END marker;
-  * the model: the new fields os_name/cpu_model + the backward-compat of the old JSON, the round-trip collapsed;
-  * the version of the JSON format = 0.9 (the single source of truth version.py), the APP_VERSION 1.3.x (since v1.3rc1; before 1.2.x since v1.2, 1.1.x since v1.1, 1.0.x since v1.0RC1);
-  * the i18n keys of v0.9 in all three languages;
-  * SystemInfoCollector: the signals info_ready/info_failed, the storage of data+password;
-  * MainWindow: the entry points _collect_node_info/_on_info_ready/_on_info_failed.
-
-Run: python tests/test_system_info.py   (from the project root) or python tests/run_all.py
-"""
+Checks: the pure parsers (`parse_info_output` over the `---OS---` / `---CPU---` / `---RAM---` / `---DISK---`
+batch, the `PRETTY_NAME` / `lsb_release` fallback, the single quotes, the meminfo kB→bytes fallback, the
+empty and junk inputs without a crash; `bytes_to_gb` for "8 gb" and for zero/negative → `''`); the batch
+containing all the sections plus the END marker; the model's new fields with the backward compatibility of
+an old JSON and the collapsed round trip; the JSON format version taken from `version.py` and the
+application version pins; the i18n keys in all three languages; the collector's `info_ready` / `info_failed` signals and its storage of data plus password; and the window's entry points."""
 import json as _json_i18n_v09
 import os
 import sys
@@ -92,12 +85,10 @@ _d2 = server_data_from_dict({"id": "t2", "alias": "B", "host": "h2", "user": "u"
                              "os_name": "Alpine", "collapsed": True})
 check("round-trip os_name/collapsed", _d2.os_name == "Alpine" and _d2.collapsed is True)
 
-# The JSON format version — 0.9 (the single source of truth, version.py); APP_VERSION — the v1.3 line
-# and later (1.0 was done in v1.0RC1: Terminal v1; 1.1 — the settings dialog; 1.2 — the refactor
-# TerminalSessionPage "window → page"; 1.3rc1 — a managed pyte fork; the JSON format does NOT change).
-# v1.3.3.2: the check compares (major, minor) instead of the hardcoded "1.3" prefix — the ROADMAP plans
-# the 1.4 line, so a prefix assertion would fail the moment the release leaves 1.3 (the exact version is
-# already pinned by EXPECTED_APP_VERSION through check_release_state()).
+# The JSON format version is `VERSION_FORMAT` (the single source of truth, `version.py`) and the
+# application release is pinned by `EXPECTED_APP_VERSION` through `check_release_state()`; the JSON
+# format does NOT change with a release. The check compares (major, minor) instead of a hardcoded
+# prefix, so a planned next line does not fail the assertion.
 import version as _ver_mod
 
 

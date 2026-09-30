@@ -1,46 +1,16 @@
 # -*- coding: utf-8 -*-
-"""v1.4.5 (ROADMAP task 2): the first-run empty state of the map.
+"""The first-run empty state of the map (DOCUMENTATION.md §36): a floating card over the canvas
+with the vector "server" icon, a title and the THREE doors that start the work — "Add your first
+server" (the AddServer dialog), "Open the example map" and "Open an existing map" (`open_map_requested`).
 
-A new user opening the application sees an empty canvas and no hint about what to do
-with it. This module is that hint: a floating card over the map with the vector
-"server" icon, a title, the ONE button that starts the work (`Add your first server`
-→ the AddServer dialog) and a line that points at the two import paths that really
-ship — the TXT import and the `~/.ssh/config` import. The two labels in that line are
-not copies: they are the translated File-menu strings themselves
-(`file.import_servers` / `file.import_ssh_config`), so a re-worded menu item can never
-leave a stale hint behind.
+The two labels of the import line are not copies: they are the translated File-menu strings themselves
+(`file.import_servers` / `file.import_ssh_config`), so a re-worded menu item can never leave a stale hint
+behind. The command palette is named by its LIVE hotkey (`palette_hotkey()` reads the action registry).
 
-v1.5rc3 (ROADMAP tasks 1 and 4) adds the two halves of "and then what?":
-
-  * a SECOND button, **"Open the example map"** — the in-code demo project
-    (`storage/example_project.py`), loaded through the ordinary project load path;
-  * a SECOND hint line naming the **command palette** by its live hotkey
-    (`palette_hotkey()` reads the action registry) and the `?` key of the cheat-sheet
-    — the first screen stops being a dead end for a user who has no servers yet.
-
-v1.5.6 (ROADMAP task 2) puts the **third door** between those two: "Open an existing
-map" — a user who already has a project file must not go through the menus to find it.
-The widget only EMITS (`open_map_requested`); the window owns the dialog and calls its
-ORDINARY project-open path (`_open_project` → `_load_project_at`), the same one
-File → Open and a dropped project use.
-
-The pinned decisions (ROADMAP v1.4.5, task 2 — unchanged by the new pieces):
-
-  * **it never blocks the canvas.** The hint card is `WA_TransparentForMouseEvents`
-    (a click on it reaches the map: panning, the rubber band and the map context menu
-    keep working behind the hint). Qt's attribute disables the delivery to the widget
-    AND its children, so a button cannot live inside the card — the buttons are created
-    as SIBLINGS children of the view and placed under the card by `place()`. They are
-    the only pieces of the empty state that take the mouse;
-  * **it is bound to the SERVER COUNT of the scene** (0 servers → visible): the window
-    shows/hides it from `_sync_empty_state()`, so it appears again when a batch delete
-    or a fresh project empties the map and disappears with the first server;
-  * **it is not a scene item** — like the minimap, the search bar and the legend it is
-    a child of `MapView`, so it stays out of every export and out of "fit to content".
-
-The widget holds no logic beyond its own layout; the WINDOW owns the dialog
-(`add_server_requested`) and the visibility (`set_state_visible`).
-"""
+Pinned: it NEVER blocks the canvas — the card is `WA_TransparentForMouseEvents` (a click reaches the map),
+so the buttons are SIBLINGS of the card, placed under it by `place()`; it is bound to the SERVER COUNT of
+the scene (0 servers → visible, from `_sync_empty_state()`); and it is not a scene item but a child of
+`MapView` like the minimap, so it stays out of every export and out of "fit"."""
 
 from PySide6.QtCore import Qt, QRectF, Signal
 from PySide6.QtGui import QBrush, QColor, QFont, QFontMetrics, QPainter, QPainterPath, QPen

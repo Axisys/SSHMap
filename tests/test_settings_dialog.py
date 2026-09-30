@@ -1,32 +1,11 @@
 """v1.1 — Settings dialog (hub): the release's themed test.
 
-ROADMAP v1.1 (tasks 1–7):
-  #1 The frame — the QTabWidget "General / Terminal / Statuses / Autosave / Map / Language"
-     (the "Hotkeys" tab will appear in v1.3);
-  #2 The entry points — the "Settings" menu item BETWEEN "View" and "Help" + the ⚙ button at the bottom
-     of the sidebar (the 6th in ui/sidebar.py _BUTTONS, the settings_clicked signal) + the vector
-     gear (ui/icons.py); the command palette (Ctrl+K) picks up the item automatically;
-  #3 The "Terminal" tab — the palette/font size/history depth (the v1.0 terminal_* keys)
-     + the session close behavior (the new key terminal_close_behavior: "close"|"ask";
-     "ask" → the confirmation in closeEvent, only for the active session);
-  #4 The "Statuses" tab — the probe interval and the timeout of the StatusChecker
-     (status_interval_sec / status_probe_timeout_sec; the defaults 30 s / 3.0 s = v1.0;
-     on the fly — set_interval/set_probe_timeout after the OK);
-  #5 The "Autosave" tab — on/off, the interval, the number of backups (the v0.9.7 keys);
-  #6 The "Language" tab — the en/ru/zh switch with the immediate apply
-     (the language_changed signal BEFORE the OK; the "Help → Language" item is kept);
-  #7 The single settings file — the external_terminal key is moved from the separate
-    ~/.sshmap_settings.json into config.json (the migration on the read, the old file is removed).
-
-The storage — the SINGLE ~/.sshmap/config.json (i18n.load_config/save_config, the atomic
-merge write); all the keys are optional, the defaults = the current behavior. i18n: +33 keys ×
-en/ru/zh in v1.1 (the parity 326 → 359) + 14 in v1.1.1 (the options around the hub — the parity 373;
-+2 in v1.1.2RC2 — msg.confirm_delete_profile, status.import_resolving — the parity 375;
-+2 in v1.1.2 final — settings.statuses.max_parallel, status.auto_interval_hint — the parity 377;
-its own thematic test — tests/test_settings_options.py).
-
-Run: python tests/test_settings_dialog.py   (from the project root) or python tests/run_all.py
-"""
+The hub is the QTabWidget "General / Terminal / Statuses / Autosave / Map / Language" (the "Hotkeys" tab
+arrives later), reached from the "Settings" menu item (between "View" and "Help"), the sidebar's ⚙ button
+and the command palette (Ctrl+K picks the item up automatically). The tabs carry the terminal keys plus
+`terminal_close_behavior` ("close" | "ask"), the probe interval and timeout, the autosave family
+(on/off, interval, the backup count) and the language switch applied IMMEDIATELY through
+`language_changed` (before the OK), with the "Help → Language" item kept. The storage is the SINGLE `~/.sshmap/config.json` (the atomic merge write; every key optional, the defaults = the current behaviour), including the migration of `external_terminal` out of the old separate settings file."""
 import json
 import os
 import sys

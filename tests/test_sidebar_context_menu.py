@@ -1,17 +1,11 @@
-"""Regression v0.9.6 — the context menu in the sidebar (server list).
+"""Regression v0.9.6 — the context menu in the sidebar (the server list).
 
-ROADMAP v0.9.6:
-  #1 the RMB on the server in the tree: Connect via SSH, the external terminal, Edit,
-     Copy IP, Copy Hostname, Ping, Gather the information,
-     Show on the map (the centering + the accent), Delete (the guarded path).
-  #2 do NOT duplicate the "card" actions (the drag-connection, the plaque collapse) — they
-     are not in the list.
-  #3 the groups/notes — N/A: the tree shows only the servers (refresh_sidebar
-     iterates scene.nodes()), the condition of the task is not met — no menu is needed for them.
-  #4 i18n: all the keys are reused from ctx.*; the new one is only ctx.reveal_on_map × en/ru/zh.
-
-Run:  python tests/test_sidebar_context_menu.py   (from the project root) or python tests/run_all.py
-"""
+The right click on a server row offers Connect via SSH, the external terminal, Edit, Copy IP, Copy
+Hostname, Ping, Gather information, Show on the map (centring the view with the accent) and Delete through
+the guarded path. It deliberately does NOT duplicate the "card" actions (the drag-connection and the plaque
+collapse). No menu is needed for groups and notes, because the tree shows SERVER rows only
+(`refresh_sidebar()` iterates `scene.nodes()`). The i18n keys are the reused `ctx.*` ones, with
+`ctx.reveal_on_map` the only new one."""
 import os, sys, tempfile, traceback
 
 from _common import (bootstrap, check, finish, wait_until, wait_for, load_i18n_langs,
@@ -84,14 +78,8 @@ try:
     check("ctx.reveal_on_map present and non-empty in en/ru/zh",
           all(langs[c].get("ctx.reveal_on_map", "").strip() for c in ("en", "ru", "zh")),
           str({c: langs[c].get("ctx.reveal_on_map") for c in ("en", "ru", "zh")}))
-    # v0.9.7: +18 autosave/backups keys (file.restore_autosave … msg.open_project_first)
-    # v0.9.8: +6 map search keys (view.find_on_map … status.no_matches)
-    # v0.9.9.2: +13 external terminal UI keys (ssh_ext.section … ssh_ext.preset.kitty)
-    # v0.9.9.7: +2 PDF export keys (file.export_pdf, status.export_pdf_ok)
-    # v1.0RC4: +22 Quick launch keys (ctx.quick_launch … msg.ql_open_failed)
-    # v1.1: +33 settings dialog keys (settings.* / menu.settings / btn.settings / status.settings_saved)
-    # v1.1.2RC2: +2 keys (msg.confirm_delete_profile, status.import_resolving)
-    # v1.1.2 final: +2 keys (settings.statuses.max_parallel, status.auto_interval_hint)
+    # The per-release key additions are the changelog family's; the live total is the parity pin
+    # (`EXPECTED_I18N_KEYS` in tests/_common.py) — never enumerated here.
     check_i18n_parity(langs)
     _sidebar_keys = ["ctx.ssh_connect", "ctx.ssh_external", "ctx.edit_server",
                      "ctx.copy_ip", "ctx.copy_hostname", "ctx.ping",
@@ -321,7 +309,7 @@ try:
     except Exception as e:
         check("right-click on empty tree area shows no menu (no crash)", False, repr(e))
 
-    # ══ Robustness: _reveal_node_on_map(None) — the node was removed while the menu was open ══
+    # ══ Robustness: _reveal_node_on_map(None) — the node is gone (deleted while the menu was open) ══
     try:
         win._reveal_node_on_map(None)
         check("_reveal_node_on_map(None) is a safe no-op", True)

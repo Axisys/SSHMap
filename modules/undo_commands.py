@@ -1,25 +1,15 @@
-"""v0.8.3: Undo/Redo — QUndoCommand classes for map operations.
+"""Undo/redo — the QUndoCommand classes for map operations (AGENTS.md §4.2, the list of the 19 commands).
 
-Undo boundaries: node status changes (v0.7.1), coordinates during project
-load, and autogather results (v0.9) do NOT enter the stack. Group
-move/resize DO enter the stack (CmdMoveGroup/CmdResizeGroup below;
-AUDIT v0.8.3 #6) — as does node movement (CmdMoveNode). Note text
-editing — CmdEditTextNote; moving/resizing the StickyNote itself is
-outside of undo.
+Undo boundaries: node status changes, coordinates applied during a project load and the autogather results
+do NOT enter the stack, while a node move, a group move/resize, a group fold and note-text editing DO (the
+`StickyNote`'s own move/resize does not).
 
-Contract for all commands: the scene is modified ONLY inside redo()/undo() —
-QUndoStack.push() calls redo() by itself, so the entry points in MainWindow
-do not perform the operation manually; they only assemble the command and push it.
-
-After each application the command invokes win._post_undo_refresh() —
-the sidebar/counters/status-check plan get synchronized with the actual
-scene state, regardless of whether the change came from the user,
-undo, or redo.
-
-LIFO invariant: Qt undoes commands strictly in reverse order, so
-removing a node (which captures its arrows) cannot be undone before
-the undo of operations on those arrows — references to objects remain valid.
-"""
+The contract for every command: the scene is modified ONLY inside `redo()` / `undo()` — `QUndoStack.push()`
+calls `redo()` itself, so the window's entry points never perform the operation by hand; they assemble the
+command and push it. After every application the command invokes `win._post_undo_refresh()`, so the
+sidebar, the counters and the status-check plan are synchronized with the real scene state whichever way
+the change arrived (user, undo or redo).
+ The LIFO invariant: Qt undoes strictly in reverse order, so removing a node (which captures its arrows) cannot be undone before the undos of operations on those arrows — the references stay valid."""
 import copy
 from typing import List, Optional, Tuple
 
@@ -298,15 +288,11 @@ class CmdAddRemoveNode(_MapCommand):
         # v1.2.6: 5-tuples (source_id, target_id, label, ctype, bidirectional);
         # pre-v1.2.6 4-tuples are supported (restore reads bidir as False).
         self._arrows = list(arrows or [])
-        # v0.9.4-fix (orphaned passwords): when a node is removed its password is
-        # deleted from the keyring; so that Ctrl+Z can bring it back, we read it
-        # into memory in advance.
-        # v1.1.2RC1 (bonus-N11): the stash is also needed in "add" mode — duplicating
-        # a node copies the keyring password under a new id BEFORE pushing the
-        # command; undo ("add") deletes the record, and redo must RESTORE it
-        # (previously a copy left after Ctrl+Z→Ctrl+Y remained without a password).
-        # For a fresh addition there is no keyring record yet — load_password
-        # returns None, the stash is empty, restore is a no-op.
+        # When a node is removed its password is deleted from the keyring, so Ctrl+Z can bring it
+        # back only if it was read into memory FIRST. The stash is needed in "add" mode too:
+        # duplicating a node copies the keyring password under a new id BEFORE pushing the command
+        # and redo must RESTORE the record the undo deleted; for a fresh addition there is no
+        # record yet — `load_password` returns None, the stash is empty, restore is a no-op.
         self._stashed_password: Optional[str] = None
         try:
             from services.credential_manager import get_credential_manager
@@ -380,7 +366,7 @@ class CmdAddRemoveNodeBatch(_MapCommand):
         self._scene = scene
         self._data_list = list(data_list)
         self._mode = mode
-        # v0.9.4-fix style: on remove, stash keyring passwords in advance for undo
+        # on remove, stash keyring passwords in advance for undo
         self._stashed_passwords: List[Tuple[str, Optional[str]]] = []
         if mode == "remove":
             try:
@@ -612,7 +598,7 @@ class CmdEditTextNote(_MapCommand):
         self._new = new_text
 
     def _resolve_note(self):
-        """v1.0-fix (audit #8): the original C++ object may have been destroyed — in the
+        """the original C++ object may have been destroyed — in the
         sequence "create → edit text → delete", undoing the delete restores a NEW note
         with the same id, while self._note points at the old dead object. In that case
         we look up the current note by id — otherwise undo/redo were silently no-op
@@ -639,7 +625,7 @@ class CmdEditTextNote(_MapCommand):
             if committed is not None and self._note_id:
                 committed[self._note_id] = value
             if note.text() == value:
-                # v1.2.4-fix (tester feedback): the text already matches — a typical
+                # the text already matches — a typical
                 # debounce commit while typing is active (QUndoStack.push calls
                 # redo by itself). set_text → setPlainText resets the document and
                 # moves the cursor to the START of the note, breaking editing;
@@ -664,7 +650,7 @@ class CmdAttachNote(_MapCommand):
     attach: redo — server_id + position at the node corner + line; undo — detach +
             return to old_pos (the note's position BEFORE attaching).
     detach: redo — unpin from the node (the note stays in place); undo — attach again
-            with keep_position=True (v1.2.4-fix: exact inverse action — the note
+            with keep_position=True (exact inverse action — the note
             doesn't jump to the corner but returns where it was detached from;
             offset is recalculated).
     No merging (id() not overridden → 0): each attach/detach is a separate
@@ -732,7 +718,7 @@ class CmdAttachNote(_MapCommand):
             else:
                 node = scene.get_node(self._node_id)
                 if node is not None and getattr(note, "server_id", None) != self._node_id:
-                    # v1.2.4-fix: detach didn't move the note → undo returns it to the
+                    # detach didn't move the note → undo returns it to the
                     # same place (keep_position), not to the node corner
                     scene.attach_note_to_node(note, node, keep_position=True)
         except RuntimeError:
@@ -875,7 +861,7 @@ def _values_copy(values) -> dict:
 class CmdMoveBackground(_MapCommand):
     """A finished background MOVE gesture (v1.6, ROADMAP task 4).
 
-    The last mouse-driven object outside the stack: the image used to only mark the
+    The last mouse-driven object outside the stack: the image would only mark the
     project dirty, so Ctrl+Z after dragging a floor plan rolled back something else.
     The `CmdMoveNode` pattern — the item reports the finished gesture (the old and the
     new position as QPointF) and the window pushes ONE command per gesture.

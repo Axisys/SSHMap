@@ -1,33 +1,12 @@
 # -*- coding: utf-8 -*-
 """v1.2.14 — Scrollback: batching of the auto-return to the live line (PYTE82_AUDIT.md batch D2).
 
-The thematic test of the theme of the release (ROADMAP v1.2.14): the pyte.HistoryScreen.before_event
-for every event of the SSH thread except prev_page/next_page spun next_page() in a loop —
-on a deep history up to ~250 iterations, each O(lines) (the D1 measurement v1.2.12: 68–73 ms/chunk
-against ~42 on the live line; the feed goes through the queued signal into the GUI thread). Now — one
-bulk operation with the same arithmetic as in next_page (screens.py): O(lines) once.
-
-Headless: the synthetic byte sequences + the real htop chunk (19 KB) into the
-TerminalScreen (without Qt, without the network). The functional asserts; the time — only in the
-report of the measurement, WITHOUT the hard ms asserts (ROADMAP v1.2.14):
-
-  * the wiring: the override before_event exists and is picked up by the wrapper by name
-    (before_event is not in HistoryScreen._wrapped);
-  * the basic auto-return (k ≤ lines): the page up → the event → position == size;
-  * the deep history + the chunk (the D1 scenario): 120×32, history=1000, ~1050 lines,
-    the user at the top edge (position=32/1000) → the feed of the htop chunk — the position
-    is back to size, bottom is empty, the grid is equal to the reference without the scroll
-    character by character (including the fg/bg and the cursor); the time of the chunk — in the report;
-  * the equivalence to the next_page() loop: several geometries (k ≤ lines AND k >> lines) —
-    the full state (position, top, bottom, the buffer character by character, the cursor) is identical
-    to the stock loop of pyte;
-  * prev_page/next_page — a no-op: the manual scroll by the wheel/PgUp-PgDn step by step,
-    is not reset by the auto-return;
-  * the boundaries: the event on the live line (a no-op), the empty history, history_lines=0,
-    two chunks in a row, the enter into the alt from a deep history (the regression v1.2.12).
-
-Run: python tests/test_scrollback_batching.py   (from the project root) or python tests/run_all.py
-"""
+`pyte.HistoryScreen.before_event` spun `next_page()` in a loop for every event of the SSH thread except
+`prev_page` / `next_page` — on a deep history up to ~250 iterations, each O(lines) (the D1 measurement:
+68–73 ms per chunk against ~42 on the live line), because the feed crosses the queued signal into the GUI
+thread. Now it is ONE bulk operation with the same arithmetic as `next_page()`: O(lines) once.
+Headless: synthetic byte sequences plus the real htop chunk (19 KB) into `TerminalScreen`, with the TIME
+only in the report of the measurement (no hard ms asserts). Checks: the wiring (the override `before_event` is picked up by name), the basic auto-return, the deep history + the htop chunk (the position back to `size`, the grid equal to the reference character by character including fg/bg and the cursor), the equivalence to the `next_page()` loop over several geometries, `prev_page` / `next_page` as a no-op, and the boundaries (the live line, an empty history, `history_lines=0`, two chunks in a row, the alt-screen regression)."""
 import math
 import sys
 import time

@@ -2,26 +2,11 @@
 """v1.5 — the release that closes the 1.5 line: the environment badge, the panel snap,
 the emulated demo statuses.
 
-The closing release of the line "Design & confidence". Its rc series (`1.5rc1` … `1.5rc5`)
-froze and implemented the line's contract; this release ships the THREE features the
-interface review left over, and they are the last ones that extend nothing:
-
-  * **the environment badge on the server card** — the primary tag as TEXT in the free band
-    above the alias, with the tag's colour as a redundant tint (§1);
-  * **the floating-panel SNAP** — dropping a panel at the edge it hangs from re-anchors it
-    and CLEARS the saved position, so every anchored rule comes back (§2);
-  * **the emulated demo statuses** — the demo map declares green/amber/red instead of
-    opening grey and settling into five red cards, and an emulated status is always MARKED
-    as emulated and never leaves the demo map (§3).
-
-The topical files of the rc series keep their own checks (`test_theme_contrast.py`,
-`test_encoding.py`, `test_first_run.py`, `test_chrome.py`, `test_audit_v15rc5.py`); this
-file carries the RELEASE-level ones: the version/pins, the cross-cutting acceptance of the
-three features, and the "no new contract" audit the ROADMAP demands of a closing release
-(no new colour, no new config key, no new action, no new dependency) — §4.
-
-Run: python tests/test_release_v15.py   (from the project root) or python tests/run_all.py
-"""
+The closing release of "Design & confidence": its rc series froze and implemented the line's contract,
+and this release ships the three features the interface review left over — the last ones that extend
+nothing. THE ENVIRONMENT BADGE puts the primary tag as TEXT in the free band above the alias, with the
+tag's colour as a redundant tint (§1). THE FLOATING-PANEL SNAP re-anchors a panel dropped at the edge it
+hangs from and CLEARS the saved position, so every anchored rule comes back (§2). THE EMULATED DEMO STATUSES make the demo map declare green/amber/red instead of opening grey and settling into five red cards, and an emulated status is always MARKED as emulated and never leaves the demo map (§3). The topical files of the rc series keep their own checks; this one carries the RELEASE-level ones: the version and pins, the cross-cutting acceptance of the three features, and the "no new contract" audit a closing release owes (no new colour, no new config key, no new action, no new dependency) — §4."""
 import dataclasses
 import os
 import re

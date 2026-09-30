@@ -1,34 +1,12 @@
 # -*- coding: utf-8 -*-
 """v1.5rc3 — First run & confidence: the demo map, the undo affordance and the age of a status.
 
-The third release of the 1.5 line "Design & confidence". v1.5rc1 fixed the palette and
-v1.5rc2 gave every meaning a second channel; this rc answers the two questions the design
-review left open: *how do I start* and *how old is what I am looking at*.
-
-  §1 the DEMO MAP is built in code (`storage/example_project.py`): a valid project dict,
-     five nodes, six connections covering all six types, one group, one note, tags — and
-     RFC 5737 documentation addresses only, so a probe can only tell the truth;
-  §2 the LOAD PATH: both entry points (the empty state's button and `Help → Open the
-     example map`) open the SAME project through the ORDINARY path; the window says it is
-     an example (the title marker, no `_project_file`, not in the MRU) and a save turns it
-     into the user's own file;
-  §3 the UNDO AFFORDANCE: `_push_command()` is the one place that offers it, a destructive
-     command arms it, the action's own message carries the button, the click restores the
-     map, and nothing outside the stack (a view state, a message with no command) offers
-     anything;
-  §4 STATUS FRESHNESS: the checker timestamps every result and owns the threshold
-     (`max(2 × interval, 90 s)`), the card paints the stale mark in the idle tone with the
-     declared shape and adds "checked N min ago" to the tooltip — and the STATUS itself is
-     never touched (a stale online stays online);
-  §5 the FIRST SCREEN: the empty state names the palette (its live hotkey) and the `?` key,
-     the palette opens on a bounded "Start here" block, and `?` / F1 open the
-     registry-derived cheat-sheet Help → About already renders;
-  §6 the SCREENSHOT probe: the demo map really renders (the acceptance's "screenshot which
-     doubles as the README source");
-  §7 the release state (version, i18n parity + the 11 new keys, the registry, the hub).
-
-Run: python tests/test_first_run.py   (from the project root) or python tests/run_all.py
-"""
+The third release of the 1.5 line answers the two questions the design review left open: how do I start,
+and how old is what I am looking at.
+§1 the DEMO MAP is built in code (`storage/example_project.py`): a valid project dict, five nodes, six
+connections covering all six types, one group, one note, tags — RFC 5737 addresses only; §2 the load
+path (both entry points open the SAME project through the ORDINARY path; the window says it is an
+example, and a save turns it into the user's own file); §3 the undo affordance (`_push_command()` is the one place that offers it, and nothing outside the stack offers a way back); §4 the status freshness (the threshold, the stale mark in the idle tone, "checked N min ago" — the STATUS itself is never touched); §5 the first screen (the palette's live hotkey, `?` / F1); §6 the screenshot probe; §7 the release state."""
 import json
 import os
 import time

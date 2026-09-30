@@ -1,64 +1,12 @@
 # -*- coding: utf-8 -*-
-"""v1.7rc2 — Files Commander, step 2: the copy and the move across the panes (ROADMAP v1.7rc2).
+"""The Files Commander, step 2: the copy and the move across the panes.
 
-The topical file of the 1.7 line's SECOND release. v1.7rc1 shipped the pane MODEL over the
-operations that already existed; this slot ships the two objects the frozen contract
-(`SFTP_PANES.md` §2) RESERVED — `queue_copy` and `queue_move` — so `F5` and `F6` finally do
-what the classic key map promises: a remote→remote copy and a cross-directory move, with
-their conflict, atomicity, cancellation and reporting policy. The directory question of the
-slot is decided as the mc-grade half of the contract: DIRECTORY TREES are copied and moved
-RECURSIVELY (a bounded walk, every FILE atomic, a partially transferred tree reported and
-never rolled back).
+Offscreen, NO network (the fake threads of `_fakes.py`). Pins the two worker kinds
+(`queue_copy` / `queue_move`), the pane batch over them — ONE conflict question per batch with
+"apply to all", ONE closing report — and the atomic per-file commit of a copied file.
+Contract — `SFTP_PANES.md` §2/§2a; mechanism — `DOCUMENTATION.md` §60.
 
-ALL the checks are offscreen and without the network: the in-memory fake SFTP of
-`tests/_fakes.py` behind a real `SftpWorker` (the worker is the CONTAINER's — one transport,
-one queue, two panes), and the fake SSH thread of the window harness for the key rules.
-
-§1 The pane model and the REFACTOR BOUNDARY: the container with ONE pane is the shipped tab
-   (every attribute read of the old single-listing tab resolves on the ACTIVE pane), the
-   pane owns the listing state while the container owns the worker binding and the session's
-   follow switch, and the pane-scoped keys are `WidgetWithChildrenShortcut` actions ON the
-   pane (F4 absent).
-§2 The two panes over ONE worker: each pane lists and navigates INDEPENDENTLY, each renders
-   only the answer of the directory it asked for, and the preview belongs to its own pane.
-§3 The ACTIVE pane: it decides for the shipped reads, it is visible through the shipped
-   focus ring, and a keyboard FocusIn moves it — in the ONE-pane mode nothing is ringed.
-§4 The pane-scoped keys call the SHIPPED worker paths (F3 view, F7 mkdir, F8 delete, the
-   same-directory F6 rename) and answer honestly when they cannot (F5 without a second pane,
-   no row) — and an F5 typed into the terminal CANVAS still reaches the SHELL (the canvas
-   keeps its own claim).
-§5 The action: the tab-bar corner control is a view of the ACTIVE session's mode, DISABLED
-   for a page without a Files tab (a split pane), and turning it on brings the Files tab on
-   screen (the lazy SFTP channel opens on the way).
-§6 The follow rule: the two-pane mode switches the cwd follow OFF and greys the switch (one
-   OSC 7 report cannot answer "which of the two"), the session is TOLD, and
-   `follow_directory()` refuses there.
-§7 The persistence: `ui_sftp_commander` + `ui_sftp_commander_ratio` ride the window's ONE
-   geometry write, a broken value falls back to the default, and the mode is restored.
-§8 i18n (the five keys of v1.7rc1 and the eight of v1.7rc2 in EVERY language) + the release
-   state.
-§9 The COPY task: a file lands BYTE-EQUAL and atomically (a cancel or a failure leaves the
-   destination byte-identical and drops the `.part`), the progress carries the total from
-   `stat`, the OpenSSH `copy-data` fast path is used when the server has it and SKIPPED with
-   ONE log line when it has not (the stream produces the identical result), and a missing
-   source is a task_error.
-§10 The RECURSIVE copy: a tree lands with its directories and its bytes, an existing
-   destination directory is MERGED (nothing inside it is deleted), a tree over its declared
-   bound is refused BEFORE anything moves, and a partial tree is REPORTED with its counters
-   (the files already published stay).
-§11 The MOVE: a cross-directory rename is one atomic operation, a destination directory that
-   already exists is merged entry by entry, and a REFUSED cross-device rename is a machine
-   payload (not a traceback) with both endpoints left untouched.
-§12 The BATCH of the panes: `F5`/`F6` move the SELECTION to the other pane's directory, the
-   conflict question is asked ONCE with "apply to all", ONE closing report names what really
-   happened (copied / skipped / failed), BOTH listings are re-listed, and a row whose
-   destination is itself is skipped instead of being copied onto itself.
-§12b The whole chain: a real terminal WINDOW hands one worker to the page, the page to the tab
-   and the tab to both panes, the copy feeds the page's transfer progress family, and the
-   closing report rides the shipped `message` bridge into the host's status bar.
-
-Run:  python tests/test_sftp_commander.py   (from the project root) or python tests/run_all.py
-"""
+Run: python tests/test_sftp_commander.py   (from the project root) or python tests/run_all.py"""
 import logging
 import os
 import posixpath

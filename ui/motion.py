@@ -1,47 +1,14 @@
 # -*- coding: utf-8 -*-
-"""v1.4.4 (ROADMAP) — the motion standards of SSHMap: durations, easing and the two gestures.
-
-Before this module every animation was a one-off: `ServerNode._start_pulse()` built its
-own `QVariantAnimation` with its own numbers, and "move the camera" was whatever
-`centerOn()`/`fitInView()` happened to do — an instant jump. The two "cosmetic" backlog
-items of v1.2.6 (smooth camera flights, hover focus/dim on arrows) are implemented on ONE
-foundation instead: this module.
-
-**The standards.** Three durations, one easing:
-
-* `DURATION_FAST` = 150 ms — feedback the user is already watching (an accent, a hover);
-* `DURATION_NORMAL` = 250 ms — the standard gesture: a camera flight, a reveal;
-* `DURATION_SLOW` = 300 ms — the longest gesture (fitting a large map end to end).
-* `EASING` = `OutQuad` — fast at the start, settling at the end: the motion reads as
-  "the map answered immediately", not as a linear slide.
-
-**Everything here is interruptible**, and that is the property the acceptance pins:
-
-* a NEW camera flight never jumps — it reads the CURRENT scale/centre as its start
-  (`fly_camera()` stops the old flight without applying its target first);
-* the USER always wins — the wheel, a mouse press (a drag) and every instant navigation
-  path (`.centerOn`, `MapView.fit_to_content`, `reset_zoom`, the zoom steps) call
-  `stop_camera()`/`MapView.stop_camera_flight()` before they move the camera;
-* `stop_camera()`/`stop_scale_in()` leave the item where it is (no snap) unless the
-  caller asks for the finished state.
-
-**No `QGraphicsOpacityEffect` anywhere** — the v1.2.10 audit pinned it: an effect is a
-separate render layer, and the pain at 500 nodes was measured. The card scale-in therefore
-uses the item's OWN `setScale()`/`setOpacity()`, and the completion restores both to unit
-(the transform origin set for the gesture is restored too, so `boundingRect()`,
-`card_rect_scene()` and every `edge_point()` are bit-for-bit what they were).
-
-**The motion switch (v1.5rc1, ROADMAP task 6).** `set_motion_enabled(False)` ("Reduce
-motion" in the Appearance tab / the `theme.motion` key of config.json) makes every gesture
-apply its FINAL state at once: `fly_camera()` builds a zero-length flight (the camera
-lands on the target, `is_flying()` is False) and `scale_in()` settles the item instead of
-growing it. Nothing else changes — the destinations, the clamps and the geometry are the
-same code path, which is why the v1.4.4 acceptance stays green with the flag off. The
-module owns ONE flag (`_motion_enabled`, default ON = every release before this one).
-
-The module is Qt-light on purpose: the pure geometry helpers stay free functions, and the
-only Qt classes used are `QObject`/`QVariantAnimation`/`QPointF`/`QTransform`.
-"""
+"""The motion standards: durations, easing and the two gestures (DOCUMENTATION.md §35).
+Three durations and ONE easing: `DURATION_FAST` 150 ms (feedback the user is already watching),
+`DURATION_NORMAL` 250 ms (the standard gesture) and `DURATION_SLOW` 300 ms (the longest — fitting a
+large map), all through `EASING` = `OutQuad`. The public gestures are `fly_camera()` — a camera flight
+that reads the CURRENT scale/centre as its start, so a new flight never jumps — and `scale_in()`, the
+card's own scale-in.
+EVERYTHING IS INTERRUPTIBLE: `stop_camera()` / `stop_scale_in()` leave the item where it is (no snap)
+unless the caller asks for the finished state, and the USER always wins — the wheel, a press and every
+instant navigation path stop the flight before they move the camera.
+NO `QGraphicsOpacityEffect` anywhere (an effect is a separate render layer — measured at 500 nodes): the scale-in uses the item's own `setScale()`/`setOpacity()` and restores the transform origin, so the geometry is bit-for-bit what it was. `set_motion_enabled(False)` ("Reduce motion", the `theme.motion` key) makes every gesture apply its FINAL state at once, through the same code path."""
 
 from typing import Optional
 
@@ -90,7 +57,7 @@ def _duration(ms) -> int:
     """
     return max(0, int(ms)) if _motion_enabled else 0
 
-# The attributes used to keep the live animations referenced. A QGraphicsItem is NOT a
+# The attributes keep the live animations referenced. A QGraphicsItem is NOT a
 # QObject, so a QVariantAnimation cannot be parented to it; remembering it on the item
 # (and dropping the reference when it finishes) keeps it alive without a global registry.
 _FLIGHT_ATTR = "_motion_camera_flight"

@@ -16,19 +16,13 @@ except ImportError:
     except ImportError:  # flat layout: the ui/ directory itself is on sys.path
         import theme
 
-# Base icon color — readable on the current theme's surfaces (slate-300 on the dark
-# palette). v1.2.5: the value comes from the central theme; the name is kept (public
-# module constant). **v1.4.3-fix: it is LIVE.**
-#
-# A module `__getattr__` would NOT have been enough here: it only serves `module.NAME`
-# access, while the drawers below read `ICON_COLOR` as a module GLOBAL — a global
-# lookup goes to `__dict__` and never reaches the hook (which is exactly the trap the
-# v1.4.3 release fell into: the constant was captured at import time and the toolbar
-# and sidebar kept their dark-theme pale glyphs on LIGHT). The name therefore holds a
-# small PROXY that resolves the ACTIVE theme's `icon_color` on every read and behaves
-# as its hex string in both places it is consumed (`QColor(ICON_COLOR)` and an f-string).
+# Base icon color — readable on the current theme's surfaces; the value comes from the central
+# theme and the name is a public module constant that is LIVE. A module `__getattr__` would NOT
+# do: it serves `module.NAME` only, while the drawers read `ICON_COLOR` as a module GLOBAL (a
+# global lookup never reaches the hook). The name therefore holds a small PROXY that resolves
+# the ACTIVE theme's `icon_color` on every read and behaves as its hex string.
 class _LiveColor:
-    """A hex-string proxy that follows the ACTIVE theme (v1.4.3-fix)."""
+    """A hex-string proxy that follows the ACTIVE theme ."""
 
     __slots__ = ("_field",)
 
@@ -55,12 +49,11 @@ ICON_COLOR = _LiveColor("ICON_COLOR")
 ICON_SIZE = 20
 
 
-# ── The icon cache + the live refresh (v1.4.3-fix) ───────────────────────────
-# A QIcon is a VALUE handed to a QAction/QPushButton: once painted it keeps its
-# pixels, and nothing repaints it when the theme changes. The cache keeps ONE
-# QIcon object per name and `refresh_all()` RE-PAINTS it in place — the QIcon is
-# implicitly shared, so every widget already holding it shows the new pixmap
-# without the window having to walk its menus and toolbars.
+# ── The icon cache + the live refresh  ───────────────────────────
+# A QIcon is a VALUE handed to a QAction/QPushButton: once painted it keeps its pixels, and nothing
+# repaints it when the theme changes. The cache keeps ONE QIcon object per name and `refresh_all()`
+# RE-PAINTS it in place — the QIcon is implicitly shared, so every widget already holding it shows the
+# new pixmap without the window having to walk its menus and toolbars.
 _ICON_CACHE = {}
 
 
@@ -311,8 +304,8 @@ def _draw_settings(p):
     path.closeSubpath()
     # The gear is slightly bolder than the base outline (1.6): on 20×20
     # a thin stroke rounds the valleys and the teeth stop reading.
-    # v1.4.3-fix: this drawer used to OVERRIDE the canvas pen with the module
-    # constant — read the live theme directly (a QColor() cannot take the proxy).
+    # this drawer reads the live theme directly, never the module
+    # constant (a QColor() cannot take the proxy).
     pen = QPen(QColor(theme.ICON_COLOR), 1.8)
     pen.setCapStyle(Qt.PenCapStyle.RoundCap)
     pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
@@ -535,8 +528,8 @@ _DRAWERS = {
 def get_icon(name: str) -> QIcon:
     """Icon by name; unknown name — empty QIcon (the button stays text-only).
 
-    **v1.4.3-fix:** the icon is CACHED by name and returned as the SAME QIcon
-    object every time (it used to be redrawn per call). That is what makes
+    The icon is CACHED by name and returned as the SAME QIcon
+    object every time (never redrawn per call). That is what makes
     `refresh_all()` possible: a QAction holds this object, so re-painting it in
     place updates every menu, toolbar and button at once — no walk of the
     widgets, no risk of missing one. A caller must therefore NOT mutate the
@@ -562,7 +555,7 @@ def draw_icon(name: str) -> QIcon:
 
 
 def set_action_icon(action, name) -> bool:
-    """Give a QAction the icon of `name` and REMEMBER the name on it (v1.4.3-fix).
+    """Give a QAction the icon of `name` and REMEMBER the name on it .
 
     The remembered name (`_sshmap_icon_name`) is how `refresh_all()` / the theme
     walk find every icon in the UI without a registry to maintain: the name
@@ -583,7 +576,7 @@ def set_action_icon(action, name) -> bool:
 
 
 def refresh_all() -> int:
-    """Re-paint every CACHED icon in the ACTIVE theme's colour (v1.4.3-fix).
+    """Re-paint every CACHED icon in the ACTIVE theme's colour .
 
     Returns how many icons were repainted. Every QIcon already handed out is
     updated in place, so the toolbar, the menus, the sidebar buttons and the
@@ -603,7 +596,7 @@ def refresh_all() -> int:
 
 
 def refresh_action_icon(action) -> bool:
-    """Re-paint one QAction's icon from its remembered name (v1.4.3-fix).
+    """Re-paint one QAction's icon from its remembered name .
 
     The QIcon is cleared first: a widget that already converted the old pixmap keeps
     serving it from its own cache otherwise (`QPushButton.icon()` hands out a COPY —
@@ -625,7 +618,7 @@ def refresh_action_icon(action) -> bool:
 
 
 def refresh_button_icon(button, name) -> bool:
-    """Re-apply the icon of `name` to a QPushButton/QToolButton (v1.4.3-fix).
+    """Re-apply the icon of `name` to a QPushButton/QToolButton .
 
     Same clear-then-set dance as `refresh_action_icon`: a widget keeps its OWN copy
     of the pixmap, so re-setting the registry's QIcon is not enough — the old render

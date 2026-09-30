@@ -2,23 +2,15 @@
 """SSH Map example plugin — the minimal one: two UI hooks, no packaging, no core imports.
 
 This file is an EXAMPLE, not a shipped plugin (see `examples/README.md`): copy it into
-`~/.sshmap/plugins/` and use `Plugins → Reload`. It shows the whole author-facing
-surface a small plugin needs and nothing else:
+`~/.sshmap/plugins/` and use "Plugins → Reload". It shows the whole author-facing surface a small plugin
+needs and nothing else: `register_commands` puts one row into the command palette (Ctrl+K), returned as a
+plain `(text, callback)` pair — the lenient shape the contract allows, so the file needs no import of the
+core at all — and `extend_node_context_menu` adds one row to the right-click menu of a server, the SAME
+hook feeding the map and the sidebar because the core hands over node RECORDS.
 
-* `register_commands` puts one row into the command palette (Ctrl+K) — returned as a
-  plain `(text, callback)` pair, the lenient shape `PLUGINS.md` §3 allows, so the file
-  needs no import of the core at all;
-* `extend_node_context_menu` adds one row to the right-click menu of a server — the
-  same hook feeds the map AND the sidebar (the core hands over node RECORDS, §5).
-
-**The rule every file of this folder follows: a plugin never imports the core.** An
-installed application does not have this repository on `sys.path`, so
-`from modules.plugin_manager import …` would work in a source checkout and break for a
-real user — everything a plugin needs arrives through `ctx` and the hook arguments.
-
-The plugin's own strings (command text, menu text, description) are the AUTHOR's: the
-core never translates them and they are outside the i18n parity policy (`PLUGINS.md` §7).
-"""
+THE RULE every file of this folder follows: a plugin never imports the core. An installed application does
+not have this repository on `sys.path`, so reaching into `modules.plugin_manager` would work in a source
+checkout and break for a real user — everything a plugin needs arrives through `ctx` and the hook arguments. The plugin's own strings (command text, menu text, description) are the AUTHOR's: the core never translates them and they stay outside the i18n parity policy."""
 
 MANIFEST = {
     "name": "hello",              # the identity: the config key, the menu row, the log

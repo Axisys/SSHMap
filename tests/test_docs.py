@@ -1,40 +1,14 @@
 # -*- coding: utf-8 -*-
-"""The documentation-consistency guards (the changelog family, ROADMAP, the quoted counters, INDEX freshness).
+"""The documentation-consistency guards (the changelog family, ROADMAP, the counters, INDEX freshness, the code-comment budget).
 
-`DOCUMENTATION.md`, `AGENTS.md`, `CHANGELOG*.md` and `ROADMAP.md` are gitignored (".gitignore:
-Overly detailed documentation; all the essentials are in README.md") and are NOT tracked by git —
-no review and no checkout reads them, which is exactly why the suite guards them. Every rule
-below is a PROPERTY over the whole document, never a pin of a literal sentence: the check that
-read `CHANGELOG.md` by name and grepped for "## v1.4.1 " broke the moment v1.5rc1 closed the
-1.4 line — a property survives that, a content pin does not.
-
-This file owns the checks about the DOCUMENTS themselves. The numbers `README.md` / `ROADMAP.md`
-quote (the test-file counter, the parity chain) stay where they were — `tests/test_i18n_live.py`
-§6 — and no topical test reads a doc any more (the docs are local-only, so a fresh clone must
-still be able to run the suite).
-
-  §1 the section ownership: the shipped release has a section in the `CHANGELOG*.md` family, no
-     release section is duplicated inside one file or across two, every history file follows the
-     naming convention, and `ROADMAP.md` plans no ALREADY RELEASED version — the "a released
-     section is removed from the plan" rule, generalised beyond the one version it started with;
-  §2 the counters the reference docs quote are the code's counters: the i18n key pin and the
-     action registry (its size in EVERY spelling — bold or not, "actions" or "entries" — and its
-     EMPTY-default count);
-  §3 `DOCUMENTATION.md` is self-consistent: every `§N` reference resolves to a heading, a DOTTED
-     `§N.M` reference names `AGENTS.md` (that numbering is not this file's), the contents list names
-     every section, and every gotcha citation stays inside the numbered list whose numbering
-     `AGENTS.md` §7 shares (a "#13" must not mean two different items);
-  §4 `tests/INDEX.md` is fresh (the generator `_gen_index.py` is the single source of truth);
-  §5 the documentation rules `AGENTS.md` states are ENFORCED: the changelog never leaks into the two
-     reference docs (no release narrative), a chapter number never collides with a numbered section,
-     no block is copied between the files, and every cross-file `§`-reference resolves in the file
-     that it names.
-
-A missing documentation set is a SKIP, not a defect (they are gitignored): the guards are for
-the maintainer's working copy, and a fresh clone stays runnable.
-
-Run: python tests/test_docs.py   (from the project root) or python tests/run_all.py
-"""
+§1 the section ownership of the changelog family and `ROADMAP.md`; §2 the counters the reference
+docs quote are the code's counters (the i18n key pin, the action registry in every spelling and
+its empty-default count); §3 `DOCUMENTATION.md` is self-consistent (every `§N` resolves, a dotted
+`§N.M` names `AGENTS.md`, the contents list is complete, the gotcha numbering is shared with §7);
+§4 `tests/INDEX.md` freshness, §5 the documentation rules over the two reference docs, §6 the CODE
+ratchet and §7 the byte budget of `AGENTS.md` (the harness TRUNCATES it) are the rest — a missing
+documentation set is a SKIP, never a defect (they are gitignored, so a fresh clone stays runnable).
+Run: python tests/test_docs.py   (from the project root) or python tests/run_all.py"""
 import collections
 import glob
 import os
@@ -42,8 +16,17 @@ import re
 import sys
 
 from _common import bootstrap, check, finish, EXPECTED_APP_VERSION, EXPECTED_I18N_KEYS
+import _comment_budget as CB  # the ONE owner of the history markers + the code-comment ratchet (§6)
+import _docs_budget as DB     # the byte budget of AGENTS.md — the harness truncates it (§7)
 
 ROOT, WORK = bootstrap()  # HOME isolation + offscreen + sys.path (BEFORE any app import)
+
+
+def _read(path):
+    """The text of one documentation file (the guards below read several of them)."""
+    with open(path, encoding="utf-8") as f:
+        return f.read()
+
 
 REFERENCE_DOCS = ("DOCUMENTATION.md", "AGENTS.md")
 _DOC = os.path.join(ROOT, "DOCUMENTATION.md")
@@ -51,28 +34,66 @@ _AGENTS = os.path.join(ROOT, "AGENTS.md")
 _ROADMAP = os.path.join(ROOT, "ROADMAP.md")
 _LIVE_CHANGELOG = os.path.join(ROOT, "CHANGELOG.md")
 _HISTORY = sorted(glob.glob(os.path.join(ROOT, "CHANGELOG_HISTORY_*.md")))
+# The DETAILS family (the released mechanism/decisions/measurements the reference docs no longer
+# carry): `CHANGELOG_DETAILS.md` is the LIVE line and `CHANGELOG_DETAILS_V<digits>.md` a closed one,
+# paired with `CHANGELOG_HISTORY_V<digits>.md` by the SAME rule — `<digits>` = the last version of the
+# line, dots dropped. It is deliberately NOT part of REFERENCE_DOCS (§2/§5: it IS the release
+# narrative, so the marker scan must never see it).
+_DETAILS = sorted(glob.glob(os.path.join(ROOT, "CHANGELOG_DETAILS*.md")))
+_LIVE_DETAILS = os.path.join(ROOT, "CHANGELOG_DETAILS.md")
+
+# The rules block of each reference doc STATES the forbidden vocabulary and NAMES the files a doc may
+# point at — it is a DEFINITION, not a claim, so the scans that would otherwise read it (the §5 history
+# markers below and the §5 stub-pointer check) run over the document WITHOUT it. Its existence is
+# asserted by §5, so the exclusion can never silently swallow a whole file.
+_RULES_BLOCK = {
+    "AGENTS.md": ("> **THE DOCUMENTATION RULES", "\n---\n"),
+    "DOCUMENTATION.md": ("> **THE RULES OF THIS FILE**", "\n\n"),
+}
+
+
+def _without_rules(name, text):
+    """The document without its rules block (None when the block is gone)."""
+    start, end = _RULES_BLOCK[name]
+    i = text.find(start)
+    j = text.find(end, i) if i >= 0 else -1
+    return None if i < 0 or j < 0 else text[:i] + text[j:]
+
+
+_rules_free = {n: _without_rules(n, _read(os.path.join(ROOT, n))) for n in REFERENCE_DOCS}
 
 _missing = [p for p in (_DOC, _AGENTS, _ROADMAP, _LIVE_CHANGELOG) if not os.path.exists(p)]
 if not _HISTORY:
     _missing.append(os.path.join(ROOT, "CHANGELOG_HISTORY_*.md"))
+if _DETAILS and not os.path.exists(_LIVE_DETAILS):
+    # The gate is STAGED: the moment the family exists, the live file must exist too (the details of
+    # the OPEN line are edited in place, exactly like `CHANGELOG.md`).
+    _missing.append(_LIVE_DETAILS)
 if _missing:
     print("  SKIP  the local documentation set is not present: "
           + ", ".join(os.path.basename(p) for p in _missing))
     print("        (DOCUMENTATION.md / AGENTS.md / CHANGELOG*.md / ROADMAP.md are gitignored "
           "local files — a fresh clone has none of them)")
+    CB.report(check)  # §6 guards the CODE, not a document: it runs on this path too
     finish()          # 0 checks, 0 failures: a SKIP is not a defect
     sys.exit(0)
-
-
-def _read(path):
-    with open(path, encoding="utf-8") as f:
-        return f.read()
 
 
 def _flat(path):
     """The text with the line breaks folded (the docs wrap at ~100 columns, so a phrase-level
     regex must see the paragraphs, not the wrapping — "24 with an\\nEMPTY default")."""
     return re.sub(r"\s+", " ", _read(path))
+
+
+def _section_versions(path):
+    """The release versions the file declares as `## vX.Y… — <title>` headings."""
+    return _RELEASE_HEADING.findall(_read(path))
+
+
+def _line_digits(name):
+    """The `<digits>` of a `CHANGELOG_<KIND>_V<digits>.md` name (the last version, dots dropped)."""
+    m = re.fullmatch(r"CHANGELOG_(?:HISTORY|DETAILS)_V(\d+)\.md", os.path.basename(name))
+    return m.group(1) if m else None
 
 
 _ARROW_BEFORE = re.compile(r"(?:→|->)\s*$")
@@ -108,18 +129,52 @@ for _file, _versions in _family.items():
     for _v in _versions:
         _by_version[_v.lower()].add(_file)
 
+# The DETAILS family is scanned with the SAME release-heading regex, and the rule is the one that
+# matters at a rollover: a version that has a `## vX.Y` section in the details may be in EXACTLY ONE
+# details file. A closed line's details left inside the live file (or copied into the closed one
+# without being deleted from the live one) is the same mistake §1 catches in the changelog family.
+_family_details = {os.path.basename(p): _section_versions(p) for p in _DETAILS}
+_by_version_details = collections.defaultdict(set)
+for _file, _versions in _family_details.items():
+    for _v in _versions:
+        _by_version_details[_v.lower()].add(_file)
+
 check(f"§1 the changelog family carries the shipped release (v{EXPECTED_APP_VERSION})",
       f"v{EXPECTED_APP_VERSION}".lower() in _by_version,
       f"{len(_family)} file(s), {len(_by_version)} release section(s)")
 check("§1 no release section is duplicated inside one file",
-      all(len(v) == len(set(v)) for v in _family.values()),
-      [n for n, v in _family.items() if len(v) != len(set(v))])
+      all(len(v) == len(set(v)) for v in list(_family.values()) + list(_family_details.values())),
+      [n for n, v in {**_family, **_family_details}.items() if len(v) != len(set(v))])
 check("§1 no release section is duplicated across two files (the close-a-line mistake)",
       all(len(files) == 1 for files in _by_version.values()),
       {v: sorted(f) for v, f in _by_version.items() if len(f) > 1})
 check("§1 every history file is named for a closed line (CHANGELOG_HISTORY_V<digits>.md)",
       all(re.fullmatch(r"CHANGELOG_HISTORY_V\d+\.md", os.path.basename(p)) for p in _HISTORY),
       [os.path.basename(p) for p in _HISTORY])
+check("§1 every details file is named for a line (CHANGELOG_DETAILS.md or "
+      "CHANGELOG_DETAILS_V<digits>.md)",
+      all(os.path.basename(p) == "CHANGELOG_DETAILS.md" or _line_digits(p) is not None
+          for p in _DETAILS),
+      [os.path.basename(p) for p in _DETAILS])
+# The PAIRING rule runs the direction that can be wrong: every CLOSED details file must have the history
+# file of the SAME line beside it (a details file named `_V1711` with no `CHANGELOG_HISTORY_V1711.md` is
+# a typo or a half-finished rollover). The other direction is a MIGRATION, not a rule: the reference
+# docs are being compressed line by line, so a line may still have its history without its details yet —
+# what the rollover has to move in ONE step is checked by the naming rule above and by AGENTS.md §9.
+_broken_pairs = sorted({_line_digits(p) for p in _DETAILS if _line_digits(p)} -
+                       {_line_digits(p) for p in _HISTORY if _line_digits(p)})
+check("§1 every CLOSED details file has the history file of its line beside it",
+      not _broken_pairs,
+      f"details without their history: {_broken_pairs}")
+_still_to_move = sorted({_line_digits(p) for p in _HISTORY if _line_digits(p)} -
+                        {_line_digits(p) for p in _DETAILS if _line_digits(p)})
+if _still_to_move:
+    print(f"  note  lines whose details are still to be created: {_still_to_move} "
+          f"(the migration of the reference docs is staged)")
+check("§1 a release section of the DETAILS family is not duplicated across two files "
+      "(the details of a closed line leave the live file)",
+      all(len(files) == 1 for files in _by_version_details.values()),
+      {v: sorted(f) for v, f in _by_version_details.items() if len(f) > 1})
 
 _planned = _RELEASE_HEADING.findall(_read(_ROADMAP))
 _released_in_plan = [v for v in _planned if v.lower() in _by_version]
@@ -140,6 +195,20 @@ for _name in REFERENCE_DOCS:
     _figures = sorted({int(m.group(1)) for m in _PIN_FIGURE.finditer(_flat(os.path.join(ROOT, _name)))})
     check(f"§2 {_name}: the quoted i18n key count is the shipped pin ({EXPECTED_I18N_KEYS})",
           _figures == [EXPECTED_I18N_KEYS], f"quoted={_figures}")
+
+# The same rule for the two figures a document writes as a LITERAL (`EXPECTED_I18N_KEYS = 870`,
+# `APP_VERSION = "1.7.1.1"`): the regex above cannot see them, and a stale literal is exactly how the
+# shipped pin survived a whole line beside a wrong number.
+_PIN_LITERAL = re.compile(r"EXPECTED_I18N_KEYS\s*=\s*(\d+)")
+_VERSION_LITERAL = re.compile(r'APP_VERSION\s*=\s*"([0-9][0-9A-Za-z.]*)"')
+for _name in REFERENCE_DOCS:
+    _doc_text = _read(os.path.join(ROOT, _name))
+    _pins = sorted({int(m.group(1)) for m in _PIN_LITERAL.finditer(_doc_text)})
+    _vers = sorted({m.group(1) for m in _VERSION_LITERAL.finditer(_doc_text)})
+    check(f"§2 {_name}: a literal `EXPECTED_I18N_KEYS = N` is the shipped pin ({EXPECTED_I18N_KEYS})",
+          all(v == EXPECTED_I18N_KEYS for v in _pins), f"quoted={_pins}")
+    check(f"§2 {_name}: a literal `APP_VERSION = \"X\"` is the shipped version "
+          f"({EXPECTED_APP_VERSION})", all(v == EXPECTED_APP_VERSION for v in _vers), f"quoted={_vers}")
 
 import ui.hotkey_registry as HR  # noqa: E402 — the declarative list, no window needed
 
@@ -253,47 +322,15 @@ print("== §5 the documentation rules are enforced ==")
 # ITSELF is EXCLUDED from the marker scan (it names the forbidden words on purpose) — and its
 # existence is asserted, so the exclusion can never silently swallow the whole file.
 
-_RULES_BLOCK = {
-    "AGENTS.md": ("> **THE DOCUMENTATION RULES", "\n---\n"),
-    "DOCUMENTATION.md": ("> **THE RULES OF THIS FILE**", "\n\n"),
-}
-
-
-def _without_rules(name, text):
-    """The document without its rules block (None when the block is gone)."""
-    start, end = _RULES_BLOCK[name]
-    i = text.find(start)
-    j = text.find(end, i) if i >= 0 else -1
-    return None if i < 0 or j < 0 else text[:i] + text[j:]
-
-
-_rules_free = {n: _without_rules(n, _read(os.path.join(ROOT, n))) for n in REFERENCE_DOCS}
 check("§5 both reference docs still carry their rules block (the scans below exclude it)",
       all(_rules_free.values()), [n for n in REFERENCE_DOCS if not _rules_free[n]])
 _rules_free = {n: (_rules_free[n] if _rules_free[n] is not None else _read(os.path.join(ROOT, n)))
                for n in REFERENCE_DOCS}
 
-# The release narrative the changelog family owns: the patterns are deliberately HIGH-PRECISION (a
-# present-tense "no longer exists" or a dated PINNED decision is documentation, not history), and
-# every one of them reads 0 in the current docs.
-_HISTORY_MARKERS = (
-    ("'used to'", re.compile(r"\bused to\b", re.I)),
-    ("a removal story", re.compile(r"\b(?:was|were|has been|have been)\s+removed\b", re.I)),
-    ("the all-caps REMOVED status", re.compile(r"\bREMOVED\b")),
-    ("a change attributed to a release",
-     re.compile(r"\b(?:added|introduced|renamed|replaced|dropped|deleted|removed|fixed)\b"
-                r"[^.]{0,40}\b(?:in|since)\s+v?\d+(?:\.\d+)+", re.I)),
-    ("a -fix marker", re.compile(r"\bv?\d[\d.]*-fix\b")),
-    ("'fixed in vX.Y'", re.compile(r"\bfixed in v\d", re.I)),
-    ("a narrative 'in vX.Y <subject>'",
-     re.compile(r"\bin v\d+(?:\.\d+)+\s+(?:we|the|a|this|it)\b", re.I)),
-    ("a release verb",
-     re.compile(r"\bv\d+(?:\.\d+)+\s+(?:renamed|rewrote|rewritten|reworked|replaced|dropped"
-                r"|deleted|introduced|reintroduced)\b", re.I)),
-    ("'this release/version adds|changed|fixes'",
-     re.compile(r"\bthis (?:release|version|line)\s+"
-                r"(?:adds|added|changes|changed|fixes|fixed|brings|brought|replaces|replaced)\b")),
-)
+# The release narrative the changelog family owns. The LIST lives in `tests/_comment_budget.py` —
+# ONE owner, because §6 below scans the CODE with exactly the same markers ("what a document may not
+# say, a comment may not say either"), and a marker added in two places would drift.
+_HISTORY_MARKERS = CB.HISTORY_MARKERS
 for _name in REFERENCE_DOCS:
     _flat_text = re.sub(r"\s+", " ", _rules_free[_name])
     _hits = []
@@ -313,6 +350,20 @@ for _name in REFERENCE_DOCS:
     check(f"§5 {_name}: no chapter number collides with a numbered section",
           not (_chapters & _sections),
           f"chapters={sorted(_chapters)} sections={sorted(_sections)}" if _chapters & _sections else "")
+    _order = [int(n) for n in re.findall(r"^## ([0-9]{1,2})\.", _text, re.M)]
+    if _name == DB.DOC:
+        # The chapter ORDER is the PRIORITY: the harness reads the file until its byte budget runs out,
+        # so the operational contract is written first and the reference chapters last. The order is
+        # DECLARED in one place (`tests/_docs_budget.py`) and audited here — a botched move fails.
+        check(f"§5 {_name}: the chapter numbers are UNIQUE and in the DECLARED reading order",
+              len(_order) == len(set(_order)) and _order == list(DB.CHAPTER_ORDER),
+              f"{_order} != {list(DB.CHAPTER_ORDER)}")
+    else:
+        check(f"§5 {_name}: the chapter numbers are UNIQUE",
+              len(_order) == len(set(_order)), f"{_order}")
+    _sub = re.findall(r"^### (4\.[0-9]+) ", _text, re.M)
+    check(f"§5 {_name}: every §4.x heading appears exactly once",
+          len(_sub) == len(set(_sub)), f"{sorted({n for n in _sub if _sub.count(n) > 1})}")
 check("§5 DOCUMENTATION.md cites its chapters by NAME (they are unnumbered there)",
       not re.findall(r"^## [0-9]{1,2}\.", _doc, re.M),
       re.findall(r"^## [0-9]{1,2}\.", _doc, re.M))
@@ -359,5 +410,70 @@ for _name in REFERENCE_DOCS:
     _dup = [k for k, n in _counted.items() if n > 1]
     check(f"§5 {_name} has no block duplicated inside itself", not _dup,
           [k[:70] for k in _dup[:2]])
+
+
+# ── The DETAILS family and the STUB contract ─────────────────────────────────────────────────
+# A section whose body moved away keeps a pointer to the file that now owns the detail, and that
+# pointer is audited here: the reference docs are the ENTRY POINT of the family, so a pointer at a file
+# that does not exist is a dead end. `CHANGELOG_DETAILS*.md` may be a GLOB (the map of §2 uses one for
+# the whole family); the scan skips the rules block, which DEFINES the names rather than pointing.
+_DETAILS_REF = re.compile(r"CHANGELOG_DETAILS(?:_V\d+|\*)?\.md")
+
+
+def _details_pointers(name):
+    """Every `CHANGELOG_DETAILS*.md` pointer of a reference doc, its rules block aside."""
+    scanned = _without_rules(name, _read(os.path.join(ROOT, name)))
+    if scanned is None:
+        scanned = _read(os.path.join(ROOT, name))
+    return [m.group(0) for m in _DETAILS_REF.finditer(scanned)]
+
+
+# The scan runs over the docs WITHOUT their rules block: the block that STATES the family (and names
+# its live file as the thing an author writes) is a DEFINITION, not a pointer — the same exclusion §5
+# itself makes for the marker scan. A GLOB pointer is checked against the family that really exists.
+for _name in REFERENCE_DOCS:
+    _broken = sorted({p for p in _details_pointers(_name)
+                      if not (glob.glob(os.path.join(ROOT, p)) if "*" in p
+                              else os.path.exists(os.path.join(ROOT, p)))})
+    check(f"§5 {_name}: every CHANGELOG_DETAILS file it points a reader at EXISTS (a stub names its "
+          f"details)", not _broken or not _DETAILS, _broken)
+check("§5 the live details file is named by a reference doc "
+      "(otherwise the family has no entry point for an agent)",
+      not os.path.exists(_LIVE_DETAILS)
+      or os.path.basename(_LIVE_DETAILS) in [p for _n in REFERENCE_DOCS
+                                             for p in _details_pointers(_n)],
+      f"{os.path.basename(_LIVE_DETAILS)} exists but no reference doc names it")
+
+# The same "one fact, one home" rule as above, applied to the family that has just been created
+# outside the pair: a paragraph that was MOVED into the details and left behind in the reference doc
+# is the drift the move exists to remove. `CHANGELOG_HISTORY_V*.md` predates the rule and is not
+# scanned (its overlap with the old docs is pinned by the changelog family's own history).
+_details_paras = collections.Counter(k for _p in _DETAILS for k, _ in _paragraphs(_read(_p)))
+_shared_details = {_n: [k for k in _details_paras if k in dict(_paras[_n])]
+                   for _n in REFERENCE_DOCS}
+check("§5 no block is copied between the details family and the reference docs "
+      "(a moved paragraph is DELETED from its old home)",
+      not any(_shared_details.values()),
+      {_n: v[:1] for _n, v in _shared_details.items() if v})
+
+
+# ════════════════════════════════════════════════════════════════════════════
+print("== §6 the code-comment budget (a ratchet — the pins live in _comment_budget.py) ==")
+# ════════════════════════════════════════════════════════════════════════════
+
+# §6 applies the §5 rule to the text INSIDE the code: a release narrative belongs to the changelog
+# family, the mechanism to DOCUMENTATION.md, a rule and a name to AGENTS.md (§12 states the budget).
+# The debt that shipped before the rule existed is PINNED in `tests/_comment_budget.py` and the pins
+# may only go DOWN — cleaning a file is the only way to move them. Measure: `python tests/_comment_budget.py`.
+CB.report(check)
+
+
+# ════════════════════════════════════════════════════════════════════════════
+print("== §7 the byte budget of AGENTS.md (a ratchet — the pins live in _docs_budget.py) ==")
+# ════════════════════════════════════════════════════════════════════════════
+
+# A consistent file may still be USELESS: the harness reads an instruction file under a byte budget
+# and truncates what does not fit, so the positions are pinned and they only go DOWN.
+DB.report(check)
 
 finish()

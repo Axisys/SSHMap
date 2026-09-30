@@ -1,29 +1,12 @@
 # -*- coding: utf-8 -*-
 """v1.2.9 — full wcwidth(3) for CJK (ROADMAP "Terminal hygiene", task 2).
 
-It replaces the `east_asian_width` W/F heuristic of v1.0RC1 (the known limitation of v1.0 is closed):
-the width of a glyph — THE SAME library `wcwidth` as pyte 0.8.2 itself for the layout of the grid
-(pyte.screens: `from wcwidth import wcwidth`), therefore the classification of the canvas always
-matches how pyte places the glyphs into the cells (+ the stub after a wide one).
-
-  * char_width() — the full table of wcwidth(3): the wide (CJK/Fullwidth/Hangul/kana/emoji) = 2;
-    the narrow AND the ambiguous (wcwidth(3): the Ambiguous category = the narrow, the C locale) = 1;
-    the zero-width (the combining marks, the variation selectors) = 0; the control (-1) is clamped to 0;
-    the empty string (the stub) = 0; the multi-character cell (the NFC cluster of pyte) — the sum;
-  * is_wide_char() — char_width == 2; the cross-check against the wcwidth library by the sample;
-    the heuristic unicodedata.east_asian_width is not in the module anymore (the hygiene);
-  * the E2E through the real TerminalScreen: the grid is laid out exactly by wcwidth
-    ("a中b" = [a][中][''][b], the stub — the width 0; the total width = wcswidth),
-    the NFC composite cluster "e"+U+0301 → ONE cell 'é' of the width 1 (the regression: the old
-    heuristic counted the combining mark as narrow → the width would be 2);
-  * split_row_runs/word_units on the CJK lines: the stub is not in any run,
-    a wide glyph at the end of the line — without an IndexError; "a中b" = one word on 4 cells
-    (the semantics of v1.2.7 under the full wcwidth).
-
-Headless: the Qt widgets are not created (the TerminalScreen — headless-friendly, the pure functions
-of terminal_widget.py — without the GUI). Run:  python tests/test_wcwidth_cjk.py   (from the project root)
-or python tests/run_all.py
-"""
+It replaces the `east_asian_width` W/F heuristic of RC1, so the known v1.0 limitation is closed: the width
+comes from the SAME `wcwidth` library pyte 0.8.2 uses for the grid layout, therefore the canvas
+classification always matches how pyte places a glyph into its cells (plus the stub after a wide one).
+`char_width()` is the full table — wide (CJK / Fullwidth / Hangul / kana / emoji) = 2, narrow AND ambiguous
+= 1 (the C locale), combining marks and variation selectors = 0, a control (-1) clamped to 0, the empty
+stub = 0, a multi-character cell = the sum — and `is_wide_char()` is `char_width == 2`, cross-checked against the library. The E2E through the real `TerminalScreen` lays out "a中b" as [a][中][''][b] with the total equal to `wcswidth`, and the NFC cluster "e"+U+0301 becomes ONE cell 'é' of width 1 (the old heuristic counted the mark as narrow and produced 2). `split_row_runs` / `word_units` are checked on CJK lines: the stub is in no run and a wide glyph at the line end raises nothing. Headless — no Qt widgets."""
 import inspect
 
 from _common import bootstrap, check, finish

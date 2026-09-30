@@ -1,42 +1,14 @@
-"""v1.3.3.8 — What the app supports but the UI cannot reach: the user language folder, the import/export manager, one range for `terminal_max_open`, a UI for `terminal_wheel`.
+"""v1.3.3.8 — the user language folder, the import/export manager and ONE `terminal_max_open` range.
 
-ROADMAP v1.3.3.8 (tasks 1-4):
-  #1 the USER language folder `~/.sshmap/languages/*.json` joins the discovery in ONE
-     place (`i18n.language_file_path()`): a user file SHADOWS the built-in one of the
-     same code, a new code adds a language, and every consumer (the `Help → Language`
-     submenu, the settings combo, `lang.reload`) sees both without a restart. The
-     folder is created ON DEMAND — never at startup. A user file that is not a usable
-     language file (broken JSON / a non-object root / no translation key) is SKIPPED
-     with a log line and the built-in file of that code is used instead. The strict
-     suite check keeps walking the PACKAGE `i18n/` folder only (`i18n_lang_codes()`),
-     so a user folder can neither break nor weaken it;
-  #2 the language manager in the "Language" tab: "Import a language file…" validates
-     (object root, >= 1 translation key, the `"name"` meta key, a usable code) and
-     copies into the user folder — a refused file never reaches it; an INCOMPLETE file
-     is imported WITH the English-fallback note (the copy is marked `"partial": true`);
-     "Export the current language…" writes the file that wins for the active language
-     (or the `en` template);
-  #3 `terminal_max_open`: the spin follows the VALIDATOR (1..32) — the old 1..16 range
-     was a BUG, not only a narrower range: a saved 20 was displayed as 16 and an OK
-     wrote 16 back, silently lowering a valid value;
-  #4 `terminal_wheel` gets its UI (a two-value combo in the "Terminal" tab) — the hub's
-     `collect()` goes 20 -> 21 keys and the last "config-only" key is closed.
-
-Sections:
-  §1 the folder is created on demand (never by the import of the module);
-  §2 discovery: a new code appears, the user's "name" is displayed;
-  §3 shadowing: the user's file wins for its code, removing it restores the built-in;
-  §4 broken / non-object / foreign files are skipped and the app still starts;
-  §5 the strict suite check is neither broken nor weakened by a user folder;
-  §6 import: validation, the partial marker, a clean folder on a refusal;
-  §7 export: the active language (or the en template), the file imports back;
-  §8 the hub: terminal_max_open is ONE 1..32 range (the silent-downgrade regression);
-  §9 the hub: the terminal_wheel combo, collect() = 21 keys, "off" reaches the canvas;
-  §10 the manager through the real dialog (buttons, reports, the live switch);
-  §11 the release state (the pins of tests/_common.py).
-
-Run: python tests/test_language_folder.py   (from the project root) or python tests/run_all.py
-"""
+The topic: what the application supports but the UI could not reach. §1–§5 the USER folder
+`~/.sshmap/languages/*.json` — created ON DEMAND (never at startup) and discovered in ONE place,
+`i18n.language_file_path()`, where a user file SHADOWS the built-in one of its code, a new code adds
+a language and an unusable file (broken JSON, a non-object root, no translation key) is SKIPPED with
+a log line while the strict suite check keeps walking the PACKAGE folder. §6–§7 the manager of the
+"Language" tab: import validates (root object, at least one key, the `"name"` meta key, a usable
+code) and copies, marking an incomplete file `"partial": true`; export writes the winning file (or
+the `en` template). §8–§11 the hub's ranges and the release state.
+Run: python tests/test_language_folder.py   (from the project root) or python tests/run_all.py"""
 import importlib.util
 import io
 import json

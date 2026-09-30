@@ -1,26 +1,16 @@
 # -*- coding: utf-8 -*-
-"""v1.3.3.3 (ROADMAP v1.3.3.3, task 6): the "About" window.
+"""The "About" window — Help → About (DOCUMENTATION.md §32).
 
-Help → About — the "where is what" window the application did not have. It answers
-four questions in one place, and every answer comes from its single source of truth:
-
-* **which version is this** — ``APP_NAME`` / ``APP_VERSION`` from ``version.py``
-  (never a literal, never the window title: the About box is the one place a user
-  reads the version off);
-* **what may I do with it** — the license (MIT) and a pointer to the LICENSE file;
-* **where does my data live** — the paths of ``~/.sshmap/config.json`` and
-  ``~/.sshmap/logs/``, plus a button that opens the folder in the OS file manager
-  (the "I need to send you my config" case);
-* **what can I press** — the **hotkey cheat-sheet generated FROM the action registry**
-  (``ui/hotkey_registry.py``): the LIVE values, i.e. what the user actually has
-  configured, never a hardcoded list. It cannot drift and it costs nothing — the same
-  registry that installs the shortcuts renders them here.
-
-The dialog is read-only: it owns no settings and writes no config, so closing it is
-the only outcome. The i18n keys are ``about.*``; like every UI container it owns a
-``retranslate()`` (the v1.3.3.1 container rule) and swallows ``RuntimeError`` on the
-teardown races.
-"""
+The "where is what" window the application did not have: it answers four questions in one place, and every
+answer comes from its single source of truth. WHICH VERSION IS THIS — `APP_NAME` / `APP_VERSION` from
+`version.py`, never a literal and never the window title, because the About box is where a user reads the
+version off. WHAT MAY I DO WITH IT — the licence (MIT) and a pointer to the LICENSE file. WHERE DOES MY
+DATA LIVE — the paths of `~/.sshmap/config.json` and `~/.sshmap/logs/`, plus a button that opens the folder
+in the OS file manager (the "I need to send you my config" case). WHAT CAN I PRESS — the hotkey
+cheat-sheet generated FROM the action registry (`ui/hotkey_registry.py`), i.e. the LIVE values the user
+actually has configured and never a hardcoded list: the same registry that installs the shortcuts renders
+them here, so it cannot drift and it costs nothing.
+ The dialog is read-only — it owns no settings and writes no config, so closing it is the only outcome. Its keys are `about.*`, and like every UI container it owns a `retranslate()` (the container rule) and swallows `RuntimeError` on teardown races."""
 
 import os
 import subprocess

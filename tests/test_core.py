@@ -20,14 +20,11 @@ ROOT, WORK = bootstrap()  # BEFORE the app module imports
 print("== compile ==")
 import py_compile
 bad = []
-# v1.1.4: the cfile — into the process working folder (WORK is unique per file under a parallel
-# run_all.py): writing .pyc into the SHARED __pycache__ from 4 processes races on Windows
-# (WinError 5 "Access is denied" on renaming the .pyc while another process holds it) —
-# the "all .py compile" flake. The semantics are the same: a full compile of every module.
-# v1.3-fix: `*os.path.dirname(rel)` unpacked a STRING PER CHARACTER (a join with a single
-# "\" = an absolute path → the prefix was dropped): the cfiles of nested modules went to the root
-# disk (C:\p\y\t\e\… with WORK on C: — Permission denied; F:\p\y\t\e\… for a single
-# run — "passed", leaving the junk). split(os.sep) — the real components.
+# The cfile goes into the process working folder (WORK is unique per file under a parallel
+# run_all.py): writing .pyc into the SHARED __pycache__ from several processes races on Windows
+# (WinError 5 on renaming the .pyc while another process holds it). `*os.path.dirname(rel)` unpacked
+# a STRING PER CHARACTER, so the cfiles of nested modules went to a root like C:\p\y\t\e\… — the
+# real components come from split(os.sep). The semantics stay: a full compile of every module.
 _pyc_dir = os.path.join(WORK, "pyc")
 for dirpath, _, files in os.walk(ROOT):
     if "__pycache__" in dirpath:

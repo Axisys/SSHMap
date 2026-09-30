@@ -1,31 +1,16 @@
 # -*- coding: utf-8 -*-
-"""v1.3.3.4 (ROADMAP task 1): the find bar of the terminal — a floating panel over the canvas.
+"""The find bar of the terminal — a floating panel over the canvas (DOCUMENTATION.md §14a).
 
-The `ui/map_search_bar.py` pattern (v0.9.8) applied to the terminal: a small
-OVERLAY widget (a child of the canvas, outside every layout — NOT a new dock, not
-a row of the session page) with an input field, a "k / N" counter and a close
-button. The widget holds NO search logic: it accepts the input and emits signals;
-what matches, where the viewport goes and how the matches are painted is decided
-by `TerminalWidget` (the single source of truth, modules/terminal_widget.py).
+The `ui/map_search_bar.py` pattern applied to the terminal: a small OVERLAY widget (a child of the canvas,
+outside every layout — not a new dock and not a row of the session page) with an input field, a "k / N"
+counter and a close button. The widget holds NO search logic: it accepts the input and emits signals,
+while what matches, where the viewport goes and how the matches are painted is decided by
+`TerminalWidget` (the single source of truth in `modules/terminal_widget.py`).
 
-Why an overlay and not a dock: the terminal canvas is the only text surface of the
-application that had no search at all (the map and the command library both have
-one), and a dock would steal a strip of the grid from the session — the panel must
-cost the user nothing while it is closed (a hidden child of the canvas: 0 px) and
-float above the output while it is open.
-
-The keys are handled HERE, in the panel's own field (Enter — next match,
-Shift+Enter — previous, Esc — close): the terminal's own keys are the xterm wire
-protocol and must never be re-bound (§14a scope boundary) — the panel takes the
-keyboard while it is open, so nothing typed into it can reach the PTY.
-
-Colors — the central theme (ui/theme.py), the same card/accent pair as the map
-search bar; the app palette is the only source (v1.2.5 rule).
-
-v1.3.3.4: i18n keys `terminal.find.*` (placeholder / count / next / prev / close);
-the empty state reuses `search.no_results` (the map bar's key — the same situation,
-ZERO new keys).
-"""
+An overlay rather than a dock, because the terminal canvas was the only text surface without a search (the
+map and the command library have one) and a dock would steal a strip of the grid: a hidden child of the
+canvas costs 0 px while closed and floats above the output while open.
+ The keys are handled HERE, in the panel's own field — Enter is the next match, Shift+Enter the previous, Esc closes — because the terminal's own keys are the xterm wire protocol and must never be re-bound (the §14a scope boundary). The panel takes the keyboard while it is open, so nothing typed into it can reach the PTY. Colours come from the central theme (the card/accent pair of the map search bar; the app palette is the only source), and the keys are `terminal.find.*` plus the map bar's existing `search.no_results`."""
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QKeyEvent

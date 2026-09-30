@@ -200,12 +200,11 @@ class CredentialManager:
         except keyring.errors.NoKeyringError:
             return True  # Nothing to delete — no store available
         except Exception as e:
-            # v1.2.10rc2 (AUDIT manual #6): an explicit PasswordDeleteError check instead of
-            # the misleading `except getattr(keyring.errors, "PasswordDeleteError", ())` —
-            # when the attribute is missing, except () never fired and the exception
-            # silently fell through to the generic handler. Now the same degradation (the
-            # generic handler), but without the misdirection: the class via getattr(..., None)
-            # + isinstance.
+            # An explicit `PasswordDeleteError` check instead of the misleading
+            # `except getattr(keyring.errors, "PasswordDeleteError", ())`: when the attribute is missing,
+            # `except ()` never fires and the exception silently falls through to the generic handler. The
+            # same degradation, but without the misdirection — the class via `getattr(..., None)` +
+            # `isinstance`.
             _pde = getattr(keyring.errors, "PasswordDeleteError", None)  # keyring 25.x
             if _pde is not None and isinstance(e, _pde):
                 return True  # Nothing to delete — entry was already absent

@@ -1,28 +1,12 @@
 # -*- coding: utf-8 -*-
-"""v1.2.13 — the mouse wheel in the full-screen TUI (SGR/X10 passthrough) (ROADMAP v1.2.13, PYTE82_AUDIT.md batch C).
+"""v1.2.13 — the mouse wheel in the full-screen TUI (SGR/X10 passthrough)
+(ROADMAP v1.2.13, PYTE82_AUDIT.md batch C).
 
-  * The headless matrix of the modes: the DECSET 1000/1002/1003 × 1006 — mouse_tracking() ==
-    (enabled, sgr); the 1006 ALONE → (False, True) (the xterm semantics: 1006 — only
-    the encoding of the reports, without the 1000/1002/1003 there are no mouse events — the correction
-    of the acceptance of the ROADMAP); \x1b[?…l — the disable; the RIS (\x1bc) clears the modes;
-    the htop-style toggle during the session (the read on every event — no cache);
-  * The offscreen Qt with a fake thread (the pattern test_terminal_input.py): the wheel with
-    1006 → into send_data goes EXACTLY \x1b[<64;{col};{row}M (up=64, down=65 — ctlseqs:
-    the buttons 4/5 = the event codes of the buttons 1/2 + 64), with the 1002 without 1006 → X10 \x1b[M +
-    [96|97, 32+col, 32+row]; the coordinates are clamped to the grid; the X10 additionally — in the
-    protocol limit 223 (=255−32, the ctlseqs "Extended coordinates": the extensions only through
-    the UTF-8 1005 / the SGR 1006);
-  * The alt without the tracking → a no-op (the regression v1.2.12: nothing in the PTY, the scrollback is untouched,
-    the event is not consumed — the propagation is harmless, no ancestor-QScrollArea);
-  * The passthrough is prior to terminal_wheel="off"; "off" without the tracking — the event.ignore
-    + nothing is sent (the regression v1.1.2RC3);
-  * The scrollback regression (without the modes): up → prev_page, down → next_page;
-  * The multi-input: the bytes of the wheel do NOT pass the hub.broadcast (the coordinates are session-local)
-    — with the active hub and a foreign session in the registry only the source receives them;
-  * terminal_thread=None + the tracking — without exceptions.
-
-Run:  python tests/test_terminal_mouse.py   (from the project root) or python tests/run_all.py
-"""
+The headless matrix of the modes: DECSET 1000/1002/1003 × 1006 → `mouse_tracking() == (enabled, sgr)`,
+with 1006 ALONE giving `(False, True)` — the xterm semantics are that 1006 only encodes the reports, so
+without 1000/1002/1003 there are no mouse events at all (the ROADMAP acceptance is corrected here); the
+disable, the RIS (`\x1bc`) clearing the modes, and the htop-style toggle mid-session (read on every event,
+never cached). The offscreen Qt with a fake thread: with 1006 the wheel sends EXACTLY `\x1b[<64;{col};{row}M` (up = 64, down = 65 — the button codes 1/2 plus 64) and with 1002 but no 1006 it sends X10 `\x1b[M` plus `[96|97, 32+col, 32+row]`, the coordinates clamped to the grid and to the X10 protocol limit of 223 (= 255−32; the wide coordinates exist only through the UTF-8 1005 / the SGR 1006). The alt screen without tracking is a no-op (nothing in the PTY, the scrollback untouched, the event not consumed), the passthrough takes priority over `terminal_wheel = "off"` (which otherwise ignores the event), the plain scrollback still pages, and the wheel bytes never ride the multi-input hub because the coordinates are session-local. `terminal_thread=None` with tracking raises nothing."""
 import sys
 
 from _common import (bootstrap, check, finish, check_release_state, load_i18n_langs,

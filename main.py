@@ -32,7 +32,7 @@ def main():
             from version import APP_NAME, APP_VERSION
         except ImportError:
             from .version import APP_NAME, APP_VERSION
-        # v1.0-fix (audit #10): the release feature line is no longer hardcoded here —
+        # the release feature line is no longer hardcoded here —
         # it went stale with every next release; the version comes from version.py,
         # the release description lives in CHANGELOG.md/DOCUMENTATION.md.
         log.info(f"{APP_NAME} v{APP_VERSION} starting up")
@@ -46,14 +46,11 @@ def main():
         app = QApplication(sys.argv)
         app.setStyle('Fusion')
 
-        # v1.4.3 (ROADMAP task 4/6): the base palette AND the application QSS are
-        # built from the ACTIVE theme — and the ACTIVE theme is the SAVED one,
-        # applied BEFORE the window exists, so nothing is ever constructed with the
-        # wrong palette. `ui/theme_qss.apply_theme()` is the ONE place that turns a
-        # Theme into the application's look; every later switch is
-        # `MainWindow.apply_theme()`.
-        # v1.5rc1: an `auto` mode is resolved here too — the platform's colour
-        # scheme decides, and `MainWindow` keeps following it live.
+        # The base palette AND the application QSS are built from the ACTIVE theme, and the ACTIVE
+        # theme is the SAVED one, applied BEFORE the window exists, so nothing is ever constructed
+        # with the wrong palette; an `auto` mode is resolved here too (the platform's colour scheme
+        # decides, and `MainWindow` keeps following it live). `ui/theme_qss.apply_theme()` is the ONE
+        # place that turns a Theme into the application's look; every later switch is `apply_theme()`.
         _saved_theme = load_theme_settings()
         theme_qss.apply_theme(theme_from_settings(_saved_theme), app=app,
                               refresh_windows=False)
@@ -95,7 +92,7 @@ def main():
         else:
             import traceback
             traceback.print_exc()
-        # v1.0-fix (audit #10): a fatal error after QApplication creation used to be
+        # a fatal error after QApplication creation would otherwise be
         # swallowed and the process exited with code 0 — now a non-zero exit code,
         # so a launcher/CI can detect a failed startup.
         sys.exit(1)

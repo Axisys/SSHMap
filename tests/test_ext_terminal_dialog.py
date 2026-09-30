@@ -1,17 +1,10 @@
-"""Regression v0.9.9.2 — the external terminal UI (presets + reset to defaults).
+"""Regression v0.9.9.2 — the external terminal UI (presets and reset to defaults).
 
-ROADMAP v0.9.9.2:
-  #1 the section in SSHConnectDialog: the preset choice (auto / windows_terminal / cmd /
-     conhost on Windows; the Linux list) + the "Reset to default" button
-     (= the ready rollback to auto). The storage — the existing ~/.sshmap_settings.json
-     (load/save_external_terminal_setting from modules/external_terminal.py).
-  #2 the preset is saved from the UI and applied to the launch (detect_terminal reads
-     the config) — both from the dialog and from the ctx menu of MainWindow.
-  #3 i18n × en/ru/zh: +13 keys (ssh_ext.section/preset_label/reset/preset.*).
-  The arbitrary command template with the placeholders — deliberately in v1.1 (the settings dialog).
-
-Run:  python tests/test_ext_terminal_dialog.py   (from the project root) or python tests/run_all.py
-"""
+The dialog section carries the preset choice ("auto" / "windows_terminal" / "cmd" plus the Linux list) and a
+"Reset to default" button that is the ready rollback to "auto", stored through the external-terminal
+setting. The preset is saved from the UI and then applied to the launch — `detect_terminal` reads the config
+— both from the dialog and from the window's context menu. The keys are `ssh_ext.*` in en/ru/zh, and an
+arbitrary command template with placeholders is deliberately left to the settings hub."""
 import os, sys, shutil, tempfile, traceback
 
 from _common import bootstrap, check, finish, load_i18n_langs, check_i18n_parity

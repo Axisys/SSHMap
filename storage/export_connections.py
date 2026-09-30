@@ -1,22 +1,16 @@
 # -*- coding: utf-8 -*-
-"""v1.6 (ROADMAP task 5): the CONNECTION report — "who talks to whom" as a table.
+"""The CONNECTION report — "who talks to whom" as a table (DOCUMENTATION.md §48; AGENTS.md §4.13).
 
-The second DATA report of the application, next to the inventory table of the LIST mode
-(`ui/sidebar.list_report_rows()`). It answers the question a picture cannot be searched
-for: give me every link of the map with its two endpoints, its declared type and its
-direction — as a CSV/TSV a spreadsheet can sort.
+The second DATA report, next to the inventory table of the LIST mode (`ui/sidebar.list_report_rows()`): it
+answers the question a picture cannot be searched for — every link of the map with its two endpoints, its
+declared type and its direction, as a CSV/TSV a spreadsheet can sort.
 
-**The writer is NOT here on purpose.** The RFC-4180 quoting (a doubled `"`, a field
-quoted only when it must be) lives in ONE place — `ui/sidebar.list_table_text()` — and
-this module only produces ROWS for it: the columns are declared once (`CONNECTION_COLUMNS`)
-and `connection_report_rows()` builds the header plus one row per link. A label with a
-comma, a quote or a line break therefore leaves the application exactly the way the
-inventory's comment does.
-
-The header cells are TRANSLATED (the caller hands its translator in, the
-`node_group.status_caption()` precedent) — a report is read by a human, and a language
-switch moves it with the rest of the window.
-"""
+The writer is NOT here on purpose: the RFC-4180 quoting (a doubled `"`, a field quoted only when it must
+be) lives in ONE place, `ui/sidebar.list_table_text()`, and this module only produces ROWS for it. The
+columns are declared once (`CONNECTION_COLUMNS`) and `connection_report_rows()` builds the header plus one
+row per link, so a label carrying a comma, a quote or a line break leaves the application exactly the way
+the inventory's comment does.
+ The header cells are TRANSLATED (the caller hands its translator in, the `node_group.status_caption()` precedent), because a report is read by a human and a language switch moves it with the window."""
 from typing import List
 
 #: (field id, i18n key) — the column order of the report, declared ONCE.

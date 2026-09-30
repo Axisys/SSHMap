@@ -1,16 +1,11 @@
-"""Review fixes v0.8.0: node elide/max width, status markers in the sidebar (former smoke_test).
+"""Review fixes v0.8.0: node elide and max width, status markers in the sidebar (a former smoke-test part).
 
-A part of the suite split out of smoke_test.py v0.6–v0.9.2 (see INDEX.md).
-  * #4 the node with a long alias/host/comment → the cap MAX_NODE_WIDTH + the full text in the tooltips
-    (the elide invariant is font-independent: either the full text without the tooltip, or elided + the tooltip;
-    the right edge does not slip under the dots [W-46, W-10]);
-  * the node with a tiny content → the MIN size; the idempotency of update_appearance;
-  * #3 the status markers in the sidebar tree: the icon of the row + the live update without the rebuild
-    (the idle gray → the online green, the i18n tooltip with the host, the unknown status is ignored,
-    refresh_sidebar rebuilds the rows with the current markers).
-
-Run: python tests/test_node_labels.py   (from the project root) or python tests/run_all.py
-"""
+Checks: a node with a long alias / host / comment is capped at `MAX_NODE_WIDTH` and carries the full text in
+its tooltips, with the elide invariant held independently of the font (either the full text and no tooltip,
+or elided plus the tooltip) and the right edge never slipping under the status marks; a node with tiny
+content takes the MIN size and `update_appearance()` stays idempotent; and the sidebar's status markers
+follow the row icon and update LIVE without a rebuild — the idle grey becomes the online green, the tooltip
+carries the host and its translation, an unknown status is ignored, and `refresh_sidebar()` rebuilds the rows with the current markers."""
 import sys
 
 from _common import bootstrap, check, finish

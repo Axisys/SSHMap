@@ -1,36 +1,12 @@
 # -*- coding: utf-8 -*-
 """v1.4 — the two example plugins (`examples/plugins/hello.py`, `disk_monitor.py`).
 
-ROADMAP tasks 11–12 (the base release `v1.4` of the plugin foundation) asked for the
-release to ship something to SHOW: the frozen API v1 contract (`PLUGINS.md`) had been
-implemented by three rcs and never exercised from the outside. This file is the
-acceptance of those tasks — it loads BOTH example files through the REAL discovery path
-of `PluginManager` (copy into the isolated `~/.sshmap/plugins/`, then `discover()`), not
-through a syntax check, and drives their hooks.
-
-Sections:
-  §1 the examples as plugins: the real discovery, the manifests, the recorded hooks, the
-     "a plugin never imports the core" rule (a source scan) and the packaging guard (they
-     are NOT auto-discovered and NOT part of the installable set);
-  §2 `hello`: the palette command (the lenient `(text, callback)` pair) and the node
-     context-menu row on both surfaces, with the narrowed node records;
-  §3 `disk_monitor`: the `df -hP` parser over fixtures — the header, the worst-of-several
-     rule, a mount point with a SPACE, the pseudo-filesystem filter, a truncated line, an
-     empty answer, a locale-decimal `Use%`, the 0–100 clamp;
-  §4 the plugin's own cache: the atomic write, the merge, the record cap, a corrupt file,
-     a foreign document, a write that cannot happen;
-  §5 the threshold: 89 → no opinion, 90 → `warn`, the exact detail text, a stale record,
-     an unknown node;
-  §6 the COLLECTOR: `run_on_nodes` on a fake context (no socket) — the command, a per-node
-     failure as a result for that node, the status line, the per-node log, the cache;
-  §7 the REPORTER end to end: the real manager + the runner's documented transport seam,
-     the merged opinion (the worse of the two), a disabled plugin, and the window's
-     "Run on selected servers" pass;
-  §8 the release state: the examples add NO i18n key (the pin is the shipped one), `examples/`
-     documented, the suite index regenerated.
-
-Run: python tests/test_plugin_examples.py   (from the project root) or python tests/run_all.py
-"""
+The acceptance of the plugin-foundation tasks: BOTH example files are loaded through the REAL discovery
+path of `PluginManager` (copied into the isolated `~/.sshmap/plugins/`, then `discover()`), never a
+syntax check, and their hooks are driven.
+§1 the examples as plugins (the manifests, the recorded hooks, the "a plugin never imports the core"
+source scan, the packaging guard — NOT auto-discovered, NOT installable); §2 `hello` (the palette command
+and the node context-menu row with narrowed records); §3 `disk_monitor`'s `df -hP` parser over fixtures (the header, the worst-of-several rule, a mount point with a SPACE, the pseudo-fs filter, a truncated line, an empty answer, a locale decimal, the 0–100 clamp); §4 its atomic cache, the merge and the cap; §5 the threshold (89 → no opinion, 90 → `warn`); §6 `run_on_nodes` on a fake context (no socket); §7 the reporter end to end; §8 the examples add NO i18n key and the index is regenerated."""
 import json
 import os
 import re
@@ -536,12 +512,11 @@ def _fake_transport(node, command, timeout, credentials):
 PR.run_command_over_ssh = _fake_transport
 PR.default_credentials = lambda node, facts=None: {"password": "secret", "key_path": ""}
 try:
-    # The regression the dogfooding found (fixed in v1.4): `ctx.run_command` called from a
-    # plugin's WORKER thread. The receiver context of a signal connected to a plain Python
-    # callable is the thread that calls `connect()` (AGENTS.md §7 gotcha #20), so a runner
-    # built inside a `run_on_nodes` worker used to post its results into a thread with no
-    # event loop — and lose them silently. Calling the service from a bare `threading.Thread`
-    # is the smallest reproduction of that path.
+    # `ctx.run_command` called from a plugin's WORKER thread (the regression the dogfooding found). The
+    # receiver context of a signal connected to a plain Python callable is the thread that calls
+    # `connect()` (`AGENTS.md` §7 gotcha #20), so a runner built inside a `run_on_nodes` worker would post
+    # its results into a thread with no event loop — and lose them silently. Calling the service from a
+    # bare `threading.Thread` is the smallest reproduction of that path.
     _from_worker = []
 
     def _call_from_a_worker():

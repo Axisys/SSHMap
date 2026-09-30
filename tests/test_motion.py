@@ -1,36 +1,12 @@
 # -*- coding: utf-8 -*-
 """v1.4.4 — Motion: the standards, the camera flights, the node scale-in, the hover focus/dim.
 
-Checks (ROADMAP v1.4.4; offscreen, no network, isolated HOME):
-  §1 `ui/motion.py` — the standards (150/250/300 ms, OutQuad, the 200 ms scale-in), the pure
-     geometry helpers, and the two source-level rules (no `QGraphicsOpacityEffect`, no i18n —
-     the release is behaviour only);
-  §2 `fly_camera()` — it drives scale+centre to the target (both by hand and through the real
-     animation), the zoom stays in sync, out-of-range targets are clamped, a NEW flight starts
-     from the CURRENT state (no jump), and the wheel / a mouse press / every instant path stops
-     a running flight immediately;
-  §3 the app paths — "Fit map" (Ctrl+Shift+F) flies to exactly the transform `fit_to_content()`
-     would apply (Qt's own 2 px fit margin), the sidebar reveal flies to the node's card centre
-     and keeps the zoom, the collapsed-map guard holds, and the instant paths (the palette, the
-     search step, the minimap drag) cancel a flight;
-  §4 the node scale-in — `CmdAddRemoveNode`/`CmdAddRemoveNodeBatch` make the card appear
-     (scale 0.9 → 1.0 + a fade) while a plain `add_server()` and a project load stay instant;
-     the completion is at unit scale/opacity, the transform origin is restored and
-     `boundingRect()`/`card_rect_scene()`/`edge_point` are not shifted; a dimmed node keeps its
-     dim, and an undo in the middle of the gesture is harmless;
-  §5 the arrow hover focus — the scene owns the state, `MainWindow` remains the ONE owner of
-     the dim (the hover, the tag filter and the search merge and never stack), the two ends
-     light up while the rest recedes, a fast hover/un-hover leaves no residue, and a dying
-     arrow/node restores everything;
-  §6 the MOTION SWITCH (v1.5rc1) — the flag defaults to ON, only a real False turns it off,
-     and with it OFF every gesture applies its FINAL state at once: `fly_camera()` lands on
-     the target inside the call (clamps included), a new card is settled at unit scale, and
-     `fly_to_content()` still returns True and lands on the instant fit target;
-  §7 i18n parity + the release state (v1.5rc1 adds the three "Appearance" keys — the pin is
-     the shipped one, 619).
-
-Run: python tests/test_motion.py   (from the project root) or python tests/run_all.py
-"""
+Offscreen, no network, isolated HOME. §1 `ui/motion.py` — the standards (150/250/300 ms, OutQuad, the
+200 ms scale-in), the pure geometry helpers and the two source-level rules (no
+`QGraphicsOpacityEffect`, no i18n); §2 `fly_camera()` — it drives scale+centre to the target, clamps
+out-of-range targets, starts a NEW flight from the CURRENT state and is stopped at once by the wheel, a
+press or any instant path; §3 the app paths ("Fit map" lands on exactly what `fit_to_content()` would
+apply, the sidebar reveal keeps the zoom, the instant paths cancel a flight); §4 the node scale-in (scale 0.9 → 1.0 + a fade for the add commands, instant for a plain add and a project load, the geometry restored); §5 the arrow hover focus (the scene owns the state, `MainWindow` the ONE dim owner, no residue); §6 the motion switch (ON by default, OFF → every gesture applies its FINAL state inside the call); §7 i18n parity and the release state."""
 import ast
 import inspect
 import os

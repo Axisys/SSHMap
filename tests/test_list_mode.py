@@ -1,45 +1,13 @@
 # -*- coding: utf-8 -*-
 """v1.4.6 — List mode: collapsing the map = server parameters (ROADMAP v1.4.6).
 
-The topical test of the release (the "new topical file" convention): offscreen, no network
-(the probes answer instantly) and no real terminal session.
-
-§1 The adaptive columns (`ui/sidebar.py`): collapsing the map switches the tree to the wide
-   LIST layout — 8 columns, visible headers with the `sidebar.list.*` labels, interactive
-   (draggable) sections, and the panel's own minimum width untouched; expanding restores the
-   narrow one-column view with NO residual column state.
-
-§2 The cell mapping (`list_cell_values()` — a pure function, no Qt) and the live rows of a
-   window: one cell per column, the values straight from `ServerData`, an EMPTY field is an
-   empty cell (never "None"), the host cell carries the IP in parentheses, the CPU cell falls
-   back to `cpu_model`, the tags are comma-joined.
-
-§3 The mode switch is idempotent and stable: off → on → off keeps the item set and the
-   selection, `refresh_sidebar()` in wide mode never duplicates a row, and a repeated
-   `set_list_mode()` with the same value reports "nothing changed".
-
-§4 Row actions in wide mode: the context menu offers every `CONTEXT_MENU_ITEMS` action and the
-   row double click follows the pinned `ui_node_double_click` semantics ("properties" opens the
-   AddServer dialog, "connect" opens the SSH dialog) while the NARROW mode keeps the v0.9.9.4
-   reveal-on-map behaviour.
-
-§5 The filters in wide mode: the search field and the tag combo narrow the TABLE exactly as
-   they narrow the narrow tree (and the v1.4.5 status filter ANDs with them).
-
-§6 The v1.2.4.1 invariants survive: "both panels collapsed" is still refused with
-   `status.collapse_both_forbidden`, and the refusal never switches list mode off.
-
-§7 Persistence: the mode IS `ui_map_collapsed` (nothing new is written) — a new window with
-   the key starts in LIST mode and the collapse/expand round-trip reaches config.json.
-
-§8 A status probe refreshes the STATUS CELL in place (no rebuild of the rows), a language
-   switch re-texts the headers without throwing away a dragged width, and no column state is
-   ever persisted.
-
-§9 i18n parity + the release state (the pin `tests/_common.py`).
-
-Run: python tests/test_list_mode.py   (from the project root) or python tests/run_all.py
-"""
+The topical test of the release: offscreen, no network (the probes answer instantly) and no real
+terminal session. Its §1–§9 sections check, in order: the adaptive columns (the wide LIST layout,
+its headers, the draggable sections, the untouched minimum width), the pure `list_cell_values()`
+and the live rows, the idempotent mode switch, the row actions with the `ui_node_double_click`
+semantics, the filters, the v1.2.4.1 "both panels collapsed" refusal, the `ui_map_collapsed`
+persistence, the in-place refresh and the i18n parity with the release state.
+Run: python tests/test_list_mode.py   (from the project root) or python tests/run_all.py"""
 import sys
 
 from PySide6.QtCore import QPoint, Qt

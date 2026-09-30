@@ -1,34 +1,16 @@
 # -*- coding: utf-8 -*-
-"""v1.6.7 (ROADMAP v1.6.7): "The bookmarks" — ONE application-level place for the links.
+""""The bookmarks" — ONE application-level place for the links (AGENTS.md §4.23; DOCUMENTATION.md §57).
 
-The quick launch of a card is PER SERVER, so a link that belongs to nobody's server (the
-team wiki, a monitoring dashboard, a hypervisor's console, the ticket queue) has no home in
-the application at all. This module is that home: ONE user file, `~/.sshmap/bookmarks.json`,
-holding the very entry SHAPE the project already declares for a quick launch entry —
-`{"type": "url", "name", "value"}` — so the sanitizer is the EXISTING
-`models.server.sanitize_quick_launch()` and there is no second copy of it.
+The quick launch of a card is PER SERVER, so a link that belongs to nobody's server (the team wiki, a
+dashboard, a hypervisor console, the ticket queue) has no home in the application at all. This module is
+that home: ONE user file, `~/.sshmap/bookmarks.json`, holding the very entry SHAPE the project already
+declares for a quick launch entry — `{"type": "url", "name", "value"}` — so the sanitizer is the
+EXISTING `models.server.sanitize_quick_launch()` and there is no second copy of it.
 
-Pinned decisions (ROADMAP v1.6.7):
-
-  * **The list is GLOBAL and it is ONE file.** A per-server list already exists (quick
-    launch); a second per-server list would be a second truth. The panel therefore names no
-    server, and the file lives OUTSIDE the project — a project never carries another
-    machine's links and `VERSION_FORMAT` does not move.
-  * **A `"type": "command"` entry is KEPT but NOT OFFERED.** A command needs a target host,
-    which a global list cannot name, so the panel's scope is declared narrower on purpose —
-    but the entry is user data and a hand-edit or a plugin may have written it: it is loaded,
-    written back untouched and simply never listed.
-  * **Reading `utf-8-sig`** (the rule of every user file — `i18n._LANG_ENCODING`), written
-    with an atomic MERGE-write (tmp + fsync + os.replace, the `i18n.save_config` pattern):
-    the document's foreign top-level keys survive a save.
-  * **A broken file is SKIPPED with a log line** — never a crash and never a silent
-    overwrite (the `modules/command_library.py` policy for `commands.json`).
-  * **The module is headless** (pure Python, no Qt): `ui/bookmark_panel.py` renders it and
-    `dialogs/bookmark_edit_dialog.py` edits it, both through `get_bookmark_store()`.
-
-Import discipline: `ui.main_window` is never imported (the "module + callbacks" pattern);
-the module stays Qt-free so it can be tested without a QApplication.
-"""
+Pinned: the list is GLOBAL and it is ONE file (a per-server list would be a second truth, so the panel
+names no server and the file lives OUTSIDE the project — `VERSION_FORMAT` does not move); a
+`"type": "command"` entry is KEPT but NOT OFFERED (it needs a target host the global list cannot name,
+but it is user data: loaded, written back untouched, never listed); the file is read `utf-8-sig` and written with an atomic MERGE-write whose foreign top-level keys survive; a broken file is SKIPPED with a log line, never a crash and never a silent overwrite; and the module is HEADLESS (pure Python, no Qt) — `ui/bookmark_panel.py` renders it and `dialogs/bookmark_edit_dialog.py` edits it through `get_bookmark_store()`. `ui.main_window` is never imported (the "module + callbacks" pattern)."""
 
 import json
 import os

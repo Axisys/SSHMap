@@ -1,40 +1,16 @@
 # -*- coding: utf-8 -*-
-"""v1.6.5 (ROADMAP task 4): the ONE gate of an UNMANAGED card.
+"""The ONE gate of an UNMANAGED card (AGENTS.md §4.21; DOCUMENTATION.md §55).
 
-A card the user does not administer (a neighbouring department's host, a customer's
-appliance, a device drawn on the diagram while nobody here holds a login for it) carries
-`ServerData.unmanaged`; the flag is the whole predicate (`models.server.is_unmanaged`) and
-this module is the ONE place that says WHICH verbs it refuses and WHAT the refused row
-says. The map's context menu, the sidebar's context menu, the command palette, the Edit
-menu and every programmatic entry point ask THIS table, so a verb can never be blocked in
-one surface and forgotten in another.
-
-**The declared surface.** The gate is keyed by an ACTION ID (the entry point, not the menu
-row) and the table below is the complete list of the verbs that cannot work without a
-login:
-
-    ``ssh``           — "Connect via SSH", the terminal and the SFTP tab (one transport)
-    ``external``      — the connection in the OS terminal (same login, different window)
-    ``collect_info``  — "Gather information" (the hardware facts come over SSH)
-    ``check_status``  — "Check statuses now" (an SSH probe: TCP + the SSH banner)
-    ``diagnose``      — "Why is it offline?" (DNS → TCP → banner → ICMP)
-    ``ping``          — the ICMP check: refused UNLESS the card opted in (task 5)
-    ``ql_command``    — a quick-launch COMMAND (a URL still opens: the browser needs no
-                        shell on that host)
-
-Everything else a card can do stays untouched: copying its IP/hostname, revealing it,
-duplicating it, groups, tags, notes, the search and every export.
-
-**A refusal is never silence.** A gated row is DISABLED and carries its own sentence
-(`unmanaged.blocked` with the row's own translated label as `{action}`), and a gated
-programmatic call writes `status.unmanaged_blocked` to the status bar — the user is told
-WHY, instead of a menu item that quietly does nothing.
-
-PURE and Qt-free on purpose (the `ui/theme.py` discipline): the module is imported by
-`graphics/map_view.py`, `ui/sidebar.py`, `ui/command_palette.py` and the window's mixins,
-and `gate_row()` reaches a QAction by DUCK TYPING, so the policy can be pinned headlessly by
-the topical test.
-"""
+A card the user does not administer carries `ServerData.unmanaged` — the whole predicate
+(`models.server.is_unmanaged`) — and this module says WHICH verbs it refuses and WHAT the refused row
+says. The map's context menu, the sidebar's, the command palette, the Edit menu and every programmatic
+entry point ask THIS table, so a verb can never be blocked in one surface and forgotten in another.
+The gate is keyed by an ACTION ID and names: `ssh` (the terminal and the SFTP tab — one transport),
+`external`, `collect_info`, `check_status`, `diagnose`, `ping` (refused UNLESS the card opted in)
+and `ql_command` (a quick-launch COMMAND — a URL still opens, the browser needs no shell).
+Everything else stays untouched (copying the IP/hostname, revealing, duplicating, groups, tags, notes,
+the search, every export). A refusal is never silence: a gated row is DISABLED with its own sentence
+(`unmanaged.blocked`, `{action}` = the row's label); a gated programmatic call writes `status.unmanaged_blocked`."""
 
 try:  # the model — the ONE predicate of the release
     from ..models.server import is_unmanaged, unmanaged_ping_allowed

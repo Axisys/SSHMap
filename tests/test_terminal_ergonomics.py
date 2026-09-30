@@ -1,34 +1,12 @@
 # -*- coding: utf-8 -*-
 """v1.6.4 — the cheap batch: the thread names, the marked secret, the Ctrl+wheel zoom and the activity dot.
 
-The topical file of the release (ROADMAP v1.6.4). Five small items, one theme: **the application
-stops being silent about what it is doing** — Qt's abort message names the worker it is about to
-kill, the command history marks the entry that may carry a secret instead of losing it, the wheel
-zooms the font where it used to do nothing, and a session that produced output while the user was
-looking elsewhere says so. The SCROLLBACK mode of the same version lives in its own home,
-`tests/test_terminal_scroll.py` (the scrollback already owns that file) — §5 below only asserts
-the one seam the two features share.
-
-Sections:
-  §1 the THREAD NAMES (task 1): every managed QThread reports a non-empty `objectName()` — the
-     one Qt prints in "QThread: Destroyed while thread '' is still running", the abort the orphan
-     registries exist to prevent — and the name is the class name the registry and the log use;
-  §2 the MARKED SECRET (task 2): the DECIDED rule — the entry is WRITTEN and MARKED. The declared
-     pattern list, the single write path, the panel's row marker with its tooltip, and the ONE
-     invariant the mark must survive: `merge_entries()` keeps it when EITHER side carries it
-     (a fold, a dedup and the per-server cap), while a file written before this version loads as
-     unmarked;
-  §3 `Ctrl`+wheel = the FONT ZOOM (task 3): the modifier that used to be read nowhere, ±1 pt,
-     clamped to the range `terminal_font_size` validates, applied through `set_font()` (the
-     metrics and the grid follow), written DEBOUNCED by one timer and reported in the status
-     line — while a plain wheel still scrolls and a `Shift`+wheel in a tracking TUI still reports;
-  §4 the ACTIVITY mark (task 4): a session that is not the visible one gets a mark in its tab
-     strip after output, the mark clears when the tab is focused, the tooltip is its second
-     channel and the tab width does not move — in BOTH containers (the window and the dock);
-  §5 the release state (the pins, the i18n parity of the three new keys).
-
-Run:  python tests/test_terminal_ergonomics.py   (from the project root) or python tests/run_all.py
-"""
+The topical file of the release: five small items, one theme — the application stops being silent about
+what it is doing. It is offscreen and without the network.
+§1 the THREAD NAMES (every managed QThread reports a non-empty `objectName()` — the one Qt prints in
+"QThread: Destroyed while thread '' is still running"); §2 the MARKED SECRET (the entry is WRITTEN and
+MARKED: the declared patterns, the single write path, the panel's row marker, and the invariant that
+`merge_entries()` keeps the mark when EITHER side carries it — a fold, a dedup or the per-server cap); §3 `Ctrl`+wheel = the FONT ZOOM (its own modifier, ±1 pt clamped to the validated range, through `set_font()`, written DEBOUNCED and reported in the status line); §4 the ACTIVITY mark (an off-screen session marks its tab, the mark clears on focus, the width never moves — in both containers); §5 the release state and the i18n parity of the three new keys."""
 import json
 import os
 import sys

@@ -1,20 +1,12 @@
 # -*- coding: utf-8 -*-
-"""v1.2.10rc3 — rubber-band selection performance on large maps (AUDIT auto #9).
+"""v1.2.10rc3 — rubber-band selection performance on large maps (the audit's auto #9).
 
-The thematic test of the release (ROADMAP v1.2.10rc3; offscreen, without the network):
-  * the synthetic scene of 520 ServerNode (the grid 26×20) + the connections and the notes — the "large maps";
-  * the frame selects exactly the intersected nodes — the result is identical to the algorithm BEFORE v1.2.10rc3
-    (the reference in the test: the full sweep of scene.items() + intersects + base_ids, as in rc2);
-  * the live selection on the intermediate drag steps also matches the reference;
-  * the additive mode (Shift): the base selection ∪ the intersection, the base outside the frame is preserved;
-  * the non-additive mode: the previously selected nodes outside the frame are cleared (the semantics of the replacement);
-  * a click without the mouse movement does not change the selection (press→release without _update);
-  * the notes/arrows are NOT selected by the frame (the filter is only the ServerNode — as before the fix);
-  * the full mouse path via QTest (the Ctrl+LMB on the empty space → the drag → the release;
-    the Ctrl+Shift — the additive) — the wiring of the modifiers end-to-end.
-
-Run: python tests/test_rubber_band_perf.py or python tests/run_all.py
-"""
+Offscreen and without the network. The scene is synthetic: 520 `ServerNode`s on a 26×20 grid plus the
+connections and the notes, i.e. the "large maps" case. The frame must select exactly the intersected nodes
+and produce a result IDENTICAL to the pre-fix algorithm, which the test keeps as its reference (the full
+sweep of `scene.items()` plus `intersects` and the base ids); the live selection on the intermediate drag
+steps matches it too, the additive mode (Shift) unions with the base selection and preserves what lies
+outside the frame, the non-additive mode clears it, a press-release without a movement changes nothing, and the frame never selects a note or an arrow. The full mouse path goes through QTest (Ctrl+LMB on empty space → drag → release, with Ctrl+Shift for the additive mode), which wires the modifiers end to end."""
 import sys
 
 from _common import (bootstrap, check, finish, viewport_point, load_i18n_langs,

@@ -1,31 +1,16 @@
 # -*- coding: utf-8 -*-
-"""v1.4.5 (ROADMAP task 4): the map legend — a small floating panel over the canvas.
+"""The map legend — a small floating panel over the canvas (DOCUMENTATION.md §36; AGENTS.md §4.6).
 
-The map distinguishes six connection types by colour and three availability statuses
-by the colour of the card's dot, and until now the only way to learn a colour was to
-open a dialog and compare. The legend names them in one place: the six arrow types
-(`theme.ARROW_TYPE_COLORS`, the SAME declaration order the connection dialog uses) and
-the three statuses (`theme.STATUS_COLORS`).
+The map distinguishes six connection types by colour and three availability statuses by the colour of the
+card's dot, and the legend names them in one place: the six arrow types (`theme.ARROW_TYPE_COLORS`, the
+SAME declaration order the connection dialog uses) and the three statuses (`theme.STATUS_COLORS`).
 
-The pinned decisions (ROADMAP v1.4.5, task 4 — "pinned at start"):
-
-  * **a widget over the scene, never a scene item** — like the minimap and the search
-    bar it is a CHILD of `MapView`, so it is invisible to the exports, to a rubber-band
-    selection, to `itemsBoundingRect()` and to "fit to content";
-  * **collapsible** — a click on the title band folds the panel down to that band
-    (the state is remembered in `config.json`, so a collapsed legend stays collapsed);
-  * **movable and remembered** — the panel can be dragged anywhere inside the view and
-    the position is persisted (`ui_legend_position`); with no saved position it sits in
-    the bottom-left corner, the one corner the minimap (top-right) and the map-collapse
-    diamond (bottom-right) leave free;
-  * **the colours are read LIVE from the theme** — a theme switch repaints the panel
-    through `refresh_theme()` (the swatches are `theme.ARROW_TYPE_COLORS` /
-    `theme.STATUS_COLORS`, both live properties of the active `Theme`).
-
-The widget owns its OWN geometry (a drag is a gesture inside its parent); the WINDOW
-owns visibility, the config round-trip and the clamping on a view resize — the same
-split as the minimap (`center_requested`) and the search bar.
-"""
+Pinned: a widget over the scene, never a scene item — like the minimap and the search bar it is a CHILD
+of `MapView`, so it is invisible to the exports, to a rubber-band selection, to `itemsBoundingRect()` and
+to "fit to content"; collapsible (a click on the title band, the state remembered in `config.json`);
+movable and remembered (`ui_legend_position`, the bottom-left corner by default — the one corner the
+minimap and the collapse diamond leave free); and the colours are read LIVE from the theme, so a switch
+repaints the swatches through `refresh_theme()`. The widget owns its OWN geometry (a drag happens inside its parent); the WINDOW owns the visibility, the config round-trip and the clamping on a view resize — the same split as the minimap and the search bar."""
 
 from PySide6.QtCore import Qt, QPoint, QPointF, QRectF, Signal
 from PySide6.QtGui import QBrush, QColor, QFont, QFontMetrics, QPainter, QPainterPath, QPen

@@ -1,22 +1,16 @@
 # -*- coding: utf-8 -*-
-"""The autogeneration of the "Files of the suite" table in tests/INDEX.md from the docstrings and the tags.
+"""The autogeneration of the "Files of the suite" table in `tests/INDEX.md`.
 
-The source of the truth = the test files themselves: the first line of the module docstring (the essence)
-and the `# tags:` line (parsed by the same functions of run_all.py as the runner — without
-the import of the files, ast.parse). The block between the AUTOGEN markers is fully recreated;
-the rest of the content of INDEX.md — manual. The set of files is taken from
-run_all.collect_files() (only test_*.py: check_i18n_keys.py is described in the section
-"Helper files"), hence the table always matches what the runner
-starts.
+The source of truth is the test files themselves: the first line of each module docstring (the essence) and
+its `# tags:` line, parsed with the same functions `run_all.py` uses and WITHOUT importing the files
+(`ast.parse`). The block between the AUTOGEN markers is recreated in full; the rest of INDEX.md is manual.
+The set of files comes from `run_all.collect_files()` (only `test_*.py` — `check_i18n_keys.py` is described
+in the "Helper files" section), so the table always matches what the runner starts.
 
 Run from the project root:
     python tests/_gen_index.py          # update INDEX.md
-    python tests/_gen_index.py --check  # without a write: exit 1 if the block is stale (CI)
-
-The convention (INDEX.md, item 9): after adding/renaming a test file or
-changing its docstring/tags run this script. Not part of the suite — run_all.py
-skips the files with the _ prefix.
-"""
+    python tests/_gen_index.py --check  # no write: exit 1 if the block is stale (CI)
+ The convention (INDEX.md, item 9): after adding or renaming a test file, or changing its docstring or its tags, run this script. It is NOT part of the suite — `run_all.py` skips every `_`-prefixed file."""
 import ast
 import difflib
 import os

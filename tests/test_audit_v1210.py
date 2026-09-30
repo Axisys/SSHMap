@@ -1,20 +1,12 @@
 # -*- coding: utf-8 -*-
 """v1.2.10 — Audit: confirmed bugs and data (AUDIT.md): the release's themed test.
 
-ROADMAP v1.2.10 (7 tasks; all the theses are verified against the codebase of v1.2.9 2026-09-09 —
-see AUDIT.md, the section "Verification of the audit theses"):
-  #1 credential_manager: get_logger() → get_logger("services.credential_manager") —
-     the warning "Rejected keyring backend" is really written to the log;
-  #2 AddServerDialog.get_data(): .strip() for the host/user/alias;
-  #3 the SSHWorker key branch: the final_password (the argument or the keyring) is passed to connect()
-     as the fallback together with key_filename (the parity with SystemInfoCollector);
-  #4 SettingsDialog._on_accept: the exception of save_config → a visible error (not a quiet return);
-  #5 wcwidth in the dependency declarations (requirements.txt + pyproject.toml, the pin >=0.2.9);
-  #6 BackupsDialog: an item without "path" — without a KeyError;
-  #7 VERSION_FORMAT_RE accepts the lower-case rc ("1.2.10rc1").
-
-Run: python tests/test_audit_v1210.py   (from the project root) or python tests/run_all.py
-"""
+Seven tasks, each thesis verified against the previous release's codebase (see the audit's "Verification of
+the audit theses" section): `credential_manager` logging through a NAMED logger, so the "Rejected keyring
+backend" warning really lands in the log; `AddServerDialog.get_data()` stripping host / user / alias; the
+`SSHWorker` key branch passing the final password (argument or keyring) to `connect()` as the fallback
+together with `key_filename`, in parity with the collector; `SettingsDialog._on_accept` turning a failing
+`save_config` into a VISIBLE error instead of a quiet return; `wcwidth` declared as a dependency (`requirements.txt` and `pyproject.toml`); `BackupsDialog` surviving an item without a "path"; and `VERSION_FORMAT_RE` accepting a lower-case rc."""
 import logging
 import os
 import re

@@ -1,31 +1,11 @@
 """v1.3.3 — Languages without writing code ("name" in JSON + parity policy + documentation): the release's themed test.
 
-ROADMAP v1.3.3 (tasks 1–4):
-  #1 the meta key "name" at the root of every language file; get_available_languages()
-     reads the display name FROM THE FILE (missing / broken → the code); the hardcoded
-     dict _LANG_LABELS is gone; the meta key is not a translation (excluded from the
-     parity checks and from t() — pinned in the i18n module docstring);
-  #2 the parity policy — a built-in language covers 100% of en's keys (strict) and the
-     count matches the EXPECTED_I18N_KEYS pin; auto-discovery of ALL i18n/*.json;
-  #3 the fallback behavior — documented, unchanged (a key missing in the active
-     language → the en value; a new user → en; a saved language validated by file
-     existence);
-  #4 the documentation — a "How to add a language" section in DOCUMENTATION.md.
-
-The sections of this file:
-  §1 discovery — every i18n/*.json is a language, sorted by the displayed name;
-  §2 the name comes from the file — a dropped-in language, a missing / empty /
-     non-string / broken "name" (→ the code), no hardcoded label dict in the code;
-  §3 the meta key is not a translation — t("name") never resolves, the key is stripped
-     on load and absent from the en fallback, t() falls back to en / to the key;
-  §4 the parity policy — en is the reference, strict key sets, the pinned count, the
-     meta keys ignored (the harness helpers of tests/_common.py);
-  §5 tests/check_i18n_keys.py — auto-discovery + parity over the discovered files
-     (a complete dropped-in language → exit 0, a missing key everywhere → exit 1);
-  §6 the UI shows the JSON name (the settings hub "Language" tab) + the release state.
-
-Run: python tests/test_i18n_languages.py   (from the project root) or python tests/run_all.py
-"""
+The release moved the language display name INTO the file (the root meta key "name", read by
+`get_available_languages()`; a missing or broken one falls back to the code), deleted the hardcoded
+`_LANG_LABELS` dict and pinned the meta key as NOT a translation (excluded from `t()` and from parity —
+the i18n module docstring states it).
+§1 discovery (every `i18n/*.json` is a language, sorted by the displayed name); §2 the name comes from the
+file (a dropped-in language, a missing / empty / non-string / broken "name" → the code); §3 the meta key is not a translation (`t("name")` never resolves, the key is stripped on load, absent from the en fallback); §4 the parity policy (en is the reference, strict key sets, the pinned count); §5 `check_i18n_keys.py` over the discovered files; §6 the UI shows the JSON name and the release state."""
 import importlib.util
 import io
 import json

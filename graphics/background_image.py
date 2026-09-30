@@ -1,22 +1,15 @@
-"""Map background image (v0.9.1): a building diagram / data-center floor plan UNDER all nodes.
+"""Map background image (v0.9.1): a building diagram or data-centre floor plan UNDER all nodes
+(AGENTS.md §4.13; DOCUMENTATION.md §25).
 
-BackgroundImage — a QGraphicsPixmapItem with z = Z_VALUE (-10), below groups (-5),
-arrows (-2) and nodes (0). Position and size — in SCENE coordinates; manual gestures
-in the style of StickyNote/NodeGroup (ItemIsMovable is NOT set — see the docstring
-in sticky_note.py about ScrollHandDrag):
+`BackgroundImage` is a QGraphicsPixmapItem at the lowest z (below the groups, the arrows and the nodes),
+positioned and sized in SCENE coordinates, with manual gestures in the style of `StickyNote` /
+`NodeGroup` (no `ItemIsMovable`, because of the ScrollHandDrag note in `sticky_note.py`): a drag by any
+point moves it, and dragging the bottom-right corner (`CORNER_HIT` px) resizes it — the aspect ratio is
+NOT enforced, but since the default size equals the native image size the corner pulls "along the image".
 
-    drag  — dragging by any point moves the background;
-    resize — dragging the bottom-right corner (CORNER_HIT px) changes the size (aspect
-            ratio is NOT enforced, but by default the size equals the native image
-            size, so the corner pulls "along the image").
-
-In the project (JSON "background") a PATH to the image is stored + geometry:
-{path, x, y, width, height}. The file is NOT embedded in the JSON (the project stays
-light); on load a missing file is simply ignored with a warning.
-
-QGraphicsObject (not a plain QGraphicsPixmapItem subclass without signals) —
-the changed signals are needed for the MainWindow dirty marker, as with notes/groups.
-"""
+In the project file the `"background"` object stores a PATH to the image plus the geometry
+`{path, x, y, width, height}`: the file itself is NOT embedded (the project stays light) and a missing one
+is ignored with a warning on load. It is a QGraphicsObject rather than a plain pixmap item, because its changed signals feed the window's dirty marker, exactly like the notes and the groups."""
 import os
 
 from typing import TYPE_CHECKING

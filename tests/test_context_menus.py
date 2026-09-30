@@ -1,17 +1,11 @@
-"""Node and arrow context menus v0.7.3 (former smoke_test.py "v0.7.3 context menus").
+"""Node and arrow context menus v0.7.3 (a former smoke-test part).
 
-A part of the suite split out of smoke_test.py v0.6–v0.9.2 (see INDEX.md).
-  * MapScene.remove_connection: the removal + the repeated call → False;
-  * EditConnectionDialog: the prefill of the label/type, the readonly source/target, get_connection;
-  * MainWindow._edit_connection: the apply of the label+type + the dirty marker;
-  * _copy_node_info: the ip field to the clipboard (the fallback to the host when the ip is empty);
-  * _ping_node: the background thread starts and finishes (the headless hermeticity:
-    the modal QMessageBox.information is replaced by the stub);
-  * MapView._classify_at: the node in the center, the arrow in the middle of the curve (the geometry EXACTLY as
-    in ConnectionArrow._compute_geometry); _remove_connection through the confirmation.
-
-Run: python tests/test_context_menus.py   (from the project root) or python tests/run_all.py
-"""
+Checks: `MapScene.remove_connection()` (the removal, and a repeated call → False); `EditConnectionDialog`
+(the prefill of label and type, the readonly source/target, `get_connection`); `MainWindow._edit_connection`
+(the apply plus the dirty marker); `_copy_node_info` putting the `ip` on the clipboard with a fallback to the
+host when it is empty; `_ping_node` starting and finishing its background thread headlessly (the modal
+`QMessageBox.information` is stubbed); and `MapView._classify_at` (the node at the centre, the arrow in the
+middle of the curve, with the geometry exactly as `ConnectionArrow._compute_geometry` computes it) plus `_remove_connection` through its confirmation."""
 import sys
 import traceback
 

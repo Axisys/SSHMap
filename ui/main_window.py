@@ -50,12 +50,11 @@ except ImportError:  # flat launch from the project root
     except ImportError:  # flat layout without ui/unmanaged — nothing is ever gated
         _unmanaged_gate = None
 
-# v1.1.4: AddServerDialog/ConnectionDialog/SSHConnectDialog/SSHTerminalWindow/_ext_term —
-# TEST SUBSTITUTION POINTS (MW.<name> = Fake): methods moved to mixins
-# (NodeOpsMixin._add_server/_add_connection, SshMixin._run_ssh_connect/
-# _spawn_terminal_window/_connect_ssh_external) resolve them from THIS module at
-# call time (host_attr, see ui/mixin_support.py) — so the imports stay here,
-# even if the core no longer uses them directly (ConnectionDialog/SSHConnectDialog).
+# AddServerDialog / ConnectionDialog / SSHConnectDialog / SSHTerminalWindow / _ext_term are TEST
+# SUBSTITUTION POINTS (`MW.<name> = Fake`): the methods moved to the mixins
+# (`NodeOpsMixin._add_server`/_add_connection, `SshMixin._run_ssh_connect`/_spawn_terminal_window/
+# _connect_ssh_external) resolve them from THIS module at call time (`host_attr`), so the imports stay
+# here even when the core no longer uses them directly (`AGENTS.md` §4.1).
 
 try:
     from ..modules.ssh_terminal import SSHTerminalWindow
@@ -228,7 +227,7 @@ except ImportError:  # flat layout without the package (same pattern as the impo
 def _diamond_icon():
     """Vector "◇" diamond on a 20×20 canvas (corner collapse buttons).
 
-    v1.2.4.1-fix (QA request): instead of "›"/"‹" chevrons — a single diamond on both
+    instead of "›"/"‹" chevrons — a single diamond on both
     panels (sidebar and map — both at the bottom right; the top of the map is reserved
     for the minimap). Same technique as ui/icons.py (QPainterPath on a transparent QPixmap),
     but the icon lives locally: per the spec only the sidebar_panel/map_panel
@@ -239,7 +238,7 @@ def _diamond_icon():
     pm.fill(QColor(0, 0, 0, 0))
     p = QPainter(pm)
     p.setRenderHint(QPainter.Antialiasing, True)
-    # v1.4.3-fix: read at CALL time — the icon is rebuilt by refresh_theme()
+    # read at CALL time — the icon is rebuilt by refresh_theme()
     # (before the fix this read a value captured at import time and the diamond
     # stayed dark-theme pale after a switch to LIGHT).
     pen = QPen(QColor(theme.ICON_COLOR), 1.8)
@@ -263,7 +262,7 @@ class _CollapseStrip(QWidget):
     """Thin clickable strip of a collapsed panel (~18 px; ROADMAP v1.2.4.1, task 1).
 
     A click ANYWHERE expands the panel (expand_requested); inside — the "◇" diamond
-    at the bottom right (v1.2.4.1-fix: instead of the chevron, QA request) + a tooltip
+    at the bottom right (instead of the chevron, QA request) + a tooltip
     (set by MainWindow).
     The real panel widget is hidden at the same time: a hidden child takes 0px —
     native Qt, no custom layout. Colors — the app's dark Fusion palette
@@ -302,7 +301,7 @@ class _CollapseStrip(QWidget):
         p.setRenderHint(QPainter.Antialiasing, True)
         # v1.2.5: colors — from the central theme (ui/theme.py); values unchanged.
         p.fillRect(self.rect(), QColor(theme.SURFACE_ALT if self._hover else theme.BASE_BG))
-        # "◇" diamond at the bottom right (v1.2.4.1-fix: QA request — instead of the chevron;
+        # "◇" diamond at the bottom right (QA request — instead of the chevron;
         # the same spot as the expanded panel's corner button — the diamond is "at the bottom"
         # both before and after collapsing).
         pen = QPen(QColor(theme.ICON_COLOR), 1.8)
@@ -330,15 +329,11 @@ STATUS_FILTER_ORDER = ("online", "warn", "offline")
 # is therefore not exposed by PySide6 — the value is the documented one.
 _WIDGET_MAX_WIDTH = 16777215
 
-# ── v1.4.6 (ROADMAP follow-up): the VIEW toggles of the toolbar ───────────────
-# (action id, icon name, i18n key, the literal fallback of the key) — ONE group at the
-# right end of the toolbar, in the order the surfaces sit in the window: the sidebar, the
-# map (whose collapsedness is the LIST mode), the minimap, the legend and the activity
-# panel. Every button is a MIRROR of its checkable "View" item — the menu item owns the
-# hotkey and the state (the v1.3.3.3 "ambiguous shortcut" rule), the button owns the click.
-# v1.6 (ROADMAP task 7): the ACTIVITY switch joins the cluster — the deliverable is the
-# CLUSTER, not one button: a new panel joins it by naming its action, with no second
-# mechanism (the bookmark panel of the backlog is the next one).
+# ── the VIEW toggles of the toolbar ──────────────────────────────────────────
+# (action id, icon name, i18n key, the literal fallback of the key) — ONE group at the right end
+# of the toolbar, in the order the surfaces sit in the window: the sidebar, the map (whose
+# collapsedness is the LIST mode), the minimap, the legend, the activity panel. Every button is a
+# MIRROR of its checkable "View" item: the item owns the hotkey and the state, the button the click.
 _VIEW_TOOLBAR_ITEMS = (
     ("view.toggle_sidebar", "sidebar_panel", "view.toggle_sidebar", "Sidebar / Map"),
     ("view.toggle_map", "map_panel", "view.toggle_map", "Map / List"),
@@ -467,13 +462,11 @@ class _ProblemsChip(QLabel):
         super().mousePressEvent(event)
 
 
-# ── v1.3.3.6 (ROADMAP task 2): dropping a project onto the window ──────────────
-# Dragging a saved `.json`/`.sshmap` onto the window is the standard gesture of the
-# platform, and it went through nothing: `setAcceptDrops(True)` existed only on the
-# SFTP tab (`modules/sftp_tab.py:293/419`). The drop is deliberately narrow — ONE
-# existing local FILE with a project suffix — and it goes through `_load_project_at()`
-# (the File → Open entry point), so every downstream rule (the autosave prompt, the
-# undo reset, the status round, the MRU) is shared instead of re-implemented.
+# ── dropping a project onto the window ────────────────────────────────────────
+# Dragging a saved `.json`/`.sshmap` onto the window is the standard gesture of the platform. The drop
+# is deliberately narrow — ONE local existing FILE with a project suffix — and it goes through
+# `_load_project_at()` (the File → Open entry point), so every downstream rule (the autosave prompt,
+# the undo reset, the status round, the MRU) is shared instead of re-implemented (`AGENTS.md` §4.1).
 
 PROJECT_DROP_SUFFIXES = (".json", ".sshmap")
 
@@ -536,13 +529,11 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
     def __init__(self):
         super().__init__()
 
-        # ── v1.4.3 (ROADMAP task 6): the SAVED theme, before anything is built ──
-        # `main.py` applies it too (even earlier, right after QApplication), but the
-        # window does not depend on that: a MainWindow created directly (a test, an
-        # embedder) must still come up in the user's theme — and every widget below
-        # is then CONSTRUCTED with the right palette instead of being repainted
-        # afterwards. A broken config can never leave the app themeless
-        # (`theme_from_settings` never fails, `apply_theme` never raises).
+        # ── the SAVED theme, before anything is built ──
+        # `main.py` applies it too (even earlier, right after QApplication), but the window does not
+        # depend on that: a MainWindow created directly (a test, an embedder) must still come up in the
+        # user's theme, and every widget below is CONSTRUCTED with the right palette instead of being
+        # repainted afterwards (`theme_from_settings` never fails, `apply_theme` never raises).
         if theme_qss is not None:
             try:
                 from ui.settings_dialog import (load_theme_settings, theme_from_settings,
@@ -634,7 +625,7 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         # v1.2.2: "Terminals" dock (terminal.mode = "tabs") — lazily created in
         # SshMixin._ensure_terminals_dock on the first session in "tabs" mode.
         self._terminals_dock = None
-        # v0.9.4-fix: IDs of nodes with an active SSH session (for indicator reset)
+        # IDs of nodes with an active SSH session (for indicator reset)
         self._ssh_connected_nodes: set = set()
         self._ping_thread = None   # v0.7.3: ping thread (AUDIT v0.7.2 #8: guard against clobbering)
         self._dns_thread = None    # AUDIT v0.7.2 (#6): reverse-DNS thread for copy-hostname
@@ -654,13 +645,11 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         self._menu_i18n: List[tuple] = []  # (widget: QMenu|QAction, key) — for re-translation
         self._sidebar_title: Optional[QLabel] = None
 
-        # ── v1.3.2 (ROADMAP v1.3.2): configurable hotkeys ─────────
-        # The registry (ui/hotkey_registry.py) is the single source of truth: every
-        # QAction/QShortcut with a hotkey is registered here under its action_id
-        # instead of carrying a literal sequence; _apply_hotkeys() (after the UI
-        # construction and after the settings dialog's OK) installs the effective
-        # sequences from ~/.sshmap/config.json ("hotkeys"). Initialized BEFORE
-        # _setup_ui/_setup_toolbar/_setup_menubar — they fill the dict.
+        # ── configurable hotkeys ─────────
+        # The registry (`ui/hotkey_registry.py`) is the single source of truth: every QAction/QShortcut with
+        # a hotkey is registered under its action_id instead of carrying a literal sequence; `_apply_hotkeys()`
+        # (after the UI construction and after the settings dialog's OK) installs the effective sequences from
+        # `~/.sshmap/config.json` ("hotkeys"). Initialized BEFORE `_setup_ui`/`_setup_toolbar`/`_setup_menubar`.
         self._hotkey_targets: Dict[str, list] = {}   # action_id -> [QAction|QShortcut, ...]
         self._hotkey_map: Dict[str, str] = {}        # action_id -> the effective sequence
 
@@ -686,32 +675,28 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         self._sidebar_collapsed = False
         self._map_collapsed = False
 
-        # ── v1.5.2 (ROADMAP task 3): the activity panel ────────────
-        # The saved visibility is read BEFORE _setup_menubar builds the checkable View
-        # item (the ui_legend/ui_minimap pattern: the menu item is the OWNER of the
-        # state, the panel is created right after the menubar and follows it). The ring
-        # itself is the process-wide singleton of `modules/activity_log.py` — the panel
-        # only renders it, so a window that is closed and reopened loses no history.
+        # ── the activity panel ────────────
+        # The saved visibility is read BEFORE `_setup_menubar` builds the checkable View item (the
+        # legend/minimap pattern: the menu item is the OWNER of the state, the panel follows it). The ring
+        # itself is the process-wide singleton of `modules/activity_log.py` — the panel only renders it, so
+        # a window that is closed and reopened loses no history.
         self._activity_enabled = MainWindow._read_activity_visible()
         self.activity_panel = None
 
-        # ── v1.6.7 (ROADMAP task 4): the bookmarks panel ────────────
-        # The saved visibility is read BEFORE `_setup_menubar` builds the checkable View
-        # item (the ui_activity_panel rule: the menu item is the OWNER of the state, the
-        # panel is created in `_setup_ui` and follows it). The store behind the panel is the
-        # module-level singleton of `modules/bookmarks.py` — the LIST is application-level
-        # and lives outside every project.
+        # ── the bookmarks panel ────────────
+        # The saved visibility is read BEFORE `_setup_menubar` builds the checkable View item (the
+        # `ui_activity_panel` rule: the menu item is the OWNER of the state, the panel follows it). The
+        # store behind the panel is the module-level singleton of `modules/bookmarks.py` — the LIST is
+        # application-level and lives outside every project (`AGENTS.md` §4.23).
         self._bookmarks_enabled = MainWindow._read_bookmarks_visible()
         self._bookmarks_pos = None
         self.bookmark_panel = None
 
-        # ── v1.4rc1 (plugin foundation, rc series): the plugin registry ─────
-        # The manager is created HERE because the "Plugins" menu is built from it; the
-        # DISCOVERY itself runs later — main.py calls start_plugin_discovery() after
-        # show() and before app.exec() (ROADMAP rc1), so merely constructing a window
-        # (every test does) never imports third-party code. The rows of the menu are
-        # rebuilt from the records; `_plugin_rows` holds the dynamic QActions, so a
-        # rebuild removes exactly its own items and never the permanent "Reload" item.
+        # ── the plugin registry ─────
+        # The manager is created HERE because the "Plugins" menu is built from it; the DISCOVERY itself runs
+        # later — main.py calls `start_plugin_discovery()` after `show()` and before `app.exec()`, so merely
+        # constructing a window (every test does) never imports third-party code. The rows are rebuilt from
+        # the records and `_plugin_rows` holds the dynamic QActions, so a rebuild removes only its own items.
         self._plugin_manager = plugin_manager.PluginManager(self)
         self._plugin_menu = None
         self.act_plugins_reload = None
@@ -776,14 +761,11 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
             if self.log:
                 self.log.warning(f"Restore splitter state failed: {e}")
 
-        # ── v0.7.1: background node status checks (online/warn/offline) ──
-        # Probes run in a separate thread — the GUI is not blocked.
-        # v1.1 (ROADMAP task 4): interval/timeout — from ~/.sshmap/config.json
-        # (status_interval_sec / status_probe_timeout_sec; defaults 30 s / 3.0 s =
-        # v1.0 behavior); changed live from the settings dialog (_apply_settings_from_dialog).
-        # v1.1.2 final: probes within a round run in parallel (ThreadPoolExecutor),
-        # cap — status_max_parallel (default 16); for large maps (N > 50) the
-        # interval doubles (effective_interval_ms + a status-bar hint).
+        # ── background node status checks (online/warn/offline) ──
+        # Probes run in a separate thread, so the GUI is not blocked. Interval/timeout come from
+        # `~/.sshmap/config.json` (`status_interval_sec` / `status_probe_timeout_sec`) and change
+        # live from the settings dialog. Probes within a round run in parallel (ThreadPoolExecutor,
+        # `status_max_parallel`, default 16); for large maps the interval doubles.
         self._status_checker = None
         self._auto_interval_hinted = False  # v1.1.2 final: the large-interval hint — shown once
         try:
@@ -829,24 +811,21 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
             if self.log:
                 self.log.warning(f"StatusChecker unavailable: {e}")
 
-        # ── v1.5rc3 (ROADMAP task 3): the freshness tick ──────────
-        # A status is a fact with a timestamp, so the map re-reads the age of every
-        # shown status a few times per minute. This timer starts NO probe round and
-        # changes NO status (the v1.4rc2 plugin/status discipline is untouched): it
-        # only moves a card to the stale mark once its datum has really aged past
-        # `StatusChecker.stale_threshold_s()`. In a headless test without an event
-        # loop it never fires — the module stays smoke-test safe.
+        # ── the freshness tick ──────────
+        # A status is a fact with a timestamp, so the map re-reads the age of every shown status a few
+        # times per minute. This timer starts NO probe round and changes NO status: it only moves a card
+        # to the stale mark once its datum has really aged past `StatusChecker.stale_threshold_s()`.
+        # In a headless test without an event loop it never fires — the module stays smoke-test safe.
         self._freshness_timer = QTimer(self)
         self._freshness_timer.setInterval(self.FRESHNESS_TICK_MS)
         self._freshness_timer.timeout.connect(self._freshness_tick)
         self._freshness_timer.start()
 
-        # ── v0.9.7: autosave (ROADMAP #1) ────────────────────────
-        # QTimer at the interval from ~/.sshmap/config.json (autosave_interval_sec,
-        # default 60 s; autosave_enabled — on/off). A tick writes an autosave
-        # ONLY when dirty and a project file is set (a new unsaved project has
-        # nothing to restore — see _autosave_tick). The interval lives until restart;
-        # the settings dialog arrives in v1.1 (ROADMAP).
+        # ── autosave ────────────────────────
+        # QTimer at the interval from `~/.sshmap/config.json` (`autosave_interval_sec`, default 60 s;
+        # `autosave_enabled` — on/off). A tick writes an autosave ONLY when dirty and a project file is
+        # set (a new unsaved project has nothing to restore — see `_autosave_tick`). The settings dialog
+        # has its row in the hub.
         self._autosave_timer = QTimer(self)
         try:
             from storage.autosave import get_autosave_settings as _get_as
@@ -958,21 +937,17 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
                 (n.data.id, n.data.host, n.data.ssh_port or 22)
                 for n in _nodes
             ]))
-            # v1.5 (ROADMAP): the SAME pass keeps the emulation in step — the demo's
-            # declared ids are never probed, and any other project clears the set (it is
-            # installed by `_open_example_map()` before the load and cleared by every
-            # ordinary load / new project / save). `_set_emulated_statuses` owns the write;
-            # this call repeats it so a checker built AFTER the state cannot miss it.
-            # v1.6.5 (ROADMAP task 3): the set is `_status_skip_ids()` — the emulated ids AND
-            # every unmanaged card, computed from the live scene, so a card switched to
-            # unmanaged by an edit stops being a target from the very next round.
+            # The SAME pass keeps the emulation in step: the demo's declared ids are never probed and
+            # any other project clears the set (installed by `_open_example_map()` before the load and
+            # cleared by every ordinary load / new project / save). `_set_emulated_statuses` owns the
+            # write; this call repeats it so a checker built AFTER the state cannot miss it. The set is
+            # `_status_skip_ids()` — the emulated ids AND every unmanaged card, read from the live scene.
             checker.set_skip_ids(self._status_skip_ids())
-            # v1.4rc2 (plugin foundation, rc2): the SAME pass feeds the plugin registry —
-            # a `status_probe` / `run_on_nodes` hook sees exactly the nodes the map holds
-            # (narrowed to {id, alias, host, port, user} by the manager, PLUGINS.md §5).
-            # The internal facts carry the private key path, which is deliberately NOT
-            # part of the plugin-visible record but IS needed by the core's credential
-            # resolver for `ctx.run_command`.
+            # The SAME pass feeds the plugin registry — a `status_probe` / `run_on_nodes` hook sees exactly
+            # the nodes the map holds (narrowed to {id, alias, host, port, user} by the manager,
+            # `PLUGINS.md` §5). The internal facts carry the private key path, which is deliberately NOT
+            # part of the plugin-visible record but IS needed by the core's credential resolver for
+            # `ctx.run_command`.
             try:
                 self._plugin_manager.set_nodes(
                     [(n.data.id, n.data.alias, n.data.host, n.data.ssh_port or 22, n.data.user)
@@ -1209,7 +1184,7 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
             if self.log:
                 self.log.warning(f"Apply hotkeys failed: {e}")
         # The dynamic action (multi-input) is owned by its mode: the key exists ONLY
-        # while the mode is on (v1.2.3 / v1.2.4-fix rule, v1.3.2 task 4).
+        # while the mode is on (the v1.2.3 rule).
         try:
             self._sync_multi_shortcut()
         except Exception as e:  # noqa: BLE001
@@ -1410,7 +1385,7 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
                 self.log.warning(f"Auto theme: the follow-up apply failed: {e}")
 
     def _refresh_icons(self):
-        """v1.4.3-fix: re-paint the vector icons in the ACTIVE theme's colour.
+        """re-paint the vector icons in the ACTIVE theme's colour.
 
         A QIcon handed to a QAction/QPushButton keeps the pixels it was painted
         with, and nothing repaints it when the theme changes — the toolbar, the
@@ -1521,19 +1496,11 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
                     dock.setWindowTitle(self.t("terminal.dock_title"))
                 except RuntimeError:
                     pass  # Qt teardown — the dock is already destroyed
-        # v1.3.3.1 (ROADMAP task 1): the terminal CONTAINERS follow the language too.
-        # The twin of the terminal-font loop in _apply_settings_from_dialog — same
-        # registry, same dead-C++-object discipline: a session that is being torn
-        # down must not break the switch. The registry stores SESSIONS (pages) in
-        # windows mode and the DOCK in tabs mode; both own retranslate(), and both
-        # re-text their own children — so nothing is missed either way. A page also
-        # points at its host window (page._host_window — the v1.2.1 contract), and
-        # the HOST owns the pieces the page cannot reach: the WINDOW TITLE and the
-        # tabs' close tooltips — so the host is re-texted as well (both calls are
-        # idempotent, the overlap costs nothing). The module translator cache
-        # (_t_cache) is deliberately NOT invalidated: the cached lambda calls i18n.t()
-        # at call time, and t() reads the current language on every call — so a
-        # re-text picks the new language up.
+        # The terminal CONTAINERS follow the language too — the twin of the terminal-font loop in
+        # `_apply_settings_from_dialog`: same registry, same dead-C++-object discipline (a session
+        # being torn down must not break the switch). The registry stores SESSIONS in windows mode
+        # and the DOCK in tabs mode; both own `retranslate()`, and the page's HOST re-texts what the
+        # page cannot reach (the window title, the tabs' close tooltips). Both calls are idempotent.
         for _session in list(getattr(self, "_terminal_windows", [])):
             try:
                 _session.retranslate()
@@ -1684,12 +1651,11 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         # had this — dragging a .json onto the window did nothing at all.
         self.setAcceptDrops(True)
 
-        # v1.2.4.1: self._splitter — a facade reference (panel collapse mechanics).
-        # Splitter children are CONTAINERS [panel | strip], not the widgets themselves: in
-        # the collapsed state the real widget is hidden (0px, native Qt), and in its
-        # place — a clickable ~18px strip (_CollapseStrip). The handle cannot be dragged
-        # to zero (setCollapsible(False) + the container's minimumWidth) — a panel cannot
-        # be "lost"; state is driven by buttons/menus (ROADMAP v1.2.4.1, task 6).
+        # `self._splitter` — a facade reference (the panel collapse mechanics). Splitter children are
+        # CONTAINERS `[panel | strip]`, not the widgets themselves: in the collapsed state the real widget
+        # is hidden (0 px, native Qt) and a clickable ~18 px strip (`_CollapseStrip`) takes its place. The
+        # handle cannot be dragged to zero (`setCollapsible(False)` + the container's `minimumWidth`), so a
+        # panel cannot be "lost"; the state is driven by buttons/menus.
         splitter = QSplitter(Qt.Horizontal)
         self._splitter = splitter
         layout.addWidget(splitter)
@@ -1826,12 +1792,11 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         splitter.setCollapsible(1, False)
         self.SIDEBAR_MIN_WIDTH = 160
         self.MAP_MIN_WIDTH = 240
-        # v1.5rc4 (ROADMAP tasks 1/2): the WINDOW's own floor. The status bar's totals
-        # sentence made the layout ask for ~818 px, i.e. the CHROME dictated how narrow the
-        # window could be — and an overflow policy for a bar that can never get narrow is
-        # decoration. The explicit floor is what the policies work against: below
-        # `MIN_WINDOW_WIDTH` nothing is squeezed any further (the chrome has already given
-        # up its passive half by then), and the sidebar/map minimums still hold.
+        # The WINDOW's own floor. The status bar's totals sentence made the layout ask for ~818 px, i.e.
+        # the CHROME dictated how narrow the window could be — and an overflow policy for a bar that can
+        # never get narrow is decoration. The explicit floor is what the policies work against: below
+        # `MIN_WINDOW_WIDTH` nothing is squeezed any further (the chrome has given up its passive half by
+        # then), and the sidebar/map minimums still hold.
         self.MIN_WINDOW_WIDTH = 480
         self.setMinimumWidth(self.MIN_WINDOW_WIDTH)
         self._sidebar_container.setMinimumWidth(self.SIDEBAR_MIN_WIDTH)
@@ -2125,8 +2090,8 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
 
         # v1.3.3.6 (ROADMAP task 4): the panel widths — written right next to the
         # geometry and with the same "before everything" rule. `saveState()` covers the
-        # dock/toolbar layout only, so the [sidebar | map] divider used to reset to
-        # 250/950 on every start (ui_splitter_state).
+        # dock/toolbar layout only, so the [sidebar | map] divider needs its own key
+        # (`ui_splitter_state`) or it starts at the default 250/950 on every start.
         try:
             save_splitter_state("ui_splitter_state", getattr(self, "_splitter", None))
         except Exception:  # noqa: BLE001 — the widths must not block closing
@@ -2139,14 +2104,11 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         except Exception:  # noqa: BLE001 — teardown robustness (C++ object RuntimeError)
             pass
 
-        # v0.9.4-fix: stopping background QThreads happens on ANY exit.
-        # The call used to stand only at the end of a "clean" exit: all three dialog
-        # branches returned early before shutdown, so with unsaved
-        # changes (the most common case) the running SystemInfoCollector /
-        # ping / DNS threads were destroyed with the QObject ->
-        # "QThread: Destroyed while thread is still running".
-        # Threads are stopped BEFORE the dialog — it may keep the window open
-        # indefinitely, and background work is no longer needed at close time.
+        # Stopping background QThreads happens on ANY exit, and the call stands on EVERY exit path
+        # (the early dialog branches included): with unsaved changes the running
+        # SystemInfoCollector / ping / DNS threads would otherwise be destroyed with the QObject
+        # ("QThread: Destroyed while thread is still running"). The threads are stopped BEFORE the
+        # dialog — it may keep the window open indefinitely.
         self._shutdown_background_threads()
 
         if self._has_unsaved_changes:
@@ -2206,14 +2168,11 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
             if hasattr(coll, "isRunning"):
                 threads.append(coll)
 
-        # Ping, reverse DNS, and import DNS resolution. v1.2.10rc1 (verification finding):
-        # a stop() with a cancel flag exists ONLY on _import_resolve_thread
-        # (HostResolverThread.stop, services/host_importer.py — sets an Event, the loop
-        # exits between names); PingThread/ReverseDnsThread have NO stop() — the current
-        # getaddrinfo/ping runs out its timeout. Threads that outlive the wait budget below
-        # are registered in the orphan registry (services/diagnostics.register_orphan_thread).
-        # v1.5.3 (ROADMAP task 3): the REACHABILITY reports join the same list — one
-        # ReachabilityThread per running report, held in `_diagnose_threads` by server id.
+        # Ping, reverse DNS and import DNS resolution. A `stop()` with a cancel flag exists ONLY on
+        # `_import_resolve_thread` (`HostResolverThread.stop` — sets an Event, the loop exits
+        # between names); `PingThread` / `ReverseDnsThread` have NO stop(), so the current
+        # `getaddrinfo`/ping runs out its timeout and a thread that outlives the wait budget below
+        # goes to the orphan registry, as do the reachability reports (`_diagnose_threads`).
         for attr in ("_ping_thread", "_dns_thread", "_import_resolve_thread"):
             th = getattr(self, attr, None)
             if th is not None and hasattr(th, "isRunning") and th.isRunning():
@@ -2239,12 +2198,11 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         terminal_waits = []
         for s in list(getattr(self, "_terminal_windows", [])):
             try:
-                # v1.2.10rc1 (manual AUDIT #1): on shutdown the "ask" gate is skipped —
-                # the thread is already stopped (stop_thread() inside close_terminal()); there is
-                # nothing to decide. Before, with terminal_close_behavior="ask", a QMessageBox.question
-                # was shown for each active session on exit, and "Cancel"
-                # did not work (the window closed regardless of the answer). The same path as the
-                # v1.1.1 limit: _force_close — a confirmed decision, no re-asking.
+                # On shutdown the "ask" gate is skipped — the thread is already stopped
+                # (`stop_thread()` inside `close_terminal()`), so there is nothing to decide. With
+                # `terminal_close_behavior="ask"` a QMessageBox.question per active session made "Cancel"
+                # meaningless (the window closed regardless of the answer). The same path as the session
+                # limit: `_force_close` — a confirmed decision, no re-asking.
                 s._force_close = True
                 s.close_terminal()
                 th = getattr(s, "terminal_thread", None)
@@ -2263,12 +2221,11 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
             except Exception:
                 pass
 
-        # v1.2.10rc1 (verification finding): ping/DNS/import-resolve threads that outlive
-        # the wait budget (getaddrinfo/ping with an unreachable resolver) are registered in
-        # the orphan registry — a live QThread without a strong referrer must not
-        # be left to GC ("QThread: Destroyed while thread is still running" on all
-        # exit paths). Terminal threads have their own N4 path (page.shutdown()
-        # -> modules/ssh_terminal._orphan_threads) — not duplicated here.
+        # ping/DNS/import-resolve threads that outlive the wait budget (`getaddrinfo`/ping with an
+        # unreachable resolver) are registered in the orphan registry — a live QThread without a strong
+        # referrer must not be left to GC ("QThread: Destroyed while thread is still running" on all exit
+        # paths). Terminal threads have their own N4 path (`page.shutdown()` →
+        # `modules/ssh_terminal._orphan_threads`) — not duplicated here.
         for th in threads:
             try:
                 if hasattr(th, "isRunning") and th.isRunning():
@@ -2356,29 +2313,11 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         self.addToolBar(toolbar)
         self._toolbar = toolbar
 
-        # UI polish: all actions get vector icons (ui/icons.py, replacing emoji);
-        # text-only actions in the toolbar would look out of place.
-        # v1.3.3.3 (task 3): the 4th tuple element is the REGISTRY action_id — the
-        # toolbar buttons of global actions join the "no orphans" audit and follow a
-        # hotkey assigned to their action (before, Ctrl+Shift+A worked in the menu
-        # and silently not on the toolbar button of the same action).
-        #
-        # v1.5rc4 (ROADMAP task 2): the PINNED set of the toolbar ────────────
-        # The toolbar stopped repeating what the SIDEBAR and the PALETTE already own
-        # (the pinned decision of the release — "the kept set is pinned at the start"):
-        #
-        #   * `edit.add_server` / `edit.add_connection` are GONE — the sidebar's own
-        #     first two buttons (and every menu/palette entry) do the same job from a
-        #     surface that is always on screen;
-        #   * `file.save_as` is GONE — a rare variant of "Save" that stays in the File
-        #     menu and in the palette.
-        #
-        # What remains is the pinned keep-set: the three file verbs, "Center" / "Fit",
-        # undo/redo and the FIVE view toggles (the panel switches have no other
-        # one-click surface; v1.6 adds the activity panel to the group). The first five
-        # are OVERFLOWABLE — on a narrow window they move into the "»" menu instead of
-        # being squeezed (the second pinned decision: overflow, not wrapping); undo/redo
-        # and the toggles never move.
+        # UI polish: all actions get vector icons (ui/icons.py, replacing emoji); text-only actions
+        # in the toolbar would look out of place. The pinned keep-set is the three file verbs,
+        # "Center" / "Fit", undo/redo and the five view toggles; the first five are OVERFLOWABLE into
+        # the "»" menu on a narrow window, the rest never move. What the SIDEBAR or the PALETTE
+        # already owns is NOT repeated here; the 4th tuple element is the REGISTRY action_id.
         _fallback = {
             "file.new_project": "New Project", "file.open": "Open...", "file.save": "Save",
             "view.center_map": "Center map", "view.fit_map": "Fit Map to Content",
@@ -2407,7 +2346,7 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
                 # same slot (see the note above _apply_hotkeys).
                 self._mark_toolbar_mirror(action)
                 try:
-                    set_action_icon(action, icon_name)  # v1.4.3-fix: remembers the name for the theme walk
+                    set_action_icon(action, icon_name)  # remembers the name for the theme walk
                 except Exception:  # noqa: BLE001 — the icon is cosmetic; do not break the toolbar
                     pass
                 self._toolbar_overflow_actions.append(action)
@@ -2415,12 +2354,11 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
                 if widget is not None:
                     self._toolbar_overflow_items.append(widget)
 
-        # v0.8.3: undo/redo in the toolbar (icons + text; enabled state driven by QUndoStack)
-        # v1.3.2: the sequences come from the action registry — "edit.undo"/"edit.redo"
-        # are registered as hotkey targets on their EDIT-MENU items; the toolbar buttons
-        # are mirrors (a second target would make Ctrl+Z an "Ambiguous shortcut overload").
-        # v1.5rc4: these two are NOT overflowable — undo is the one control a user reaches
-        # for without looking, so it must never move into a menu.
+        # Undo/redo in the toolbar (icons + text; the enabled state is driven by `QUndoStack`). The
+        # sequences come from the action registry — "edit.undo"/"edit.redo" are registered as hotkey
+        # targets on their EDIT-MENU items, and the toolbar buttons are MIRRORS (a second target would make
+        # Ctrl+Z an "Ambiguous shortcut overload"). These two are NOT overflowable — undo is the one control
+        # a user reaches for without looking.
         toolbar.addSeparator()
         self.act_undo = toolbar.addAction(
             self.t("edit.undo") if self._i18n_available else "Undo",
@@ -2444,14 +2382,11 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
             pass
         self.undo_stack.canRedoChanged.connect(self.act_redo.setEnabled)
 
-        # ── v1.4.5 (ROADMAP task 4) + v1.4.6: the VIEW toggles on the toolbar ──
-        # FOUR checkable buttons in ONE group at the right end: the two splitter panels
-        # ("Sidebar / Map" and "Map / List"), the minimap and the legend. Each MIRRORS its
-        # checkable View item — the menu item owns the hotkey and the state, the button
-        # owns the click (the v1.2.4.1 collapse-button pattern). The pairs are wired in
-        # _setup_menubar, which runs AFTER this method and creates the QActions.
-        # v1.5rc4: never overflowable — they are the only one-click surface of the four
-        # panels, and a hidden panel is exactly what a user cannot find in a menu.
+        # ── the VIEW toggles on the toolbar ──
+        # FOUR checkable buttons in ONE group at the right end: the two splitter panels ("Sidebar /
+        # Map" and "Map / List"), the minimap and the legend. Each MIRRORS its checkable View
+        # item — the item owns the hotkey and the state, the button the click (`_setup_menubar`
+        # wires the pairs and runs AFTER this method). Never overflowable: a hidden panel is lost.
         toolbar.addSeparator()
         self._view_toolbar_buttons = {}
         for action_id, icon_name, key, fallback in _VIEW_TOOLBAR_ITEMS:
@@ -2485,16 +2420,11 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         # cluster (the attribute survives for the same reason as the five above).
         self._bookmarks_toolbar_btn = self._view_toolbar_buttons["view.toggle_bookmarks"]
 
-        # ── v1.5rc4 (ROADMAP task 2): the "»" OVERFLOW menu ────────────────────
-        # Not Qt's own toolbar extension: that one is a popup of ICONS with no labels,
-        # and this application's actions are named by words. The menu holds the very
-        # SAME QActions the toolbar carries (an action may live in two widgets), so the
-        # enablement, the icons and the menu/palette behaviour cannot diverge.
-        #
-        # The button is reached through an ACTION, not through `addWidget()`: a QToolBar
-        # re-shows a widget item at layout time (measured — `hide()` on a widget item does
-        # not survive the next layout pass), while `QAction.setVisible()` is the toolbar's
-        # own visibility contract.
+        # ── the "»" OVERFLOW menu ───────────────────────────────────────────
+        # Not Qt's own toolbar extension: that one is a popup of ICONS with no labels, and this
+        # application's actions are named by words. The menu holds the very SAME QActions the
+        # toolbar carries, so the enablement, the icons and the palette cannot diverge. The
+        # button is reached through an ACTION (`QAction.setVisible()`), never `addWidget()` (§41).
         overflow_action = toolbar.addAction("\u00bb")
         overflow_btn = toolbar.widgetForAction(overflow_action)
         if overflow_btn is None:   # a stripped style without a button — no overflow menu
@@ -2603,14 +2533,11 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         """True while the toolbar is in its compact state (the topical test's seam)."""
         return bool(getattr(self, "_toolbar_compact", False))
 
-    # ── v1.5rc4 (ROADMAP task 1): the status-bar overflow policy ───────────────
-    # The pinned priority of the status bar (see `ui/status_bar.py`): the multi-input
-    # plaque, then the three CLICKABLE status counters and the zoom percentage — and only
-    # then the "Servers / Connections" totals. In this release the totals are the ONE
-    # thing that leaves the bar, which is exactly the promise of the plan ("the v1.4.5
-    # counters must not become the first thing to disappear — they are the interactive
-    # part"). The policy is ONE method, the threshold is ONE number and the widgets are
-    # only ever HIDDEN, never rebuilt — so a wide window gets the pair back untouched.
+    # ── the status-bar overflow policy (the pinned priority — `ui/status_bar.py`) ──
+    # The multi-input plaque, then the three CLICKABLE status counters and the zoom percentage,
+    # and only then the "Servers / Connections" totals: the totals are the ONE thing that leaves
+    # the bar, because the interactive part must not be the first to disappear. ONE method, ONE
+    # threshold, and the widgets are only ever HIDDEN — a wide window gets the pair back untouched.
 
     def _sync_status_bar_overflow(self, width=None) -> bool:
         """Hide the totals on a window too narrow for the whole bar (True — compact).
@@ -2672,26 +2599,11 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
     def status_bar_compact(self) -> bool:
         """True while the totals pair is hidden (the topical test's seam)."""
         return bool(getattr(self, "_status_bar_compact", False))
-    # ── v1.5rc4 (ROADMAP task 7): the floating-panel priority rule ──────────────
-    # Five panels float over the canvas (the search bar, the minimap, the legend, the
-    # first-run hint and — since v1.5.4 — the active-filter plaque) plus the map-collapse
-    # diamond, which is a child of the view too. Where they sit is decided in ONE place,
-    # from the LIVE geometry:
-    #
-    #   1. the first-run hint WINS over the legend — while an empty map explains itself,
-    #      the legend is suppressed (it explains a map that has nothing to explain yet);
-    #   2. the minimap yields to the OPEN search bar (the v1.4.2 rule, kept: the panel
-    #      steps below the bar);
-    #   3. the collapse diamond is never covered by a panel — it is moved out of the way.
-    #
-    # The filter plaque joined the SAME resolution in v1.5.4 (it is a rect in
-    # `_overlay_panel_rects()` and it yields to the bar the way the minimap does), so the
-    # rule has one home and one call site instead of a second layout pass.
-    #
-    # The suppression is TEMPORARY and never touches the saved state: the legend's own
-    # `ui_legend` key and `_legend_enabled` are the user's, and `_legend_suppressed` is
-    # the window's. That separation is the point of the rule — a hint appearing on an
-    # empty map must not silently turn the legend off for good.
+    # ── the floating-panel priority rule ──
+    # Where the five floating panels (search bar, minimap, legend, first-run hint, filter
+    # plaque) and the collapse diamond sit is decided in ONE place, from the LIVE geometry:
+    # the hint WINS over the legend (suppressed, never disabled), the minimap yields to the
+    # OPEN search bar, the diamond is never covered. The saved `ui_legend` stays the user's.
 
     def _sync_overlay_priority(self):
         """Resolve the floating panels from the live geometry (v1.5rc4, task 7)."""
@@ -2863,7 +2775,7 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         ignored as a duplicate).
 
         So: the MENU item owns the sequence, the toolbar button owns the click. This
-        also removes a real duplication — ``toolbar.addAction(text, slot)`` used to
+        also removes a real duplication — ``toolbar.addAction(text, slot)`` would
         auto-install Qt's own "Ctrl+S"-style shortcut from the action text.
         """
         try:
@@ -2888,7 +2800,7 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         self._register_i18n(action, key)
         if icon_name:
             try:
-                set_action_icon(action, icon_name)  # v1.4.3-fix: the theme walk finds it by this name
+                set_action_icon(action, icon_name)  # the theme walk finds it by this name
             except Exception:  # noqa: BLE001 — the icon is cosmetic; do not break the menu
                 pass
         if action_id:
@@ -2984,28 +2896,21 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         # click, so its QAction cannot carry a configurable sequence.
         self._add_menu_action(edit_menu, "ctx.check_status", self._check_statuses_now,
                               "node.check_status")
-        # v1.5.3 (ROADMAP tasks 2/3): the two on-demand answers of the freshness release.
-        # "Gather information" — one bounded batch for the SELECTION (or the whole map when
-        # nothing is selected), off the GUI thread; it reuses the existing `ctx.collect_info`
-        # label, so the sidebar/map context menus and this permanent Edit item read the same.
-        # "Why is it offline?" — the reachability report (DNS → TCP → banner → ping) whose
-        # sentence lands in the card tooltip, the status bar and the activity history.
-        # Both are permanent menu items on purpose: a context menu is rebuilt on every right
-        # click, so its QAction cannot carry a configurable sequence (the v1.3.3.3 rule).
+        # The two on-demand answers: "Gather information" — one bounded batch for the SELECTION
+        # (or the whole map), off the GUI thread, reusing the `ctx.collect_info` label so the
+        # context menus and this permanent Edit item read the same; "Why is it offline?" — the
+        # reachability report (DNS → TCP → banner → ping), whose sentence lands in the card
+        # tooltip, the status bar and the activity history. Both are PERMANENT items.
         self._add_menu_action(edit_menu, "ctx.collect_info", self._collect_info_many,
                               "node.collect_info")
         self._add_menu_action(edit_menu, "ctx.diagnose", self._diagnose_node,
                               "node.diagnose")
 
-        # Export menu
-        # The ONE home of everything that LEAVES the application. It is a CONTAINER, not a
-        # new family: the actions keep their ids and their `file.*` keys, because a
-        # `config.json` `hotkeys` value is keyed by the ACTION ID (a rename would drop every
-        # user's binding silently) and the Hotkeys tab groups by the id's family. Three
-        # groups, separated by the SUBJECT of the report: the map IMAGE exports, the two
-        # image paths of the clipboard/poster family, and the DATA reports (the inventory
-        # table of the LIST mode). The two DATA items are ENABLED only while the table
-        # exists (`_sync_list_mode` — the one place the mode changes).
+        # Export menu — the ONE home of everything that LEAVES the application. It is a
+        # CONTAINER, not a new family: the actions keep their ids and their `file.*` keys, because
+        # a `config.json` `hotkeys` value is keyed by the ACTION ID (a rename would drop every
+        # user's binding silently). Three groups by SUBJECT: the map images, the clipboard/poster
+        # paths and the DATA reports, which are enabled only while the table exists (§41).
         export_menu = menubar.addMenu(self.t("menu.export") if self._i18n_available else "Export")
         self._register_i18n(export_menu, "menu.export")
         # v0.9.1: export the map to an image (PNG/JPEG)
@@ -3046,12 +2951,11 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         self.act_export_connections = self._add_menu_action(
             export_menu, "file.export_connections", self._export_connections_table,
             "file.export_connections")
-        # v1.6.8 (ROADMAP task 5): the THIRD report of the DATA family — the servers that
-        # need attention (`storage/export_problems.py`, the DECLARED predicate of v1.5.4).
-        # It is the connection report's SIBLING, not a filter of the inventory: the lens
-        # dims the CANVAS (v1.5.4) and the inventory export is EXACTLY what is on screen
-        # (v1.5.5), so a report over a third subject keeps both promises. One registry
-        # action with an EMPTY default, riding the same writer and the same format question.
+        # The THIRD report of the DATA family — the servers that need attention
+        # (`storage/export_problems.py`, the DECLARED predicate). It is the connection report's SIBLING,
+        # not a filter of the inventory: the lens dims the CANVAS and the inventory export is EXACTLY what
+        # is on screen, so a report over a third subject keeps both promises. One registry action with an
+        # EMPTY default, riding the same writer and the same format question.
         self.act_export_problems = self._add_menu_action(
             export_menu, "file.export_problems", self._export_problems_table,
             "file.export_problems")
@@ -3083,14 +2987,11 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         # v0.9.8: map search (Ctrl+F) — a search bar over the canvas; the same
         # Ctrl argument as fit_map (bare F is taken by search-field typing)
         self._add_menu_action(view_menu, "view.find_on_map", self._toggle_map_search, "view.find_on_map")
-        # v1.1.1 (item 5): show/hide the WHOLE sidebar; v1.2.4.1 (task 3): the item
-        # becomes an expanded<->collapsed toggle (checked = expanded) — ONE
-        # "collapse into a thin strip" mechanism for both panels: clicking the item, the corner
-        # button, and the collapsed panel's strip all go through one QAction (toggle() -> toggled).
-        # Connecting to toggled(bool), not triggered — the v1.2.4-fix pattern on
-        # act_multi_input (PySide6 6.11: the auto-connection addAction(text, slot) emits
-        # triggered WITHOUT state; an explicit connect passes the new state and fires
-        # on a programmatic setChecked — the checkbox and the mechanism stay in sync).
+        # Show/hide the WHOLE sidebar as an expanded↔collapsed toggle (checked = expanded) — ONE
+        # "collapse into a thin strip" mechanism for both panels: the item, the corner button and
+        # the collapsed panel's strip all go through ONE QAction (`toggle()` → `toggled`).
+        # Connecting to `toggled(bool)`, not `triggered`, is the `act_multi_input` pattern:
+        # PySide6 6.11 emits `triggered` WITHOUT state from `addAction(text, slot)`.
         self.act_show_sidebar = view_menu.addAction(
             self.t("view.toggle_sidebar") if self._i18n_available else "Sidebar / Map")
         self.act_show_sidebar.setCheckable(True)
@@ -3153,13 +3054,11 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         self._register_i18n(self.act_show_bookmarks, "view.toggle_bookmarks")
         self._register_hotkey_target("view.toggle_bookmarks", self.act_show_bookmarks)
         self._wire_view_toolbar_button("view.toggle_bookmarks", self.act_show_bookmarks)
-        # v1.5.2 (ROADMAP task 3): the ACTIVITY panel — the same "created manually +
-        # toggled(bool)" pattern and the same registry rule (an EMPTY default:
-        # assignable, no key taken from anyone). v1.6 (ROADMAP task 7): it JOINS the
-        # toolbar's view cluster — the panel switches became the deliverable of that
-        # task, and the activity history is a surface a user glances at as often as the
-        # legend (the cluster is wired in `_setup_toolbar`, which runs before this
-        # method — the pair is joined here like the four toggles above).
+        # The ACTIVITY panel — the same "created manually + toggled(bool)" pattern and the same
+        # registry rule (an EMPTY default: assignable, no key taken from anyone). It JOINS the
+        # toolbar's view cluster (`_setup_toolbar` runs before this method, so the pair is joined
+        # here like the four toggles above): the activity history is a surface a user glances at as
+        # often as the legend.
         self.act_show_activity = view_menu.addAction(
             self.t("view.toggle_activity") if self._i18n_available else "Activity panel")
         self.act_show_activity.setCheckable(True)
@@ -3170,7 +3069,7 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         self._register_hotkey_target("view.toggle_activity", self.act_show_activity)
         self._wire_view_toolbar_button("view.toggle_activity", self.act_show_activity)
         # v1.2.4.1 (task 2): corner collapse buttons — the same QAction (toggle()).
-        # v1.2.4.1-fix (QA request): the icon — a "◇" diamond on both panels, both
+        # the icon — a "◇" diamond on both panels, both
         # at the bottom right (the sidebar's bottom row / the map's right BOTTOM corner — the top is
         # reserved for the minimap per the new discussions).
         self.sidebar.collapse_btn.setIcon(_diamond_icon())
@@ -3202,24 +3101,16 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
                               "view.set_background")
         self._add_menu_action(view_menu, "view.remove_background", self._remove_background_image,
                               "view.remove_background")
-        # v1.2.3 (ROADMAP tasks 2/3): multi-input — a checkable item; F12 = EXIT from
-        # the mode (not Esc — that goes to the shell as \x1b!). ApplicationShortcut: the key
-        # is caught regardless of where the focus is (map / terminal window / dock). While
-        # the mode is off, the QAction has NO shortcut (QKeySequence() is empty; QAction
-        # does not have setShortcutEnabled) — F12 goes to the shell as \x1b[24~ (the RC2
-        # mapping of TerminalWidget); in the mode, _on_multi_changed attaches F12 and the mapping is paused.
+        # Multi-input — a checkable item; F12 = EXIT from the mode (not Esc — that goes to the shell as
+        # `\x1b!`). `ApplicationShortcut`: the key is caught regardless of where the focus is (map /
+        # terminal window / dock). While the mode is off the QAction has NO shortcut (`QKeySequence()` is
+        # empty; a QAction has no `setShortcutEnabled`), so F12 goes to the shell as `\x1b[24~`; in the mode
+        # `_on_multi_changed` attaches F12 and the canvas mapping is paused.
         view_menu.addSeparator()
-        # v1.2.4-fix (root cause of the "menu item does not work" incident): the item is
-        # NOT created via _add_menu_action — its auto-connection QMenu.addAction(text, slot) in
-        # PySide6 6.11 emits QAction.triggered into the Python slot WITHOUT arguments (empirically:
-        # an explicit .triggered.connect passes the new state, the auto-connection does not),
-        # and disconnect() CANNOT remove such a connection (RuntimeWarning,
-        # the internal adapter) — the slot would remain dangling. checked=None fell into the
-        # no-op branch: the mode could not be turned on or off from the menu at all (only the
-        # checkbox moved; F12 was silent too — the shortcut is attached only in the active mode).
-        # Therefore the QAction is created manually and connected to toggled(bool) — it carries
-        # the new state (and fires on a programmatic setChecked: the checkbox and the hub stay
-        # in sync). Regression: tests/test_menu_actions_regression.py.
+        # The item is NOT created via `_add_menu_action`: its auto-connection
+        # (`QMenu.addAction(text, slot)`) fires `triggered` into the Python slot WITHOUT arguments
+        # in PySide6 6.11, and `disconnect()` cannot remove such a connection — so the QAction is
+        # built manually and connected to `toggled(bool)`, which carries the state and stays in sync.
         self.act_multi_input = view_menu.addAction(self.t("view.multi_input"))
         self._register_i18n(self.act_multi_input, "view.multi_input")
         self.act_multi_input.setCheckable(True)
@@ -3242,16 +3133,11 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         self.act_settings = self._add_menu_action(
             settings_menu, "settings.open", self._open_settings_dialog)
 
-        # ── v1.4rc1 (plugin foundation, rc series): the "Plugins" menu ─────
-        # BETWEEN "Settings" and "Help" (next to the settings hub). The manager holds
-        # the records, this menu renders them: one checkable row per discovered plugin
-        # (the enable/disable switch — persisted in `plugins` of config.json) plus
-        # "Reload" (a re-discovery of the folder: new/changed ~/.sshmap/plugins/*.py are
-        # picked up without a restart). The rows are rebuilt on aboutToShow (the
-        # v1.3.3.1 language-submenu pattern) and created MANUALLY with an explicit
-        # toggled(bool) connection (gotcha #10: a checkable item must not use the
-        # `QMenu.addAction(text, slot)` auto-connection); "Reload" is an ordinary
-        # registry action, so the keyboard can reach it like any other menu item.
+        # ── the "Plugins" menu ──────────────────────────────────────────────
+        # BETWEEN "Settings" and "Help". The manager holds the records, this menu renders
+        # them: one checkable row per discovered plugin (the enable/disable switch — persisted
+        # in `plugins` of config.json) plus "Reload"; the rows are rebuilt on aboutToShow and
+        # created MANUALLY with an explicit toggled(bool) — `PLUGINS.md`, `DOCUMENTATION.md` §33.
         self._plugin_menu = menubar.addMenu(
             self.t("menu.plugins") if self._i18n_available else "Plugins")
         self._register_i18n(self._plugin_menu, "menu.plugins")
@@ -3294,12 +3180,10 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
                                                "help.about")
 
         # Language submenu (i18n)
-        # v1.3.3.1 (ROADMAP task 3): the submenu is no longer frozen at construction —
-        # it is (re)built from get_available_languages() every time it is ABOUT TO BE
-        # SHOWN (aboutToShow), so an i18n/<code>.json dropped in afterwards appears
-        # without a restart. An explicit "Rescan the language files" item makes the
-        # behaviour discoverable (and re-reads the ACTIVE file, so an edited
-        # translation is picked up too). See _build_language_menu()/_reload_languages().
+        # The submenu is not frozen at construction: it is (re)built from `get_available_languages()`
+        # every time it is ABOUT TO BE SHOWN (aboutToShow), so an `i18n/<code>.json` dropped in
+        # afterwards appears without a restart. An explicit "Rescan the language files" item makes the
+        # behaviour discoverable and re-reads the ACTIVE file — `_build_language_menu()`.
         if self._i18n_available:
             try:
                 self._lang_menu = help_menu.addMenu(self.t("lang.menu"))
@@ -3316,19 +3200,11 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         # v0.9.2: the command palette (Ctrl+K) — a fuzzy search over actions and servers.
         self._setup_command_palette()
 
-        # ── v0.9.8 bugfix (PySide6 6.11, shiboken): a guard for QActions with menus ──
-        # Verified empirically (regression_v098 probes, offscreen AND native Windows):
-        # when the Python wrapper of a QAction with an ATTACHED QMenu dies
-        # (GC of a temporary object from menubar.actions()/act.menu()), PySide6 destroys
-        # the C++ QMenu object behind it together with its entire contents. Without the
-        # guard, opening the palette (Ctrl+K) or a language switch killed ALL menus
-        # except the last one (the palette walks menubar.actions() with temporary wrappers).
-        # PySide6 caches the wrappers (a repeat access — the same object), so keeping
-        # all such QActions in self._qaction_guard makes them immortal, and therefore
-        # the attached QMenus live on. This fixes both _switch_language and the palette,
-        # and any future code that walks menus via action.menu().
-        # v1.3.3.1: the language submenu is now REBUILT on aboutToShow — the helper is
-        # called again after every rebuild, so the fresh QActions are guarded too.
+        # ── a guard for QActions with menus (PySide6 6.11 / shiboken) ──
+        # When the Python wrapper of a QAction with an ATTACHED QMenu dies (GC of a temporary from
+        # menubar.actions()/act.menu()), PySide6 destroys the C++ QMenu behind it with everything
+        # in it — opening the palette or switching the language would kill all but the last menu.
+        # Keeping those QActions in `self._qaction_guard` makes them immortal, so the menus live on.
         self._rebuild_qaction_guard()
 
     def _rebuild_qaction_guard(self):
@@ -3441,12 +3317,11 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         if self.log:
             self.log.info(f"i18n language files rescanned (active={self.current_language!r}, ok={ok})")
 
-    # ── v1.4rc1 (plugin foundation, rc series): the "Plugins" menu ──────────────
-    # The manager (modules/plugin_manager.py) reports FACTS — records and events; the
-    # window turns them into a menu and into status-bar lines. This is the rc1 half of
-    # the frozen API v1 contract (PLUGINS.md): discovery + manager + the enable/disable
-    # switch. The hooks themselves (commands, the context menu, status probes, running
-    # on selected servers) are rc2/rc3 — nothing here calls into a plugin.
+    # ── the "Plugins" menu ──────────────
+    # The manager (`modules/plugin_manager.py`) reports FACTS — records and events; the window turns
+    # them into a menu and into status-bar lines. This is the half of the frozen API v1 contract
+    # (`PLUGINS.md`) that owns discovery + manager + the enable/disable switch; the hooks themselves
+    # (commands, the context menu, status probes, running on selected servers) are the other half.
 
     def start_plugin_discovery(self):
         """Discover the plugins — called ONCE from main.py, after show(), before app.exec().
@@ -3521,7 +3396,7 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
                     act.setChecked(rec.ok)
                     act.setToolTip(self._plugin_tooltip(rec))
                     try:  # v1.4rc3: the puzzle glyph (a menu of plugins reads as one family)
-                        set_action_icon(act, "plugin")  # v1.4.3-fix: follows the theme too
+                        set_action_icon(act, "plugin")  # follows the theme too
                     except Exception:  # noqa: BLE001 — the icon is cosmetic
                         pass
                     if rec.failed:
@@ -3891,12 +3766,12 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
             self._reject_collapse_both("map")
 
     def _reject_collapse_both(self, which: str):
-        """v1.2.4.1-fix (QA request): refuse to collapse the SECOND panel.
+        """refuse to collapse the SECOND panel.
 
         All three control paths converge on a checkable QAction, and on refusal Qt has
         already inverted checked (or a programmatic setChecked did) — the checkbox is
         restored to the actual state with signals blocked (the
-        v1.2.4-fix pattern: the checkbox and the mechanism stay in sync) + a status-bar hint.
+        pattern: the checkbox and the mechanism stay in sync) + a status-bar hint.
         """
         act = getattr(self, "act_show_sidebar" if which == "sidebar" else "act_show_map", None)
         if act is not None:
@@ -3929,7 +3804,7 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         is persistent: ui_sidebar_collapsed / ui_map_collapsed in config.json
         (a merge-write via i18n.save_config) — it survives a restart.
 
-        v1.2.4.1-fix (QA request): both panels SIMULTANEOUSLY collapsed are
+        both panels SIMULTANEOUSLY collapsed are
         NOT ALLOWED — at least one (the sidebar or the map) is always expanded, otherwise
         the window is a "shell" of two strips (even with the "Terminals" dock open).
         Collapsing the second panel is forbidden for ALL control paths (button/strip/menu/
@@ -3937,8 +3812,8 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
 
         v1.4.5 (ROADMAP task 5): the collapsed container is capped at the strip width
         (`setMaximumWidth`) and the divider handle is DISABLED while a panel is a strip —
-        the drift fix (a collapsed container used to be pinned only by `minimumWidth`,
-        so the handle could stretch it into empty space). Both invariants are applied by
+        `minimumWidth` alone would let the handle stretch it into empty space. Both
+        invariants are applied by
         `_sync_splitter_handle()` at the END of this method, so every control path and
         every resize source (handle, window resize, dock, state restore) agrees.
 
@@ -4116,8 +3991,7 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
 
         v1.4.5 (ROADMAP task 5): the collapsed container is ALSO capped at the strip
         width (`setMaximumWidth`) — with only `minimumWidth` + `setSizes` a later
-        resize (the window, the dock, the handle) could stretch the strip again, which
-        is exactly the drift this release fixes.
+        resize (the window, the dock, the handle) would stretch the strip again.
         """
         w_strip = _CollapseStrip.STRIP_WIDTH
         container = self._sidebar_container if which == "sidebar" else self._map_container
@@ -4169,9 +4043,8 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
     def _position_map_collapse_btn(self):
         """v1.2.4.1 (task 2): the map collapse button — the right BOTTOM corner of the MapView.
 
-        v1.2.4.1-fix (QA request): it used to be in the right TOP corner — now at the bottom
-        (the diamond is "at the bottom" both before and after collapsing); the top is
-        reserved for the minimap per the new discussions. Repositioned on resizeEvent
+        The bottom corner, never the top (the diamond reads "at the bottom" in both
+        states); the top is reserved for the minimap. Repositioned on resizeEvent
         (the MapView.resized signal: a window resize, a splitter-handle drag,
         a "Terminals" dock size change) and whenever a scrollbar appears or disappears
         (their `rangeChanged` — the viewPORT is what the corner is measured against).
@@ -4184,8 +4057,8 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         USER's panel position always wins over the window's own button.
 
         v1.5.6 (customer request): the corner is the VIEWPORT's, not the view's. The view's
-        own rect INCLUDES the frame and the scrollbars, so the button used to be drawn ON
-        TOP of the sliders; `viewport().geometry()` already excludes both. The extra
+        own rect INCLUDES the frame and the scrollbars, which would put the button ON
+        TOP of the sliders; `viewport().geometry()` excludes both. The extra
         `COLLAPSE_BTN_RAISE` lifts it out of the very corner, so the two collapse buttons
         (the sidebar's bottom row and this overlay) sit at visibly different levels.
         """
@@ -5550,7 +5423,7 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         ServerNode.reveal_flash flash frame (the set_status pulse pattern).
         """
         if node is None or node.scene() is None:
-            return  # the node was removed while the menu was open
+            return  # the node is gone (deleted while the menu was open)
         self._select_node(node, center=True, smooth=True)
         flash = getattr(node, "reveal_flash", None)
         if callable(flash):
@@ -5984,8 +5857,8 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
     def _position_minimap(self):
         """v1.4.2: the panel in the TOP-RIGHT corner of the map (12 px inset).
 
-        The top of the map was reserved for the minimap as early as the v1.2.4.1-fix
-        comment (the map-collapse diamond sits in the BOTTOM-right corner). While the
+        The top of the map belongs to the minimap (the map-collapse diamond sits in the
+        BOTTOM-right corner). While the
         search bar is OPEN the panel moves BELOW it, so the two floating panels cannot
         overlap on a narrow window.
 
@@ -6011,12 +5884,11 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
             if position is not None:
                 width = int(mini.width())
                 last_width = int(getattr(self, "_minimap_width", 0) or 0)
-                # v1.5rc5 (N6): a saved position is the top-left of the EXPANDED panel, so a
-                # fold used to keep that left corner while the width shrank by BODY_WIDTH and
-                # threw the title band — the collapse affordance itself — 200 px off the RIGHT
-                # edge it hangs from. The right edge is what the panel is anchored to, so it is
-                # kept in BOTH states by shifting the remembered x by the width delta (ONE
-                # attribute; the saved `{x, y}` keeps its meaning — no config-schema change).
+                # A saved position is the top-left of the EXPANDED panel; a fold keeps that left corner
+                # while the width shrinks by BODY_WIDTH, which would throw the title band — the collapse
+                # affordance itself — off the RIGHT edge it hangs from. The right edge is what the panel is
+                # anchored to, so it is kept in BOTH states by shifting the remembered x by the width delta
+                # (ONE attribute; the saved `{x, y}` keeps its meaning — no config-schema change).
                 if last_width > 0 and last_width != width:
                     self._minimap_pos = QPoint(int(position.x()) + (last_width - width),
                                                int(position.y()))
@@ -6169,21 +6041,19 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
     # ── v1.5.6 (customer request): the map collapse button keeps out of the corner ──
 
     #: The inset of the map's collapse button from the VIEWPORT's bottom-right corner.
-    #: The viewport already excludes the frame AND the scrollbars (the button used to be
-    #: placed in the VIEW's corner, i.e. on top of the sliders), and the extra raise lifts
+    #: The viewport already excludes the frame AND the scrollbars (the VIEW's corner would
+    #: put the button on top of the sliders), and the extra raise lifts
     #: it out of the very corner so the two collapse buttons sit at different levels.
     COLLAPSE_BTN_MARGIN = 8
     COLLAPSE_BTN_RAISE = 1
 
     # ── v1.5 (ROADMAP): the floating panels re-attach by dropping on an edge ──────
 
-    #: How close a dropped panel's edge must land to the VIEW edge it is anchored to
-    #: before the drop counts as "put me back": twice the 12 px default margin. A drag is
-    #: otherwise PERMANENT — the saved position wins over the corner for good, hiding and
-    #: showing a panel does not clear it — so this threshold is the ONE way back to the
-    #: documented corner that needs no hand-edited `config.json`. An explicit "Reset panel
-    #: positions" action was considered and REJECTED: the snap is the way back, and the
-    #: step therefore costs no new i18n key, no new menu entry and no new hotkey.
+    #: How close a dropped panel's edge must land to the VIEW edge it is anchored to before the drop
+    #: counts as "put me back": twice the 12 px default margin. A drag is otherwise PERMANENT — the
+    #: saved position wins over the corner for good, and hiding/showing a panel does not clear it — so
+    #: this threshold is the ONE way back to the documented corner that needs no hand-edited
+    #: `config.json`. An explicit "Reset panel positions" action was considered and REJECTED.
     SNAP_PX = 24
 
     def _snap_panel(self, panel, position, edges: str) -> bool:
@@ -6492,15 +6362,11 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
             return  # Qt teardown — the action is already destroyed
         self._sync_view_toolbar("view.toggle_activity", False)
 
-    # ── v1.6.7 (ROADMAP task 4): the bookmarks panel ─────────────────────────────
-    # The application-level list of the links the team uses (a wiki, a dashboard, a
-    # hypervisor's console, the ticket queue). The STORE is `modules/bookmarks.py` (ONE
-    # `~/.sshmap/bookmarks.json`, outside every project); the PANEL is
-    # `ui/bookmark_panel.py`; the EDITOR is `dialogs/bookmark_edit_dialog.py`; and the
-    # OPENER is the quick launch's own URL path (`SshMixin._quick_launch_url`) handed to the
-    # panel as a callback, so the browser, its failure sentence and its status line keep ONE
-    # home. The window owns nothing but the visibility key, the saved position and the fold —
-    # the legend / minimap precedent.
+    # ── the bookmarks panel ──────────────────────────────────────────────────────
+    # The application-level list of the links the team uses. The STORE is `modules/bookmarks.py`
+    # (ONE `~/.sshmap/bookmarks.json`, outside every project), the PANEL `ui/bookmark_panel.py`,
+    # the EDITOR `dialogs/bookmark_edit_dialog.py`, the OPENER the quick launch's own URL path;
+    # the window owns only the visibility key, the saved position and the fold (`AGENTS.md` §4.23).
 
     #: The inset of the DEFAULT (top-left) position — the plaque's own margin. The plaque
     #: owns the corner and the panel STEPS BELOW it instead of fighting for the pixels (the

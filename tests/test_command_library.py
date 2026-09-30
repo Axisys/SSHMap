@@ -1,48 +1,11 @@
 # -*- coding: utf-8 -*-
-"""v1.3 — "Terminal macros": a command/script library in the terminal panel (ROADMAP v1.3).
+"""Terminal macros: the command/script library of the terminal panel.
 
-The thematic test of the release v1.3 (the "new thematic file" convention): offscreen,
-ALL without the network — the fake threads with the same API as SSHTerminalThread (the test seam
-ST.SSHTerminalThread), the explicit store paths under WORK, the QMessageBox/dialog — the monkeypatch
-of the attributes of the module command_library.
+Offscreen, NO network (the fake threads + the monkeypatched dialog attributes). Pins the store
+(its explicit paths under WORK), the panel and the dialog, and the ONE `send_macro()` path the
+macros and the history tab share. Contract — `DOCUMENTATION.md` §14e.
 
-§1 CommandLibraryStore: the first run — 5 the seeds + seeded:true; the round-trip save/load;
-   a broken file → an EMPTY library without exceptions and WITHOUT the reseed; a foreign top
-   type (an array) → []; the invalid records are dropped one by one; after the removal of all
-   commands the file is not reseeded.
-
-§2 build_macro_payload (a pure function): the single-line — raw + \n; the multi-line —
-   the bracketed-paste wrapper with a guaranteed terminating \n (without a double); the CRLF/CR
-   is normalized to \n; the empty text → b"".
-
-§3 send_macro (widget/page): the exact bytes into the channel (the single-line, the multi-line);
-   a dead channel (closed=True) → False + 0 bytes; terminal_thread=None → False.
-
-§4 The container window: the central widget — the QSplitter [cmdlib_panel | session_tabs],
-   setCollapsible(False) on both sides; the collapse by the button → the config true; a new
-   window starts collapsed by the config; the click on the strip → expanded + false;
-   persist=False does not write the config.
-
-§5 The container dock: the same structure; ONE key ui_cmdlib_collapsed shared with the window
-   (the dock honors the state written by the "window").
-
-§6 The send via the panel: the double click — the exact bytes + the status sent_to({alias});
-   Enter — the same; a disabled record → 0 bytes and silence; no the active session
-   (the panel without tabs / an empty QTabWidget) → the status no_active_session without exceptions;
-   a dead channel → no_active_session.
-
-§7 The search: by the name and the text of the command, case-insensitive; a category without matches
-   is hidden; "no matches" — the info label; an empty library — the info label.
-
-§8 The CRUD: the add/edit via the dialog (the stub exec), the duplicate/toggle/copy/delete — the actions
-   of the context menu (the test seam _build_context_menu without exec()); the delete with
-   the confirmation Yes/No (the monkeypatch of the QMessageBox); the OK of the dialog is disabled until there is no
-   name+command; by a category all the actions are disabled.
-
-§9 The i18n parity (446 = 427 + 19: terminal.cmdlib.*) + the release state (the pin _common.py).
-
-Run:  python tests/test_command_library.py   (from the project root) or python tests/run_all.py
-"""
+Run: python tests/test_command_library.py   (from the project root) or python tests/run_all.py"""
 import json
 import os
 import sys

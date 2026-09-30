@@ -1,30 +1,12 @@
 # -*- coding: utf-8 -*-
 """v1.1.2RC2 — Map, import, sidebar (release theme).
 
-ROADMAP v1.1.2RC2 (the AUDIT §5 items, verified on v1.1.1):
-  N3    MapView: the reset of the drag state on the loss of focus/activation (the focusOutEvent
-         "blur" + changeEvent ActivationChange — there is no separate blurEvent for a QWidget):
-         if _move_drag_node is set or
-         dragMode()==NoDrag → ScrollHandDrag + the cleanup of _move_drag_node/
-         _group_drag_olds. Before, the only reset — mouseReleaseEvent; the stickiness path — the loss
-         of the capture (Alt+Tab in the middle of a drag).
-  N6    the import from TXT: the DNS resolve outside the GUI thread — the batch resolve_host() in
-         HostResolverThread (QThread, the _ProbeThread pattern) with the progress in the
-         status bar; a file with dozens of names on an unreachable resolver does not
-         freeze the interface. IP addresses do not need the resolve — synchronously.
-  N8/N9 the dead code of the sidebar: item.setForeground(0, windowText()) (a visual
-         no-op under the "tags in gray" comment) and setItemData(QColor,
-         Qt.DecorationRole) (the standard style reads DecorationRole as a QIcon)
-         — removed, the comments corrected.
-  N10   the i18n key msg.confirm_delete_profile × en/ru/zh: the confirmation of the PROFILE deletion
-         is no longer the server's msg.confirm_delete ("Delete server ...?").
-         The release parity 373 → 375 (with v1.1.2 final — 377): +N10 (msg.confirm_delete_profile) and +N6
-         (status.import_resolving — the resolve progress in the status bar).
-  U1    the buttons of the sidebar are left-aligned: the offset from the left edge, the icon,
-         the text (the users' remark; before — the central alignment by default).
-
-Run: python tests/test_rc2_map_import_sidebar.py   (from the project root) or python tests/run_all.py
-"""
+The release's thematic test, offscreen and without the network.
+N3 `MapView` resets the drag state when focus or activation is lost (the `FocusOut` "blur" plus
+`changeEvent(ActivationChange)` — a QWidget has no separate `blurEvent`): with `_move_drag_node` set or
+`dragMode() == NoDrag` it restores `ScrollHandDrag` and clears `_move_drag_node` / `_group_drag_olds`, so
+the capture lost mid-drag (Alt+Tab) no longer leaves the view stuck.
+N6 the TXT import resolves DNS OFF the GUI thread (`HostResolverThread`, the `_ProbeThread` pattern) with the progress in the status bar, so a file of dozens of names and an unreachable resolver never freeze the interface; IP addresses skip the resolve. N8/N9 the sidebar's dead code is gone (`item.setForeground(0, windowText())` was a no-op and a `DecorationRole` QColor is read as a QIcon). N10 `msg.confirm_delete_profile` gives the PROFILE deletion its own sentence instead of the server's `msg.confirm_delete`, with `status.import_resolving` as the second new key. U1 the sidebar buttons are left-aligned (the offset, the icon, the text) as the users asked."""
 import os
 import sys
 import threading

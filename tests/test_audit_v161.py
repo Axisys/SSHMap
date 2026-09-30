@@ -1,33 +1,12 @@
 # -*- coding: utf-8 -*-
 """v1.6.1 — the review batch (hardening): the shipped facts, the guards and the leftovers.
 
-The first follow-up of the 1.6 line is a HARDENING slot in the v1.5rc5 shape: every task of it
-is a defect or a guard — no new feature, no new dependency, no new colour, no schema move and
-NO i18n key (the parity pin stays 778 and not one language file is touched). The ledger with
-the probes is `AUDIT_PENDING.md` (`N9`–`N22`); this file is the regression of every one of them.
-
-  §1  N9  — the external terminal opens on macOS: the AppleScript `-e` SOURCE is an AppleScript
-            double-quoted literal (the POSIX `_sh_quote()` cannot compile there) and the
-            `osascript` path reports what the interpreter DID instead of assuming success.
-  §2  N10 — the no-i18n fallback literals equal `en.json`, and the FOURTH part of
-            `tests/check_i18n_keys.py` keeps them there: the walk is RED on each of the six
-            pre-fix drifts handed to it as a synthetic source.
-  §3  N11 — the string annotations resolve (a hermetic AST gate) and `pyflakes` reports no
-            `undefined name`; the only reports left are the documented `_st_module()` seams.
-  §4  N12/N13/N14/N15/N16 — the writers, the readers and the report survive a broken value:
-            no `*.tmp` after a failed write, a REAL bool out of `autosave_enabled`, a language
-            file that is not valid UTF-8 falls back instead of raising, and `dedup_entries()`
-            counts only the entries it really folded.
-  §5  N17 — the log survives a GUI launch without a console (`pythonw.exe`: BOTH streams None).
-  §6  N18 — the profile mask does not follow the length of the stored password.
-  §7  N19 — the toolbar's right-click menu names every row it lists.
-  §8  N20 — a shown session owns the keyboard; a SPLIT PANE deliberately does not take it.
-  §9  N21 — the quick-launch editor REPLACES a selected row in place and can reorder entries.
-  §10 N22 — the CPU model sits on the CPU line and the info block keeps its line COUNT.
-  §11 the release state (version, i18n parity — NO new key).
-
-Run: python tests/test_audit_v161.py   (from the project root) or python tests/run_all.py
-"""
+A HARDENING slot in the v1.5rc5 shape: every task is a defect or a guard — no new feature, no new
+dependency, no new colour, no schema move and NO i18n key. The ledger with the probes is
+`AUDIT_PENDING.md` (`N9`–`N22`) and this file is the regression of every one of them.
+§1 N9 the external terminal opens on macOS (an AppleScript literal, `osascript` reporting what it DID);
+§2 N10 the no-i18n fallback literals equal `en.json` and the fourth part of `check_i18n_keys.py` holds
+them there; §3 N11 the string annotations resolve (a hermetic AST gate) and `pyflakes` reports no undefined name beyond the documented `_st_module()` seams; §4 N12–N16 the writers, the readers and the report survive a broken value; §5 N17 the log survives a GUI launch without a console; §6 N18 the profile mask; §7 N19 the toolbar's right-click menu; §8 N20 a shown session owns the keyboard (a split pane does not take it); §9 N21 the quick-launch editor; §10 N22 the CPU line; §11 the release state."""
 import ast
 import builtins
 import json

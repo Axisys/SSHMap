@@ -1,25 +1,15 @@
-"""ProjectIOMixin — the "project: create/open/save/autosave/backups" cluster.
+"""`ProjectIOMixin` — the "project: create / open / save / autosave / backups" cluster (AGENTS.md §4.1).
 
-v1.1.4 (ROADMAP v1.1.4, task 1): moved out of ui/main_window.py as part of
-the "main_window.py hygiene" series. "Module + callbacks" pattern
-(precedents: v0.9.9.4 sidebar, v0.9.9.3 diagnostics): the mixin holds only
-methods, MainWindow remains the facade, the public API is unchanged; method
-names and call sites were not touched.
+Methods only: `MainWindow` stays the facade and the public API is unchanged (the "module + callbacks"
+pattern of `ui/sidebar.py` / `services/diagnostics.py`). The mixin does NOT import the window module
+(cycle) — it duck-types the instance.
 
-Ownership of shared state (AUDIT §3, pinned by this comment):
-  * ``self._project_file`` — path of the open project file (None = new, unsaved);
-  * ``self._dirty`` — unsaved-changes marker (" [*]" in the title);
-  * ``self._autosave_timer`` — the autosave QTimer (created in
-    MainWindow.__init__, tick — ``_autosave_tick`` below).
-The mixin does NOT import ui.main_window (cycle) — duck-typing on the
-instance only.
+Shared state it owns (the audit's ownership rule): `self._project_file` (the path of the open project, or
+`None` for a new unsaved one), `self._dirty` (the unsaved-changes marker behind the title's " [*]") and
+`self._autosave_timer` (created in `MainWindow.__init__`, ticking into `_autosave_tick`).
 
-v1.3.3.6 (ROADMAP "Projects: open, recover, remember"):
-  * the RECENT list (``recent_projects`` in config.json — see ``_recent_projects``);
-  * the recovery path of an UNREADABLE project file (``_recover_unreadable_project``):
-    the backup ring + the autosave are consulted automatically, but NOTHING is
-    written without an explicit "Restore" click.
-"""
+The cluster also owns the RECENT list (`recent_projects` in `config.json`) and the recovery path of an
+UNREADABLE project file (`_recover_unreadable_project`): the backup ring and the autosave are consulted automatically, but NOTHING is written without an explicit "Restore" click."""
 import os
 
 from PySide6.QtWidgets import QMessageBox, QFileDialog
@@ -240,7 +230,7 @@ class ProjectIOMixin:
                 if self.log:
                     self.log.warning("Skipping broken connection record on load", extra={"error": str(e)})
                 continue
-            # v1.0-fix (audit #9): add_connection returns None both for a
+            # add_connection returns None both for a
             # duplicate and for unknown node ids — earlier broken references
             # were dropped without a trace; now there is a warning in the log
             # (a duplicate is a normal case — not logged).
@@ -274,14 +264,11 @@ class ProjectIOMixin:
             except (TypeError, ValueError):
                 continue
             self._connect_note_signals(note)
-            # v1.2.4 (D8): pinned notes — optional "server_id" field.
-            # Old files without the key → free notes; a broken reference
-            # (node missing / not a string) → a warning in the log + the note
-            # is free at its saved position. No undo command: the stack is
-            # reset after the import (_reset_undo_stack).
-            # v1.2.4-fix: the saved x/y of a pinned note is TRUSTED (it can be
-            # moved with the mouse) — the offset from the anchor is computed
-            # from it, so the note stays where it was left (keep_position=True).
+            # Pinned notes: the optional "server_id" field. A file without the key → free notes;
+            # a broken reference (node missing / not a string) → a log warning + the note is free
+            # at its saved position. No undo command: the stack is reset after the import
+            # (`_reset_undo_stack`). The saved x/y of a pinned note is TRUSTED (it can be moved
+            # with the mouse) — the offset from the anchor is computed from it (`keep_position=True`).
             sid = raw_note.get("server_id")
             if isinstance(sid, str) and sid:
                 srv = self.scene.get_node(sid)
@@ -323,13 +310,11 @@ class ProjectIOMixin:
             return
         self._load_project_at(path)
 
-    # ── v1.3.3.6 (ROADMAP task 1): Recent projects (MRU) ────────────────────
-    #
-    # Storage — the `recent_projects` key of ~/.sshmap/config.json (merge-write, like
-    # every other settings key). The list is the raw material of the "File → Recent"
-    # submenu: it is pruned on READ (a project moved or deleted on disk must not leave
-    # a dead entry behind) and every read rebuilds it from the config, so the menu and
-    # the config can never drift apart.
+    # ── Recent projects (MRU) ───────────────────────────────────────────────
+    # Storage — the `recent_projects` key of `~/.sshmap/config.json` (merge-write, like every other
+    # settings key). The list is the raw material of the "File → Recent" submenu: it is pruned on READ
+    # (a project moved or deleted on disk must not leave a dead entry behind) and every read rebuilds it
+    # from the config, so the menu and the config can never drift apart (`AGENTS.md` §4.1).
 
     def _recent_projects(self) -> list:
         """The MRU list: newest first, deduplicated, capped, missing files pruned.
@@ -521,12 +506,11 @@ class ProjectIOMixin:
                 if self.log:
                     self.log.warning(f"Failed to restore view state: {e}")
 
-            # v0.7.1: right after the load — an immediate status check round
-            # v1.6.6 (ROADMAP task 3): ... UNLESS the checker is in the MANUAL-only mode.
-            # Opening a project is not "check my servers now", and a user who asked for manual
-            # only must not get traffic from File → Open: the checker answers the ONE predicate
-            # (`manual_only`), so this guard and `StatusChecker.start()` can never disagree, and
-            # the manual doors ("Check statuses now" and the node context menu) are untouched.
+            # Right after the load — an immediate status check round ... UNLESS the checker is in the
+            # MANUAL-only mode. Opening a project is not "check my servers now", and a user who asked for
+            # manual only must not get traffic from File → Open: the checker answers the ONE predicate
+            # (`manual_only`), so this guard and `StatusChecker.start()` can never disagree, and the manual
+            # doors ("Check statuses now" and the node context menu) are untouched.
             checker = getattr(self, "_status_checker", None)
             if (checker is not None and not checker.is_busy
                     and not getattr(checker, "manual_only", False)):
@@ -767,13 +751,11 @@ class ProjectIOMixin:
 
     def _do_save(self, path: str) -> bool:
         """Save the project to a file. Passwords go to the keyring (the JSON has only the rest)."""
-        # v1.3.3.1 (ROADMAP task 6): FLUSH the pending note-text debounce FIRST.
-        # The bug found by the v1.3.3 audit: typing in a note and pressing Ctrl+S
-        # inside the 600 ms debounce wrote the new text to the JSON (to_dict() reads
-        # the LIVE text) and THEN the pending CmdEditTextNote landed on the FRESH
-        # undo stack — the title showed unsaved changes right after a save, and
-        # Ctrl+Z reverted text that was already on disk. Committing here pushes the
-        # command BEFORE the stack is reset (a new baseline), so the state is clean.
+        # FLUSH the pending note-text debounce FIRST: with text typed inside the 600 ms window, `to_dict()`
+        # reads the LIVE text and the new text would reach the JSON while the pending `CmdEditTextNote`
+        # landed on the FRESH undo stack — the title showed unsaved changes right after a save, and Ctrl+Z
+        # reverted text already on disk. Committing here pushes the command BEFORE the stack is reset
+        # (a new baseline), so the state is clean (`AGENTS.md` §4.2).
         commit = getattr(self, "_commit_note_text", None)
         if callable(commit):
             try:

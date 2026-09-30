@@ -1,40 +1,16 @@
 # -*- coding: utf-8 -*-
-"""v1.1.2RC3 (AUDIT U2): saving/restoring window sizes.
+"""Saving and restoring window sizes, states and the main splitter (`AGENTS.md` §4.4, §6).
 
-User remark U2 ("saving window sizes, the main window and the terminal"):
-windows got a default size on every start (the main one — resize(1200, 850), the
-terminal — resize(800, 600)), and stretching did not survive a restart. Fix: on
-window close, saveGeometry()/saveState() are written to ~/.sshmap/config.json
-under a key; on start / window creation — they are restored.
-
-Keys (one per window, both values inside):
-  * ui_window_geometry_main      — the main window (MainWindow);
-  * ui_window_geometry_terminal  — the terminal windows (SSHTerminalWindow; all
-                                   terminals share the key — the last closed
-                                   one is remembered).
-
-v1.3.3.6 (ROADMAP task 4) adds a third, differently-shaped key:
-  * ui_splitter_state            — base64(QSplitter.saveState()) of the MAIN
-                                   window's [sidebar | map] divider. It is a plain
-                                   base64 STRING, not a {"geometry", "state"} object:
-                                   the value covers one splitter, one window. Saved
-                                   at the start of `closeEvent` next to the main
-                                   geometry and applied LAST on startup (after
-                                   `restoreState()` and the collapsed-panel state —
-                                   a collapsed panel keeps its strip).
-
-The key value — a JSON object {"geometry": <base64>, "state": <base64>}:
-  * geometry — the QByteArray saveGeometry() (window position + size);
-  * state    — the QByteArray saveState() (QMainWindow state: maximized/normal,
-               the docks/toolbars layout).
-
-QByteArray is not directly JSON-serializable → base64. restoreGeometry()/
-restoreState() take a QByteArray back (a symmetric pair of Qt APIs).
-
-Headless-friendly and teardown-robust: both functions NEVER raise — no key /
-a broken value / a C++ object RuntimeError → no-op + False. Saving/restoring
-geometry must not break the application start or close.
-"""
+On close, `saveGeometry()` / `saveState()` are written to `~/.sshmap/config.json`; on start and on
+window creation they are restored. The keys:
+  * `ui_window_geometry_main` — the main window; `ui_window_geometry_terminal` — the terminal windows
+    (all of them share the key: the last closed one is remembered). Each value is a JSON object
+    `{"geometry": <base64>, "state": <base64>}` — the QByteArray pair of Qt's symmetric APIs (a
+    QByteArray is not JSON-serializable, hence base64; `state` carries maximized/normal and the
+    docks/toolbars layout);
+  * `ui_splitter_state` — `base64(QSplitter.saveState())` of the main window's [sidebar | map] divider:
+    a plain base64 STRING (one splitter, one window), saved next to the main geometry and applied LAST
+    on startup (after `restoreState()` and the collapsed-panel state); both never raise — no key, a broken value or a C++ RuntimeError is a no-op + False."""
 
 import base64
 
@@ -142,14 +118,11 @@ def restore_window_geometry(key: str, window) -> bool:
     return restored
 
 
-# ── v1.3.3.6 (ROADMAP task 4): the panel widths ──────────────────────────────
-# `saveState()` of a QMainWindow covers the dock/toolbar layout, NOT the inner
-# QSplitter of the central widget — the sidebar/map divider was the one piece of
-# window state that did not survive a restart (a dangling "see ROADMAP" reference
-# since v1.2.4.1). The key `ui_splitter_state` holds base64(splitter.saveState());
-# the shape is the `ui_window_geometry_*` pattern (base64 of a Qt QByteArray), so
-# a broken value is indistinguishable from "no key" — the caller keeps its
-# defaults. Never raises, exactly like the geometry pair above.
+# ── the panel widths ─────────────────────────────────────────────────────────
+# `saveState()` of a QMainWindow covers the dock/toolbar layout, NOT the inner QSplitter of the
+# central widget — the sidebar/map divider was the one piece of window state that did not survive
+# a restart. The key `ui_splitter_state` holds base64(splitter.saveState()), the
+# `ui_window_geometry_*` shape, so a broken value is indistinguishable from "no key".
 
 
 def splitter_state_b64(splitter) -> str:

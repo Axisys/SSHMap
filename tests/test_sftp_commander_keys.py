@@ -1,51 +1,11 @@
 # -*- coding: utf-8 -*-
-"""v1.7rc3 — Files Commander, step 3: the mc/far walk, the hint row and the preview of the other pane
-(ROADMAP v1.7rc3).
+"""The Files Commander, step 3: the mc/far walk, the hint row and the preview of the other pane.
 
-The topical file of the 1.7 line's THIRD release. rc1 shipped the pane MODEL, rc2 the copy/move
-family over it; this slot spends the second pane's BUTTON ROW on the keys that act on it, makes the
-two-pane view walkable without the mouse and shows a preview WHERE THE OTHER PANE IS — the classic
-commander's three faculties:
+Offscreen, NO network. Pins the pane-scoped key map (`Tab`/`Shift+Tab`, `Enter`, `Insert`/`Space`,
+`Backspace`, `Left`, `Esc`), the hint row the second pane spends its button line on, and the ONE
+preview that moves into the other pane. Contract — `SFTP_PANES.md`; mechanism — `DOCUMENTATION.md` §61.
 
-  §1 The HINT ROW: the SECOND pane hides the shipped button row (a commander has ONE button row —
-     the first pane's) and shows the key hints in that line; the FIRST pane keeps its buttons and
-     no hints; the shipped single-pane look is untouched. The row is ONE elided line (a narrow
-     pane or a long translation never reflows the listing), its tooltip carries the whole text,
-     every entry is built from `PANE_HINTS` over the SAME keys `PANE_SHORTCUTS` binds, and the
-     background colour of both rows is the historical one (the second pane is not repainted).
-  §2 The PANE TOGGLE: `Tab` and `Shift+Tab` move the ACTIVE pane AND the keyboard, in both
-     directions, and the walk is a CYCLE (neither key can leave the Files tab); with ONE pane the
-     toggle answers None (the shipped single-pane look keeps its tab order) and the container's
-     `focus_pane()` / `focus_other_pane()` are honest about a foreign pane.
-  §3 The WALK over a listing: `Enter`/`Return` on a directory row ENTERS it, on a file row opens
-     the preview (§6 — the other pane in the two-pane view) and on ".." goes one level up (exactly
-     the `F3` slot); `Insert` and
-     `Space` MARK the current row and step down (the mc/far mark — the tree's own selection, which
-     is what the rc2 batch reads), with no row they answer `sftp.cmd.no_selection`; `Backspace`
-     goes one level up; `Left` on a directory leaves it for its PARENT ROW instead of collapsing
-     it; a `Left` on a file row and an unmodified key like `Down` fall through to Qt. A listing
-     that came back with no current row puts the cursor on its FIRST navigable one.
-  §4 The KEYBOARD DOMAIN: the walk is reached from the ADDRESS BAR and from the hint row as well
-     as from the tree (the pane's `eventFilter`), the completer's popup keeps Qt's own `Tab`/`Enter`
-     completion, and a `Tab` in the pane queues NO worker task (the keys are pure view state).
-  §5 The MARK feeds the rc2 batch END TO END: two rows marked with `Insert` copy with ONE `F5`,
-     the conflict question is the shipped one and the batch lands BOTH files in the other pane.
-  §6 The PREVIEW OF THE OTHER PANE (the mc `F3`): a file opened in one pane is shown in the OTHER
-     pane's splitter while the reading pane keeps its cursor and the keyboard; the borrowed pane
-     gives up its address bar and its key row for as long as the panel is there; `Esc` closes the
-     preview from EITHER side (the tree and the address bar), puts the viewer back in its own pane
-     and restores the reading pane's rows; ONE preview exists at a time (a second file opened
-     while the other pane previews is refused with ONE sentence); opening a file always starts
-     from a clean look; the single-pane mode keeps the shipped in-pane panel.
-  §7 i18n + the release state: the nine keys of the slot are present and non-empty in EVERY
-     language, the hint row is really re-texted by `retranslate()`, and the version/format/deps
-     pins are the release's.
-
-ALL the checks are offscreen and without the network: the in-memory fake SFTP of `tests/_fakes.py`
-behind a real `SftpWorker` (the worker is the CONTAINER's — one transport, one queue, two panes).
-
-Run:  python tests/test_sftp_commander_keys.py   (from the project root) or python tests/run_all.py
-"""
+Run: python tests/test_sftp_commander_keys.py   (from the project root) or python tests/run_all.py"""
 import os
 import re
 import sys
@@ -750,8 +710,9 @@ check("the version pin is the release this file describes",
       re.fullmatch(r"1\.7(?:rc\d+|(?:\.\d+){1,2})?", EXPECTED_APP_VERSION) is not None,
       EXPECTED_APP_VERSION)
 check("the i18n pin counts the SHIPPED release (854 + the 9 keys of v1.7rc3"
-      " + the 4 of the v1.7.1 Files panel + the 3 of the v1.7.1.1 Files display mode)",
-      EXPECTED_I18N_KEYS == 854 + 9 + 4 + 3, str(EXPECTED_I18N_KEYS))
+      " + the 4 of the v1.7.1 Files panel + the 3 of the v1.7.1.1 Files display mode"
+      " + the 4 of the v1.7.1.2 device choice)",
+      EXPECTED_I18N_KEYS == 854 + 9 + 4 + 3 + 4, str(EXPECTED_I18N_KEYS))
 check("VERSION_FORMAT did NOT move (the project schema is unchanged)",
       __import__("version").VERSION_FORMAT == "0.9")
 check("no new dependency was added for the walk (the four pinned ones)",

@@ -1,115 +1,15 @@
 # -*- coding: utf-8 -*-
-"""SFTP worker thread of the terminal window (v1.1.3, ROADMAP task 1).
+"""The SFTP worker of a terminal session — ONE thread with a FIFO queue over the session's LIVE
+transport, driven from the GUI thread only (`queue_*`; the task-id counter is not synchronized).
 
-One worker thread per session with a FIFO task queue
-(list/upload/download/read + the v1.3.3.2 file operations mkdir/rename/delete):
-the paramiko SFTPClient does NOT guarantee thread-safety — all operations on
-the client are performed strictly in this thread; N threads for one client are
-forbidden. The window opens the client on top of a live transport
-(`terminal_thread.client.open_sftp()`) — without a second authentication and a
-second known_hosts pass (ROADMAP task 3); the transport serves the terminal
-channel at the same time — this is paramiko's standard mode (different channels
-of one Transport, the transport's internal locks).
-
-Cancellation: a flag (_cancel_event), checked BETWEEN operations — before each
-transfer chunk and before starting each task from the queue. A cancelled
-transfer stops at the nearest chunk; the tasks left in the queue are skipped
-with a task_cancelled signal (the GUI state is driven by signals only). The
-flag auto-resets when the queue is empty — subsequent operations work.
-
-Correct shutdown: stop_event + cancel_event + wait(); the SFTPClient is closed
-in the finally of run() INSIDE the worker thread (the channel is not closed
-from a foreign thread with requests in flight). If the window closed while a
-transfer is stuck on a dead network (closeEvent waits a bounded time), the
-thread keeps living: the transport's death (the terminal client.close() in the
-terminal thread's finally) tears the SFTP channel down, the operation fails
-with an exception → except → stop. The orphan-worker registry
-(_orphan_workers, the _orphan_threads pattern from ssh_terminal.py v1.1.2RC1
-N4) holds such a thread until finished() — a QThread without a QObject parent
-must not be left to GC ("QThread: Destroyed while thread is still running");
-all of the window's slots are disconnected in closeEvent, late emits without
-receivers — a safe no-op (Qt itself removes connections to a destroyed
-C++ object).
-
-Signals (emitted from the worker thread; delivery to the GUI — queued):
-    list_ready(task_id, remote_dir, entries)  — entries: [{name,is_dir,size,mtime}]
-                                                (directories first, then by name)
-    task_started(task_id, kind, label)        — kind: "list" | "upload" | "download"
-                                                | "read" | "mkdir" | "rename" | "delete"
-                                                | "normalize"
-    progress(task_id, done_bytes, total_bytes)
-    task_done(task_id, detail)                — detail: final path (file/directory)
-    task_error(task_id, kind, message)        — task error; the QUEUE does NOT die
-    task_cancelled(task_id, kind)             — cancellation (not an error)
-    read_ready(task_id, remote_path, data)    — v1.3.1: the viewer's file content (bytes)
-    normalize_ready(task_id, requested, resolved) — v1.6.3: the address bar's path,
-                                                resolved by the SERVER (REALPATH)
-
-For a "read" task the task_error message is a MACHINE CODE (READ_ERROR_*), not a
-human sentence: the SFTP tab maps it to an i18n message (the worker stays free of
-UI strings). Everything else reports str(exception) as before.
-
-The transfer ATOMICITY (v1.3.3.2, ROADMAP tasks 3 and 6): both directions write to a
-provisional PART_SUFFIX name and commit the result in ONE step — the local side with
-os.replace (the tmp + fsync + replace discipline every other write path of the
-application uses), the remote side with posix_rename (posix-rename@openssh.com, the
-extension that exists exactly for the atomic overwrite) and, on a server that does not
-know it, with a v3 rename that clears an existing destination first (a small
-non-atomic window — DOCUMENTATION.md §14f). A cancelled or failed transfer therefore
-never truncates the destination: the old file stays byte-identical, the provisional
-file is dropped — EXCEPT in the one case where the commit already cleared the
-destination and the retry failed as well (v1.5rc5, N2): the provisional file is then
-the only copy of the new bytes and is KEPT, with its path named in the error.
-
-The queue_mkdir / queue_rename / queue_delete kinds (v1.3.3.2, ROADMAP task 1) share
-the same queue and the same rule: the client stays single-threaded, a failing
-operation reports task_error, and the QUEUE DOES NOT DIE (the v1.1.3 rule). A
-directory delete is NOT recursive (rmdir — a non-empty directory reports the server's
-error); recursive transfers are out of the version.
-
-v1.7rc2 (ROADMAP v1.7rc2, tasks 1–3): the copy and the move — the two RESERVED kinds of
-the Files Commander contract (`SFTP_PANES.md` §2). `queue_copy(source, target_dir, name="")`
-copies a FILE or a whole DIRECTORY TREE remote→remote, and `queue_move(...)` moves one
-across directories:
-
-  * **A file is ALWAYS atomic** — the SAME `<target>.part` + commit discipline as the
-    upload (`_commit_upload`), so a cancelled or failed copy leaves the destination
-    byte-identical and a directory copy is additive: nothing that was already in the
-    destination is ever deleted;
-  * **a tree is copied by a BOUNDED walk** (`MAX_TREE_ENTRIES` / `MAX_TREE_DEPTH`, refused
-    with a machine payload before anything moves), directories created before their
-    contents, the cancellation checked between chunks AND between entries, and the bytes of
-    the whole tree reported as ONE progress line;
-  * **a partially transferred tree is REPORTED, never silent** (`_SftpPartial` carries the
-    number of files already published and the path where the walk stopped) and never rolled
-    back — the files that landed are real;
-  * **a move is ONE atomic rename** (`posix-rename@openssh.com` when the server has it), or
-    a walk of renames when the destination directory already exists; a server that refuses
-    a rename with both endpoints present answers `MOVE_ERROR_REFUSED` — the honest sentence
-    that names the fallback (copy + delete), never a traceback;
-  * **the OpenSSH `copy-data` extension is an OPTIONAL fast path** (`_try_copy_data`,
-    detected once per session): the chunked stream is the contract and produces the
-    identical result, so a server without the extension costs one log line;
-  * symlinks are NOT followed (SFTP v3 cannot read a link target): a link to a file is
-    copied as that file's content, a link to a directory is refused by the server.
-
-The queue_copy / queue_move task_error messages are MACHINE PAYLOADS (`task_payload()` —
-a JSON object with a `code` and its fields, the READ_ERROR_* pattern generalised), which
-the SFTP tab renders as translated sentences; `task_log_line()` records their human
-one-line rendering in `sshmap.log` and in the activity panel.
-
-v1.5.2 (ROADMAP task 2): the worker logged NOTHING — a failed transfer existed only as a
-progress line that vanished with the tab. Every task of the TRANSFER / FILE-MANAGER
-family (upload, download, mkdir, rename, delete) now leaves ONE record when it finishes,
-fails or is cancelled, and it reaches both `sshmap.log` and the activity panel. `list`
-(a directory listing) and `read` (the viewer opening a file) are deliberately NOT logged:
-they are navigation, and they happen on every click — a history of them would drown the
-facts a user opens the panel for. The record carries the task's own LABEL (a path), never
-a credential: this module never holds a password.
-
-The queue_* methods are intended to be called from the GUI thread (the task id
-counter is not synchronized — all calls come from a single thread).
-"""
+The client is never touched from another thread (paramiko's `SFTPClient` is not thread-safe): every
+call happens in `run()`. The API is the `queue_*` family — list / upload / download / read / mkdir /
+rename / delete / normalize plus the Commander's copy and move — and the answers are its signals
+(`list_ready`, `task_done`, `task_error`, `read_ready`, `normalize_ready`, …). A refusal and the
+copy/move family travel as MACHINE codes/payloads (`READ_ERROR_*`, `task_payload()`), so the tab owns
+every sentence and this module holds no UI string and no password. A transfer is ATOMIC
+(`<name>.part` + ONE commit — `os.replace` locally, `posix_rename` remotely) and the client is closed
+in the `finally` of `run()`; a stuck thread is an ORPHAN, never left to GC (§14f, §60)."""
 import json
 import logging
 import os
@@ -165,13 +65,11 @@ OUTCOME_DONE = "done"
 OUTCOME_FAILED = "failed"
 OUTCOME_CANCELLED = "cancelled"
 
-# ── v1.7rc2 (ROADMAP v1.7rc2): the copy / move family ────────────────────────
-# The OpenSSH `copy-data@openssh.com` extension copies a file ON THE SERVER (not a
-# byte crosses the wire). paramiko does NOT wrap it, so it is ONE raw extended
-# request on the client; a server that does not know the extension answers an error
-# and the chunked stream below runs instead. The optional path writes the SAME
-# provisional `<target>.part` name and goes through the SAME commit, so a server
-# with the extension and one without produce the identical result.
+# ── the copy / move family ────────────────────────
+# The OpenSSH `copy-data@openssh.com` extension copies a file ON THE SERVER (not a byte crosses the
+# wire). paramiko does NOT wrap it, so it is ONE raw extended request on the client; a server that does
+# not know the extension answers an error and the chunked stream runs instead. The optional path writes
+# the SAME provisional `<target>.part` name and goes through the SAME commit (`AGENTS.md` §4.24).
 COPY_DATA_EXTENSION = "copy-data@openssh.com"
 SFTP_CMD_EXTENDED = 200     # paramiko's CMD_EXTENDED (paramiko/sftp.py, SFTP v3)
 
@@ -958,7 +856,7 @@ class SftpWorker(QThread):
         """Best-effort cleanup of a provisional remote path (never masks the real
         error of the task that is already on its way to task_error).
 
-        v1.5rc5 (N2): returns whether the path was actually REMOVED — the commit
+        v1.5rc5 (N2): returns whether the path is really gone — the commit
         step has to know that the destination is gone (an existing caller simply
         ignores the value).
         """

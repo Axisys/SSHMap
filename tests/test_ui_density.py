@@ -2,36 +2,11 @@
 """v1.4.5 — UI density & first run (ROADMAP v1.4.5): the compact sidebar grid, the first-run
 empty state, the live status bar, the legend panel and the splitter-handle rule.
 
-The topical test of the release (the "new topical file" convention): offscreen, no network
-(the probes answer instantly) and no real terminal session.
-
-§1 The compact action grid (task 1): the six buttons of `ui/sidebar.py` — the SAME
-   attributes/signals/icons/i18n keys as before, in a 2-column × 3-row grid with the compact
-   row height; `retranslate()` re-texts them (and their tooltips) and `set_buttons_visible`
-   still reflows the block.
-
-§2 The first-run empty state (task 2): visible at 0 servers, the ONE button opens the
-   AddServer dialog (the real `_add_server` path), hidden from the first server on, back
-   after a batch delete down to zero; the import line carries the REAL File-menu labels; the
-   card is mouse-transparent and the button is NOT its child (the click-through rule).
-
-§3 The live status bar (task 3): a click on a status counter filters the sidebar, a second
-   click resets, the counters keep the TOTALS, the tag filter ANDs with the status filter,
-   the state is transient (never written to config.json) and a status change re-filters.
-
-§4 The legend panel (task 4): the rows follow `theme.ARROW_TYPE_COLORS` / `theme.STATUS_COLORS`,
-   the header click collapses it, the View item and the toolbar mirror stay in step, the
-   position/visibility/collapsed state round-trip through config.json (a broken value → the
-   default) and the panel stays out of the scene (never a scene item).
-
-§5 The splitter handle (task 5): enabled only while BOTH panels are expanded; a collapsed
-   container is capped at 18 px — a `setSizes` attempt and an external resize give the whole
-   delta to the expanded panel; expanding releases the cap and re-enables the divider.
-
-§6 i18n parity + the release state (the pin `tests/_common.py`).
-
-Run: python tests/test_ui_density.py   (from the project root) or python tests/run_all.py
-"""
+The topical test of the release: offscreen, no network (the probes answer instantly), no real session.
+§1 the compact action grid (the SAME six buttons, attributes, signals, icons and keys — in a 2×3 grid
+with the compact row height, `retranslate()` and `set_buttons_visible` still working); §2 the first-run
+empty state (visible at 0 servers, the ONE button through the real `_add_server` path, the REAL
+File-menu labels, the card mouse-transparent with the button NOT its child); §3 the live status bar (a click filters, a second click resets, the tag filter ANDs, the state is never persisted); §4 the legend panel (the theme's live colours, the header click, the config round-trip, never a scene item); §5 the splitter handle (enabled only while BOTH panels are expanded, an 18 px cap on a collapsed container); §6 the i18n parity and the release state."""
 import json
 import os
 import sys
@@ -628,7 +603,7 @@ check("the collapsed container is capped at the strip width (the invariant)",
       and win._sidebar_container.width() == STRIP_W,
       f"max={win._sidebar_container.maximumWidth()} w={win._sidebar_container.width()}")
 
-# a setSizes attempt cannot stretch the strip any more (the drift this release fixes)
+# a setSizes attempt cannot stretch the strip any more (the drift the cap prevents)
 win._splitter.setSizes([500, 700])
 app.processEvents()
 check("setSizes([500, …]) cannot stretch the collapsed strip (it stays 18 px)",

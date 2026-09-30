@@ -1,96 +1,15 @@
 # -*- coding: utf-8 -*-
-"""v1.4rc1 (plugin foundation, ROADMAP "Plugin foundation" — the rc series): discovery + manager.
+"""The plugin foundation — discovery and the isolation machinery around every call INTO a plugin.
 
-The plugin foundation opens the 1.4 line. This module is the FIRST half of it — rc1,
-"discovery and manager": the core finds third-party code and keeps a registry of what
-it found; the execution side (`PluginContext`, Main Thread isolation, the UI hooks)
-arrives in rc2/rc3. The API v1 contract is FROZEN by specification before rc1 —
-`PLUGINS.md` is the contract, this module implements its discovery half.
+Headless by design: it reports FACTS (records, events, signals), owns no widget and no i18n string.
+Two discovery sources: the standard entry points (group `sshmap.plugins/v1`) and one file per plugin
+in `~/.sshmap/plugins/`. A module is a plugin when it carries `MANIFEST` with a usable
+`name`/`version` and `api_version == API_VERSION`; the states are `loaded` / `disabled` / `error`, and
+the enable switch is the `plugins` key of the config (a missing id = ENABLED).
 
-**Two discovery sources** (both are "a plugin is a Python module with a MANIFEST"):
-
-1. **Standard entry points** — a plugin is an ordinary installed Python package
-   (`pip install sshmap-<name>-plugin`) declaring
-
-       [project.entry-points."sshmap.plugins/v1"]
-       my-plugin = "my_plugin_module"
-
-   This is how pytest/jupyter/flake8 find their plugins: no app-specific packaging
-   and no registry file. The GROUP NAME CARRIES THE API VERSION (`/v1`) — a future
-   API v2 is a NEW group (`sshmap.plugins/v2`) that lives next to this one, so
-   installed plugins keep working (ROADMAP task 0).
-2. **The user folder** `~/.sshmap/plugins/*.py` — "a file is a plugin": no packaging,
-   no install, works for a user of an INSTALLED app (the v1.3.3.8 language-folder
-   precedent). Each file is loaded as a module with a UNIQUE name
-   (`sshmap_plugin_local_<stem>`), registered in `sys.modules` so a reload replaces
-   it; a file whose name starts with `_` is skipped (a helper of another plugin).
-
-**A module is a plugin if it carries** ``MANIFEST = {"name", "version",
-"api_version": 1, "description"}`` — `name` IS the plugin's identity (the id used by
-the config and by the "Plugins" menu), `version` is the author's string (the core
-never parses it), `api_version` must equal `API_VERSION` and `description` is
-optional (missing → ""). The optional HOOKS are `register_commands`,
-`extend_node_context_menu`, `status_probe` and `run_on_nodes`; their presence is
-recorded in `PluginRecord.hooks` — from rc2/rc3 the hooks a plugin declares are really
-CALLED (rc2: `status_probe` + `run_on_nodes`, rc3: the two UI hooks).
-
-**States.** `loaded` (usable) | `disabled` (the user switched it off in the
-"Plugins" menu) | `error` (it could not be loaded). An error is NEVER fatal: the
-plugin is reported (a log record + one event for the status bar) and the application
-plus every other plugin keep working. The three reasons are machine values the UI
-translates: `import` (the module could not be imported / the file could not be read),
-`manifest` (no `MANIFEST`, not a dict, no usable `name`/`version`), `api_version`
-(the manifest declares another API — the contract says the old group stays supported,
-so a v2 plugin installed today is simply not a v1 plugin).
-
-**Enable / disable** lives in the `plugins` key of `~/.sshmap/config.json`
-(merge-write through `i18n.save_config`, the v1.3.2 hotkeys pattern):
-`{"<plugin id>": false}` = switched off, a missing id / a broken value = ENABLED
-(a new plugin is on by default), an unknown id in the file is ignored. Only the ids
-of the plugins really discovered are written, so the key stays clean.
-
-A DISABLED plugin is still IMPORTED — the core must read its `MANIFEST` to name it in
-the menu (a folder plugin's file name is not the plugin's name). What "disabled"
-stops is the plugin's HOOKS: rc2/rc3 never call into a disabled record. Documented
-in `PLUGINS.md` (the author contract), pinned by `tests/test_plugins.py`.
-
-**v1.4rc2 — the execution half (ROADMAP tasks 5–6).** The discovery above is unchanged;
-what rc2 adds is the isolation machinery every call INTO a plugin goes through:
-
-* `PluginContext` (`modules/plugin_context.py`) — the only window into the core, built
-  per record by `build_context()` and handed to hooks as `ctx`; its services are the
-  three adapter methods of this class (`plugin_log` / `plugin_status` /
-  `plugin_run_command`), so the manager stays headless (no widget, no i18n) while the
-  window owns the status bar and the token guard.
-* **Main Thread discipline.** `call_ui_hook()` invokes a UI hook synchronously and TIMES
-  it against the contract budget (200 ms — a slower hook is a warning in the log);
-  `call_hook_watched()` invokes a headless hook from whatever worker thread is already
-  running (the ordinary use is `status_probe` inside a `StatusChecker` round) and
-  ABANDONS it after the wait budget instead of blocking the round; `run_on_nodes()`
-  starts every `run_on_nodes` hook on a MANAGED QThread. Anything that outlives the wait
-  budget (1500 ms — the v1.2 semantics) is registered in the orphan registry instead of
-  being left to GC ("QThread: Destroyed while thread is still running").
-* **Never throws.** One wrapper for every path into a plugin: an exception is a log line,
-  an event and a status-bar report — never a crash of the host or of a neighbour plugin.
-* **Qt objects the manager owns.** `guard(obj)` keeps a reference (the PySide6 6.11
-  pitfall of `AGENTS.md` §7 gotcha #9: a dead QAction wrapper takes its C++ menu with
-  it) — rc3 hands every QAction a UI hook creates to this guard.
-
-**v1.4rc3 — the UI hooks (ROADMAP tasks 7–8).** The last two hooks become reachable:
-`plugin_commands()` returns the `(plugin_id, PluginCommand)` pairs the palette renders
-in its own section, `plugin_node_context_menu(menu, node)` lets every plugin append its
-rows to a node context menu the window built (map and sidebar — one entry point), and
-`plugin_run_on_nodes(nodes)` is the "Run on selected servers" action behind the menu
-item. `PluginCommand` (frozen dataclass) is the record of a contributed command; the
-coercion of what a hook returned (`plugin_commands()`) is deliberately lenient — a
-hand-written plugin may return a nested list, a pair or a dict, and an unusable entry is
-SKIPPED with a log line instead of breaking the palette.
-
-"Never raises": every step of the discovery is wrapped — a broken plugin is a record
-with a state, never an exception that reaches the startup. The module has no UI and
-no i18n: it reports FACTS (records + events + signals), the window turns them into
-strings.
-"""
+The isolation is the point: `call_ui_hook()` timed against `UI_HOOK_BUDGET_MS`, `call_hook_watched()`
+abandoned at the wait budget instead of blocking the round, `run_on_nodes()` on a managed QThread,
+plus the orphan registry and `guard()`. Contract — `PLUGINS.md`; mechanism — `DOCUMENTATION.md` §33."""
 
 import importlib.metadata as importlib_metadata
 import importlib.util
@@ -458,14 +377,11 @@ class PluginManager(QObject):
     hook_timeout = Signal(str, str, int)          # (plugin_id, hook, budget_ms)
     command_result = Signal(str, str, dict)       # (plugin_id, node_id, result)
     command_finished = Signal(str, list)          # (plugin_id, results)
-    # v1.4: the manager marshals a command start onto ITS OWN thread. The receiver context
-    # of a signal connected to a plain Python callable is the thread that calls `connect()`
-    # (AGENTS.md §7 gotcha #20), so a runner built inside a `run_on_nodes` worker posts its
-    # per-node results into a thread WITHOUT an event loop and they are lost forever — the
-    # documented "the callbacks are delivered on the GUI thread" (PLUGINS.md §5) held only
-    # for a GUI-thread caller. Emitted on the manager's thread this signal is a direct call;
-    # emitted from a plugin's worker it is queued to the manager's thread, which is the one
-    # that owns the workers and the event loop their signals need.
+    # The manager marshals a command start onto ITS OWN thread. The receiver context of a signal
+    # connected to a plain Python callable is the thread that calls `connect()` (gotcha #20), so a
+    # runner built inside a `run_on_nodes` worker posts its per-node results into a thread WITHOUT an
+    # event loop and they are lost — the documented "callbacks on the GUI thread" (`PLUGINS.md` §5)
+    # held only for a GUI-thread caller. Emitted on the manager's thread it is a direct call.
     command_requested = Signal(str, list, str, object, object, float)
 
     def __init__(self, parent=None):
@@ -648,14 +564,11 @@ class PluginManager(QObject):
         except RuntimeError:
             return False  # Qt teardown — no receiver left
 
-    # ── v1.4rc3: the UI hooks (PLUGINS.md §3, ROADMAP task 7) ─────────────────
-    # Two of the four hooks build UI, and the core builds it FOR the plugin: the
-    # manager stays headless (no menu, no widget) and hands out exactly two things —
-    # the RECORDS of the commands a plugin declared and a way to APPEND rows to a menu
-    # the window already created. Everything Qt-shaped stays in the window, including
-    # the QAction guard (gotcha #9: a dead Python wrapper takes its C++ menu with it).
-    # Both paths call `call_ui_hook()` — synchronous, on the GUI thread, timed against
-    # the contract's 200 ms budget, and "never throws" (an exception is a report).
+    # ── the UI hooks (`PLUGINS.md` §3) ───────────────────────────────────────
+    # Two of the four hooks build UI and the core builds it FOR the plugin: the manager stays
+    # headless and hands out the RECORDS of the declared commands plus a way to APPEND rows to a menu
+    # the window already created; everything Qt-shaped stays in the window, including the QAction
+    # guard (gotcha #9). Both paths call `call_ui_hook()` — GUI thread, 200 ms budget, never throws.
 
     def plugin_commands(self) -> List[Tuple[str, PluginCommand]]:
         """`(plugin_id, command)` for every command of every loaded plugin, in order.

@@ -1,28 +1,12 @@
 # -*- coding: utf-8 -*-
 """v1.0 — Terminal v1, final: full acceptance of all RCs + terminal_* config (ROADMAP tasks 9–10).
 
-One run WITHOUT the network covers the Acceptance v1.0 on a simulated TUI output:
-  * bash — the prompt + `ls --color` (SGR 34/93/256/truecolor) through the terminal window;
-  * vim  — the cursor hiding ESC[?25l, the alternate screen \x1b[?1049h (v1.2.12:
-           SshmapHistoryScreen), the full-screen repaint with the colors; the exit \x1b[?1049l —
-           the previous screen is restored character by character including the fg/bg (the known
-           limitation was closed in v1.2.12, pinned down by the test);
-  * htop — the repeating full-screen frames + the dirty render without the timer;
-  * the copying — the mouse selection → the clipboard; the Ctrl+C with the selection = the copying,
-    without the selection = \\x03 (SIGINT, "it kills top");
-  * Ctrl+V — the bracketed paste of the clipboard as a single block.
-Plus task 9: the terminal_palette / terminal_font / terminal_font_size /
-terminal_history_lines keys from ~/.sshmap/config.json (all optional, the defaults = the current
-behavior) + v1.1.1: terminal_max_open (the limit of one's own terminals) and the release state —
-_common.check_release_state() (the pin EXPECTED_APP_VERSION — in tests/_common.py),
-v1.2.9: TerminalScreen.render() (the HTML path) removed (the dead code since v1.0RC1),
-the i18n parity — _common.check_i18n_parity() (the pin EXPECTED_I18N_KEYS; +33 keys v1.1,
-+14 in v1.1.1, +2 in v1.1.2RC2: msg.confirm_delete_profile and status.import_resolving;
-in v1.1.2RC3 no new keys — terminal_wheel is only the config; +2 in v1.1.2 final:
-settings.statuses.max_parallel and status.auto_interval_hint; +21 in v1.1.3: sftp.*).
-
-Run: python tests/test_terminal_acceptance.py   (from the project root) or python tests/run_all.py
-"""
+One run WITHOUT the network covers the v1.0 acceptance on simulated TUI output: bash (the prompt and
+`ls --color` with SGR 34/93/256 and truecolor) through the terminal window; vim (the hidden cursor
+`ESC[?25l`, the alternate screen `\x1b[?1049h`, the full-screen repaint, and the exit `\x1b[?1049l`
+restoring the previous screen character by character INCLUDING the fg/bg — the pinned limitation);
+htop (repeating full-screen frames with the dirty render and no timer); the copying (a mouse selection →
+the clipboard; Ctrl+C WITH a selection copies, without one it sends `\x03`); and Ctrl+V (the bracketed paste as a single block). Plus the `terminal_palette` / `terminal_font` / `terminal_font_size` / `terminal_history_lines` / `terminal_max_open` keys of `~/.sshmap/config.json` (all optional, the defaults = the shipped behaviour) and the release state — `_common.check_release_state()` (the `EXPECTED_APP_VERSION` pin) and `_common.check_i18n_parity()` (the `EXPECTED_I18N_KEYS` pin), with the dead `TerminalScreen.render()` HTML path long gone."""
 import json
 import os
 import sys
@@ -189,12 +173,11 @@ emit_out(win, b"\x1b[1;32mroot@master\x1b[0m:\x1b[1;34m~\x1b[0m$ vim notes.txt\r
          until_substr="vim notes.txt")
 g0 = win.tscreen.snapshot()   # (rows, cx, cy, hidden) — a snapshot with colors BEFORE entering alt
 
-# The cursor at the end — on the EMPTY line 4: the cursor pixel checks must go by
-# a cell without glyphs (in the offscreen environment a font without glyphs draws "tofu" in the color
-# default_fg, which matches CURSOR_COLOR — the check on the lines with text
-# would have been incorrect).
-# vim enters the alternate screen (v1.2.12): \x1b[?25l + \x1b[?1049h + a full-screen
-# a repaint with the colors (the work buffer — a fresh empty one, the main one is saved).
+# The cursor at the end — on the EMPTY line 4: the cursor pixel checks must go by a cell without glyphs
+# (in the offscreen environment a font without glyphs draws "tofu" in the default_fg colour, which
+# matches `CURSOR_COLOR`, so a check on a line with text would be incorrect).
+# vim enters the alternate screen: `\x1b[?25l` + `\x1b[?1049h` + a full-screen repaint with the colours
+# (the work buffer — a fresh empty one, the main one is saved).
 emit_out(win, b"\x1b[?25l\x1b[?1049h\x1b[2J\x1b[H\x1b[41m vim session \x1b[0m\r\nvim content line\x1b[5H",
          until_substr="vim session")
 

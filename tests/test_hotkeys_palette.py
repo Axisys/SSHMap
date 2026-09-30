@@ -1,16 +1,11 @@
-"""Hotkeys + command palette v0.9.2 (former smoke_test "v0.9.2 hotkeys + command palette").
+"""Hotkeys and command palette v0.9.2 (a former smoke-test part).
 
-A part of the suite split out of smoke_test.py v0.6–v0.9.2 (see INDEX.md).
-  * the hotkeys: Ctrl+Return (the SSH connect), Ctrl+E (the edit of the node), Ctrl+Shift+N (the add of a note),
-    Ctrl+K (the palette) are registered as the QKeySequence/QShortcut;
-  * the wrapper slots _edit_selected_node/_add_note_at_view_center are callable;
-  * CommandPalette: fuzzy_score (the subsequence, the empty pattern matches everything), the collection of the commands
-    from the menus + the servers of the scene, the filtering by the name, the reveal — the selection of the node + centerOn
-    (the offscreen proxy via the scroll state);
-  * the i18n keys of v0.9.2 in all three languages.
-
-Run: python tests/test_hotkeys_palette.py   (from the project root) or python tests/run_all.py
-"""
+Checks: the registered sequences — Ctrl+Return for the SSH connect, Ctrl+E for editing the node,
+Ctrl+Shift+N for adding a note and Ctrl+K for the palette — as `QKeySequence` / `QShortcut`; the wrapper
+slots `_edit_selected_node` / `_add_note_at_view_center` being callable; `CommandPalette` (the
+`fuzzy_score` subsequence with an empty pattern matching everything, the commands collected from the menus
+plus the servers of the scene, filtering by name, and the reveal that selects the node and centres the view
+— the offscreen proxy going through the scroll state); and the i18n keys in all three languages."""
 import json as _json_i18n_v092
 import os
 import sys

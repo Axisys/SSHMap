@@ -1,17 +1,15 @@
 # -*- coding: utf-8 -*-
-"""v1.5rc3 (ROADMAP task 4): the keyboard cheat-sheet as a window of its own.
+"""The keyboard cheat-sheet as a window of its own (DOCUMENTATION.md §41).
 
-Help → About already renders the live hotkey cheat-sheet from the action registry
-(`ui/about_dialog.py:cheatsheet()`). This dialog is the SECOND way in — the `?` key
-and the `Help → Keyboard shortcuts` item — for the moment the user wants the list and
-nothing else: same single source of truth (the registry in `ui/hotkey_registry.py`,
-merged with the user's own `hotkeys` config), so the two surfaces can never drift.
+Help → About already renders the live cheat-sheet from the action registry
+(`ui/about_dialog.py:cheatsheet()`); this dialog is the SECOND way in — the `?` key and the
+"Help → Keyboard shortcuts" item — for the moment the user wants the list and nothing else. Both surfaces
+read the same single source of truth (`ui/hotkey_registry.py` merged with the user's own `hotkeys` config),
+so they can never drift.
 
-Read-only and stateless: it owns no settings, writes no config, and the registry is
-re-read on every construction and on `retranslate()` — a user who rebinds Ctrl+S sees
-their own binding, and a language switch re-texts the action NAMES, because those are
-i18n labels read at call time.
-"""
+It is read-only and stateless: it owns no settings and writes no config, and the registry is re-read on
+every construction and on `retranslate()`, so a user who rebinds Ctrl+S sees their own binding, while a
+language switch re-texts the action NAMES, because those are i18n labels read at call time."""
 
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPlainTextEdit, QDialogButtonBox,

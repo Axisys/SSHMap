@@ -1,180 +1,16 @@
 # -*- coding: utf-8 -*-
-"""SFTP tab of the terminal window (v1.1.3, ROADMAP task 2).
+"""The Files tab of a terminal session — a CONTAINER of 1–2 PANES over ONE SFTP worker.
 
-Classic SFTP mode on top of the worker from modules/sftp_worker.py (a single
-thread with a queue — SFTPClient is not thread-safe): the directory tree as
-a current listing (QTreeWidget) + "..." navigation:
+`SftpTab` owns the single worker binding, the session's follow switch, the two panes and the ACTIVE
+pane; `_SftpPane` owns one listing (its address bar with the completer, its buttons, its tree, its
+viewer and its task bookkeeping) and binds the SHARED worker's signals, answering only the task ids IT
+queued — so the panes navigate independently, without a second worker or a second channel. The page
+talks to the container (`page.sftp_tab`); a shipped attribute read resolves on the ACTIVE pane.
 
-  * the ".." row (first, if the current dir != "/") and the "Up" button — go
-    one level up; double-click on a directory — enter it;
-  * upload: local files (QFileDialog) → the CURRENT shown directory
-    (several files = sequential queue tasks);
-  * D&D (v1.2.8): files from Explorer into the tab → the same worker-queue
-    upload; v1.3.3.2: the target is the directory UNDER THE CURSOR — a drop on a
-    directory row goes into THAT directory, a drop on a file row or on empty
-    space goes into the current directory; directories/non-files are ignored
-    with a hint; no connection — "waiting" hint (same as the Upload button);
-  * download: selected files (multi-selection) → the chosen local directory;
-  * the OVERWRITE CONFLICT (v1.3.3.2, ROADMAP task 2 — the deferred v1.3
-    promise): an existing destination in either direction opens a dialog with
-    Overwrite / Skip / Rename / "Apply to all" for the rest of the batch; a
-    cancelled dialog skips that file; the existence check is never a guess (the
-    current listing for the shown directory, a listing of the target directory
-    queued first for a drop on a row, os.path.exists for the local side);
-  * progress — in the window's status bar (SSHTerminalWindow connects to
-    the worker's signals itself: progress bar + showMessage); the tab only
-    keeps its own state (the "Cancel" button is active while transfers are
-    running) and local hints via the message() signal;
-  * the GUI is not blocked: all SFTP operations run in the worker thread,
-    the tab merely queues tasks and redraws the listing on list_ready.
-
-v1.3.3.2 (ROADMAP v1.3.3.2): the tab becomes a FILE MANAGER.
-  * the file operations — New folder / Rename / Delete / Copy remote path in the
-    tree's context menu (`_build_context_menu(item)` — the test seam, the
-    QActions are triggered directly by the tests, no menu.exec()). The three
-    operations are ordinary tasks of the SAME worker queue (kind mkdir/rename/
-    delete): the client stays single-threaded, a failure is a task_error and the
-    queue lives on; the listing is refreshed when an operation finishes; the
-    delete asks for a confirmation (QMessageBox — a module attribute, the
-    command-library test-seam pattern);
-  * both transfer directions are ATOMIC (modules/sftp_worker.py): the download
-    goes to `<dest>.part` + os.replace, the upload to `<remote>.part` + rename —
-    a cancelled or failed transfer never truncates the destination;
-  * drag-OUT: a dragged row publishes its REMOTE PATH as text/plain, so a file
-    can be dropped into a terminal, an editor or a chat window (the real "drag
-    files out to Explorer" — a download into a temp dir with its own
-    progress/cancel story — is NOT in this version).
-
-v1.3.1 (ROADMAP v1.3.1): the read-only PREVIEW. The tab body is a
-QSplitter [tree | viewer]: a double click on a text file queues a "read"
-task through the SAME worker queue (never a read on the GUI thread), and the
-answer (read_ready) fills a read-only QPlainTextEdit in a monospace font
-under a header line (path + size + × close). Selecting another file replaces
-the content; × hides the panel — a repeated double click opens it again.
-Directories keep the tree behaviour (navigation). The refusals come from the
-worker as machine codes (READ_ERROR_*): a binary file (known-binary
-extension or a null byte in the first chunk) and files over MAX_READ_BYTES
-are reported as a message, WITHOUT a panel and without a download. The
-encoding: UTF-8 (BOM-aware) first, the Latin-1 fallback on a decode failure
-+ a note in the header. close_viewer() drops the panel — the tab goes
-through the single page teardown (page.shutdown()).
-
-v1.3.1.1 (the follow-up polish): the listing MARKS the rows the viewer cannot
-preview — a binary file or one over MAX_READ_BYTES — with a recoloured file
-icon (the theme's "no preview" tone) and the reason in the row's tooltip. The
-mark is deliberately NOT the name colour: an explicit setForeground() would
-overcome the style's selection colours, and the recoloured glyph is a shape,
-not only a colour. The mark comes from preview_block_reason(): a session FACT
-(a real refusal by the worker — the only way to see a null byte), then the
-certain size from the listing, then the extension guess. A `.txt` with a null
-byte therefore gets its mark after the first attempt, and the mark stays for
-the session (set_worker clears the facts together with the transport).
-
-v1.4.7 (ROADMAP v1.4.7): SYNTAX HIGHLIGHTING of the preview. The panel gains
-ONE `QSyntaxHighlighter` per tab (modules/syntax_highlight.py) and the visible
-content stops being monochrome: numbers everywhere, and a real grammar for
-JSON/XML/YAML. The release rules, unchanged from the plan:
-
-  * the viewer stays READ-ONLY and the read path (worker queue, 1 MB limit,
-    encodings) is untouched — the highlighter only paints what is already in
-    the widget;
-  * **the honesty rule**: the extension is a HINT, the content is the VERDICT.
-    `detect_syntax(path, text)` accepts `.json`/`.xml` only after `json.loads` /
-    `ElementTree.fromstring` really parsed the text; a file that does not parse
-    degrades to the language-agnostic `"numbers"` mode instead of wearing a
-    grammar that does not describe it. YAML has no stdlib parser, so it is a
-    HEURISTIC — the header says so (`sftp.viewer.syntax_heuristic`), exactly the
-    way the `encoding` note works;
-  * **colours only** (no bold/italic), which is what lets the formatting be
-    applied LAZILY to the blocks around the viewport
-    (`QPlainTextEdit.updateRequest` → `_highlight_visible()`): a 1 MB file costs
-    roughly what its first screen costs, and a minified 1 MB single line trips
-    the per-block TOKEN cap of the tokenizer instead of freezing the GUI.
-
-Stale responses (navigation/Refresh while an old listing is in flight) are
-dropped by matching task_id → requested path: only the response for the
-CURRENT directory is rendered. If the SSH connection is not ready yet, the
-tab shows "Waiting for SSH connection…" and waits for set_worker(worker) —
-the window calls it after connected_signal / when switching to the tab
-(open_sftp() on the same transport — ROADMAP task 3).
-
-A full tree with lazy expansion and recursive transfers — still the backlog: the tab
-is built around ONE current directory (a model change), and the drop "into a specific
-row" landed in v1.3.3.2 as the directory under the cursor.
-
-v1.7rc1 (ROADMAP v1.7rc1): the FILES COMMANDER, step 1 — the tab stops being ONE
-listing and becomes a container of 1–2 PANES (`SFTP_PANES.md` is that frozen contract,
-the `PLUGINS.md` pattern: this slot IMPLEMENTS it and does not change it). The split of
-responsibilities:
-
-  * **`_SftpPane`** owns EVERYTHING a listing needs — the address bar with its completer,
-    the button row, the tree, the preview viewer, the drag-out payload and the state that
-    goes with them (`_current_dir`, `_pending_lists`, `_completer_dir`, `_blocked`, the
-    task bookkeeping, the highlighter). Each pane binds the SHARED worker's signals and
-    answers only the task ids it queued — task ids are unique, so the two panes navigate
-    and list INDEPENDENTLY without a second worker and without a second channel.
-  * **`SftpTab`** (the container) owns the ONE `_worker` binding, the "follow the shell's
-    directory" switch (a SESSION state), the two panes, the ACTIVE pane and the pane-scoped
-    key map (F3 view / F5 copy / F6 move-rename / F7 mkdir / F8 delete as
-    `Qt.WidgetWithChildrenShortcut` actions ON THE PANE — the terminal canvas keeps its own
-    claim on the F-keys, so an F5 typed into a shell still reaches the shell). The
-    container is the OBJECT THE PAGE TALKS TO (`page.sftp_tab`), so the page-level contract
-    — `set_worker()`, `set_follow_cwd()`, `follow_directory()`, `close_viewer()`,
-    `retranslate()`, `refresh_theme()`, the `message` signal — is unchanged; a shipped
-    attribute read (`tab.tree`, `tab._blocked`, `tab._relist()`) resolves on the ACTIVE
-    pane, which is what makes the ONE-pane container byte-identical to the shipped tab.
-  * **The F5 copy was RESERVED by this slot**: the contract froze its shape for the next
-    step of the line, so rc1 answered it with ONE honest sentence instead of a silent no-op
-    (`sftp.cmd.copy_unavailable` — the key stays in every language file, the i18n rule is
-    additive). `F4` is REFUSED (the application has no remote editing
-    at all — `SFTP_PANES.md` "The key map").
-
-v1.7rc2 (ROADMAP v1.7rc2): the Files Commander, step 2 — `F5` COPIES and `F6` MOVES across
-the panes, so the reserved half of the contract is shipped. The two kinds of
-`modules/sftp_worker.py` (`queue_copy` / `queue_move`) do the work; the pane owns the
-POLICY:
-
-  * **the batch is the SELECTION** (the current row when nothing is selected): the classic
-    commander behaviour, and the reason the overwrite question can be answered "apply to
-    all" ONCE for the whole batch — the shipped `_ask_conflict` / `_conflict_decision`
-    machinery, unchanged, over `target_pane._names_in_current_dir()` (the other pane's
-    listing IS the server's answer for the destination directory, so the check is never a
-    guess);
-  * **the destination is the OTHER pane's directory** — with ONE pane there is no target and
-    `F5` answers ONE sentence (`sftp.cmd.copy_no_target`); `F6` falls back to the shipped
-    same-directory RENAME whenever the other pane shows the same directory (or there is no
-    other pane), so the one-pane tab keeps the key it always had;
-  * **directories are copied and moved RECURSIVELY** (the frozen decision of rc2, written
-    into `SFTP_PANES.md`): a file is atomic, a tree is a bounded walk, and the source
-    directories of a move are removed last;
-  * **ONE report per batch** names what really happened (`Copied: N · skipped: N ·
-    failed: N`) — skipped counts the conflict "skip" answers and the rows whose destination
-    is the row ITSELF; a failure is reported per file (the v1.1.3 rule: one failure never
-    stops the others) and counted in the closing report;
-  * the batch walker (`_remote_batch`) is the ONE path both keys use, and the ACTIVE
-    pane's own `_relist()` plus `SftpTab.relist_dir()` keep BOTH panes' listings true after
-    an operation.
-
-v1.7rc3 (ROADMAP v1.7rc3): the Files Commander, step 3 — the mc/far WALK inside the two-pane
-view and the button row of the right pane spent on the key HINTS. Nothing about the pane model
-moves: the worker stays the container's, the keys stay the pane's, and the copy/move family is
-the rc2 one. What this slot adds:
-
-  * **the hints row** (`hints_label`): in the two-pane mode the SECOND pane hides the shipped
-    button row (a commander has ONE button row — the first pane's) and spends that line on the
-    keys that really act on it (`sftp.hint.*` read off `PANE_HINTS`). It is ONE elided line, so
-    a narrow pane or a long translation can never reflow the listing; the whole text rides the
-    tooltip. `retranslate()` re-texts it like every other pane string.
-  * **`Tab` / `Shift+Tab` switch the ACTIVE pane** — the mc/far pane toggle, and the reason the
-    mode is usable without the mouse. It is deliberately NOT a `QAction`: the pane reads the key
-    off every widget it owns (the tree, the address bar, the buttons) through its own
-    `eventFilter` hook, so nothing enters the registry (§4.9) and no shortcut is stolen.
-  * **the walk over a listing**: `Enter` (and `Return`) on a row is the shipped double-click
-    (a directory is entered, a file opens the preview), `Insert` and `Space` MARK the current
-    row and step down (the batch `F5`/`F6` already work with — `ExtendedSelection`),
-    `Backspace` goes one level up, and `Left` on a directory leaves it for its parent row
-    instead of collapsing it. `F4` stays REFUSED.
-"""
+The pane-scoped keys (`F3`/`F5`/`F6`/`F7`/`F8` as `Qt.WidgetWithChildrenShortcut` actions ON the pane,
+plus `Tab`/`Shift+Tab` and the walk keys of `_on_pane_key()`) leave the canvas's claim on the F-keys
+intact; the Commander spends ONE button row (the first pane) and the second pane's line on the key
+hints, and a preview opens IN THE OTHER PANE. Contract — `SFTP_PANES.md`; mechanism — §38, §59-§63."""
 import os
 import posixpath
 from datetime import datetime
@@ -237,12 +73,11 @@ except ImportError:
     import syntax_highlight as syntax
 
 
-# ── v1.7rc1 (ROADMAP v1.7rc1): the Files Commander — the pane model ───────────
-# The state of the two-pane view lives in ~/.sshmap/config.json, exactly like the
-# terminal SPLIT's (`ui_terminal_split` / `ui_terminal_split_ratio`, §4.3): ONE bool
-# and ONE float, merged into the window's geometry write on close. The ratio is a
-# FRACTION of the width so a window resize keeps the proportion, and a foreign/broken
-# value falls back to the default instead of squeezing a pane into unusability.
+# ── the Files Commander — the pane model ───────────
+# The state of the two-pane view lives in `~/.sshmap/config.json`, exactly like the terminal SPLIT's
+# (`ui_terminal_split` / `ui_terminal_split_ratio`): ONE bool and ONE float, merged into the window's
+# geometry write on close. The ratio is a FRACTION of the width, so a window resize keeps the proportion,
+# and a foreign/broken value falls back to the default instead of squeezing a pane into unusability.
 COMMANDER_CONFIG_BOOL = "ui_sftp_commander"          # bool — the mode was on at the last close
 COMMANDER_CONFIG_RATIO = "ui_sftp_commander_ratio"   # float — the FIRST pane's share of the width
 COMMANDER_RATIO_DEFAULT = 0.5
@@ -267,13 +102,11 @@ PANE_SHORTCUTS = (
     ("F8", "_cmd_delete"),
 )
 
-#: v1.7rc3: the ROW the SECOND pane shows where the first one keeps its buttons. In the
-#: two-pane view the shipped button row belongs to the FIRST pane (the mc/far look: the
-#: commander has ONE button row and the panes are nothing but listings), so the right pane
-#: spends that line on the key HINTS of the keys it really answers — the classic
-#: commander's bottom line. The pairs travel with `PANE_SHORTCUTS` (the same keys, in the
-#: same order) and the two that are not F-keys close the row: the pane toggle of the mc
-#: walk and the mark key of the batch. A tuple — never a second key table.
+#: The ROW the SECOND pane shows where the first one keeps its buttons. In the two-pane view the
+#: shipped button row belongs to the FIRST pane (the mc/far look: the commander has ONE button row and
+#: the panes are nothing but listings), so the right pane spends that line on the key HINTS of the keys
+#: it really answers — the classic commander's bottom line. The pairs travel with `PANE_SHORTCUTS` (the
+#: same keys, in the same order) and the two that are not F-keys close the row. A tuple, never a table.
 PANE_HINTS = (
     ("F3", "sftp.hint.view"),
     ("F5", "sftp.hint.copy"),
@@ -595,7 +428,7 @@ class _ButtonRow(QWidget):
     The two-pane view needs the row as a unit: the FIRST pane keeps it and the SECOND one hides it
     and shows the key hints in the same line. A bare `QWidget` would report its LAYOUT's whole
     minimum size — a row of five buttons — and that number travels up into the terminal window's own
-    floor, so a narrow window that used to clip the row would refuse to shrink instead. The row is
+    floor, so a narrow window that would clip the row refuses to shrink instead. The row is
     therefore allowed to shrink and clip, exactly as it behaved while it was a plain layout of the
     pane (`BUTTONS_BAR_MIN_WIDTH` is the declared floor, and the HEIGHT keeps the layout's hint so
     the hint row can borrow it).
@@ -749,13 +582,11 @@ class _SftpPane(QWidget):
         bar.addWidget(self.btn_upload)
         bar.addWidget(self.btn_download)
         bar.addWidget(self.btn_cancel)
-        # v1.7rc3: the button row as ONE widget, so the SECOND pane of the two-pane view can
-        # hide it (a commander has ONE button row) and show the key hints in the same line.
-        # The layout is built INTO the widget (never `addLayout` on the pane and then a
-        # re-parent — Qt refuses a layout that already has an owner), and the wrapper carries a
-        # DELIBERATELY small minimum width: a bare QWidget reports its layout's whole minimum,
-        # which is a row of five buttons and would raise the WINDOW's own floor by that row
-        # (a narrow window is meant to clip the row, not to refuse to shrink).
+        # The button row as ONE widget, so the SECOND pane of the two-pane view can hide it (a commander
+        # has ONE button row) and show the key hints in the same line. The layout is built INTO the widget
+        # (never `addLayout` on the pane and then a re-parent — Qt refuses a layout that already has an
+        # owner), and the wrapper carries a DELIBERATELY small minimum width: a bare QWidget reports its
+        # layout's whole minimum (a row of five buttons) and would raise the WINDOW's own floor by that row.
         self.buttons_bar = _ButtonRow()
         self.buttons_bar.setLayout(bar)
         outer.addWidget(self.buttons_bar)
@@ -2637,13 +2468,11 @@ class _SftpPane(QWidget):
         popup's events are left to Qt.
         """
         etype = event.type()
-        # v1.7rc1: `obj is self._container` is "the tab itself" — the shipped production
-        # path (with DragOnly the tree's viewport refuses drops, so Qt hands them to the
-        # tab), where the point is in the TAB's coordinates and is mapped back to the tree.
-        # v1.7: the pane's OWN viewer counts as this pane even while it is BORROWED by the other
-        # one (a re-parented widget is nobody's descendant any more), so a key typed into the open
-        # panel still reaches the walk — `Esc` closes the preview from the panel itself — and a
-        # click into it makes its OWNER the ACTIVE pane.
+        # `obj is self._container` is "the tab itself" — the shipped production path (with DragOnly
+        # the tree's viewport refuses drops, so Qt hands them to the tab), where the point is in the
+        # TAB's coordinates and is mapped back to the tree. The pane's OWN viewer counts as this pane
+        # even while it is BORROWED by the other one (a re-parented widget is nobody's descendant any
+        # more), so a key typed into the open panel still reaches the walk (`AGENTS.md` §4.24).
         mine = (obj is self or obj is self._container or self.isAncestorOf(obj)
                 or obj is self.viewer or self.viewer.isAncestorOf(obj))
         if etype in self._DRAG_TYPES and mine:

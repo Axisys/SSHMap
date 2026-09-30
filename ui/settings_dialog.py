@@ -1,72 +1,16 @@
 # -*- coding: utf-8 -*-
-"""v1.1: Settings dialog (hub) — ROADMAP v1.1, tasks 1–6; v1.1.1 — options around the hub.
+"""The settings hub — the QTabWidget behind "Settings" (AGENTS.md §4.12, DOCUMENTATION.md §30).
 
-QTabWidget "General / Terminal / Statuses / Autosave / Map / Hotkeys / Language":
-centralized application settings + entry points (the "Settings" menu and the
-⚙ sidebar button — in ui/main_window.py / ui/sidebar.py). Each next idea from
-the ROADMAP is added as a field/checkbox in an existing tab, not as a new
-UI version.
+The dialog is the UI of ONE `~/.sshmap/config.json` (the atomic merge-write of `i18n.save_config`):
+every key is optional and a missing one means the shipped default. `collect()` writes the document
+on OK, `load_ui_settings()` is the validator of the `ui_*` keys, and `retranslate()` re-texts the
+open dialog, so a language change inside it updates its own labels.
 
-Storage — a SINGLE ~/.sshmap/config.json (i18n.save_config, atomic
-merge-write); all keys are optional, defaults = current behavior:
-  * General:          external_terminal (v1.1: moved from ~/.sshmap_settings.json,
-                     migration on read — modules/external_terminal.py, task 7)
-                     + v1.1.1: ui_font_family/ui_font_size (UI font, live),
-                     ui_show_sidebar_buttons (the sidebar button block);
-  * Terminal:         terminal_palette / terminal_font_size / terminal_history_lines
-                     (v1.0 keys) + terminal_close_behavior (v1.1: "close"|"ask")
-                     + v1.1.1: terminal_font (family; read since v1.0, UI for
-                     the first time), terminal_max_open (own-terminals limit,
-                     default 4; v1.3.3.8: the spin is 1..32 — the VALIDATOR's range)
-                      + v1.2.2: terminal_mode ("windows" default | "tabs" — the dock on the map)
-                      + v1.3.3.8: terminal_wheel ("scrollback" default | "off" — the
-                      mouse wheel; the LAST key that had no UI at all)
-                      + v1.6.2: terminal_cursor_style ("bar" default — the thin blinking
-                      line of Windows Terminal | "block" | "underline"; the first NEW
-                      UI-facing key since terminal_wheel, so collect() goes 22 → 23)
-                      + v1.7.1.1: terminal_files_mode ("tab" default — the shipped
-                      `Terminal | Files | History` strip | "panel" — the Files tree in the
-                      right-hand panel beside the shell; the mode a NEW terminal window
-                      OPENS with, so collect() goes 23 → 24);
-  * Statuses:         status_interval_sec / status_probe_timeout_sec (v1.1; defaults
-                     30 s / 3.0 s — v1.0 behavior, services/status_checker.py);
-  * Autosave:         autosave_enabled / autosave_interval_sec / backup_count (v0.9.7);
-  * Map:              v1.1.1: ui_node_double_click ("properties"|"connect"),
-                     ui_show_connection_type (type on the connection plaque);
-  * Language:         language — applied immediately (signal language_changed →
-                     MainWindow._switch_language; the "Help → Language" item is kept).
-                     v1.3.3.8 (ROADMAP task 2): the tab also carries the language
-                     MANAGER — "Import a language file…" (validated + copied into
-                     ~/.sshmap/languages/, the user folder, created on demand; the
-                     imported language becomes active at once) and "Export the current
-                     language…" (the file that WINS for the active language, or the
-                     `en` template); both report through `language.*` in a status
-                     label. Import/export only — no editor, no downloading.
-  * Hotkeys (v1.3.2): hotkeys — a nested dict action_id → sequence string
-                     ("" = the hotkey is disabled); the rows come from the action
-                     registry ui/hotkey_registry.py, the action NAMES reuse the
-                     existing menu i18n keys. Collected on OK and applied live by
-                     MainWindow._apply_hotkeys (QAction.setShortcut/QShortcut.setKey).
+The dialog does not know MainWindow (the "module + callbacks" pattern of `ui/sidebar.py`): it only
+reports through its signals — `applied()` (the config was saved; the window then applies autosave,
+the statuses and the live options) and `language_changed(str)` (fired immediately, before OK).
 
-v1.1.1: load_ui_settings() — the ui_* key validator (the get_status_settings
-pattern); live application without a restart — MainWindow
-(_apply_settings_from_dialog): QApplication.setFont, the font of open
-terminal windows, sidebar button visibility, double-click mode, connection
-plaque redraw.
-
-Signals (the module pattern — like ui/sidebar.py: the dialog does not know
-about MainWindow):
-    applied()            — the config was saved on OK; MainWindow applies
-                           autosave (QTimer), statuses (StatusChecker) and
-                           the v1.1.1 options (fonts/buttons/double-click/
-                           plaques) live; the terminal reads the config on
-                           the next window creation;
-    language_changed(str)— the language choice in the "Language" tab
-                           (immediately, before OK).
-
-i18n: keys settings.* × en/ru/zh; the string registry — in retranslate()
-(a language change inside the open dialog updates its own labels).
-"""
+The key inventory and the live-application rule of each row are the DOCUMENTATION section's."""
 
 import sys
 
@@ -212,17 +156,11 @@ def load_ui_settings():
     return defaults
 
 
-# ── v1.4.3 (ROADMAP task 6): the "Appearance" tab — the theme config ──────────
-# The `theme` key of ~/.sshmap/config.json: a NESTED object {"mode", "accent"}
-# (the `hotkeys` precedent — one key, several values). Everything here validates
-# and never raises: a broken value is the DARK theme + the default hue, plus ONE
-# log line, which is what keeps a hand-edited config from leaving the app
-# themeless (exactly like `get_status_settings` and `load_ui_settings`).
-#
-# Note the SHAPE of the choice: the user picks a COLOUR (a swatch or their own
-# hex), while `Theme` stores the HUE. The hue comes back out of the hex through
-# `theme.hex_hue`, so editing "accent": "#38bdf8" by hand and re-opening the tab
-# shows the same swatch as picking sky by hand would.
+# ── the "Appearance" tab — the theme config ───────────────────────────────────
+# The `theme` key of `~/.sshmap/config.json`: a NESTED object {"mode", "accent"} (the `hotkeys`
+# precedent). Everything validates and never raises — a broken value is the DARK theme + the
+# default hue plus ONE log line. The user picks a COLOUR, `Theme` stores the HUE (`hex_hue`
+# turns the stored hex back into the swatch), so a hand-edited value re-opens as the choice.
 
 #: The accent swatches of the tab: (key suffix, hue, representative hex).
 #: The hex is computed, not typed — a swatch cannot drift from its hue.
@@ -383,12 +321,11 @@ class SettingsDialog(QDialog):
         self._initial_density = load_theme_settings()["density"]
         self._density = self._initial_density
 
-        # ── v1.5rc4 (ROADMAP task 3): the settings search ─────────────────────
-        # ONE field above the tabs filters the ROWS and the PAGES by their TRANSLATED
-        # labels (the command palette's matching — a plain case-insensitive substring,
-        # no new dependency). The index behind it is filled by the tab builders through
-        # `_register_search_entry()` / `_register_form_rows()`; a hit switches to its tab
-        # and highlights the row, and Enter walks the hits.
+        # ── the settings search ─────────────────────
+        # ONE field above the tabs filters the ROWS and the PAGES by their TRANSLATED labels (the command
+        # palette's matching — a plain case-insensitive substring, no new dependency). The index behind it
+        # is filled by the tab builders through `_register_search_entry()` / `_register_form_rows()`; a hit
+        # switches to its tab and highlights the row, and Enter walks the hits.
         self._search_entries = []     # [{"page", "label", "widgets", "text"}, …]
         self._search_hits = []
         self._search_index = -1
@@ -433,17 +370,11 @@ class SettingsDialog(QDialog):
         btn_layout.addWidget(self.cancel_btn)
         layout.addLayout(btn_layout)
 
-    # ── v1.5rc4 (ROADMAP task 3): the settings search ──────────────────────────
-    # The hub is eight tabs deep and the thing a user wants is a WORD they read in a
-    # dialog once. The search therefore indexes the rows the tabs already built (their
-    # TRANSLATED labels — the same strings on screen, so a re-worded setting is found by
-    # its new name) plus the tab titles, which makes "the whole page" a searchable item
-    # of its own. Matching is the command palette's: a case-insensitive substring.
-    #
-    # The index is built by REGISTRATION while the tabs are constructed
-    # (`_register_form_rows()` for a form layout, `_register_search_entry()` for a row
-    # that is a layout of its own) — the builders know their rows, so nothing has to be
-    # guessed from the widget tree at search time.
+    # ── the settings search ──
+    # The hub is eight tabs deep, so the search indexes the ROWS the tabs already built (their
+    # TRANSLATED labels) plus the tab titles, matching like the palette (a case-insensitive
+    # substring); the index is filled by REGISTRATION while the tabs are constructed, never
+    # guessed from the widget tree (`_register_form_rows()` / `_register_search_entry()`).
 
     def _register_search_entry(self, page, label_widget, widgets=None, text=None) -> None:
         """Add ONE searchable row of ``page`` to the index.
@@ -978,13 +909,11 @@ class SettingsDialog(QDialog):
         self._lbl_mode = QLabel(_t("settings.terminal.mode"))
         form.addRow(self._lbl_mode, self.mode_combo)
 
-        # v1.7.1.1 (ROADMAP v1.7.1.1): the FILES display mode — WHERE the session's Files
-        # tree lives, asked right beside the terminal display mode because it is the same
-        # kind of question (a layout preference, not a per-window control): "tab" (the
-        # default — the shipped `Terminal | Files | History` strip) | "panel" (the
-        # right-hand panel beside the shell, `[commands | terminal | files]` at once).
-        # Read at window construction like the mode above: a NEW terminal window opens with
-        # it and open windows keep the layout they have (`terminal_mode`'s rule).
+        # The FILES display mode — WHERE the session's Files tree lives, asked right beside the
+        # terminal display mode because it is the same kind of question (a layout preference, not a
+        # per-window control): "tab" (the default — the shipped `Terminal | Files | History` strip) |
+        # "panel" (the right-hand panel beside the shell, `[commands | terminal | files]` at once). Read
+        # at window construction like the mode above: a NEW window opens with it (`AGENTS.md` §4.3).
         self.files_mode_combo = QComboBox()
         self.files_mode_combo.addItem(_t("settings.terminal.files_mode.tab"), "tab")
         self.files_mode_combo.addItem(_t("settings.terminal.files_mode.panel"), "panel")
@@ -1022,14 +951,10 @@ class SettingsDialog(QDialog):
         self._lbl_font_size = QLabel(_t("settings.terminal.font_size"))
         form.addRow(self._lbl_font_size, self.font_size_spin)
 
-        # v1.1.1 (item 3): the limit of own open terminals — when reached,
-        # not a refusal but an offer to close the oldest session
-        # (MainWindow._spawn_terminal_window).
-        # v1.3.3.8 (ROADMAP task 3): the spin follows the VALIDATOR (1..32 in
-        # load_terminal_settings) instead of the old 1..16. That was a bug, not only
-        # a narrower range: a saved 20 was DISPLAYED as 16 and an OK wrote 16 back,
-        # silently lowering a valid value. The two limits are ONE limit now, pinned
-        # by tests/test_language_folder.py.
+        # The limit of own open terminals — when reached, not a refusal but an offer to close the
+        # oldest session (`MainWindow._spawn_terminal_window`). The spin follows the VALIDATOR
+        # (1..32 in `load_terminal_settings`): a display limit narrower than the saved range would
+        # silently LOWER a valid value on OK — the two limits are ONE limit.
         self.max_open_spin = QSpinBox()
         self.max_open_spin.setRange(1, 32)
         self.max_open_spin.setValue(cfg["max_open"])
@@ -1055,12 +980,11 @@ class SettingsDialog(QDialog):
         self._lbl_close_behavior = QLabel(_t("settings.terminal.close_behavior"))
         form.addRow(self._lbl_close_behavior, self.close_behavior_combo)
 
-        # v1.3.3.8 (ROADMAP task 4): the mouse wheel — the LAST key that had no UI at
-        # all (documented as deliberate in v1.1.2RC3 and never revisited). "scrollback"
-        # (default) = the wheel scrolls the local scrollback; "off" = the wheel is not
-        # intercepted, only the full SGR/X10 passthrough of a mouse-tracking TUI is
-        # left (widget._wheel_mode — modules/terminal_widget.py). The page/window reads
-        # the key on creation exactly as before: only the UI is new.
+        # The mouse wheel — the LAST key that had no UI at all. "scrollback" (default) = the wheel
+        # scrolls the local scrollback; "off" = the wheel is not intercepted, only the full SGR/X10
+        # passthrough of a mouse-tracking TUI is left (`widget._wheel_mode` —
+        # `modules/terminal_widget.py`). The page/window reads the key on creation exactly as before:
+        # only the UI is new.
         self.wheel_combo = QComboBox()
         self.wheel_combo.addItem(_t("settings.terminal.wheel.scrollback"), "scrollback")
         self.wheel_combo.addItem(_t("settings.terminal.wheel.off"), "off")
@@ -1104,12 +1028,11 @@ class SettingsDialog(QDialog):
         tab = QWidget()
         form = QFormLayout(tab)
 
-        # v1.6.6 (ROADMAP task 3): the THIRD state of the cadence. The checkbox owns the visible
-        # state and the `status_interval_sec = 0` SENTINEL is what `collect()` writes for it, so
-        # one setting keeps one home; the interval spinbox beside it is DISABLED but REMEMBERED
-        # (never zeroed), so un-ticking the box gives the user their number back. The row is a
-        # VIEW of the state — the checker is its owner (`set_manual_only()`, applied live by
-        # `MainWindow._apply_settings_from_dialog()`).
+        # The THIRD state of the cadence. The checkbox owns the visible state and the
+        # `status_interval_sec = 0` SENTINEL is what `collect()` writes for it, so one setting keeps one
+        # home; the interval spinbox beside it is DISABLED but REMEMBERED (never zeroed), so un-ticking
+        # the box gives the user their number back. The row is a VIEW of the state — the checker is its
+        # owner (`set_manual_only()`, applied live by `MainWindow._apply_settings_from_dialog()`).
         self.manual_only_chk = QCheckBox(_t("settings.statuses.manual_only"))
         self.manual_only_chk.setChecked(bool(st["manual"]))
         self.manual_only_chk.toggled.connect(self._on_manual_only_toggled)
@@ -1762,7 +1685,7 @@ class SettingsDialog(QDialog):
     def _refresh_language_combo(self, force: bool = False):
         """v1.3.3.1 (ROADMAP task 3): re-read the discovered languages at dialog open.
 
-        The combo was built once at dialog construction; a language file dropped into
+        The combo was built once at dialog construction; a language file placed into
         `i18n/` (or into the user folder since v1.3.3.8) afterwards must not need a
         restart — `showEvent` calls this. The current language is preselected, so the
         refresh does not fire `currentIndexChanged` for the already active language.
@@ -1916,8 +1839,8 @@ class SettingsDialog(QDialog):
         is valid by construction). 22 → 23 UI-facing keys.
         v1.7.1.1 (ROADMAP v1.7.1.1): +1 key — terminal_files_mode ("tab"|"panel"
         of the same "Terminal" tab, the row below the display mode; the combo gives
-        fixed ids). It owns the Files panel's MODE, which the terminal window used
-        to write for itself as the legacy `ui_files_panel` (read once as the
+        fixed ids). It owns the Files panel's MODE, which the terminal window would
+        otherwise write for itself as the legacy `ui_files_panel` (read once as the
         migration source, never written again). 23 → 24 UI-facing keys.
         """
         return {

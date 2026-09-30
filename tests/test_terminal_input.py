@@ -1,32 +1,12 @@
 # -*- coding: utf-8 -*-
 """v1.0RC2 — keyboard + selection/copy (ROADMAP v1.0RC2).
 
-  * selection_cells (a pure function, no GUI): the single-line/multi-line/
-    the inverted boundaries/one cell/the whole grid/the column clamp; a regression on
-    the draft error #4 (TERMINAL.md §3) — the coordinates are ALWAYS (row, col),
-    the line-by-line order: the column interpretation of the draft ((col, row)) does not give
-    the same set of cells;
-  * the keyboard (an offscreen widget + a fake thread): the full F1–F12 table
-    (the xterm sequences SS3/CSI), PageUp/PageDown, Home/End/Delete
-    (the semantics of the old SSHTerminalTextEdit are preserved), the basic RC1 set
-    (the printable/utf-8/Return/Backspace/Tab/Shift+Tab/Esc/the arrows); the Ctrl+C without the selection →
-    b'\\x03' (the Acceptance: "Ctrl+C kills top"); the Ctrl+D → \\x04, the Ctrl+Z → \\x1a;
-    the AltGr guard (Ctrl+Alt held → nothing is sent — TERMINAL.md §3.12);
-  * Tab/Shift+Tab by the FULL path (QApplication.sendEvent through notify, §2b):
-    the regression v1.2.9-fix — Qt 6 intercepts them BEFORE the keyPressEvent
-    (the focus-change mechanism), the \t/\x1b[Z must reach the channel, and the focus must stay
-    on the terminal (the mc scenario: the series of Tabs without the focus drift);
-  * the bracketed paste Ctrl+V (the move from v0.9.4): the multi-line clipboard with
-    mixed EOL — a SINGLE block \\x1b[200~...\\x1b[201~ with the normalized
-    line breaks; an empty clipboard → nothing is sent;
-  * the mouse selection + the copying (offscreen, the synthetic QMouseEvents):
-    the LMB drag in both directions, a plain click = the selection reset, the Ctrl+C with the
-    selection → the copy of the multi-line text to the clipboard (the Acceptance),
-    without the selection → \\x03; the drag beyond the grid → the clamp; the semi-transparent
-    highlight renders (the pixels + the stats).
-
-Run:  python tests/test_terminal_input.py   (from the project root) or python tests/run_all.py
-"""
+`selection_cells()` is pure (single-line, multi-line, inverted boundaries, one cell, the whole grid, the
+column clamp) and pins the (row, col) order — the pre-1.0 (col, row) mistake does not give the same cells.
+The keyboard (an offscreen widget plus a fake thread): the full F1–F12 table (the SS3/CSI xterm
+sequences), PageUp/PageDown, Home/End/Delete, the RC1 set (printable/utf-8/Return/Backspace/Tab/Esc/the
+arrows), Ctrl+C without a selection → `\x03`, Ctrl+D → `\x04`, Ctrl+Z → `\x1a`, and the AltGr guard
+(Ctrl+Alt sends nothing — `DOCUMENTATION.md` §14a). Tab/Shift+Tab is checked by the FULL path (`QApplication.sendEvent` through `notify`): Qt 6 intercepts them BEFORE `keyPressEvent`, so `\t` / `\x1b[Z` must reach the channel and the focus must stay on the terminal (the mc scenario). Bracketed paste (Ctrl+V) sends ONE normalized `\x1b[200~…\x1b[201~` block; the mouse selection and the copy are checked offscreen (both drag directions, a plain click resetting, Ctrl+C copying the multi-line text, the drag beyond the grid clamped, the highlight really rendered)."""
 import sys
 
 from _common import bootstrap, check, finish
@@ -44,7 +24,7 @@ from modules.terminal_widget import TerminalWidget, selection_cells
 
 
 # ════════════════════════════════════════════════════════════
-# 1. selection_cells — a pure function (a regression for draft error №4)
+# 1. selection_cells — a pure function (a regression for the pre-1.0 (col, row) mistake)
 # ════════════════════════════════════════════════════════════
 print("== selection_cells (pure) ==")
 
@@ -73,7 +53,7 @@ check("the clamp of the columns: c2=99 → cols-1",
       selection_cells((0, 0), (1, 99), 8) == [(r, c) for r in (0, 1) for c in range(8)],
       f"got={selection_cells((0, 0), (1, 99), 8)}")
 
-# A REGRESSION for error №4 (TERMINAL.md §3): the draft stored (col, row) and compared
+# A REGRESSION for the pre-1.0 mistake: the draft stored (col, row) and compared
 # as a tuple — column order. start=(0,5), end=(2,1), cols=8: line by line this is
 # line 0 with col 5..7, line 1 in full, line 2 up to col 1 (13 cells).
 cells4 = selection_cells((0, 5), (2, 1), 8)
@@ -163,7 +143,7 @@ for label, k, e in (("Ctrl+D", Qt.Key.Key_D, b"\x04"), ("Ctrl+Z", Qt.Key.Key_Z, 
     press_key(w, k, mod=CTRL)
     check(f"{label} → {e!r}", sent == [e], f"sent={sent!r}")
 
-# The AltGr guard (TERMINAL.md §3.12): on Windows AltGr = Ctrl+Alt — nothing is sent
+# The AltGr guard (DOCUMENTATION.md §14a): on Windows AltGr = Ctrl+Alt — nothing is sent
 for label, k in (("C", Qt.Key.Key_C), ("D", Qt.Key.Key_D), ("V", Qt.Key.Key_V),
                  ("Z", Qt.Key.Key_Z), ("2", Qt.Key.Key_2)):
     sent.clear()
@@ -182,16 +162,10 @@ except Exception as e:
 
 
 # ════════════════════════════════════════════════════════════
-# 2b. Tab/Shift+Tab — the FULL delivery path (the v1.2.9-fix regression)
-#     Qt 6 intercepts bare Tab/Shift+Tab at the focus-change level BEFORE
-#     keyPressEvent (QWidget docs: "To force those keys to be processed
-#     by your widget, you must reimplement QWidget::event()"). A direct call
-#     keyPressEvent (the table above) this path did NOT cover — so the bug survived
-#     from v1.0RC2 to v1.2.9: in a real window Tab drove focus across buttons/tabs,
-#     and \t never reached the shell (bash autocompletion, mc panels).
-#     Here — QApplication.sendEvent (via notify) + a second focusable
+# 2b. Tab/Shift+Tab — the FULL delivery path
+#     Qt 6 intercepts them at the focus-change level BEFORE keyPressEvent, so a direct call
+#     does not cover this path: QApplication.sendEvent (via notify) + a second focusable
 #     widget in the same window = a real focus chain.
-# ════════════════════════════════════════════════════════════
 print("== Tab/Shift+Tab focus retention (full delivery path) ==")
 
 

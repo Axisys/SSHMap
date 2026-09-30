@@ -1,50 +1,11 @@
 # -*- coding: utf-8 -*-
-"""v1.2 — TerminalSessionPage refactor (window → page) + per-session tracking.
+"""TerminalSessionPage — the session as a reusable widget (window → page).
 
-The thematic test of the release v1.2 (ROADMAP v1.2, the "new thematic file" convention):
+Offscreen, NO network (the fake threads). Pins the page construction (thread + screen + canvas +
+SFTP tab), the idempotent `shutdown()`, the PTY grid hand-over and the per-session tracking.
+Contract — `AGENTS.md` §4.3; mechanism — `DOCUMENTATION.md` §14b.
 
-§1 The page construction: TerminalSessionPage — the session as a reusable
-   widget (thread + screen + the terminal canvas + the SFTP tab; the status is data,
-   not a row — the v1.4.7 follow-up), the terminal_* config from config.json, the test
-   seam of the thread class (ST.SSHTerminalThread).
-
-§2 ALL the teardown paths — through the single method page.shutdown() (idempotent):
-   a) the regular path: the PTY timer is stopped, the signals of the thread/worker are detached
-      (a late emit without receivers — a no-op), the thread is stopped, the registry of the orphan threads is empty;
-   b) the orphan path (v1.1.2RC1 N4): the thread "connects" (blocks up to 15 s in
-      reality) — shutdown() waits wait(1500), did not wait → the registry _orphan_threads,
-      the late finished() self-cleans the registry;
-   c) the SFTP worker: the lazy start on the live transport, shutdown() — the stop in the budget,
-      the signals are detached (the pattern test_sftp_tab §6);
-   d) the error path: error_signal → QMessageBox.critical + the status (state AND the
-      status-bar bridge — the v1.4.7 follow-up) + close_terminal
-      (without the host — the teardown directly);
-   e) close_terminal() with the host window — the window is closed by the regular path.
-
-§3 confirm_close — the "ask" gate (terminal_close_behavior): "close" without the dialog;
-   "ask" + the active session → Cancel holds / Close closes; _force_close (the path
-   of the limit v1.1.1) and a finished session — without the dialog.
-
-§4 The regression of the window lifecycle (the mode `windows` = v1.1.x): the wrapper
-   (WA_DeleteOnClose, the title, the geometry window_geometry.py), the central widget —
-   the QTabWidget of the sessions (v1.2.1: the compat properties live-reference the ACTIVE tab),
-   the canvas resize → the grid synchronization via eventFilter
-   (before — the window resizeEvent), the bridge "the page status bar → the window status bar"
-   (the sticky text + the SFTP progress), the round-trip of ui_window_geometry_terminal,
-   the WA_DeleteOnClose E2E (the C++ object is destroyed after the close).
-
-§5 The tracking by SESSIONS in MainWindow (ROADMAP task 4): the registry _terminal_windows
-   stores the TerminalSessionPage, not the windows; v1.2.1: two sessions of one node — two tabs
-   in one window (the second "connect to the node" reuses the live window); the green
-   dot of the node goes out only when ALL the sessions of the node are closed; the limit "4 own terminals"
-   (terminal_max_open) is counted by the sessions in all the windows — Close closes the tab
-   of the oldest one (_force_close), Cancel — None.
-
-§6 The i18n parity (the pin EXPECTED_I18N_KEYS in _common.py; v1.2.1: 400) + the release state
-   (the pin _common.py).
-
-Run:  python tests/test_terminal_page.py   (from the project root) or python tests/run_all.py
-"""
+Run: python tests/test_terminal_page.py   (from the project root) or python tests/run_all.py"""
 import json
 import os
 import sys
@@ -430,12 +391,11 @@ check("compat: win.tabs/sftp_tab/status_label/_sftp_worker — live references",
       and wv.status_label is wv.page.status_label
       and wv._sftp_worker is None)
 
-# A canvas resize (inside the tab) → the grid synchronization via the page eventFilter
-# (previously — the window's resizeEvent); a guard on grid change + ~150 ms debounce.
-# IMPORTANT: show() BEFORE resize — offscreen defers the geometry of a hidden top-level
-# before the first show (verified: a hidden window does NOT get a resizeEvent in v1.1.x,
-# nor in v1.2 — the grid synchronization happens on show/resize of the visible window;
-# the production path of _spawn_terminal_window always show()s right after the creation).
+# A canvas resize (inside the tab) → the grid synchronization via the page's `eventFilter` (the
+# window's `resizeEvent` is not the trigger); a guard on a real grid change + the ~150 ms debounce.
+# IMPORTANT: `show()` BEFORE the resize — offscreen defers the geometry of a hidden top-level, so a
+# hidden window gets no `resizeEvent`; the production path of `_spawn_terminal_window` always `show()`s
+# right after the creation (`DOCUMENTATION.md` §14b).
 wv.show()
 app.processEvents()
 wv.resize(700, 500)

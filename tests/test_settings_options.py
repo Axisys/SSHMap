@@ -1,28 +1,12 @@
 # -*- coding: utf-8 -*-
 """v1.1.1 — Small options around the hub: the release's themed test (ROADMAP v1.1.1).
 
-The items of ROADMAP v1.1.1 (each is independently shippable, here each is covered by its own block):
-  #1 The fonts — ui_font_family/ui_font_size (the UI) + terminal_font (the terminal, the key
-    was read since v1.0, the UI for the first time); the apply on the fly without a restart:
-    QApplication.setFont + widget.set_font() into the open terminal windows;
-  #2 English by default — i18n._default_language "ru" → "en": it affects only
-    the new users (without config.json); for the existing ones get_last_language()
-    returns the saved language;
-  #3 The limit of one's own terminals = 4 — terminal_max_open (the default 4); on reaching it
-    not a refusal, but the offer to close the OLDEST session / a cancel (_spawn_terminal_window);
-  #4 The double click on a node — ui_node_double_click "properties"|"connect"
-    ("connect" → _run_ssh_connect(node) opens the SSHConnectDialog immediately);
-  #5 The hiding of the button block of the sidebar — ui_show_sidebar_buttons (the default True) +
-    SidebarPanel.set_buttons_visible(bool); the whole sidebar — the menu item "View → Sidebar";
-  #6 The connection plaque — the type on the plaque (ui_show_connection_type: "SSH · <label>") +
-    the 20-character limit of the label (setMaxLength(20) in ConnectionDialog/EditConnectionDialog,
-    only on the input — the old projects with the long labels are read unchanged).
-
-The storage — the SINGLE ~/.sshmap/config.json; all the keys are optional, the defaults = the behavior
-of v1.1. i18n: +14 keys × en/ru/zh (the parity 359 → 373).
-
-Run: python tests/test_settings_options.py   (from the project root) or python tests/run_all.py
-"""
+Every item is independently shippable and each is covered by its own block: #1 the fonts —
+`ui_font_family` / `ui_font_size` for the UI and `terminal_font` for the terminal (read since v1.0, its
+UI for the first time) — applied live without a restart through `QApplication.setFont` and
+`widget.set_font()` into the open terminal windows; #2 English by default (`i18n._default_language` moved
+from "ru" to "en", which affects only a NEW user: an existing one gets the saved language back); #3 the
+limit of own terminals (`terminal_max_open`, default 4) offering to close the OLDEST session instead of a refusal; #4 the node double click (`ui_node_double_click` "properties" | "connect", the latter opening the SSHConnectDialog at once); #5 the sidebar button block (`ui_show_sidebar_buttons` plus `SidebarPanel.set_buttons_visible()`, while the whole sidebar keeps the View menu item); #6 the connection plaque (`ui_show_connection_type` → "SSH · <label>" with the label's 20-character input limit, so project files with longer labels stay readable). The storage is the SINGLE `~/.sshmap/config.json` (every key optional, the defaults = the v1.1 behaviour); the keys are en/ru/zh."""
 import json
 import os
 import sys

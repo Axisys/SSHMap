@@ -1,39 +1,16 @@
 # -*- coding: utf-8 -*-
-"""v1.5rc4 (ROADMAP task 5): the VISIBLE focus of the three keyboard domains.
-
-The v1.5 line closed the gap between what the map SHOWS and what the chrome SAYS; the
-last thing the chrome never answered is "where do my keys go?". The window has three
-keyboard domains — the **map**, the **sidebar** and the **terminal** — and until now
-nothing on screen told the user which of them owns the keyboard: in
-``terminal_mode = "tabs"`` the session shares the window with the map, so "does Ctrl+F
-search the map or reach the shell?" had no visible answer at all.
-
-This module is that answer, in ONE place, following the two rules of the line:
-
-  * **the tone is not new.** It is ``theme.ACCENT_STRONG`` — the v1.5rc1 role for INK
-    on a surface ("the accent family exists to be readable"), never a fresh colour and
-    never the decorative ``accent`` (which measured 1.96:1 as ink on a LIGHT surface
-    — the very number the v1.5rc1 gate was written for). A ring therefore reads on both
-    instances by construction, and ``tests/test_chrome.py`` pins the colour to that one
-    field instead of to a literal;
-  * **one indicator, three consumers.** ``FocusRing`` owns the state
-    (``set_active()`` / ``is_active()``) and the two ways a domain can show it:
-
-      - ``paint(painter, rect)`` — a 2 px frame drawn by a CUSTOM canvas (``MapView``
-        paints it over the viewport, ``TerminalWidget`` over its cell grid);
-      - ``styled_widget`` — a STANDARD widget (the sidebar's ``QTreeWidget``) that
-        carries the same frame as a stylesheet, from the ONE QSS registry
-        (``theme_qss`` — the "no hardcoded QSS in a widget" rule of §4.6).
-
-The width is a declared constant (``RING_WIDTH``) and the two registry names
-(``STYLE_ACTIVE`` / ``STYLE_INACTIVE``) keep the frame's thickness in BOTH states, so
-switching the focus on never reflows the layout the user is looking at.
-
-The ring NEVER forces a repaint of a whole window: it repaints the widgets it is attached
-to, and it is deliberately silent when nothing changed (the ``set_active`` early return) —
-a focus walk over a large map must not cost a repaint per Keystroke that is not a focus
-change.
-"""
+"""The VISIBLE focus of the three keyboard domains (DOCUMENTATION.md §41).
+The window has three keyboard domains — the map, the sidebar and the terminal — and nothing on screen
+told the user which one owns the keyboard (in `terminal_mode = "tabs"` the session shares the window
+with the map, so "does Ctrl+F search the map or reach the shell?" had no visible answer).
+Two rules: the tone is NOT new — `theme.ACCENT_STRONG`, the INK role on a surface (never the decorative
+`accent`, which measured 1.96:1 as ink on LIGHT; `tests/test_chrome.py` pins that field); and there is
+ONE indicator with three consumers — `FocusRing` owns the state (`set_active()` / `is_active()`) and
+the two ways to show it: `paint(painter, rect)` for a custom canvas (`MapView`, the terminal grid) and
+`styled_widget` for a standard widget (the sidebar tree, through the ONE QSS registry, §4.6).
+`RING_WIDTH` and the two registry names (`STYLE_ACTIVE` / `STYLE_INACTIVE`) keep the thickness in BOTH
+states, so switching the focus on never reflows the layout; the ring repaints only its own widgets and
+`set_active()` returns early when nothing changed."""
 
 from PySide6.QtCore import QRectF, Qt
 from PySide6.QtGui import QColor, QPen

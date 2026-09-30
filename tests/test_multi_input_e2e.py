@@ -1,32 +1,12 @@
 # -*- coding: utf-8 -*-
 """v1.2.4 — Multi-input: E2E on REAL SSH channels (paramiko), no fake threads.
 
-Why a separate file: the thematic test_multi_input.py proves the chain
-TerminalWidget.keyPressEvent → _send → hub.broadcast → page.terminal_thread.send_data()
-on the fakes (the same API as SSHTerminalThread). This file closes the last
-uncovered segment — the REAL paramiko: the real Transport/Channel on the
-server side (the in-process echo-shell), the real SSHTerminalThread of the client, the real
-authentication and the known_hosts pinning. The incident of v1.2.4: the manual testing did not
-confirm the broadcast on the live sessions — the E2E pins down the behavior on the real
-channels and catches the regressions in send_data/the liveness of the threads that the fakes do not see.
-
-§1 The window mode (as the user: terminal_mode=windows), 3 terminals:
-   the enabling via the menu path (_toggle_multi_input(True)) → a key in the active
-   widget → the same bytes into ALL the other real channels; the source receives
-   exactly once (no echo). The mode is disabled → no duplicates (the behavior of v1.2.2).
-   Plus the "real event path" (v1.2.4-fix): the keys by postEvent through the Qt
-   event loop (the focus + QWidget::event) — not only the direct keyPressEvent calls.
-
-§2 The dock mode (terminal_mode=tabs, TerminalDockContent): 2 sessions in the dock —
-   the broadcast into all the other tabs of the dock.
-
-§3 The diagnostics (v1.2.4-fix): the state change of the mode is written to the log of the application
-   (the INFO "Multi-input mode enabled/disabled"), the broadcast — the DEBUG line on every
-   input; the log file under the isolated HOME is checked by the content.
-
-Run:  python tests/test_multi_input_e2e.py   (from the project root) or python tests/run_all.py
-The network is not needed: the SSH server lives in the process (the paramiko ServerInterface, the echo-shell).
-"""
+`tests/test_multi_input.py` proves the chain `keyPressEvent` → `_send` → `hub.broadcast` →
+`terminal_thread.send_data()` on the FAKES; this file closes the segment the fakes cannot see — the REAL
+paramiko: a real Transport/Channel on the server side (the in-process echo-shell), the real
+`SSHTerminalThread`, real authentication and known_hosts pinning. It exists because the manual testing of
+v1.2.4 did not confirm the broadcast on live sessions, and it catches regressions in `send_data` and in
+thread liveness. The network is not needed: the SSH server lives in the process. §1 the window mode (`terminal_mode=windows`) with three terminals: enabling through the menu path (`_toggle_multi_input(True)`) sends the same bytes into ALL the other real channels, the source receives exactly ONCE (no echo), disabling gives no duplicates, and the "real event path" (postEvent through the Qt event loop, focus included) is checked beside the direct calls; §2 the dock mode (2 sessions in the dock, the broadcast into the other tabs); §3 the diagnostics (the INFO on a state change and the DEBUG line per broadcast, read from the log file under the isolated HOME)."""
 import os
 import socket
 import sys
@@ -137,7 +117,7 @@ _listener.listen(8)
 
 
 def _serve():
-    # IMPORTANT (v1.2.4-fix): THE THREAD ON THE CONNECTION — _handle is blocked in the recv loop
+    # IMPORTANT: THE THREAD ON THE CONNECTION — _handle is blocked in the recv loop
     # before closing the channel; a single-threaded accept loop would have served only the FIRST
     # client, the others would have been waiting for the banner ("Error reading SSH protocol banner").
     while True:
@@ -274,12 +254,11 @@ check("the mode is off: exactly ONE channel (the source) received the bytes, no 
       len(got) == 1 and all(b"solo-only\r" not in log or i in got
                             for i, log in enumerate(logs)), repr(logs))
 
-# ── The real event path (v1.2.4-fix): the keys via the Qt event loop ───────────
-# The direct keyPressEvent() calls above bypass the focus and the QWidget::event() chain;
-# postEvent + setFocus is closer to a physical keyboard (the event goes through
-# the Qt queue → QWidget::event() → keyPressEvent). The app shortcuts on
-# the printable keys/Enter are not registered (the QKeySequence audit over ui/:
-# The Ctrl+K palette, F12 — only in the mode and only EXIT) — no interception.
+# ── The real event path : the keys via the Qt event loop ───────────
+# The direct `keyPressEvent()` calls bypass the focus and the `QWidget::event()` chain; `postEvent` +
+# `setFocus` is closer to a physical keyboard (the event goes through the Qt queue → `QWidget::event()`
+# → `keyPressEvent`). The application shortcuts on the printable keys/Enter are not registered (the
+# `QKeySequence` audit over `ui/`: the Ctrl+K palette and F12 — only in the mode and only EXIT).
 mw._toggle_multi_input(True)
 app.processEvents()
 for s in SERVERS:
@@ -370,7 +349,7 @@ ST.load_terminal_settings = _orig_load_ts
 
 
 # ════════════════════════════════════════════════════════
-# 3. Diagnostics (v1.2.4-fix): mode switching and broadcast — in the log file
+# 3. Diagnostics : mode switching and broadcast — in the log file
 # ════════════════════════════════════════════════════════
 print("== 3. diagnostics in app log ==")
 

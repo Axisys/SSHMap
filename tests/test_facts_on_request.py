@@ -1,39 +1,12 @@
 # -*- coding: utf-8 -*-
-"""v1.6.6 — the measurement you asked for: the status round you start, and the data mount
-that holds the capacity.
+"""v1.6.6 — the measurement you asked for: the status round you start, and the data mount that holds the capacity.
 
-The topical file of the release (ROADMAP v1.6.6). ONE theme: what the application measures is
-what the user asked for — asked WHEN (the status cadence gains a manual-only state) and asked
-OF THE RIGHT FILESYSTEM (the collected facts read the data mount beside the root).
-
-Sections:
-  §1 the SENTINEL and its reader (task 1): `status_interval_sec = 0` selects the manual mode,
-     `resolve_interval_sec()` is the ONE pure reader, and every OTHER value — missing, negative,
-     non-numeric, boolean, out of range — keeps the ordinary clamp instead of silently
-     switching the probes off;
-  §2 the CHECKER's live switch (task 2): `start()` arms nothing in that mode, the deferred first
-     round is a guarded slot, the switch is live in both directions, the MANUAL horizon is the
-     declared day, and the manual doors plus the freshness tick behave as always;
-  §3 the DOORS and the WORDS (task 3): the load-round guard is the checker's own predicate, and
-     the "Status Checks" tab carries the checkbox over the remembered (disabled) spinbox with
-     the sentence that spells out what the mode means;
-  §4 the TWO-MOUNT READ (task 4): the pure parser and the declared classifier — the colleagues'
-     two measured hosts, a path that does not exist, a `cifs` mount, a `fuse.sshfs` mount, the
-     transport of the request into the batch and the refusal the collector reports;
-  §5 the MODEL (task 5): the four additive optional strings, their coercion, the "write only
-     what was measured" policy, and the ONE write path that dates them;
-  §6 the DIALOG (task 6): the data-mount row — the REQUEST beside the measured ANSWER, and a
-     refused mount leaving the answer EMPTY;
-  §7 the CARD and the TABLE (task 7): the measured line with the height formula intact, the
-     compact density dropping it with the rest of the block, and `LIST_COLUMNS` untouched;
-  §8 the RELEASE STATE: the pins, the parity of the eleven new keys, no new dependency, no new
-     colour and `VERSION_FORMAT` still `0.9`.
-
-Hermetic by construction: the window is built with NO status checker (or with a recorder that
-never spawns a probe thread), and nothing here opens a socket.
-
-Run:  python tests/test_facts_on_request.py   (from the project root) or python tests/run_all.py
-"""
+The topical file of the release, and of the device choice that joins the same family: ONE theme — what
+the application measures is what the user asked for, asked WHEN (the cadence gains a manual-only state)
+and OF THE RIGHT FILESYSTEM (the facts read the data mount beside the root, or the DEVICE the card
+names). It is hermetic: the window is built with NO status checker and nothing here opens a socket.
+§1 the sentinel `status_interval_sec = 0` and the ONE pure reader `resolve_interval_sec()`; §2 the
+checker's live switch and the declared manual horizon; §3 the doors and the words (the load-round guard, the checkbox over the remembered spinbox); §4 the two-mount read (the pure parser and the classifier); §5 the model's four additive strings and the ONE dating write path; §6 the dialog's request/answer row; §7 the card line with `LIST_COLUMNS` untouched; §8 the DEVICE choice (`lsblk -d`, the pure device family, the model pair, the dialog combo and the composed card line); §9 the release state."""
 import json
 import os
 import re
@@ -57,7 +30,7 @@ import ui.hotkey_registry as HR  # noqa: E402
 import ui.main_window as MW  # noqa: E402
 from dialogs.add_server_dialog import AddServerDialog  # noqa: E402
 from models.server import (ServerData, optional_text, server_data_from_dict,  # noqa: E402
-                           server_data_to_dict)
+                           server_data_to_dict, sanitize_device_list)
 from services.status_checker import (  # noqa: E402
     StatusChecker, get_status_settings, resolve_interval_sec, is_manual_interval,
     MANUAL_INTERVAL_SEC, MANUAL_STALE_SEC, STALE_MIN_SEC, DEFAULT_INTERVAL_SEC,
@@ -66,7 +39,9 @@ from services.system_info_collector import (  # noqa: E402
     build_info_batch, parse_disk_report, parse_disk_presence, resolve_disk_answer,
     resolve_disk_mount, disk_refusal_kind, is_network_fs, sh_quote, parse_info_output,
     INFO_BATCH, DISK_MOUNT_DEFAULT, DISK_MOUNT_TOKEN, NETWORK_FS_TYPES,
-    DISK_REFUSAL_MISSING, DISK_REFUSAL_NETWORK, DISK_NOTE_MISSING)
+    DISK_REFUSAL_MISSING, DISK_REFUSAL_NETWORK, DISK_NOTE_MISSING,
+    parse_lsblk_report, physical_disks, device_label, device_labels, resolve_disk_device,
+    DISK_TYPE_PHYSICAL, DISK_REFUSAL_DEVICE, DISK_NOTE_DEVICE_MISSING)
 from ui.settings_dialog import SettingsDialog  # noqa: E402
 from ui import sidebar as SB  # noqa: E402
 
@@ -85,6 +60,12 @@ NEW_KEYS = (
     "server.disk_free_hint", "server.disk_size_hint", "server.disk_mount_tooltip",
     "node.disk_mount",
     "status.disk_mount_network", "status.disk_mount_missing",
+)
+
+# The four keys of the DEVICE choice (§8) — the ONE list the second i18n block iterates.
+DEVICE_KEYS = (
+    "server.disk_device_hint", "server.disk_device_tooltip",
+    "node.disk_devices", "status.disk_device_missing",
 )
 
 # The colleagues' two measured hosts (the ROADMAP's own numbers): the root is 9.8 G on BOTH,
@@ -708,39 +689,318 @@ check("§7 ... and the data mount is deliberately NOT a column",
 
 
 # ════════════════════════════════════════════════════════════════════════════
-print("== §8 the release state ==")
+print("== §8 the DEVICE choice — `lsblk -d` names them, the user picks one ==")
+# ════════════════════════════════════════════════════════════════════════════
+
+# The colleague's own box one level DOWN: the root lives on `sda` (9.8 gb) while the volume the card
+# is about is `sdb` (100 gb). Every other row carries a TYPE of its own — a candidate is DECLARED by
+# `TYPE == "disk"`, never by the shape of its name.
+_LSBLK_HEADER = "NAME SIZE TYPE"
+_LSBLK_DISKS = [
+    "sda 10522669875 disk",
+    "sdb 107374182400 disk",
+    "nvme0n1 512110190592 disk",
+    "mmcblk0 31914983424 disk",
+    "vda 10737418240 disk",
+    "loop0 1024 loop",
+    "sr0 1073741824 rom",
+    "dm-0 63350767616 lvm",
+    "md0 214748364800 raid1",
+]
+_LSBLK_ROWS = [_LSBLK_HEADER] + _LSBLK_DISKS
+_DEVICE_LABELS = ["sda 9.8 gb", "sdb 100 gb", "nvme0n1 476.9 gb",
+                  "mmcblk0 29.7 gb", "vda 10 gb"]
+
+
+def device_output(rows, present="present", lsblk=None):
+    """A collection output carrying the disk report AND the `lsblk` device listing."""
+    listing = _LSBLK_ROWS if lsblk is None else lsblk
+    return "\n".join(["---DISK---"] + list(rows) + ["---DISKS---"] + list(listing)
+                     + ["---DISKMOUNT---", present, "---END---"])
+
+
+check("§8 the batch asks for the devices in their OWN section (no user input in that command)",
+      "---DISKS---" in INFO_BATCH and "lsblk -d -n -b -o NAME,SIZE,TYPE" in INFO_BATCH
+      and DISK_MOUNT_TOKEN not in INFO_BATCH.split("---DISKS---")[1].split("---DISKMOUNT---")[0])
+check("§8 ... and it still carries the requested mount twice (the shipped half is untouched)",
+      build_info_batch("").count("'/opt'") == 2 and build_info_batch("").count("---DISKS---") == 1)
+
+_dev_rows = parse_lsblk_report("\n".join(_LSBLK_ROWS))
+check("§8 the parser splits the listing into rows (name, size, type) with the size as an int",
+      _dev_rows[0] == ("sda", 10522669875, "disk")
+      and _dev_rows[1] == ("sdb", 107374182400, "disk")
+      and len(_dev_rows) == 9, str(_dev_rows[:2]))
+check("§8 ... dropping the header, an empty line and every unparsable row",
+      all(row[0] != "NAME" for row in _dev_rows)
+      and parse_lsblk_report("") == [] and parse_lsblk_report("---DISKS---\n---END---") == []
+      and parse_lsblk_report("lsblk: not found") == []
+      and parse_lsblk_report("sda notanumber disk") == [])
+check("§8 an lsblk too old for the column list yields NOTHING (a degradation, never an error)",
+      parse_lsblk_report("sda 107374182400") == []
+      and physical_disks(parse_lsblk_report("sda 107374182400")) == [])
+
+check("§8 the TYPE is the DECLARATION: only `disk` is a candidate",
+      DISK_TYPE_PHYSICAL == "disk"
+      and [name for name, _size in physical_disks(_dev_rows)]
+      == ["sda", "sdb", "nvme0n1", "mmcblk0", "vda"],
+      str(physical_disks(_dev_rows)))
+check("§8 ... so a loop device, a CD-ROM, an LVM volume and an array are dropped BY TYPE",
+      all(name not in [n for n, _s in physical_disks(_dev_rows)]
+          for name in ("loop0", "sr0", "dm-0", "md0")))
+check("§8 physical_disks() is total (a malformed row is skipped, never raised)",
+      physical_disks([None, ("sda",), ("sdb", "x", "disk"), ("sdc", 10, "DISK"), "junk"])
+      == [("sdc", 10)])
+check("§8 a device is LABELLED through one function (the list, the combo and the tooltip)",
+      device_label("sdb", 107374182400) == "sdb 100 gb"
+      and device_label(" sda ", 10522669875) == "sda 9.8 gb"
+      and device_label(None, 5) == "" and device_label("sdz", 0) == "sdz")
+check("§8 the stored LIST is those labels, in the order lsblk printed them",
+      device_labels(_dev_rows) == _DEVICE_LABELS, str(device_labels(_dev_rows)))
+
+check("§8 no choice answers NOTHING (the root's df figure stays the figure `disk` carries)",
+      resolve_disk_device(_dev_rows, "") == {"name": "", "size": "", "note": ""}
+      and resolve_disk_device(_dev_rows, None) == {"name": "", "size": "", "note": ""}
+      and resolve_disk_device(_dev_rows, "   ")["name"] == "")
+check("§8 the chosen device answers ITS capacity — the number the field asked for",
+      resolve_disk_device(_dev_rows, "sdb") == {"name": "sdb", "size": "100 gb", "note": ""}
+      and resolve_disk_device(_dev_rows, "sda")["size"] == "9.8 gb",
+      str(resolve_disk_device(_dev_rows, "sdb")))
+check("§8 the match is by NAME and case-insensitive (a user may type SDB)",
+      resolve_disk_device(_dev_rows, "SDB")["size"] == "100 gb"
+      and resolve_disk_device(_dev_rows, " NVME0N1 ")["size"] == "476.9 gb"
+      and resolve_disk_device(_dev_rows, "SDB")["name"] == "SDB")
+check("§8 a name the listing does NOT hold is a REPORTED miss, never another disk's number",
+      resolve_disk_device(_dev_rows, "sdz")
+      == {"name": "sdz", "size": "", "note": DISK_NOTE_DEVICE_MISSING}
+      and resolve_disk_device(_dev_rows, "loop0")["note"] == DISK_NOTE_DEVICE_MISSING,
+      str(resolve_disk_device(_dev_rows, "sdz")))
+check("§8 ... and an EMPTY listing is the same miss (an lsblk-less host invents nothing)",
+      resolve_disk_device([], "sdb")["size"] == ""
+      and resolve_disk_device([], "sdb")["note"] == DISK_NOTE_DEVICE_MISSING)
+check("§8 the ONE classifier names the third refusal kind",
+      disk_refusal_kind(DISK_NOTE_DEVICE_MISSING) == DISK_REFUSAL_DEVICE == "device"
+      and disk_refusal_kind("") == "" and disk_refusal_kind(DISK_NOTE_MISSING) == DISK_REFUSAL_MISSING
+      and disk_refusal_kind("cifs") == DISK_REFUSAL_NETWORK)
+
+_info_dev = parse_info_output(device_output([_DF_HEADER, _ROOT_ROW, _HOST_A_ROW]), "sdb")
+check("§8 the whole batch yields the DEVICE's capacity, the listing and the data mount",
+      _info_dev["disk_gb"] == "100 gb" and _info_dev["disk_devices"] == _DEVICE_LABELS
+      and _info_dev["disk_device_note"] == "" and _info_dev["disk_path"] == "/opt"
+      and _info_dev["disk_free"] == "48 gb" and _info_dev["disk_size"] == "59 gb",
+      str(_info_dev))
+_info_nodev = parse_info_output(device_output([_DF_HEADER, _ROOT_ROW, _HOST_A_ROW]))
+check("§8 a card with NO choice keeps the root's figure byte for byte (the feature is opt-in)",
+      _info_nodev["disk_gb"] == "9.8 gb" and "disk_device_note" not in _info_nodev
+      and _info_nodev["disk_devices"] == _DEVICE_LABELS,
+      str(_info_nodev.get("disk_gb")))
+_info_gone = parse_info_output(device_output([_DF_HEADER, _ROOT_ROW], lsblk=[_LSBLK_HEADER]), "sdb")
+check("§8 a chosen device the listing lost leaves NO figure and says WHICH device",
+      "disk_gb" not in _info_gone and _info_gone["disk_device_note"] == DISK_NOTE_DEVICE_MISSING
+      and "disk_devices" not in _info_gone,
+      str(_info_gone))
+_info_old = parse_info_output(disk_output([_DF_HEADER, _ROOT_ROW]), "sdb")
+check("§8 an output without the section says NOTHING about a device (a pre-release batch/fixture)",
+      "disk_devices" not in _info_old and "disk_device_note" not in _info_old
+      and _info_old["disk_gb"] == "9.8 gb",
+      str(_info_old))
+check("§8 the collector builds its answer from the NODE's own choice",
+      callable(getattr(SIC.SystemInfoCollector(
+          ServerData(id="c2", alias="a", host="h", user="u", disk_device="sdb")), "_log_disk_note", None)))
+_dev_collector = SIC.SystemInfoCollector(ServerData(id="c3", alias="a", host="h", user="u",
+                                                    disk_device="sdb"))
+check("§8 the collector names a vanished device in its own report (the activity history's half)",
+      _dev_collector._log_disk_note({"disk_device_note": DISK_NOTE_DEVICE_MISSING}) is None
+      and _dev_collector._log_disk_note({"disk_note": "cifs",
+                                         "disk_device_note": DISK_NOTE_DEVICE_MISSING}) is None
+      and _dev_collector._log_disk_note({"disk_device_note": ""}) is None)
+
+check("§8 the two model fields exist with the declared defaults",
+      ServerData(id="x", alias="a", host="h", user="u").disk_device == ""
+      and ServerData(id="x", alias="a", host="h", user="u").disk_devices == [])
+check("§8 sanitize_device_list() is the tags rule applied to a MEASUREMENT",
+      sanitize_device_list([" sda 9.8 gb ", "sdb 100 gb", "", "  ", 22, None, ["x"]])
+      == ["sda 9.8 gb", "sdb 100 gb"]
+      and sanitize_device_list(None) == [] and sanitize_device_list("sdb") == []
+      and sanitize_device_list({"a": 1}) == [] and sanitize_device_list((1, 2)) == [],
+      str(sanitize_device_list([" sda 9.8 gb ", 22, None])))
+_dev_bad = server_data_from_dict({"id": "devbad", "alias": "a", "host": "h", "user": "u",
+                                  "disk_device": " sdb ", "disk_devices": ["sda 9.8 gb", 7, None]})
+check("§8 a hand-edited device field degrades without breaking the load",
+      _dev_bad.disk_device == "sdb" and _dev_bad.disk_devices == ["sda 9.8 gb"], str(_dev_bad))
+check("§8 a project written before the release loads with NO choice and NO listing",
+      _old.disk_device == "" and _old.disk_devices == [])
+_dev_meas = server_data_from_dict({"id": "devm", "alias": "a", "host": "h", "user": "u",
+                                   "disk_device": "sdb", "disk_devices": _DEVICE_LABELS})
+_dev_rt = server_data_from_dict(server_data_to_dict(_dev_meas))
+check("§8 the pair round-trips through save → load", _dev_rt.disk_device == "sdb"
+      and _dev_rt.disk_devices == _DEVICE_LABELS, str(_dev_rt.disk_devices))
+check("§8 an unmeasured map writes the REQUEST but NO list key (nothing is claimed)",
+      server_data_to_dict(_old)["disk_device"] == ""
+      and "disk_devices" not in server_data_to_dict(_old))
+check("§8 ... the schema does NOT move with them", _version.VERSION_FORMAT == "0.9")
+check("§8 the model keeps `disk` a PURE size string (the inventory's own sort key parses it whole)",
+      _dev_meas.disk == "" and _disk_key("512 mb") < _disk_key("9.8 gb") < _disk_key("100 gb")
+      and SB.list_cell_values(server_data_from_dict(
+          {"id": "v", "alias": "a", "host": "h", "user": "u", "disk": "100 gb",
+           "disk_device": "sdb"}))[SB.list_column_index("disk")] == "100 gb")
+
+_rec3 = RoundRecorder()
+win3 = make_main(checker=_rec3)
+win3.scene.add_server(ServerData(id="d1", alias="data-1", host="10.4.0.9", user="root",
+                                 disk_device="sdb"))
+_node3 = win3.scene.get_node("d1")
+check("§8 the ONE write path takes the DEVICE's capacity and the listing TOGETHER",
+      win3._apply_info_result("d1", {"disk_gb": "100 gb", "disk_devices": _DEVICE_LABELS,
+                                     "disk_device_note": ""}) is True
+      and _node3.data.disk == "100 gb" and _node3.data.disk_devices == _DEVICE_LABELS,
+      str((_node3.data.disk, _node3.data.disk_devices)))
+check("§8 the composed line and the listing reach the CARD through that one write",
+      "DISK: SDB 100 gb" in _node3._info.toPlainText()
+      and "Devices: sda 9.8 gb · sdb 100 gb" in _node3._info.toolTip(),
+      _node3._info.toolTip().replace("\n", " | "))
+check("§8 a device that VANISHED clears the figure and is REPORTED (never another disk's number)",
+      win3._apply_info_result("d1", {"disk_devices": ["sda 9.8 gb"],
+                                     "disk_device_note": DISK_NOTE_DEVICE_MISSING}) is True
+      and _node3.data.disk == "" and _node3.data.disk_devices == ["sda 9.8 gb"]
+      and "sdb" in win3.statusBar().currentMessage(),
+      win3.statusBar().currentMessage())
+check("§8 ... and the card claims NO line rather than an empty one",
+      _node3._disk_line() == "" and "DISK" not in _node3._info.toPlainText())
+check("§8 a collection silent about a device leaves the figure and the list where they are",
+      win3._apply_info_result("d1", {"os_name": "Debian GNU/Linux 12"}) is True
+      and _node3.data.disk == "" and _node3.data.disk_devices == ["sda 9.8 gb"])
+check("§8 ... while a payload written before the section keeps the plain figure rule",
+      win3._apply_info_result("d1", {"disk_gb": "9.8 gb"}) is True and _node3.data.disk == "9.8 gb")
+check("§8 ... and the choice itself is NEVER erased by a collection",
+      _node3.data.disk_device == "sdb")
+check("§8 a node that vanished during the collection still writes nothing",
+      win3._apply_info_result("nope", {"disk_devices": _DEVICE_LABELS}) is False)
+win3._dirty = False
+win3.close()
+app.processEvents()
+
+dlg7 = AddServerDialog(edit_data=ServerData(id="e3", alias="data-3", host="10.4.0.11", user="root",
+                                            disk="100 gb", disk_device="sdb",
+                                            disk_devices=_DEVICE_LABELS))
+check("§8 the DISK row carries the device REQUEST beside the measured figure",
+      all(hasattr(dlg7, f) for f in ("disk_device", "disk_device_row", "_disk_device_arrow", "disk"))
+      and dlg7.disk.text() == "100 gb")
+check("§8 the choice is an EDITABLE combo over the REAL devices the collection read",
+      dlg7.disk_device.isEditable() and dlg7.disk_device.count() == len(_DEVICE_LABELS)
+      and [dlg7.disk_device.itemText(i) for i in range(dlg7.disk_device.count())] == _DEVICE_LABELS,
+      str([dlg7.disk_device.itemText(i) for i in range(dlg7.disk_device.count())]))
+check("§8 the request field names the choice and its precedence in its placeholder",
+      dlg7.disk_device.lineEdit().placeholderText() == LANGS["en"]["server.disk_device_hint"]
+      and dlg7.disk_device.currentText() == "sdb",
+      repr(dlg7.disk_device.lineEdit().placeholderText()))
+check("§8 the row's tooltip spells the precedence out (the choice wins over the typed number)",
+      "WINS" in dlg7.disk_device.toolTip() and dlg7.disk_device.toolTip().strip() != "")
+check("§8 the stored request is the NAME alone — the figure shown beside it never enters the model",
+      dlg7.get_data().disk_device == "sdb"
+      and dlg7.get_data().disk_devices == _DEVICE_LABELS
+      and dlg7.get_data().disk == "100 gb")
+dlg7.disk_device.setCurrentText("sdb 100 gb")
+check("§8 picking a row takes its name, not its label", dlg7.get_data().disk_device == "sdb")
+dlg7.disk_device.setEditText("sdz")
+check("§8 a name the last collection did not see can still be TYPED (the field stays editable)",
+      dlg7.get_data().disk_device == "sdz" and dlg7.disk_device.isEditable())
+dlg7.close()
+_dlg_new = AddServerDialog()
+check("§8 a NEW card starts with no choice and no listing (and an empty combo)",
+      _dlg_new.disk_device.count() == 0 and _dlg_new.get_data().disk_device == ""
+      and _dlg_new.get_data().disk_devices == [])
+_dlg_new.close()
+
+_dev_card = ServerNode(ServerData(id="c-dev", alias="data", host="10.0.0.1", user="u",
+                                  os_name="Ubuntu 24.04 LTS", ram="16 gb", disk="100 gb",
+                                  disk_device="sdb", disk_devices=_DEVICE_LABELS))
+_dev_plain = ServerNode(ServerData(id="c-plain", alias="plain", host="10.0.0.2", user="u",
+                                   os_name="Ubuntu 24.04 LTS", ram="16 gb", disk="9.8 gb"))
+_dev_card.update_appearance()
+_dev_plain.update_appearance()
+check("§8 the card COMPOSES the name into its line, UPPERCASED, beside the pure figure",
+      "DISK: SDB 100 gb" in _dev_card._info.toPlainText()
+      and _dev_card._info.toPlainText().count("DISK") == 1,
+      _dev_card._info.toPlainText().replace("\n", " | "))
+check("§8 ... while a card with no choice renders exactly the shipped line",
+      _dev_plain._info.toPlainText().endswith("DISK: 9.8 gb")
+      and "SDB" not in _dev_plain._info.toPlainText(),
+      _dev_plain._info.toPlainText().replace("\n", " | "))
+check("§8 the listing rides the TOOLTIP as ONE line (no second card line, no elision pressure)",
+      "Devices: " + " · ".join(_DEVICE_LABELS) in _dev_card._info.toolTip()
+      and "Devices:" not in _dev_card._info.toPlainText()
+      and _dev_card._info_tip_full == "",
+      _dev_card._info.toolTip().replace("\n", " | "))
+check("§8 ... so the measured height formula does not move (58 + info + 12)",
+      _dev_card._current_height == _dev_plain._current_height == 130,
+      f"{_dev_card._current_height} / {_dev_plain._current_height}")
+check("§8 a card whose device vanished claims NO capacity line at all",
+      ServerNode(ServerData(id="c-gone", alias="gone", host="10.0.0.3", user="u",
+                            os_name="Ubuntu 24.04 LTS", ram="16 gb", disk="", disk_device="sdb",
+                            disk_devices=["sda 9.8 gb"]))._disk_line() == "")
+_dev_gone = ServerNode(ServerData(id="c-gone2", alias="gone", host="10.0.0.3", user="u",
+                                  disk="", disk_device="sdb", disk_devices=["sda 9.8 gb"]))
+_dev_gone.update_appearance()
+check("§8 ... and its tooltip still names what the listing DID find",
+      "Devices: sda 9.8 gb" in _dev_gone._info.toolTip()
+      and "DISK" not in _dev_gone._info.toPlainText())
+check("§8 a card with no listing keeps its empty tooltip (nothing to say)",
+      ServerNode(ServerData(id="c-t", alias="t", host="10.0.0.4", user="u",
+                            ram="16 gb"))._disk_devices_text() == "")
+check("§8 the device list is deliberately NOT an inventory column (13 columns stay)",
+      len(SB.LIST_COLUMNS) == 13
+      and "disk_device" not in [f for f, _k in SB.LIST_COLUMNS]
+      and "disk_devices" not in [f for f, _k in SB.LIST_COLUMNS])
+
+
+# ════════════════════════════════════════════════════════════════════════════
+print("== §9 the release state ==")
 # ════════════════════════════════════════════════════════════════════════════
 
 check_release_state(ROOT)
-check("§8 the version pin is the version this file describes",
+check("§9 the version pin is the version this file describes",
       releases_at_least(EXPECTED_APP_VERSION, "1.7") and releases_at_least(_version.APP_VERSION, "1.7"),
       f"{EXPECTED_APP_VERSION} / {_version.APP_VERSION}")
-check("§8 the i18n pin counts the SHIPPED release (811 + 17 of v1.6.7 + 13 of v1.6.8 + 5 of v1.7rc1 + 8 of v1.7rc2)",
-      EXPECTED_I18N_KEYS >= 854, str(EXPECTED_I18N_KEYS))
+check("§9 the i18n pin counts the SHIPPED release (811 + 17 of v1.6.7 + 13 of v1.6.8 + 5 of v1.7rc1"
+      " + 8 of v1.7rc2 + 9 of v1.7rc3 + 4 of v1.7.1 + 3 of v1.7.1.1 + 4 of the v1.7.1.2 device choice)",
+      EXPECTED_I18N_KEYS == 811 + 17 + 13 + 5 + 8 + 9 + 4 + 3 + 4, str(EXPECTED_I18N_KEYS))
 check_i18n_parity(LANGS)
 check_i18n_format(LANGS)
-check("§8 the ELEVEN new keys are present and non-empty in every language",
+check("§9 the ELEVEN new keys are present and non-empty in every language",
       all(str(LANGS[c].get(k, "")).strip() for k in NEW_KEYS for c in LANGS)
       and len(NEW_KEYS) == 11,
       str([k for k in NEW_KEYS for c in LANGS if not str(LANGS[c].get(k, "")).strip()]))
-check("§8 the placeholders of the new keys match en in every language",
+check("§9 the placeholders of the new keys match en in every language",
       all({m for m in re.findall(r"\{([A-Za-z_][A-Za-z0-9_]*)\}", LANGS[c][k])}
           == {m for m in re.findall(r"\{([A-Za-z_][A-Za-z0-9_]*)\}", LANGS["en"][k])}
           for k in NEW_KEYS for c in LANGS))
-check("§8 the card's measured line carries the three placeholders it renders",
+check("§9 the card's measured line carries the three placeholders it renders",
       {"mount", "free", "size"}
       <= {m for m in re.findall(r"\{([A-Za-z_][A-Za-z0-9_]*)\}", LANGS["en"]["node.disk_mount"])})
-check("§8 the registry moved only by the closing release's ONE export action",
+check("§9 the FOUR device keys are present and non-empty in every language",
+      all(str(LANGS[c].get(k, "")).strip() for k in DEVICE_KEYS for c in LANGS)
+      and len(DEVICE_KEYS) == 4,
+      str([k for k in DEVICE_KEYS for c in LANGS if not str(LANGS[c].get(k, "")).strip()]))
+check("§9 the placeholders of the device keys match en in every language",
+      all({m for m in re.findall(r"\{([A-Za-z_][A-Za-z0-9_]*)\}", LANGS[c][k])}
+          == {m for m in re.findall(r"\{([A-Za-z_][A-Za-z0-9_]*)\}", LANGS["en"][k])}
+          for k in DEVICE_KEYS for c in LANGS))
+check("§9 the tooltip line renders {devices} and the sentence renders {device} + {alias}",
+      {"devices"} <= {m for m in re.findall(r"\{([A-Za-z_][A-Za-z0-9_]*)\}",
+                                            LANGS["en"]["node.disk_devices"])}
+      and {"device", "alias"} <= {m for m in re.findall(
+          r"\{([A-Za-z_][A-Za-z0-9_]*)\}", LANGS["en"]["status.disk_device_missing"])})
+check("§9 the registry moved only by the closing release's ONE export action",
       len(HR.HOTKEY_ACTIONS) == 61 and len(HR.empty_default_action_ids()) == 38,
       f"{len(HR.HOTKEY_ACTIONS)}/{len(HR.empty_default_action_ids())}")
-check("§8 the settings hub still collects 23 keys (the sentinel is a VALUE, not a new row)",
+check("§9 the settings hub still collects 23 keys (a per-card choice is not a new row)",
       len(SettingsDialog(None).collect()) == 24)
-check("§8 no new dependency (requirements.txt keeps its four)",
+check("§9 no new dependency (requirements.txt keeps its four)",
       len([ln for ln in open(os.path.join(ROOT, "requirements.txt"), encoding="utf-8")
            if ln.strip() and not ln.startswith("#")]) == 4
       or all(x in open(os.path.join(ROOT, "requirements.txt"), encoding="utf-8").read()
              for x in ("PySide6", "paramiko", "keyring", "wcwidth")))
-check("§8 no new colour field (the theme stays the 60-field palette it ships)",
+check("§9 no new colour field (the theme stays the 60-field palette it ships)",
       len(list(theme.Theme.__dataclass_fields__)) == 60
       and "MANUAL_STALE_SEC" in open(os.path.join(ROOT, "services", "status_checker.py"),
                                      encoding="utf-8").read(),

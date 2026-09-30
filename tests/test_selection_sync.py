@@ -1,22 +1,11 @@
-"""Regression v0.9.9.1 — selection sync without blockSignals (reentry guard).
+"""Regression v0.9.9.1 — selection sync without blockSignals (a reentry guard).
 
-ROADMAP v0.9.9.1 (the closure of the "Open remark" in the CHANGELOG):
-  #1 instead of scene.blockSignals / tree.blockSignals in _select_node and
-     _sync_selection_state — the reentry-guard flag MainWindow._selection_syncing
-     (a plain bool, the GUI thread; the reset in finally). The echo of own signals
-     during the programmatic change returns immediately (without the recursion), and the explicit
-     synchronization after the change is idempotent: the full recomputation of the state
-     ("the tree = the current selection of the scene"), not the "apply of the delta".
-  #2 the signals are no longer blocked globally — the other slots
-     of selectionChanged keep working; the external change during the sync
-     is not lost, the next alignment converges.
-
-The accompanying fix v0.9.9.1 (the behavior test — in test_map_search.py):
-  MapView.resized + resizeEvent — the search bar is repositioned on the window resize
-  (earlier the connect fell into the AttributeError and was silently swallowed by the try/except).
-
-Run:  python tests/test_selection_sync.py   (from the project root) or python tests/run_all.py
-"""
+Instead of `scene.blockSignals` / `tree.blockSignals` in `_select_node` and `_sync_selection_state`, the
+window uses the reentry flag `MainWindow._selection_syncing` (a plain bool on the GUI thread, reset in
+`finally`): the echo of its own signals during a programmatic change returns immediately, so there is no
+recursion, and the explicit synchronization afterwards is idempotent — it recomputes the WHOLE state
+("the tree = the current selection of the scene") instead of applying a delta. The signals are no longer
+blocked globally, so the other slots of `selectionChanged` keep working and an external change during the sync is not lost (the next alignment converges). The accompanying fix of that release — the search bar repositioned on a window resize — is covered in `tests/test_map_search.py`."""
 import os, sys, json, tempfile, traceback, inspect
 
 from _common import bootstrap, check, finish

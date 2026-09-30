@@ -1,22 +1,16 @@
 # -*- coding: utf-8 -*-
-"""v1.2.10rc3 — the measurement of the rubber-band selection (the AUDIT auto #9). NOT part of the suite.
+"""The measurement of the rubber-band selection (the audit's auto #9). NOT part of the suite.
 
-The pattern of the standalone measurement (like tests/_bench_history.py for v1.2.12): it is run
-manually, prints the ms to stdout — the numbers go to CHANGELOG.md ("measured on …,
-v1.2.10rc3"). run_all.py does NOT collect it (files with the _ prefix are skipped).
+It follows the pattern of the standalone measurements (like `tests/_bench_history.py`): it is run by hand,
+prints the milliseconds to stdout, and the numbers belong to the changelog family. `run_all.py` does not
+collect it — `_`-prefixed files are skipped.
 
-The scenario: a synthetic map of 500 ServerNode (the grid 25×20) + the connections and a note
-(a realistic composition of the scene elements); the drag of the selection frame across the map —
-N steps from the top-left corner to the bottom-right. Each step = one mouse movement
-= one call of MapView._update_rubber_select (before the fix of v1.2.10rc3 — the full
-O(n) sweep of scene.items(); after — the spatial index scene().items(rect)
-+ the isinstance filter).
-
-The before/after comparison: run the script on the codebase of v1.2.10rc2 (before the fix),
-then after the fix of graphics/map_view.py — both pairs of numbers into the CHANGELOG.
-
-Run:  python tests/_bench_rubber.py   (from the project root)
-"""
+The scenario builds a synthetic map of 500 `ServerNode`s on a 25×20 grid plus connections and a note — a
+realistic composition of the scene elements — and drags the selection frame across it in N steps from the
+top-left to the bottom-right corner. Every step is one mouse movement, i.e. one call of
+`MapView._update_rubber_select`: BEFORE the fix that was a full O(n) sweep of `scene.items()`, and AFTER it
+uses the spatial index (`scene().items(rect)`) with an `isinstance` filter.
+ The before/after comparison: run the script on the pre-fix codebase, then on the fixed `graphics/map_view.py`, and record both pairs of numbers in the changelog."""
 import platform
 import sys
 import time

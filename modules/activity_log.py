@@ -1,48 +1,16 @@
 # -*- coding: utf-8 -*-
-"""v1.5.2 (ROADMAP task 1): the activity history the interface never kept.
-
-A status-bar line lives for a few seconds, and a probe round, an import, an SFTP
-failure or a plugin error leaves nothing behind at all: `~/.sshmap/logs/sshmap.log`
-is the durable record, but it is a FILE — nobody reads it while working. This module
-is the missing HISTORY: a bounded, memory-only ring buffer of what just happened,
-filled by TWO thin taps that rewire no existing emitter:
-
-  * **the logging tap** — ONE `logging.Handler` (`ActivityLogHandler`) that
-    `modules/logger.py` installs beside the rotating file handler. Any module that
-    already calls `get_logger(__name__)` reaches the buffer for free; a module that
-    logged nothing (the ROADMAP task 2 list) simply gets its calls added.
-  * **the status-bar tap** — `record_status_message()`, called from the ONE
-    connection to `statusBar().messageChanged` (and to `UndoStatusBar.offer_shown`,
-    because the Undo offer never travels through `messageChanged`). The transient UI
-    sentences become history too.
-
-The pinned decisions (ROADMAP v1.5.2):
-
-  * **MEMORY ONLY.** Nothing here is ever serialized: `sshmap.log` stays the durable
-    record and the ring dies with the process (one home per fact — a second file would
-    be a second truth to keep in sync).
-  * **BOUNDED.** `MAX_EVENTS = 200` — the oldest event leaves the ring when a new one
-    arrives. A history that grows without a bound is a leak, and a leak in a GUI that
-    runs for weeks is a defect.
-  * **The line stays ENGLISH.** The event text is a logging line (the logging
-    convention of the project), the UI chrome around it is translated by the panel.
-    That is what keeps the i18n cost at the chrome keys instead of one key per event
-    kind.
-  * **A repeated fact is ONE event with a counter.** The same
-    `(family, source, level, message)` arriving again within `REPEAT_WINDOW_S`
-    increments `ActivityEvent.repeats` instead of pushing a twin — "Ready." posted ten
-    times in a burst is one row saying `×10`, and the ring is not spent on it.
-  * **No secret can enter a record** (ROADMAP task 2 acceptance): the taps copy a
-    message, they never inspect an object — a password would have to be formatted into
-    the text by the CALLER. The rule for every call site is therefore "a fact, never a
-    credit" (hosts, paths, plugin ids, counts, language codes), and
-    `tests/test_activity_panel.py` scans the call sites for it.
-
-The module is Qt-free and import-safe (stdlib only): `modules/logger.py` imports it at
-startup, so anything heavier would slow every log line down. The UI half is
-`ui/activity_panel.py`, which wraps the buffer in a QObject bridge to marshal the
-worker-thread appends to the GUI thread.
-"""
+"""The activity history the interface never kept (DOCUMENTATION.md §45): a bounded, memory-only ring
+buffer of what just happened, filled by TWO thin taps that rewire no existing emitter.
+  * the logging tap — ONE `logging.Handler` (`ActivityLogHandler`) installed by `modules/logger.py`
+    beside the rotating file handler, so a module already calling `get_logger(__name__)` reaches the
+    buffer for free;
+  * the status-bar tap — `record_status_message()` from the ONE connection to `statusBar().messageChanged`
+    and to `UndoStatusBar.offer_shown` (the Undo offer never travels through `messageChanged`).
+Pinned: MEMORY ONLY (nothing is serialized — `sshmap.log` stays the durable record), BOUNDED
+(`MAX_EVENTS = 200`), the line stays ENGLISH (the panel translates the chrome), a repeated fact is
+ONE event with a counter (`REPEAT_WINDOW_S`), and NO secret can enter a record — the taps copy a
+message and never inspect an object, which `tests/test_activity_panel.py` scans the call sites for.
+Qt-free and import-safe (stdlib only — `modules/logger.py` imports it at startup); the UI half is `ui/activity_panel.py`, a QObject bridge to the GUI thread."""
 
 import collections
 import logging

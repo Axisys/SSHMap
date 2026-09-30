@@ -1,23 +1,12 @@
 # -*- coding: utf-8 -*-
 """Bidirectional arrows (v1.2.6, ROADMAP task 1).
 
-It covers:
-  * the geometry: the arrowheads on BOTH the ends of the curve — the tips exactly on the borders of the nodes, each arrowhead looks AT ITS node (←——→);
-    the standard mode — the path of the original arrowhead is empty (the item is invisible);
-  * set_bidirectional: the toggle + the idempotence without the recreation of the item;
-  * ConnectionDialog / EditConnectionDialog: the checkbox, the prefill from the arrow,
-    the tuples of get_connection() 5/3 elements (v1.2.6);
-  * MapScene.add_connection(bidirectional=...);
-  * the JSON: the "bidirectional" field is written only when true (the pattern of server_id),
-    the round-trip save/load, the backward-compat (no field → one-way);
-  * undo/redo: CmdAddRemoveConnection (the flag is preserved through undo/redo),
-    CmdEditConnection (the toggle of the flag by one command), the removal of a node —
-    the stash of the 5-tuples E2E (_remove_node_guarded with the patched QMessageBox.question);
-  * the drawio export: the startArrow=classic of the two-way edge, without it of the regular one;
-  * the i18n parity + the release state.
-
-Run: python tests/test_bidirectional_arrows.py   (from the project root) or python tests/run_all.py
-"""
+The geometry: arrowheads on BOTH ends of the curve, with the tips exactly on the borders of the nodes and
+each arrowhead pointing AT ITS node (←——→), while in standard mode the second path stays empty (the item
+is invisible). `set_bidirectional` is the toggle, idempotent and without recreating the item. The
+connection dialogs carry the checkbox with the prefill from the arrow, and `get_connection()` answers its
+5- or 3-element tuple accordingly; `MapScene.add_connection(bidirectional=…)` takes the flag.
+The JSON writes `"bidirectional"` only when true (the `server_id` pattern), round-trips on save/load and reads an old file as one-way. Undo/redo keeps the flag through `CmdAddRemoveConnection` and toggles it with ONE `CmdEditConnection`, and removing a node stashes the 5-element tuples E2E. The drawio export writes `startArrow=classic` for the two-way edge and nothing for the regular one. Plus the i18n parity and the release state."""
 import json
 import os
 import sys
@@ -95,12 +84,11 @@ check("target head tip lies on target boundary (left edge of D)",
       and rect_d.top() - 1 <= tip_tgt.y <= rect_d.bottom() + 1,
       f"tip=({tip_tgt.x:.1f},{tip_tgt.y:.1f}) left={rect_d.left()}" if tip_tgt else "no tip")
 
-# v1.2.6-fix: THE ORIENTATION — each arrowhead looks AT ITS node (←——→), not both
-# in the direction of movement (→——→). The centroid of the filled triangle lies on the "wing" side
-# side from the tip: for the original arrowhead it must lie between p0 and p3 (on the
-# curve, outside the node), in the target one — between p3 and p0. Before, only
-# the elementCount/the tip position, so the flipped source arrowhead (the body under
-# node) passed the tests, but visually it was indistinguishable from a one-way arrow.
+# THE ORIENTATION — each arrowhead looks AT ITS node (←——→), not both in the direction of movement
+# (→——→). The centroid of the filled triangle lies on the "wing" side from the tip: for the source
+# arrowhead it must lie between p0 and p3 (on the curve, outside the node), for the target one between
+# p3 and p0. Without the centroid check the flipped source arrowhead (its body under the node) passed
+# the tip-position assertions while being indistinguishable from a one-way arrow.
 p0_pts, _c1, _c2, p3_pts = bi._curve_pts
 
 

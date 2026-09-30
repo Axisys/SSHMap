@@ -1,19 +1,12 @@
 # -*- coding: utf-8 -*-
 """v1.4.1 — Import from ~/.ssh/config (ROADMAP v1.4.1, tasks 1–6).
 
-Sections:
-  §1 the parser: the directives, ssh's own defaults, case, `=`, quoting, continuations, comments;
-  §2 first-obtained-wins: a repeated `Host` alias fills only the gaps;
-  §3 the skip / note records (a wildcard pattern, a `Match` block, `ProxyJump`, an extra `IdentityFile`);
-  §4 `Include`: relative to ~/.ssh, nested, a glob, a missing file, a cycle, the depth cap;
-  §5 the loader and the path helpers (`default_config_path`, the token expansion, missing/unreadable);
-  §6 the TXT parser stops losing data (the v1.3.3 audit) — unit + end to end through the window;
-  §7 the picker dialog (checkboxes, the all/none buttons, `selected_hosts()`, the report);
-  §8 the window wiring (the menu item, the registry action, the end-to-end import, duplicates, cancel);
-  §9 the release state (the registry counters, i18n parity, the pins, the ROADMAP figures).
-
-Run: python tests/test_ssh_config_import.py   (from the project root) or python tests/run_all.py
-"""
+§1 the parser (the directives, ssh's own defaults, the case-insensitivity, `=`, quoting, continuations and
+comments); §2 first-obtained-wins (a repeated `Host` alias fills only the gaps); §3 the skip and note
+records (a wildcard pattern, a `Match` block, `ProxyJump`, an extra `IdentityFile`); §4 `Include` (relative
+to `~/.ssh`, nested, a glob, a missing file, a cycle and the depth cap); §5 the loader and the path helpers
+(`default_config_path`, the token expansion, the missing and unreadable cases); §6 the TXT parser that stops
+losing data (unit plus end to end through the window); §7 the picker dialog (the checkboxes, the all/none buttons, `selected_hosts()`, the report); §8 the window wiring (the menu item, the registry action, the end-to-end import, the duplicates and cancel); §9 the release state."""
 import json
 import os
 import sys
@@ -711,7 +704,7 @@ check("§9 the hint and the result carry their placeholders",
       and "{detail}" in json.load(open(os.path.join(ROOT, "i18n", "en.json"),
                                        encoding="utf-8-sig"))["sshconfig.reason.include_missing"])
 
-# The documentation guards that used to sit here (the ROADMAP baseline, the released-section
+# The documentation guards live in tests/test_docs.py (the ROADMAP baseline, the released-section
 # rule, the changelog entry) are about the DOCUMENTS, not about this importer: they moved to
 # tests/test_docs.py §1/§2. A topical test must not read the gitignored docs at all — a fresh
 # clone has none of them, so such a check is a crash waiting for the first person without them.

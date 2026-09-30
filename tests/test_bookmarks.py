@@ -1,33 +1,12 @@
 # -*- coding: utf-8 -*-
 """v1.6.7 — The bookmarks: ONE application-level place for the links the team uses.
 
-The topical file of the release (ROADMAP v1.6.7). ONE theme: a link that belongs to nobody's
-server had no home — the quick launch of a card is PER SERVER — so the release adds ONE
-user file (`~/.sshmap/bookmarks.json`), ONE floating panel over the canvas and ONE editor,
-all three built on shipped precedents (the `commands.json` store, the legend / minimap
-panel family, the quick-launch editor) and inventing nothing new.
-
-Sections:
-  §1 the STORE (`modules/bookmarks.py`): the path, the `utf-8-sig` read, the atomic
-     MERGE-write (a foreign top-level key survives), the sanitizer of the PROJECT reused (no
-     second copy), the operations (add / update / remove / move), the declared cap, the
-     POSITIONAL rule that keeps a foreign `command` entry where it is, the broken-file path
-     (skipped, never overwritten) and the pure filter;
-  §2 the PANEL (`ui/bookmark_panel.py`): the rows (the name + the URL as the second channel),
-     the filter, the fold, the two messages of an empty / filtered list, the ONE opener
-     behind a callback (a double click, Enter, and the no-opener / bad-row refusals);
-  §3 the SWITCH: ONE registry action with an EMPTY default in its family, the checkable View
-     item, the toolbar MIRROR, the owner-written `ui_bookmarks*` state keys, and the settings
-     hub's `collect()` untouched;
-  §4 the EDITOR (`dialogs/bookmark_edit_dialog.py`): add / edit in place / remove / reorder,
-     the validation of the quick-launch shape, and that it writes ONLY `url` entries;
-  §5 the WINDOW (`ui/main_window.py`): the toggle + persistence, the restart round trip, the
-     v1.5 SNAP on the anchored LEFT|TOP edge, `retranslate()` / `refresh_theme()`, the REAL
-     opener with its failure sentence, and the editor path with the report it prints;
-  §6 the i18n parity and the release state.
-
-Run: python tests/test_bookmarks.py   (from the project root) or python tests/run_all.py
-"""
+A link that belongs to nobody's server had no home (the quick launch of a card is PER SERVER), so the
+release adds ONE user file (`~/.sshmap/bookmarks.json`), ONE floating panel over the canvas and ONE
+editor — all three built on shipped precedents (the `commands.json` store, the legend/minimap panel
+family, the quick-launch editor) and inventing nothing new.
+§1 the STORE (`modules/bookmarks.py`): the path, the `utf-8-sig` read, the atomic MERGE-write (a foreign
+top-level key survives), the sanitizer of the PROJECT reused, add / update / remove / move, the declared cap, the POSITIONAL rule that keeps a foreign `command` entry where it is, and the broken-file path (skipped, never overwritten); §2 the PANEL (the rows with the URL as the second channel, the filter, the fold, the ONE opener behind a callback); §3 the SWITCH (ONE registry action with an EMPTY default, the checkable View item, the toolbar mirror, the owner-written `ui_bookmarks*` keys); §4 the EDITOR (it writes ONLY `url` entries); §5 the WINDOW (the toggle and its persistence, the snap, `retranslate()` / `refresh_theme()`, the real opener with its failure sentence); §6 the i18n parity and the release state."""
 import json
 import os
 import re
@@ -621,8 +600,8 @@ check("§6 the reused keys the editor reports with are the quick-launch ones (no
            "msg.ql_no_browser")))
 check_i18n_parity(langs)
 check_i18n_format(langs)
-check("§6 the pin counts the SHIPPED release (811 + the 17 keys of v1.6.7 + the 13 of v1.6.8 + the 5 of v1.7rc1 + the 8 of v1.7rc2 + the 9 of v1.7rc3 + the 4 of v1.7.1 + the 3 of v1.7.1.1)",
-      EXPECTED_I18N_KEYS == 811 + 17 + 13 + 5 + 8 + 9 + 4 + 3, str(EXPECTED_I18N_KEYS))
+check("§6 the pin counts the SHIPPED release (811 + the 17 keys of v1.6.7 + the 13 of v1.6.8 + the 5 of v1.7rc1 + the 8 of v1.7rc2 + the 9 of v1.7rc3 + the 4 of v1.7.1 + the 3 of v1.7.1.1 + the 4 of the v1.7.1.2 device choice)",
+      EXPECTED_I18N_KEYS == 811 + 17 + 13 + 5 + 8 + 9 + 4 + 3 + 4, str(EXPECTED_I18N_KEYS))
 check("§6 EXPECTED_APP_VERSION is the release this file describes",
       releases_at_least(EXPECTED_APP_VERSION, "1.7"), EXPECTED_APP_VERSION)
 check_release_state(ROOT)

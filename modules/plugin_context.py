@@ -1,49 +1,16 @@
 # -*- coding: utf-8 -*-
-"""v1.4rc2 (plugin foundation, ROADMAP task 5): `PluginContext` — the only window into the core.
+"""`PluginContext` — the only window into the core that a plugin gets (PLUGINS.md §5).
 
-The frozen API v1 contract (`PLUGINS.md` §5) says that a plugin receives **no**
-MainWindow, no scene, no `ServerData` internals, no keyring object and no paramiko
-object: everything arrives through one small object, and everything on it is either a
-read-only fact or a service the CORE performs on the plugin's behalf. This module is
-that object.
-
-**Read-only** (plain properties, no state a plugin can move):
-
-    ctx.plugin_id     the plugin's own MANIFEST["name"]
-    ctx.api_version   the API version of the context (1 — the group `sshmap.plugins/v1`)
-    ctx.app_version   the running SSH Map version (`version.APP_VERSION`)
-    ctx.log(message)  one line into ~/.sshmap/logs/sshmap.log, prefixed with the id
-
-**Services** (all of them are performed by the core, never by the plugin):
-
-    ctx.run_command(nodes, command, on_result=…, on_finished=…, timeout=…)
-        non-interactive execution over SSH — the credentials are resolved by the CORE
-        (`services/credential_manager.py`); per-node results arrive through callbacks
-        and hold the output, the exit code and the error of that node. Interactive
-        sessions are NOT available to plugins (PLUGINS.md §5).
-    ctx.status(text, timeout_ms=…)
-        a status-bar line; the core owns the widget and the token guard, so a stale
-        asynchronous result can never overwrite a newer message.
-
-**Node records** (PLUGINS.md §5): a plugin sees exactly `{id, alias, host, port, user}`
-— `PluginNode` here. It is a frozen dataclass, so a plugin cannot reach the model
-through it; `as_dict()` exists for a plugin that wants to serialize a node.
-
-**No Qt, no window, no i18n.** The context talks to the core through a duck-typed
-adapter (`core`): the methods are looked up at CALL time and every one of them may be
-missing — a context built without an adapter is a valid, completely inert context
-(that is what makes this module testable without an application). Nothing here raises:
-a service that cannot be performed returns False and leaves a log line.
-
-The adapter's methods (all optional):
-
-    plugin_log(plugin_id, message) -> None
-    plugin_status(plugin_id, text, timeout_ms) -> bool
-    plugin_run_command(plugin_id, nodes, command, on_result, on_finished, timeout) -> bool
-
-They are implemented by `modules/plugin_manager.py`, which owns the worker registry and
-the Qt signals; the context itself stays a plain Python object.
-"""
+A plugin receives NO MainWindow, no scene, no `ServerData` internals, no keyring and no paramiko
+object: everything arrives through this one small object, and all of it is either a read-only fact
+(`plugin_id`, `api_version`, `app_version`) or a service the CORE performs on the plugin's behalf —
+`log(message)`, `run_command(nodes, command, on_result=…, on_finished=…, timeout=…)` (non-interactive
+SSH; the core resolves the credentials) and `status(text, timeout_ms=…)` behind the core's token guard.
+Interactive sessions are NOT available to plugins.
+`PluginNode` is a frozen dataclass holding exactly `{id, alias, host, port, user}` (`as_dict()`
+serializes one), so a plugin cannot reach the model. No Qt, no window, no i18n: the core is a
+duck-typed adapter whose methods are looked up at CALL time and may ALL be missing — a context built
+without one is valid and inert, and nothing here raises."""
 
 from dataclasses import dataclass
 from typing import Callable, Dict, List, Optional

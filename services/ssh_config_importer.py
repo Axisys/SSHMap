@@ -1,60 +1,16 @@
 # -*- coding: utf-8 -*-
-"""SSH Config Importer — bulk import of servers from an OpenSSH client config (v1.4.1).
+"""The `~/.ssh/config` importer: the parser, the loader and their reason codes (§27).
 
-The file `~/.ssh/config` already describes the topology of most SSH users:
-one `Host` block per machine with the real host name, the login, the port and
-the key. This module reads it the way `ssh` itself does and turns the blocks
-into `SshConfigHost` records — the caller (`MainWindow._import_servers_from_ssh_config`)
-maps them onto `ServerData` and adds them to the map as ONE undoable batch
-(the v0.9.5.5 import-from-TXT pattern).
+`parse_hosts_file()` reads one file the way `ssh` does: a case-insensitive keyword, a value after
+whitespace or `=`, `"…"` quoting, a trailing `\`, `#` comments, `Host a b c` (three aliases at once),
+`!` as an exclusion, FIRST OBTAINED VALUE WINS per option, `Include` resolved recursively relative to
+`~/.ssh` (globs expanded); `load_ssh_config()` logs ONE record per call and answers the `skipped`/`notes` lists.
 
-WHAT IS IMPORTED (one map node per concrete `Host` pattern)
-    ``HostName``      → ``host`` (unset → the alias itself, the ssh default)
-    ``User``          → ``user`` (unset → the LOCAL user name, the ssh default)
-    ``Port``          → ``ssh_port`` (unset → 22; a malformed value is ignored)
-    ``IdentityFile``  → ``key_path`` (the FIRST one wins; ``none`` clears it)
-    ``Include``       → read RECURSIVELY at the point of the directive (see below)
-
-WHAT IS NOT IMPORTED — and is REPORTED (the ``skipped`` / ``notes`` lists)
-    * a wildcard pattern (``Host *``, ``?.example.com``) — pattern matching is
-      connection-time logic, not import logic, so the block is skipped WITH its
-      options: a ``Host *`` block that carries the global ``User`` is NOT applied
-      to the other hosts (the one deliberate fidelity gap of the version);
-    * a ``Match`` block and every directive inside it;
-    * ``ProxyJump`` / ``ProxyCommand`` / ``Jump`` — the app has no jump-host
-      concept; the host IS imported, the directive is dropped (a note);
-    * a second ``IdentityFile`` of the same host (a note);
-    * an ``Include`` that cannot be read / matches no file (a skip record — the
-      rest of the config still imports).
-
-OPENSSH RULES IMPLEMENTED
-    * a directive keyword is case-INSENSITIVE;
-    * the value is separated from the keyword by whitespace or ``=``;
-    * ``"…"`` quoting and a trailing ``\\`` line continuation are honoured;
-    * an unquoted ``#`` starts a comment and runs to the end of the line;
-    * ``Host a b c`` opens a block for THREE aliases at once;
-    * a pattern starting with ``!`` is an exclusion, not a host (ignored);
-    * FIRST OBTAINED VALUE WINS per option: a later ``Host <same alias>`` block
-      does not override an option already set, it only fills the gaps;
-    * ``Include`` paths resolve relative to ``~/.ssh`` (a glob is expanded).
-
-DELIBERATELY OUT OF SCOPE (documented, not hidden): the default identity files
-(``~/.ssh/id_rsa`` and friends) when ``IdentityFile`` is absent, per-host
-``StrictHostKeyChecking``/forwarding/``known_hosts`` directives (irrelevant to a
-map), a host block that STARTS in one file and CONTINUES in an included one,
-and any pattern matching at connection time.
-
-The module is HEADLESS: no Qt, no i18n, no network. Every user-visible string is
-a reason CODE (``REASON_*`` / ``NOTE_*``) plus a ``detail``; the dialog owns the
-translation (`dialogs/ssh_config_import_dialog.py`).
-
-v1.5.2 (ROADMAP task 2): the loader logged nothing — an import that found no host, or
-that could not read the file at all, left no trace. `load_ssh_config()` now writes ONE
-record per call (the result summary, or the reason the entry file was unusable), which
-reaches `sshmap.log` AND the activity panel. The parser stays silent: it runs once per
-included FILE and would flood the history with intermediate lines — the loader is the
-ONE place that knows the whole answer.
-"""
+IMPORTED: `HostName` → host (unset → the alias), `User` (unset → the local user), `Port` (unset →
+22), `IdentityFile` (the first one; `none` clears it). SKIPPED WITH A NOTE: a wildcard or `Match`
+block, `ProxyJump`/`ProxyCommand`, a second `IdentityFile`, an unreadable `Include` — the app has
+no jump-host concept and pattern matching is connection-time logic. HEADLESS: no Qt, no i18n, no
+network; every user string is a `REASON_*`/`NOTE_*` code plus a `detail`."""
 
 import getpass
 import glob

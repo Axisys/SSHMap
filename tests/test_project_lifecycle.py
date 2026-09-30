@@ -1,25 +1,12 @@
 # -*- coding: utf-8 -*-
 """v1.3.3.6 (ROADMAP "Projects: open, recover, remember"): the life cycle of a project file.
 
-Four holes of the released v1.3.3.x, closed in one topical test (offscreen, sandbox HOME,
-no network):
-
-  * the MRU — `recent_projects` in config.json (newest first, deduplicated by the
-    normalized absolute path, capped at 10, missing files pruned on read, a broken value
-    ignored) + the "File → Recent" submenu rebuilt on `aboutToShow` with its QActions
-    alive (PySide6 6.11 gotcha #9);
-  * the drop — a real QDropEvent carrying ONE local `.json`/`.sshmap` file loads the
-    project through `_load_project_at()` (the File → Open path); two files, a directory
-    and a foreign suffix are refused with a hint and no state change;
-  * the recovery — an unreadable project no longer ends in a bare critical dialog: the
-    backup ring and the autosave are consulted (nothing is overwritten without an
-    explicit choice), while the v0.9.7 #3 autosave-newer prompt keeps its own case;
-  * the panel widths — `ui_splitter_state` (base64 QSplitter.saveState()) round-trips,
-    a broken value falls back to the 250/950 defaults, and the restore runs AFTER the
-    collapsed-panel state so a collapsed panel keeps its strip.
-
-Run: python tests/test_project_lifecycle.py   (from the project root) or python tests/run_all.py
-"""
+Four holes of the released 1.3.3.x line, closed in one topical test (offscreen, sandbox HOME, no network).
+The MRU: `recent_projects` in `config.json` (newest first, deduplicated by the normalized absolute path,
+capped at 10, missing files pruned on read, a broken value ignored) plus the "File → Recent" submenu
+rebuilt on `aboutToShow` with its QActions kept alive (gotcha #9). The DROP: a real `QDropEvent` carrying
+ONE local `.json` / `.sshmap` file loads the project through `_load_project_at()` — the File → Open path —
+while two files, a directory and a foreign suffix are refused with a hint and no state change. The RECOVERY: an unreadable project no longer ends in a bare critical dialog, because the backup ring and the autosave are consulted (nothing is overwritten without an explicit choice), while the existing autosave-newer prompt keeps its own case. The PANEL WIDTHS: `ui_splitter_state` (base64 `QSplitter.saveState()`) round-trips, a broken value falls back to the defaults, and the restore runs AFTER the collapsed-panel state so a collapsed panel keeps its strip."""
 import json
 import os
 import sys
@@ -614,7 +601,7 @@ check("the same rule for the map (collapsed, strip kept)",
       w_coll2._map_collapsed is True and w_coll2._map_container.minimumWidth() == STRIP_W
       and w_coll2._splitter.sizes()[1] <= w_coll2._splitter.sizes()[0],
       f"min={w_coll2._map_container.minimumWidth()} sizes={w_coll2._splitter.sizes()}")
-check("collapsing both panels is still forbidden (the v1.2.4.1-fix invariant)",
+check("collapsing both panels is still forbidden (the invariant)",
       w_coll2._set_panel_collapsed("sidebar", True) == "forbidden")
 
 # closeEvent writes the key next to the geometry (never throws, one save per window)

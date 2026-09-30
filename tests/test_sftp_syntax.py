@@ -1,44 +1,12 @@
 # -*- coding: utf-8 -*-
 """v1.4.7 — Syntax highlighting in the SFTP viewer (numbers, JSON/XML/YAML, ROADMAP v1.4.7).
 
-The release theme: the read-only preview of the SFTP tab stops being monochrome. The
-viewer and its "no preview" markers made the LISTING informative; what was missing was
-the readability of the CONTENT — a 40 KB nginx config, a minified JSON or a k8s manifest
-in a monochrome canvas is hard to skim. Nothing about the read path changes: the same
-worker queue, the same 1 MB limit, the same encodings — the release only PAINTS what is
-already in the widget, and it does so without a new dependency (the standard library for
-the grammars, `QSyntaxHighlighter` for the paint).
-
-Everything here is checked WITHOUT the network: the fake in-memory SFTP of
-tests/_fakes.py feeds the real worker queue, exactly like test_sftp_viewer.py.
-
-The sections:
-  1. The palette — the `SYNTAX_*` block of `ui/theme.py`: the 8 roles of the tokenizer
-     vocabulary, a PER-INSTANCE field pair (DARK/LIGHT each carry their own), valid
-     hexes, pairwise distinct, never the "no preview" tone, live proxies; and the
-     module contract of `modules/syntax_highlight.py` (importable WITHOUT PySide6 —
-     the tokenizers must stay headless).
-  2. Detection — `detect_syntax(path, text)`: the extension is a HINT, the content is
-     the VERDICT. A `.json`/`.xml` that does not really parse degrades to "numbers";
-     `.yaml`/`.yml` is accepted as a HEURISTIC; an unknown extension NEVER guesses from
-     the content.
-  3. The tokenizers — exact spans: JSON (escapes inside a string, keys vs values,
-     numbers, keywords, punctuation), XML (tag/attribute/value/comment/CDATA/
-     declaration + a multi-line comment and CDATA through the block state), YAML
-     (comments, keys, list markers, quoted scalars, a `|`/`>` block scalar up to the
-     end of the block, a `#` inside a quoted scalar is NOT a comment) and the shared
-     numbers-only rule (no false positives: `abc123`, `1.2.3`, a date, a glued size).
-  4. The budgets — the per-block TOKEN cap (a minified MB-scale single line must not
-     freeze the GUI) and the measured opening budgets of a ~1 MB file.
-  5. The tab — the detected language, the heuristic note in the header (YAML only), the
-     colours really applied to the blocks, the reset between two files (no bleed).
-  6. Laziness — only the blocks around the viewport carry formats; scrolling formats the
-     next ones; the repeat pass is free.
-  7. The theme switch — the applied formats follow the ACTIVE theme (they are values).
-  8. i18n (613) + the release state.
-
-Run:  python tests/test_sftp_syntax.py   (from the project root) or python tests/run_all.py
-"""
+The release theme: the read-only preview stops being monochrome — the release only PAINTS what is
+already in the widget (no new dependency: the stdlib for the grammars, `QSyntaxHighlighter` for the
+paint), and everything is checked WITHOUT the network (the fake in-memory SFTP of tests/_fakes.py).
+§1 the palette and the module contract of `modules/syntax_highlight.py`; §2 `detect_syntax`
+(extension a hint, content the verdict — YAML a heuristic); §3 the exact spans; §4 the token cap and
+the budgets; §5–§7 the tab, the laziness, the theme switch; §8 i18n and the release state."""
 import ast
 import dataclasses
 import json

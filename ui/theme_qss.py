@@ -1,37 +1,16 @@
 # -*- coding: utf-8 -*-
-"""The Qt half of the theme: the QPalette, the QSS builders and the live switch.
+"""The Qt half of the theme: the QPalette, the QSS builders and the live switch (§4.6; the theme chapter
+of `DOCUMENTATION.md`). It is a SEPARATE module because `ui/theme.py` is pure data that must stay
+importable without PySide6 (the contract the tests and `ui/icons.py` rely on), while the palette, the QSS
+strings and `apply_theme()` need Qt — so neither half has to compromise.
 
-**Why this is a separate module from ``ui/theme.py``.** The ``Theme`` object is
-pure data and must stay importable without PySide6 (a contract since v1.2.5,
-relied on by the tests and by ``ui/icons.py``); the palette, the QSS strings and
-``apply_theme()`` need Qt. v1.4.3 puts the Qt half here (ROADMAP task 4 — "a new
-``ui/theme_qss.py`` or a function in ``ui/theme.py`` — decided at start") so that
-neither half has to compromise.
-
-What lives here:
-
-* ``build_palette(theme)`` — the base ``QPalette`` (the ``main.py`` v1.2.5
-  palette), now one call instead of eight;
-* ``build_qss(theme)`` — **THE** application stylesheet: every QSS rule of the
-  application that is a *global* rule (the window chrome, the menu bar and the
-  menus, the tooltips, the header/tab frame, the tables and trees, and the
-  floating cards). One theme → one stable string;
-* ``STYLE_BUILDERS`` — the widget-level registry: every stylesheet a *single*
-  widget used to build inline in its ``__init__`` (the muted status labels, the
-  dialog separators and headings, the search bar card, the terminal find bar,
-  the multi-input frame). One name → one builder → one string, so both the
-  initial styling and a theme switch go through the same code;
-* ``style(name)`` / ``refresh(widget, name)`` — the two accessors the widgets
-  use (``refresh`` also hides the widget while the stylesheet changes, the Qt
-  repaint rule of the profile dialog);
-* ``apply_theme(theme, app=None)`` — the live switch: the QPalette, the QSS and
-  a repaint of every window (and of the scene, through ``MainWindow``).
-
-Scope note (deliberately NOT moved here): ``modules/terminal_screen.py``'s
-output palettes, ``TerminalWidget.CURSOR_COLOR``, ``storage/export_drawio.py``
-and the sidebar button's geometry-only rule (``text-align: left`` — see
-``ui/sidebar.py``). Non-QSS colours never belonged to this module at all.
-"""
+What lives here: `build_palette(theme)` (the base QPalette in ONE call); `build_qss(theme)` — **THE**
+application stylesheet, every GLOBAL rule (the window chrome, the menu bar and menus, the tooltips, the
+header/tab frame, the tables and trees, the floating cards), one theme → one stable string;
+`STYLE_BUILDERS` — the widget-level registry (every stylesheet a SINGLE widget would build inline: the
+muted status labels, the dialog separators and headings, the search-bar card, the find bar, the
+multi-input frame), one name → one builder → one string, so the first styling and a theme switch go
+through the same code; `style(name)` / `refresh(widget, name)` — the accessors the widgets use (`refresh` also hides the widget while the stylesheet changes, the Qt repaint rule); `apply_theme(theme, app=None)` — the live switch: the QPalette, the QSS and a repaint of every window (and of the scene, through `MainWindow`). Out of scope on purpose: the terminal's own output palettes, `TerminalWidget.CURSOR_COLOR`, the drawio writer and the sidebar's geometry-only `text-align` rule — non-QSS colours were never this module's."""
 
 from PySide6.QtGui import QColor, QPalette
 from PySide6.QtWidgets import QApplication
@@ -63,12 +42,11 @@ def build_palette(theme=None) -> QPalette:
     palette.setColor(role.Text, QColor(t.text_primary))
     palette.setColor(role.Button, QColor(t.surface_alt))
     palette.setColor(role.ButtonText, QColor(t.text_primary))
-    # Roles the v1.2.5 palette left to the platform but which a LIGHT theme
-    # cannot inherit from a dark Fusion default: the disabled/highlight tones
-    # follow the theme explicitly, or a disabled label would stay pale-on-pale.
-    # v1.5rc1: the HIGHLIGHT is a FILL THAT CARRIES TEXT (HighlightedText), so it
-    # is the STRONG accent — the decorative sky of LIGHT leaves selected text at
-    # 2.05:1. In DARK the two are the same value, so nothing moves.
+    # Roles the palette leaves to the platform but which a LIGHT theme cannot inherit from a dark
+    # Fusion default: the disabled/highlight tones follow the theme explicitly, or a disabled label
+    # would stay pale-on-pale. The HIGHLIGHT is a FILL THAT CARRIES TEXT (`HighlightedText`), so it is
+    # the STRONG accent — the decorative sky of LIGHT leaves selected text at 2.05:1. In DARK the two
+    # are the same value, so nothing moves.
     palette.setColor(role.Highlight, QColor(t.accent_strong))
     palette.setColor(role.HighlightedText, QColor(t.canvas_bg))
     palette.setColor(role.ToolTipBase, QColor(t.window_bg))
@@ -251,7 +229,7 @@ QScrollBar::handle:vertical, QScrollBar::handle:horizontal {{
 
 
 # ── The widget-level stylesheets (the ONE registry) ───────────────────────────
-# Every entry replaces an f-string that used to be built inline in a widget's
+# Every entry replaces an f-string that would otherwise be built inline in a widget's
 # __init__ — and, more importantly, that could never be rebuilt. The keys are
 # stable names; a widget calls `theme_qss.style("<key>")` at construction and
 # `theme_qss.refresh(self, "<key>")` from its `refresh_theme()`.
@@ -267,12 +245,10 @@ STYLE_BUILDERS = {
     "status.muted": lambda t: f"color: {t.text_muted};",
     "status.bar_counts": lambda t: f"color: {t.text_muted}; padding-right: 10px;",
     "status.bar_zoom": lambda t: f"color: {t.text_primary}; padding-right: 6px;",
-    # v1.4.5 (ROADMAP task 3): the CLICKABLE status counters of the status bar. The
-    # clickable ones are tinted like a link (the accent); the ACTIVE one — the filter
-    # that is currently applied to the sidebar — is bold, so the transient state is
-    # visible without a second widget. v1.5rc1: this is INK on the window surface, so
-    # it is the STRONG accent (and its strong hover shade) — the decorative sky of
-    # LIGHT measured 1.96:1 here.
+    # The CLICKABLE status counters of the status bar: the clickable ones are tinted like a link (the
+    # accent) and the ACTIVE one — the filter currently applied to the sidebar — is bold, so the
+    # transient state is visible without a second widget. This is INK on the window surface, so it is
+    # the STRONG accent (and its strong hover shade): the decorative sky of LIGHT measured 1.96:1 here.
     "status.bar_filter": lambda t: f"color: {t.accent_strong}; padding-right: 10px;",
     "status.bar_filter_active": lambda t: (
         f"color: {t.accent_strong_hover}; font-weight: bold; padding-right: 10px;"),
@@ -390,12 +366,10 @@ QTextEdit#StickyNoteEditor {{
     # never the decorative tone and never a new colour.
     "focus.widget": lambda t: f"border: {FOCUS_RING_WIDTH}px solid {t.accent_strong};",
     "focus.widget_off": lambda t: f"border: {FOCUS_RING_WIDTH}px solid transparent;",
-    # v1.5.6 (ROADMAP task 4): the two panel COLLAPSE buttons (the "◇" of the sidebar's
-    # bottom row and the map's corner overlay). They are plain QToolButtons — the frame
-    # the macro panel's collapse button already draws — and this entry is its ONE
-    # definition: a themed surface fill with a border, so the button READS as a button
-    # before the pointer arrives (an auto-raised button appears only under the cursor).
-    # The padding is deliberately tight: the glyph stays the whole point of the control.
+    # The two panel COLLAPSE buttons (the "◇" of the sidebar's bottom row and the map's corner
+    # overlay): plain QToolButtons, and this entry is their ONE definition — a themed surface fill with
+    # a border, so the button READS as a button before the pointer arrives (an auto-raised button
+    # appears only under the cursor). The padding is deliberately tight: the glyph stays the point.
     "collapse.button": lambda t: f"""
 QToolButton {{
     background-color: {t.surface_alt};

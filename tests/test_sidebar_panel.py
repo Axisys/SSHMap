@@ -1,21 +1,11 @@
-"""ui/sidebar.py: SidebarPanel — a MainWindow facade + retranslate (v0.9.9.4).
+"""`ui/sidebar.py`: `SidebarPanel` — a facade of `MainWindow` plus `retranslate` (v0.9.9.4).
 
-ROADMAP v0.9.9.4 — phase 1 of the "Hygiene of main_window.py" series: the sidebar cluster
-(the buttons, the header, the search, the tag filter, the tree with the status markers, the context
-menu) was moved from ui/main_window.py into ui/sidebar.py (SidebarPanel(QWidget)).
-The public API of MainWindow stays the facade — the existing tests were not touched.
-
-  * the facade: win.tree/win.tag_filter/win.search_edit/win.btn_* — the references to the
-    panel's widgets; refresh_sidebar/_sync_selection_state/_on_tree_item_clicked etc. — the window's methods;
-  * the hygiene: the tree/markers/rows are built by the panel, their code is not in main_window.py;
-  * the panel at the unit level: translate_fn=None → the English fallback literals, the retranslate is a no-op;
-    a missing action callback → ValueError; fill_context_menu — 9 items + 4 separators;
-  * THE REGRESSION OF THE BUG v0.9.2 (the i18n registry via a callback): on the language switch the sidebar rows
-    (the buttons, the header, the placeholder, "All tags") are NOT lost and do not stay on the old
-    language; the tag filter choice survives the retranslate.
-
-Run: python tests/test_sidebar_panel.py   (from the project root) or python tests/run_all.py
-"""
+The release was phase 1 of the "main_window.py hygiene" series: the sidebar cluster (the buttons, the
+header, the search, the tag filter, the tree with its status markers and the context menu) moved from the
+window module into `ui/sidebar.py` as `SidebarPanel(QWidget)`, while the public API of `MainWindow` stayed
+the facade and the existing tests were not touched.
+Checked here: the facade references (`win.tree` / `win.tag_filter` / `win.search_edit` / `win.btn_*` and
+the window methods `refresh_sidebar` / `_sync_selection_state` / `_on_tree_item_clicked`); the hygiene (the tree, the markers and the rows are built by the panel, not in the window module); the panel at the unit level (`translate_fn=None` → the English fallback literals and a no-op `retranslate`; a missing action callback → `ValueError`; `fill_context_menu` producing its items and separators); and THE REGRESSION of the v0.9.2 bug — on a language switch the sidebar rows (the buttons, the header, the placeholder, "All tags") are not lost and do not stay in the old language, with the tag filter choice surviving the `retranslate`."""
 import sys
 
 from _common import bootstrap, check, finish

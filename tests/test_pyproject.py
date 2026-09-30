@@ -1,19 +1,12 @@
 # -*- coding: utf-8 -*-
 """v0.9.9.6 — pyproject.toml: installable identity for 1.0 (ROADMAP).
 
-The cross-check pyproject ↔ version.py ↔ requirements.txt WITHOUT an install:
-  * pyproject.toml exists and parses (tomllib / tomli);
-  * [project].name matches the APP_NAME from version.py (normalization: the lower
-    case, the non-alphanumerics stripped — "SSH Map" → "sshmap");
-  * [project].version == the APP_VERSION from version.py (the single source of truth — version.py);
-  * [project].dependencies match requirements.txt (the same set of name+pin);
-  * the entry point sshmap = main:main points to the existing top-level function
-    main() in main.py (ast, without an import), and the module is in the build;
-  * [build-system] is present (pipx / pip install .).
-
-The suite is run through tests/run_all.py; the file is self-contained:
-bootstrap() → the checks → finish().
-"""
+The cross-check `pyproject.toml` ↔ `version.py` ↔ `requirements.txt` WITHOUT installing anything: the file
+exists and parses (`tomllib` / `tomli`); `[project].name` matches `APP_NAME` after normalization (lower case
+with the non-alphanumerics stripped — "SSH Map" → "sshmap"); `[project].version` equals `APP_VERSION` from
+`version.py`, the single source of truth; `[project].dependencies` match `requirements.txt` name for name and
+pin for pin; the entry point `sshmap = main:main` points at a real top-level `main()` in `main.py` (checked
+with `ast`, without importing it) and the module is part of the build; and `[build-system]` is present, which is what `pip` / `pipx install .` need. The file is self-contained: `bootstrap()` → the checks → `finish()`."""
 import ast
 import os
 import re

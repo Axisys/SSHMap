@@ -1,29 +1,11 @@
 """v1.5.4 — trouble first: the map answers "where is the problem".
 
-The topical gate of the FOURTH patch ON the released 1.5. v1.5rc4 made the CHROME answer
-the same questions as the map; this release makes the MAP answer the one question a
-hundred equal cards cannot: *where is the trouble*. The three halves:
-
-  §1 the group AGGREGATE (ROADMAP task 1): the worst member status plus the counts, read
-     LIVE from the members, painted on the title band of the frame (which the FOLD keeps)
-     with the DECLARED status shape and the status colour — and never written into the
-     group's JSON (a view fact, the v1.4.2 rule for view state);
-  §2 the "problems only" LENS (ROADMAP task 2): ONE transient toggle beside the status
-     counters that dims everything that is not `warn` / `offline` / stale; it COMPOSES
-     with the tag filter and the map search instead of replacing them, it never writes a
-     config key, and the counters keep telling the whole truth;
-  §3 the ACTIVE-FILTER PLAQUE (ROADMAP task 3): the floating panel that NAMES the active
-     filters with one × each, joins the v1.5rc4 priority resolver (the collapse diamond is
-     never covered), never reaches an export and owns `retranslate()`;
-  §4 the release state: the version/pins, the eleven new i18n keys, and the "no new
-     contract" audit (no new registry action, no new colour field, no new config key, no
-     new dependency).
-
-Everything runs offscreen and hermetic: no socket is opened, no probe is started — the
-statuses are set through the ORDINARY `set_status()` / `_on_node_status_changed()` paths.
-
-Run: python tests/test_problem_first.py   (from the project root) or python tests/run_all.py
-"""
+The topical gate of the fourth patch on the released 1.5 line. v1.5rc4 made the CHROME answer the same
+questions as the map; this release makes the MAP answer the one question a hundred equal cards cannot:
+where is the trouble.
+§1 the group AGGREGATE: the worst member status plus the counts, read LIVE from the members and painted on
+the title band of the frame (which the FOLD keeps) with the DECLARED status shape and colour — and never
+written into the group's JSON (a view fact); §2 the "problems only" LENS: ONE transient toggle beside the status counters that dims everything not `warn` / `offline` / stale, COMPOSES with the tag filter and the map search instead of replacing them, never writes a config key, and leaves the counters telling the whole truth; §3 the ACTIVE-FILTER PLAQUE: the floating panel that NAMES the active filters with one × each, joins the v1.5rc4 priority resolver (the collapse diamond is never covered), never reaches an export and owns `retranslate()`; §4 the release state: the version pins, the eleven new i18n keys and the "no new contract" audit. Everything runs offscreen and hermetic — no socket, no probe: the statuses go through the ORDINARY `set_status()` / `_on_node_status_changed()` paths."""
 import dataclasses
 import json
 import os

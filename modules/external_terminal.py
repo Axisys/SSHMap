@@ -1,38 +1,16 @@
 # -*- coding: utf-8 -*-
-"""v0.8.2: Launching an SSH session in an alternative (system) terminal.
+"""Launching an SSH session in an alternative (system) terminal (AGENTS.md §4.15, §6).
 
-The application only spawns a process (subprocess.Popen) with the OS ssh
-client (`ssh.exe` ships with Windows 10/11 and nearly all Linux distros) —
-after launch no link to the window is needed.
+The application only spawns a process (`subprocess.Popen`) with the OS ssh client (`ssh.exe` ships with
+Windows 10/11 and nearly all Linux distributions) — after the launch no link to the window is needed.
 
-SECURITY: the password is NOT passed through command-line arguments
-(it would be visible in `ps`/task manager). External terminal = OS ssh:
-the user types the password themselves, or key auth is used
+SECURITY: the password is NEVER passed through command-line arguments (it would be visible in `ps` or
+the task manager). External terminal = the OS ssh: the user types the password, or key auth is used
 (`ssh -i key -p port user@host`).
 
-Settings — the single ~/.sshmap/config.json file (i18n.load_config/save_config,
-atomic write), key:
-    "external_terminal": "auto" | "windows_terminal" | "cmd"
-                         | "x-terminal-emulator" | "gnome-terminal" | "konsole"
-                         | "xfce4-terminal" | "alacritty" | "kitty"
-Key absent = "auto".
-
-v1.1.2RC1 (N2): the "conhost" preset was REMOVED — conhost.exe is not a launcher
-(it does not accept /c; positional arguments are interpreted as console/process
-server handles), so the assembled command was guaranteed not to work. The old
-config value "conhost" is treated as "cmd" (the cmd.exe window IS the classic
-conhost): the mapping lives in load_external_terminal_setting() + normalization
-during legacy-file migration; build_command("conhost", ...) remains an alias
-for "cmd" for direct calls.
-
-v1.1 (ROADMAP task 7): before v1.0 the setting lived in a separate
-~/.sshmap_settings.json — the application had two sources of settings. Now a
-migration runs on read: if the key is missing from config.json but present in
-the old file — the value is copied into config.json (save_config), and the old
-file is deleted (best effort). Writes go ONLY to config.json. The preset-picker
-UI — the SSHConnectDialog section (v0.9.9.2) and the "General" tab of the
-settings dialog (v1.1).
-"""
+Settings — the ONE `~/.sshmap/config.json` (the atomic write of `i18n.save_config`), key
+`external_terminal`: `"auto"` (the default when the key is absent) | `"windows_terminal"` | `"cmd"` |
+`"x-terminal-emulator"` | `"gnome-terminal"` | `"konsole"` | `"xfce4-terminal"` | `"alacritty"` | `"kitty"`. There is deliberately NO `"conhost"` preset (conhost.exe is not a launcher: it does not accept `/c`), and the legacy value maps to `"cmd"` in `load_external_terminal_setting()` and in the migration. The preset picker is the SSHConnectDialog section and the "General" tab of the settings hub."""
 
 import os
 import shutil
@@ -244,7 +222,7 @@ def build_ssh_args(host: str, user: str, port: int = 22,
 def _sh_quote(s: str) -> str:
     """Escape a single argument for bash -c '...' (POSIX single-quote).
 
-    v0.9.4-fix: key paths with spaces/quotes broke the shell command assembled
+    key paths with spaces/quotes broke the shell command assembled
     by concatenation. Used ONLY for the Linux/macOS branches where the command
     is passed as a string to `bash -c`.
     """
@@ -316,13 +294,11 @@ def build_command(terminal: str, host: str, user: str, port: int = 22,
         ssh_exe = _which("ssh") or "ssh"
         return ["cmd.exe", "/c", "start", "", ssh_exe] + ssh_args[1:]
     if terminal == "open_terminal":  # macOS
-        # v0.9.4-fix: `open -a Terminal bash -c ...` does not work — open does
-        # not pass arguments that way. The correct way is osascript: open
-        # Terminal.app and run the command in it (the window survives the
-        # session drop thanks to `exec bash`).
-        # The `-e` SOURCE is AppleScript, so the ssh command it carries is
-        # escaped as an AppleScript literal — never with the POSIX `_sh_quote()`
-        # of the `bash -c` branches below.
+        # `open -a Terminal bash -c ...` does not work — `open` does not pass arguments that way. The
+        # correct way is osascript: open Terminal.app and run the command in it (the window survives the
+        # session drop thanks to `exec bash`). The `-e` SOURCE is AppleScript, so the ssh command it
+        # carries is escaped as an AppleScript literal — never with the POSIX `_sh_quote()` of the
+        # `bash -c` branches below.
         script = f"{_shell_join(ssh_args)}; exec bash"
         return ["osascript", "-e",
                 'tell application "Terminal" to do script ' + _applescript_quote(script)]
@@ -355,7 +331,7 @@ def launch(command: Optional[List[str]] = None, host: str = "", user: str = "",
       - command=None      → detect_terminal() + build_command(host, user, ...);
         a call without host now gives a clear error instead of KeyError.
     Windows: CREATE_NEW_CONSOLE — the window lives its own life
-    (AUDIT v0.8.3 #2: DETACHED_PROCESS from the old code was removed — the
+    (AUDIT v0.8.3 #2: DETACHED_PROCESS is deliberately not used — the
     flags are mutually exclusive, only the second overwrite took effect).
     Returns True/False; a Popen exception is logged and turned into False.
     An INTERPRETER launcher (`_is_interpreter_command()`, the osascript branch)

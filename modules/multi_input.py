@@ -1,37 +1,16 @@
 # -*- coding: utf-8 -*-
-"""v1.2.3 (ROADMAP v1.2.3): Multi-input — broadcast of the active session's input to all other open sessions.
+"""Multi-input — the broadcast of the active session's input to every other open session
+(AGENTS.md §4.3; DOCUMENTATION.md §14/§64).
 
-Single input point (architecture with no refactoring): **all** user input
-goes through `TerminalWidget.keyPressEvent()` → `_send(bytes)` →
-`terminal_thread.send_data()`. The hub is attached exactly to this point: when
-the mode is enabled, `_send` sends the same bytes to `send_data()` of all other
-live sessions in the registry (v1.2 — `MainWindow._terminal_windows` holds
-TerminalSessionPage). Ctrl+V (bracketed paste) goes through the same `_send` —
-it is duplicated too (otherwise the "typed" text would not appear everywhere).
-
-The source — only the focused window/tab: the bytes come from the keyboard of
-the focused widget, not from output — there is no echo by definition (broadcast
-does not re-transmit foreign output and does not send back to the source). A
-session that died during typing (error → close) is removed from the registry
-the standard way (`_forget_terminal_window` on `destroyed`), and broadcast
-additionally filters threads by liveness — a dead channel receives no bytes.
-
-UI (MainWindow/SshMixin): a checkable QAction in the "View" menu + F12 — EXIT
-the mode (not Esc: Esc goes to the shell as \\x1b!) — when the mode is enabled
-the RC2 mapping F12→\\x1b[24~ is suspended (the key does not reach the shell),
-when disabled F12 works as before; a "MULTI: N sessions" badge in the status bar
-with an exit button; highlight — tab badges "MULTI · <alias>" + a container
-frame (apply_container_highlight, windows and dock).
-
-Test seams: an explicit `multi_hub` in the TerminalWidget constructor (isolation
-from the module hub); `hub.reset()` — state reset between sections of a test file.
-
-Diagnostics (v1.2.4-fix, the "manual test did not confirm broadcast" incident):
-a mode state change → INFO in the application log; each broadcast → a DEBUG line
-(in TerminalWidget._send); the mode is enabled but the bytes went nowhere
-(empty registry / all threads dead) → a rate-limited WARNING with details —
-visible in the console too.
-"""
+The hub hangs on the SINGLE input point: all user input goes `TerminalWidget.keyPressEvent()` →
+`_send(bytes)` → `terminal_thread.send_data()`, and with the mode on, `_send` duplicates the same bytes
+into every other LIVE session of the registry (`MainWindow._terminal_windows`). Ctrl+V (bracketed paste)
+travels the same path and is duplicated too. Only the FOCUSED window/tab is the source — the bytes are
+keyboard input, never output, so nothing echoes back and the source is not re-sent; a session that died
+during typing leaves the registry the standard way and the broadcast additionally filters by thread
+liveness. The UI is a checkable QAction in "View" plus F12 (EXIT the mode — not Esc, which reaches the
+shell): while the mode is on, F12 no longer maps to `\x1b[24~`; a "MULTI: N sessions" status-bar badge
+with an exit button and the tab badges / container frame (`apply_container_highlight`) mark it. Test seams: an explicit `multi_hub` in the `TerminalWidget` constructor and `hub.reset()`. Diagnostics: a state change logs INFO, every broadcast a DEBUG line, and "enabled but the bytes went nowhere" (an empty registry / all threads dead) a rate-limited WARNING with details."""
 
 import time
 
@@ -58,12 +37,10 @@ def get_translator():
 
 
 # ── Highlight: the "MULTI" frame/badge color + the frame objectName (QSS selector) ─────
-# v1.2.5: the amber accent — from the central theme (the same one as node/group selection);
-# the MULTI_ACCENT name is kept (used in the MainWindow status-bar badge QSS).
-# v1.4.3 (ROADMAP task 5): MULTI_ACCENT was a module constant captured at import
-# time; it is now a callable so the mode frame/badge follows a theme switch. The
-# old spelling stays available as a live module attribute (module __getattr__ of
-# ui/theme.py does the same for the theme constants).
+# The amber accent comes from the central theme (the same one as the node/group selection); the
+# `MULTI_ACCENT` name is kept (the MainWindow status-bar badge QSS uses it) and it is a CALLABLE now,
+# so the mode frame/badge follows a theme switch instead of an import-time capture. The old spelling
+# stays available as a live module attribute (the `module __getattr__` trick of `ui/theme.py`).
 
 
 def multi_accent() -> str:
@@ -119,7 +96,7 @@ class MultiInputHub:
         self._active = False
         self._provider = None
         self._listeners = []
-        # v1.2.4-fix: rate-limited WARNING "0 receivers" (do not spam on every key)
+        # rate-limited WARNING "0 receivers" (do not spam on every key)
         self._last_zero_warn = 0.0
 
     # ── mode state ────────────────────────────────────────────────────────
@@ -149,7 +126,7 @@ class MultiInputHub:
     def set_active(self, on: bool):
         """Toggle the mode on/off; listeners are notified ONLY on a real change.
 
-        Diagnostics (v1.2.4-fix): a state change is logged at INFO — in the log
+        Diagnostics : a state change is logged at INFO — in the log
         file (~/.sshmap/logs/sshmap.log) you can see whether the mode was ENABLED
         and when it was disabled (F12 / menu / the badge ✕ button). Never raises."""
         on = bool(on)
@@ -238,7 +215,7 @@ class MultiInputHub:
         return sent
 
     def _warn_zero_receivers(self, others: int, dead: int, excluded: int = 0):
-        """v1.2.4-fix (diagnostics): the mode is enabled but the bytes went nowhere.
+        """the mode is enabled but the bytes went nowhere.
 
         This is the silent-failure scenario of the "I type — nothing in the second
         terminal" manual test: a WARNING (visible in the console too) with details —
@@ -261,7 +238,7 @@ class MultiInputHub:
     def participant_count(self, pages=None) -> int:
         """v1.3.3.4 (ROADMAP task 5): how many sessions the broadcast would reach.
 
-        The plaque counter used to be `len(registry)`, which promised N sessions while
+        The plaque counter is `participant_count()`, never `len(registry)`, which would promise N sessions while
         an excluded one was silently skipped; the counter now counts the SESSIONS THAT
         PARTICIPATE (the excluded ones are not "MULTI" any more — their badge says so).
         `pages` — an explicit registry (the test seam); without it the hub asks its own

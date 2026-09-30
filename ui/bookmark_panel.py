@@ -1,32 +1,16 @@
 # -*- coding: utf-8 -*-
-"""v1.6.7 (ROADMAP v1.6.7): the bookmarks panel — the fourth floating panel over the canvas.
+"""The bookmarks panel — the fourth floating panel over the canvas (AGENTS.md §4.23, DOCUMENTATION.md §57).
 
-The store of `modules/bookmarks.py` is invisible without a surface, and the surface is the
-one the map already knows: a CHILD OF `MapView` (never a scene item), so it stays out of
-every export, out of a rubber-band selection, out of `itemsBoundingRect()` and out of "fit
-to content" — the legend / minimap / filter-plaque rule.
+The store of `modules/bookmarks.py` is invisible without a surface, and the surface is the one the map
+already knows: a CHILD OF `MapView` (never a scene item), so it stays out of every export, out of a
+rubber-band selection, out of `itemsBoundingRect()` and out of "fit to content" — the
+legend / minimap / filter-plaque rule.
 
-Built on what the three shipped panels prove, and inventing nothing new:
-
-  * **a fold** — a click on the title band folds the panel down to that band, and the state
-    is remembered by the WINDOW in `~/.sshmap/config.json` (`ui_bookmarks_collapsed`);
-  * **a saved position** — a drag of the title band reports where the panel landed
-    (`moved`) and the window persists it (`ui_bookmarks_position`), with the v1.5 snap
-    (`SNAP_PX`) re-anchoring a drop that lands on the anchored edge;
-  * **a filter row** — the case-insensitive substring of `modules/bookmarks.filter_entries()`
-    (the PURE policy — the widget renders, it does not decide);
-  * **one opener behind a callback** — a double click or Enter on a row calls the opener the
-    WINDOW hands in (`SshMixin._quick_launch_url`), so the browser, its failure sentence and
-    its status line keep ONE home ("module + callbacks, no imports of the window").
-
-The rows carry the URL as the SECOND CHANNEL — the name on the first line and the address
-under it in the muted tone — because a list of link NAMES is exactly what a team cannot
-recognise; an entry of another type (`command`) is not listed at all (the panel's declared
-scope, `modules/bookmarks.py`).
-
-Import discipline: `ui.main_window` is never imported; the widget talks to the store and to
-the callbacks it was given.
-"""
+It is built on what the three shipped panels prove: a FOLD (a click on the title band; the window
+remembers `ui_bookmarks_collapsed`), a SAVED POSITION (dragging the band reports `moved` and the window
+persists `ui_bookmarks_position`, with the v1.5 `SNAP_PX` snap re-anchoring a drop on the anchored edge),
+a FILTER ROW over the PURE `modules/bookmarks.filter_entries()` policy (the widget renders, it does not
+decide), and ONE OPENER behind a callback (a double click or Enter calls what the WINDOW hands in — `SshMixin._quick_launch_url` — so the browser, its failure sentence and its status line keep ONE home). The rows carry the URL as the SECOND CHANNEL (the name first, the address under it in the muted tone), because a list of link NAMES is exactly what a team cannot recognise; a `command` entry is not listed at all (the panel's declared scope). `ui.main_window` is never imported."""
 
 from PySide6.QtCore import QPoint, QRectF, QSize, Qt, Signal
 from PySide6.QtGui import QBrush, QColor, QFont, QFontMetrics, QPainter, QPainterPath, QPen

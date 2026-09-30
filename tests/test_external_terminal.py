@@ -1,20 +1,11 @@
-"""External (system) terminal v0.8.2: modules/external_terminal.py (former smoke_test).
+"""External (system) terminal v0.8.2: `modules/external_terminal.py` (a former smoke-test part).
 
-A part of the suite split out of smoke_test.py v0.6–v0.9.2 (see INDEX.md).
-  * build_ssh_args: the port/key/ConnectTimeout, the known_hosts is not touched, the password is never in argv;
-  * build_command for ALL the terminals without a real launch (wt/cmd/gnome/konsole/
-    alacritty/kitty + bash -c "; exec bash" — the window survives the exit of ssh), the ValueError on
-    an unknown id, the -J jump; v1.1.2RC1 (N2): "conhost" is removed from the presets — build_command
-    accepts the old id as an alias of "cmd", detect never returns "conhost";
-  * detect_terminal on the current OS (headless-friendly);
-  * the settings of the external terminal (v1.1: the single ~/.sshmap/config.json, the migration from the legacy
-    ~/.sshmap_settings.json): the round-trip, the merge of the foreign keys, invalid → auto;
-  * launch(): the Popen is mocked — the flags of the detach of the console of Windows;
-  * the error paths of connect_external: no_ssh_client / no_terminal;
-  * the UI integration: external_btn in the SSHConnectDialog + the i18n keys v0.8.2 + the method of MainWindow.
-
-Run: python tests/test_external_terminal.py   (from the project root) or python tests/run_all.py
-"""
+Checks: `build_ssh_args` (the port, the key and `ConnectTimeout`; known_hosts untouched; the password NEVER
+in argv); `build_command` for ALL the terminals without a real launch (wt / cmd / gnome / konsole / alacritty
+/ kitty plus `bash -c "; exec bash"`, so the window survives the exit of ssh), the `ValueError` on an unknown
+id and the `-J` jump — while "conhost" is no longer a preset: `build_command` accepts the old id as an alias
+of "cmd" and `detect` never returns it; `detect_terminal` on the current OS; the settings round trip in the
+SINGLE `~/.sshmap/config.json` (the migration from the legacy file, the merge of foreign keys and an invalid value → "auto"); `launch()` with a mocked `Popen` (the console-detach flags of Windows); the error paths of `connect_external`; and the UI integration (the dialog button, the keys and the window method)."""
 import json as _json_v082
 import os
 import sys
@@ -29,10 +20,9 @@ app = QApplication(sys.argv)
 from models.server import ServerData
 
 # ══════════════════════════════════════════════════════════
-# v0.8.2: the external (system) terminal — modules/external_terminal.py
-# build_command() for all terminals (WITHOUT a real launch),
-# detect_terminal(), the external terminal settings round-trip (v1.1: a single config.json),
-# The UI integration (the ctx menu + the dialog button).
+# the external (system) terminal — modules/external_terminal.py
+# `build_command()` for all terminals (WITHOUT a real launch), `detect_terminal()`, the external terminal
+# settings round-trip (one `config.json`) and the UI integration (the ctx menu + the dialog button).
 # ══════════════════════════════════════════════════════════
 try:
     from modules import external_terminal as _ET

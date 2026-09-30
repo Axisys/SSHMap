@@ -1,33 +1,16 @@
 # -*- coding: utf-8 -*-
-"""v1.2.2 (ROADMAP v1.2.2): "Terminals" as a dock of the map window (terminal.mode = "tabs").
+""""Terminals" as a dock of the map window, for `terminal_mode = "tabs"` (AGENTS.md §4.3).
 
-TerminalDockContent — an embeddable session container, the analog of
-SSHTerminalWindow (v1.2.1 session_tabs) but for MainWindow: a QTabWidget of
-TerminalSessionPage + its own status line (label + SFTP progress bar). The
-contract is the same: each tab = one session, tab title — the node alias,
-tooltip — terminal.tab_close_tooltip; closing a tab = cleanup of the LOCAL
-page (the "ask" confirm_close gate → unified teardown shutdown, neighboring
-tabs are untouched). Difference from the window: closing the LAST tab does
-NOT destroy the container — the last_tab_closed signal (TerminalsDock hides
-the dock); sessions are closed page by page, the container outlives them.
+`TerminalDockContent` is an embeddable session container — the analogue of `SSHTerminalWindow` for
+`MainWindow`: a QTabWidget of `TerminalSessionPage` plus its own status line (a label and the SFTP
+progress bar). The contract is the same: one tab per session, the title is the node alias, the tooltip
+`terminal.tab_close_tooltip`, and closing a tab runs the LOCAL page's cleanup (`confirm_close` → the
+idempotent `shutdown()`), leaving its neighbours untouched. The difference from the window: closing the
+LAST tab does NOT destroy the container — it emits `last_tab_closed` and `TerminalsDock` hides itself.
 
-The "status bar" bridge — only the ACTIVE tab (v1.2.1 pattern), but into the
-dock's OWN status line, not the map's status bar: when the dock is floated
-into a separate window, messages and progress follow the container and do not
-conflict with MainWindow's status bar.
-
-TerminalsDock(QDockWidget) — a detachable dock (default flags
-Movable|Closable|Floatable): float → a separate window with tabs, back →
-back on the map; from a single mechanism come both "tabs" and "windows". The
-map remains the central widget of MainWindow — self.view is untouched.
-WA_DeleteOnClose is NOT set: the container lives until MainWindow closes
-(created lazily on the first session in "tabs" mode; recreating it on mode
-switches is not needed).
-
-Test seams — the same as for the page (v1.2): the thread class and QMessageBox
-are taken from the ssh_terminal module at call time
-(TerminalSessionPage._st_module()).
-"""
+The status bridge follows the ACTIVE tab only, into the dock's OWN status line rather than the map's bar,
+so a FLOATED dock never fights `MainWindow`'s status bar. `TerminalsDock` is a detachable QDockWidget
+(movable, closable, floatable): floated — a separate window with the tabs, docked — back on the map, so ONE mechanism yields both "tabs" and "windows", while the map stays the central widget. `WA_DeleteOnClose` is NOT set: the container lives until `MainWindow` closes (it is created lazily on the first session in "tabs" mode). Test seams are the page's: the thread class and `QMessageBox` are taken from the `ssh_terminal` module at call time."""
 import itertools
 
 from PySide6.QtCore import Qt, QTimer, Signal
@@ -131,12 +114,10 @@ class TerminalDockContent(QWidget):
         self.commander.act.toggled.connect(self._on_commander_toggled)
         self.session_tabs.setCornerWidget(self.commander, Qt.Corner.TopRightCorner)
 
-        # v1.3 (ROADMAP v1.3): the "Terminal Macros" panel to the left of the tabs —
-        # the same one as in SSHTerminalWindow (QSplitter [cmdlib_panel |
-        # session_tabs]; a single config key ui_cmdlib_collapsed for both
-        # containers). The panel's status messages go to the DOCK's status line
-        # via the existing _on_page_status_message bridge (token-guard; the
-        # (str, int) signature matches — no new bridge code).
+        # The "Terminal Macros" panel to the left of the tabs — the same one as in SSHTerminalWindow
+        # (QSplitter [cmdlib_panel | session_tabs]; a single config key `ui_cmdlib_collapsed` for both
+        # containers). The panel's status messages go to the DOCK's status line via the existing
+        # `_on_page_status_message` bridge (token-guard; the `(str, int)` signature matches).
         self.cmdlib_panel = CommandLibraryPanel(self.session_tabs, parent=self)
         self.cmdlib_panel.status_message.connect(self._on_page_status_message)
         splitter = QSplitter(Qt.Orientation.Horizontal)

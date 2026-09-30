@@ -1,28 +1,12 @@
 # -*- coding: utf-8 -*-
 """v1.5.1 — map images: "Copy Map as Image" and the fixed-frame documentation poster.
 
-The first patch ON the released 1.5. Two pieces of the SAME machinery
-(`MapScene.render_to_pixmap`, the v0.9.1 export path) that both exist to kill the manual
-screenshot work the documentation and the issue reports still do by hand:
-
-  * **the copy** — the 2× render of the CURRENT theme (`theme.PALETTE_THEME`) straight into
-    `QApplication.clipboard()`, NO file dialog and NO palette question (an export is a
-    document, a copy is "what I am looking at"); File menu + the map's empty-space menu;
-  * **the docs frame** — `MapScene.render_frame_to_pixmap()`: the map fitted into a FIXED
-    1600×900 LOGICAL frame at 2× (3200×1800 px) and centred on a 40 px margin, so the
-    picture has the SAME size for every map. A poster of the MAP (a scene render), with the
-    published README image taken from the EXAMPLE map through `tests/_gen_docs_image.py`.
-
-Sections:
-  §1 the fixed frame — the declared geometry, the fit ratio, the centring, the empty map,
-     the determinism, the palette scope (the pure `frame_source_rect()` where possible);
-  §2 the copy — the clipboard pixmap, the current-theme palette, the "no palette question"
-     audit, the empty map and the two menu homes;
-  §3 the docs frame — the file writer, the status report and the committed README image;
-  §4 the release state — the pins, the two registry actions and the "no new contract" audit.
-
-Run: python tests/test_map_images.py   (from the project root) or python tests/run_all.py
-"""
+The first patch on the released 1.5 line: two pieces of the SAME machinery
+(`MapScene.render_to_pixmap`, the export path) that both kill the manual screenshot work the
+documentation and the issue reports still do by hand.
+THE COPY renders the CURRENT theme (`theme.PALETTE_THEME`) at 2× straight into the clipboard — no file
+dialog and no palette question, because an export is a document while a copy is "what I am looking at" —
+and it lives in the File menu and the map's empty-space menu. THE DOCS FRAME (`MapScene.render_frame_to_pixmap()`) fits the map into a FIXED 1600×900 LOGICAL frame at 2× (3200×1800 px), centred on a 40 px margin, so the picture has the same size for every map; the published README image is the EXAMPLE map rendered through `tests/_gen_docs_image.py`. §1 the fixed frame (the declared geometry, the fit ratio, the centring, an empty map, the determinism, the palette scope, the pure `frame_source_rect()`); §2 the copy (the clipboard pixmap, the current-theme palette, the "no palette question" audit, the two menu homes); §3 the docs frame (the file writer, the status report, the committed image); §4 the release state and the "no new contract" audit."""
 import dataclasses
 import os
 import re

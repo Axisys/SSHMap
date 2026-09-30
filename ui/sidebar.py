@@ -1,27 +1,15 @@
-"""Sidebar panel (server list) — v0.9.9.4.
+"""The sidebar panel (the server list) — AGENTS.md §4.13; DOCUMENTATION.md §36, §37, §48.
 
-The sidebar cluster was moved out of ui/main_window.py (phase 1 of the
-"main_window.py hygiene" series): action buttons, title, search field,
-tag filter, the server tree with status markers, and the per-row context
-menu composition.
+The cluster was moved out of the window module: the action buttons, the title, the search field, the tag
+filter, the server tree with its status markers and the per-row context menu composition.
 
-"Module + callbacks" pattern (like services/diagnostics.py in v0.9.9.3):
-the panel knows neither MainWindow nor MapScene — everything comes from
-outside:
-  * translate_fn(key, **kw) — i18n callback; the panel's own string
-    registry is re-applied in retranslate() on language switch (regression
-    for the v0.9.2 bug — sidebar strings are not lost/left in the old
-    language);
-  * actions — a dict of context menu callbacks {action key: callable(node)};
-  * button clicks — panel signals; MainWindow wires up its own slots.
-
-MainWindow remains the facade (public API unchanged): self.tree /
-self.tag_filter / self.search_edit / self.btn_* — references to the
-panel's widgets, refresh_sidebar()/_sync_selection_state()/_on_tree_item_clicked()
-etc. — window methods. The context menu object is CREATED by MainWindow
-(QMenu — module-level global, the test seam for monkeypatching); the panel
-only fills it with items (fill_context_menu).
-"""
+It follows the "module + callbacks" pattern (`services/diagnostics.py`'s precedent) and knows neither
+`MainWindow` nor `MapScene`: `translate_fn(key, **kw)` is the i18n callback and the panel's own string
+registry is re-applied in `retranslate()` on a language switch; `actions` is a dict of context-menu
+callbacks `{action key: callable(node)}`; the button clicks are panel signals the window wires to its own
+slots. `MainWindow` stays the facade, so `self.tree` / `self.tag_filter` / `self.search_edit` / `self.btn_*`
+and the window methods (`refresh_sidebar()`, `_sync_selection_state()`, …) are unchanged.
+ The QMenu itself is CREATED by the window (a module-level global, which is the test seam for monkeypatching) and the panel only fills it with rows (`fill_context_menu`)."""
 import re
 import time
 
@@ -131,14 +119,11 @@ _BUTTONS = (
     ("btn_settings", "settings", "btn.settings", "Settings"),
 )
 
-# ── v1.4.5 (ROADMAP task 1): the compact action grid ─────────────────────────
-# Six full-width rows took roughly a quarter of the sidebar's height and read as
-# "heavy" next to the map. The SAME six buttons (same attributes, same signals,
-# same i18n keys — _BUTTONS is untouched, so `set_buttons_visible`, `retranslate`
-# and MainWindow's public `btn_*` references keep working) now sit in a
-# two-column × three-row grid: three dense rows instead of six. Every cell keeps
-# its icon and its text (the cell elides a long label — the tooltip carries the
-# full one).
+# ── the compact action grid ──────────────────────────────────────────────────
+# Six full-width rows took roughly a quarter of the sidebar's height and read as "heavy" next to
+# the map. The SAME six buttons (same attributes, signals and i18n keys — `_BUTTONS` is untouched,
+# so `set_buttons_visible`, `retranslate` and MainWindow's public `btn_*` references keep working)
+# now sit in a two-column × three-row grid; every cell keeps its icon and elides a long label.
 _BUTTON_COLUMNS = 2             # 2 columns × 3 rows = the 6 buttons
 _COMPACT_BUTTON_HEIGHT = 28     # the dense row height (the v1.1.2RC2 34px was a full-width row)
 _COMPACT_BUTTON_ICON = 16       # the icon size of a compact cell
@@ -154,28 +139,18 @@ _COMPACT_BUTTON_QSS = "QPushButton { text-align: left; padding-left: 6px; paddin
 # the same three the cards and the status dots know.
 _STATUS_FILTERS = ("online", "warn", "offline")
 
-# v1.6.5 (ROADMAP task 6): the Status cell of a card that is NEVER monitored. The cell
-# cannot stay empty — "not checked YET" is a question and "not monitored" is the answer —
-# so the panel's raw-value channel (`_RAW_ROLE`) carries this declared CAPTION ID instead of
-# a status, and the panel renders it with the SAME key the card's own tooltip uses
-# (`node.unmanaged.status`), so the table and the map cannot spell it two ways. It is
-# deliberately NOT a member of `_STATUS_FILTERS`: it is not a status the probe can produce,
-# and a filter over it (or a fourth counter in the status bar) would be a fourth kind of
-# status — exactly what the release refuses.
+# The Status cell of a card that is NEVER monitored. The cell cannot stay empty — "not checked
+# YET" is a question and "not monitored" is the answer — so the raw-value channel (`_RAW_ROLE`)
+# carries this declared CAPTION ID instead of a status, rendered with the SAME key the card's
+# tooltip uses (`node.unmanaged.status`), so the table and the map cannot spell it two ways. It is
+# deliberately NOT a member of `_STATUS_FILTERS` — not a status a probe can produce.
 STATUS_NOT_MONITORED = "not_monitored"
 
-# ── v1.4.6 (ROADMAP v1.4.6, task 1): the LIST layout of the sidebar tree ─────
-# Collapsing the map used to leave a dead ~18 px strip, while the sidebar CONTAINER
-# stretched to the whole window width with a single-column tree inside it — the "wide
-# window" for the server parameters already existed, only the tree ignored it. In that
-# mode the tree becomes the table the width deserves: one column per ServerData field,
-# headers shown, every column draggable (QTreeWidget's own section behaviour).
-# (field key, i18n header key) — the cells are built by `list_cell_values()`.
-# v1.5.5 (ROADMAP task 3): the inventory columns — what the model already holds and an
-# admin asks for: the SSH port, the user, the age of the status, the age of the collected
-# facts (v1.5.3) and the comment. `LIST_COLUMNS` stays the SINGLE declaration of the
-# column order and the captions: the table, the sort keys and the export all read THIS
-# tuple, so a column can never exist in one of them and not in the others.
+# ── the LIST layout of the sidebar tree ──────────────────────────────────────
+# Collapsing the map gives the sidebar the whole window width; without the list the container
+# stretched with a single-column tree inside it and left a dead strip — the "wide window" for
+# the server parameters existed and only the tree ignored it. The table gets one column per
+# field, and `LIST_COLUMNS` is the SINGLE declaration the table, the sort and the export read.
 LIST_COLUMNS = (
     ("alias", "sidebar.list.alias"),
     ("host", "sidebar.list.host"),
@@ -206,14 +181,11 @@ _LIST_STATUS_COLUMN = list_column_index("status")
 # stay interactive (the QTreeWidget default), so the user drags them.
 _LIST_COLUMN_WIDTHS = (190, 180, 60, 90, 90, 90, 170, 170, 100, 90, 90, 220, 150)
 
-# ── v1.5.5 (ROADMAP task 1): the sort keys of the table ──────────────────────
-# ONE sort key per LIST_COLUMNS cell, computed from the MODEL (never parsed back out of
-# the rendered text — an age cell says "5 min" in English and "5 мин" in Russian, and a
-# sort that reads the sentence would sort the translations). The key is the 4-tuple
-# `(empty, kind, number, text)`: a MISSING value is `empty = 1` (so it sorts LAST in
-# both directions), `kind` picks the numeric (0) or the textual (1) comparison and the
-# two remaining slots are homogeneous inside a column — every tuple in a column can be
-# compared with every other one, which is what makes the ordering total.
+# ── the sort keys of the table ───────────────────────────────────────────────
+# ONE sort key per LIST_COLUMNS cell, computed from the MODEL and never parsed back out of the
+# rendered text (an age cell says "5 min" in English and "5 мин" in Russian, so a sort that read
+# the sentence would sort the translations). The key is the 4-tuple
+# `(empty, kind, number, text)`: `empty = 1` sorts a MISSING value LAST in both directions.
 _SORT_FILLED, _SORT_EMPTY = 0, 1
 _SORT_NUMBER, _SORT_TEXT = 0, 1
 
@@ -472,12 +444,11 @@ def list_cell_values(data, status_text: str = "", status_age_text: str = "",
     ]
 
 
-# ── v1.5.5 (ROADMAP task 2): the export — the table leaves the application ───
+# ── the export — the table leaves the application ───
 # The visible table IS the report: the caller hands over the rows it displays
-# (`SidebarPanel.list_report_rows()`) and gets CSV/TSV text back. Quoting is RFC 4180
-# (`"` doubled, a field quoted when it carries the delimiter, a quote or a line break),
-# so a comma, a quote or a `\n` inside a comment round-trips through any spreadsheet
-# and through Python's own `csv` module.
+# (`SidebarPanel.list_report_rows()`) and gets CSV/TSV text back. Quoting is RFC 4180 (`"` doubled, a
+# field quoted when it carries the delimiter, a quote or a line break), so a comma, a quote or a `\n`
+# inside a comment round-trips through any spreadsheet and through Python's own `csv` module.
 LIST_DELIMITERS = {"csv": ",", "tsv": "\t"}
 _LIST_EXPORT_ROW_END = "\r\n"   # RFC 4180: CRLF, and no translation on the way out
 
@@ -509,12 +480,11 @@ def list_table_text(rows, delimiter: str = ",") -> str:
                    for row in rows)
 
 
-# ── v1.5.5 (ROADMAP task 1): the sortable row ────────────────────────────────
-# The tree is REBUILT on every refresh, so a sort that relied on the widgets alone would
-# be silently dropped on the next `refresh_sidebar()`. The row therefore carries its own
-# keys (`_SORT_ROLE`) and the panel re-applies the column and the direction after every
-# rebuild — that is the whole contract of "the order survives a node add/remove and a
-# status round".
+# ── the sortable row ────────────────────────────────
+# The tree is REBUILT on every refresh, so a sort that relied on the widgets alone would be silently
+# dropped on the next `refresh_sidebar()`. The row therefore carries its own keys (`_SORT_ROLE`) and the
+# panel re-applies the column and the direction after every rebuild — the whole contract of "the order
+# survives a node add/remove and a status round".
 _SORT_ROLE = Qt.ItemDataRole.UserRole + 1   # the comparable key of ONE cell (5-tuple)
 _RAW_ROLE = Qt.ItemDataRole.UserRole + 2    # the RAW value behind a translated cell
 _ORDER_ROLE = Qt.ItemDataRole.UserRole + 3  # the row's BUILD index (the stable tie-break)
@@ -702,23 +672,21 @@ class SidebarPanel(QWidget):
         # because the next `refresh_rows()` rebuilds the rows from scratch.
         self.tree.header().sortIndicatorChanged.connect(self._on_sort_indicator_changed)
 
-        # ── v1.5rc4 (ROADMAP task 5): the sidebar is a keyboard domain ─────────
-        # The tree is where the keyboard lands when it is in the sidebar, so the tree
-        # carries the visible focus frame — the SAME indicator the map and the terminal
-        # canvas show (ui/focus_ring.py: one state, one colour, `theme.ACCENT_STRONG`).
-        # The frame is applied DIRECTLY (not through `theme_qss.refresh()`, which hides
-        # and re-shows the widget — re-showing a widget drops the focus we react to).
+        # ── the sidebar is a keyboard domain ─────────
+        # The tree is where the keyboard lands when it is in the sidebar, so the tree carries the visible
+        # focus frame — the SAME indicator the map and the terminal canvas show (`ui/focus_ring.py`: one
+        # state, one colour, `theme.ACCENT_STRONG`). The frame is applied DIRECTLY, not through
+        # `theme_qss.refresh()`, which hides and re-shows the widget — re-showing it drops the focus.
         self._focus_ring = (focus_ring.FocusRing(styled_widget=self.tree)
                             if focus_ring is not None else None)
         if self._focus_ring is not None:
             self.tree.installEventFilter(self)
 
-        # v0.9.6: server tree context menu (right-click on a sidebar row).
-        # CustomContextMenu policy + customContextMenuRequested signal — Qt's
-        # standard path for QTreeWidget (the widget has no overridable
-        # contextMenuEvent without intercepting viewport events; the signal
-        # carries the position in tree coordinates, itemAt(pos) gives the row).
-        # The slot handler lives in MainWindow.
+        # Server tree context menu (right-click on a sidebar row) — `CustomContextMenu` policy +
+        # `customContextMenuRequested`, Qt's standard path for a QTreeWidget (the widget has no
+        # overridable `contextMenuEvent` without intercepting viewport events; the signal carries the
+        # position in tree coordinates and `itemAt(pos)` gives the row). The slot handler lives in
+        # MainWindow (`AGENTS.md` §4.14).
         self.tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
 
         # ── Buttons (always created, i18n applied when a callback is present) ──
@@ -736,13 +704,10 @@ class SidebarPanel(QWidget):
             # v1.4.5: and a small WIDTH minimum — see _COMPACT_BUTTON_MIN_WIDTH (without it
             # the two columns set the panel's minimum width to the sum of two full labels).
             btn.setMinimumWidth(_COMPACT_BUTTON_MIN_WIDTH)
-            # v1.1.2RC2 (U1, user feedback): left alignment — indent from the
-            # left edge, icon, text. QPushButton centers its content by
-            # default; QStyle does not allow setting alignment without a
-            # stylesheet, so — minimal CSS (frame/background stay native,
-            # styling is only content positioning).
-            # v1.4.5: the padding shrinks with the cell (the compact grid), the
-            # alignment rule stays — it is what the U1 regression checks.
+            # Left alignment (U1): indent from the left edge, icon, text. QPushButton centers its
+            # content by default and QStyle allows no alignment without a stylesheet, so the rule is
+            # minimal CSS (frame/background stay native — only content positioning). The padding
+            # shrinks with the cell (the compact grid); the alignment rule stays — the U1 regression.
             btn.setStyleSheet(_COMPACT_BUTTON_QSS)
             if translate_fn is not None:
                 try:
@@ -766,12 +731,11 @@ class SidebarPanel(QWidget):
         self.btn_delete.clicked.connect(self.delete_selected_clicked)
         self.btn_settings.clicked.connect(self.settings_clicked)  # v1.1: settings hub
 
-        # ── v1.2.4.1 (ROADMAP task 2): collapse button — bottom row, right corner ──
-        # The icon (vector rhombus "◇", v1.2.4.1-fix) and tooltip are set by MainWindow (i18n + ui/icons);
-        # here — only the widget and the collapse_clicked signal ("module + callbacks" pattern).
-        # v1.5.6 (ROADMAP task 4): NO `setAutoRaise` — the button carries a visible FRAME
-        # (the `collapse.button` entry of the QSS registry, applied by the window), so it
-        # reads as a button before the pointer arrives.
+        # ── collapse button — bottom row, right corner ──
+        # The icon (vector rhombus "◇") and the tooltip are set by MainWindow (i18n + ui/icons); here
+        # only the widget and the `collapse_clicked` signal ("module + callbacks" pattern). NO
+        # `setAutoRaise` — the button carries a visible FRAME (the `collapse.button` entry of the QSS
+        # registry, applied by the window), so it reads as a button before the pointer arrives.
         self.collapse_btn = QToolButton()
         self.collapse_btn.setToolTip("Sidebar")  # fallback without i18n (like the buttons above)
         _row = QHBoxLayout()
@@ -780,12 +744,11 @@ class SidebarPanel(QWidget):
         layout.addLayout(_row)
         self.collapse_btn.clicked.connect(self.collapse_clicked)
 
-    # ── v1.5rc4 (ROADMAP task 5): the VISIBLE FOCUS of the sidebar ────────────
-    # The panel is one of the three keyboard domains; the TREE is the widget the keyboard
-    # lands in, so the tree carries the frame. The state follows the tree's own
-    # FocusIn/FocusOut through an event filter (the panel owns the filter, the widget owns
-    # nothing) — and it is deliberately a plain bool + one stylesheet swap, never a
-    # hide/show (that would move the focus away the moment we react to it).
+    # ── the VISIBLE FOCUS of the sidebar ────────────
+    # The panel is one of the three keyboard domains; the TREE is the widget the keyboard lands in, so
+    # the tree carries the frame. The state follows the tree's own FocusIn/FocusOut through an event
+    # filter (the panel owns the filter, the widget owns nothing) and it is deliberately a plain bool +
+    # one stylesheet swap, never a hide/show (that would move the focus away the moment we react).
 
     def eventFilter(self, obj, event):
         """Follow the tree's focus (v1.5rc4, ROADMAP task 5) — everything else passes."""
@@ -842,14 +805,11 @@ class SidebarPanel(QWidget):
             self.tag_filter.setItemText(0, self._tr("filter.all_tags"))
             if idx > 0:
                 self.tag_filter.setCurrentIndex(idx)
-            # v1.4.6 (ROADMAP task 1): the LIST headers are i18n too — re-apply them
-            # (the column WIDTHS are kept: `_apply_list_columns` resets them only when
-            # the column count changes, i.e. on a real mode switch).
-            # v1.5.5: the TRANSLATED CELLS of the table (the status word and the two ages)
-            # are re-texted here as well — they are sentences of the panel, not data of the
-            # node, and the data they were built from is remembered on the row (`_RAW_ROLE`).
-            # Their SORT KEYS need no re-apply: a key describes the data (a rank, a number,
-            # a casefolded string), never the caption, so the order survives the switch.
+            # The LIST headers are i18n too — re-apply them (the column WIDTHS are kept:
+            # `_apply_list_columns` resets them only when the column count changes, i.e. on a real
+            # mode switch). The TRANSLATED CELLS (the status word and the two ages) are re-texted
+            # here as well — they are sentences of the panel, not data of the node, remembered on
+            # the row (`_RAW_ROLE`); a sort KEY describes the data, never the caption.
             self._apply_list_columns()
             self._retext_table_cells()
         except RuntimeError:
@@ -877,7 +837,7 @@ class SidebarPanel(QWidget):
     def _set_btn_icon(self, btn, name):
         """UI polish: a vector icon on the button (no-op without ui/icons).
 
-        v1.4.3-fix: the icon NAME is remembered on the button — a QPushButton keeps
+        the icon NAME is remembered on the button — a QPushButton keeps
         its own copy of the pixmap, so `refresh_theme()` has to re-apply the icon by
         name after a theme switch (the registry's in-place repaint does not reach it).
         """
@@ -891,7 +851,7 @@ class SidebarPanel(QWidget):
             pass
 
     def refresh_theme(self):
-        """v1.4.3-fix: re-apply the theme to the panel's own icons.
+        """re-apply the theme to the panel's own icons.
 
         The tree's status markers are painted fresh on every `refresh_rows()`, so
         only the six action buttons carry a cached pixmap. Never raises.
@@ -1013,12 +973,11 @@ class SidebarPanel(QWidget):
             tree.header().setSortIndicatorShown(False)
             tree.setSortingEnabled(False)
 
-    # ── v1.5.5 (ROADMAP task 1): sorting the table ────────────────────────────
-    # The table is REBUILT on every refresh (the v1.4.6 composition hook), so the sort
-    # CANNOT live in the widgets alone: the panel remembers the column and the direction
-    # and re-applies them after every rebuild. `header().sortIndicatorChanged` is what
-    # keeps that memory honest when the USER clicks a section — the same signal Qt's own
-    # sorting is driven by.
+    # ── sorting the table ────────────────────────────
+    # The table is REBUILT on every refresh (the composition hook), so the sort CANNOT live in the
+    # widgets alone: the panel remembers the column and the direction and re-applies them after every
+    # rebuild. `header().sortIndicatorChanged` is what keeps that memory honest when the USER clicks a
+    # section — the same signal Qt's own sorting is driven by.
 
     def sort_state(self) -> tuple:
         """The live sort column and direction (the default: the first column ascending)."""
@@ -1231,9 +1190,6 @@ class SidebarPanel(QWidget):
                                      node.data.host or "")
             # v0.9.4: the tag caption at the end of the row ("[tag1, tag2]", up to 3 tags).
             # v1.4.6: only in the NARROW mode — the LIST layout has a column of its own.
-            # v1.1.2RC2 (N8): setForeground(0, palette().windowText()) REMOVED — under
-            # the "gray" comment it painted the WHOLE row with the standard text
-            # color (visual no-op: the color was indistinguishable from the default).
             tags = getattr(node.data, "tags", None) or []
             if tags and not list_mode:
                 item.setText(0, item.text(0) + f"  [{', '.join(tags[:3])}]")
@@ -1292,9 +1248,7 @@ class SidebarPanel(QWidget):
         try:
             combo.clear()
             combo.addItem(all_label, "")
-            # v1.1.2RC2 (N9): setItemData(QColor, Qt.DecorationRole) REMOVED — the
-            # standard style reads DecorationRole as QIcon, QColor never rendered
-            # (dead code); the "● tag" in the text is a plain text-color glyph, the
+            # the "● tag" in the text is a plain text-color glyph, the
             # tag color is carried by the card.
             for tag in all_tags:
                 combo.addItem(f"● {tag}", tag)
@@ -1430,14 +1384,11 @@ class SidebarPanel(QWidget):
             return  # the consumer does not know about Quick Launch — the menu is as in v0.9.6
         entries = list(getattr(node.data, "quick_launch", None) or [])
         sub = menu.addMenu(self._tr("ctx.quick_launch"))
-        # v1.0RC4-fix (PySide6 6.11/shiboken — the same bug as _qaction_guard in
-        # main_window.py v0.9.8): the local `sub` wrapper dies when the method
-        # returns, but MainWindow shows the menu only AFTER the return
-        # (menu.exec). When a Python QAction wrapper with an attached QMenu
-        # dies (GC), PySide6 destroys the C++ submenu behind it — the "Quick
-        # Launch" item disappeared from the menu or fell over with
-        # RuntimeError. We keep the references (QAction + QMenu) on the parent
-        # menu's wrapper: they live exactly as long as the ephemeral menu.
+        # PySide6 6.11/shiboken GC bug (the same as `_qaction_guard` in main_window.py): the local
+        # `sub` wrapper dies when the method returns, but MainWindow shows the menu only AFTER the
+        # return (`menu.exec`), and a Python QAction wrapper with an attached QMenu destroyed by GC
+        # takes the C++ submenu with it ("Quick Launch" disappeared or raised RuntimeError). The
+        # QAction + QMenu references are kept on the parent menu's wrapper (gotcha #9).
         _guard = getattr(menu, "_sshmap_ql_guard", None)
         if _guard is None:
             _guard = menu._sshmap_ql_guard = []

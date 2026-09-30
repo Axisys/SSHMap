@@ -1,68 +1,15 @@
-"""Internationalization (i18n) system for SSH Map.
+"""The i18n system: `t()`, `set_language()`, the language discovery and the parity policy.
 
-Usage:
-    from i18n import t, set_language, get_available_languages, current_language
-    print(t("menu.file"))  # "File" / "Файл" / "文件" depending on language
+Every `i18n/*.json` is a language — the FILE NAME is the code and the root meta key "name" is the
+display name — and `~/.sshmap/languages/*.json` joins the discovery with SHADOWING, because ONE
+place decides the path (`language_file_path()`): a user file whose code matches a built-in one wins,
+a new code adds a language, an unreadable one is skipped with a log line. The meta keys are NOT
+translations: "name" and "partial" are pinned here and STRIPPED on load, so `t("name")` never
+resolves to them, and the parity checks compare translation keys only. Files are read "utf-8-sig".
 
-    set_language("en")     # Switch to English
-    set_language("ru")     # Switch to Russian
-    set_language("zh")     # Switch to Chinese
-
-Language files are stored in i18n/ directory as JSON; the FILE NAME is the language
-code and every *.json there is a language (no hardcoded list of codes — v1.3.3).
-Since v1.3.3.8 the USER folder ~/.sshmap/languages/ is discovered next to it.
-The last-used language is persisted to ~/.sshmap/config.json and restored on startup.
-
-Adding a language (v1.3.3 — no code changes):
-    1. copy i18n/en.json to i18n/<code>.json (e.g. i18n/de.json);
-    2. set the root meta key "name" to the language name IN ITS OWN LANGUAGE
-       ("Deutsch") — that is what the UI shows;
-    3. translate every value; all of en's keys must stay present (parity policy:
-       a built-in language covers 100% of en's keys);
-    4. python tests/check_i18n_keys.py   # green = the language is complete.
-
-The USER language folder (v1.3.3.8, ROADMAP task 1) — the same recipe WITHOUT
-touching the installed package:
-    * ~/.sshmap/languages/*.json is a SECOND discovery folder, read next to the
-      built-in i18n/ one. The file name is the code here as well;
-    * a user file whose code matches a BUILT-IN language SHADOWS it (the user's
-      file wins, the built-in one is not read at all); a NEW code adds a language;
-    * ~/.sshmap/languages/ is created ON DEMAND only — an import creates it, never
-      the import of this module, so no empty directory appears for a user who does
-      not care about languages;
-    * a user file that cannot be parsed / whose root is not an object / that carries
-      no translation key at all is NOT a language: it is SKIPPED with a log line and
-      the built-in file of that code (if any) is used instead — a typo in an editor
-      can never cost the user a built-in language. Everything else (an incomplete
-      file, a missing "name", a stray extra key) loads exactly as a built-in one:
-      the runtime never refuses a file, the en fallback covers the holes;
-    * the developer's strict parity check (tests/check_i18n_keys.py) walks the
-      PACKAGE i18n/ folder only (tests/_common.py i18n_lang_codes()), so a user
-      folder can never break or weaken the suite;
-    * "partial": true keeps the v1.3.3.1 meaning in the user folder too (see below).
-
-The meta keys are NOT translations — they are pinned here and relied upon by the
-code:
-    * "name" — the display name: get_available_languages() reads it from the file
-      (missing / broken / empty → the language code is shown instead — a language
-      file still works);
-    * "partial" (v1.3.3.1) — `true` marks a DELIBERATELY incomplete language: the
-      file loads and works exactly as any other (the runtime en-fallback is what
-      makes it usable), but the parity check reports its missing keys / count
-      mismatch as a WARNING instead of a defect. A file WITHOUT the key stays
-      STRICT (a missing key AND an extra key are defects);
-    * both are STRIPPED when a language is loaded, so t("name") / t("partial")
-      never resolve to them (they return the key itself, exactly like any other
-      unknown key);
-    * the parity checks (tests/check_i18n_keys.py, tests/_common.py) compare the
-      TRANSLATION keys only — meta keys are outside the en-parity policy.
-The name is displayed in the "Help → Language" submenu and in the "Language" tab of
-the settings hub.
-
-Encoding (v1.3.3.1): every language file is read as "utf-8-sig" — a file saved by
-Notepad as "UTF-8 with BOM" (the first thing a Windows contributor produces) loads
-exactly like a plain UTF-8 one. The BOM is a file-level artifact, never a key.
-"""
+Adding a language: copy `i18n/en.json` to `i18n/<code>.json`, set "name" to the language name in
+its own language, translate every value (all of en's keys must stay present) and run
+`python tests/check_i18n_keys.py`. AGENTS.md §4.5 is the contract, DOCUMENTATION.md §17 the rest."""
 
 import json
 import os
@@ -97,13 +44,11 @@ _META_KEYS = ("name", "partial")
 # codec, so a BOM-prefixed file is byte-for-byte equivalent to a plain UTF-8 one.
 _LANG_ENCODING = "utf-8-sig"
 
-# v1.3.3.8 (ROADMAP task 1): the USER language folder — ~/.sshmap/languages/. One
-# more discovery source next to the package's i18n/ directory: the USER file wins
-# for its code (shadowing), a new code adds a language. The folder is created ON
-# DEMAND only (ensure_user_language_dir — the import path), never on import of this
-# module, so a user who does not care about languages never sees an empty directory
-# appear. The developer's strict parity check walks the PACKAGE folder only
-# (tests/_common.py i18n_lang_codes()), so a user folder cannot break the suite.
+# The USER language folder — `~/.sshmap/languages/`: one more discovery source next to the package's
+# `i18n/` directory, where the USER file wins for its code (shadowing) and a new code adds a language.
+# The folder is created ON DEMAND only (`ensure_user_language_dir` — the import path), never on import
+# of this module, so a user who does not care about languages never sees an empty directory appear. The
+# developer's strict parity check walks the PACKAGE folder only, so a user folder cannot break the suite.
 _USER_LANG_DIRNAME = "languages"
 
 # The reason codes of a rejected file (v1.3.3.8). They are machine values, translated
@@ -151,10 +96,9 @@ def _strip_meta(data) -> Dict[str, str]:
 
 
 # ── The USER language folder and the resolution of a language code ────────────
-# v1.3.3.8 (ROADMAP task 1): ONE place decides WHERE the file of a code lives — the
-# user folder first (shadowing), the package second. Every consumer (discovery, the
-# load path, the name/partial readers, the last-language restore, the import/export
-# manager) goes through language_file_path(), so "the user's file wins" holds in one
+# ONE place decides WHERE the file of a code lives — the user folder first (shadowing), the package
+# second. Every consumer (discovery, the load path, the name/partial readers, the last-language restore,
+# the import/export manager) goes through `language_file_path()`, so "the user's file wins" holds in one
 # place instead of five.
 
 
@@ -462,12 +406,11 @@ def get_current_language() -> str:
     return _current_language
 
 
-# ── v1.3.3.8 (ROADMAP task 2): the language manager (import / export) ──────────
-# The two halves of "let the user bring a language in and take one out" without a
-# language EDITOR (deliberately not in v1.3.3.8): the file stays the user's to edit
-# in any text editor, the application only VALIDATES, COPIES and REPORTS. Both
-# helpers return a plain dict of facts (never a UI string) — the "Language" tab of
-# the settings hub is what turns them into the i18n messages of `language.*`.
+# ── the language manager (import / export) ──────────
+# The two halves of "let the user bring a language in and take one out" without a language EDITOR (the
+# file stays the user's to edit in any text editor; the application only VALIDATES, COPIES and REPORTS).
+# Both helpers return a plain dict of facts (never a UI string) — the "Language" tab of the settings hub
+# turns them into the i18n messages of `language.*`.
 
 def _atomic_write_json(path: str, data) -> bool:
     """Write JSON atomically (tmp + os.replace) — the storage/autosave pattern. Never raises."""

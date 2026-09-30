@@ -1,17 +1,15 @@
 # -*- coding: utf-8 -*-
-"""v1.5rc2 (ROADMAP task 3): the export options dialog — the print-palette opt-out.
+"""The export options dialog — the print-palette opt-out (DOCUMENTATION.md §39).
 
-An export is a different medium from the screen, so the ROADMAP pinned the decision
-at the START of the release: **print-friendly by default**. "Print-friendly" is not a
-third palette to maintain — it is the LIGHT instance with the high-contrast lines
-(`ui/theme.py export_theme(PALETTE_PRINT)`), which the v1.5rc1 contrast gate already
-measured at AA. This dialog is the ONE place the user can opt out and keep the current
-look, and it is deliberately minimal: a hint line and one checkbox.
+An export is a different medium from the screen, so the decision is pinned at the START of the release:
+PRINT-FRIENDLY BY DEFAULT. "Print-friendly" is not a third palette to maintain — it is the LIGHT instance
+with the high-contrast lines (`ui/theme.py export_theme(PALETTE_PRINT)`), which the contrast gate already
+measured at AA.
 
-The window keeps the CALLING side (which file, which status line); the dialog only
-answers a palette id through :meth:`chosen_palette`, so the four export commands
-(PNG/JPEG, PDF, SVG, drawio) share one question and one vocabulary.
-"""
+This dialog is the ONE place the user can opt out and keep the current look, and it is deliberately minimal:
+a hint line and one checkbox. The window keeps the CALLING side (which file, which status line), while the
+dialog only answers a palette id through `chosen_palette()`, so all four export commands (PNG/JPEG, PDF, SVG
+and drawio) share one question and one vocabulary."""
 
 try:
     from ..i18n import t

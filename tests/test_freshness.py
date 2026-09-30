@@ -1,30 +1,11 @@
 """v1.5.3 — freshness everywhere: the collected facts get an age, and a red card answers "why".
 
-The topical gate of the THIRD patch ON the released 1.5, and the file that pins the three
-halves of the release:
-
-  §1 the AGE of the collected facts (ROADMAP task 1): the optional `info_collected_at`
-     field of `ServerData` (write-only-when-set, a missing key is a default, junk is
-     refused), the "collected N ago" line and the idle-tone mark on the info plaque, the
-     INDEPENDENCE of the info freshness from the status freshness, and the rule that the
-     mark never changes a stored value;
-  §2 the batch collection (ROADMAP task 2): the bounded queue with a parallelism CAP, the
-     per-node guard (no node collected twice in parallel), one failure never stopping the
-     rest, `cancel()` dropping everything not yet started, the pure summary helpers and the
-     ONE window entry point ("gather information for the selection / all");
-  §3 the reachability report (ROADMAP task 3): DNS → TCP → SSH banner → ICMP ping in the
-     declared order, the FIRST failing step named in its own words (a DNS-only failure, a
-     refused port, a silent port and a live SSH host each get their OWN sentence), the
-     ICMP evidence, the tooltip/status-bar/activity routing, and the untouched STATUS;
-  §4 the release state: the version/pins, the registry pair, the schema decision of task 1
-     (`VERSION_FORMAT` stays 0.9) and the "no new contract" audit (no dependency, no config
-     key of the hub, no new colour).
-
-Everything runs offscreen and hermetic: the network seams of the report and the collector
-factory of the batch are INJECTED, so no socket is opened and no SSH session is started.
-
-Run: python tests/test_freshness.py   (from the project root) or python tests/run_all.py
-"""
+The topical gate of the third patch on the released 1.5 line, pinning its three halves.
+§1 the AGE of the collected facts: the optional `info_collected_at` of `ServerData` (written only when
+set, a missing key is the default, junk is refused), the "collected N ago" line and the idle-tone mark on
+the info plaque, the independence of the info freshness from the status freshness, and the rule that the
+mark never changes a stored value; §2 the batch collection: the bounded queue with a parallelism CAP, the
+per-node guard (no node collected twice in parallel), one failure never stopping the rest, `cancel()` dropping everything not yet started, the pure summary helpers and the ONE window entry point; §3 the reachability report: DNS → TCP → SSH banner → ICMP ping in the declared order, the FIRST failing step named in its own words (a DNS-only failure, a refused port, a silent port and a live host each get their OWN sentence), the ICMP evidence, the tooltip / status-bar / activity routing and the untouched STATUS; §4 the release state (the version pins, the registry pair, `VERSION_FORMAT` staying 0.9 and the "no new contract" audit). Everything is offscreen and hermetic: the network seams and the collector factory are INJECTED, so no socket is opened and no SSH session is started."""
 import json
 import os
 import re

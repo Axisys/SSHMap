@@ -313,12 +313,8 @@ new_keys = ["file.restore_autosave", "file.backups", "dialog.autosave_found",
             "status.autosaved", "msg.restore_failed", "msg.open_project_first"]
 missing = [k for k in new_keys if any(not langs[c].get(k, "").strip() for c in ("en", "ru", "zh"))]
 check("the 18 new v0.9.7 keys are present and non-empty in en/ru/zh", not missing, str(missing))
-# v0.9.9.2: +13 external terminal UI keys (ssh_ext.section … ssh_ext.preset.kitty)
-# v0.9.9.7: +2 PDF export keys (file.export_pdf, status.export_pdf_ok)
-# v1.0RC4: +22 Quick launch keys (ctx.quick_launch … msg.ql_open_failed)
-# v1.1: +33 settings dialog keys (settings.* / menu.settings / btn.settings / status.settings_saved)
-# v1.1.2RC2: +2 keys (msg.confirm_delete_profile, status.import_resolving)
-# v1.1.2 final: +2 keys (settings.statuses.max_parallel, status.auto_interval_hint)
+# The per-release key additions are the changelog family's; the live total is the parity pin
+# (`EXPECTED_I18N_KEYS` in tests/_common.py) — never enumerated here.
 check_i18n_parity(langs)
 
 # Cleanup: first dirty=False — otherwise closeEvent would go to the save dialog.

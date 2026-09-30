@@ -1,21 +1,11 @@
-"""Node groups on the map v0.8.1 (former smoke_test.py "v0.8.1 groups").
+"""Node groups on the map v0.8.1 (the "v0.8.1 groups" part of the old smoke test).
 
-A part of the suite split out of smoke_test.py v0.6–v0.9.2 (see INDEX.md).
-The tasks of the release: (1) graphics/node_group.py — a QGraphicsObject with the frame and the title;
-(2) the servers inside the group are moved automatically on the boundary change;
-(3) the groups are saved/loaded from the JSON (the "groups" array).
-  * the creation/the id/to_dict+from_dict, the z below the nodes;
-  * the geometric membership: the center of the card in the upper group; find_group_at;
-  * the drag of the group (QTest): the members shift by the same delta, the sync of data.x/y, the moved signal;
-  * the resize: the proportional reposition ×3 including the clamp into the frame smaller than the node;
-  * the exit/enter of the node from the frame — the membership is recomputed on the fly;
-  * the overlapping groups: the node only in the upper (the later added);
-  * the JSON round-trip of 4 groups + the restoration of the membership from the geometry, the backward-compat;
-  * the path via MainWindow: _add_group_at (the QPoint and the bool guard), the Delete key, the Edit menu;
-  * the ctx menu of the group add/rename/delete + the double click on the title → renameRequested.
-
-Run: python tests/test_groups.py   (from the project root) or python tests/run_all.py
-"""
+The release built `graphics/node_group.py` (a QGraphicsObject with a frame and a title), made the servers
+inside a group move automatically when its boundary changes, and saved/loaded the groups in the JSON
+`"groups"` array.
+Checks: the creation, the id, `to_dict` / `from_dict` and the z below the nodes; the geometric membership
+(the card's centre inside the UPPER group, `find_group_at`); the drag (the members shift by the same delta,
+`data.x/y` stay in sync, the `moved` signal); the proportional resize including the clamp into a frame smaller than a node; a node entering and leaving the frame with the membership recomputed on the fly; the overlapping groups (the node belongs to the later-added one); the JSON round trip of four groups restoring the membership from the geometry; the path through the window (`_add_group_at`, the Delete key, the Edit menu); and the group's context menu plus the double click on the title (`renameRequested`)."""
 import os
 import sys
 

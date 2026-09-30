@@ -29,62 +29,53 @@ class ServerData:
     # JSON as the "tags" array (server_data_to_dict via asdict). Backward-compat:
     # old JSON without the key is read as an empty list (server_data_from_dict).
     tags: "list | None" = None
-    # v1.0RC4: Quick launch — a list of menu entries for the server. Each entry:
-    # {"type": "url"|"command", "name": str, "value": str}. URL opens in the
-    # default browser; command is sent as the first command to the SSH terminal.
-    # Stored in JSON as the "quick_launch" array (asdict). Backward-compat: old
-    # JSON without the key is read as an empty list (server_data_from_dict), and old
-    # application versions simply ignore the unknown key.
+    # Quick launch — a list of menu entries for the server. Each entry:
+    # {"type": "url"|"command", "name": str, "value": str}. A URL opens in the default browser; a command
+    # is sent as the first command to the SSH terminal. Stored in JSON as the "quick_launch" array
+    # (`asdict`); a file without the key reads as an empty list, and an older application version ignores
+    # the unknown key.
     quick_launch: "list | None" = None
-    # v1.5.3 (ROADMAP task 1): WHEN the auto-collected facts above (os_name / cpu_model /
-    # cpu / ram / disk / ip) were collected — epoch seconds, 0.0 = "not dated" (never
-    # collected, or a project file written before this release). Optional and additive:
-    # a missing key loads as 0.0 and the card stays unmarked (the tags/quick_launch
-    # compatibility policy — write only when set, absent means the default, an old
-    # application version ignores the unknown key). It is written WITH the values (ONE
-    # write in `MainWindow._apply_info_result`), so a fact and its date can never drift:
-    # the date is the age of THAT measurement, not of the file.
-    # VERSION_FORMAT stays "0.9": an optional field with a default is not a schema change
-    # (the `collapsed` / `tags` / `quick_launch` precedent).
+    # WHEN the auto-collected facts above were measured — epoch seconds, 0.0 = "not dated".
+    # Optional and additive (the `tags` / `quick_launch` policy: written only when set, absent
+    # means the default, an older version ignores the unknown key) and written WITH the values
+    # in ONE place (`MainWindow._apply_info_result`), so a fact and its date cannot drift.
+    # `VERSION_FORMAT` stays "0.9" — an optional field with a default is not a schema change.
     info_collected_at: float = 0.0
-    # v1.6.5 (ROADMAP task 1): the NEIGHBOUR on the map — a card for a server this user
-    # does NOT administer. The flag is the ONE predicate of the whole release: the card
-    # carries no credentials (user / password / key_path / ssh_port are cleared and the
-    # keyring is never written for it), no SSH verb reaches it, no probe round ever touches
-    # it and it is painted with an honest "not monitored" mark instead of a status. Written
-    # through `asdict()` like `collapsed`, so an old project loads as fully managed and an
-    # older application version simply ignores the unknown key.
+    # The NEIGHBOUR on the map — a card for a server this user does NOT administer. The flag is the ONE
+    # predicate of the whole feature: the card carries no credentials (user / password / key_path /
+    # ssh_port are cleared and the keyring is never written), no SSH verb reaches it, no probe round
+    # touches it, and it is painted with an honest "not monitored" mark instead of a status. Written
+    # through `asdict()` like `collapsed`, so an older project loads as fully managed (`AGENTS.md` §4.21).
     unmanaged: bool = False
     # v1.6.5 (ROADMAP task 5): the OPT-IN reachability check of such a card — one ICMP
     # ping, on request, never a TCP/SSH probe. DEFAULT OFF: with it off no network call is
     # ever made for the card. Per-NODE data (the `collapsed` precedent) — deliberately NOT
     # a `config.json` key, so the settings hub's `collect()` does not move.
     unmanaged_ping: bool = False
-    # v1.6.6 (ROADMAP task 5): the DATA MOUNT beside the root. A server whose capacity lives on
-    # a separate volume reports the root's small number in `disk` while the filesystem that
-    # really holds the data stays invisible; these four optional strings are the fix. They are
-    # the only fields of the pair family and each one has its OWN job:
-    #   disk_mount — the REQUEST: the path to measure ("" ⇒ the declared default `/opt`);
-    #   disk_path  — the ANSWER: the mount point `df` really reported (`/` when the requested
-    #                path has no filesystem of its own). Separate from the request ON PURPOSE:
-    #                collapsing them would make a symlinked or automounted path indistinguishable
-    #                from the typed one;
-    #   disk_free  — the free figure of that mount;
-    #   disk_size  — the capacity of that mount.
-    # Additive optional strings, the `tags` / `info_collected_at` compatibility policy: a
-    # missing key, an explicit null, a number or any foreign value loads as "" ("never
-    # measured"), an older build ignores the keys, and `VERSION_FORMAT` stays "0.9" — an
-    # optional field with a default is not a schema change.
+    # The DATA MOUNT beside the root: a server whose capacity lives on a separate volume
+    # would otherwise report the root's small number. Four optional strings, each with its
+    # own job — `disk_mount` the REQUEST ("" ⇒ `/opt`), `disk_path` the ANSWER `df` really
+    # reported (`/` when the requested path has no filesystem of its own — kept separate ON
+    # PURPOSE), `disk_free` / `disk_size` of that mount. Additive: a foreign value loads as "".
     disk_mount: str = ""
     disk_path: str = ""
     disk_free: str = ""
     disk_size: str = ""
+    # The DEVICE the card is about — the second REQUEST/ANSWER pair, one level DOWN. `disk_device`
+    # is the REQUEST (a device name, "" = no choice, so the root's own figure answers as it always
+    # did) and `disk_devices` is the LIST the last collection read ("sda 9.7 gb") — offered by the
+    # dialog's combo and carried by the card's tooltip. `disk` stays a PURE size string either way:
+    # the inventory's sort key parses that field WHOLE. Additive: a foreign value loads as "" / [].
+    disk_device: str = ""
+    disk_devices: "list | None" = None
 
     def __post_init__(self):
         if self.tags is None:
             self.tags = []
         if self.quick_launch is None:
             self.quick_launch = []
+        if self.disk_devices is None:
+            self.disk_devices = []
 
 
 def is_unmanaged(target) -> bool:
@@ -131,16 +122,31 @@ def info_collected_epoch(value) -> float:
 def optional_text(value) -> str:
     """Coerce a raw optional STRING field into its usable value (v1.6.6, ROADMAP task 5).
 
-    PURE, and the ONE rule of the DATA-mount family (`disk_mount` / `disk_path` / `disk_free` /
-    `disk_size`): a string is taken STRIPPED, and every other value — a missing key (`None`), an
-    explicit null, a number, a boolean, a list or a dict — answers `""` ("never measured"). A
-    number is deliberately NOT stringified: these fields hold a mount point or a formatted
-    figure, and a stray `22` silently becoming a mount path would be a lie about a measurement
-    instead of a missing one.
+    PURE, and the ONE rule of the REQUEST/ANSWER families (`disk_mount` / `disk_path` /
+    `disk_free` / `disk_size` and the device REQUEST `disk_device`): a string is taken
+    STRIPPED, and every other value — a missing key (`None`), an explicit null, a number, a
+    boolean, a list or a dict — answers `""` ("never measured"). A number is deliberately NOT
+    stringified: these fields hold a mount point, a device name or a formatted figure, and a
+    stray `22` silently becoming a mount path would be a lie about a measurement instead of a
+    missing one.
     """
     if isinstance(value, str):
         return value.strip()
     return ""
+
+
+def sanitize_device_list(raw) -> list:
+    """Coerce a raw "disk_devices" value into the list of device labels (v1.7.1.2).
+
+    The `tags` rule — a list of strings, junk dropped, empty entries removed — applied to a
+    MEASUREMENT. PURE: a missing key and every non-list value answer `[]`, every entry is
+    taken STRIPPED, and a non-string entry is DROPPED rather than stringified, because a `22`
+    in this field is a hand-edited file and not a device.
+    """
+    if not isinstance(raw, (list, tuple)):
+        return []
+    return [entry.strip() for entry in raw
+            if isinstance(entry, str) and entry.strip()]
 
 
 def sanitize_quick_launch(raw) -> list:
@@ -155,7 +161,7 @@ def sanitize_quick_launch(raw) -> list:
         for e in raw:
             if not isinstance(e, dict):
                 continue
-            # v1.0-fix (audit #3): an explicit null in JSON — e.get(...) returns None
+            # an explicit null in JSON — e.get(...) returns None
             # (the default only kicks in when the key is ABSENT), and str(None) = "None"
             # would pass as a valid name/value. None → empty string → the record
             # is dropped, as the "corrupt records are dropped" policy dictates.
@@ -189,9 +195,8 @@ def server_data_from_dict(raw: dict) -> ServerData:
         # undo commands, registries). We coerce to str after the emptiness check.
         data['id'] = str(data['id'])
     # Defaults as when building ServerData manually in old versions of _open_project().
-    # v1.0-fix (audit #4): setdefault only filled MISSING keys — an explicit
-    # null in JSON ("host": null) passed through as None and crashed the SSH dialog on .strip()
-    # (_start_worker). Now a missing key AND an explicit null yield the default; the other
+    # A missing key AND an explicit null in JSON ("host": null) yield the default: a null that
+    # passed through as None crashed the SSH dialog on .strip() (_start_worker). The other
     # string fields — an explicit null → empty string (like a missing key), so that
     # "corrupt" records don't break the UI paths working with ServerData.
     for _field, _default in (('alias', 'Server'), ('host', 'localhost'),
@@ -204,8 +209,10 @@ def server_data_from_dict(raw: dict) -> ServerData:
     # `disk_mount` precedent (`_optional_text()`): a missing key, an explicit null, a number, a
     # list or any other foreign value all degrade to "" ("never measured"), so a hand-edited
     # project file can never put a non-string into a field the card and the dialog render.
-    for _field in ('disk_mount', 'disk_path', 'disk_free', 'disk_size'):
+    # v1.7.1.2: the device REQUEST joins them, and the discovered LIST is sanitized like `tags`.
+    for _field in ('disk_mount', 'disk_path', 'disk_free', 'disk_size', 'disk_device'):
         data[_field] = optional_text(data.get(_field))
+    data['disk_devices'] = sanitize_device_list(data.get('disk_devices'))
     try:
         data['ssh_port'] = int(data.get('ssh_port') or 22)
     except (TypeError, ValueError):
@@ -251,8 +258,10 @@ def server_data_to_dict(data: ServerData) -> dict:
     # (an empty `disk_mount` is the meaningful "use the declared default"), while the three
     # ANSWERS are MEASUREMENTS — nothing was measured ⇒ the key is ABSENT, so an ordinary map
     # keeps the file it had and a project written before the release is never "measured" by a
-    # later save (the `info_collected_at` rule, applied to a string family).
+    # later save. v1.7.1.2: the device REQUEST follows `disk_mount`, the LIST the answers.
     for _field in ('disk_path', 'disk_free', 'disk_size'):
         if not optional_text(serialized.get(_field)):
             serialized.pop(_field, None)
+    if not sanitize_device_list(serialized.get('disk_devices')):
+        serialized.pop('disk_devices', None)
     return serialized

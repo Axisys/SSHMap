@@ -1,17 +1,12 @@
 # -*- coding: utf-8 -*-
-"""Map export to drawio (.drawio) v0.9.5 (former tests/smoke_v095_drawio.py).
+"""Map export to drawio (.drawio) v0.9.5 (a former smoke test).
 
-Checks (DOCUMENTATION.md v0.9.5 #6):
-  1. The round-trip of the structure of the XML: the nodes / the connections / the groups / the notes / the background.
-  2. The file opens by the XML validator (ET.parse).
-  3. The coordinates of the members of the groups are recalculated relative to the parent.
+Checks: the round trip of the XML STRUCTURE (the nodes, the connections, the groups, the notes and the
+background); the file being accepted by the XML validator (`ET.parse`); and the coordinates of a group's
+members being recalculated relative to their parent.
 
-v1.3.3.7 (ROADMAP task 4): the structure counting is done INLINE here — the module's
-`load_drawio_structure()` was deleted as production-dead (see `CHANGELOG_HISTORY_V1338.md`, v1.3.3.7),
-so `count_structure()` below is the same `ET.iter("mxCell")` scan the helper used.
-
-Run: python tests/test_drawio_export.py   (from the project root) or python tests/run_all.py
-"""
+Since v1.3.3.7 the structure counting happens INLINE here — the module's `load_drawio_structure()` was
+deleted as production-dead — so `count_structure()` below is the same `ET.iter("mxCell")` scan that helper used."""
 import os
 import xml.etree.ElementTree as ET
 

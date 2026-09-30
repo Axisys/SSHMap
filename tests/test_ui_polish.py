@@ -1,20 +1,11 @@
-"""UI polish: nodes, grid, fit/zoom, status bar, icons, arrow hit zones (former smoke_test).
+"""UI polish: nodes, grid, fit/zoom, status bar, icons, arrow hit zones (a former smoke-test part).
 
-A part of the suite split out of smoke_test.py v0.6–v0.9.2 (see INDEX.md).
-  * the node's boundingRect includes the shadow halo (v1.4.2: a cached pixmap);
-    the decorative 🔒 button removed; the anchors use `card_rect_scene()`;
-  * the status dot + the dimming of the offline node's content down to 0.55;
-  * the adaptive grid: a 20px step at zoom >= 1, the doubling at a small zoom;
-  * fit_to_content (with the content → True, an empty scene → False without a crash);
-  * set_zoom_and_center: the valid values are applied, the broken ones are ignored;
-  * _center_view centers by the map's content;
-  * the status bar: the % of the zoom + the counters of servers/connections (ru);
-  * the vector icons 20x20, an unknown name → an empty QIcon;
-  * the arrow's hit area catches the middle of the curve (the shape is wider than the visible stroke);
-  * i18n: the v0.7.3 keys + UI polish + v0.8.1 in all three languages.
-
-Run: python tests/test_ui_polish.py   (from the project root) or python tests/run_all.py
-"""
+Checks: the node's `boundingRect()` includes the shadow halo (a cached pixmap), the decorative lock button
+is gone and the anchors use `card_rect_scene()`; the status dot plus the dimming of an offline node's
+content; the adaptive grid (a 20 px step at zoom ≥ 1, doubling at a small zoom); `fit_to_content` (True with
+content, False on an empty scene without a crash); `set_zoom_and_center` applying the valid values and
+ignoring the broken ones; `_center_view` centring on the content; the status bar's zoom percentage and the
+server/connection counters; the 20×20 vector icons and an unknown name → an empty QIcon; the arrow's hit area catching the middle of the curve; and the i18n keys in all three languages."""
 import json
 import os
 import sys
@@ -35,7 +26,7 @@ from i18n import set_language
 print("== UI polish ==")
 
 # The fixture: a window with two nodes and WITHOUT connections — the win73 state in smoke_test after
-# v0.7.3 section (the arrow was removed by _remove_connection): the "Connections: 0" counter below depends on this.
+# v0.7.3 section (the arrow is dropped by _remove_connection): the "Connections: 0" counter below depends on this.
 win = MW.MainWindow()
 d_a = server_data_from_dict({"alias": "ctx-a", "host": "192.168.3.52", "user": "u", "ip": "192.0.2.10", "x": 100, "y": 100})
 d_b = server_data_from_dict({"alias": "ctx-b", "host": "192.168.3.53", "user": "u", "x": 450, "y": 160})

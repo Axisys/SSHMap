@@ -1,31 +1,12 @@
 # -*- coding: utf-8 -*-
 """v1.0RC3 — PTY resize + scrollback + dirty rendering (ROADMAP v1.0RC3).
 
-  * The scrollback on the ready-made pyte.HistoryScreen (TERMINAL.md §5.4, fact #7; the input
-    ONLY with \\r\\n — the convention since v1.0RC3; fact #10 was closed in v1.2.11: LNM is on
-    by default, a bare \n = CR+LF): the history grows, prev/next page (a page =
-    ceil(lines * ratio)), the auto-return to the live line on the new output (built
-    into pyte's before_event), the boundaries (a no-op at the top/bottom), the depth limit;
-  * The PTY resize — the guard on the grid change + the ~150 ms debounce (TERMINAL.md §5.5,
-    ROADMAP task 6): the fake channel counts the resize_pty calls — 10 resize
-    events on one grid → exactly 1 PTY call; the initial invoke_shell stays
-    120×32, the first resizeEvent synchronizes with the window; a series of fast grid
-    changes coalesces into a SINGLE call with the latest sizes;
-  * The keyboard: Ctrl+Shift+PageUp/PageDown → the scrollback (the interception BEFORE the bare
-    PageUp/PageDown — the fall-through trap from the ROADMAP), the bare PgUp/PgDn
-    remain the forward to the shell (\\x1b[5~/\\x1b[6~ — the semantics of v1.0RC2, the paging
-    of less/man); Shift+PgUp without Ctrl and Ctrl+Alt+Shift+PgUp (the AltGr guard) do
-    not scroll;
-  * The mouse wheel: up → prev_page, down → next_page, a no-op at the boundaries;
-    it works even with terminal_thread=None (a local operation);
-  * The dirty render (ROADMAP task 8): the 33 ms timer removed — _on_output →
-    widget.update() directly (E2E through the window with a fake thread);
-  * The cursor blink: its own QTimer in TerminalWidget (the start in showEvent, the stop
-    in hideEvent), the phase toggle changes the render of the block cursor;
-  * The "Close the terminal" button removed (v1.0RC3): a QPushButton in the window — only on the SFTP tab (v1.1.3) and in the command library panel (v1.3); close_terminal() is kept (the MainWindow's cleanup path).
-
-Run:  python tests/test_terminal_scroll.py   (from the project root) or python tests/run_all.py
-"""
+The scrollback on the ready-made `pyte.HistoryScreen` (`DOCUMENTATION.md` §12; input arrives with `\r\n` —
+the convention since RC3, and the fork keeps LNM on — patch 0002 — so a bare `\n` is CR+LF): the history
+grows, `prev_page` / `next_page` (a page = `ceil(lines * ratio)`), the auto-return to the live line on new
+output, the boundaries as no-ops and the depth limit.
+The PTY resize (the grid-change guard plus the ~150 ms debounce, `DOCUMENTATION.md` §14b): ten resize
+events on ONE grid produce exactly ONE `resize_pty` call, the initial `invoke_shell` stays 120×32, the first `resizeEvent` synchronizes with the window, and fast changes coalesce into a single call with the latest sizes. The keyboard: `Ctrl+Shift+PageUp/PageDown` scroll the scrollback (intercepted BEFORE the bare PageUp/PageDown, which still go to the shell as `\x1b[5~` / `\x1b[6~`), while `Shift+PgUp` without Ctrl and the AltGr guard do not. The wheel pages, the dirty render calls `widget.update()` directly, the cursor blink has its own timer, and the old "Close the terminal" button is gone."""
 import sys
 
 from _common import bootstrap, check, finish, wait_until
@@ -229,14 +210,11 @@ finally:
             pass
 
 
-# ════════════════════════════════════════════════════════════
-# 2b. v1.5.7: the grid computed BEFORE the connection is NOT lost
-# ════════════════════════════════════════════════════════════
-# The layout runs when the window appears — long before paramiko authenticates — so the
-# debounced resize_pty of that pass used to be refused by the `channel is None` guard while
-# `_last_cols/_last_rows` were already updated: no further Resize event followed and the PTY
-# kept invoke_shell's 120x32 for the whole life of the session (every TUI then drew a 120x32
-# screen inside a canvas of another size). The request now WAITS for the channel.
+# ═══ 2b. the grid computed BEFORE the connection is NOT lost ═══
+# The layout runs when the window appears, long before paramiko authenticates, so the debounced
+# resize_pty of that pass must not be refused by the `channel is None` guard while `_last_cols/
+# _last_rows` were already updated — no further Resize event follows and the PTY would keep
+# invoke_shell's 120x32 for the whole session. The request now WAITS for the channel (§4.3).
 print("== the initial PTY grid survives the connect (v1.5.7) ==")
 
 win2 = None
@@ -501,12 +479,10 @@ wb.hide()
 app.processEvents()
 
 
-# ════════════════════════════════════════════════════════════
-# 7. v1.6.4 (ROADMAP task 5): the PINNED scrollback — terminal_scroll = "live" | "pin"
-# ════════════════════════════════════════════════════════════
-# The opt-in mode where a chunk of output does NOT yank the view: the viewport keeps the LINES
-# it shows, which is what a real terminal does. The DEFAULT ("live") is the behaviour every
-# earlier release had, and the regression below asserts exactly that.
+# ═══ 7. the PINNED scrollback — terminal_scroll = "live" | "pin" ═══
+# The opt-in mode where a chunk of output does NOT yank the view: the viewport keeps the LINES it
+# shows, which is what a real terminal does. The DEFAULT ("live") is the shipped behaviour, and the
+# regression below asserts exactly that (`AGENTS.md` §4.3, `DOCUMENTATION.md` §64).
 print("== the pinned scrollback (terminal_scroll) ==")
 
 
@@ -520,7 +496,7 @@ def lines_of(scr, count=None):
 class CountingHistory(TS.SshmapHistoryScreen):
     """The shipped screen + a counter of the PYTEs PAGE operations (prev_page/next_page).
 
-    The D2 batching exists because those calls used to be spun in a loop (one per page); the
+    The D2 batching exists because those calls would otherwise be spun in a loop (one per page); the
     pinned restore must not reintroduce them, so the topical test counts THEM — never
     milliseconds (the ROADMAP acceptance says so explicitly).
     """

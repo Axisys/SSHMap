@@ -213,7 +213,7 @@ class ConnectionDialog(QDialog):
                 self.target.setCurrentIndex(idx)
         else:
             # v1.6.8: "Connect to…" (the map/sidebar row) hands in the SOURCE alone, and
-            # the target used to stay on item 0 — which IS the source for the first card,
+            # the target must not stay on item 0 — which IS the source for the first card,
             # so the dialog opened on its own refusal (`validation.self_connection`). The
             # default target is the first node that is NOT the chosen source; an explicit
             # `default_target_id` (the drag path) still wins untouched.

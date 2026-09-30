@@ -1,27 +1,16 @@
 # -*- coding: utf-8 -*-
-"""The declared STATUS SHAPES (v1.5rc2, ROADMAP task 2) — one mark, three consumers.
+"""The declared STATUS SHAPES — one mark, three consumers (AGENTS.md §4.6, §4.11).
 
-The 1.5 line opened with a measured problem: the interface encoded meaning in COLOUR
-alone, so an availability status was unreadable in greyscale and for a colour-vision
-deficiency. v1.5rc2 gives every status a SHAPE beside its colour — the pinned set of
-`ui/theme.py`: a filled dot / a ring / a triangle — and this module is the ONE place
-that turns that declaration into pixels.
-
-Three consumers, one declaration (so a mark can never drift from the map):
-
-  * the card's status dot (`graphics/server_node.py` — a `QGraphicsPathItem`, the
-    shape comes from :func:`shape_path`);
-  * the sidebar row marker (`ui/sidebar.py` — a 16 px `QIcon`, :func:`shape_icon`);
-  * the legend row (`ui/legend.py` — painted directly, :func:`paint_shape`).
+The 1.5 line opened with a measured problem: the interface encoded meaning in COLOUR alone, so an
+availability status was unreadable in greyscale and for a colour-vision deficiency. The release gives every
+status a SHAPE beside its colour — the pinned set of `ui/theme.py`: a filled dot, a ring or a triangle —
+and this module is the ONE place that turns that declaration into pixels: the card's status dot
+(`graphics/server_node.py`, a `QGraphicsPathItem` built by `shape_path()`), the sidebar row marker
+(`ui/sidebar.py`, a 16 px `QIcon` from `shape_icon()`) and the legend row (`ui/legend.py`, painted with
+`paint_shape()`). One declaration for three consumers, so a mark can never drift from the map.
 
 The colour is never invented here: the caller passes the tone the status already had
-(`Theme.status_colors`, the idle grey while unchecked), so the shape is a SECOND
-channel and not a new palette. The WORDS stay in the tooltips (`node.status.*`) —
-"the tooltips keep the words" is what makes the shape a hint rather than a riddle.
-
-Like `ui/theme.py` this module is Qt-light by construction: it imports PySide6 for
-the path/pixmap types and nothing else — no window, no widget, no i18n.
-"""
+(`Theme.status_colors`, the idle grey while unchecked), which is what makes the shape a SECOND channel rather than a new palette. The WORDS stay in the tooltips (`node.status.*`) — that is what makes the shape a hint and not a riddle. Like `ui/theme.py` it is Qt-light by construction: PySide6 is imported for the path and pixmap types and nothing else — no window, no widget, no i18n."""
 
 from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QBrush, QColor, QIcon, QPainter, QPainterPath, QPen, QPixmap

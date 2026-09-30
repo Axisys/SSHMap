@@ -1,35 +1,12 @@
 # -*- coding: utf-8 -*-
 """v1.5.5 — The inventory: the LIST mode becomes a report (ROADMAP v1.5.5).
 
-The topical test of the release (the "new topical file" convention): offscreen, no network
-(the probes answer instantly) and no real terminal session.
-
-§1 The column set (task 3): `LIST_COLUMNS` is the ONE declaration of the 13 inventory
-   columns and the pure `list_cell_values()` maps a `ServerData` onto them — the SSH port,
-   the user, the comment and the two AGES (the status and the collected facts) on top of
-   the v1.4.6 set; the age cells come from the pure `list_age_text()` whose English
-   fallbacks are the `en.json` values and whose boundaries are minutes / hours / days.
-
-§2 Sorting (task 1): the pure `list_sort_key()` sorts by DATA, not by the rendered text
-   ("512 MB" before "8 GB", 10.9.0.1 before 10.10.0.1, the declared status severity, a
-   bigger age later), needs no locale (a key never reads a translated cell), and an EMPTY
-   cell sorts LAST in BOTH directions. The live table sorts by every column, the direction
-   and the column are REMEMBERED across a rebuild (a node add/remove, a status round, a
-   filter change), a row with equal keys keeps its build order, and the NARROW mode has no
-   sorting at all.
-
-§3 The export (task 2): the pure CSV/TSV writer (RFC 4180 quoting — a comma, a quote and a
-   line break round-trip through Python's own `csv` module), `list_report_rows()` = the
-   VISIBLE table (the live header + the displayed rows in their displayed order), the
-   clipboard path through the ONE text-copy helper, the file path through the ordinary
-   save dialog (UTF-8 with a BOM, the extension from the filter), the header following a
-   language switch, the actions enabled only while the table exists, and the acceptance
-   that the exported example map carries ONLY the RFC 5737 addresses.
-
-§4 i18n parity + the release state (the pins `tests/_common.py`).
-
-Run: python tests/test_inventory.py   (from the project root) or python tests/run_all.py
-"""
+The topical test of the release: offscreen, no network (the probes answer instantly), no real session.
+§1 the column set (`LIST_COLUMNS` is the ONE declaration of the 13 inventory columns and the pure
+`list_cell_values()` maps a `ServerData` onto them — the SSH port, the user, the comment and the two
+AGES, whose cells come from `list_age_text()`); §2 sorting (the pure `list_sort_key()` sorts by DATA,
+not by the rendered text: "512 MB" before "8 GB", 10.9.0.1 before 10.10.0.1, an empty cell LAST in BOTH
+directions; the column and the direction survive a rebuild; the narrow mode has no sorting); §3 the export (the RFC-4180 writer, `list_report_rows()` = the VISIBLE table, the clipboard through the ONE helper, the file through the ordinary save dialog, the actions enabled only while the table exists); §4 the i18n parity and the release state."""
 import csv
 import io
 import os
@@ -346,13 +323,10 @@ check("the sort indicator is SHOWN in LIST mode",
       and win.tree.header().sortIndicatorOrder() == Qt.SortOrder.AscendingOrder)
 
 # The expected orders, written by hand (the topical test does not re-implement the keys).
-# s-web: web-01 / 10.10.0.5 / 22 / deploy / offline / 2 h old / Ubuntu 24.04 / 2 vCPU /
-#        4 GB / 40 GB / no facts date / "front" / prod
-# s-db:  db-01 / 10.9.0.5 / 2222 / postgres / online / 1 min old / Debian 12 / 8 vCPU /
-#        512 MB / 2 TB / 30 d old / "z-backup" / db
-# s-misc: alpha / zeta-unknown (a NAME, no address) / 22 / root / never probed /
-#        no status age / no OS / "Intel Xeon" (a text model) / no RAM / no disk /
-#        no facts date / no comment / dev
+# s-web:  web-01 / 10.10.0.5 / 22 / deploy / offline / 2 h old / Ubuntu 24.04 / 2 vCPU / 4 GB / 40 GB / no facts date / "front" / prod
+# s-db:   db-01 / 10.9.0.5 / 2222 / postgres / online / 1 min old / Debian 12 / 8 vCPU / 512 MB / 2 TB / 30 d old / "z-backup" / db
+# s-misc: alpha / zeta-unknown (a NAME, no address) / 22 / root / never probed / no status age / no OS / "Intel Xeon" (a text model) /
+#         no RAM / no disk / no facts date / no comment / dev
 _EXPECT = {
     "alias": [["s-misc", "s-db", "s-web"], ["s-web", "s-db", "s-misc"]],
     # a name is not an address: the addresses come first, the name last (both directions

@@ -1,41 +1,16 @@
 # -*- coding: utf-8 -*-
-"""v1.5.2 (ROADMAP task 3): the activity panel — the HISTORY, never a second status bar.
+"""The activity panel — the HISTORY, never a second status bar (DOCUMENTATION.md §45).
 
-The buffer of `modules/activity_log.py` is invisible without a surface, and the surface
-has one rule to obey: the status bar and the SFTP progress line stay the "now", the
-Plugins menu keeps the current records — **this panel lists what HAPPENED**. It is a
-log view over a bounded ring, not a live status widget: a fact is displayed here as a
-row with a time, and clearing the status bar (or finishing a transfer) does not remove
-it, while a row never becomes the current state of anything.
+The status bar and the SFTP progress line stay the "now" and the buffer of `modules/activity_log.py`
+is invisible without a surface: this panel LISTS WHAT HAPPENED — a log view over a bounded ring,
+where a row carries a time and never becomes the current state of anything.
 
-Pinned decisions (ROADMAP v1.5.2, task 3):
-
-  * **A non-modal WINDOW, not a floating panel.** The v1.5rc4 floating-panel priority
-    resolver (`MainWindow._overlay_panel_rects()` + the "the collapse diamond is never
-    covered" rule) governs the panels that live INSIDE the canvas — the legend, the
-    minimap, the search bar, the first-run hint. A window keeps the new surface out of
-    that rule entirely: it is not a child of `MapView`, so it cannot cover the diamond,
-    cannot be dragged into an export and cannot fight the legend for a corner. The
-    rejected alternative (a fifth floating panel) would have had to join the resolver
-    for no benefit.
-  * **It owns `retranslate()`** (the v1.3.3.1 invariant) — reached from
-    `MainWindow._apply_ui_translations()`. Only the CHROME is translated (the window
-    title, the level captions, the column headers, Clear); the event LINES stay English,
-    because they are logging lines (the i18n cost is the chrome, never one key per event
-    kind — `modules/activity_log.py` owns that rule).
-  * **Visibility is ONE `config.json` key** (`ui_activity_panel`, written by its owner
-    with a merge write — the `ui_legend`/`ui_minimap` pattern). The settings hub's
-    `collect()` is untouched: this is UI state, not a preference.
-  * **The newest first**, the ring's bound as the row cap, and a level filter whose
-    policy is the PURE `activity_log.matches_level()` — the widget renders, it does not
-    decide.
-
-Threading: the buffer is written from worker threads (probes, SFTP, DNS), so the panel
-never listens to it directly — `_ActivityBridge` (a QObject living in the GUI thread)
-turns every append into ONE queued Qt signal, and the rows are rebuilt by a coalescing
-timer (`REFRESH_MS`), which is what keeps a burst of 200 records from rebuilding the
-view 200 times.
-"""
+Pinned: a non-modal WINDOW, not a floating panel (the priority resolver governs the panels INSIDE
+the canvas, so a window cannot cover the collapse diamond, be dragged into an export or fight the
+legend for a corner); it owns `retranslate()` and translates only the CHROME — the event LINES stay
+English, being logging lines; the visibility is ONE `config.json` key (`ui_activity_panel`,
+owner-written UI state — `collect()` is untouched); newest first, the ring's bound is the row cap,
+and the level filter is the PURE `activity_log.matches_level()`. `_ActivityBridge` (a QObject in the GUI thread) queues the worker appends; a timer rebuilds."""
 
 from PySide6.QtCore import QObject, Qt, QTimer, Signal
 from PySide6.QtWidgets import (

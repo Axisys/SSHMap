@@ -1,27 +1,11 @@
-"""services/diagnostics.py: PingThread + ReverseDnsThread (v0.9.9.3).
+"""`services/diagnostics.py`: `PingThread` + `ReverseDnsThread` (v0.9.9.3).
 
-ROADMAP v0.9.9.3 — phase 0 of the "Hygiene of main_window.py" series: _PingThread/_ReverseDnsThread
-were moved from ui/main_window.py (they were nested straight inside the _ping_node/_copy_node_info methods)
-into services/diagnostics.py. ZERO behavior change: the same signals
-(finished_ping(bool, str), resolved(str)), the same ping command lines (AUDIT v0.9.5.5 #4),
-the same i18n keys; the "module + callbacks" pattern — MainWindow keeps the references to the threads
-(self._ping_thread/self._dns_thread) and connects local closures.
-
-  * the moved classes: the QThread subclasses, the signals with the same signature (the emit from Python);
-  * the hygiene: the nested Thread classes are gone from main_window.py, the imports — services.diagnostics;
-  * ReverseDnsThread: success (the monkeypatched gethostbyaddr) + the fallback to the host on herror;
-  * PingThread: the ok/fail/exception paths via the fake subprocess.run + the command line per OS;
-  * the MainWindow regression (offscreen): _ping_node (the start/finish, the self-cleanup, the guard AUDIT v0.7.2 #8),
-    _copy_node_info(hostname) — the clipboard + the status bar + the cleanup of _dns_thread.
-
-§5a in two modes (the suite optimization, phase 3): by default hermetic — subprocess.run
-is intercepted, the ping "fails" instantly (returncode 1), the whole path MainWindow._ping_node →
-PingThread → finished_ping → the dialog + the cleanup is run WITHOUT the network; the real ping
-TEST-NET-1 (up to ~10 s) runs only with an explicit `run_all.py --tag network`
-(the runner passes the tag to the env SSHMAP_TEST_TAGS).
-
-Run: python tests/test_diagnostics.py   (from the project root, hermetic) or python tests/run_all.py
-"""
+The release's theme was phase 0 of the "main_window.py hygiene" series: both threads were nested inside
+the window's `_ping_node` / `_copy_node_info` methods and moved out with ZERO behaviour change — the same
+signals (`finished_ping(bool, str)`, `resolved(str)`), the same ping command lines, the same i18n keys and
+the "module + callbacks" pattern, with `MainWindow` keeping the references (`self._ping_thread` /
+`self._dns_thread`) and connecting local closures.
+Checks: the moved QThread subclasses and their signal signatures; the hygiene (no nested Thread class left in the window module, the imports pointing at `services.diagnostics`); `ReverseDnsThread` on success (a monkeypatched `gethostbyaddr`) and its fallback to the host on `herror`; `PingThread`'s ok / fail / exception paths through a fake `subprocess.run` plus the command line per OS; and the window regression offscreen (`_ping_node` start/finish/self-cleanup and its guard, `_copy_node_info(hostname)` with the clipboard, the status bar and the cleanup of `_dns_thread`). The ping section runs in two modes: hermetic by default (the subprocess is intercepted and the ping "fails" instantly, so the whole path runs without the network) and REAL only under `run_all.py --tag network`."""
 # tags: network
 # §5a: a real ping of TEST-NET-1 only with run_all.py --tag network (env SSHMAP_TEST_TAGS);
 #      normal runs are hermetic and fast
@@ -238,14 +222,10 @@ check("fixture: node on scene + window has _ping_thread/_dns_thread slots",
       _node is not None and hasattr(win, "_ping_thread") and hasattr(win, "_dns_thread"))
 
 # 5a. _ping_node — pinging a TEST-NET host: the thread starts and finishes.
-# Two modes (suite optimization phase 3):
-#   * by default (hermetic): subprocess.run is intercepted — ping "fails" instantly
-#     (returncode 1, the fake from §4), full path _ping_node → PingThread → finished_ping
-#     → the dialog + cleanup runs WITHOUT network;
-#   * run_all.py --tag network (env SSHMAP_TEST_TAGS contains "network"): REAL
-#     ping TEST-NET-1 (up to ~10 s) — an integration check on a live machine.
-# The headless hermeticity: on failure the slot shows a MODAL QMessageBox.information()
-# — in offscreen no one will close it (the test_context_menus.py pattern).
+# Two modes (suite optimization phase 3): by default (hermetic) subprocess.run is intercepted,
+# so ping "fails" instantly and the full path _ping_node → PingThread → finished_ping → the
+# dialog runs WITHOUT network; under `--tag network` it is a REAL ping of TEST-NET-1 (~10 s).
+# The failure slot shows a MODAL QMessageBox — in offscreen no one closes it (the menu pattern).
 _REAL_NET = "network" in os.environ.get("SSHMAP_TEST_TAGS", "").split()
 _real_qmb_info = QMessageBox.information
 _ping_dialog_calls = []

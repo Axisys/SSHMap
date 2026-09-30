@@ -1,33 +1,16 @@
 # -*- coding: utf-8 -*-
-"""v1.4rc2 (plugin foundation, ROADMAP tasks 5–6): the managed SSH worker of `ctx.run_command`.
+"""The managed SSH worker of `ctx.run_command` (PLUGINS.md §5).
 
-`PluginContext.run_command()` is a **service the core performs** (PLUGINS.md §5): the
-plugin hands over node records and a shell command, and the core does the rest —
-resolving the credentials, opening the connection, running the command, reporting one
-result per node. This module is that worker.
+`PluginContext.run_command()` is a service the CORE performs: the plugin hands over node records and a
+shell command, and the core resolves the credentials, opens the connection, runs the command and reports
+one result per node. This module is that worker.
 
-**One-shot QThread, per-node results.** `PluginCommandRunner` walks the node list in
-order and emits `node_result(node_id, dict)` the moment a node's result is known
-(output / exit code / error), then `all_finished(list)` once. A failure on one node is
-a RESULT for that node — the loop continues with the rest, so one unreachable server can
-never hide the answer from its neighbours (the acceptance of ROADMAP rc2).
+One-shot QThread, per-node results: `PluginCommandRunner` walks the node list in ORDER and emits
+`node_result(node_id, dict)` the moment a node's answer is known (output / exit code / error), then
+`all_finished(list)` once. A failure on one node is a RESULT for that node — the loop continues, so one
+unreachable server can never hide the answer from its neighbours.
 
-**Credentials are the core's business.** The default resolver reads the password from
-the OS keyring by node id (`services/credential_manager.py` — the same allowlist
-singleton the rest of the app uses) and the private key path from the internal node
-FACTS the window registers; the password is passed to paramiko and is never logged,
-never serialized and never handed to a plugin. Both the resolver and the network
-transport are injectable seams — that is how the suite tests the whole worker without a
-socket (`tests/test_plugin_runtime.py`).
-
-**A bounded life.** `stop(wait_ms)` sets the cancel flag (a node that has not started is
-skipped) and waits for the thread with a budget; the connection uses one timeout for
-connect/auth/banner and one for the channel, so the worker cannot hang forever on a
-black-holed host. The manager owns the registry this thread is registered in
-(ROADMAP rc2 task 6: the worker registry + the orphan registry).
-
-The module has no UI, no i18n and no window: it reports FACTS and never raises.
-"""
+Credentials are the core's business: the default resolver reads the password from the OS keyring by node id (`services/credential_manager.py`, the same allowlist singleton as the rest of the app) and the key path from the internal node FACTS; the password goes to paramiko and is never logged, never serialized and never handed to a plugin. Both the resolver and the transport are injectable seams — that is how the suite tests the worker without a socket (`tests/test_plugin_runtime.py`). A bounded life: `stop(wait_ms)` sets the cancel flag (a node not yet started is skipped) and waits with a budget, while one timeout covers connect/auth/banner and another the channel, so a black-holed host cannot hang the worker. The manager owns the registry it is registered in. No UI, no i18n, never raises."""
 
 import threading
 from typing import Callable, Dict, List, Optional

@@ -1,40 +1,12 @@
 # -*- coding: utf-8 -*-
 """v1.5rc1 — the CONTRAST GATE: the LIGHT palette, the two accent roles and the numbers that pin them.
 
-The 1.5 line opened with a measured problem (the design review of 2026-09-27, the
-as-shipped v1.4.5 palette): the accent used as TEXT measured 1.96:1 in LIGHT
-(DARK 8.33), a selected menu/item row 2.05 (9.42), the six arrow strokes
-2.4 … 4.4 (7.4 … 12.1), the three statuses 2.4 … 3.9 (3.9 … 9.6) and
-`text_muted` 4.34 (6.96). Two of the weak arrows had a NAMEABLE cause: `vpn`
-derives from `node_hover` and `database` from `group_hover`, and those two fields
-were among the five that LIGHT never re-tuned — a dark-tuned value propagated
-onto a light surface by the (correct!) "declared once" design.
-
-This file is the gate the ROADMAP asked for: **numbers, not taste**, in the spirit
-of the i18n-parity check. It is deliberately NOT a screenshot comparison — it reads
-the DECLARED table of pairs below, computes the WCAG ratio for BOTH themes (and for
-"auto", whichever way the platform resolves) and fails when a tone drops below its
-threshold. A colour that no pair covers and no exemption explains also fails.
-
-  §1 the WCAG arithmetic — the formula itself, with known answers;
-  §2 the DECLARED table of pairs + the decorative exemptions;
-  §3 the COMPLETENESS audit — every colour field of `Theme` is gated or explained;
-  §4 the GATE — every pair clears its threshold in DARK, LIGHT and auto;
-  §5 DARK did not move a pixel — the strong accent resolves to the DARK values and
-     the DARK QSS / QPalette / widget styles are the v1.4.7 ones, value for value;
-  §6 the LIGHT decisions — the re-tuned fields, the arrow derivation and the fact
-     that the strong family is GENERATED from the hue (no second stored palette);
-  §7 "Auto (system)" — `resolve_mode` follows a stubbed platform scheme live, and
-     the "Appearance" tab resolves the same way;
-  §8 the two roles at the call sites — the menu/item selection, the status-bar
-     counters and the empty-state button read `accent_strong`, the decoration
-     (borders, frames, the minimap frame) still reads `accent`;
-  §9 a render probe — a real DARK/LIGHT/auto render, most frequent pixel = the
-     canvas of the resolved mode (this is the "screenshot probe" of the acceptance);
-  §10 i18n parity + the release state.
-
-Run: python tests/test_theme_contrast.py   (from the project root) or python tests/run_all.py
-"""
+The gate the release asked for: NUMBERS, not taste — it reads the DECLARED table of pairs, computes the
+WCAG ratio for DARK, LIGHT and "auto" (both resolutions) and fails when a tone drops below its threshold.
+§1 the WCAG arithmetic; §2 the declared pairs and the exemptions; §3 completeness (every field of
+`Theme` is gated or explained); §4 the gate itself; §5 DARK did not move a pixel; §6 the LIGHT re-tuning
+and the arrow derivation; §7 "Auto (system)" resolved live; §8 the two roles at the call sites
+(`accent_strong` for ink, `accent` for decoration); §9 the render probe; §10 i18n and the release state."""
 import dataclasses
 import hashlib
 import os
@@ -613,7 +585,7 @@ check("§8 the QPalette Highlight is the strong tone (a fill carrying Highlighte
           QPalette.ColorRole.HighlightedText).name() == theme.LIGHT.canvas_bg)
 
 # The source audit: a NEW `color: <accent>` in the QSS builder would be the same
-# class of defect this release fixed. The rule is readable from the source.
+# class of defect the gate exists for. The rule is readable from the source.
 _qss_src = open(os.path.join(ROOT, "ui", "theme_qss.py"), encoding="utf-8").read()
 check("§8 the QSS builder never uses the DECORATIVE accent as `color:` (ink is the strong role)",
       not re.search(r"color:\s*\{t\.accent\}", _qss_src)

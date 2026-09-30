@@ -137,12 +137,11 @@ class MapView(QGraphicsView):
         # Group drag: positions of all selected nodes before the gesture
         self._group_drag_olds = []               # [(node, QPointF), ...]
 
-        # ── v1.5rc4 (ROADMAP tasks 5/6): the keyboard domain of the map ────────
-        # The map is one of the three keyboard domains (map / sidebar / terminal) and
-        # the ONLY one that navigates its objects: Tab walks the cards, the arrows move
-        # the selection geometrically, Enter opens per `ui_node_double_click` and Esc
-        # clears. The focus ring is the visible half (ui/focus_ring.py — ONE indicator,
-        # the STRONG accent, never a new colour).
+        # ── the keyboard domain of the map ────────
+        # The map is one of the three keyboard domains (map / sidebar / terminal) and the ONLY one that
+        # navigates its objects: Tab walks the cards, the arrows move the selection geometrically, Enter
+        # opens per `ui_node_double_click` and Esc clears. The focus ring is the visible half
+        # (`ui/focus_ring.py` — ONE indicator, the STRONG accent, never a new colour).
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self._focus_ring = focus_ring.FocusRing(owner=self) if focus_ring is not None else None
 
@@ -647,16 +646,11 @@ class MapView(QGraphicsView):
             self.setDragMode(QGraphicsView.ScrollHandDrag)
         super().mouseReleaseEvent(event)
 
-    # ── v1.1.2RC2 (N3): resetting "stuck" drag state on focus loss ──
-    # The only regular reset is mouseReleaseEvent; but if the capture is lost
-    # without a release (Alt+Tab / window activation change mid-drag), the release
-    # never arrives and the view stays in NoDrag with a live _move_drag_node:
-    # the next left drag behaves unpredictably. Focus/activation loss is the
-    # same symptom, so we restore ScrollHandDrag and clean up the gesture state
-    # (idempotent: with no active drag both conditions are false — nothing
-    # changes). In Qt "blur" is QFocusEvent(FocusOut) → focusOutEvent (QWidget
-    # has no separate blurEvent, verified on PySide6 6.11); window activation
-    # change — changeEvent.
+    # ── resetting "stuck" drag state on focus loss (N3) ──
+    # The only regular reset is mouseReleaseEvent, so a lost capture (Alt+Tab mid-drag) left
+    # the view in NoDrag with a live `_move_drag_node` and the next drag behaved unpredictably.
+    # `_reset_stuck_drag_state()` is idempotent and restores ScrollHandDrag from `focusOutEvent`
+    # (PySide6 6.11 has no `blurEvent`) and from `changeEvent(ActivationChange)` — §7.
 
     def _reset_stuck_drag_state(self):
         """Reset an unfinished drag gesture: ScrollHandDrag + state cleanup."""
@@ -750,7 +744,7 @@ class MapView(QGraphicsView):
     def event(self, e):
         """v1.5rc4 (ROADMAP task 6): Tab/Shift+Tab must reach the keyboard walk.
 
-        The v1.2.9-fix lesson, applied to the map: Qt 6 handles bare Tab/Shift+Tab as
+        The lesson, applied to the map: Qt 6 handles bare Tab/Shift+Tab as
         FOCUS NAVIGATION inside `QWidget::event()` — the keys never reach
         `keyPressEvent`, so a walk implemented there would only work when a test calls
         the method directly and would silently do nothing for a real user. The
@@ -767,22 +761,11 @@ class MapView(QGraphicsView):
             pass  # a degenerate event — the default handling below decides
         return super().event(e)
 
-    # ── v1.5rc4 (ROADMAP task 6): the keyboard navigation of the map ──────────
-    # The map is the one surface whose objects can be REACHED by the keyboard: Tab walks
-    # the cards, the arrows move the selection to the geometrically nearest card in that
-    # direction, Enter (or Space) opens the selected card exactly as a double click does
-    # and Esc clears the selection. Everything is implemented HERE, on MapView, and reuses
-    # the existing selection/centering path (`MainWindow._select_node`, the same one the
-    # sidebar, the search navigation and the palette use) — no second selection model.
-    #
-    # The pinned boundaries:
-    #   * the arrows are claimed ONLY while a card is selected: with nothing selected they
-    #     keep Qt's own behaviour (scrolling the canvas), so keyboard panning is not lost;
-    #   * Tab is claimed only while the map HAS cards — an empty map lets Qt move the focus
-    #     to the next widget (keyboard accessibility of the window is untouched);
-    #   * Ctrl+Tab (and Ctrl+Shift+Tab) LEAVES the map for the next keyboard domain
-    #     (`MainWindow._focus_domain_step`) — the same "Tab is the widget's, Ctrl+Tab is
-    #     the window's" convention the terminal canvas has had since v1.2.9-fix.
+    # ── the keyboard navigation of the map ──
+    # Tab walks the cards, the arrows move the selection to the geometrically nearest card in
+    # that direction, Enter/Space opens it as a double click does, Esc clears. It reuses the
+    # existing `MainWindow._select_node` path — no second selection model. Boundaries: the
+    # arrows are claimed ONLY with a card selected, Tab only while the map HAS cards.
 
     #: The height band, in scene units, inside which two cards count as ONE row of the
     #: reading order Tab follows (cards a few pixels apart still read left-to-right).
@@ -1133,7 +1116,7 @@ class MapView(QGraphicsView):
             try:
                 menu.exec(self._event_global_point(event))
             except Exception as e:  # noqa: BLE001 — a GUI component must not crash the app
-                # v1.0-fix (audit #11): logger instead of print to stderr, like the rest of the code.
+                # logger instead of print to stderr, like the rest of the code.
                 try:
                     from modules.logger import get_logger
                     get_logger(__name__).error(f"contextMenuEvent: menu.exec failed: {e}")
@@ -1260,14 +1243,11 @@ class MapView(QGraphicsView):
                     w._connect_ssh_external(n)
                 act_ext.triggered.connect(_ssh_ext)
                 _gate_row(act_ext, "external", win_node, "ctx.ssh_external")
-            # v1.6.8 (ROADMAP task 1): "Connect to…" — the ROW the discovered gesture
-            # needed. Shift+dragging from a card has created connections since v0.7 and
-            # opens the dialog PRE-FILLED, yet the colleagues who asked for "drawing
-            # connections" never found it: the undiscoverability WAS the defect. This row
-            # is ONE more entry point of the SAME call (`_add_connection(default_source_id
-            # =…)`, `mouseReleaseEvent` above), so there is no new dialog, no new command
-            # and no new undo path. It is NOT gated for an unmanaged card: drawing a link
-            # needs no login on that host (`ui/unmanaged.py` is deliberately untouched).
+            # "Connect to…" — the ROW the discovered gesture needed. Shift+dragging from a card has
+            # created connections since v0.7 and opens the dialog PRE-FILLED, yet the colleagues who
+            # asked for "drawing connections" never found it: the undiscoverability WAS the defect. This
+            # row is ONE more entry point of the SAME call, so there is no new dialog, no new command and
+            # no new undo path. It is NOT gated for an unmanaged card — drawing a link needs no login.
             if hasattr(win, "_add_connection"):
                 act_conn_to = menu.addAction(_t("ctx.connect_to"))
                 def _connect_to(checked=False, n=win_node):  # checked — a bool from triggered
@@ -1305,13 +1285,11 @@ class MapView(QGraphicsView):
                 # unmanaged card may make — it stays in the menu, disabled until the card
                 # opted in (with the refusal sentence saying so).
                 _gate_row(act_ping, "ping", win_node, "ctx.ping")
-            # v1.3.3.3 (ROADMAP task 5): "Check statuses now" — one on-demand round for
-            # the SELECTION (the clicked node when nothing is selected). The probes stay
-            # off the GUI thread (StatusChecker.start_round → _ProbeThread); the action
-            # is registered (an empty default) and appears in the sidebar menu too.
-            # v1.5.3 (ROADMAP task 3): "Why is it offline?" — the on-demand reachability
-            # report (DNS → TCP → banner → ICMP ping) of THIS node; its sentence lands in
-            # the card tooltip, the status bar and the activity history.
+            # "Check statuses now" — one on-demand round for the SELECTION (the clicked node when nothing
+            # is selected). The probes stay off the GUI thread (`StatusChecker.start_round` →
+            # `_ProbeThread`); the action is registered (an empty default) and appears in the sidebar menu
+            # too. "Why is it offline?" — the on-demand reachability report (DNS → TCP → banner → ICMP
+            # ping) of THIS node; its sentence lands in the card tooltip, the status bar and the activity list.
             if hasattr(win, "_diagnose_node"):
                 act_diag = menu.addAction(_t("ctx.diagnose"))
                 act_diag.triggered.connect(
@@ -1332,15 +1310,11 @@ class MapView(QGraphicsView):
                 act_delnode = menu.addAction(_t("ctx.delete_server"))
                 act_delnode.triggered.connect(
                     lambda _=False, n=win_node: self.window()._remove_node_guarded(n))
-            # ── v1.4rc3 (plugin foundation, task 7): the plugin rows ──────────────
-            # The frozen API v1 contract (`PLUGINS.md` §3) gives a plugin
-            # `extend_node_context_menu(menu, nodes)`: the manager calls it
-            # synchronously on the GUI thread (200 ms budget, "never throws") and
-            # hands over the live QMenu plus the narrowed node records — never the
-            # scene objects. The call sits LAST in the node block, so a plugin's
-            # rows live under the built-in ones; `_extend_node_context_menu()`
-            # re-runs the QAction guard (a plugin's QAction wrapper must outlive
-            # the Python frame that created it — gotcha #9).
+            # ── the plugin rows (`PLUGINS.md` §3) ─────────────────────────────────
+            # A plugin's `extend_node_context_menu(menu, nodes)` is called synchronously on the
+            # GUI thread (200 ms budget, "never throws") with the live QMenu and the narrowed node
+            # records — never the scene objects. The call sits LAST in the node block and
+            # `_extend_node_context_menu()` re-runs the QAction guard (gotcha #9).
             if hasattr(win, "_extend_node_context_menu"):
                 fn = getattr(win, "_extend_node_context_menu")
                 try:
@@ -1405,7 +1379,7 @@ class MapView(QGraphicsView):
             if hasattr(win, "_add_server"):
                 p = scene_pos
                 act_srv = menu.addAction(_t("btn.add_server"))
-                # v0.8.1: `checked` — a bool from QAction.triggered; it used to clobber
+                # v0.8.1: `checked` — a bool from QAction.triggered; it would otherwise clobber
                 # the closure p, and MainWindow._add_server received True instead of the click point.
                 def _add_server(checked=False, p=p):
                     w = self.window()

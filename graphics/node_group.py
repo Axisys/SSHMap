@@ -1,42 +1,15 @@
-"""Node grouping (v0.8.1): a cluster/folder on the map.
-
-v1.5.4 (ROADMAP task 1) — THE GROUP ANSWERS "WHERE IS THE PROBLEM". A group used to
-know only `member_count()`: a frame around twenty cards said nothing about them, so a
-red card inside a folded group was invisible. The group now carries an AGGREGATE of its
-members' availability — the WORST status plus the counts — painted on the title band of
-the frame (which the FOLD keeps: folding re-fits the frame, it does not remove the band)
-and in the group's tooltip. The vocabulary of severity lives HERE (`STATUS_SEVERITY` /
-`PROBLEM_STATUSES`, `worst_status()` / `aggregate_status()` / `is_in_trouble()`), because
-the aggregate and the "problems only" lens of the same release must mean the same thing
-by ONE declaration.
-
-The aggregate is a VIEW FACT and is never serialized: `to_dict()` still writes only
-`{id, name, x, y, width, height}` (+ the optional fold keys), and every value is read
-LIVE from the members at paint time — a probe round changes a card and the next repaint
-of its group tells the truth (`MapScene.refresh_group_aggregates()` is the nudge).
-
-A group — a labeled rectangular area UNDER the nodes and arrows (z = Z_VALUE,
-the lowest: the map's "background" zone). The gestures — as in StickyNote
-(manual mouse handling, ItemIsMovable is NOT set — see the sticky_note.py
-docstring about ScrollHandDrag):
-
-    drag  — by any point of the frame it moves the group; ALL members are shifted
-            by the same delta (task v0.8.1 #2: "the servers inside a group move
-            automatically when the group boundary changes");
-    resize — by the bottom-right corner (CORNER_HIT px): the members are repositioned
-            proportionally to the new size and clamped inside the frame;
-    a double click on the top band (TITLE_ZONE_H) — the renameRequested signal →
-            the rename dialog in MainWindow.
-
-Membership is geometric: a server center inside the TOPMOST group → it is its member
-(MapScene.resync_group_members() recomputes on any move/resize).
-That is why the JSON (the "groups" array) stores only {id, name, x, y, width, height} —
-membership is not serialized and is restored from the geometry on load.
-
-QGraphicsObject (not QGraphicsItem) — per the v0.8.1 spec: the signals
-(moved/resized/titleChanged/membershipChanged/renameRequested) are needed, which
-MainWindow turns into the project dirty marker, as with the notes.
-"""
+"""Node grouping — a cluster/folder on the map (DOCUMENTATION.md §21, §47; AGENTS.md §4.2).
+A labeled rectangular area UNDER the nodes and arrows (the lowest z), with manual mouse handling
+(`ItemIsMovable` is NOT set — see `sticky_note.py` about ScrollHandDrag): a drag by any point of the
+frame moves the group and shifts ALL members by the same delta, the bottom-right corner resizes it
+with the members repositioned proportionally and clamped inside, and a double click on the top band
+emits `renameRequested`. Membership is GEOMETRIC — the center inside the TOPMOST group wins
+(`MapScene.resync_group_members()`), which is why the JSON stores only the frame and the geometry
+restores the membership on load.
+THE GROUP ANSWERS "WHERE IS THE PROBLEM": it carries the WORST member status plus the counts
+(`STATUS_SEVERITY` / `PROBLEM_STATUSES`, `worst_status()` / `aggregate_status()` / `is_in_trouble()`),
+painted on the title band (which the FOLD keeps) and in the tooltip — a VIEW FACT, read LIVE from the
+members at paint time and never serialized."""
 import uuid
 from typing import List, Optional
 
@@ -76,12 +49,11 @@ def _t(key: str, **kw) -> str:
         return key
 
 
-# ── v1.5.4 (ROADMAP task 1): the DECLARED severity of an availability status ──────
-# The group aggregate and the "problems only" lens of the SAME release answer one
-# question ("what needs attention here?") and therefore share ONE declaration: the
-# severity order is ASCENDING (the LAST entry is the worst) and `PROBLEM_STATUSES`
-# names what "in trouble" means. A status outside the tuple is not a datum at all —
-# a card that was never probed carries "" and neither wins the aggregate nor counts.
+# ── the DECLARED severity of an availability status ──────
+# The group aggregate and the "problems only" lens answer one question ("what needs attention here?") and
+# therefore share ONE declaration: the severity order is ASCENDING (the LAST entry is the worst) and
+# `PROBLEM_STATUSES` names what "in trouble" means. A status outside the tuple is not a datum at all — a
+# card that was never probed carries "" and neither wins the aggregate nor counts.
 STATUS_SEVERITY = ("online", "warn", "offline")
 PROBLEM_STATUSES = ("warn", "offline")
 
@@ -377,12 +349,11 @@ class NodeGroup(QGraphicsObject):
         # their data.x/data.y stay SCENE coordinates and are saved correctly in the JSON).
         self._members = set()
 
-        # v1.4.2 (ROADMAP task 5): the fold state.
+        # The fold state.
         # `_collapsed`            — the flag (persisted);
         # `_expanded_state`       — the session snapshot {node_id: (x, y, collapsed, movable)};
-        # `_expanded_size`        — the frame size to return to on unfold (persisted, so a
-        #                           group restored from a file can unfold sensibly);
-        # `_laying_out`           — the re-entry guard of the badge grid.
+        # `_expanded_size`        — the frame size to return to on unfold (persisted, so a group restored
+        #                           from a file can unfold sensibly); `_laying_out` — the re-entry guard.
         self._collapsed = bool(collapsed)
         self._expanded_state = None
         self._expanded_size = None

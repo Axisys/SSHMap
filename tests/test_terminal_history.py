@@ -1,40 +1,12 @@
 # -*- coding: utf-8 -*-
 """v1.5.7 — the command history: the terminal's third tab, one history per server.
 
-ROADMAP v1.5.7:
-  #1 `modules/command_history.py` — the store (`~/.sshmap/history/<key>.json`, one file per
-     server, atomic, MERGE on every write), the PURE parser and the panel; the store is keyed
-     by `ServerData.id`, so a renamed alias keeps its history;
-  #2 the parser: bash (one command per line + the `HISTTIMEFORMAT` markers), zsh extended
-     (`: <epoch>:<duration>;<command>`), empty lines dropped, the identity = the text after
-     `strip()` ONLY, a duplicate keeps the LATEST timestamp and counts its repeats;
-  #3 the two DECLARED caps — `MAX_CMD_CHARS` (skipped at import, counted in the report) and
-     `MAX_ENTRIES_PER_SERVER` (the FIFO eviction cap);
-  #4 the `History` tab of `TerminalSessionPage` (index 2), its `retranslate()` and
-     `refresh_theme()`;
-  #5 the context menu: import a file, import from the server, copy, send, dedup, clear
-     (confirmed);
-  #6 "Send to terminal" through the ONE `send_macro()` path (a bracketed paste for a multi-line
-     entry, never the multi-input broadcast);
-  #7 the application records what IT sent (the macro library, quick launch, this tab) and
-     NOTHING is inferred from the typed input;
-  #8 the import: a local file, and the server's `~/.bash_history` over the session's SFTP
-     channel with the worker's own cap surfaced honestly.
-
-Sections:
-  §1 the pure parser (bash markers, zsh extended, the exact-text identity, the dedup rule);
-  §2 the caps (MAX_CMD_CHARS at import, MAX_ENTRIES_PER_SERVER as the FIFO ring) + the pure
-     helpers (`normalize_entry`, `merge_entries`, `dedup_entries`, `sorted_entries`);
-  §3 the store (an atomic merge write, the two-session case, the corrupt file, the clear);
-  §4 the tab (index 2, the titles, retranslate, the compact pane);
-  §5 the tree sorted by the DATA (the epoch and the int, never the displayed text);
-  §6 the context menu and the maintenance actions;
-  §7 "Send to terminal" through `send_macro()` + the auto-record of what the app sent;
-  §8 the import — a local file and the server's `~/.bash_history` (with the refusals);
-  §9 the release state.
-
-Run: python tests/test_terminal_history.py   (from the project root) or python tests/run_all.py
-"""
+ROADMAP v1.5.7: the store of `modules/command_history.py` (`~/.sshmap/history/<key>.json`, one file per
+`ServerData.id`, atomic and MERGE on every write), the PURE parser (bash markers, zsh extended, the
+identity = the text after `strip()`, a duplicate keeps the LATEST and counts repeats), the two DECLARED
+caps (`MAX_CMD_CHARS`, `MAX_ENTRIES_PER_SERVER`), the tab (index 2) with its retranslate and
+refresh_theme, the context menu, "Send to terminal" through the ONE `send_macro()` path, the rule that
+only what the APPLICATION sent is recorded, and the import of a local file or the server's `~/.bash_history`."""
 
 import json
 import os
@@ -603,8 +575,9 @@ check("EXPECTED_APP_VERSION is the version this test file describes",
 check("the pin counts the shipped keys (+29 of v1.5.7: the tab, the panel chrome, the seven menu items "
       "with their reports and refusals, + the marked secret of v1.6.4) — "
       "708 + 29 + 41 + 4 + 4 + 3 + 11 + 11 + 17 + 13 + 5 + 8 = 854 (+9 of v1.7rc3 = 863,"
-      " +4 of the v1.7.1 Files panel = 867, +3 of the v1.7.1.1 Files display mode = 870)",
-      EXPECTED_I18N_KEYS == 863 + 4 + 3, str(EXPECTED_I18N_KEYS))
+      " +4 of the v1.7.1 Files panel = 867, +3 of the v1.7.1.1 Files display mode = 870,"
+      " +4 of the v1.7.1.2 device choice = 874)",
+      EXPECTED_I18N_KEYS == 863 + 4 + 3 + 4, str(EXPECTED_I18N_KEYS))
 check_release_state(ROOT)
 
 _langs = load_i18n_langs(ROOT)

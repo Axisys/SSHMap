@@ -1,33 +1,12 @@
 # -*- coding: utf-8 -*-
 """v1.4rc3 — Plugin foundation, part 3: the UI hooks and dogfooding (ROADMAP tasks 7–9).
 
-rc1 discovered the plugins and gave them a menu, rc2 gave them `PluginContext` +
-`run_command` + the Main Thread discipline. rc3 makes the last two hooks REACHABLE: a
-plugin's commands land in the command palette (Ctrl+K) in their own section, its rows are
-appended to the node context menu of the MAP and of the SIDEBAR, and "Run on selected
-servers" (the `run_on_nodes` hook, the rc2 machinery) gets its entry point — a Plugins-menu
-item and a registry action.
-
-Sections:
-  §1 `PluginCommand` + the lenient coercion of `register_commands` (nested lists, pairs,
-     dicts, junk) — a typo is a skipped entry, never a broken palette;
-  §2 `PluginManager.plugin_commands()`: the loaded/enabled filter, the ctx of the hook,
-     a raising hook;
-  §3 the palette: the plugin section comes AFTER the servers, the command runs through the
-     manager (its own `ctx`, the exception wrapper), a disabled/broken plugin is invisible;
-  §4 the node context menu: the MAP path (a real `ServerNode`, `build_context_menu`) and
-     the SIDEBAR path (a node id through `_on_sidebar_context_menu`) — one entry point, the
-     frozen `{id, alias, host, port, user}` records, the 200 ms budget ("never throws");
-  §5 the QAction guard: a plugin's row survives a garbage collection (gotcha #9) and is
-     gone from the menu once the plugin is switched off;
-  §6 "Run on selected servers": the menu item, its enabled state, the hint row, the status
-     line of the round, the hook really running on a managed worker with the selection;
-  §7 dogfooding: a folder plugin that contributes a command + a context row + a node action
-     — the "plugin in 20 minutes" scenario of PLUGINS.md, end to end;
-  §8 the release state: the new keys × en/ru/zh/de, the parity, the pin, the version.
-
-Run: python tests/test_plugin_ui.py   (from the project root) or python tests/run_all.py
-"""
+rc1 discovered the plugins and gave them a menu, rc2 gave them `PluginContext` + `run_command`; rc3 makes
+the last two hooks REACHABLE: a plugin's commands land in the command palette (Ctrl+K) in their own
+section, its rows are appended to the node context menu of the MAP and of the SIDEBAR, and "Run on
+selected servers" (`run_on_nodes`) gets a Plugins-menu item and a registry action.
+§1 `PluginCommand` and the lenient coercion of `register_commands` (a typo is a skipped entry, never a
+broken palette); §2 `plugin_commands()` (the loaded/enabled filter, a raising hook); §3 the palette (the plugin section AFTER the servers, the exception wrapper, a broken plugin invisible); §4 the node context menu (the MAP and SIDEBAR paths, one entry point, the frozen records, the 200 ms budget); §5 the QAction guard (a plugin's row survives GC — gotcha #9); §6 "Run on selected servers"; §7 dogfooding; §8 the release."""
 import gc
 import os
 import sys

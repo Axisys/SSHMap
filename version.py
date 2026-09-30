@@ -1,19 +1,16 @@
 # -*- coding: utf-8 -*-
-"""The single source of truth for the application version (AUDIT v0.8.3, medium #1).
+"""The single source of truth for the application version and the project JSON format.
 
-Previously the version was scattered across the main.py log, the i18n key title.main_window,
-the version field in the project JSON (storage/project.py) and comments — which already
-led to drift (the code said v0.8.1 while the release was v0.8.3).
+Every consumer reads the version from here — `APP_NAME` (the base name of the window title), `APP_VERSION`
+(the application release, used by the startup log and the title) and `VERSION_FORMAT` (the version of the
+project JSON FORMAT, which changes only on a real schema change and is NOT required to match the release).
+A scattered version drifts, which is exactly why this module exists: a release number has ONE home.
 
-Now all consumers import it from here:
+Import it flat when running from the root:
+    from version import APP_VERSION
+or relatively when the application is used as a package:
+    from ..version import APP_VERSION"""
 
-    from version import APP_VERSION          # flat run (from the root)
-    from ..version import APP_VERSION        # from a package
-
-VERSION_FORMAT holds the version of the project JSON FORMAT (changes only on
-an actual schema change; the format is not required to match the release).
-"""
-
-APP_VERSION = "1.7.1.1"      # application release (startup log, window title)
+APP_VERSION = "1.7.1.2"      # application release (startup log, window title)
 APP_NAME = "SSH Map"         # base name (window title)
 VERSION_FORMAT = "0.9"       # project JSON format version (+ "background", storage/project.py)

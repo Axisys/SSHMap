@@ -1,18 +1,12 @@
 # -*- coding: utf-8 -*-
 """Regression v0.9.5.5 (security #1): the keyring backend — validation and guard.
 
-Run: python tests/test_keyring_validation.py or python tests/run_all.py
-
-Checks:
-  1. the plaintext backend (keyrings.alt.*) is rejected on Windows AND on Linux —
-     save/load/delete do not write/read into it;
-  2. the fail-backend (keyring.backends.fail) is rejected on Linux;
-  3. with the rejected backend: save→False, load→None, delete→True
-     (the semantics v094b: "nothing was stored — there is nothing to delete");
-  4. the real backend of this machine (if accepted): the round-trip save/load/delete
-     and the delete of the missing entry → True (keyring 25.x raises
-     PasswordDeleteError — it is caught).
-"""
+The plaintext backend (`keyrings.alt.*`) is REJECTED on Windows and on Linux, so save, load and delete never
+touch it; the fail backend (`keyring.backends.fail`) is rejected on Linux; and with a rejected backend the
+semantics are `save → False`, `load → None`, `delete → True` — the documented "nothing was stored, so there
+is nothing to delete". With the real backend of the machine, when it is accepted, the save/load/delete round
+trip works and deleting a MISSING entry still answers True (keyring 25.x raises `PasswordDeleteError`, which
+is caught)."""
 import os
 import sys
 

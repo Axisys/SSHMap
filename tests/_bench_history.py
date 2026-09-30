@@ -1,29 +1,16 @@
 # -*- coding: utf-8 -*-
-"""v1.2.12 the D1 measurement (the PYTE82_AUDIT.md pack D): the overhead of the HistoryScreen wrappers
-on a deep history — the worst case of the auto-return to the live line.
+"""The D1 measurement (PYTE82_AUDIT.md pack D): the overhead of the HistoryScreen wrappers on a deep
+history — the worst case of the auto-return to the live line.
 
-NOT part of the suite (files with the _ prefix are skipped by run_all.py). The protocol (D1):
-  * TerminalScreen(120, 32, history_lines=1000); print ~1050 history lines;
-  * scroll_up() to the top edge — the user is at the top of the history (the worst case:
-    the before_event auto-return spins next_page() up to ~250 times in ONE feed);
-  * the measurement of the feed of an htop-like chunk (~19 KB) → ms;
-  * the baseline lines: the same chunk on the live line (no history to return to) +
-    the plain pyte.Screen without the history;
-  * the expected number of next_page ≈ (size − position) / ceil(lines × ratio)
-    (~250 on a deep history, ratio=0.1 → a page = 4 lines).
+NOT part of the suite (`_`-prefixed files are skipped by `run_all.py`). The protocol: build a
+`TerminalScreen(120, 32, history_lines=1000)`, print ~1050 lines, `scroll_up()` to the top edge (the
+worst case, where the `before_event` auto-return spins `next_page()` up to ~250 times in ONE feed), then
+measure the feed of an htop-like chunk (~19 KB) in ms against the baseline — the same chunk on the LIVE
+line and the plain `pyte.Screen` without a history. The expected number of pages is
+`(size − position) / ceil(lines × ratio)` (~250 on a deep history, ratio 0.1 → a page of 4 lines).
 
-The numbers — into CHANGELOG/ROADMAP ("measured on …, v1.2.12"); the pain threshold ~20–50 ms per
-chunk on a deep history — the trigger of v1.2.14 (the batching of the auto-return).
-
-v1.2.14: the batching is released (the override before_event in SshmapHistoryScreen) — the scenario A
-must be ≈ B (measured: A = 42.7 ms against B = 42.4 ms, the overhead 0.25 ms). The script
-stays the regression monitor: if A is again > 50 ms or A−B is large — check the override.
-
-The htop chunk: pyte/tests/captured/htop.input from the master-checkout F:\\PythonAI\\pyte
-(~19 KB); no file — a synthetic htop-like chunk of the same size.
-
-Run: python tests/_bench_history.py   (from the project root)
-"""
+The numbers belong to the changelog family ("measured on …, v1.2.12"); the pain threshold of ~20–50 ms per
+chunk on a deep history is what triggered the batching of the auto-return. With that batching released (the `before_event` override of `SshmapHistoryScreen`) the scenario A must be ≈ B — measured A = 42.7 ms against B = 42.4 ms, an overhead of 0.25 ms — so this script stays a regression monitor: if A exceeds 50 ms again or A−B grows, check the override. The chunk is `pyte/tests/captured/htop.input` from the master checkout (`F:\PythonAI\pyte`, ~19 KB); with no file, a synthetic htop-like chunk of the same size is used. Run: `python tests/_bench_history.py`."""
 import math
 import os
 import platform

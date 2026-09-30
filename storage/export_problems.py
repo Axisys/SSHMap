@@ -1,33 +1,16 @@
 # -*- coding: utf-8 -*-
-"""v1.6.8 (ROADMAP task 4): the ATTENTION report — "what needs a look" as a table.
+"""The ATTENTION report — "what needs a look" as a table (DOCUMENTATION.md §58; AGENTS.md §4.19).
 
-The third DATA report of the application, next to the inventory table of the LIST mode
-(`ui/sidebar.list_report_rows()`) and the CONNECTION report (`storage/export_connections.py`).
-The map already DECLARES which cards need attention — `graphics.node_group.is_in_trouble()`
-is the predicate the group aggregate and the "problems only" lens share — but that SET
-had no way out of the application: the lens dims the CANVAS, and the inventory report
-leaves with whatever the search and the tag filter kept. This module answers the question
-a dimmed map cannot be pasted into a ticket: give me the servers that are not fine, with
-WHY each of them is on the list.
+The third DATA report, next to the inventory table of the LIST mode and the CONNECTION report of
+`storage/export_connections.py`. The map already DECLARES which cards need attention
+(`graphics.node_group.is_in_trouble()`), but that SET had no way out of the application: the lens dims
+the CANVAS and the inventory leaves with whatever the search and the tag filter kept. This module answers
+what a dimmed map cannot be pasted into a ticket: the servers that are not fine, and WHY each is listed.
 
-**The writer is NOT here on purpose** (the connection report's rule, literally): the
-RFC-4180 quoting lives in ONE place — `ui/sidebar.list_table_text()` — and this module only
-produces ROWS for it: the columns are declared once (`PROBLEM_COLUMNS`) and
-`problem_report_rows()` builds the header plus one row per card in trouble.
-
-**The predicate is IMPORTED, never restated.** `problem_nodes()` calls
-`is_in_trouble(status, stale)` for every node, so the report, the group aggregate and the
-lens can never disagree about who is on the list; the `stale` argument is the card's own
-mark (`ServerNode.is_stale`), exactly the value the lens reads.
-
-**An UNMANAGED card is never a problem.** It is never probed (`AGENTS.md` §4.21), so it
-carries no status and no stale mark — and `is_in_trouble("", False)` answers False. That
-falls out of the predicate rather than being a special case here, which is the point.
-
-The header cells are TRANSLATED (the caller hands its translator in, the
-`node_group.status_caption()` precedent) — a report is read by a human, and a language
-switch moves it with the rest of the window.
-"""
+The writer is NOT here on purpose (the connection report's rule): the RFC-4180 quoting lives in ONE place
+(`ui/sidebar.list_table_text()`) and this module only produces ROWS — the columns are declared once
+(`PROBLEM_COLUMNS`) and `problem_report_rows()` builds the header plus one row per card in trouble. The
+predicate is IMPORTED, never restated: `problem_nodes()` calls `is_in_trouble(status, stale)` for every node (with the card's own `ServerNode.is_stale`), so the report, the group aggregate and the lens can never disagree about who is on the list. An UNMANAGED card is never a problem — it is never probed, so `is_in_trouble("", False)` answers False and that falls out of the predicate instead of being a special case. The header cells are TRANSLATED (the caller hands its translator in, the `node_group.status_caption()` precedent), because a report is read by a human."""
 from typing import List
 
 try:  # the ONE predicate of "needs attention" (v1.5.4) — imported, never restated

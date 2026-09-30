@@ -1,39 +1,12 @@
 # -*- coding: utf-8 -*-
-"""v1.6.8 — The last mile, closing the line: the gesture the map already had, and the problem
-set it already knew.
+"""v1.6.8 — The last mile, closing the line: the gesture the map already had, and the problem set it already knew.
 
-The topical file of the CLOSING release of the 1.6 line (ROADMAP v1.6.8). ONE theme:
-**nothing new to know — only to reach.** The application already knew how to draw a
-connection by `Shift`+dragging from a card (since v0.7), and it already DECLARED which cards
-need attention (`graphics.node_group.is_in_trouble()`, v1.5.4) — but neither could be FOUND
-or TAKEN OUT: the gesture had no row in any menu, the two node pickers of the dialog could
-not be typed into, and the "problems" set stayed on the canvas. The release adds ONE row, ONE
-sentence, ONE search rule and ONE report, all of them built on shipped machinery.
-
-Sections:
-  §1 THE ROW: "Connect to…" in the MAP's node menu and in the sidebar's `CONTEXT_MENU_ITEMS`,
-     both calling the SAME `_add_connection(default_source_id=…)` the drag gesture calls (one
-     undo command, the prefill, and the unmanaged card is NOT gated — the verb needs no login);
-  §2 THE HINT: the first screen's sentence about the gesture and the tooltip of the registry
-     action `edit.add_connection`, ONE composer and ONE key, with the action's REAL label
-     inside it (the v1.4.5 rule) — plus the two refusals the plan fixed (no per-card line, no
-     second wording);
-  §3 THE SEARCHABLE PICKERS (`dialogs/connection_dialog.py`): the pure `match_index()` rule
-     (exact, then the first case-insensitive substring over alias AND host), the `QCompleter`
-     of both fields, the no-match answer that KEEPS the previous selection, the provider
-     callback (the dialog knows no scene) and the unchanged `get_connection()` contract;
-  §4 THE REPORT'S PURE HALF (`storage/export_problems.py`): the declared columns, the rows the
-     PREDICATE keeps (warn / offline / stale), the reason vocabulary, the RFC-4180 quoting
-     through the SHARED writer, and the `[]` answer of a map with nothing to report;
-  §5 THE ACTION AND ITS REPORTS: ONE registry action with an EMPTY default in the Export
-     menu's DATA group, the empty map and the all-clear map in their OWN sentences (no file),
-     and the written file on a map that really has problems;
-  §6 THE LINE'S CLOSING AUDIT: ONE entry per fact the 1.6 line DECLARED, re-read against the
-     shipped source — a drift is a defect, and none was found here;
-  §7 the i18n parity and the release state.
-
-Run: python tests/test_last_mile.py   (from the project root) or python tests/run_all.py
-"""
+The topical file of the CLOSING release of the 1.6 line: ONE theme — nothing new to know, only to
+reach. The map already knew how to draw a connection by `Shift`+dragging and already DECLARED which
+cards need attention (`graphics.node_group.is_in_trouble()`), but neither could be FOUND or TAKEN OUT.
+§1 the row "Connect to…" in both node menus (the SAME `_add_connection(default_source_id=…)` the drag
+calls); §2 the hint (ONE composer, the action's REAL label in it); §3 the searchable pickers (the pure
+`match_index()`, the completers, the provider callback); §4 the report's pure half (`storage/export_problems.py`); §5 the registry action with an EMPTY default; §6 the closing audit."""
 import csv
 import io
 import os
@@ -686,8 +659,8 @@ check_i18n_format(LANGS)
 
 check("§7 the pin counts the SHIPPED release (828 + the 13 keys of v1.6.8"
       " + the 5 of v1.7rc1 + the 8 of v1.7rc2 + the 9 of v1.7rc3 + the 4 of v1.7.1"
-      " + the 3 of v1.7.1.1)",
-      EXPECTED_I18N_KEYS >= 854 and EXPECTED_I18N_KEYS == 828 + 13 + 5 + 8 + 9 + 4 + 3,
+      " + the 3 of v1.7.1.1 + the 4 of the v1.7.1.2 device choice)",
+      EXPECTED_I18N_KEYS >= 854 and EXPECTED_I18N_KEYS == 828 + 13 + 5 + 8 + 9 + 4 + 3 + 4,
       str(EXPECTED_I18N_KEYS))
 check("§7 EXPECTED_APP_VERSION is the release this file describes",
       releases_at_least(EXPECTED_APP_VERSION, "1.7"), EXPECTED_APP_VERSION)

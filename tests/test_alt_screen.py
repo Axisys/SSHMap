@@ -1,33 +1,12 @@
 # -*- coding: utf-8 -*-
 """v1.2.12 — Terminal: alternate screen (private modes 47/1047/1048/1049).
 
-The thematic test of the theme of the release (ROADMAP v1.2.12, the PYTE82_AUDIT.md pack B):
-the SshmapHistoryScreen implements the alternate screen that pyte 0.8.2 does not have
-(the modes were inert bits of screen.mode with the <<5 shift, no handlers).
-The semantics — per the upstream PR #212 (closed without a merge, the author dwgx; the code of pyte is LGPL-3.0 —
-the attribution in the comment to the code), differentially verified against tmux 3.6b
-and GNU screen. Headless: the synthetic byte sequences into the TerminalScreen
-(without Qt, without the network):
-
-  * the round-trip (the main): the shell output → the snapshot G0 with the colors;
-    \x1b[?1049h\x1b[2J\x1b[H + the "TUI frame" → the grid = the TUI; \x1b[?1049l → the grid
-    is equal to G0 character by character (including the fg/bg) and the cursor;
-  * the matrix of the enters/exits over ALL the combinations of {47, 1047, 1048, 1049}
-    (the enter a → the exit b — always the return to the main screen) + the re-enter is idempotent;
-  * the cross exit: 1049h … 47l → the exit (one in_alt flag, not four);
-  * the double enter: 1049h 1049h → the main screen is not lost, one exit returns;
-  * the cursor: (5,3) → 1049h (NOT homed) → the TUI drives the cursor → 1049l → again (5,3);
-    for 47/1047 — NOT restored (pinned down by the specification);
-  * the history isolation: 50+ lines in the alt (scrolling past the edge) → the exit → the TUI lines
-    are not in the scrollback (like less in a real terminal);
-  * the RIS (ESC c — NOT ESC [ c, this is the CSI DA) inside the alt → the main screen, everything clean,
-    the modes are the defaults;
-  * the resize in the alt: the enter at 120 columns → resize(80) → the exit → the lines of the main
-    screen are cut down to 80 (no "over-wide" restoration);
-  * the enter during the history viewing: the auto-return to the live fired, the alt is active.
-
-Run: python tests/test_alt_screen.py   (from the project root) or python tests/run_all.py
-"""
+`SshmapHistoryScreen` implements the alternate screen pyte 0.8.2 does not have (the modes were inert bits
+of `screen.mode` with no handlers). The semantics follow the upstream PR #212 (never merged; the author
+dwgx, and pyte's LGPL-3.0 attribution lives in the code) and were verified differentially against
+tmux 3.6b and GNU screen. Headless: synthetic byte sequences into `TerminalScreen`, no Qt, no network.
+Checks: the round trip (the main screen snapshotted WITH colours, the TUI grid, the exit restoring it
+character by character); the enter/exit matrix over all four modes; the cross exit (`1049h … 47l`); the double enter; the cursor (`(5,3)` restored by 1049, NOT by 47/1047 — the specification); the history isolation (the TUI's lines never reach the scrollback); the RIS inside the alt; the resize inside it; and the enter during history viewing."""
 import sys
 
 from _common import (bootstrap, check, finish, load_i18n_langs, check_i18n_parity,

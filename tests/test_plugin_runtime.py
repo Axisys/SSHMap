@@ -2,28 +2,11 @@
 """v1.4rc2 — Plugin foundation, part 2: `PluginContext` and Main Thread isolation
 (ROADMAP v1.4rc2, tasks 5–6; the contract is the frozen `PLUGINS.md`).
 
-rc1 discovered plugins and rendered the menu; rc2 makes the core CALL into them — and
-that is where the hard part of a Qt plugin system lives. This file is the executable
-specification of the second half:
-
-Sections:
-  §1 `PluginContext` — the read-only surface (`plugin_id` / `api_version` / `app_version`
-     / `log`) and the node record (`{id, alias, host, port, user}`, nothing else);
-  §2 the services: `ctx.status()` (a signal to the window + the token guard) and
-     `ctx.run_command()` (the managed SSH worker, per-node callbacks, "never throws");
-  §3 the status merge: `status_probe` joined with the SSH probe — the worse by severity,
-     the details concatenated, an unknown kind / a broken answer ignored;
-  §4 the `StatusChecker` seam: a round with a provider (merged status + the detail
-     signal + `last_detail()`), a round without one (byte-for-byte the old probe);
-  §5 Main Thread isolation: the 200 ms UI-hook budget, the 1500 ms wait budget of a
-     headless hook, the orphan registry, the self-cleanup of managed workers, the Qt
-     guard, the "never throws" wrapper;
-  §6 the window wiring: the token-guarded status line, the hook reports, the node
-     registry, the tooltip detail;
-  §7 PLUGINS.md + the release state (the pins of `_common.py`).
-
-Run: python tests/test_plugin_runtime.py   (from the project root) or python tests/run_all.py
-"""
+rc1 discovered the plugins and rendered the menu; rc2 makes the core CALL into them — the hard part of a
+Qt plugin system — and this file is the executable specification of that half.
+§1 `PluginContext` — the read-only surface (`plugin_id` / `api_version` / `app_version` / `log`) and the
+node record `{id, alias, host, port, user}`, nothing else; §2 the services: `ctx.status()` (a signal to the
+window behind the token guard) and `ctx.run_command()` (the managed SSH worker, per-node callbacks, "never throws"); §3 the status merge: `status_probe` joined with the SSH probe — the worse by severity, the details concatenated, an unknown kind or a broken answer ignored; §4 the `StatusChecker` seam: a round WITH a provider (the merged status, the detail signal, `last_detail()`) and a round WITHOUT one (byte-for-byte the old probe); §5 Main Thread isolation: the 200 ms UI-hook budget, the 1500 ms wait budget of a headless hook, the orphan registry, the self-cleanup of managed workers, the Qt guard and the "never throws" wrapper; §6 the window wiring (the token-guarded status line, the hook reports, the node registry, the tooltip detail); §7 the frozen contract and the release state."""
 import logging
 import os
 import sys
@@ -572,12 +555,11 @@ check("…and after the node in flight times out nothing is left running",
                  timeout_ms=4000) is not False, str(mgr2.orphan_threads()))
 restore_runner_seams()
 
-# v1.4 regression (found by the example plugins, ROADMAP tasks 11–12): a command started
-# from a plugin's WORKER thread — the `run_on_nodes` path, the ordinary way a plugin
-# reaches `ctx.run_command` — must deliver its callbacks like a GUI-thread one. The
-# receiver context of a signal connected to a plain Python callable is the thread that
-# CALLS `connect()` (AGENTS.md §7 gotcha #20), so a runner built in a worker thread used
-# to post its per-node results into a thread WITHOUT an event loop and lose them silently.
+# A command started from a plugin's WORKER thread — the `run_on_nodes` path, the ordinary way a plugin
+# reaches `ctx.run_command` — must deliver its callbacks like a GUI-thread one. The receiver context of
+# a signal connected to a plain Python callable is the thread that CALLS `connect()`
+# (`AGENTS.md` §7 gotcha #20), so a runner built in a worker thread would post its per-node results into
+# a thread WITHOUT an event loop and lose them silently.
 patch_transport()
 patch_credentials()
 mgr3 = PM.PluginManager()

@@ -1,42 +1,16 @@
 # -*- coding: utf-8 -*-
-"""v1.5rc3 (ROADMAP task 2): the status bar that can offer an UNDO.
+"""The status bar that can offer an UNDO (DOCUMENTATION.md §41; the contract is `AGENTS.md` §4.2).
 
-The undo stack of this application is disciplined but invisible: the Edit menu owns
-Ctrl+Z, and nothing tells the user that the thing they just deleted can come back.
-This module is the affordance — after a DESTRUCTIVE change the status bar shows the
-action's own message next to an "Undo" button.
+The undo stack is disciplined but invisible: this module is the affordance — after a DESTRUCTIVE
+change the bar shows the action's OWN message next to an "Undo" button.
 
-The pinned decisions (ROADMAP 1.5rc3, task 2):
-
-  * **armed in ONE place.** `MainWindow._push_command()` — the only path that knows a
-    command really landed on the stack — calls `arm_undo()`. Nothing offers the way
-    back for work that is NOT on the stack (the terminal, the SFTP tab, a view state,
-    the background image), because no command exists to push for it;
-  * **the message carries it.** `showMessage()` is the surface every action already
-    reports through, so the bar CONSUMES the first message that follows the arming:
-    the delete's own "Server deleted: web-01" appears WITH the button, in one line,
-    and no call site had to learn about the feature. A message that arrives without a
-    fresh arming clears the offer (the next message wins);
-  * **it clears itself.** The offer disappears on its own after
-    `OFFER_TIMEOUT_MS` (the pattern of `showMessage(..., timeout)`), so a stale
-    button can never sit there acting on a stack the user has since changed — and
-    `clearMessage()` / `MainWindow._reset_undo_stack()` (a save, a load, a new
-    project) drop it immediately, because the stack it pointed at is gone;
-  * **it is Qt's own layout.** The offer is ONE widget holding a label and a
-    `QToolButton`, added with `addWidget()` — the standard "left side of the status
-    bar" slot, which Qt hides by itself while a temporary message is showing. That is
-    what makes "the next message clears it" free.
-
-`showMessage` / `clearMessage` are overridden (Python call sites only — Qt's own
-internal calls go straight to C++, which is exactly what we want for a statusTip:
-it must NOT carry the button). The class is cosmetic on its own: the window owns the
-callback (`set_undo_callback`).
-
-v1.5.2: the offer also announces itself through `offer_shown(str)` — the activity panel's
-status tap listens to `messageChanged`, and the OFFER never travels through it (the offer
-replaces the temporary message on purpose). Without the signal the history would silently
-lose exactly the sentences a destructive action produces.
-"""
+Pinned: it is ARMED in ONE place (`MainWindow._push_command()` calls `arm_undo()`, so work that is
+not on the stack can never offer a way back); the message CARRIES it (`showMessage()` is the surface
+every action already reports through, so the bar CONSUMES the first message after the arming); it
+CLEARS itself after `OFFER_TIMEOUT_MS`, and `clearMessage()` / `_reset_undo_stack()` drop it at once;
+and the layout is Qt's own (ONE widget with a label and a `QToolButton` in the `addWidget()` slot,
+which Qt hides while a temporary message shows). `showMessage` / `clearMessage` are overridden for
+PYTHON call sites only, and `offer_shown(str)` is the second channel the activity tap listens to."""
 
 from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QStatusBar, QToolButton, QWidget
@@ -68,24 +42,11 @@ def _t(key: str, **kw) -> str:
         return key
 
 
-# ── v1.5rc4 (ROADMAP task 1): the status-bar overflow policy ──────────────────
-# The bar carries everything at every window width: the "Servers / Connections" totals,
-# the three CLICKABLE status counters, the zoom percentage and (while the mode is on) the
-# multi-input plaque. On a narrow window that is more than the surface has room for, and
-# the parts are NOT equal: the counters are the INTERACTIVE half (v1.4.5), the plaque is
-# the state of a MODE, and the totals are the only passive text. The pinned priority:
-#
-#     the multi-input plaque  >  the status counters + the zoom %  >  the totals pair
-#
-# i.e. the totals are given up FIRST and — in this release — they are the only thing that
-# is ever given up: the counters and the zoom never disappear, they only get crowded.
-#
-# The threshold is MEASURED, not typed: `status_bar_needed_width()` sums what the bar's
-# own permanent widgets ask for (the same `sizeHint()` Qt would use), so a longer
-# translation, a bigger UI font or the multi-input plaque moves the threshold with them —
-# a typed number would silently clip a German "Verbindungen" on a window the number calls
-# wide enough. The decision itself is ONE pure comparison (`is_compact(width, needed)`),
-# which is what the topical test pins.
+# ── the status-bar OVERFLOW policy ───────────────────────────────────────────
+# The parts are NOT equal: the multi-input plaque > the status counters + the zoom % >
+# the totals pair, so the totals are given up first (the counters and the zoom only get
+# crowded). The threshold is MEASURED from the bar's own `sizeHint()`s
+# (`status_bar_needed_width()`), never typed; the decision is ONE pure `is_compact()`.
 
 #: The room the bar keeps between its widgets and the window edge.
 STATUS_BAR_SLACK = 24

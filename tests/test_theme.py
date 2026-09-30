@@ -1,29 +1,12 @@
 # -*- coding: utf-8 -*-
 """v1.1.5 → v1.4.3 — the central theme `ui/theme.py`: the `Theme` object, LIGHT, the accent hue.
 
-v1.2.5 introduced this file as the regression test of the refactoring that moved every
-literal colour/radius/font into one module. v1.4.3 (ROADMAP "Appearance: light theme +
-accent color") keeps the file and REPLACES its subject: the constants became ONE
-`Theme` object, a second instance (LIGHT) appeared, and the accent became a HUE that
-generates its shades — so the old "the constant equals the literal" checks are replaced
-by the checks the new contract actually needs.
-
-§1 The `Theme` object — pure data: importable WITHOUT PySide6, standard library only.
-§2 `DARK` — a snapshot of the pre-v1.4.3 constants BY VALUE (the zero-visual-change
-   promise of the refactoring) + the semantic dicts and the live module proxies.
-§3 `LIGHT` — COMPLETE (the same field set as DARK) and different on the surfaces.
-§4 The accent — one HUE: a pure function, a known hue → the expected hex, the default
-   hue → today's #38bdf8, the three shades ordered, and a hex → hue round trip.
-§5 The QSS builder (`ui/theme_qss.py`) — one theme → one stable string, LIGHT ≠ DARK.
-§6 The config round trip — `load_theme_settings()` / `theme_from_settings()`; a broken
-   value → the default + a log line; the "Appearance" tab of the settings hub.
-§7 The live switch — `set_theme`/`apply_theme` without a restart: the module proxies,
-   the class-level colours of the scene items and the widget stylesheets all move.
-§8 Out of scope — unchanged (the terminal output palettes, CURSOR_COLOR, export_drawio).
-§9 i18n parity + the release state.
-
-Run: python tests/test_theme.py   (from the project root) or python tests/run_all.py
-"""
+The regression test of the refactoring that moved every literal colour, radius and font into one module;
+since v1.4.3 its subject is the `Theme` object itself — a second LIGHT instance and an accent stored as a
+HUE that generates its shades — so the old "the constant equals the literal" checks were replaced by the
+ones the new contract needs.
+§1 the object is pure data, importable WITHOUT PySide6 (standard library only); §2 `DARK` as a snapshot of
+the pre-v1.4.3 constants BY VALUE plus the semantic dicts and the live module proxies; §3 `LIGHT` complete (the same field set) and different on the surfaces; §4 the accent as one HUE (a pure function, a known hue → the expected hex, the default hue → the shipped colour, the three shades ordered, a hex → hue round trip); §5 the QSS builder (one theme → one stable string, LIGHT ≠ DARK); §6 the config round trip (`load_theme_settings()` / `theme_from_settings()`; a broken value → the default + a log line); §7 the live switch (`set_theme` / `apply_theme` move the proxies, the class-level colours and the stylesheets); §8 out of scope (the terminal palettes, `CURSOR_COLOR`, the drawio writer); §9 i18n and the release state."""
 import ast
 import os
 import re
@@ -597,13 +580,11 @@ check("§7 the application stylesheet + palette are swapped in ONE call",
       app.palette().color(theme_qss.QPalette.ColorRole.Window).name())
 
 
-# ── §7b The vector icons (the v1.4.3-fix: they stayed dark-theme pale on LIGHT) ──
-# Reported after the release: the toolbar and sidebar glyphs kept the OLD colour on
-# the light theme. Root cause — a QIcon is a VALUE like a QBrush: `ICON_COLOR` was a
-# module constant captured at import time, the icons were painted once, and a WIDGET
-# keeps its own copy of the pixmap (measured: `QPushButton.icon()` and a registry
-# QIcon answering DIFFERENT cacheKeys()). The fix makes the colour live, caches ONE
-# QIcon per name and re-applies it (clear-then-set) through the theme walk.
+# ── §7b The vector icons (they stayed dark-theme pale on LIGHT) ──
+# A QIcon is a VALUE like a QBrush: the icons were painted once from a module constant captured at
+# import time and a WIDGET keeps its own copy of the pixmap (measured: `QPushButton.icon()` and a
+# registry QIcon answer DIFFERENT cacheKeys()), so the toolbar and sidebar glyphs kept the OLD colour
+# on the light theme. The fix makes the colour live, caches ONE QIcon per name and re-applies it.
 from ui import icons as icons_mod  # noqa: E402
 
 

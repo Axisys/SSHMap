@@ -25,13 +25,11 @@ def _get_translator():
     return _t_cache
 
 
-# ── Registry of active workers (patch v0.6.x) ───────────────────
-# server_id → running SSHWorker. Populated when the thread is created,
-# and cleared on the finished() signal. Needed so that before removing a
-# ServerNode we can check that its SSH operation finished cleanly
-# (AUDIT / plan v0.6.x #2): otherwise the thread could deliver
-# success/error to an already-destroyed dialog, or keep "writing"
-# to data of a removed node.
+# ── Registry of active workers ───────────────────
+# server_id → running SSHWorker. Populated when the thread is created and cleared on the
+# `finished()` signal: before removing a `ServerNode` we check that its SSH operation finished
+# cleanly, otherwise the thread could deliver success/error to an already-destroyed dialog, or keep
+# writing to the data of a removed node.
 _active_workers: Dict[str, "SSHWorker"] = {}
 
 
@@ -201,12 +199,10 @@ class SSHWorker(QThread):
             msg = t("ssh.ssh_error", message=str(e))
             self.error.emit(msg if not msg.startswith("[") else f"SSH error: {e}")
         except OSError as e:
-            # v1.5rc5 (N4): socket.gaierror, socket.timeout and
-            # paramiko.ssh_exception.NoValidConnectionsError are OSError, NOT SSHException —
-            # they used to fall through to the generic handler of run() and were displayed
-            # VERBATIM in English while the sibling "Test connection" button answered in the
-            # user's language. The branch is deliberately LAST so it cannot shadow the
-            # paramiko ones above.
+            # `socket.gaierror`, `socket.timeout` and `paramiko.ssh_exception.NoValidConnectionsError` are
+            # OSError, NOT SSHException — they would otherwise fall through to the generic handler of `run()`
+            # and be displayed VERBATIM in English while the sibling "Test connection" button answered in the
+            # user's language. The branch is deliberately LAST so it cannot shadow the paramiko ones above.
             msg = t("ssh.connection_failed", host=self.host, port=self.port)
             self.error.emit(msg if not msg.startswith("[")
                             else f"Connection failed for {self.host}:{self.port}: {e}")

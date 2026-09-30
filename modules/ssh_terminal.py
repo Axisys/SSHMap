@@ -7,16 +7,10 @@ except ImportError:
     from models.server import ServerData
 
 # ── THE LIVE NAMESPACE OF THE TERMINAL FAMILY (a test seam — do not "clean" it) ──
-# terminal_page.py and terminal_dock.py resolve these names on THIS module at call
-# time (`_st_module()`, the v1.1.4 host_attr pattern), and the tests substitute them
-# the same way (`ST.TerminalScreen`, `ST.QMessageBox`, …). The names therefore stay
-# imported here although this module never references them directly: a static
-# analyser reports them as unused, and that report is the EXPECTED state (the
-# v1.6.1 ROADMAP task 3 acceptance names this file as its only exception).
-#   TerminalScreen / DEFAULT_HISTORY_LINES / TerminalWidget — the session page's screen
-#   and canvas; SftpWorker / register_orphan_sftp_worker — the SFTP transport;
-#   SftpTab / format_size — the Files tab. QMessageBox is the same seam (see its own
-#   comment below).
+# terminal_page.py and terminal_dock.py resolve the names IMPORTED BELOW on THIS module
+# at call time (`_st_module()`, the `host_attr` pattern) and the tests substitute them
+# the same way, so a static "unused import" report on them is the EXPECTED state
+# (`AGENTS.md` §4.1); QMessageBox is the same seam (see its own comment below).
 try:
     from .terminal_screen import (TerminalScreen, DEFAULT_HISTORY_LINES, SCROLL_MODE_DEFAULT,
                                   SCROLL_MODES)
@@ -48,17 +42,11 @@ try:
 except ImportError:
     from modules.sftp_tab import COMMANDER_CONFIG_BOOL, CommanderCorner, SftpTab, format_size
 
-# v1.2 (ROADMAP v1.2): the session was moved to a reusable page — the window
-# became a thin wrapper. terminal_page does NOT import ssh_terminal at module
-# level (it fetches it lazily via _st_module() — a test seam), so the cycle
-# is excluded.
-# v1.3.3.5 (ROADMAP v1.3.3.5): the terminal SPLIT — the window's session area is a
-# vertical QSplitter [session_tabs | split_host] and the split host may hold a
-# SECOND full session of the SAME node (a second shell over a second channel), so a
-# TUI in the top pane and a usable command line below stop being mutually exclusive.
-# The pane is an ordinary TerminalSessionPage (add_session(split=True)) — every
-# concern of the split keeps its single owner (the PTY debounce, the idempotent
-# page.shutdown(), the alternate screen per pyte screen, the multi-input provider).
+# The window is a thin wrapper over a reusable session page (`terminal_page` does NOT
+# import this module at module level — it fetches it lazily via `_st_module()`).
+# The session area is a vertical QSplitter [session_tabs | split_host] and the host may
+# hold a SECOND full session of the SAME node (`add_session(split=True)`, an ordinary
+# TerminalSessionPage) — one owner per concern (`DOCUMENTATION.md` §14g).
 try:
     from .terminal_page import TerminalSessionPage
 except ImportError:
@@ -71,18 +59,10 @@ try:
 except ImportError:
     from modules.terminal_page import refresh_session_activity, render_session_activity
 
-# v1.2.9: Qt imports — only those actually used (QPlainTextEdit/QApplication and
-# the other leftovers of the SSHTerminalTextEdit HTML path were removed along
-# with the class).
-# QMessageBox is NOT an HTML-path leftover — a live namespace for the test seams
-# in terminal_page.py/terminal_dock.py: `_st_module().QMessageBox` is resolved
-# at call time (the v1.1.4 host_attr pattern), so monkeypatching
-# ST.QMessageBox.question/critical in tests works unchanged; without the import
-# confirm_close("ask")/_show_error would crash with AttributeError
-# (regression v1.2.9, caught by the suite).
-# v1.3 (ROADMAP v1.3): the "Terminal Macros" panel — a command/script library to
-# the left of the session tabs. command_library does not import ssh_terminal
-# (no cycle).
+# Qt imports — only those actually used. `QMessageBox` is NOT a leftover: it is a LIVE
+# namespace for the test seams (`_st_module().QMessageBox` is resolved at call time, the
+# host_attr pattern), so monkeypatching `ST.QMessageBox.question/critical` works; without it
+# `confirm_close("ask")` / `_show_error` would crash. `command_library` does not import us.
 try:
     from .command_library import (CommandLibraryPanel, PANEL_BODY_MIN_WIDTH, _CollapseStrip,
                                   _WIDGET_MAX_WIDTH, _diamond_icon, hand_over_splitter_width)
@@ -123,28 +103,18 @@ def get_translator():
     return _t_cache
 
 
-# ── v1.6.2 (ROADMAP task 1): the session that says it ended ───────────────────
-# `TERMINAL_KEEPALIVE_SEC` is the interval of the SSH-level keepalive (`Transport.
-# set_keepalive`): one declared constant, deliberately NOT a config key — the value
-# that keeps a NAT/firewall idle mapping alive is a protocol fact, not a taste. 30 s
-# is below every common idle timeout (60 s and up) and is what OpenSSH's own
-# ServerAliveInterval ships with.
-# WHY IT MATTERS HERE (measured on paramiko 5.0, `transport.py`/`packet.py`): the
-# keepalive is the ONLY writer that touches an otherwise silent socket, and paramiko's
-# transport thread turns any resulting socket error into `_unlink()` of EVERY channel
-# plus `active = False` (`Transport.run`'s `finally`). So the keepalive is what makes a
-# peer that vanished without a FIN visible to the recv loop below at all — without it
-# `recv_ready()` answers False forever and the loop sleeps until the process dies.
+# ── the session that says it ended ────────────────────────────────────────────
+# `TERMINAL_KEEPALIVE_SEC` (30 s) is the interval of the SSH keepalive: one declared constant,
+# deliberately NOT a config key — a protocol fact, below every common idle timeout. It is the
+# ONLY writer touching an otherwise silent socket, and a socket error makes paramiko unlink
+# every channel — which is what makes a peer that vanished without a FIN visible at all.
 TERMINAL_KEEPALIVE_SEC = 30
 
-# ── v1.0 final (ROADMAP task 9): terminal_* keys from ~/.sshmap/config.json ────
-# All keys are OPTIONAL, defaults = the current behaviour (a config without
-# the keys looks exactly like RC4): palette "default", the system monospace
-# pt 10, HistoryScreen depth DEFAULT_HISTORY_LINES=1000 (scrollback ON — the
-# RC3 behaviour; an explicit 0 — the user deliberately disabled the scrollback),
-# closing a session — immediately (v1.1: terminal_close_behavior). UI for the
-# keys — v1.1 (the settings dialog); here they are read when the terminal
-# window is created.
+# ── the terminal_* keys of `~/.sshmap/config.json` ───────────────────────────
+# All keys are OPTIONAL and a config without them behaves exactly like the shipped defaults:
+# palette "default", the system monospace at pt 10, the scrollback depth
+# `DEFAULT_HISTORY_LINES = 1000` (an explicit 0 disables it) and an immediate close. They are read
+# when the terminal window is created; the UI is the settings dialog (`AGENTS.md` §4.12).
 def load_terminal_settings():
     """Reads and validates the terminal_* keys from ~/.sshmap/config.json.
 
@@ -200,12 +170,10 @@ def load_terminal_settings():
     if isinstance(v, int) and not isinstance(v, bool) and 1 <= v <= 32:
         defaults["max_open"] = v     # corrupt/out of range → 4 (default)
 
-    # v1.1.2RC3 (AUDIT U3, leftover): mouse wheel — "scrollback" (default: the
-    # wheel scrolls the local scrollback, as in v1.0RC3) | "off" (the wheel is
-    # not intercepted for scrollback; full SGR wheel passthrough to the app —
-    # v1.2+, since pyte 0.8.2 does not track the DECSET 1000/1002/1006 mouse
-    # modes). The key is config-only (the ROADMAP v1.1.2RC3 decision — no UI in
-    # the settings dialog).
+    # Mouse wheel — "scrollback" (the DEFAULT: the wheel scrolls the local scrollback) | "off"
+    # (the wheel is not intercepted for scrollback; the full SGR wheel passthrough to the application
+    # remains, since pyte 0.8.2 does not track the DECSET 1000/1002/1006 mouse modes). The key is
+    # config-only (`AGENTS.md` §4.3).
     v = cfg.get("terminal_wheel")
     if isinstance(v, str) and v.strip().lower() in ("scrollback", "off"):
         defaults["wheel"] = v.strip().lower()   # corrupt/foreign → "scrollback" (default)
@@ -247,12 +215,11 @@ def load_terminal_settings():
     return defaults
 
 
-# ── v1.3.3.5 (ROADMAP v1.3.3.5): the terminal SPLIT ────────────────────────────
-# The window's session area is a VERTICAL QSplitter: the session tabs on top and the
-# split host (a SECOND full session of the SAME node) below. The state and the ratio
-# live in ~/.sshmap/config.json — the ratio is a FRACTION of the height, so a window
-# resize keeps the proportion; the pixel floor is derived from the canvas metrics
-# (SPLIT_MIN_ROWS rows + the pane's own chrome), never from a magic number.
+# ── the terminal SPLIT ────────────────────────────
+# The window's session area is a VERTICAL QSplitter: the session tabs on top and the split host (a
+# SECOND full session of the SAME node) below. The state and the ratio live in `~/.sshmap/config.json` —
+# the ratio is a FRACTION of the height, so a window resize keeps the proportion; the pixel floor is
+# derived from the canvas metrics (`SPLIT_MIN_ROWS` rows + the pane's own chrome), never a magic number.
 SPLIT_CONFIG_BOOL = "ui_terminal_split"          # bool — the pane was open at the last close
 SPLIT_CONFIG_RATIO = "ui_terminal_split_ratio"   # float — the pane's share of the height
 SPLIT_RATIO_DEFAULT = 0.25                       # the ROADMAP default (a quarter of the height)
@@ -298,24 +265,11 @@ def load_split_settings():
     return defaults
 
 
-# ── v1.7.1 (ROADMAP v1.7.1): the FILES PANEL — the right half of the window ────
-# In `terminal_mode = "windows"` a wide screen shows `[commands | terminal | files]` at
-# once instead of switching to the Files TAB: the session's Files widget is re-parented
-# from its tab strip into a right-hand panel with ONE stack page per session, and the tab
-# strip of that session becomes `Terminal | History`.
-#
-# v1.7.1.1 (ROADMAP v1.7.1.1): the panel is a SETTING, not a fourth control of the session
-# tab bar's corner. The corner keeps the shipped pair (Split + Files Commander) and the
-# question "tab or panel?" is asked in the settings hub's "Terminal" tab, beside the
-# terminal display mode — ONE `terminal_files_mode` key per application:
-#   * `terminal_files_mode`      — "tab" (the shipped Files tab) | "panel" (the right-hand
-#                                  panel): how a NEW terminal window OPENS. Owner-written by
-#                                  the settings hub, read at window construction
-#   * `ui_files_panel`           — LEGACY, READ ONLY: the pre-1.7.1.1 per-window mode key,
-#                                  honoured as the MIGRATION source when the new key is
-#                                  absent (and never written again)
-#   * `ui_files_panel_collapsed` — bool — the panel was folded to its strip; UI STATE, still
-#                                  written by the window in its single geometry write
+# ── the FILES PANEL — the right half of the window ───────────────────────────────
+# In `terminal_mode = "windows"` a wide screen shows `[commands | terminal | files]` at once:
+# the session's Files widget is RE-PARENTED from its tab strip into a right-hand panel (ONE
+# stack page per session; the strip becomes `Terminal | History`). The mode is ONE key —
+# `terminal_files_mode` ("tab" | "panel"); `ui_files_panel` is the legacy migration source.
 FILES_MODE_CONFIG_KEY = "terminal_files_mode"              # str — "tab" | "panel"
 FILES_PANEL_MIGRATION_BOOL = "ui_files_panel"              # LEGACY (read-only migration source)
 FILES_PANEL_CONFIG_COLLAPSED = "ui_files_panel_collapsed"  # bool — the panel was folded
@@ -329,12 +283,11 @@ FILES_MODE_DEFAULT = "tab"
 #: gives the mode exactly TWO `ui_*` keys, and a width the user can drag is not worth a third.
 FILES_PANEL_WIDTH_DEFAULT = 320
 
-#: The horizontal floor of the CANVAS while the panel is on, in CELLS — the mirror of
-#: `SPLIT_MIN_ROWS` (the vertical floor of the split pane): the narrowest canvas the panel
-#: may squeeze the terminal into, built from the live cell metrics (`widget.cell_size[0]`),
-#: never from a magic pixel number. 20 columns is a QUARTER of the classic 80-column line —
-#: a floor that still shows a command line and its output, and one that leaves the default
-#: 800 px window room for the command panel (86 px) and the panel itself (200 px).
+#: The horizontal floor of the CANVAS while the panel is on, in CELLS — the mirror of `SPLIT_MIN_ROWS`
+#: (the vertical floor of the split pane): the narrowest canvas the panel may squeeze the terminal into,
+#: built from the live cell metrics (`widget.cell_size[0]`), never from a magic pixel number. 20 columns
+#: is a QUARTER of the classic 80-column line — a floor that still shows a command line and its output,
+#: and one that leaves the default 800 px window room for the command panel (86 px) and the panel (200 px).
 FILES_PANEL_MIN_COLS = 20
 
 #: The floor of the panel itself (px) while the mode is on — the `COMMANDER_MIN_PANE_PX`
@@ -710,13 +663,10 @@ class _FilesPanel(QWidget):
             pass   # Qt teardown
 
 
-# ANSI escape sequences:
-#   CSI (ESC [ ... final byte), simple escapes (ESC + char) and
-#   OSC (ESC ] ... BEL | ESC \) — window-title-setting sequences that
-#   TUI apps (vim/htop) send constantly. Without stripping them, the output
-#   keeps garbage like "0;vim".
-# v1.2.10rc2 (AUDIT manual #5a): used only by tests/test_core.py (in production
-# pyte parses ANSI); DO NOT REMOVE — see ROADMAP "Do not touch".
+# ANSI escape sequences: CSI (ESC [ … final byte), simple escapes (ESC + char) and OSC
+# (ESC ] … BEL | ESC \) — the window-title sequences TUI apps (vim/htop) send constantly; without
+# stripping them the output keeps garbage like "0;vim". In production pyte parses ANSI, so this helper
+# is used only by `tests/test_core.py`: DO NOT REMOVE — see ROADMAP "Do not touch".
 ANSI_ESCAPE_RE = re.compile(
     r'\x1B\[[0-?]*[ -/]*[@-~]'   # CSI: ESC [ params final
     r'|\x1B\][^\x07\x1b]*(?:\x07|\x1B\\)'  # OSC: ESC ] ... BEL / ST
@@ -724,16 +674,11 @@ ANSI_ESCAPE_RE = re.compile(
 )
 
 
-# ── v1.1.2RC1 (N4): orphan terminal thread registry ───────────────────────────
-# The terminal window has WA_DeleteOnClose: if it is closed during a
-# connection, closeEvent waits for the thread with just wait(1500), while
-# paramiko can block for up to 15 s. The thread is created WITHOUT a QObject
-# parent — with no strong referencing object, GC would destroy a LIVE QThread
-# ("QThread: Destroyed while thread is still running" + the risk of a
-# RuntimeError on late emits). The registry keeps such threads alive until
-# finished() — the _active_workers pattern (modules/ssh_worker.py): all window
-# slots are already disconnected in closeEvent, so late emits without
-# receivers are a safe no-op.
+# ── the orphan terminal thread registry (the N4 pattern) ──────────────────────
+# The terminal window has WA_DeleteOnClose: closed during a connection, closeEvent waits
+# for the thread with `wait(1500)`, while paramiko can block for up to 15 s. The thread is
+# created WITHOUT a QObject parent, so a live one must not be left to GC ("QThread:
+# Destroyed while running") — the registry keeps it until `finished()` (`AGENTS.md` §4.3).
 _orphan_threads: List["SSHTerminalThread"] = []
 
 
@@ -850,15 +795,11 @@ class SSHTerminalThread(QThread):
                 self.status_signal.emit(note if not note.startswith("[")
                                         else f"New host key accepted ({policy.last_fingerprint})")
 
-            # v1.6.2 (ROADMAP task 1): the loop ends on THREE facts now, and each of them is
-            # a real end of the session: `channel.closed` (the transport died — what the
-            # keepalive above turns a silently dead TCP into), `recv() == b""` (EOF: the peer
-            # closed the stream) and `eof_received` / `exit_status_ready()` (the peer said
-            # goodbye in the protocol). The EOF branch is also the anti-spin guard: a discarded
-            # `b""` made `recv_ready()` True forever, so the loop called `recv()` in a hot loop
-            # (measured: 7 534 475 calls in 1.5 s) and never reached `closed_signal`.
-            # Whatever ends it, `finally` still emits `closed_signal`, and the session's own
-            # `_on_closed` writes the ONE status line of that fact (`terminal.session_closed`).
+            # The loop ends on THREE facts: `channel.closed`, `recv() == b""` (EOF) and
+            # `eof_received` / `exit_status_ready()` — each a real end of the session. An EOF must
+            # never be discarded: a dropped `b""` made `recv_ready()` True forever, so the loop
+            # hot-spun on `recv()` and never signalled. Whatever ends it, `finally` emits
+            # `closed_signal` and `_on_closed` writes the ONE status line (§12).
             while self.running and self.channel and not self.channel.closed:
                 try:
                     if self.channel.recv_ready():
@@ -942,9 +883,8 @@ class SSHTerminalThread(QThread):
         self.running = False
 
 
-# v1.2.9 (ROADMAP "Terminal hygiene"): the deprecated SSHTerminalTextEdit (the
-# QPlainTextEdit HTML path, v1.0RC1) is REMOVED — dead code since v1.0RC1, never
-# created by the window; keyboard handling lives in TerminalWidget.keyPressEvent.
+# v1.2.9: the SSHTerminalTextEdit HTML path is gone — the keyboard lives in
+# TerminalWidget.keyPressEvent.
 
 
 class SSHTerminalWindow(QMainWindow):
@@ -1030,13 +970,11 @@ class SSHTerminalWindow(QMainWindow):
         self.session_tabs.tabCloseRequested.connect(self._on_tab_close_requested)
         self.session_tabs.currentChanged.connect(self._on_current_tab_changed)
 
-        # v1.3.3.5 (ROADMAP task 1): the SPLIT — the session area becomes a VERTICAL
-        # QSplitter [session_tabs | split_host]; the host holds the second session and
-        # is HIDDEN until the split is on (a hidden splitter member costs no geometry,
-        # so the single-pane look of v1.3.3.4 is preserved). NOT collapsible on either
-        # side (the divider can never "lose" a pane) and the floors are applied with
-        # setMinimumHeight + setSizes only (Qt gotcha #13: setMaximum* on a splitter
-        # member breaks the size accounting after hide/show).
+        # The SPLIT — the session area becomes a VERTICAL QSplitter [session_tabs | split_host]; the host
+        # holds the second session and is HIDDEN until the split is on (a hidden splitter member costs no
+        # geometry, so the single-pane look is preserved). NOT collapsible on either side (the divider can
+        # never "lose" a pane) and the floors are applied with `setMinimumHeight` + `setSizes` only —
+        # Qt gotcha #13: `setMaximum*` on a splitter member breaks the size accounting after hide/show.
         self.split_host = QWidget()
         _split_layout = QVBoxLayout(self.split_host)
         _split_layout.setContentsMargins(0, 0, 0, 0)
@@ -1049,17 +987,11 @@ class SSHTerminalWindow(QMainWindow):
         self._v_splitter.splitterMoved.connect(self._on_split_moved)
         self.split_host.hide()
 
-        # v1.3 (ROADMAP v1.3): the "Terminal Macros" panel to the left of the
-        # session tabs — QSplitter [cmdlib_panel | QSplitter(session_tabs | split_host)].
-        # A double-click/Enter on a command — sends the macro to the ACTIVE session (not
-        # the multi-input broadcast; v1.3.3.5: the panel asks the container for the
-        # session the user is in, so a macro lands in the FOCUSED pane). Collapsing into
-        # a thin strip (the v1.2.4.1 technique) — the state lives in the single config
-        # key ui_cmdlib_collapsed for both containers (window + dock).
-        # setCollapsible(False) on both sides: the panel cannot be "lost" by dragging
-        # the splitter. The panel's status messages go to the existing
-        # _on_page_status_message → statusBar() bridge (the same (str, int) signature,
-        # no new bridge code).
+        # The "Terminal Macros" panel to the left of the session tabs —
+        # QSplitter [cmdlib_panel | QSplitter(session_tabs | split_host)]. A double-click /
+        # Enter sends the macro to the ACTIVE session (never the multi-input broadcast: the
+        # panel asks the container for the FOCUSED session); the collapse state is the ONE
+        # config key `ui_cmdlib_collapsed` for both containers (`DOCUMENTATION.md` §14).
         self.cmdlib_panel = CommandLibraryPanel(self.session_tabs, parent=self)
         self.cmdlib_panel.status_message.connect(self._on_page_status_message)
         self.cmdlib_panel.set_active_session_provider(self.active_session)
@@ -1086,17 +1018,11 @@ class SSHTerminalWindow(QMainWindow):
         self.files_panel.hide()
         self.setCentralWidget(splitter)
 
-        # v1.3.3.5 (ROADMAP task 1): ONE checkable action drives BOTH surfaces — the
-        # BUTTON in the right corner of the session tab bar and the window's
-        # context-menu item (`terminal.split`). No registry sequence: a keyboard
-        # shortcut is deliberately NOT part of this version (ROADMAP "Not in
-        # v1.3.3.5"), so the action ships without one.
-        # The button is a plain QPushButton — the look of the command panel's
-        # Add/Edit/Delete buttons (a toolbar item read as a label, not as a control).
-        # A QPushButton has no setDefaultAction in PySide6, so it is wired to the
-        # action by hand (`clicked` → the action; the action's state → the button):
-        # the ACTION stays the single source of truth, and `retranslate()` re-texts
-        # both from the same key.
+        # ONE checkable action (`terminal.split`) drives BOTH surfaces — the BUTTON in the
+        # right corner of the tab bar and the window's context-menu item — and carries NO
+        # keyboard shortcut. The button is a plain QPushButton (PySide6 has no
+        # `setDefaultAction`), so it is wired by hand and the ACTION stays the single source
+        # of truth (`DOCUMENTATION.md` §14g).
         self.act_split = QAction(t("terminal.split"), self)
         self.act_split.setCheckable(True)
         self.act_split.setToolTip(t("terminal.split_tooltip"))
@@ -1106,17 +1032,11 @@ class SSHTerminalWindow(QMainWindow):
         self.btn_split.setCheckable(True)
         self.btn_split.setToolTip(t("terminal.split_tooltip"))
         self.btn_split.clicked.connect(self._on_split_button_clicked)
-        # The right corner of the session tab bar: the natural place of a per-session
-        # action (the left side belongs to the command panel).
-        # v1.7rc1 (ROADMAP v1.7rc1, task 3): a tab bar has ONE corner widget, so the corner
-        # is a small container holding BOTH per-session controls — the split button and the
-        # Files Commander action (the `SftpTab` two-pane view of the ACTIVE session). The
-        # control is a VIEW of the session's state: `_sync_commander()` re-reads it whenever
-        # the active session changes, so switching tabs never moves a mode between sessions.
-        # v1.7.1.1: the Files panel is NOT a fourth control any more. A layout preference
-        # belongs to the settings hub ("Terminal" → Files display mode) and the corner keeps
-        # the shipped PAIR — the third LABEL was what raised the window's own minimum width,
-        # so removing it hands the corner back its declared two-button floor.
+        # The right corner of the session tab bar — the natural place of a per-session
+        # action (the left side belongs to the command panel). A tab bar has ONE corner
+        # widget, so the corner is a container holding the shipped PAIR: the split button
+        # and the Files Commander action of the ACTIVE session. The control is a VIEW of the
+        # session's state (`_sync_commander()` re-reads it on a tab switch), `SFTP_PANES.md`.
         self.act_files_panel = QAction(t("terminal.files_panel"), self)
         self.act_files_panel.setCheckable(True)
         self.act_files_panel.setToolTip(t("terminal.files_panel_tooltip"))
@@ -1125,20 +1045,11 @@ class SSHTerminalWindow(QMainWindow):
         self.commander.act.toggled.connect(self._on_commander_toggled)
         self.session_tabs.setCornerWidget(self.commander, Qt.Corner.TopRightCorner)
 
-        # v1.2 (`windows` mode): the "status bar" is bridged into the window's status
-        # bar — sticky text + SFTP progress (a permanent widget on the right, hidden
-        # when there are no transfers) exactly as in v1.1.x; since v1.2.1 only the
-        # ACTIVE tab is bridged (_set_bridged_page); v1.3.3.5: the FOCUSED pane wins.
-        # The page does not know about QMainWindow: in dock mode (v1.2.2) the bridge
-        # will attach to the dock.
-        # v1.4.7 follow-up (the maintainer's request): this bar is now the ONE status
-        # surface of the window — the page stopped drawing a status line above its
-        # `[Terminal | Files]` tabs, which repeated this very text one row lower on
-        # every session. The SPLIT pane adds a SECOND text right next to it
-        # ("Split Terminal  SSH session opened" — `terminal.split` names the pane, the
-        # way the empty state names the real menu items), shown while the pane is open
-        # and hidden the moment it closes. Both are PERMANENT widgets, so a transient
-        # SFTP line in the message area cannot wipe the pane's state.
+        # The "status bar" of a session is BRIDGED into the window's status bar — sticky text +
+        # the SFTP progress widget (hidden while there are no transfers). Only the ACTIVE tab is
+        # bridged, and with a split the FOCUSED pane wins. The bar is the ONE status surface of
+        # the window (the page draws none), and the pane's own line (`terminal.split`) is a
+        # PERMANENT widget too, so a transient SFTP message cannot wipe it.
         self._split_status_text = ""
         self._split_status_label = QLabel("")
         if theme_qss is not None:
@@ -1173,13 +1084,11 @@ class SSHTerminalWindow(QMainWindow):
         if self._split_config["split"]:
             self.act_split.setChecked(True)
 
-        # v1.7.1.1 (ROADMAP v1.7.1.1): the OPENING Files display mode of this window. It is
-        # the setting's job to decide how a window opens (the `terminal_mode` convention:
-        # "applied to new windows; open ones live on as-is"), so the key is read HERE and the
-        # mode is installed through the ONE action (`toggled` → `set_files_panel_enabled`),
-        # exactly like the restored split above. The fold rides along. A live toggle of the
-        # window's own context-menu item is a per-window override and is deliberately NOT
-        # written back — `ui_files_panel` survives only as the migration source.
+        # The OPENING Files display mode of this window. It is the setting's job to decide how a window
+        # opens (the `terminal_mode` convention: "applied to new windows; open ones live on as-is"), so the
+        # key is read HERE and the mode is installed through the ONE action (`toggled` →
+        # `set_files_panel_enabled`); the fold rides along. A live toggle of the window's own context-menu
+        # item is a per-window override and is deliberately NOT written back (`AGENTS.md` §4.3).
         self.files_panel.set_collapsed(self._files_config["collapsed"], persist=False)
         if self._files_config["mode"] == "panel":
             self.act_files_panel.setChecked(True)
@@ -1368,14 +1277,11 @@ class SSHTerminalWindow(QMainWindow):
         """
         t = get_translator()
         if split:
-            # v1.3.3.5: the pane is a COMMAND LINE — no SFTP tab (a second channel, a
-            # second worker and a file tree squeezed into ~130 px are pure cost there);
-            # it also keeps the page's own layout minimum small, which is what makes the
-            # 25% default honest (the pane's floor is then driven by the canvas rows).
-            # And no STATUS LINE either (`with_status_line=False`): the pane's live state
-            # goes onto its inner `Terminal` tab ("Terminal  SSH session opened") instead
-            # of a whole row under the canvas — measured, that row plus its spacing costs
-            # ~25 px of a ~140 px pane.
+            # The pane is a COMMAND LINE — no SFTP tab (a second channel, a second worker and a file
+            # tree squeezed into ~130 px are pure cost there) and no status line either
+            # (`with_status_line=False`): the pane's live state goes onto its inner `Terminal` tab
+            # instead of a whole row under the canvas, measured at ~25 px of a ~140 px pane. It also
+            # keeps the page's layout minimum small, which is what makes the 25% default honest.
             page = TerminalSessionPage(
                 server_data, parent=self.split_host, with_sftp=False,
                 with_status_line=False, split=True,
@@ -1456,25 +1362,11 @@ class SSHTerminalWindow(QMainWindow):
         if page is not None:
             self.close_page(page)
 
-    # ── v1.3.3.5 (ROADMAP v1.3.3.5): the SPLIT — a second pane under the sessions ──
-    #
-    # The whole feature hangs on ONE owner per concern:
-    #   * the ACTION (`act_split`, `terminal.split`) — the tab-bar BUTTON and the
-    #     window's context-menu item are views of the same checkable QAction, so the
-    #     checkmark, the pane and the geometry can never diverge;
-    #   * the LAYOUT — the vertical QSplitter [session_tabs | split_host]; the host is
-    #     hidden while the split is off, so the single-pane look costs nothing;
-    #   * the SESSION — an ordinary TerminalSessionPage (add_session(split=True)): its
-    #     own SSHTerminalThread to the SAME node, its own pyte screen (a TUI in EACH
-    #     pane is legal by construction), its own PTY debounce and the idempotent
-    #     page.shutdown() of every other teardown path;
-    #   * the REGISTRY — the pane is a real session for the green dot and the
-    #     multi-input provider, but NOT a reason to refuse a new terminal: the page
-    #     marker `_is_split_pane` keeps it out of the terminal_max_open limit
-    #     (ui/main_window_ssh.py; the window registers the pane through the host's
-    #     duck-typed `_adopt_split_session`);
-    #   * the PERSISTENCE (~/.sshmap/config.json) — `ui_terminal_split` +
-    #     `ui_terminal_split_ratio`, merged into the window's geometry write.
+    # ── the SPLIT — a second pane under the sessions ──
+    # ONE owner per concern: `act_split` (`terminal.split`) is the tab-bar button and the
+    # context-menu item; the LAYOUT is `[session_tabs | split_host]`, hidden while the split
+    # is off; the SESSION is an ordinary `TerminalSessionPage(split=True)` with its own
+    # thread, screen and idempotent `shutdown()`; `_is_split_pane` keeps it out of the limit.
 
     @property
     def split_pane(self):
@@ -1624,9 +1516,9 @@ class SSHTerminalWindow(QMainWindow):
     def _wire_page(self, page):
         """v1.3.3.5 (ROADMAP task 6): let the window follow the FOCUS of a canvas.
 
-        The bridge and `win.page` used to follow the ACTIVE TAB only (v1.2.1); with a
-        split there are two sessions on the screen at once, so the container follows
-        the focus as well. The canvas FocusIn filter is the cheap first half — the
+        The bridge and `win.page` follow the ACTIVE TAB — and, with a
+        split, two sessions on the screen at once — the FOCUS as well; the container follows
+        the focus there. The canvas FocusIn filter is the cheap first half — the
         reliable half is the application-level `focusChanged` signal connected in
         __init__: a page's canvas calls `setFocus()` while it is still hidden
         (`TerminalSessionPage.__init__`), so the pane can hold the focus WITHOUT any
@@ -1777,13 +1669,11 @@ class SSHTerminalWindow(QMainWindow):
         except RuntimeError:
             pass  # teardown — the action is gone
 
-    # ── v1.7rc1 (ROADMAP v1.7rc1, task 3): the Files Commander of the ACTIVE session ──
-    #
-    # The two-pane view lives on the PAGE (`page.sftp_tab`, the `SftpTab` container), while
-    # the control that drives it is the tab bar's — one corner widget for the whole window.
-    # The window therefore keeps them in step in ONE place (`_sync_commander`, called from
-    # the bridge that already knows which session is on screen) and routes the control's
-    # click into the active session's own `set_commander()`.
+    # ── the Files Commander of the ACTIVE session ──
+    # The two-pane view lives on the PAGE (`page.sftp_tab`, the `SftpTab` container), while the control
+    # that drives it is the tab bar's — one corner widget for the whole window. The window keeps them in
+    # step in ONE place (`_sync_commander`, called from the bridge that already knows which session is on
+    # screen) and routes the control's click into the active session's own `set_commander()`.
 
     def _commander_tab(self):
         """The Files tab of the ACTIVE session (None — no session / no SFTP channel).
@@ -1854,37 +1744,11 @@ class SSHTerminalWindow(QMainWindow):
         except RuntimeError:
             pass  # teardown — the corner is gone
 
-    # ── v1.7.1 (ROADMAP v1.7.1): the FILES PANEL — the right-hand tree of the window ──
-    #
-    # `[commands | terminal | files]` at once: the ACTIVE session's Files widget is
-    # RE-PARENTED from its own tab strip into the panel's stack (one page per session), and
-    # the session's tab strip becomes `Terminal | History`. ONE owner per concern:
-    #   * the OPENING MODE — `terminal_files_mode` (`resolve_files_mode()`), read ONCE per
-    #     window: "tab" (the shipped look) | "panel". It is a SETTING of the settings hub's
-    #     "Terminal" tab (v1.7.1.1), applied to NEW windows exactly like `terminal_mode`;
-    #   * the SWITCH of a LIVE window — `act_files_panel` (`terminal.files_panel`): the
-    #     window's context-menu item is its ONE view, the checkmark IS the state, so the
-    #     checkmark and the layout can never diverge (the `act_split` pattern). A live toggle
-    #     is an override of this window only and is NOT persisted;
-    #   * the LAYOUT — the top-level `QSplitter [cmdlib_panel | session area | files_panel]`;
-    #     the panel is hidden while the mode is off, so the shipped look costs nothing;
-    #   * the PANEL — `_FilesPanel`: the fold (its own `ui_files_panel_collapsed` key), the
-    #     stack and the header; it never touches an `SftpTab`;
-    #   * the SESSION — the page keeps `page.sftp_tab` as the OWNER and only LOSES THE TAB
-    #     (`TerminalSessionPage.detach_files_tab()` / `attach_files_tab()`), which is what
-    #     keeps every page-level read, the viewer and the browsed directory alive across the
-    #     switch (a window-level tree bound to the active session would re-list `/` on every
-    #     tab switch and cancel a read — the ROADMAP refuses that shape);
-    #   * the LAZY CHANNEL — the panel mode has no `Files` tab to switch to, so the page
-    #     opens its SFTP channel from `connected_signal` (`set_files_panel(True)`);
-    #   * the PERSISTENCE (~/.sshmap/config.json) — `ui_files_panel_collapsed` alone (UI
-    #     state, merged into the window's single geometry write). The MODE is the settings
-    #     hub's key now; the legacy `ui_files_panel` is read once as the migration source.
-    #
-    # `terminal_mode = "tabs"` IGNORES the mode: the dock content has no window chrome and
-    # shares the map's width (it builds no panel and reads no key), so the two settings are
-    # simply independent. The SPLIT PANE is unaffected too: it is built `with_sftp=False`, has
-    # no Files tab at all and is never a page of the stack.
+    # `[commands | terminal | files]` at once: the ACTIVE session's Files widget is RE-PARENTED
+    # from its tab strip into `_FilesPanel.stack` (ONE page per session, so the strip reads
+    # `Terminal | History`) while the page KEEPS `page.sftp_tab` as the OWNER — the browsed
+    # directory, the viewer and every page-level read survive. The mode is `terminal_files_mode`
+    # (`resolve_files_mode()`); the layout, the fold, the channel and the persistence — §63.
 
     def _tab_pages(self) -> list:
         """Every live session that CARRIES A TAB (the split pane is deliberately not one)."""
@@ -2628,12 +2492,10 @@ class SSHTerminalWindow(QMainWindow):
             p.close_terminal()
 
     def closeEvent(self, event):
-        # v1.1.2RC3 (AUDIT U2): save the window's size/state BEFORE the "ask"
-        # dialog — if the user cancels the close (event.ignore), the written values
-        # are equal to the current ones anyway; on a normal close they will be read
-        # by the next window.
-        # v1.3.3.5 (ROADMAP task 5): the split state/ratio ride along in the SAME
-        # save_config() call (merged into the geometry write — one write per window).
+        # The window's size/state is saved BEFORE the "ask" dialog — if the user cancels the close
+        # (`event.ignore`), the written values are equal to the current ones anyway; on a normal close the
+        # next window reads them. The split state/ratio ride along in the SAME `save_config()` call (merged
+        # into the geometry write — one write per window).
         try:
             from .window_geometry import save_window_geometry as _save_geo
         except ImportError:

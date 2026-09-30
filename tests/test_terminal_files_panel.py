@@ -1,48 +1,12 @@
 # -*- coding: utf-8 -*-
-"""v1.7.1 — The Files tree as a right-hand panel of a standalone terminal window
-(ROADMAP v1.7.1; v1.7.1.1 moved its SWITCH into the settings hub — `terminal_files_mode`).
+"""The Files tree as a right-hand panel of a standalone terminal window.
 
-The topical test of the release (the "new thematic file" convention): offscreen, ALL without
-the network — the fake threads with the same API as SSHTerminalThread (the test seam
-ST.SSHTerminalThread) plus the fake paramiko/SFTP surface of `_fakes.py`.
+Offscreen, NO network (the fake threads + the fake paramiko/SFTP surface of `_fakes.py`). Pins the
+`[commands | terminal | files]` layout, the RE-PARENTING of the ACTIVE session's Files widget, the
+lazy channel open, the fold, the floors and the Commander exclusion.
+Contract — `AGENTS.md` §4.3; mechanism — `DOCUMENTATION.md` §63.
 
-§1 The shape and the switch: the window's central widget is
-   `QSplitter[cmdlib_panel | QSplitter(session_tabs | split_host) | files_panel]`, the panel
-   is built but HIDDEN and out of the layout while the mode is off, and the corner keeps the
-   shipped PAIR (Split + Files Commander). The mode itself is a SETTING of the settings hub
-   ("Terminal" → Files display mode, `terminal_files_mode`): `resolve_files_mode()` reads it
-   once per window (the legacy `ui_files_panel` of v1.7.1 is the migration source, never
-   written again), and ONE checkable action (`terminal.files_panel`) — the window's
-   context-menu item is its only surface left — is the switch of a LIVE window.
-§2 The mode moves the WIDGET, not the session: the ACTIVE session's Files widget is
-   re-parented from its tab strip into the panel's stack (the strip becomes
-   `Terminal | History`), the page KEEPS `page.sftp_tab` as the owner, and switching the mode
-   off puts the tab back at its shipped position (`Terminal | Files | History`).
-§3 ONE page per SESSION: the stack follows `session_tabs.currentChanged` (each session keeps
-   its own browsed directory, its viewer and its state), a session born in the mode joins the
-   stack, and closing a tab hands its widget back before the session dies.
-§4 The lazy channel open moves: the panel mode has no Files tab to switch to, so the SFTP
-   channel opens from `connected_signal` — and for a session that is already connected when
-   the mode is switched on.
-§5 The fold: one owner-written key (`ui_files_panel_collapsed`), the 24 px `_CollapseStrip`,
-   the `setMaximumWidth` cap and the hand-over of the freed width to the columns on the LEFT
-   (the three-member arithmetic — the bug a mirrored two-member copy would have shipped).
-§6 The floors: the canvas keeps `FILES_PANEL_MIN_COLS` live cells at a narrow window (the
-   mirror of `SPLIT_MIN_ROWS`), the open panel keeps `FILES_PANEL_MIN_PX`, and both are gone
-   again in the shipped single-pane look.
-§7 The mutual exclusion with the Files Commander: the corner control is DISABLED while the
-   panel is on, the two-pane view of every tab is forced OFF but KEPT, and switching the
-   panel off restores it (the kept state is also what a window close writes).
-§8 The refusals and the scope: `terminal_mode = "tabs"` IGNORES the mode (the dock has no
-   panel and keeps its Files tab), and a SPLIT PANE (`with_sftp=False`) gets none.
-§9 The persistence: `ui_files_panel_collapsed` alone rides the window's SINGLE geometry
-   write — the MODE is not written back (the setting stays its one owner) — the restore comes
-   back through the ONE action, and a broken value falls back to the shipped single-pane look.
-§10 The chrome: live i18n (the action, the panel's own strings and the hub's new row) + the
-   release state (the pins of `tests/_common.py`).
-
-Run:  python tests/test_terminal_files_panel.py   (from the project root) or python tests/run_all.py
-"""
+Run: python tests/test_terminal_files_panel.py   (from the project root) or python tests/run_all.py"""
 import inspect
 import re
 import sys
@@ -700,8 +664,8 @@ check("§10 EXPECTED_APP_VERSION is the release this file describes (the 1.7.1 p
       and re.fullmatch(r"1\.7(?:rc\d+|(?:\.\d+){1,2})?", EXPECTED_APP_VERSION) is not None,
       EXPECTED_APP_VERSION)
 check("§10 the pin counts the shipped release (863 + the 4 keys of the Files panel"
-      " + the 3 of the Files display mode)",
-      EXPECTED_I18N_KEYS == 863 + 4 + 3, str(EXPECTED_I18N_KEYS))
+      " + the 3 of the Files display mode + the 4 of the v1.7.1.2 device choice)",
+      EXPECTED_I18N_KEYS == 863 + 4 + 3 + 4, str(EXPECTED_I18N_KEYS))
 check("§10 VERSION_FORMAT stays `0.9` (the mode lives in config.json, not in the project file)",
       __import__("version").VERSION_FORMAT == "0.9")
 check("§10 no new dependency was added for the panel (the four pinned ones)",

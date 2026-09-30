@@ -1,45 +1,16 @@
 # -*- coding: utf-8 -*-
-"""v1.5.7 (ROADMAP v1.5.7): the COMMAND history — the terminal's third tab, one history per server.
-
-The session grows a **History** tab after `Terminal` and `Files`: the commands of THIS server,
-kept between sessions. The module has the `modules/command_library.py` shape — store + panel +
-pure functions, no import of the window — and is composed of three parts:
-
-  * **the PURE parser** — `parse_history_text(text)` (no Qt, no I/O): the text of a history file
-    in, the entries + a report out. The rules are DECLARED, not guessed: bash (one command per
-    line, plus the `HISTTIMEFORMAT` markers `#<epoch>` whose timestamp belongs to the commands
-    that FOLLOW them), zsh extended (`: <epoch>:<duration>;<command>`) and the empty lines
-    dropped. The identity of an entry is the command text after `strip()` ONLY — no case folding
-    and no inner-whitespace collapsing (that would silently corrupt commands: `grep  a` is not
-    `grep a`). A duplicate keeps the LATEST timestamp and counts its repeats.
-  * **`CommandHistoryStore`** — `~/.sshmap/history/<key>.json`, ONE file per server, keyed by
-    `ServerData.id` (the same identity the keyring uses, so a renamed alias or a changed host
-    keeps its history). A write RE-READS AND MERGES the document, it never overwrites it from
-    memory: two sessions of one node (a tab and a split pane) share the file. A corrupt file is a
-    log line + an empty history — user data is never re-seeded and a read never writes.
-  * **`CommandHistoryPanel`** — the tab: the filter, the three-column tree (command / last used /
-    count) and the counts line, the right-click menu (import a local file, import the server's
-    `~/.bash_history` over the session's SFTP channel, copy, send to the terminal, merge the
-    duplicates, clear).
-
-**Naming (do not skip it).** In this codebase the word "history" already means the pyte
-SCROLLBACK (`TerminalScreen.history`, `terminal_history_lines`). The owner of THIS module is the
-COMMAND history and is therefore `command_history` / `cmd_history` everywhere; the existing keys
-and constants are not renamed (i18n is additive only).
-
-**What is recorded, and what is deliberately NOT.** The application records exactly what IT sent
-(the macro library, quick launch, the "Send to terminal" of this tab — the ONE `send_macro()`
-path, plus the server import, which is a read). **Nothing is inferred from the typed input**: the
-canvas sees raw bytes and keys, not the shell's line editing (arrows, backspace, Tab completion,
-`Ctrl+R`), so a reconstruction of a typed command would be a guess. That is a documented
-non-goal, not a bug.
-
-**Security.** `~/.sshmap/history/*.json` is a plain-text file and its entries may carry secrets
-(a token or a password passed as an argument of a command). It is never logged, never written
-into the project file and never exported. An entry that the application SENDS and that matches
-the declared secret shapes is written AND MARKED (`SECRET_FIELD` + the panel's row marker) —
-the mark is additive to the file's own shape and the PROJECT's `VERSION_FORMAT` is untouched.
-"""
+"""The COMMAND history — the terminal's third tab, one history per server (`DOCUMENTATION.md` §49, `AGENTS.md` §4.3).
+The PURE parser `parse_history_text(text)` returns the entries plus a report: bash (one command per
+line, the `HISTTIMEFORMAT` markers `#<epoch>` belonging to the commands that FOLLOW them), zsh
+extended (`: <epoch>:<duration>;<command>`), empty lines dropped. An entry's identity is the command
+text after `strip()` ONLY — no case folding, no collapsing of inner whitespace (`grep  a` is not
+`grep a`); a duplicate keeps the LATEST timestamp and counts repeats. `CommandHistoryStore` owns
+`~/.sshmap/history/<key>.json`, ONE file per `ServerData.id` (a renamed alias keeps its history):
+a write RE-READS AND MERGES (two sessions of one node share the file) and a corrupt file is a log
+line + an empty history (a read never writes). `CommandHistoryPanel` is the tab: the filter, the
+three-column tree, the counts line and the right-click menu (import a local file or the server's
+`~/.bash_history`, copy, send, merge duplicates, clear); only what the APPLICATION sent is recorded
+(the ONE `send_macro()` path), and the file may carry secrets — never logged, never exported."""
 
 import hashlib
 import json
@@ -123,13 +94,11 @@ FORMAT_VERSION = 1
 SERVER_HISTORY_PATH = "~/.bash_history"
 
 
-# ── v1.6.2 (ROADMAP task 3): the Command column is SIZED, and the size is KEPT ─────
-# The panel never touched a column width, so all three sections sat at Qt's own default
-# (measured: `QHeaderView.defaultSectionSize()` = 100 px) and a 636 px command was elided to
-# a few characters. TWO halves, ONE rule: a DECLARED default and the width the user dragged,
-# persisted as ONE int in `~/.sshmap/config.json` and re-applied BEFORE the first `reload()`.
-# The name follows the `ui_terminal_split_ratio` precedent (a `ui_*` UI state written by its
-# OWNER, not a settings-hub row: `collect()` stays at its own key count).
+# ── the Command column is SIZED, and the size is KEPT ─────
+# Without a width all three sections sat at Qt's own default (measured: 100 px) and a long command was
+# elided to a few characters. TWO halves, ONE rule: a DECLARED default
+# (`HISTORY_COL_COMMAND_WIDTH_DEFAULT`) and the width the user dragged, persisted as ONE int in
+# `~/.sshmap/config.json` and re-applied BEFORE the first `reload()` (owner-written UI state, §4.3).
 
 #: The width the panel opens with. 400 = 4 × Qt's default section size — the maintainer's ask,
 #: and the `modules/sftp_tab.py` precedent (`self.tree.setColumnWidth(0, 320)`) applied to the
@@ -150,30 +119,20 @@ HISTORY_COL_COMMAND_WIDTH_KEY = "ui_terminal_history_cmd_width"
 COMMAND_WIDTH_SAVE_DEBOUNCE_MS = 600
 
 
-# ── v1.6.4 (ROADMAP task 2): the MARKED secret ──────────────────────────────
-# The store holds what the APPLICATION sent, and such an entry may carry a secret. The
-# DECIDED rule: the entry is WRITTEN **and MARKED** — the application never loses what it
-# really put on the wire (the one fact this store exists to keep, which a refusal would
-# silently drop), while the user can SEE that a row is sensitive. The two REFUSED variants
-# and their reasons are recorded in CHANGELOG.md.
-#
-# The mark is a declared boolean in the entry (`SECRET_FIELD`), and the pattern list below
-# is evaluated ONCE, at the single write path of what the application sends
-# (`CommandHistoryStore.record()` — reached from `record_sent_command()`). An IMPORTED
-# history file is deliberately NOT scanned: it is the shell's own record of what a human
-# typed, not what this application sent, and the mark is a statement about the latter.
+# ── the MARKED secret ─────────────────────────────────────────────────────────
+# An entry the application sent may carry a secret: it is WRITTEN **and MARKED** — the store
+# never loses what really went on the wire, while the user SEES that the row is sensitive
+# (the refused variants are in CHANGELOG.md). The mark is `SECRET_FIELD`, evaluated ONCE at
+# the single write path (`record()`); an IMPORTED history file is NOT scanned — it is the shell's.
 
 #: The entry field that carries the mark (additive to the history file's own shape; the
 #: PROJECT's `VERSION_FORMAT` is a different schema and is deliberately untouched, §5).
 SECRET_FIELD = "secret"
 
-#: The DECLARED secret shapes — a literal list, never a heuristic:
-#:   * `-p<value>` (mysql/sshpass/…: the value is ATTACHED to the flag) and `-p <value>`;
-#:   * `password=<value>` / `--password <value>`;
-#:   * `passwd:` / `passwd=<value>`;
-#:   * `token=` / `secret=` / `api_key=` / `access_key=<value>` (any separator `=` or `:`);
-#:   * `Bearer <value>`;
-#:   * `-----BEGIN` (a pasted PEM block).
+#: The DECLARED secret shapes — a literal list, never a heuristic: `-p<value>` (mysql/sshpass) and
+#: `-p <value>`; `password=` / `--password <value>`; `passwd:` / `passwd=<value>`; `token=` / `secret=`
+#: / `api_key=` / `access_key=<value>` (any separator `=` or `:`); `Bearer <value>`; and `-----BEGIN`
+#: (a pasted PEM block). The patterns themselves are `SECRET_PATTERNS` below — this line names them.
 SECRET_PATTERNS = (
     re.compile(r"(?:^|\s)-p\s*\S"),
     re.compile(r"(?:^|\s)--?pass(?:word|wd)?\s*[:=]?\s*\S", re.I),
@@ -756,12 +715,11 @@ class CommandHistoryPanel(QWidget):
         self.tree.setRootIsDecorated(False)
         self.tree.setUniformRowHeights(True)
         self.tree.itemDoubleClicked.connect(self._on_item_double_clicked)
-        # THE POLICY IS WHAT MAKES THE SIGNAL EXIST (the sftp_tab pattern): with the default
-        # `Qt.DefaultContextMenu` a right click is a plain contextMenuEvent that this widget
-        # ignores, so it travels UP to the container — where the terminal window answers it with
-        # its own "Split Terminal" menu and the dock answers nothing at all. The panel takes the
-        # policy too, so a right click on the EMPTY area of a fresh history still reaches the two
-        # imports (the tree alone would leave that gesture to the container again).
+        # THE POLICY IS WHAT MAKES THE SIGNAL EXIST (the `sftp_tab` pattern): with the default
+        # `Qt.DefaultContextMenu` a right click is a plain `contextMenuEvent` that this widget ignores, so
+        # it travels UP to the container — where the terminal window answers with its own "Split Terminal"
+        # menu and the dock answers nothing at all. The panel takes the policy too, so a right click on the
+        # EMPTY area still reaches the two imports.
         self.tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.tree.customContextMenuRequested.connect(self._on_context_menu)
         self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)

@@ -1,47 +1,15 @@
-"""Background diagnostics of map nodes: ping + reverse DNS (v0.9.9.3).
-
-The classes were moved in v0.9.9.3 FROM ui/main_window.py, where they were
-nested directly in the `_ping_node` / `_copy_node_info` methods (phase 0 of the
-"main_window.py hygiene" series). ZERO behavior change: the same signals, the
-same ping command lines, the same i18n keys, the same fallback to host on a
-DNS failure.
-
-The "module + callbacks" pattern: MainWindow holds references to the threads
-(`self._ping_thread` / `self._dns_thread` — guard AUDIT v0.7.2 #8 against
-clobbering a running ping and orphan threads), connects the signals
-with local closures as callbacks and starts the thread; the stop on window
-close — the shared `_shutdown_background_threads()` (stop()/wait(), like StatusChecker).
-
-Usage (MainWindow):
-    from services.diagnostics import PingThread, ReverseDnsThread
-
-    ping = PingThread(host)
-    ping.finished_ping.connect(on_done)      # (ok: bool, text: str)
-    self._ping_thread = ping                 # keep the reference — not an orphan
-    ping.start()
-
-    dns = ReverseDnsThread(host, parent=self)  # v1.2.10rc1: parent — owner of the C++ object
-    dns.resolved.connect(on_resolved)        # (name: str)
-    self._dns_thread = dns
-    dns.start()
-
-v1.2.10rc1 (AUDIT auto #2 + a verification finding): the orphan-thread registry
-`_orphan_threads` + `register_orphan_thread()` — ping/DNS have no stop(), and with
-an unreachable resolver getaddrinfo/ping outlive the shutdown wait budget
-(~2 s); a surviving thread must not be left to GC ("QThread: Destroyed while thread
-is still running") — the registry holds it until finished() (pattern N4, _orphan_threads
-from modules/ssh_terminal.py).
-
-v1.5.3 (ROADMAP task 3): the module also owns the **reachability report** — the "why is
-it red?" answer behind a red card. `diagnose_reachability()` runs the steps the
-application already knows how to take, IN ORDER — DNS resolve → TCP connect → SSH
-banner → ICMP ping — and names the FIRST step that failed in its own words; `ReachabilityThread`
-is the off-the-GUI-thread wrapper. The report is a `ReachabilityReport` (a frozen
-dataclass of FACTS — no i18n, no Qt), and `report_parts()` turns it into the
-`(i18n key, params)` pairs the window formats: this module stays language-free exactly
-like `status_checker.probe_ssh`, and the STATUS itself is never touched — a report
-explains, it does not decide.
-"""
+"""Background diagnostics off the GUI thread — ping, reverse DNS and the reachability report — in the
+"module + callbacks" pattern (AGENTS.md §4.1; DOCUMENTATION.md §46).
+`PingThread(host)` emits `finished_ping(ok, text)`, `ReverseDnsThread(host, parent=…)` emits
+`resolved(name)`; MainWindow keeps the reference (`self._ping_thread` / `self._dns_thread`) and
+connects with local closures, so a repeated request never clobbers a running one, and
+`_shutdown_background_threads()` stops them with `stop()`/`wait()`. Neither has a `stop()`: with an
+unreachable resolver it outlives the wait budget, so a survivor goes to the orphan registry
+(`_orphan_threads` / `register_orphan_thread()`) — never a live QThread left to GC.
+`diagnose_reachability()` walks the steps the application already knows IN ORDER (DNS resolve → TCP
+connect → SSH banner → ICMP ping) and names the FIRST failure in its own words; `ReachabilityThread`
+wraps it off-thread, and `ReachabilityReport` / `report_parts()` give the window its
+`(i18n key, params)` pairs. No Qt, no i18n here, and no status is ever touched by a report."""
 import platform
 import socket
 import subprocess
@@ -53,16 +21,11 @@ from typing import List
 from PySide6.QtCore import QThread, Signal
 
 
-# ── v1.2.10rc1: orphan-thread registry for ping/DNS (pattern N4) ───────────────────
-# PingThread/ReverseDnsThread have NO stop(): on window close we can only
-# wait for them with a budget (~2 s, MainWindow._shutdown_background_threads).
-# If getaddrinfo/ping outlive the budget (an unreachable resolver — exactly the
-# scenario for which DNS was moved to a thread), a live QThread with no strong
-# referencing object must not be left to GC: "QThread: Destroyed while thread
-# is still running" + the risk of a RuntimeError on late emits. The registry holds
-# such threads until finished() — like _orphan_threads (modules/ssh_terminal.py,
-# v1.1.2RC1 N4); all window slots are already disconnected / the window is closed
-# by then, so late emits without receivers — a safe no-op.
+# ── the orphan-thread registry for ping/DNS (the N4 pattern) ──────────────────────
+# `PingThread` / `ReverseDnsThread` have NO stop(): on window close they are only waited
+# for with a budget (`MainWindow._shutdown_background_threads`), and a live QThread with
+# no strong referencing object must not be left to GC ("QThread: Destroyed while running").
+# The registry holds such threads until `finished()` — `AGENTS.md` §4.3, `DOCUMENTATION.md` §64.
 _orphan_threads: List["QThread"] = []
 
 
@@ -134,7 +97,7 @@ class PingThread(QThread):
 class ReverseDnsThread(QThread):
     """Reverse DNS outside the GUI thread (AUDIT v0.7.2, medium #6).
 
-    With an unreachable resolver gethostbyaddr used to freeze on the DNS timeout
+    With an unreachable resolver gethostbyaddr freezes on the DNS timeout
     in the GUI thread; now — a separate thread, the resolved(name) signal.
     DNS did not return a name → name = the host itself (the callback copies it as-is).
     """
@@ -158,20 +121,11 @@ class ReverseDnsThread(QThread):
         self.resolved.emit(name)
 
 
-# ── v1.5.3 (ROADMAP task 3): the reachability report — "why is it red?" ────────────
-# A red card collapses refused / timeout / DNS into ONE `offline`
-# (`status_checker.probe_ssh`), and that is exactly the moment a user needs the
-# difference. The pieces of the real answer already exist in this module and in the
-# probe; the release only puts them in ORDER and names the FIRST step that failed.
-#
-# The steps are DECLARED (REPORT_STEP_ORDER) and the verdict of the first failure is a
-# KIND (one i18n key each) — so the report is data, and the sentence is composed by the
-# window (`report_parts()`), which keeps this module free of i18n and Qt-free logic
-# (`probe_ssh` has the same shape: a fact out, the words elsewhere).
-#
-# Budget: every network step keeps the 3 s probe budget (`REPORT_TIMEOUT_S`); a report
-# runs at most DNS + TCP + one ICMP packet, so it is bounded by ~2 × timeout + the ping's
-# own timeout — it is an EXPLICIT user action (a context-menu item), never a periodic one.
+# ── the reachability report — "why is it red?" ────────────────────────────────────
+# A red card collapses refused / timeout / DNS into ONE `offline`, which is exactly the moment
+# a user needs the difference: the report puts the existing pieces in ORDER and names the
+# FIRST step that failed. The steps are DECLARED (`REPORT_STEP_ORDER`) and a verdict is a
+# KIND (one i18n key), so the module stays Qt-free and the window composes the sentence.
 
 REPORT_TIMEOUT_S = 3.0                 # a single step's budget (the probe's own 3 s)
 PING_BUDGET_S = 4.0                    # the ICMP stage: 1 packet + a 4 s ceiling

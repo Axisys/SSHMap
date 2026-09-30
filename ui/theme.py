@@ -1,102 +1,25 @@
 # -*- coding: utf-8 -*-
-"""Central UI theme for SSH Map — the ``Theme`` object (v1.2.5, reworked in v1.4.3).
+"""Central UI theme — the ``Theme`` object: the single source of every colour, radius and font.
 
-The single source of truth for every colour, corner radius and font family of
-the application UI: nodes, arrows, notes, groups, dialogs, status labels, QSS
-strings, the base window palette (main.py).
-
-* v1.2.5 introduced the module with module-level constants (~50 colour points
-  in ~14 files with duplicates).
-* **v1.4.3 turned those constants into ONE ``Theme`` object.** The v1.2.5
-  docstring promised "the accent colour and a light theme are added by
-  reassigning this module's constants" — that promise was WRONG in one detail:
-  a consumer that captured a value at import time (``COLOR_BG = theme.NODE_BG``
-  in a class body, a QBrush built in ``__init__``) would never see the switch.
-  Reassigning is still what happens underneath, but the reading side moved to
-  *access time*: a consumer asks for ``theme.NODE_BG`` (the live proxy) or reads
-  a live descriptor / a property inside ``paint()``, so ``set_theme()`` is
-  visible everywhere without touching a single consumer.
-
-Structure of this module:
-
-    Theme      — the frozen dataclass: EVERY colour, radius and font of the UI;
-    DARK       — the instance that replicates the pre-v1.4.3 constants (the
-                 default; the values are pinned by tests/test_theme.py);
-    LIGHT      — the slate-100 counterpart (a light canvas, darker statuses);
-    accent_hex / accent_hover_hex / accent_selected_hex
-               — PURE functions: one hue → the three DECORATIVE accent shades;
-    accent_strong_hex / accent_strong_hover_hex / accent_strong_selected_hex
-               — PURE functions: the same hue → the three STRONG accent shades
-                 (v1.5rc1 — the tone for text on a surface and for a fill that
-                 carries text);
-    resolve_mode / system_color_scheme
-               — a mode id → "dark"/"light" ("auto" asks the PLATFORM);
-    ArrowStyle / ARROW_TYPE_STYLES / STATUS_SHAPES
-               — the DECLARED ENCODINGS (v1.5rc2): the six pen styles and the three
-                 status shapes — the second channel next to the colours, so the
-                 interface never encodes a meaning in a colour alone;
-    resolve_export_palette / export_theme
-               — an export palette id → the instance an export renders with
-                 (`print` = the LIGHT page by default, `theme` = the current look);
-    THEME      — the ACTIVE instance; ``set_theme()`` swaps it;
-    every old name (CANVAS_BG, ACCENT, RADIUS_NODE, FONT_UI, …) — a live proxy
-               that resolves against the ACTIVE instance on EVERY access;
-    STATUS_COLORS / TAG_COLORS / TAG_PALETTE / ARROW_TYPE_COLORS — live dict
-               views of the same instance (they are DERIVED, not stored twice);
-    ARROW_TYPE_STYLES / STATUS_SHAPES — the same live rule for the two ENCODINGS
-               (v1.5rc2: a dash pattern and a shape are geometry, declared once and
-               shared by the map, the sidebar, the legend and the exports);
-    SYNTAX_COLORS — the v1.4.7 syntax palette by ROLE (the SFTP viewer's
-               modules/syntax_highlight.py vocabulary), derived the same way.
-
-The module stays pure data: NO PySide6 import, importable without QApplication
-(convenient for tests). Colours are "#rrggbb" hex strings (QSS-compatible);
-consumers wrap them in QColor() where needed. The one exception is the
-PySide6-touching half of the switch — ``ui/theme_qss.py`` (the QPalette + the
-QSS builder), deliberately a separate module so this one keeps its promise.
-
-Out of scope (deliberately — see AGENTS.md §4.6):
-  * the palettes in modules/terminal_screen.py (default/nord/dracula/
-    tokyo_night) — user-selectable colour schemes for TERMINAL OUTPUT, not the
-    app UI theme;
-  * the colours in storage/export_drawio.py — the export format (its own
-    dark/light variants in draw.io XML);
-  * TerminalWidget.CURSOR_COLOR — the block cursor is tied to the terminal
-    scheme's default text ("classic look"), part of the output appearance.
-
-Adding a colour: one field on ``Theme``, one line in ``DARK``, one line in
-``LIGHT``, one proxy line at the bottom of this module, and **a row in the gate**
-(``tests/test_theme_contrast.py`` — either a ``(foreground, background,
-threshold)`` pair or an exemption with a written reason) — and NOTHING else. A
-new field that exists in only one instance is refused by the completeness test,
-and so is a colour that enters the registry without a threshold: the gate is what
-keeps "readable in both themes" a fact instead of a claim (v1.5rc1).
-
-Adding an ENCODING (v1.5rc2) is the sibling rule: a new connection type joins
-``ARROW_TYPE_STYLES`` with a style **pairwise distinct** from the other five, and
-a new availability status joins ``STATUS_SHAPES`` with one of the pinned shapes —
-``tests/test_encoding.py`` is the gate there ("a meaning that lives in a colour
-alone is a defect"), and it also measures the greyscale separation of every type
-in both instances.
-
-Dependency policy (unchanged in spirit, adjusted in v1.4.3): the module imports
-NOTHING outside the standard library (``dataclasses`` / ``copy`` / ``typing``) —
-in particular NO PySide6, so it stays importable without a QApplication. The
-PySide6 half of the switch lives in ``ui/theme_qss.py``.
-"""
+PURE DATA — nothing outside the standard library is imported (no PySide6, so it is importable
+without a QApplication; the PySide6 half of the switch is ``ui/theme_qss.py``). The READING side
+resolves at ACCESS time: a value captured at import time never follows ``set_theme()``, so a
+consumer asks for ``theme.NODE_BG`` (the live proxy) or reads a live descriptor inside ``paint()``.
+``Theme`` is frozen and ``DARK`` / ``LIGHT`` are the two instances; the accent shades, the declared
+``ARROW_TYPE_STYLES`` / ``STATUS_SHAPES`` and the dict views (``STATUS_COLORS``, ``TAG_COLORS``,
+``SYNTAX_COLORS``) all resolve against the ACTIVE instance. Out of scope: the terminal output
+palettes, the draw.io colours and ``TerminalWidget.CURSOR_COLOR``. The cache rule, the numbers and
+the gates — ``DOCUMENTATION.md`` (the "Central UI theme" chapter) and ``AGENTS.md`` §4.6."""
 
 import copy
 import dataclasses
 from dataclasses import dataclass
 from typing import Dict, List, Optional
 
-# The default accent hue (v1.4.3): the sky accent of v1.2.5-v1.4.2 (#38bdf8).
-# The three numbers below are the HSL coordinates of that EXACT colour — and the
-# HSL↔RGB formulas round 0.5 up, so the coordinates are pinned by the acceptance
-# test as VALUES rather than as a claim: 198.4/93/59.6 reproduces `#38bdf8` to
-# the byte, which is what keeps DARK's accent identical to the pre-v1.4.3
-# constant instead of "nearly identical". (198/92/60, the obvious reading, gives
-# `#3bbbf7` — three channels off — which is why the pair is written out.)
+# The default accent hue: the sky accent `#38bdf8`, whose HSL coordinates are the three numbers
+# below. The HSL↔RGB formulas round 0.5 up, so the pair is pinned by the acceptance test as VALUES
+# rather than as a claim: 198.4/93/59.6 reproduces the colour to the byte, while the obvious reading
+# 198/92/60 gives `#3bbbf7` — three channels off, which is why it is written out.
 DEFAULT_ACCENT_HUE = 198.4
 
 # The saturation/lightness of the accent shades. They are FIXED so that the
@@ -114,20 +37,11 @@ MODE_LIGHT = "light"
 MODE_AUTO = "auto"
 MODES = (MODE_DARK, MODE_LIGHT, MODE_AUTO)
 
-# ── The CARD DENSITY (v1.6, ROADMAP task 2) ───────────────────────────────────
-# The SECOND non-colour flag of the nested ``theme`` config object (the `motion`
-# precedent): how much of a server card the map paints. It is NOT a Theme field —
-# nothing here is a colour — but the VALUE is read live like every other datum of
-# this section, so a switch reaches the cards through the ordinary refresh walk.
-#
-#   * ``normal``  — the historical card: alias, host, the info plaque and the two
-#                   badges. The DEFAULT, and a project renders byte-identically to
-#                   the pre-v1.6 build with it.
-#   * ``compact`` — the dense card of a map at scale: the alias, the host and the
-#                   status marks stay, the info plaque and the environment chip
-#                   collapse. The measured height formula (``58 + info + 12``, floored
-#                   by ``ServerNode.MIN_NODE_HEIGHT``) and the FREE BAND rules hold in
-#                   BOTH modes — a badge never enters the height.
+# ── The CARD DENSITY ──────────────────────────────────────────────────────────
+# The SECOND non-colour flag of the nested ``theme`` config object (the `motion` precedent):
+# how much of a card the map paints. NOT a Theme field, but read live like every other datum
+# here.   * ``normal``  — alias, host, the info plaque and the two badges (the DEFAULT,
+# byte-identical to the pre-1.6 card);   * ``compact`` — alias, host and the status marks only.
 DENSITY_NORMAL = "normal"
 DENSITY_COMPACT = "compact"
 DENSITIES = (DENSITY_NORMAL, DENSITY_COMPACT)
@@ -167,23 +81,11 @@ PALETTE_PRINT = "print"
 PALETTE_THEME = "theme"
 EXPORT_PALETTES = (PALETTE_PRINT, PALETTE_THEME)
 
-# ── The STRONG accent (v1.5rc1, ROADMAP task 1) ───────────────────────────────
-# The DECORATIVE accent above is drawn on the theme's own surfaces: a border, a
-# glow, a frame. The STRONG accent is the second role of the same hue — the tone
-# for TEXT on a surface and for a FILL that carries text — so it has to clear the
-# AA threshold on the surfaces of its mode, which the decorative tone cannot do on
-# a light one (`#38bdf8` on `#f8fafc` measures 2.05).
-#
-#   * DARK  — the strong tone IS the decorative one (lightness 59.6 + the same ±5
-#             pair), so every call site that moves to `accent_strong` renders
-#             byte-identically to the pre-v1.5rc1 build. The DARK look does not
-#             move a pixel; that is what the literal snapshot test proves.
-#   * LIGHT — lightness 34.0, the deepest value the design review's arithmetic
-#             allows while a near-white text still clears AC against the fill
-#             (`#0676a7`: 4.83 on the canvas, 4.61 on the window surface), and the
-#             hover/selected pair goes DARKER (never brighter): the strong family
-#             exists to be readable, so "more contrast" is the only direction it
-#             may move. `tests/test_theme_contrast.py` is the gate that pins it.
+# ── the STRONG accent ─────────────────────────────────────────────────────────
+# The second role of the same hue: the tone for TEXT on a surface and for a FILL that
+# carries text, so it clears the AA threshold on the surfaces of its mode. In DARK it IS
+# the decorative tone (the DARK look does not move a pixel); in LIGHT its hover/selected
+# pair only ever goes DARKER. Numbers, roles and the gate — `DOCUMENTATION.md`, §4.6.
 ACCENT_STRONG_LIGHTNESS = {MODE_DARK: ACCENT_LIGHTNESS, MODE_LIGHT: 34.0}
 ACCENT_STRONG_HOVER_DELTA = {MODE_DARK: ACCENT_HOVER_DELTA, MODE_LIGHT: -4.0}
 ACCENT_STRONG_SELECTED_DELTA = {MODE_DARK: ACCENT_SELECTED_DELTA, MODE_LIGHT: -8.0}
@@ -305,15 +207,11 @@ def accent_strong_selected_hex(hue=None, mode: str = MODE_DARK) -> str:
                        mode, ACCENT_STRONG_SELECTED_DELTA[MODE_DARK])))
 
 
-# ── The second channel: per-type pen styles + status shapes (v1.5rc2) ─────────
-# ROADMAP v1.5rc2, tasks 1/2 — "the interface stops encoding meaning in colour
-# alone". Both declarations live HERE, next to the palettes they accompany, for the
-# reason every other declaration lives here: a consumer (the arrow, the card dot,
-# the sidebar row, the legend, the exports, the topical test) reads ONE source, so
-# a mark can never drift from the map. Unlike a COLOUR these are not per-instance:
-# a dash pattern and a shape are geometry, identical in DARK and LIGHT (like the
-# radii) — but they are still reached through the ACTIVE theme (live properties
-# below), so the reading rule of §4.6 holds without an exception.
+# ── The second channel: per-type pen styles + status shapes ───────────────────
+# OWNED HERE, next to the palettes they accompany, so a consumer (the arrow, the card dot,
+# the sidebar row, the legend, the exports, the topical test) reads ONE source and a mark
+# cannot drift from the map. A dash pattern and a shape are geometry, identical in DARK and
+# LIGHT — but they are still reached through the ACTIVE theme (the §4.6 reading rule).
 
 @dataclass(frozen=True)
 class ArrowStyle:
@@ -365,12 +263,11 @@ def arrow_type_style(ctype: str) -> ArrowStyle:
     return ARROW_TYPE_STYLES.get(ctype, DEFAULT_ARROW_STYLE)
 
 
-# ── The declared STATUS SHAPES (v1.5rc2, ROADMAP task 2) ──────────────────────
-# The pinned set: a filled dot / a ring / a triangle. One shape per availability
-# status, drawn by the card's status dot, the sidebar row's marker and the legend —
-# so a status is readable in greyscale and for colour-vision deficiencies. The
-# WORDS stay in the tooltips (`node.status.*`), which is what makes the shape a
-# second channel rather than a replacement.
+# ── The declared STATUS SHAPES ──────────────────────
+# The pinned set: a filled dot / a ring / a triangle — one shape per availability status, drawn by the
+# card's status dot, the sidebar row's marker and the legend, so a status is readable in greyscale and
+# for colour-vision deficiencies. The WORDS stay in the tooltips (`node.status.*`), which is what makes
+# the shape a second channel rather than a replacement (`AGENTS.md` §4.6).
 STATUS_SHAPE_DOT = "dot"
 STATUS_SHAPE_RING = "ring"
 STATUS_SHAPE_TRIANGLE = "triangle"
@@ -390,13 +287,11 @@ def status_shape(status) -> str:
     return STATUS_SHAPES.get(status, DEFAULT_STATUS_SHAPE)
 
 
-# ── "Auto (system)" (v1.5rc1, ROADMAP task 6) ─────────────────────────────────
-# The third mode reads the PLATFORM's colour scheme. Qt exposes it as
-# `QStyleHints.colorScheme()`; the import is LAZY (inside the function), which is
-# how this module keeps its "no PySide6 at import time" contract — the same trick
-# the class-level descriptors below use. A platform without the hint (or a
-# PySide6 that does not know the enum) behaves exactly like the releases before
-# this one: the dark theme.
+# ── "Auto (system)" ───────────────────────────────────────────────────────────
+# The third mode reads the PLATFORM's colour scheme through `QStyleHints.colorScheme()`; the
+# import is LAZY (inside the function), which is how this module keeps its "no PySide6 at import
+# time" contract — the same trick the class-level descriptors below use. A platform without the
+# hint (or a PySide6 that does not know the enum) behaves like the dark theme, never an error.
 
 def system_color_scheme() -> str:
     """The platform's colour scheme as a mode id (v1.5rc1) — DARK when unknown.
@@ -529,12 +424,11 @@ class Theme:
     note_border: str
     note_text: str
 
-    # ── Syntax highlighting of the SFTP viewer (v1.4.7) ──────────────────────
-    # A palette of its OWN, like the terminal output palettes of
-    # modules/terminal_screen.py — these tones colour the READ-ONLY preview of
-    # modules/sftp_tab.py and nothing else. The names are the ROLE names of
-    # modules/syntax_highlight.py (`syntax_<role>`), and the reader is the
-    # `syntax_colors` property below (declared once, like every other dict).
+    # ── Syntax highlighting of the SFTP viewer ──────────────────────
+    # A palette of its OWN, like the terminal output palettes of `modules/terminal_screen.py` — these
+    # tones colour the READ-ONLY preview of `modules/sftp_tab.py` and nothing else. The names are the
+    # ROLE names of `modules/syntax_highlight.py` (`syntax_<role>`), and the reader is the
+    # `syntax_colors` property below (`DOCUMENTATION.md` §38).
     syntax_number: str
     syntax_string: str
     syntax_key: str
@@ -568,7 +462,7 @@ class Theme:
 
     @property
     def tag_colors(self) -> Dict[str, str]:
-        """Known roles — fixed colours (order as in v0.9.4)."""
+        """Known roles — the fixed colours (the v0.9.4 order)."""
         return {"prod": self.status_offline,   # red — production environment
                 "staging": self.status_warn,   # yellow — staging
                 "dev": self.status_online,     # green — development
@@ -722,7 +616,7 @@ DARK = Theme(
     arrow_kubernetes="#22d3ee",
     arrow_hover_compat="#6ee7b7",
 
-    # Notes — the muted yellow palette of v1.2.4-fix (kept by LIGHT too: it
+    # Notes — the muted yellow palette (kept by LIGHT too: it
     # reads on a light background, which is why the sticky note does not change)
     note_bg="#eedd9f",
     note_border="#a9853d",
@@ -757,22 +651,11 @@ DARK = Theme(
 )
 
 
-# ── LIGHT — the slate-100 counterpart (v1.4.3, retuned in v1.5rc1) ─────────────
-# The SAME field set as DARK (a field existing in only one instance is refused by
-# the completeness test). Only what a light background really changes moves.
-#
-# **v1.5rc1 (ROADMAP tasks 1/3/4/5) re-tuned this instance against MEASURED
-# thresholds.** The design review of 2026-09-27 measured the as-shipped palette
-# and found the light half below the readability line: the accent used as text
-# 2.05 (the decorative sky is a BORDER tone, not an ink), the `vpn` and `database`
-# arrows 2.43/2.60 — a dark-tuned value (`node_hover`, `group_hover`) propagated
-# onto a light surface by the ("declared once") derivation — the warn status 2.94
-# on the white card, `text_muted` 4.34 (AA wants 4.5) and the amber selection
-# 2.05. Every number below is a DECISION pinned by `tests/test_theme_contrast.py`,
-# which is the gate: a tone that stops clearing its threshold fails the suite.
-# What deliberately did NOT move: the surfaces, `text_primary`, `icon_color`, the
-# tag roles (`tag_test`/`tag_backup`/`tag_dmz`/`tag_pink`) and `status_online`/
-# `status_offline` — they already cleared their thresholds.
+# ── LIGHT — the slate-100 counterpart ─────────────────────────────────────────
+# The SAME field set as DARK (a field in only one instance is refused by the completeness
+# test); only what a light background really changes moves. The light half is tuned against
+# MEASURED thresholds: every number below is pinned by `tests/test_theme_contrast.py`, so a
+# tone that stops clearing its threshold fails the suite.
 
 LIGHT = Theme(
     # Surfaces (slate-100 scale)
@@ -804,12 +687,10 @@ LIGHT = Theme(
     # on the canvas: amber-700 clears AA on the window (4.58) and 3:1 as a mark.
     selection_amber="#b45309",
 
-    # Server node (card): the card is WHITE on the light canvas — that is what
-    # separates a node from the background now (the halo shadow still works).
-    # The blues are ordered by strength: the resting outline, the hover outline
-    # (also the `vpn` arrow) and the icon PLATE — which inverts with the theme
-    # (a pale plate under the near-black glyph; the deep one of v1.4.3 left the
-    # glyph at 2.05:1), keeping the round icon's own `node_border` outline.
+    # Server node (card): the card is WHITE on the light canvas — that is what separates a node from the
+    # background now (the halo shadow still works). The blues are ordered by strength: the resting
+    # outline, the hover outline (also the `vpn` arrow) and the icon PLATE — which inverts with the
+    # theme (a pale plate under the near-black glyph; the deep one left the glyph at 2.05:1).
     node_bg="#ffffff",
     node_border="#2563eb",
     node_hover="#1d4ed8",
@@ -858,12 +739,10 @@ LIGHT = Theme(
     note_border="#8a6d2f",
     note_text="#403a2b",
 
-    # Syntax highlighting of the SFTP viewer (v1.4.7): the SAME role set, tuned
-    # for the light viewer background (`base_bg` — the QPlainTextEdit surface the
-    # global QSS gives it). v1.5rc1 re-tuned them to AA on THAT surface: the
-    # v1.4.7 set measured 2.58 … 4.48 there. Again: eight distinct values, none
-    # of them the light "no preview" tone (#a16207), and every one of them a
-    # value this instance already ships elsewhere (the SFTP topical test's rule).
+    # Syntax highlighting of the SFTP viewer: the SAME role set, tuned for the light viewer background
+    # (`base_bg` — the QPlainTextEdit surface the global QSS gives it), re-tuned to AA on THAT surface
+    # (the first set measured 2.58 … 4.48 there). Again: eight distinct values, none of them the light
+    # "no preview" tone (#a16207), every one of them a value this instance already ships elsewhere.
     syntax_number="#92400e",        # the group-title-selected amber
     syntax_string="#065f46",        # the arrow-hover green
     syntax_key="#155e75",           # the Kubernetes deep cyan
@@ -950,14 +829,11 @@ def current_theme() -> Theme:
     return THEME
 
 
-# ── The export palette (v1.5rc2, ROADMAP task 3) ──────────────────────────────
-# The decision the ROADMAP asked to pin at the START of the rc: an export renders
-# PRINT-FRIENDLY by default. "Print-friendly" is not a third palette to maintain —
-# it IS `LIGHT` (the white page and the strokes the 1.5rc1 gate already measured at
-# AA), asked for with the ACTIVE theme's accent hue so the user's accent survives
-# the switch. `theme` keeps the current look, and both are addressed by the two
-# ids above, so the scene, the `.drawio` writer and the export dialog speak ONE
-# vocabulary.
+# ── The export palette ────────────────────────────────────────────────────────
+# An export renders PRINT-FRIENDLY by default and "print-friendly" is not a third palette:
+# it IS `LIGHT` (the white page and the strokes the contrast gate already measured at AA),
+# asked for with the ACTIVE theme's accent hue so the user's accent survives the switch.
+# `theme` keeps the current look; both are addressed by the two ids above — ONE vocabulary.
 
 def resolve_export_palette(palette) -> str:
     """An export palette id → a KNOWN id (an unknown / missing value → `print`)."""
@@ -985,16 +861,11 @@ def theme_snapshot() -> dict:
     return {f.name: copy.deepcopy(getattr(THEME, f.name)) for f in dataclasses.fields(Theme)}
 
 
-# ── Live descriptors for CLASS-LEVEL constants ────────────────────────────────
-# A class that used to cache a colour in its body is the second half of the
-# v1.4.3 problem (the first is the module constant): ``ServerNode.COLOR_BG =
-# QColor(theme.NODE_BG)`` captured the value at IMPORT time, so a class attribute
-# read (``node.COLOR_BG``, ``ServerNode.STATUS_COLORS``) — which is how the
-# paint code and the tests read them — would keep the old theme forever. These
-# two descriptors keep the exact old syntax working while resolving the ACTIVE
-# instance on every access. A fresh QColor per access is deliberate: a QColor is
-# a cheap value object and the shared-instance trap (Qt implicit sharing) is
-# exactly what the switch has to avoid.
+# ── Live descriptors for CLASS-LEVEL constants (the `DOCUMENTATION.md` theme chapter) ──
+# A class attribute CACHING a colour (``ServerNode.COLOR_BG = QColor(theme.NODE_BG)``) would
+# capture the value at IMPORT time and keep the old theme forever, so the class-level
+# constants are `ThemeColor` / `ThemeMap` / `ThemeValue` descriptors resolving the ACTIVE
+# instance on every access — a FRESH QColor each time (Qt implicit sharing is the trap).
 
 class ThemeColor:
     """A class attribute that is ``QColor(theme.<field>)`` of the ACTIVE theme.
@@ -1074,19 +945,10 @@ class ThemeValue:
 
 
 # ── Live module-level constants ───────────────────────────────────────────────
-# Every historical name of this module (`theme.NODE_BG`, `theme.RADIUS_NODE`,
-# `theme.FONT_UI`, …) is resolved by the module PEP-562 hook BELOW against the
-# ACTIVE instance, on every access. This is what makes the switch reach a
-# consumer that only ever wrote `theme.NODE_BG`: before v1.4.3 that read a plain
-# string captured at import time; now it asks the module every single time.
-#
-# Two deliberate consequences:
-#   * `THEME` stays a real Theme object (not a name in the mapping), so
-#     `isinstance(theme.THEME, theme.Theme)` and `dataclasses.replace()` work;
-#   * `from ui.theme import NODE_BG` would capture ONE value and silently stop
-#     following the theme — the imports inside the project therefore always go
-#     through the module (`from ..ui import theme`), which is what they did since
-#     v1.2.5. The mapping below is the authoritative list of the live names.
+# Every historical name (`theme.NODE_BG`, `theme.RADIUS_NODE`, …) is resolved by the PEP-562
+# hook BELOW against the ACTIVE instance, on every access — that is what makes the switch
+# reach a consumer that only wrote `theme.NODE_BG`. `THEME` stays a real `Theme` object, and
+# a `from ui.theme import NODE_BG` would capture ONE value, so the project imports the module.
 
 _LIVE_FIELDS: Dict[str, str] = {
     # surfaces

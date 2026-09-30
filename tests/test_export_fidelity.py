@@ -1,25 +1,12 @@
 # -*- coding: utf-8 -*-
 """v1.3.3.7 — Export fidelity: the drawio vertex keeps the map's data, SVG joins the formats.
 
-Checks (ROADMAP v1.3.3.7; offscreen, no network; the tests/test_drawio_export.py parser pattern):
-  §1 the drawio label carries the TAGS and the COMMENT — a multi-line comment survives
-     through `&#xa;`, the file stays parseable by `ET`, a node without them gains NO
-     extra line, and a group MEMBER cell is built by the same label function;
-  §2 the source audit of the two decisions: `status` is deliberately NOT read by the
-     exporter (a runtime fact, not project data — a live status never reaches the file)
-     and the tag COLOURS are not replicated;
-  §3 the SVG export: the file, the `<?xml`/`<svg` header, the node and connection
-     labels, background + grid (the drawBackground composition), the returned size ==
-     the size on disk, the scale parameter, an empty scene, and the API identity with
-     `render_to_pixmap`;
-  §4 the File menu: `_export_map_svg` exists, `file.export_svg` is in the i18n registry
-     AND in the hotkey registry (with a registered target), and a real call writes the file;
-  §5 the fate of the dead `load_drawio_structure` helper — DELETED, no importers left
-     (the decision recorded in v1.3.3.7);
-  §6 i18n (the 2 new keys × every discovered language + parity + format) and the release state.
-
-Run: python tests/test_export_fidelity.py   (from the project root) or python tests/run_all.py
-"""
+Offscreen and without the network (`tests/test_drawio_export.py`'s parser pattern).
+§1 the drawio label carries the TAGS and the COMMENT (a multi-line comment survives through `&#xa;`, the
+file stays parseable by `ET`, a node without them gains NO extra line, and a group MEMBER cell is built by
+the same label function); §2 the source audit of the two decisions (a live status never reaches the file,
+and the tag COLOURS are not replicated); §3 the SVG export (the `<?xml` / `<svg` header, the node and
+connection labels, the background and grid from `drawBackground`, the returned size equal to the size on disk, the scale parameter, an empty scene and the API identity with `render_to_pixmap`); §4 the File menu (`_export_map_svg` exists and `file.export_svg` sits in BOTH the i18n and the hotkey registry, with a real call writing the file); §5 the dead `load_drawio_structure` helper and its zero importers; §6 the i18n keys in every discovered language and the release state."""
 import os
 import re
 import xml.etree.ElementTree as ET

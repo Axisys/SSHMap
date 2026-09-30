@@ -1,46 +1,12 @@
 # -*- coding: utf-8 -*-
-"""v1.3.3.4 — Terminal: working with the output (ROADMAP v1.3.3.4, the topical file).
+"""Working with the terminal's output: the find bar, the reset and the transcript.
 
-The last version of the v1.3.3.x follow-up series gives the terminal the three
-"output" capabilities it never had (search in the scrollback, a way to throw the
-history away, a transcript), turns the command-library seed names into i18n keys and
-adds the per-session multi-input exclusion. Offscreen, NO network: the terminal
-thread is the shared fake (`tests/_fakes.py`), the SFTP progress is fed by hand.
+Offscreen, NO network (the fake threads). Pins the scrollback search (visible grid + history, the
+wraparound walk), the local clear/reset that sends no byte, the transcript TEE, the multi-input
+exclusion and the shortcut claim (`ShortcutOverride`) of a docked session.
+Contract — `AGENTS.md` §4.3.
 
-§1 The find bar over a synthetic scrollback (task 1): the panel opens from the
-   CANVAS (Ctrl+Shift+F) and from the context menu; a case-insensitive LITERAL
-   search over the history AND the live grid; the "k / N" counter; Enter/Shift+
-   Enter walk the matches with wraparound and the viewport follows; Esc closes the
-   panel and restores the history position the search started from; NOT one byte
-   reaches the PTY (the fake thread records every send); a plain Ctrl+F still goes
-   to the shell as \\x06 (the §14a scope boundary — the terminal's keys are the
-   xterm protocol and are not configurable).
-
-§2 Clear the scrollback / reset the screen (task 2): two LOCAL context-menu actions
-   — the history is dropped while the live grid survives, the grid is re-initialized
-   and repainted; the PTY receives nothing.
-
-§3 Save transcript… (task 3): the checkable menu item + the file dialog seam; the tee
-   appends EXACTLY the fed bytes (raw, ANSI and non-UTF-8 included); an existing file
-   is appended to, never truncated; a cancelled dialog leaves the tee off; the file is
-   closed by the idempotent page.shutdown() and a write after it is a safe no-op.
-
-§4 The command-library seed names (task 4): the first seeding writes the names in the
-   ACTIVE language; an EXISTING commands.json is never re-translated.
-
-§5 The multi-input exclusion (task 5): the hub skips an excluded session (its own
-   typing keeps working), the participant count / the plaque counter follow, the tab
-   carries the "NO MULTI" badge, un-excluding restores everything; F12 / the registry
-   entry are unchanged.
-
-§6 The transfer rate/ETA of the SFTP progress line (task 6 — the detachable task 7 of
-   v1.3.3.2): the duration formatter and the sliding-window meter (pure, an injected
-   clock), and the progress line the page actually emits.
-
-§7 i18n parity (+17 keys) and the release state (the pin in tests/_common.py).
-
-Run:  python tests/test_terminal_output.py   (from the project root) or python tests/run_all.py
-"""
+Run: python tests/test_terminal_output.py   (from the project root) or python tests/run_all.py"""
 import json
 import os
 import sys
@@ -610,14 +576,11 @@ mw._toggle_multi_input(False)
 
 # ══════════════════════════════════════════════════════════════════════════════
 print("== 5b. the canvas owns its keys in a DOCKED session (the ShortcutOverride fix) ==")
-# ══════════════════════════════════════════════════════════════════════════════
-# In `terminal_mode = "tabs"` the session lives INSIDE the main window, so its
-# window-level QActions claim Ctrl+F / Ctrl+Shift+F / Ctrl+D / Ctrl+Z / Delete…
-# Qt asks the FOCUS WIDGET first (ShortcutOverride) — before v1.3.3.4-fix the plain
-# QWidget ignored it and the QAction won, so a docked terminal never received those
-# keys (Ctrl+D duplicated a map node, Ctrl+Shift+F ran "fit map"). The canvas now
-# claims the Ctrl+… combinations and the function/Delete family; the map-focused
-# case below proves the claim is scoped to the focused canvas.
+# ═══ the canvas claims its keys (terminal_mode = "tabs") ═══
+# The session lives INSIDE the main window, so its window-level QActions claim Ctrl+F / Ctrl+Shift+F /
+# Ctrl+D / Ctrl+Z / Delete… Qt asks the FOCUS WIDGET first (ShortcutOverride) — a plain QWidget ignored
+# it and the QAction won, so a docked terminal never received those keys. The canvas claims the Ctrl+…
+# combinations and the function/Delete family; the map-focused case below proves the claim is scoped.
 
 os.makedirs(os.path.dirname(config_path()), exist_ok=True)
 with open(config_path(), "w", encoding="utf-8") as f:

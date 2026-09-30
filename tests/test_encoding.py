@@ -1,33 +1,12 @@
 # -*- coding: utf-8 -*-
 """v1.5rc2 — the ENCODING gate: "no meaning in a colour alone" + the print-friendly export.
 
-The 1.5 line opened with the design review of 2026-09-27: *the interface encodes meaning
-in colour alone, and never says how fresh its data is.* v1.5rc1 fixed the palette (the
-LIGHT instance, the two accent roles, `tests/test_theme_contrast.py`). v1.5rc2 adds the
-SECOND CHANNEL and makes an export printable:
-
-  §1 the two DECLARED encodings — every connection type has a pen style
-     (`Theme.arrow_type_styles`) and every status has a shape (`Theme.status_shapes`);
-     both sets are complete, pairwise distinct and identical in DARK and LIGHT;
-  §2 the DESATURATION probe — the WCAG grey separation of every type from its canvas in
-     BOTH themes, plus a real greyscale RENDER measured in the middle of the arc: a
-     solid line has no holes, each dash rhythm has its own hole count, and the double
-     type shows two rails in every column. The measured numbers are the criterion
-     ("the pattern carries the meaning where the tones are close");
-  §3 the status SHAPES reach the three surfaces — the path of every shape (a filled dot /
-     a ring / a triangle), the painted mark, the card's status dot (its item, its colour
-     and its shape per status), the sidebar row icon;
-  §4 the LEGEND becomes a real key — every row's sample comes from the declared maps
-     (never a copy) and follows a theme switch;
-  §5 the PRINT-FRIENDLY export — PNG/PDF/SVG/drawio render the LIGHT page by default
-     from a DARK window (`PALETTE_PRINT`), `PALETTE_THEME` keeps the current look, the
-     active theme and the map are restored afterwards, and the SVG stays vector;
-  §6 the EXPORT DIALOG (the opt-out) + the MainWindow path — the print default, the
-     remembered choice, a cancelled dialog writing nothing;
-  §7 i18n (the 3 new keys × every discovered language) + the release state.
-
-Run: python tests/test_encoding.py   (from the project root) or python tests/run_all.py
-"""
+The 1.5 line opened with the design review (the interface encodes meaning in colour alone); v1.5rc1 fixed
+the palette and v1.5rc2 adds the SECOND CHANNEL and makes an export printable.
+§1 the two DECLARED encodings — every connection type has a pen style and every status a shape, both sets
+complete, pairwise distinct and identical in DARK and LIGHT; §2 the DESATURATION probe — the WCAG grey
+separation of every type from its canvas in BOTH themes plus a real greyscale RENDER measured in the
+middle of the arc (a solid line has no holes, each dash rhythm its own hole count, the double type two rails in every column); §3 the status SHAPES on the three surfaces (the path, the painted mark, the card dot, the sidebar row); §4 the legend as a real key (every sample comes from the declared maps); §5 the print-friendly export (PNG/PDF/SVG/drawio render the LIGHT page from a DARK window, the map and the theme restored afterwards, the SVG stays vector); §6 the export dialog and the MainWindow path; §7 i18n and the release state."""
 import hashlib
 import os
 import re
@@ -157,12 +136,10 @@ def relative_luminance(color: str) -> float:
     return 0.2126 * _channel(r) + 0.7152 * _channel(g) + 0.0722 * _channel(b)
 
 
-# THE CRITERION (pinned here, measured below):
-#   * every type keeps at least GREY_INK_MIN of relative luminance away from its canvas
-#     — a type may not vanish in greyscale;
-#   * two types whose tones are closer than GREY_PAIR_MIN are told apart by the PATTERN
-#     — that is exactly what "no meaning in a colour alone" means;
-#   * and the pattern is not decoration: at least one pair really needs it.
+# THE CRITERION (pinned here, measured below): every type keeps at least GREY_INK_MIN of relative
+# luminance away from its canvas — a type may not vanish in greyscale; two types whose tones are closer
+# than GREY_PAIR_MIN are told apart by the PATTERN, which is exactly what "no meaning in a colour alone"
+# means; and the pattern is not decoration — at least one pair really needs it.
 GREY_INK_MIN = 0.20
 GREY_PAIR_MIN = 0.05
 

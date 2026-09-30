@@ -1,28 +1,12 @@
 # -*- coding: utf-8 -*-
-"""v1.2.10rc1 — Audit: threads and teardown (AUDIT.md auto #2 + manual #1 + a verification finding).
+"""v1.2.10rc1 — Audit: threads and teardown (the auto #2 and manual #1 findings plus a verification one).
 
-The thematic test of the release (ROADMAP v1.2.10rc1; offscreen, the fake threads — without the network):
-
-§1 The DNS guard (auto #2): two quick "Copy Hostname" → ONE ReverseDnsThread,
-   the repeated request is ignored with the status message (without the clobbering of the running
-   thread); the thread is created with parent=MainWindow; after finished() — the cleanup
-   of self._dns_thread + the clipboard; the guard is released — the next request starts.
-
-§2 closeEvent with a hanging fake DNS thread (the finding of the verification): the window is closed
-   within the wait budget (~2 s, does not hang), the surviving thread — in the orphan registry
-   services/diagnostics._orphan_threads (not left to the GC: "QThread: Destroyed
-   while thread is still running"), the registry self-cleans on finished().
-
-§3 The shutdown with 2 active terminal sessions at terminal_close_behavior="ask"
-   (manual #1, the real bug): ZERO QMessageBox.question (the seam ST.QMessageBox.question
-   is patched) — the "ask" gate is passed via _force_close (the path of the limit v1.1.1),
-   the main window is closed; the surviving threads — in ST._orphan_threads (the N4 path).
-
-§4 The release state + the i18n parity (427 — no NEW keys: the guard message
-   reuses the existing status.import_resolving).
-
-Run:  python tests/test_audit_rc1_threads.py   (from the project root) or python tests/run_all.py
-"""
+Offscreen, with fake threads and without the network.
+§1 the DNS guard (auto #2): two quick "Copy Hostname" calls produce ONE `ReverseDnsThread` and the second
+request is ignored with a status message (never clobbering the running thread); the thread is created with
+`parent=MainWindow`, `finished()` cleans `self._dns_thread` and the clipboard, and the guard is released
+for the next request. §2 `closeEvent` with a hanging fake DNS thread (the verification finding): the window
+closes inside the wait budget (~2 s, no hang) and the survivor lands in the orphan registry `services/diagnostics._orphan_threads` — not left to the GC ("QThread: Destroyed while thread is still running") — which self-cleans on `finished()`. §3 the shutdown with two active sessions and `terminal_close_behavior = "ask"` (manual #1, the real bug): ZERO `QMessageBox.question` (the `ST.QMessageBox.question` seam is patched), because the "ask" gate is passed through `_force_close` — the path of the session limit — and the survivors go to `ST._orphan_threads` (the N4 path). §4 the release state and the i18n parity (no NEW keys: the guard message reuses `status.import_resolving`)."""
 # tags: slow
 # the reason: the ~2 s wait budgets in the teardown scenarios (§2, §3 — part of the specification)
 

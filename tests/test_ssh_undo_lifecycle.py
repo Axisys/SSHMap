@@ -1,24 +1,12 @@
 # -*- coding: utf-8 -*-
 """v1.1.2RC1 — the SSH path: undo, paramiko defaults, thread lifecycle (release theme).
 
-ROADMAP v1.1.2RC1 (the AUDIT §5 items, verified on v1.1.1):
-  N1    the user/key/port changes on a successful SSH connection go through the undo stack:
-        the direct writes into server_data from SSHConnectDialog._on_worker_success() are removed —
-        the single path MainWindow._apply_ssh_dialog_fields → CmdEditNodeData;
-        regression: the user/port change in the dialog → the connection → Ctrl+Z reverts it.
-  N2    the "conhost" preset of the external terminal is removed (conhost.exe is not a launcher, /c does
-        not accept it): TERMINAL_CHOICES_WINDOWS/detect/build_command; the old config value
-        "conhost" is treated as "cmd" (backward-compat, the file is not overwritten).
-  N5    the password branch of SSHWorker: look_for_keys=False, allow_agent=False (the parity with
-        ssh_terminal.py) — no polling of the local keys/agent before the password attempt.
-  N4    the thread lifecycle on the window close during the connection: the guard
-        `if self.running` before error_signal.emit() in the except branches of run() + the registry
-        of the orphan threads (a thread that survived the closeEvent wait(1500) is kept until finished()).
-  bonus-N11 CmdAddRemoveNode(mode="add"): the stash of the keyring password on the command creation and
-        the restoration in redo — after the Ctrl+Z→Ctrl+Y the duplicate's copy is again with the password.
-
-Run: python tests/test_ssh_undo_lifecycle.py   (from the project root) or python tests/run_all.py
-"""
+The audit items of the release, verified on the previous one. N1 — the user/key/port changes made by a
+successful SSH connection go through the undo stack: the direct writes into `server_data` from
+`SSHConnectDialog._on_worker_success()` are gone in favour of the single path
+`MainWindow._apply_ssh_dialog_fields` → `CmdEditNodeData`, so Ctrl+Z reverts the change. N2 — the
+"conhost" preset of the external terminal is gone (conhost.exe is not a launcher and does not accept `/c`)
+from `TERMINAL_CHOICES_WINDOWS` / `detect` / `build_command`, while an old config value "conhost" is treated as "cmd" for backward compatibility (the file is never overwritten). N5 — the password branch of `SSHWorker` uses `look_for_keys=False, allow_agent=False`, in parity with `ssh_terminal.py`, so no local key or agent is polled before the password attempt. N4 — the thread lifecycle when the window closes during a connection: the `if self.running` guard before `error_signal.emit()` plus the orphan registry, which keeps a thread that survived the `closeEvent` wait until it finishes. Bonus-N11 — `CmdAddRemoveNode(mode="add")` stashes the keyring password when the command is created and restores it in `redo()`, so a Ctrl+Z → Ctrl+Y round trip leaves the duplicate WITH its password."""
 import json as _json
 import os
 import sys

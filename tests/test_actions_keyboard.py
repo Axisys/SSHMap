@@ -1,33 +1,12 @@
 # -*- coding: utf-8 -*-
 """v1.3.3.3 — The action registry, completed: keyboard, on-demand operations, About.
 
-ROADMAP v1.3.3.3 (the release's topical test):
-  #1 `file.save_as` gets a home in the registry (the call site + "default": "Ctrl+Shift+S");
-  #2 zoom becomes a first-class action — `view.reset_zoom` (Ctrl+0) + the NEW
-     `view.zoom_in` / `view.zoom_out` (Ctrl+= / Ctrl+-), real View-menu items with two new
-     vector icons (ui/icons.py — the project draws them) and a step API on MapView;
-  #3 the REMAINING global actions enter the registry with an EMPTY default (assignable,
-     no behaviour change) — the extended "no orphans" audit requires EVERY global action
-     of the menus/sidebar/palette to be registered;
-  #4 "Reset to defaults" in the "Hotkeys" tab — the registry defaults through the existing
-     merge-write, foreign config keys survive, the button is idempotent;
-  #5 "Check statuses now" — one call into the existing StatusChecker.start_round() path
-     for the selection, from the map/sidebar context menus and the Edit menu;
-  #6 the "About" window — version.py, the license, the two ~/.sshmap paths, a button that
-     opens the config folder in the OS file manager and the hotkey cheat-sheet generated
-     FROM the registry (the live values, never a hardcoded list).
-
-The audit is split in two halves on purpose:
-  * STRUCTURAL — every `_add_menu_action(..., action_id)` call site in ui/main_window.py
-    must name a registry id (a source scan, so a menu item added without a registry entry
-    fails here instead of silently living outside the keyboard);
-  * BEHAVIOURAL — the sequences really fire on a LIVE window (QTest.keySequence, the same
-    Qt shortcut machinery a user's keystroke goes through), the reset button restores and
-    persists, the manual status round starts exactly one round off the GUI thread, and the
-    About box renders the live version + the registry cheat-sheet.
-
-Run: python tests/test_actions_keyboard.py   (from the project root) or python tests/run_all.py
-"""
+The release gives `file.save_as` a home in the registry (`Ctrl+Shift+S`), makes zoom first-class
+(`view.reset_zoom` Ctrl+0 plus the new `view.zoom_in` / `view.zoom_out` with their vector icons and a step
+API on `MapView`), lets the REMAINING global actions enter with an EMPTY default (the extended
+"no orphans" audit requires every global action of the menus/sidebar/palette to be registered), adds
+"Reset to defaults" to the "Hotkeys" tab (the registry defaults through the existing merge-write, foreign
+keys survive), routes "Check statuses now" into the existing `StatusChecker.start_round()` path, and builds the About window (the version, the licence, the two `~/.sshmap` paths, a button opening the config folder and the cheat-sheet generated FROM the registry). The audit is split on purpose: a STRUCTURAL half (every `_add_menu_action(..., action_id)` call site must name a registry id — a source scan) and a BEHAVIOURAL half (the sequences really fire on a LIVE window through `QTest.keySequence`, the reset persists, the manual round starts exactly one round off the GUI thread, and the About box renders the live version and the registry cheat-sheet)."""
 import json
 import os
 import re
@@ -174,13 +153,11 @@ check("registry: no duplicate default sequence among the non-empty ones",
       == len(set(s for s in HR.default_hotkeys().values() if s)),
       str(sorted(s for s in HR.default_hotkeys().values() if s)))
 
-# STRUCTURAL HALF of the audit — THREE passes:
-#  (a) the parameter order of _add_menu_action() is read from the LIVE signature (no
-#      literal positional assumption in this test);
-#  (b) a source scan: the i18n keys of the call sites are exactly the menu keys the
-#      application uses, and the action_id position carries a registry id;
-#  (c) the runtime record of what the constructor ACTUALLY passed (the wrapper below) —
-#      the authoritative "no global action lives outside the registry".
+# STRUCTURAL HALF of the audit — THREE passes: (a) the parameter order of `_add_menu_action()` is read
+# from the LIVE signature (no literal positional assumption); (b) a source scan proves the i18n keys of
+# the call sites are exactly the menu keys the application uses and that the action_id position carries
+# a registry id; (c) the runtime record of what the constructor ACTUALLY passed (the wrapper below) —
+# the authoritative "no global action lives outside the registry".
 _add_params = list(inspect.signature(MW.MainWindow._add_menu_action).parameters)[2:]  # self, menu
 _i18n_pos, _id_pos = _add_params.index("key"), _add_params.index("action_id")
 with open(os.path.join(ROOT, "ui", "main_window.py"), encoding="utf-8") as f:
@@ -208,18 +185,10 @@ check("source audit: the named ids cover every menu family (file/edit/view/profi
        "edit.connect_selected", "profile.manage", "help.open_logs", "help.about"} <= _lit_ids,
       str(sorted(_lit_ids)))
 
-# (c) Runtime: wrap _add_menu_action BEFORE the window is built and record every call.
-#      The four ids below are created MANUALLY (never through _add_menu_action) and are
-#      therefore absent from the record: the two dynamic/multi-input ones (multi_input is
-#      installed by the mode, palette.open is a QShortcut) and, since v1.4.2,
-#      view.toggle_minimap — a CHECKABLE item, which must be connected to toggled(bool)
-#      (the v1.2.4-fix pitfall: the auto-connection of addAction(text, slot) carries no
-#      state), so it is built by hand and registered through _register_hotkey_target.
-#      v1.4.5 adds view.toggle_legend to the same family (the checkable View item of the
-#      legend panel, mirrored by a toolbar button); v1.5.2 adds view.toggle_activity
-#      (the checkable View item of the activity panel — the same hand-built pattern);
-#      v1.5.3 adds NOTHING to the manual set: the freshness pair (node.collect_info /
-#      node.diagnose) is built through `_add_menu_action` on permanent Edit-menu items.
+# (c) Runtime: wrap _add_menu_action BEFORE the window is built and record every call. The
+#      ids built MANUALLY (never through it) are therefore absent from the record: the two
+#      dynamic ones (multi_input is installed by the mode, palette.open is a QShortcut) and
+#      every CHECKABLE View item — those connect to toggled(bool), so they are built by hand.
 _recorded = []
 _orig_add_menu_action = MW.MainWindow._add_menu_action
 

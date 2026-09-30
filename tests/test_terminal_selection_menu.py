@@ -1,33 +1,12 @@
 # -*- coding: utf-8 -*-
 """v1.2.7 — Terminal: double/triple-click selection + context menu (ROADMAP v1.2.7).
 
-  * word_units() (a pure function, no GUI): a word = the maximal run of the non-blank
-    cells; the punctuation belongs to the word ("foo,bar" — one); the stub of the wide
-    CJK glyph (data=='') belongs to the word ("a中b" — one word on 4 cells);
-    the blanks/an empty string → [];
-  * the double click — the selection of the WORD (offscreen, the synthetic QMouseEvents;
-    the click-count is counted by the widget itself: the QMouseEvent in PySide6 does not carry it):
-    the boundaries of the word + selected_text(); the click on a blank — does nothing; the interval
-    beyond DOUBLE_CLICK_MS → the counter is reset, a plain click resets the selection;
-  * the triple click — the whole LINE (0..columns-1);
-  * the drag after the double click — the extension from the FAR end of the word (the
-    _click_sel_end anchor), the release at count>=2 does NOT clobber the selection;
-  * the context menu of the right click (_build_context_menu — the test seam, without menu.exec()):
-    the composition/the order [Copy | Paste | Select all], the Copy is enabled
-    only with the selection → the clipboard, the Paste → the bracketed-paste block into the PTY
-    (the same path as Ctrl+V; an empty clipboard → nothing; thread=None → disabled),
-    the Select all → the whole grid; the right click does not reset the selection; the REAL path of the right click
-    (the contextMenuEvent with the real QContextMenuEvent → menu.exec in the global
-    coordinates — the regression v1.2.7-fix: globalPos() is already a QPoint, .toPoint() crashed);
-    the captions en/ru/zh;
-  * i18n: +3 keys terminal.menu.* × en/ru/zh, the parity 422 → 425, the release state.
-
-The Acceptance of the ROADMAP v1.2.7: the double click selects the word, the triple — the line,
-the actions of the menu work (the copy with the selection → the clipboard, the paste → the bytes
-into the PTY); the full run of the suite exit 0.
-
-Run:  python tests/test_terminal_selection_menu.py   (from the project root) or python tests/run_all.py
-"""
+`word_units()` is pure (a word = the maximal run of non-blank cells; punctuation belongs to it —
+"foo,bar" is one; the stub of a wide CJK glyph belongs to the word; blanks → `[]`). The double click
+selects the WORD (the click-count is counted by the WIDGET, because a QMouseEvent in PySide6 carries
+none: the boundaries, `selected_text()`, a blank click doing nothing, the `DOUBLE_CLICK_MS` reset), the
+triple click the whole LINE, and a drag after a double click extends from the FAR end of the word
+(`_click_sel_end`); a release at count >= 2 does not clobber the selection. The context menu (`_build_context_menu`, no `menu.exec()` in the test): its composition and order, Copy enabled only with a selection, Paste as the bracketed block into the PTY (the same path as Ctrl+V; `thread=None` → disabled), Select all; the right click does not reset the selection, the REAL `QContextMenuEvent` path passes the global coordinates, and the captions are en/ru/zh."""
 import sys
 import time
 
@@ -290,13 +269,11 @@ rmb_press(w, 0, 7)
 rmb_release(w, 0, 7)
 check("the RMB → the selection is not reset", w.has_selection() and w.selected_text() == "world")
 
-# v1.2.7-fix (a manual-testing regression): the REAL right-click path — contextMenuEvent
-# with a real QContextMenuEvent it must call menu.exec() in the global coordinates.
-# Before, .toPoint() on a QPoint (QContextMenuEvent's globalPos() already returns a QPoint,
-# and not a QPointF) raised an AttributeError, which the except swallowed silently → "a right-click does nothing
-# does". A spy via the module global _tw.QMenu: the class-attribute assignment
-# QMenu.exec = f in PySide6 6.11 — a silent no-op (verified), and _build_context_menu
-# takes the QMenu from its own module global.
+# the REAL right-click path — contextMenuEvent
+# With a real QContextMenuEvent it must call `menu.exec()` in the global coordinates: `.toPoint()` on
+# a QPoint (globalPos() already returns a QPoint, not a QPointF) raises an AttributeError the except
+# swallows silently — "a right-click does nothing". The spy goes through the module global
+# `_tw.QMenu`, because `QMenu.exec = f` on the class is a silent no-op in PySide6 6.11.
 _ctx_exec_calls = []
 
 
@@ -313,7 +290,7 @@ try:
                                          QPoint(12, 34), QPoint(567, 89)))
 finally:
     _tw.QMenu = _saved_qmenu
-check("the real RMB path: contextMenuEvent → menu.exec is called (the v1.2.7-fix regression)",
+check("the real RMB path: contextMenuEvent → menu.exec is called (the regression)",
       len(_ctx_exec_calls) == 1, f"calls={_ctx_exec_calls!r}")
 check("the real RMB path: exec got the global coordinates of the event",
       bool(_ctx_exec_calls) and _ctx_exec_calls[0] == QPoint(567, 89),

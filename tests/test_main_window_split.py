@@ -1,20 +1,12 @@
 # -*- coding: utf-8 -*-
 """v1.1.4: main_window.py hygiene — split into mixins (ROADMAP v1.1.4 acceptance).
 
-The thematic test of the split: the offscreen MainWindow + the run of each cluster:
-  * the structure: all the methods of the plan are defined in ProjectIOMixin/NodeOpsMixin/SshMixin
-    (not in MainWindow.__dict__), the MRO order, the mixins do NOT import main_window
-    (the cycle), the seam host_attr sees the swaps of the facade module (MW.<name> = Fake);
-  * ProjectIOMixin: the save/load/restore — _save_project_as → _autosave_tick →
-    _restore_from_autosave → _load_project_at in the second window;
-  * NodeOpsMixin: the add/duplicate/delete of a node — _add_server (the fake AddServerDialog,
-    including the bool guard v0.8.1), _duplicate_selected_node, the group _delete_selected_nodes;
-  * SshMixin: the ssh-dialog flow — _run_ssh_connect with the fakes of the SSHConnectDialog/
-    SSHTerminalWindow: the fields via the undo stack, the indicator, the registry of the windows,
-    _forget_terminal_window; the quick launch lives in the same mixin.
-
-Run: python tests/test_main_window_split.py   (from the project root) or python tests/run_all.py
-"""
+The thematic test of the split, offscreen, running each cluster through a real `MainWindow`.
+The STRUCTURE: every method of the plan is defined in `ProjectIOMixin` / `NodeOpsMixin` / `SshMixin` (and
+NOT in the window's own dict), the MRO is the planned one, the mixins never reach back into the facade
+module (the cycle), and the `host_attr` seam sees the swaps (`MW.<name> = Fake`).
+`ProjectIOMixin`: the save/load/restore chain (`_save_project_as` → `_autosave_tick` →
+`_restore_from_autosave` → `_load_project_at` in a second window). `NodeOpsMixin`: add, duplicate and delete with the fake dialog and the bool guard, plus the group delete. `SshMixin`: the ssh-dialog flow with fake dialogs and windows (the fields through the undo stack, the indicator, the window registry and `_forget_terminal_window`), plus the quick launch that lives in the same mixin."""
 import json
 import os
 import re

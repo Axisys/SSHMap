@@ -1,31 +1,16 @@
 # -*- coding: utf-8 -*-
-"""v1.5.3 (ROADMAP task 2): collect the system info of MANY nodes at once.
+"""Collect the system info of MANY nodes at once (AGENTS.md §4.8; DOCUMENTATION.md §46).
 
-Until this release the application could ask ONE server for its hardware
-(`MainWindow._collect_node_info` → `SystemInfoCollector`, one QThread per node) and the
-only automatic fill happened after a successful connect. A hundred-node map therefore had
-no way to answer "refresh everything", which is the question the freshness work of the
-same release asks out loud.
+Before this layer the application could ask ONE server for its hardware
+(`MainWindow._collect_node_info` → `SystemInfoCollector`, one QThread per node) and the only automatic
+fill happened after a successful connect, so a hundred-node map had no way to answer "refresh
+everything" — the very question the freshness work asks out loud.
 
-`InfoBatch` is that missing layer and it is deliberately HEADLESS (no window, no i18n, no
-scene): it owns a **bounded queue** with a **parallelism cap** — the `StatusChecker`
-pattern (`ThreadPoolExecutor` there, a queue of live QThreads here, because a collector
-IS a QThread) — plus the per-node guard the single-node path already had
-(`MainWindow._info_collectors`). Facts it guarantees:
-
-* at most `max_parallel` collectors run at once; the rest WAIT in the queue;
-* a node that is already being collected is SKIPPED, never collected twice in parallel;
-* one node's failure never stops the others (`node_failed` is a report, not an abort);
-* `cancel()` stops everything that has not started yet (a running collector is one
-  unauthenticated-free SSH session with a bounded wait — `SystemInfoCollector.stop()` —
-  so it is allowed to run out and its result is still reported);
-* the outcome is ONE summary (`batch_log_line`) plus per-node signals, so the caller can
-  put a live progress line in the status bar and a final sentence naming the failures.
-
-The module is Qt-light (QObject + signals, no widgets) and free of i18n: the LOG line is
-English (the log-file policy), and the user-facing sentences are composed by the window
-from the counts this class reports.
-"""
+`InfoBatch` is that missing layer and it is deliberately HEADLESS (no window, no i18n, no scene): it owns
+a bounded queue with a parallelism CAP — the `StatusChecker` pattern, but a queue of live QThreads
+because a collector IS a QThread — plus the per-node guard the single-node path already had
+(`MainWindow._info_collectors`). This is the summary line, the keyed report and `batch_log_line()`.
+ Guarantees: at most `max_parallel` collectors run at once and the rest WAIT; a node already being collected is SKIPPED, never collected twice in parallel; one node's failure never stops the others (`node_failed` is a report, not an abort); `cancel()` stops everything that has not started yet (a running collector is one SSH session with a bounded wait, so it is allowed to run out and still report); and the outcome is ONE summary plus per-node signals, so the caller can show a live progress line and a final sentence naming the failures. Qt-light (QObject + signals, no widgets) and free of i18n: the log line is English and the user-facing sentences are composed by the window from the reported counts."""
 from typing import Dict, List, Tuple
 
 from PySide6.QtCore import QObject, Signal

@@ -1,39 +1,16 @@
 # -*- coding: utf-8 -*-
-"""v1.2 (ROADMAP v1.2): TerminalSessionPage — an SSH session as a reusable widget.
+"""`TerminalSessionPage` — an SSH session as a reusable widget (AGENTS.md §4.3; DOCUMENTATION.md §14b).
 
-Refactor "window → page": the whole session (terminal thread + pyte screen +
-terminal canvas + status line + SFTP tab) was moved out of SSHTerminalWindow
-into a QWidget that does not know about QMainWindow. The terminal window became
-a thin wrapper (WA_DeleteOnClose, title, geometry — see modules/ssh_terminal.py),
-and on this page the rest of the v1.2.x series is built: tabs in one window
-(v1.2.1) and a dock in the map window (v1.2.2).
+The whole session — terminal thread, pyte screen, canvas, SFTP tab and the command history — moved into
+a QWidget that does not know about `QMainWindow`: the terminal window and the dock are thin containers
+around it, and a split pane is a second page of the same class.
 
-A single teardown method — `shutdown()` (idempotent): every teardown path
-(window close, session error, MainWindow shutdown, the "4 own terminals" limit)
-goes through it. The deliberate v1.1.x guards are kept:
-  * the PTY debounce timer is stopped FIRST (resize_pty shrieks into a dead channel);
-  * the SFTP worker is disconnected and stopped BEFORE the terminal thread (it
-    depends on the thread's transport); a worker wait that does not finish goes
-    to the orphan worker registry;
-  * the thread's signals are disconnected from the page, then stop() + wait(1500);
-    a thread that outlives the wait (paramiko blocks up to ~15 s on connect) goes
-    to the module-level orphan thread registry `_orphan_threads` (v1.1.2RC1 N4) —
-    a live QThread without a QObject parent must not be left to GC;
-  * RuntimeError on C++ objects does not block the close (teardown robustness).
-
-Bridge to the host (window/dock): the Qt signals `status_message`/`progress_*` —
-the page does NOT know where they go. In `windows` mode SSHTerminalWindow attaches
-them to its status bar and QProgressBar — the display is identical to v1.1.x.
-**v1.4.7 follow-up (the maintainer's request): the page stopped drawing its own
-status line** — it duplicated in a row of the session the text the host's status
-bar was already showing. Every status write goes through ONE method
-(`_set_status_text`) into `session_status` + the bridge, so the host is the single
-status surface and the split pane's state becomes a SECOND text of the same bar.
-
-Test seams (the v1.1.4 host_attr pattern): the thread class and QMessageBox are
-fetched from the ssh_terminal module at call time — monkeypatching
-`ST.SSHTerminalThread`/`ST.QMessageBox.question` in tests works unchanged.
-"""
+ALL teardown lives in the ONE idempotent `shutdown()`: the PTY debounce timer stops FIRST (a
+`resize_pty` into a dead channel), the SFTP worker is stopped BEFORE the terminal thread (it depends on
+that transport, and a worker outliving its budget goes to the orphan registry), then the thread's
+signals are unbound and `stop()` + `wait(1500)` runs — a thread that outlives the wait goes to
+`_orphan_threads` (a live QThread without a QObject parent must not be left to GC). A `RuntimeError` on
+a C++ object never blocks the close. The host learns everything through `status_message` / `progress_*`, and every status write goes through ONE method (`_set_status_text`, `session_status` + the bridge), so the HOST is the single status surface and a split pane's state is its second text. Seams: the thread class and `QMessageBox` are fetched from `ssh_terminal` at call time."""
 
 import re
 import time
@@ -105,7 +82,7 @@ def get_translator():
 def _log():
     """The app logger (lazy — the command_history / terminal_widget pattern).
 
-    v1.5.7: the output path uses it for a FEED FAILURE — a swallowed emulator error used to
+    v1.5.7: the output path uses it for a FEED FAILURE — a swallowed emulator error would otherwise
     cost the repaint silently, and silence is what made the symptom unguessable from outside.
     """
     try:
@@ -121,32 +98,21 @@ def _log():
 # the progress signals of the SFTP worker (the sftp.progress line itself is unchanged
 # — the rate/ETA is appended to it, so a broken/absent measurement is invisible).
 
-# ── v1.6.4 (ROADMAP task 3): the Ctrl+wheel font zoom ───────────────────────
-# The GESTURE belongs to the canvas (`TerminalWidget.wheelEvent`), the CONSEQUENCE to the
-# page: the PTY grid must follow the new cell metrics at once, the new size is written into
-# the SAME `terminal_font_size` key the settings hub owns — DEBOUNCED, because a wheel is a
-# stream of events and the §4.2 `CmdEditTextNote` rule is one write per gesture — and the
-# session's status line says which size is in force.
+# ── the Ctrl+wheel font zoom ───────────────────────
+# The GESTURE belongs to the canvas (`TerminalWidget.wheelEvent`), the CONSEQUENCE to the page: the PTY
+# grid must follow the new cell metrics at once, the new size is written into the SAME
+# `terminal_font_size` key the settings hub owns — DEBOUNCED, because a wheel is a stream of events and
+# the §4.2 `CmdEditTextNote` rule is one write per gesture — and the status line says which size is in force.
 FONT_SIZE_CONFIG_KEY = "terminal_font_size"
 #: The debounce of the write (the `COMMAND_WIDTH_SAVE_DEBOUNCE_MS` / `CmdEditTextNote` value).
 FONT_SIZE_SAVE_DEBOUNCE_MS = 600
 
 
-# ── v1.6.4 (ROADMAP task 4): the ACTIVITY mark of an inactive session ───────
-# A session whose canvas is not the one on screen keeps producing output (a long build in the
-# tab beside the one you are reading). The mark says so WITHOUT touching the session's own
-# state (the node's dot, the status line): it means exactly "there is new output here" and it
-# clears when the tab is focused.
-#
-# The rule lives ONCE, on the page (`TerminalSessionPage.note_output()`); the RENDERING lives
-# with the tab strip, and BOTH containers (the terminal window and the dock) share the two
-# module-level helpers below — the `multi_input.apply_container_highlight(host, on)` precedent:
-# a container is duck-typed by its `session_tabs`.
-#
-# The mark is a filled DOT — a SHAPE, never a colour alone (§4.6 / tests/test_encoding.py) —
-# in the theme's existing STRONG ACCENT role (no new colour field), it carries the meaning in
-# a TOOLTIP as its second channel, and EVERY tab gets the same fixed-size slot, so a mark
-# never changes the width of a tab.
+# ── the ACTIVITY mark of an inactive session ─────────────────────────────────
+# A session off screen keeps producing output; the mark says "there is new output here"
+# without touching the session's own state and clears when the tab is focused. The RULE
+# lives once on the page (`note_output()`), the RENDERING with the tab strip, shared by
+# both containers. The mark is a SHAPE (a filled dot) in the STRONG ACCENT role.
 
 #: The size of the mark (px) — the fixed icon slot of every tab title.
 ACTIVITY_ICON_PX = 10
@@ -238,15 +204,11 @@ def refresh_session_activity(container) -> int:
     return done
 
 
-# ── v1.6.3 (ROADMAP task 5): the Files tab follows the shell (OSC 7) ─────────
-# A shell can REPORT its working directory with the OSC 7 escape (`ESC ] 7 ; file://host/path`
-# terminated by BEL or ST) — the habit every file panel of this class has. The application has
-# ONE session kind (SSH), so there is no environment to preset at spawn: the session injects a
-# ONE-TIME hook, INVISIBLY (its echo is held back), APPENDED to the user's own PROMPT_COMMAND
-# and, under zsh, registered through `precmd_functions+=` (a bare `precmd` is clobbered by the
-# popular frameworks; the `$ZSH_VERSION` guard keeps a POSIX `sh` from failing to parse the
-# line). Both branches are IDEMPOTENT — a duplicated hook would report twice per prompt — and
-# NEVER overwrite what the user already has.
+# ── the Files tab follows the shell (OSC 7; `AGENTS.md` §4.3, `DOCUMENTATION.md` §64) ──
+# A shell REPORTS its working directory with the OSC 7 escape (`ESC ] 7 ; file://host/path`,
+# BEL- or ST-terminated). The application has ONE session kind (SSH), so there is no environment
+# to preset at spawn: the session injects a ONE-TIME hook INVISIBLY (its echo held back),
+# APPENDED to the user's `PROMPT_COMMAND` and, under zsh, through `precmd_functions+=`.
 FOLLOW_CWD_CONFIG_KEY = "terminal_follow_cwd"
 CWD_HOOK_COMMAND = (
     "_sshmap_cwd() { printf '\\033]7;file://%s%s\\033\\\\'"
@@ -426,7 +388,7 @@ class TerminalSessionPage(QWidget):
     """
 
     # v1.0RC3: resize PTY — a grid-change guard + a ~150 ms debounce before
-    # channel.resize_pty (TERMINAL.md §5.5); the initial invoke_shell is 120×32,
+    # channel.resize_pty (DOCUMENTATION.md §14b); the initial invoke_shell is 120×32,
     # the first canvas resize syncs it with the real size.
     PTY_RESIZE_DEBOUNCE_MS = 150
 
@@ -435,15 +397,11 @@ class TerminalSessionPage(QWidget):
     # not lost).
     INITIAL_COMMAND_DELAY_MS = 500
 
-    # v1.3.1: the SFTP task kinds that feed the progress bridge (the busy counter,
-    # the QProgressBar and the status-bar text). "read" is the viewer's read
-    # (ROADMAP v1.3.1) — its OUTCOME is rendered by the SFTP tab itself.
-    # v1.3.3.2: the file operations (OP_KINDS — mkdir/rename/delete) are outside
-    # this set on purpose: no bytes, no bar, and the tab owns both the success and
-    # the error message.
-    # v1.7rc2: a remote→remote COPY is a real transfer (bytes, a total from stat, the
-    # rate/ETA meter), so it joins this set; a MOVE is a rename and stays outside it
-    # (nothing to measure — the tab reports the batch).
+    # The SFTP task kinds that feed the progress bridge (the busy counter, the QProgressBar and the
+    # status-bar text): `read` is the viewer's read, whose OUTCOME the SFTP tab renders itself.
+    # The file operations (mkdir/rename/delete) are outside this set on purpose — no bytes, no bar —
+    # and a remote→remote COPY joins it (bytes, a total from stat, the rate/ETA meter) while a MOVE
+    # is a rename (nothing to measure) — `_SFTP_PROGRESS_KINDS`, `DOCUMENTATION.md` §14.
     _SFTP_PROGRESS_KINDS = ("upload", "download", "read", "copy")
 
     # v1.7rc2: the i18n key that NAMES a transfer in flight — one mapping for the start
@@ -465,13 +423,11 @@ class TerminalSessionPage(QWidget):
         self._host_window = None     # the host window (SSHTerminalWindow); close_terminal() closes it
         self._force_close = False    # v1.1.1: the limit path — a confirmed decision, "ask" does not ask again
         self._shut_down = False      # shutdown() is idempotent (all teardown paths go through one method)
-        # v1.3.3.5 (ROADMAP task 2): the SPLIT marker — the page was created as the second
-        # pane of a terminal window (add_session(split=True)), NOT as a tab. The registry
-        # of MainWindow (_terminal_windows) keeps it for the green dot and the multi-input
-        # provider, while the terminal_max_open limit and _find_terminal_window_for skip
-        # it (ui/main_window_ssh.py): a pane is a session, not a reason to refuse a new
-        # terminal. v1.6.1 (task 8): the flag is a CONSTRUCTOR argument — the page must know
-        # from birth that it is a pane, because the keyboard claim below is decided HERE.
+        # The SPLIT marker — the page was created as the second pane of a terminal window
+        # (`add_session(split=True)`), NOT as a tab. `MainWindow._terminal_windows` keeps it for the green
+        # dot and the multi-input provider, while the `terminal_max_open` limit and
+        # `_find_terminal_window_for()` skip it: a pane is a session, not a reason to refuse a new
+        # terminal. The flag is a CONSTRUCTOR argument — the page must know from birth that it is a pane.
         self._is_split_pane = bool(split)
         # v1.6.1 (ROADMAP task 8): the keyboard claim — the session takes the focus once,
         # when it is really SHOWN (`claim_focus()`), never while it is still hidden.
@@ -494,14 +450,11 @@ class TerminalSessionPage(QWidget):
         t = get_translator()
         layout = QVBoxLayout(self)
 
-        # v1.4.7 follow-up (the maintainer's request): the session state stops taking a
-        # row of the session. The old status line repeated, one row above the
-        # `[Terminal | Files]` tabs, the very text the HOST's status bar already showed
-        # through the `status_message` bridge — a duplicate that cost a row in every
-        # tab and ~40 px of a ~140 px split pane. The label OBJECT is deliberately kept
-        # (the compatibility readers `page.status_label.text()`, the window's compat
-        # property, `_split_min_height`) but it is a HIDDEN child that is never added to
-        # the layout, so it costs no height at all.
+        # The session state stops taking a row of the session: the old status line repeated, one row
+        # above the `[Terminal | Files]` tabs, the very text the HOST's status bar already showed
+        # through the `status_message` bridge — a duplicate that cost a row in every tab. The label
+        # OBJECT is deliberately kept (the compatibility readers `page.status_label.text()`, the
+        # window's compat property, `_split_min_height`) but is a HIDDEN child, never in the layout.
         self._session_status = t("terminal.initializing")
         self.status_label = QLabel(self._session_status, self)
         # v1.4.3 (ROADMAP task 4): the style comes from the ONE registry
@@ -564,18 +517,10 @@ class TerminalSessionPage(QWidget):
                 family=term_cfg["font_family"],
                 size=term_cfg["font_size"] if term_cfg["font_size"] is not None else 10)
 
-        # v1.1.3 (ROADMAP task 4): QTabWidget [Terminal | Files]. The SFTP tab
-        # reuses the same transport (terminal_thread.client.open_sftp() —
-        # without a second authentication and known_hosts pass); the worker is
-        # created lazily — on the first switch to "Files" / after connected_signal.
-        # v1.3.3.5 (the terminal SPLIT, ROADMAP task 4): `with_sftp=False` builds the
-        # page WITHOUT the SFTP tab — the split pane is a COMMAND LINE, and a second
-        # channel, a second worker and a file tree squeezed into ~130 px are pure cost
-        # there. The flag also keeps the page's own layout minimum small, which is what
-        # makes the 25% default of the split honest (the floor is then driven by the
-        # canvas rows, not by the tree). Everything else keeps working unchanged:
-        # `page.tabs` still exists (ONE tab — the canvas; the multi-input badge of a
-        # pane lands on it) and `page.sftp_tab` is None (every reader is guarded below).
+        # The SFTP tab reuses the SAME transport (no second authentication or known_hosts pass)
+        # and its worker is created lazily — on the first switch to "Files" / after
+        # `connected_signal`. `with_sftp=False` builds the page WITHOUT it: the split pane is a
+        # command line, and a second channel, worker and tree in ~130 px are pure cost.
         self._with_sftp = bool(with_sftp)
         # v1.7.1 (ROADMAP v1.7.1): the window may show this session's Files tree in a
         # right-hand panel instead of the Files TAB (`detach_files_tab()` /
@@ -588,14 +533,11 @@ class TerminalSessionPage(QWidget):
         if self.sftp_tab is not None:
             self.tabs.addTab(self.sftp_tab, t("sftp.tab_files"))
 
-        # v1.5.7 (ROADMAP task 1): the COMMAND history — the THIRD tab of the session
-        # (`Terminal | Files | History`), one history per server. The STORE exists on every
-        # page, because what the application sends belongs to the server whether it went to a
-        # tab or to a split PANE; the TAB exists only on a page with the SFTP channel
-        # (`with_sftp=True`), because the panel's "Import from the server…" has no channel to
-        # read through on a compact pane and the pane's layout budget is deliberately small
-        # (§4.3). The panel is duck-typed against this page: `send_macro()` (the ONE send
-        # path), `server_data.alias` and `ensure_sftp_worker()`.
+        # The COMMAND history — the THIRD tab of the session (`Terminal | Files | History`), one
+        # history per server. The STORE exists on every page, because what the application sends
+        # belongs to the server whether it went to a tab or to a split PANE; the TAB exists only on a
+        # page with the SFTP channel (`with_sftp=True`), because "Import from the server…" has no
+        # channel to read through on a compact pane (§4.3). The panel is duck-typed against this page.
         self.command_history = CommandHistoryStore(getattr(server_data, "id", ""))
         self.history_tab = None
         if self._with_sftp:
@@ -603,25 +545,22 @@ class TerminalSessionPage(QWidget):
             self.tabs.addTab(self.history_tab, t("terminal.tab_history"))
             self.history_tab.status_message.connect(self._on_history_message)
 
-        # v1.5.7 (ROADMAP task 7): the application records exactly what IT sent. The hook sits
-        # on the CANVAS, because that is the ONE method (`TerminalWidget.send_macro`) every
-        # explicit send goes through — the macro library calls it directly on `page.widget`,
-        # and the page's own `send_macro()` (the History tab) reaches it the same way. Typed
-        # input is deliberately NOT recorded: the canvas sees raw bytes and keys, not the
-        # shell's line editing. Quick launch sends through `terminal_thread.send_data()`, so it
-        # records itself in `_send_initial_command()`.
+        # The application records exactly what IT sent. The hook sits on the CANVAS, because that is the
+        # ONE method (`TerminalWidget.send_macro`) every explicit send goes through — the macro library
+        # calls it directly on `page.widget` and the page's own `send_macro()` (the History tab) reaches
+        # it the same way. Typed input is deliberately NOT recorded (the canvas sees raw bytes and keys,
+        # not the shell's line editing). Quick launch sends through `send_data()` and records itself.
         self.widget.command_sent_hook = self.record_sent_command
         # v1.6.4 (ROADMAP task 3): the Ctrl+wheel font zoom — the canvas owns the gesture, the
         # PAGE owns the consequence (the PTY grid, the debounced `terminal_font_size` write and
         # the status line), the same split as the command-sent hook above.
         self.widget.font_zoom_hook = self._on_font_zoomed
 
-        # v1.4.7 follow-up (the maintainer's request): a page with a SINGLE tab does not
-        # show a tab STRIP at all — the split pane is a command line, and the strip spent
-        # a row of a ~140 px pane on one redundant title. The QTabWidget keeps its frame
-        # (the pane still has its border) and the multi-input state of a pane is carried
-        # by the amber FRAME on `split_host` (`multi_input.apply_container_highlight`);
-        # the badge kept on the hidden title is state, not a plaque.
+        # A page with a SINGLE tab does not show a tab STRIP at all — the split pane is a command line and
+        # the strip spent a row of a ~140 px pane on one redundant title. The QTabWidget keeps its frame
+        # (the pane still has its border) and the multi-input state of a pane is carried by the amber FRAME
+        # on `split_host` (`multi_input.apply_container_highlight`); the badge kept on the hidden title is
+        # state, not a plaque.
         if self.tabs.count() == 1:
             self.tabs.tabBar().hide()
         layout.addWidget(self.tabs)
@@ -670,12 +609,10 @@ class TerminalSessionPage(QWidget):
         # the one debounced resize that the missing channel refused (see _flush_pty_grid).
         self.terminal_thread.connected_signal.connect(self._flush_pty_grid)
 
-        # v1.0RC4: Quick Launch — the first command is sent after the connection
-        # (connected_signal), not before: on a failed authentication the command
-        # simply does not go out, the error is shown via the regular error path.
-        # The Connection is kept — shutdown() disconnects ONLY if the connection
-        # was made (PySide6 6.11: disconnecting an unconnected slot raises
-        # RuntimeWarning).
+        # Quick Launch — the first command is sent after the connection (`connected_signal`), not before:
+        # on a failed authentication the command simply does not go out and the error is shown via the
+        # regular error path. The Connection is kept, because `shutdown()` disconnects ONLY if the
+        # connection was made (PySide6 6.11: disconnecting an unconnected slot raises a RuntimeWarning).
         self._initial_command = (initial_command or "").strip()
         self._initial_cmd_conn = None
         if self._initial_command:
@@ -700,13 +637,11 @@ class TerminalSessionPage(QWidget):
         self.terminal_thread.connected_signal.connect(self._on_connected_for_follow)
 
         self.terminal_thread.start()
-        # v1.6.1 (ROADMAP task 8): this call is a NO-OP — the page is still HIDDEN here and
-        # Qt delivers no FocusIn to a hidden container, so the keystrokes of a fresh session
-        # went nowhere until the user clicked the canvas. The real claim is the DEFERRED
-        # `claim_focus()`, armed by the first `showEvent` and by the tab-current hook of the
-        # container (see `claim_focus()`). A SPLIT PANE does not even arm it: with two shells
-        # on one screen the choice of the target belongs to the user (and Qt would otherwise
-        # hand the window's focus_child to a pane the user never touched).
+        # This call is a NO-OP — the page is still HIDDEN here and Qt delivers no FocusIn to a hidden
+        # container, so the keystrokes of a fresh session would go nowhere until the user clicked the
+        # canvas. The real claim is the DEFERRED `claim_focus()`, armed by the first `showEvent` and by
+        # the container's tab-current hook. A SPLIT PANE does not even arm it: with two shells on one
+        # screen the choice of the target belongs to the user (`AGENTS.md` §4.3).
         if not self._is_split_pane:
             self.widget.setFocus()
 
@@ -1134,7 +1069,7 @@ class TerminalSessionPage(QWidget):
             _dissig(thread.error_signal, self._show_error)
             _dissig(thread.status_signal, self._set_status)
             _dissig(thread.closed_signal, self._on_closed)
-            # v1.0-fix (audit #6): + connected_signal — it was not disconnected before;
+            # + connected_signal — it was not disconnected before;
             # on a close before the connect finished, the orphan thread would still
             # send the first Quick Launch command into the void after a successful
             # connection.
@@ -1180,8 +1115,8 @@ class TerminalSessionPage(QWidget):
 
         `setFocus()` called while the page is still HIDDEN never reaches the container —
         no `FocusIn` is delivered (the fact `modules/ssh_terminal.py` states at
-        `_wire_page()`), so a fresh session used to open with a blinking cursor and
-        keystrokes that went nowhere until the user clicked the canvas. The claim is
+        `_wire_page()`), so without the claim a fresh session opens with a blinking cursor and
+        keystrokes that go nowhere until the user clicks the canvas. The claim is
         therefore ONE DEFERRED `setFocus` (singleShot(0), when the layout has run) and it
         is armed from the two places that know the session is really on screen: the first
         `showEvent` and the tab-current hook of the container.
@@ -1236,8 +1171,8 @@ class TerminalSessionPage(QWidget):
         copy someone else's text. Without new output / without an active selection,
         the behaviour of a plain click and of Ctrl+C does not change.
 
-        v1.5.7: a failure INSIDE the emulator no longer costs the repaint. This path used to
-        `return` on any exception — the canvas then kept the previous frame until the NEXT
+        v1.5.7: a failure INSIDE the emulator does not cost the repaint. A bare
+        `return` would leave the canvas on the previous frame until the NEXT
         output arrived, which from the outside looks like "the full-screen application is gone
         but the prompt only appears when I press a key" (a TUI's exit sequence is followed by
         silence until the user types). The state is now whatever pyte managed to apply: it is
@@ -1274,16 +1209,11 @@ class TerminalSessionPage(QWidget):
             self.widget.write_transcript(data)
         except Exception:  # noqa: BLE001 — the tee never breaks the session
             pass
-        # v1.1.2RC3 (N7): a history position change ⇔ an auto-return to live (feed() —
-        # the only path that changes the position without a manual scroll). An active
-        # selection on the "old" screen is reset before copying.
-        #
-        # v1.6.4 (ROADMAP task 5): under `terminal_scroll = "pin"` the viewport does NOT move —
-        # the chunk restores the very lines it held — so the (row, col) of a selection made
-        # while reading the history still point at the same cells and the guard is skipped (a
-        # selection dropped by every chunk would make the pin useless for copying). The move
-        # back to live is a USER action, and the canvas drops the selection with it
-        # (`TerminalWidget._release_pin`). The "live" mode keeps the N7 rule unchanged.
+        # N7: a history position change ⇔ an auto-return to live (`feed()` — the only path
+        # that changes the position without a manual scroll), so a selection on the "old"
+        # screen is reset before copying. Under `terminal_scroll = "pin"` the viewport does NOT
+        # move — the chunk restores the very lines it held — so the guard is SKIPPED (the "live"
+        # mode keeps the N7 rule); the move back to live is a USER action that drops it (§64).
         try:
             if pos_before is not None and self.tscreen.scroll_mode_id() != SCROLL_MODE_PIN \
                     and self.tscreen.scroll_info()[0] != pos_before \
@@ -1505,7 +1435,7 @@ class TerminalSessionPage(QWidget):
             if (cols, rows) == (self._last_cols, self._last_rows):
                 return  # the grid did not change — no pyte.resize, no PTY signal
             self._last_cols, self._last_rows = cols, rows
-            self.tscreen.resize(cols, rows)   # pyte: a no-op at the same size (fact #9)
+            self.tscreen.resize(cols, rows)   # pyte: a no-op at the same size
             self.widget.update()              # the grid changed — repaint the canvas
             self._pending_pty = (cols, rows)
             self._pty_timer.start()           # restart the 150 ms countdown (debounce)
@@ -1538,11 +1468,11 @@ class TerminalSessionPage(QWidget):
     def _on_pty_debounce(self):
         """The debounce expired — resize_pty with the LAST grid (only a live channel).
 
-        v1.5.7: a grid computed BEFORE the connection is no longer thrown away. The layout
+        v1.5.7: a grid computed BEFORE the connection is never thrown away. The layout
         runs when the window appears — long before paramiko has authenticated — so the first
-        (and, on a window nobody resizes, the ONLY) grid change used to be dropped right here:
-        `_last_cols/_last_rows` were already updated, no further Resize event followed, and the
-        session kept `invoke_shell`'s 120×32 for its whole life while the pyte grid held the
+        (and, on a window nobody resizes, the ONLY) grid change must not be dropped right here:
+        `_last_cols/_last_rows` would already be updated, no further Resize event follows, and the
+        session keeps `invoke_shell`'s 120×32 for its whole life while the pyte grid holds the
         real canvas size. Every full-screen application then drew a 120×32 screen inside a
         differently sized canvas (the tester's "not full screen until I resize the window").
         The request now WAITS: it stays pending and `_flush_pty_grid()` sends it on connect.
@@ -1578,8 +1508,8 @@ class TerminalSessionPage(QWidget):
         `_session_status` (the `session_status` property — what a host reads to render
         its own strip) and through the `status_message` bridge into the HOST's status
         bar / status strip. Routing EVERY status write through here is what makes the
-        ERROR path readable too: `_show_error` used to write the line nobody but the
-        modal dialog saw while the status bar kept the previous text. Never raises: a
+        ERROR path readable too: a line written only to the modal dialog would leave the
+        status bar on the previous text. Never raises: a
         dying C++ object must not break the status path.
         """
         self._session_status = text or ""
@@ -1736,13 +1666,11 @@ class TerminalSessionPage(QWidget):
             return False  # Qt teardown — the C++ object is already gone
         return True
 
-    # ── v1.7.1 (ROADMAP v1.7.1): the Files tree as a panel of the WINDOW ────
-    #
+    # ── the Files tree as a panel of the WINDOW ────
     # The window may show this session's Files widget in a right-hand panel of its own
-    # (`modules/ssh_terminal.py`): the widget is RE-PARENTED from the session's tab strip
-    # into the window's `QStackedWidget`, one page per session. The PAGE keeps its owner
-    # (`page.sftp_tab` never changes) and only the TAB is taken away — which is why every
-    # page-level read, the lazy channel open and the teardown keep working unchanged.
+    # (`modules/ssh_terminal.py`): the widget is RE-PARENTED from the session's tab strip into the
+    # window's `QStackedWidget`, one page per session. The PAGE keeps its owner (`page.sftp_tab` never
+    # changes) — only the TAB is taken away, so every page-level read and the teardown keep working (§4.3).
 
     def detach_files_tab(self):
         """Hand the Files widget over to a host panel: remove the TAB, return the WIDGET.

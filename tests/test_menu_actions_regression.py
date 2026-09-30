@@ -1,31 +1,12 @@
 # -*- coding: utf-8 -*-
-"""v1.2.4-fix — REGRESSION: the real click path on checkable menu items (QAction.trigger()).
+"""REGRESSION: the real click path on checkable menu items (`QAction.trigger()`).
 
-The incident: the manual testing did not confirm the multi-input — "I put the check in
-View → Multi-input, and nothing happens: no frame, no badges, no plaque". The root
-(the empirics on PySide6 6.11.1, offscreen): the auto-connection of QMenu.addAction(text, slot)
-— what MainWindow._add_menu_action does — emits QAction.triggered into the Python slot
-WITHOUT arguments (an explicit action.triggered.connect(slot) passes the new state, and
-the auto-connection — not). _toggle_multi_input(checked=None) fell into the no-op branch
-(target = the current state) — the mode from the menu was not enabled nor disabled at all;
-only the checkmark moved (Qt itself flips it), F12 was silent (the shortcut is attached
-only in the active mode).
-
-The fix: the item is connected to toggled(bool) (the new state — the same as with the explicit
-triggered.connect); the checked=None in _toggle_multi_input — now a real toggle.
-
-This test goes EXACTLY the path of a user click: act.trigger() — Qt itself
-inverts the checked and emits the signals (that is how both the menu item and the F12 shortcut on
-the same QAction work). SSH is not needed: the hub/provider/the plaque live without the terminals; for
-the check of the frame/badge one duck-typed fake container is put into the registry.
-
-v1.3.3.3 (ROADMAP task 2/5) extends the same real-click discipline to four new menu items:
-View → Zoom In / Zoom Out / Reset zoom (they must move the view scale, with the two new
-vector icons) and "Check statuses now" (it must start exactly ONE round for the selection,
-with the probes off the GUI thread).
-
-Run:  python tests/test_menu_actions_regression.py   (from the project root) or python tests/run_all.py
-"""
+The incident: the manual testing did not confirm multi-input — "I put the check in View → Multi-input and
+nothing happens". The root (empirics on PySide6 6.11.1, offscreen): the auto-connection of
+`QMenu.addAction(text, slot)` — what `MainWindow._add_menu_action` used — emits `QAction.triggered` into
+the Python slot WITHOUT arguments (an explicit `action.triggered.connect(slot)` passes the new state; the
+auto-connection does not), so `_toggle_multi_input(checked=None)` fell into the no-op branch and the mode
+was never enabled or disabled — only the checkmark moved and F12 stayed silent. The fix: the item is connected to `toggled(bool)`, and `checked=None` in `_toggle_multi_input` is now a real toggle. This test goes EXACTLY the path of a user click: `act.trigger()`, so Qt itself inverts the checked state and emits the signals (which is how both the menu item and the F12 shortcut on the same QAction work). SSH is not needed — the plaque lives without terminals, and a duck-typed fake container is put into the registry for the frame/badge checks. The same real-click discipline covers the zoom items and "Check statuses now" (exactly ONE round for the selection, the probes off the GUI thread)."""
 import inspect
 import sys
 

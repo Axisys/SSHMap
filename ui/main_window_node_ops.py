@@ -1,36 +1,15 @@
-"""NodeOpsMixin — the "operations on the map's nodes and connections" cluster.
+"""`NodeOpsMixin` — the "operations on the map's nodes and connections" cluster (AGENTS.md §4.1, §4.2).
 
-v1.1.4 (ROADMAP v1.1.4, task 2): moved out of ui/main_window.py as part of
-the "main_window.py hygiene" series. "Module + callbacks" pattern
-(precedents: v0.9.9.4 sidebar, v0.9.9.3 diagnostics): the mixin holds only
-methods, MainWindow remains the facade, the public API is unchanged; method
-names and call sites were not touched.
+Methods only: `MainWindow` stays the facade and the public API is unchanged. The mixin does NOT import
+the window module (cycle) — it duck-types the instance, and `AddServerDialog` / `ConnectionDialog` are
+resolved on the facade at call time (`host_attr`), which is the test seam (`MW.AddServerDialog = Fake`).
 
-The cluster includes the entire TXT import (``_import_servers_from_txt`` +
-the thread slots ``_on_import_resolve_progress``/``_on_import_resolved`` and
-the assembly ``_finish_import_from_txt``) — it is one feature and cannot be
-split across files.
-
-Ownership of shared state (AUDIT §3): the nodes/connections live on
-``self.scene``, the undo stack and ``_dirty`` — in the core (MainWindow);
-the ping/DNS/import threads are held on the instance
-(``self._ping_thread``/``self._dns_thread``/``self._import_resolve_thread``
-+ the batch context ``self._import_pending/_import_path/_import_skipped``).
-The mixin does NOT import ui.main_window (cycle) — duck-typing on the
-instance only; the dialogs (AddServerDialog/ConnectionDialog) are taken
-from the facade module at call time (host_attr) — the test seam for
-``MW.AddServerDialog``/``MW.ConnectionDialog`` monkeypatching.
-
-``_is_scene_point`` moved here with the cluster (AUDIT §3: "module-level
-globals go to their own mixin or stay in the core"); main_window.py imports
-it back — ``_add_group_at`` (groups, the core) uses the same guard.
-
-v1.5.3 (ROADMAP task 3): the cluster also owns "why is it offline?" —
-``_diagnose_node()`` and the report slots. The report RUNS in
-``services/diagnostics.ReachabilityThread`` (never on the GUI thread); the
-registry of live reports is ``self._diagnose_threads`` (keyed by server id, so
-"the same node twice" is refused while a different node is fine).
-"""
+The cluster owns the whole TXT import (the entry, the thread slots and the assembly — ONE feature, not
+splittable), the ping/DNS/import thread references (`self._ping_thread`, `self._dns_thread`,
+`self._import_resolve_thread` plus the batch context) and, since v1.5.3, "why is it offline?":
+`_diagnose_node()` and the report slots, whose registry is `self._diagnose_threads` keyed by server id
+(the same node twice is refused while a different node is fine). The report RUNS in
+`services/diagnostics.ReachabilityThread`, never on the GUI thread. `_is_scene_point` moved here with the cluster and `main_window.py` imports it back (`_add_group_at`)."""
 from PySide6.QtCore import QPointF
 from PySide6.QtWidgets import QDialog, QMessageBox, QApplication
 
@@ -1041,25 +1020,20 @@ class NodeOpsMixin:
             host = node.data.host
             from services.diagnostics import ReverseDnsThread  # v0.9.9.3: was a nested class
 
-            # AUDIT v1.2.10 (auto #2): do not clobber a still-running DNS thread —
-            # the same guard as for ping (_ping_node below): a second "Copy
-            # Hostname" while the first request is alive (getaddrinfo may hang
-            # until the resolver timeout) earlier overwrote self._dns_thread,
-            # and the old thread became an orphan (closeEvent stops only the
-            # CURRENT _dns_thread). We ignore it and show a status message.
-            # i18n: no new keys — the existing status.import_resolving
-            # ("Resolving host names… 0/1").
+            # Do not clobber a still-running DNS thread — the same guard as for ping below: a second
+            # "Copy Hostname" while the first request is alive (`getaddrinfo` may hang until the
+            # resolver timeout) would overwrite `self._dns_thread` and orphan the old one, which
+            # `closeEvent` stops only through the CURRENT reference. The request is ignored with a
+            # status message (`status.import_resolving` — no new key).
             if self._dns_thread is not None and self._dns_thread.isRunning():
                 self.statusBar().showMessage(
                     self.t("status.import_resolving", done=0, total=1))
                 return
 
-            # v1.2.10rc1: parent=self — the thread's C++ object has an owner
-            # while the window is alive (GC races on a live QThread are
-            # excluded); a thread that outlives the shutdown wait budget is
-            # registered in the orphan registry (services/diagnostics.
-            # register_orphan_thread — the N4 pattern, like ssh_terminal's
-            # _orphan_threads).
+            # `parent=self` — the thread's C++ object has an owner while the window is alive (GC races on
+            # a live QThread are excluded); a thread that outlives the shutdown wait budget is registered
+            # in the orphan registry (`services.diagnostics.register_orphan_thread` — the N4 pattern, like
+            # `ssh_terminal`'s `_orphan_threads`).
             thread = ReverseDnsThread(host, parent=self)
 
             def _on_dns_done(name):
@@ -1154,7 +1128,7 @@ class NodeOpsMixin:
             from dialogs.connection_dialog import EditConnectionDialog
             dlg = EditConnectionDialog(arrow, self)
             if dlg.exec() == QDialog.Accepted:
-                # v1.2.6: the 3rd element — the bidirectional mode (it used to be a 2-tuple)
+                # v1.2.6: the 3rd element — the bidirectional mode (the shape is a 3-tuple)
                 label, ctype, bidir = dlg.get_connection()
                 # v0.8.3: editing the connection (label/type/direction) — an undo command
                 from modules.undo_commands import CmdEditConnection

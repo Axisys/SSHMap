@@ -1,33 +1,12 @@
 # -*- coding: utf-8 -*-
-"""v1.6.3 — the canvas at the cell: the glyph grid, the mouse the TUI asks for, the Files tab that answers back (ROADMAP v1.6.3).
+"""v1.6.3 — the canvas at the cell: the glyph grid, the mouse the TUI asks for, the Files tab that answers back.
 
-  §1 THE GLYPH GRID (task 1) — each glyph is painted at ITS OWN cell: a homogeneous
-     100-cell row puts the last glyph at `(n − 1) * cell_w` (a recording painter reads the
-     real drawText arguments), kerning is OFF in the canvas font, and the PURE
-     `font_grid_problems()` gate is RED on a synthetic non-integral metrics object and
-     GREEN on the shipped font (`run_glyphs()` maps a run back to its CELLS, so a grapheme
-     cluster keeps its cell count);
-  §2 THE MOUSE FAMILY (task 2) — the press / release / motion matrix over the DECSET
-     1000 / 1002 / 1003 × the SGR / X10 encodings, the 223 clamp of the X10 protocol, the
-     session-local coordinates that never ride the multi-input hub, and the rule that a
-     press while the application owns the mouse does NOT start a local selection;
-  §3 THE TRACKING A TUI LEAVES BEHIND (task 3, N32) — the bits STAY in `screen.mode`
-     after `\\x1b[?1049l` (the accepted cost, decided): the wheel keeps reporting to the
-     application that asked for it and `Shift` is the LOCAL override that scrolls the local
-     scrollback / makes the local selection instead;
-  §4 THE FILES TAB'S ADDRESS BAR (task 4) — Enter navigates through the SERVER's own
-     resolution (`queue_normalize` + its REALPATH/stat check), a bad path answers through
-     the `message` signal, and the completer is fed by the SAME async `queue_list()` while
-     listing a typed directory at most ONCE per directory change;
-  §5 THE FILES TAB FOLLOWS THE SHELL (task 5, OSC 7) — the pure parser, the ONCE-injected
-     hook (through `send_data()`, never the hub; APPENDED to `PROMPT_COMMAND`, with the
-     zsh branch under `precmd_functions+=`), the echo hold-back that the first report
-     DROPS, a shell that never answers costing the held bytes back, and the follow itself;
-  §6 the ledger rows N31 / N32 — the two probes of the version, one row each;
-  §7 the release state + the i18n parity of the four new keys.
-
-Run:  python tests/test_canvas_truth.py   (from the project root) or python tests/run_all.py
-"""
+§1 THE GLYPH GRID — each glyph is painted at ITS OWN cell (a recording painter reads the real `drawText`
+arguments), kerning is OFF, and the PURE `font_grid_problems()` gate is RED on a synthetic non-integral
+metrics object and GREEN on the shipped font (`run_glyphs()` maps a run back to its CELLS, so a grapheme
+cluster keeps its cell count); §2 THE MOUSE FAMILY — the press / release / motion matrix over DECSET
+1000/1002/1003 × the SGR/X10 encodings, the 223 clamp of X10, the session-local coordinates that never
+ride the multi-input hub, and "a press while the application owns the mouse does not start a selection"; §3 THE TRACKING A TUI LEAVES BEHIND — the bits STAY in `screen.mode` after the alt-screen leave (the accepted cost) and `Shift` is the LOCAL override; §4 THE ADDRESS BAR — Enter navigates through the SERVER's own resolution, a bad path answers via `message`, the completer shares the async `queue_list()`; §5 the OSC 7 follow (the pure parser, the once-injected hook, the echo hold-back); §6 the ledger rows N31 / N32; §7 the release state and the i18n parity of the four new keys."""
 import sys
 import time
 
@@ -556,7 +535,7 @@ check("§5 a second timeout call is an idempotent no-op",
 # ── v1.6.4 fix: the answer usually arrives WITH the echo, and it must still drop it ─────────
 # bash echoes the injected line and prints the next prompt within one read, and `PROMPT_COMMAND`
 # runs BEFORE that prompt is written — so the report comes first and the prompt follows it. The
-# hold used to be released by the scan BEFORE the same chunk was filtered, which rendered the
+# hold must be released by the scan BEFORE the same chunk is filtered, or it renders the
 # whole hook command on the screen (reproduced: `echo + report + prompt` in ONE chunk leaked).
 REPORT5 = b"\x1b]7;file://worker-node-2/home/ubuntu\x07"
 PROMPT5 = b"ubuntu@worker-node-2:~$ "

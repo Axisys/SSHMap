@@ -1,105 +1,14 @@
-"""v0.8: TerminalScreen — an ANSI terminal emulator on pyte.
+"""TerminalScreen — the pyte-based screen behind the terminal canvas (ANSI/CSI/OSC, 120×32).
 
-A full replacement for the "dumb" QPlainTextEdit output: pyte parses all
-escape sequences (CSI/OSC/cursor modes, colors) and keeps a 120x32 grid —
-the same geometry that SSHTerminalThread requests via invoke_shell(term='xterm',
-width=120, height=32). The alternative screen (mode 1049) is NOT in pyte 0.8.2
-(checked against the installed version — TERMINAL.md fact #6): after vim/htop
-the previous screen is not restored, a known limitation (ROADMAP v1.0).
-→ CLOSED in v1.2.12 by the SshmapHistoryScreen subclass (modes 47/1047/1048/1049 —
-see the v1.2.12 section below and PYTE82_AUDIT.md batch B).
+The pyte import is the ONE seam of the managed fork (`from third_party import pyte`); the provenance,
+the patch list and the revert instruction live in `third_party/pyte-patches/MANIFEST.md` — the single
+source of truth (`AGENTS.md` §4.7). The rest is a thin adapter: the palettes + `resolve_color()`,
+`snapshot()` for the canvas, the scrollback API (`scroll_up()`/`scroll_down()`/`text_lines()`/
+`scroll_to_line()`) and the two mode readers `application_cursor_keys()` / `mouse_tracking_mode()`.
 
-v1.0RC1: added a color engine for the per-cell canvas (PALETTES +
-resolve_color, TERMINAL.md §5.1) and snapshot() — a grid snapshot for
-TerminalWidget (modules/terminal_widget.py). The old HTML renderer render()
-was marked deprecated in v1.0RC1 and removed in v1.2.9 (ROADMAP "Terminal hygiene").
-
-v1.0RC3: pyte.Screen → pyte.HistoryScreen (TERMINAL.md §5.4) — a ready-made
-scrollback (deque history + prev_page()/next_page()) with a built-in auto-return
-to the live line on new output (before_event, verified as fact #7). scroll_up()/
-scroll_down()/at_bottom() — under the same lock as feed(). The rest of the API
-(feed/resize/snapshot/render) unchanged — duck typing.
-
-v1.1.2RC3 (AUDIT U3): application_cursor_keys() — the DECCKM state (private
-mode 1) under the same lock as feed(): TerminalWidget picks the arrow-key
-sequences from it (SS3 \x1bOA… under mc/vim/htop, CSI \x1b[A… in normal
-mode). Verified pyte 0.8.2 fact: private modes are stored in screen.mode
-shifted left by 5 bits (set_mode(private=True): mode << 5) — DECCKM is 32,
-NOT 1 (verified by a run on the installed version).
-
-v1.2.11 (PYTE82_AUDIT.md batch A): SshmapHistoryScreen — a pyte.HistoryScreen
-subclass with two compatibility overrides for the INSTALLED pyte 0.8.2.
-Mechanism: Stream binds the screen methods via getattr(listener, attr) at
-attach (streams.py, create_dispatcher) → the subclass overrides are picked up
-by the parser automatically; the public TerminalScreen API is unchanged
-(duck typing). Verified fact #12 (a run on the installed pyte 0.8.2): Vim 9+
-sends \x1b[?4m (private SGR, upstream issue #202); in 0.8.2 that is a TypeError
-from feed() — Screen.select_graphic_rendition does not accept private, and the
-tail of the chunk after the sequence is lost (the parser resets; the
-except Exception: return in _on_output swallows the exception). The subclass
-ignores private SGR; in master the fix is already merged (PR #203, 2025-09-02) —
-the override with the same semantics stays until the pin is raised to pyte 0.8.3
-(compatible and documented; at 0.8.3 the 'bfightmagenta' item in resolve_color()
-is marked legacy — in master the BG_AIXTERM[105] typo is already fixed).
-LNM (mode 20) is ON by default: bare LF = CR+LF (xterm behavior; Screen.reset()
-drops mode to _DEFAULT_MODE without LNM → an explicit restore after
-super().__init__ and in reset(); explicit \x1b[20h/\x1b[20l (SM/RM 20) from a
-remote program still work).
-
-v1.2.12 (PYTE82_AUDIT.md batch B): the alternative screen in SshmapHistoryScreen —
-private modes 47/1047/1048/1049, which in 0.8.2 were inert bits of screen.mode
-with the <<5 shift (no handlers). Semantics — per upstream PR #212 (closed
-without a merge, author dwgx; the pyte code is LGPL-3.0 — attribution to the PR
-author in a code comment is mandatory), differentially checked against tmux 3.6b
-and GNU screen: a SINGLE in_alt flag (ESC[?47l leaves the screen entered via
-1049h); enter — save the main buffer → the working one = a fresh empty one
-(the cursor is NOT homed — the TUI sends CUP itself; re-entering is
-idempotent); leave — restore the saved buffer clipped to the current width,
-drop the alt buffer (the content does not survive the round-trip — the behavior
-of both reference emulators takes priority over the xterm wording "without
-clearing"); the cursor is saved/restored only for 1048/1049 (xterm: 1049 =
-1047+1048) in a separate _alt_cursor field, NOT a savepoint stack (the TUI
-inside the session runs ESC 7/ESC 8 itself). Lines that scroll out of the alt
-buffer (index/reverse_index while in_alt) do not enter the scrollback — like
-less in a real terminal; RIS (ESC c — NOT ESC [ c, that is CSI DA) inside alt →
-full reset + leave.
-Access: screen.in_alt + TerminalScreen.in_alt_screen() under the same lock as
-feed(); while in_alt — the mouse wheel and Ctrl+Shift+PgUp/PgDn do not scroll
-history (the gate in TerminalWidget; full wheel routing in the TUI — v1.2.13).
-
-v1.2.14 (PYTE82_AUDIT.md batch D2): batching of the auto-return to the live line —
-a before_event override in SshmapHistoryScreen. For every event except
-prev_page/next_page pyte spun next_page() in a loop: with a deep history up to
-~250 iterations, each O(lines) (measurement D1 v1.2.12: 68–73 ms/chunk against
-~42 on the live line; feed comes through a queued signal — blocking the GUI
-thread). Now a single bulk operation with the same arithmetic as next_page
-(screens.py): mid = min(len(history.bottom), size − position);
-top.extend(buffer[0:mid]); the buffer shifts up; buffer[-mid:] — from
-bottom.popleft(); position += mid; dirty = all lines — O(lines) once. Verified
-fact (a run): the invariant len(history.bottom) == size − position → mid can
-exceed lines (deep history); the surplus of mid over lines returns from the
-HEAD of bottom back to top (the same lines the loop would have moved in the
-intermediate iterations) — the result is identical to the next_page() loop:
-position == size, bottom empty, top fully restored, buffer = the live screen.
-The wrapper calls self.before_event(event) by name → the override is picked up
-(before_event is not in _wrapped); prev_page/next_page — no-ops, as in pyte.
-
-v1.3rc1 (PYTE82_AUDIT.md "managed fork"): pyte → a managed fork. The import seam —
-one line `from third_party import pyte`: the vendored pyte 0.8.2 (the PyPI sdist
-with provenance, sha256) + the explicit patches 0001–0009 in third_party/pyte/;
-the single source of truth — third_party/pyte-patches/MANIFEST.md. The batch A
-overrides (private SGR → patch 0001, LNM → patch 0002) and batch B (the
-alternative screen → patch 0003) were removed from the subclass — now they are
-patches of the fork; SshmapHistoryScreen keeps only the before_event batching
-(D2). The behavior is unchanged: the existing terminal tests are green
-unchanged (except the one-line import seam, v1.3rc1). Reverting to stock pyte
-= one line back (import pyte) — see MANIFEST.md.
-
-Headless-friendly: the Screen class itself requires no Qt — tested without a GUI.
-Thread safety: feed() from the SSH thread, snapshot()/application_cursor_keys
-from the GUI thread (v1.1.2 final N13: the dead cursor property was removed —
-the declaration matches the code; the cursor comes from snapshot()).
-"""
+`SshmapHistoryScreen` is the ONE subclass — its compatibility overrides became fork patches, and what
+stays is the `before_event` batching of the auto-return to the live line. Thread contract: `feed()` on
+the SSH thread, every reader on the GUI thread, under ONE lock; no Qt, so it tests headless (§12)."""
 
 import math
 import threading
@@ -110,49 +19,35 @@ import threading
 # third_party/pyte-patches/MANIFEST.md). Reverting to stock pyte = one line back (import pyte).
 from third_party import pyte
 
-# ── v1.0RC1: the per-cell color engine (TERMINAL.md §5.1) ────────────────────
-# Verified pyte 0.8.2 facts (a run on the installed version):
-#   * SGR 33 → fg='brown', SGR 93 → fg='brightbrown' — yellow is called brown;
-#   * the 256-colors AND truecolor are stored as hex strings WITHOUT '#' ('ff0000',
-#     '0a141e') — the isdigit() branch never fires, a hex passthrough is needed;
-#   * a typo in pyte itself: BG_AIXTERM[105] = 'bfightmagenta' (SGR 4;105 → bg='bfightmagenta').
-# The engine is headless (no Qt) — tested without a GUI (tests/test_terminal_colors.py).
+# ── the per-cell color engine (`DOCUMENTATION.md` §12) ────────────────────────────
+# Verified pyte 0.8.2 facts: SGR 33 → fg='brown' and SGR 93 → fg='brightbrown' (yellow is called
+# brown); the 256-colour AND truecolor values are stored as hex strings WITHOUT '#' ('ff0000'), so
+# the isdigit() branch never fires and a hex passthrough is needed; and pyte itself carries a typo,
+# BG_AIXTERM[105] = 'bfightmagenta'. The engine is headless (no Qt) — `tests/test_terminal_colors.py`.
 
 DEFAULT_FG_HEX = "#e2e8f0"   # the default text on the dark terminal window background
 DEFAULT_BG_HEX = "#0f172a"   # the terminal window background (the QPlainTextEdit v0.8 style)
 
-# ── v1.0RC3: HistoryScreen scrollback parameters (TERMINAL.md §5.4) ──────────
+# ── HistoryScreen scrollback parameters (`DOCUMENTATION.md` §12) ──────────────────
 # history — the depth of the deque history (lines); ratio — the "page" size for
-# prev_page()/next_page() = ceil(lines * ratio): ratio=0.1 at 32 lines gives
-# ~4 lines per wheel tick / Ctrl+Shift+PgUp/PgDn press. The config key
-# terminal_history_lines was wired up in the v1.0 final (ROADMAP task 9,
-# load_terminal_settings() in modules/ssh_terminal.py) — the default = the
-# behavior AFTER RC3 (scrollback ON); an explicit 0 — the user disabling it.
+# `prev_page()`/`next_page()` = ceil(lines * ratio): ratio = 0.1 at 32 lines gives ~4 lines per wheel
+# tick / `Ctrl+Shift+PgUp/PgDn` press. The key `terminal_history_lines` is validated by
+# `load_terminal_settings()`: the default keeps the scrollback ON, an explicit 0 disables it.
 DEFAULT_HISTORY_LINES = 1000
 SCROLL_RATIO = 0.1
 
-# ── v1.3.3.4 (ROADMAP task 1): the safety bound of the find bar's navigation ──
-# scroll_to_line()/scroll_to_position() move the viewport with pyte's own pages
-# (~10% of the grid each, SCROLL_RATIO). A page that does not move the border is
-# the edge of the history and ends the loop; this constant is the second belt —
-# a guard against a hypothetical pyte page that reports no progress. The real
-# budget per call is derived from the CURRENT history depth (_scroll_step_budget:
-# enough pages to cross the whole deque + a small margin), so a deep scrollback
-# (terminal_history_lines up to 1_000_000) stays fully searchable while the loop
-# remains finite; MAX_SCROLL_STEPS is the hard ceiling of that budget.
+# ── the safety bound of the find bar's navigation ─────────────────────────────
+# `scroll_to_line()` / `scroll_to_position()` move the viewport with pyte's own pages (~10% of
+# the grid, SCROLL_RATIO) and a page that does not move the border ends the loop; MAX_SCROLL_STEPS
+# is the second belt against a page that reports no progress. The real budget per call comes from
+# the CURRENT history depth (`_scroll_step_budget`), so a deep scrollback stays searchable (§14).
 MAX_SCROLL_STEPS = 200_000
 
-# ── v1.6.4 (ROADMAP task 5): the two modes of `terminal_scroll` ───────────────
-# The key is CONFIG-ONLY (no settings-hub row) and validated like `terminal_wheel`:
-# a missing / foreign / broken value is the DECLARED default, never an error.
-#
-#   * SCROLL_MODE_LIVE ("live") — the DEFAULT and the behaviour every earlier release
-#     had: new output pulls the view back to the live line, so the output is visible
-#     immediately even while the user was reading the scrollback (the auto-return that
-#     `before_event` performs in one bulk operation — batch D2).
-#   * SCROLL_MODE_PIN ("pin") — OPT-IN: the view stays on the SAME LINES while output
-#     keeps arriving, which is what a real terminal does. Implemented in OUR subclass,
-#     so the vendored fork is not touched: pyte's auto-return is our own override.
+# ── the two modes of `terminal_scroll` (`AGENTS.md` §4.3, `DOCUMENTATION.md` §64) ─────
+# The key is CONFIG-ONLY (no settings-hub row) and validated like `terminal_wheel`: a
+# missing / foreign / broken value is the DECLARED default, never an error.
+# SCROLL_MODE_LIVE ("live") is the DEFAULT — new output pulls the view back to the live
+# line; SCROLL_MODE_PIN ("pin") is OPT-IN — the view keeps the SAME LINES. Our override.
 SCROLL_MODE_LIVE = "live"
 SCROLL_MODE_PIN = "pin"
 SCROLL_MODES = (SCROLL_MODE_LIVE, SCROLL_MODE_PIN)
@@ -173,7 +68,7 @@ def resolve_scroll_mode(value) -> str:
 
 
 # Palettes: the REQUIRED keys black…white + br_* (8+8) — otherwise the SGR 33/93
-# and the bright colors fall to default (critical error #2 from TERMINAL.md §3).
+# and the bright colors fall to default (the color engine — DOCUMENTATION.md §12).
 # 'default' — the current xterm-like palette: the defaults = the current look.
 # default_fg/default_bg — the text color and the screen background (reverse folds to them).
 ANSI_COLOR_NAMES = ("black", "red", "green", "yellow", "blue", "magenta", "cyan", "white")
@@ -211,7 +106,7 @@ PALETTES = {
 
 
 def resolve_color(value, palette=None, default_hex=DEFAULT_FG_HEX):
-    """pyte color → hex '#rrggbb' (TERMINAL.md §5.1).
+    """pyte color → hex '#rrggbb' (DOCUMENTATION.md §12).
 
     value: None/'default' | a name ('brown', 'brightred', …) | a 6-hex without '#'
     (in pyte 0.8.2 both the 256-colors and truecolor are stored exactly like that —
@@ -422,14 +317,14 @@ class SshmapHistoryScreen(pyte.HistoryScreen):
                 self._pin_anchor = len(h.top)   # a CONTENT offset — what pin_end() restores
             self._restore_live()
 
-    # v1.3rc1: the batch A/B overrides REMOVED — they became the fork patches
-    # 0001/0002/0003 (third_party/pyte-patches/MANIFEST.md); the behavior is the same, the provenance is explicit.
+    # The batch A/B compatibility overrides live as the fork patches
+    # 0001/0002/0003 (third_party/pyte-patches/MANIFEST.md) — same behaviour, explicit provenance.
 
 
 class TerminalScreen:
     """A columns x lines grid on pyte + thread-safe input.
 
-    v1.0RC3: screen — pyte.HistoryScreen (scrollback, TERMINAL.md §5.4).
+    v1.0RC3: screen — pyte.HistoryScreen (scrollback, DOCUMENTATION.md §12).
     v1.2.11: screen — SshmapHistoryScreen (a subclass, compatibility with pyte 0.8.2).
     v1.2.12: + in_alt_screen() — the alternative screen state under the lock.
     v1.3rc1: pyte — the managed fork third_party/pyte (the import seam, MANIFEST.md);
@@ -510,7 +405,7 @@ class TerminalScreen:
         with self._lock:
             return bool(self.screen.pin_release())
 
-    # ── v1.0RC3: the scrollback (HistoryScreen, TERMINAL.md §5.4) ──────────
+    # ── v1.0RC3: the scrollback (HistoryScreen, DOCUMENTATION.md §12) ──────────
     def scroll_up(self):
         """A history page up (prev_page). True — the position changed.
 
@@ -534,7 +429,7 @@ class TerminalScreen:
 
     def at_bottom(self):
         """Are we on the live line? (history.position == history.size — the cursor
-        is visible, the scroll down is forbidden; TERMINAL.md §5.4)."""
+        is visible, the scroll down is forbidden; DOCUMENTATION.md §12)."""
         with self._lock:
             return self.screen.history.position == self.screen.history.size
 
@@ -544,13 +439,11 @@ class TerminalScreen:
             h = self.screen.history
             return h.position, h.size
 
-    # ── v1.3.3.4 (ROADMAP task 1): the scrollback DOCUMENT of the find bar ────
-    # pyte.HistoryScreen keeps three queues (the class docstring of the fork):
-    # history.top — the lines ABOVE the screen (oldest first), buffer — the visible
-    # grid, history.bottom — the lines BELOW it (non-empty only while the user has
-    # scrolled back). The document below is the three of them in that order, so it
-    # is the SAME line sequence at any scroll position — that is what makes a match
-    # index stable while Enter/Shift+Enter move the viewport through it.
+    # ── the scrollback DOCUMENT of the find bar ────
+    # `pyte.HistoryScreen` keeps three queues (the fork's class docstring): `history.top` — the lines
+    # ABOVE the screen (oldest first), `buffer` — the visible grid, `history.bottom` — the lines BELOW
+    # it (non-empty only while the user has scrolled back). The document is the three of them in that
+    # order, so it is the SAME line sequence at any scroll position — a match index is stable.
 
     def _row_text(self, row) -> str:
         """One pyte grid row → str (the cells are a SPARSE dict: the width comes from columns).
@@ -821,11 +714,3 @@ class TerminalScreen:
             cx = min(scr.cursor.x, scr.columns - 1)
             cy = min(scr.cursor.y, scr.lines - 1)
             return rows, cx, cy, bool(scr.cursor.hidden)
-
-    # v1.2.9 (ROADMAP "Terminal hygiene"): the deprecated HTML renderer render()
-    # (v1.0RC1) REMOVED together with the _color()/_esc_html() helpers — dead code
-    # since v1.0RC1, never created by the window; the render — TerminalWidget.snapshot().
-
-    # v1.1.2 final (N13): the dead cursor() property REMOVED — there were no callers
-    # in the code (AUDIT: only the internal screen.cursor.* reads under the lock).
-    # The cursor for the render comes from snapshot() — under the same lock as feed().

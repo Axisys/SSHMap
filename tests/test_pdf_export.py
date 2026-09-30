@@ -1,26 +1,12 @@
 # -*- coding: utf-8 -*-
-"""v0.9.9.7 — Map PDF export (ROADMAP v0.9.9.7); geometry pinned in v1.3.3.7-fix.
+"""v0.9.9.7 — Map PDF export (ROADMAP v0.9.9.7); the page geometry is pinned in §6 of this file.
 
-It checks (offscreen, WITHOUT parsing the PDF content):
-  1. `MapScene.render_to_pdf()` → the file exists, the size > 0, the %PDF header and
-     the %%EOF marker; the return value == the size of the file on disk.
-  2. An empty scene — also a valid PDF (the fallback rect of render_to_pixmap).
-  3. A portrait map (the height > the width) — the page without a crash.
-  4. MainWindow: `_export_map_pdf` exists and is registered in the "File" menu
-     (the i18n registry `_menu_i18n`).
-  5. i18n: the new keys `file.export_pdf` / `status.export_pdf_ok` × en/ru/zh
-     are not empty; the sets of keys are identical (the parity pin — tests/_common.py).
-  6. **v1.3.3.7-fix — the PAGE GEOMETRY** (the regression that shipped in v0.9.9.7 and
-     was found while verifying the export set: a ~72 pt thumbnail in the corner of a
-     870×1200 pt white page). Measured on the real file: the /MediaBox (the long side
-     1200 pt = 42 cm, the short side following the map's proportions, the orientation
-     the map's own), the /Width//Height of the embedded image (the raster floor), and —
-     when QtPdf is available — the INK COVERAGE of the page rendered back: the drawn
-     map must fill the page, not sit in its corner. Both defects are also explained in
-     `MapScene.render_to_pdf`.
-
-Run: python tests/test_pdf_export.py   (from the project root) or python tests/run_all.py
-"""
+Offscreen and WITHOUT parsing the PDF content, the checks are: the file really exists after
+`MapScene.render_to_pdf()` with a size > 0, the `%PDF` header, the `%%EOF` marker and a return value equal
+to the file size; an EMPTY scene still producing a valid PDF (the `render_to_pixmap` fallback rect); a
+portrait map (height > width) rendering without a crash; `MainWindow._export_map_pdf` existing and being
+registered in the "File" menu's i18n registry; the two new keys `file.export_pdf` / `status.export_pdf_ok`
+being non-empty in every language with identical key sets (the parity pin). THE PAGE GEOMETRY is the regression this file was extended for (a ~72 pt thumbnail in the corner of an 870×1200 pt page shipped once and was found while verifying the export set): measured on the real file it checks the `/MediaBox` (a 1200 pt long side, the short side following the map's proportions, the orientation the map's own), the `/Width`//`/Height` of the embedded image (the raster floor) and — when QtPdf is available — the INK COVERAGE of the page rendered back, because the drawn map must fill the page and not sit in its corner. Both defects are explained in `MapScene.render_to_pdf` too."""
 import os
 import re
 
@@ -111,7 +97,7 @@ def ink_coverage(path, render_px=600):
 
 
 def export_and_check(scene, name, path, expect_landscape=None, has_content=True):
-    """render_to_pdf + the file checks + the v1.3.3.7-fix page-geometry checks."""
+    """render_to_pdf + the file checks + the page-geometry checks."""
     size = scene.render_to_pdf(path)
     exists = os.path.isfile(path)
     check(f"{name}: the file exists", exists, f"got {path!r}")
@@ -128,7 +114,7 @@ def export_and_check(scene, name, path, expect_landscape=None, has_content=True)
     check(f"{name}: the %PDF header", head == b"%PDF-", f"got {head!r}")
     check(f"{name}: the %%EOF marker in the tail of the file", b"%%EOF" in tail)
 
-    # ── the page geometry (v1.3.3.7-fix) ────────────────────────────────────────────
+    # ── the page geometry ────────────────────────────────────────────
     box = page_box(path)
     check(f"{name}: the /MediaBox is readable", box is not None, str(box))
     if box is None:

@@ -1,42 +1,12 @@
 # -*- coding: utf-8 -*-
 """v1.7 — Files Commander, the closing release: the CLAUSE AUDIT of the frozen contract
-(SFTP_PANES.md) against the shipped code (ROADMAP v1.7, task 1).
+(SFTP_PANES.md) against the shipped code.
 
-The rc series of the 1.7 line IMPLEMENTED the frozen contract; this release VERIFIES it. The audit
-is a gate and not a paragraph: every owner, name, refusal and persistence key the contract declares
-is read off the SHIPPED objects here, so a clause that quietly stops being true fails in the suite
-instead of in the field. The slot adds no behaviour of its own — and the three preview clauses of
-§3b are the ones the audit found BROKEN in the shipped rc3 (the panel was moved but got no column,
-a second file opened from the reading pane was refused as "busy", and a read the worker refused left
-the other pane dressed as a panel that showed nothing); they are pinned here as the clauses they are.
-
-  §1 The pane model (§1): the container's seven owned facts, the pane's own listing state, the
-     ACTIVE-pane forwarding surface (`PANE_STATE` + `__getattr__`) and the four Qt methods the
-     container must DELEGATE rather than inherit.
-  §2 The worker API surface (§2/§2a): the two reserved kinds exist with the declared fields, both
-     join `OP_KINDS`/`LOGGED_KINDS`, the tree bounds and the machine payloads are declared, and the
-     signal set of the contract is complete — ONE worker, N panes.
-  §3 The key map (§3/§3a): `F3`/`F5`/`F6`/`F7`/`F8` are ONE pane-owned action each with the declared
-     shortcut context, the rc3 keys are NOT actions, `F4` is ABSENT everywhere, and a key with no
-     current row answers the contract's sentence.
-  §4 The two-pane view (§4/§4a): one pane = ONE member and no handle, two = two, the second pane
-     starts where the first is, the ring follows the ACTIVE pane and exists only in the mode, and
-     the button row and the hint row are never both and never neither.
-  §5 The persistence (§5): the two declared keys, their defaults, the clamp and the foreign-type
-     fallback.
-  §6 The follow rule (§6): the mode switches the follow OFF, greys the switch and tells the session;
-     `follow_directory()` refuses while the mode is on.
-  §7 The preview of §3b — the clause the audit closed: the panel of one pane is shown in the OTHER
-     pane's splitter and really occupies its column, the walk over the listing never answers "busy",
-     and a refused read changes no pane's look.
-  §8 The line's state (§8): the contract is in the repository with its slots, the version pins are
-     the release's, the i18n pin is unmoved, `VERSION_FORMAT` stays `0.9` and no dependency grew.
-
-ALL checks are offscreen and without the network: the in-memory fake SFTP of `tests/_fakes.py`
-behind a real `SftpWorker` (ONE transport, ONE queue, two panes).
-
-Run:  python tests/test_sftp_commander_contract.py   (from the project root) or python tests/run_all.py
-"""
+The rc series IMPLEMENTED the frozen contract; this release VERIFIES it — a GATE, not a paragraph:
+every owner, name, refusal and persistence key is read off the SHIPPED objects, so a clause that quietly
+stops being true fails in the suite. ALL checks are offscreen, on the fake SFTP behind a real SftpWorker.
+§1 the pane model; §2 the worker API surface; §3 the key map; §4 the two-pane view; §5 the persistence;
+§6 the follow rule; §7 the preview of §3b; §8 the line's state and the version pins."""
 import os
 import sys
 

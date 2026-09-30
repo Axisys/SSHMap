@@ -1,50 +1,11 @@
 # -*- coding: utf-8 -*-
-"""v1.2.2 — Terminals docked in the map window (terminal.mode: windows/tabs, ROADMAP v1.2.2).
+"""Terminals docked in the map window (`terminal_mode`: windows/tabs).
 
-The thematic test of the release v1.2.2 (the "new thematic file" convention): offscreen,
-ALL without the network — the fake threads with the same API as SSHTerminalThread (the test seam
-ST.SSHTerminalThread).
+Offscreen, NO network (the fake threads). Pins the dock content, the per-session tabs, the
+status-bar bridges that follow the ACTIVE tab, and the teardown that leaves no live worker
+behind. Contract — `AGENTS.md` §4.3; mechanism — `DOCUMENTATION.md` §14c.
 
-§1 The config key terminal_mode: no key → "windows" (the default, the current behavior);
-   "tabs" / " TABS " (strip+lower) → "tabs"; a broken value/a foreign type (int) → the default
-   (the validation of load_terminal_settings() by the pattern of the other keys).
-
-§2 The structure of the dock + the spawn in the mode "tabs": MainWindow._spawn_terminal_window creates
-   the QDockWidget "Terminals" (objectName terminals_dock, the title terminal.dock_title)
-   with the QTabWidget of the TerminalSessionPage; the map stays the central widget
-   (self.view is not touched); the second node — the second tab in the SAME dock (+ the status
-   terminal.session_new_tab); the registry stores the SESSIONS.
-
-§3 The apply without a restart: the mode switch by the config key — the new sessions go to
-   the chosen mode, the open windows/dock live as is until the close (tabs→windows:
-   a separate window; windows→tabs: the session in the dock, the old window lives).
-
-§4 The cleanup in the dock — per page (v1.2): the tab close = the cleanup of the LOCAL page
-   (the "ask" gate Cancel holds / Close closes only this tab; the neighbor lives and types);
-   the close of the LAST tab → the dock is hidden (not destroyed); the green dot goes out
-   when ALL the sessions of the node are closed; the cross on the tab — the same path.
-
-§5 The status line of the dock — only the active tab + the auto-clear by the timeout (the token guard):
-   the messages of the inactive tabs do not reach, the switch reconnects the bridge;
-   the SFTP progress follows the active tab; timeout_ms>0 → the label is cleared, a
-   newer message is not clobbered by the old timeout; the status bar of the MAP is not touched by the
-   dock sessions.
-
-§6 The tear-off of the dock into a window and back: setFloating(True) — a separate window (isWindow),
-   the sessions type; setFloating(False) — back to the map, the state is unchanged.
-
-§7 The shutdown of MainWindow: closeEvent closes ALL the sessions of the registry (the dock + the windows) —
-   the threads are stopped, the registry is empty, the dock is hidden, the terminal window is destroyed.
-
-§8 The limit terminal_max_open by the SESSIONS in all the containers: 1 window + 1 tab of the dock =
-   the limit; Cancel → None; Close → the oldest one (_force_close) is closed in its own
-   container, the new session goes to the chosen mode.
-
-§9 The i18n parity (404 = 400 + 4: terminal.dock_title + settings.terminal.mode.*)
-   + the release state (the pin _common.py).
-
-Run:  python tests/test_terminal_dock.py   (from the project root) or python tests/run_all.py
-"""
+Run: python tests/test_terminal_dock.py   (from the project root) or python tests/run_all.py"""
 import json
 import os
 import sys

@@ -1,16 +1,11 @@
-"""Sticky notes: drag/resize/edit/delete + JSON round-trip (former smoke_test.py §6e "v0.7.2").
+"""Sticky notes: drag / resize / edit / delete plus the JSON round trip (a former smoke-test part).
 
-A part of the suite split out of smoke_test.py v0.6–v0.9.2 (see INDEX.md).
-  * creation + serialization (to_dict/from_dict, broken values → the defaults);
-  * the size clamp MIN/MAX;
-  * the mouse drag through the FULL pipeline view→scene→item (QTest input): MapView itself
-    switches to NoDrag on the press over a note; the moved signal on the release;
-  * the resize by the bottom-right corner; the edit mode on the double click (the focus policy);
-  * textChanged → note.textEdited; the Delete key via MainWindow._remove_note;
-  * the JSON round-trip + the backward-compat of an old project without the "notes" key.
-
-Run: python tests/test_notes.py   (from the project root) or python tests/run_all.py
-"""
+Checks: the creation and serialization (`to_dict`/`from_dict`, a broken value → the defaults) and the
+MIN/MAX size clamp; the mouse drag through the FULL pipeline view→scene→item (QTest input) — `MapView`
+switches to `NoDrag` on the press over a note and the release emits `moved`; the resize by the bottom-right
+corner and the edit mode entered by a double click (the focus policy); `textChanged` → `note.textEdited`;
+the Delete key routed through `MainWindow._remove_note`; and the JSON round trip including the backward
+compatibility of an old project without a `"notes"` key."""
 import sys
 
 from _common import bootstrap, check, finish, viewport_point as _vp

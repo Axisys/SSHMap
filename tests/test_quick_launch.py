@@ -1,20 +1,12 @@
 # -*- coding: utf-8 -*-
-"""v1.0RC4 — Quick launch (server links/commands): the release's themed test.
+"""v1.0RC4 — Quick launch (server links and commands): the release's themed test.
 
-The feature (at the colleagues' request, outside the original ROADMAP v1.0):
-  * ServerData.quick_launch — a list of items {"type": "url"|"command", "name", "value"};
-    stored in the project JSON as the "quick_launch" array (backward-compat: the old files
-    are read as an empty list, the broken records are dropped);
-  * the right click on the server (the sidebar row AND the map node) — the "Quick launch" submenu FIRST
-    (above "Connect via SSH"): the items + a separator + "Configure…";
-  * a URL opens in the default browser (webbrowser); a command is sent
-    as the first command into the server's SSH terminal (SSHTerminalWindow(initial_command=...),
-    the send after connected_signal with the INITIAL_COMMAND_DELAY_MS delay);
-  * the configuration — the "Quick launch…" button in the server properties (below
-    "Manage profiles…") + "Configure…" from the submenu; the changes via the undo stack.
-
-Run: python tests/test_quick_launch.py   (from the project root) or python tests/run_all.py
-"""
+`ServerData.quick_launch` is a list of items `{"type": "url"|"command", "name", "value"}` stored in the
+project JSON as the `"quick_launch"` array (an old file reads as an empty list and a broken record is
+dropped). The right click on a server — the sidebar row AND the map node — puts the "Quick launch" submenu
+FIRST, above "Connect via SSH", with the items, a separator and "Configure…". A URL opens in the default
+browser; a command is sent as the FIRST command into the server's SSH terminal
+(`SSHTerminalWindow(initial_command=…)`, sent after `connected_signal` behind the initial-command delay). The editor is the "Quick launch…" button of the server properties plus "Configure…" in the submenu, and its changes go through the undo stack."""
 import json
 import os
 import sys
@@ -396,8 +388,8 @@ reloaded = server_data_from_dict(s_ql)
 check("reload via server_data_from_dict restores the entries",
       reloaded.quick_launch == before, str(reloaded.quick_launch))
 
-# ══ 7b. v1.0-fix: KeyError "name" in LogRecord (extra={"name": ...}) ═══════
-print("== v1.0-fix: quick launch logging ==")
+# ══ 7b. KeyError "name" in LogRecord (extra={"name": ...}) ═══════
+print("== quick launch logging ==")
 
 # Before the fix, extra={"name": name} in log.info() collided with the built-in attribute
 # LogRecord.name (the logger name) → makeRecord() raised KeyError AFTER the successful

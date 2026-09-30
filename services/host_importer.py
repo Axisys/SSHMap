@@ -1,25 +1,15 @@
-"""Host Importer — bulk import of servers from a text file (v0.9.5.5).
+"""Host importer — bulk import of servers from a text file (v0.9.5.5; DOCUMENTATION.md §27).
 
-File format: one server per line — an IP address or a host DNS name; a line may
-carry SEVERAL whitespace-separated entries (v1.4.1, see parse_hosts_file()).
-Empty lines are ignored, and '#' or '//' — at the start of a line or inside it —
-starts a comment that runs to the end of the line.
+The file format is one server per line: an IP address or a DNS name, and a line may carry SEVERAL
+whitespace-separated entries (see `parse_hosts_file()`). Empty lines are ignored, and `#` or `//` — at the
+start of a line or inside it — starts a comment that runs to the end of the line.
 
-Logic:
-  • a line looks like an IPv4/IPv6 → take it as-is (host = IP);
-  • otherwise it is a DNS name → resolve it via socket.getaddrinfo(); on success
-    the found IP is stored in the node's `ip` field, and `host` stays the name
-    (the SSH connection will use the name from then on); on failure the node is
-    still created with host=name, ip="" — the user will sort it out manually.
-
-Passwords/users are not touched — the user sets them up after the import.
-
-v1.5.2 (ROADMAP task 2): the DNS stage of the import left no record at all. The resolver
-thread now writes ONE summary per run (how many names got an address, how many did not,
-and whether the run was cancelled), so the activity history answers "did the import
-actually resolve anything" — the question the batch's own "Imported N servers" line
-cannot answer (the node is created either way, with an empty `ip`).
-"""
+The logic: a line that looks like an IPv4/IPv6 address is taken as-is (`host` = the IP); otherwise it is a
+DNS name and is resolved through `socket.getaddrinfo()` — on success the found IP goes into the node's `ip`
+field while `host` KEEPS the name (the SSH connection then uses the name), and on failure the node is still
+created with `host` = the name and an empty `ip`, for the user to sort out. Passwords and users are never
+touched: the user sets them up after the import.
+ The DNS stage now leaves a record: the resolver thread writes ONE summary per run — how many names got an address, how many did not and whether the run was cancelled — so the activity history can answer "did the import actually resolve anything", which the batch's own "Imported N servers" line cannot (a node is created either way)."""
 
 import ipaddress
 import socket
@@ -39,7 +29,7 @@ log = get_logger(__name__)
 def parse_hosts_file(text: str) -> List[str]:
     """Parse the file text: EVERY whitespace-separated word of every data line.
 
-    v1.4.1 (ROADMAP task 4): the parser used to take ``entry.split()[0]``, so a
+    v1.4.1 (ROADMAP task 4): the parser takes EVERY whitespace-separated word, never ``entry.split()[0]``, so a
     line like ``web-1 web-2 db-master`` imported ONLY ``web-1`` — the remaining
     words were neither imported nor counted in the "skipped" report (a silent
     loss; the v1.3.3 audit, confirmed by the third-party review). The pinned
@@ -151,10 +141,7 @@ class HostResolverThread(QThread):
         self.resolved_map.emit(result)
 
 
-# v1.0-fix (audit #14): removed the dead build_server_data() and import_from_text() —
-# they were never called anywhere (the actual import in MainWindow._import_servers
-# builds ServerData inline: deduplication against existing map nodes happens there
-# too), and the annotation/docstring of import_from_text disagreed with the code.
-# The actually used parse_hosts_file / is_ip_address / resolve_host are kept;
-# v1.1.2RC2 (N6): processEvents during a long resolution is replaced by
-# HostResolverThread (outside the GUI thread).
+# The actually used `parse_hosts_file` / `is_ip_address` / `resolve_host` are all this module has:
+# the import itself (`MainWindow._import_servers`) builds `ServerData` inline, where deduplication
+# against the existing map nodes happens too. A long resolution runs off the GUI thread through
+# `HostResolverThread` (N6), never a `processEvents` pump.

@@ -1,79 +1,14 @@
-"""Background checking of map node statuses (v0.7.1).
+"""Background checking of map node statuses — one parallel round in a QThread.
 
-Status semantics:
-    online  — TCP port is open AND the server sent an SSH banner ("SSH-x.y-...")
-    warn    — port is open, but no banner within the timeout (non-SSH service / firewall)
-    offline — unreachable (refused / timeout / DNS)
+`online` = the port is open AND an SSH banner arrived; `warn` = an open port without a
+banner; `offline` = unreachable. The module owns the PROBE alone — the card's mark, the
+freshness tick and the activity line live in `graphics/server_node.py` / `ui/main_window.py`,
+and the plugin status merge is the manager's (`set_status_provider`).
 
-Probes run in a dedicated QThread (_ProbeThread), not via a QTimer in the
-main thread: a synchronous socket.create_connection with timeout=3 s × N nodes
-would block the GUI. The QTimer here only spreads the rounds over time
-(interval is configurable, default 30 s); a concurrent re-launch of a
-round is impossible (_busy flag).
-
-v1.1.2 final: probes within a round run IN PARALLEL (ThreadPoolExecutor,
-ceiling status_max_parallel, default 16): the worst case of a round used to be
-N × timeout (100 offline ≈ 5 min), now ceil(N/max_parallel) × timeout
-(≈ 20–30 s). Results arrive as they complete (as_completed →
-probed signal in the QThread — the _busy/round_finished semantics are
-unchanged). Soft auto-interval: N > LARGE_MAP_THRESHOLD (50) → the round
-interval doubles (effective_interval_ms; there is no hard limit on the number
-of servers — ROADMAP v1.1.2 final, task 3).
-
-Cancellation: stop()/shutdown() set a threading.Event — a probe that has not
-started yet (was waiting for a worker) returns immediately with no result
-(the node is assigned no status, just like "skipped between nodes" in the old
-sequential loop); in-flight probes run out their network timeout. Then the
-thread is waited on with a margin of
-ceil(N/max_parallel) × timeout + 2 s (upper bound; the actual exit takes
-one timeout). Previously shutdown waited only probe_timeout + 2 s, which with
-≥ 2 nodes is shorter than a whole round — the QObject was destroyed together
-with a running QThread (AUDIT v0.7.2, high #5).
-
-v1.4rc2 (plugin foundation, rc2): an optional PLUGIN STATUS PROVIDER joins a probe. The
-manager installs it with `set_status_provider(provider)`; the provider is called inside
-the pool worker (a worker thread — never the GUI thread, PLUGINS.md §6) with
-`(server_id, ssh_status)` and returns `(kind, detail) | None`. The round keeps the WORSE
-of the two by severity and the plugin's detail travels on its own `status_detail` signal
-(a tooltip line on the card); a hung plugin is abandoned by the manager's hook budget, so
-it cannot hang a round. With no provider installed the round is exactly the pre-rc2 probe.
-
-v1.5rc3 (ROADMAP task 3): every result is TIMESTAMPED. `_on_probed` records
-`time.time()` per server and `_on_done` records the end of the round, so the window can
-ask "how old is this datum" (`last_checked_at` / `last_round_at`) and paint the stale mark
-once `stale_threshold_s()` — `max(2 × the effective interval, STALE_MIN_SEC)` — has
-passed. The timestamps are FACTS about the round; the checker itself never repaints
-anything (the GUI half lives in `graphics/server_node.py` + `ui/main_window.py`).
-
-v1.5 (ROADMAP): the checker can be told to never probe a set of ids (`set_skip_ids`) —
-the DEMO map's nodes, whose status is EMULATED by `storage/example_project.py`. The
-filter lives in `_subset()`, so every round obeys it; the checker still knows nothing
-about emulation, and with no skip set it behaves exactly as before.
-
-In a headless environment without a running event loop the timers never fire —
-child threads do not start, which makes the module safe for smoke tests.
-
-v1.5.2 (ROADMAP task 2): the round had NO logging call at all — a probe result reached
-the card and the status bar and left nothing behind (the "history the interface never
-kept"). `start_round()`'s `_on_done` now writes ONE summary record per round into
-`~/.sshmap/logs/sshmap.log` AND into the activity ring the panel renders. It is a
-SUMMARY on purpose: the per-node answers are already on the cards, and a hundred-node
-map must not turn one round into a hundred log lines.
-
-v1.6.6 (ROADMAP task 1/2): the cadence has a THIRD state — **manual only**, selected by
-`status_interval_sec = 0` (`MANUAL_INTERVAL_SEC`, a DECLARED sentinel, so one setting keeps
-one home and no second key appears). In that mode NOTHING starts a round by itself: `start()`
-arms neither the timer nor the deferred first round, a project load is refused by the ONE
-guard in `MainWindow._load_project_at()`, and `set_manual_only(True)` stops a running timer
-immediately. The deferred first round becomes a GUARDED slot (`_deferred_first_round()`) —
-a `QTimer.singleShot` cannot be un-armed, so the slot re-asks the mode when it fires. The
-MANUAL doors are untouched: "Check statuses now" and the node context menu still call
-`start_round()`, `_subset()`, `is_busy` and the skip set behave exactly as they do
-automatically. Because "two missed rounds" means nothing where there are no rounds, the
-freshness horizon of that mode is the DECLARED `MANUAL_STALE_SEC` (one day) instead of
-`max(2 × the interval, STALE_MIN_SEC)` — the freshness tick keeps running either way, so a
-green card that was true yesterday is not presented as a current fact.
-"""
+The probes run in a `ThreadPoolExecutor` inside the QThread (a synchronous
+`create_connection(timeout=3)` × N nodes would block the GUI), and `stop()`/`shutdown()` are
+idempotent: an unstarted probe returns with no status, an in-flight one runs out its timeout.
+Mechanism, the cadence states and the numbers — `DOCUMENTATION.md` §19."""
 import socket
 import threading
 import time
@@ -101,12 +36,11 @@ DEFAULT_INTERVAL_MS = 30_000   # interval between periodic checks
 DEFAULT_INTERVAL_SEC = 30      # the same, in seconds — default for the status_interval_sec key (v1.1)
 PROBE_TIMEOUT_S = 3.0          # timeout of a single probe (connect + banner)
 
-# v1.6.6 (ROADMAP task 1): the cadence's DECLARED range and its third state. The range is
-# the clamp the key has always had (`5..86400`); `MANUAL_INTERVAL_SEC = 0` is the SENTINEL
-# that selects "manual only" — NOT a second config key, so the setting keeps ONE home.
-# `resolve_interval_sec()` is the PURE reader: exactly 0 means manual, every other value
-# (a missing, negative, non-numeric or out-of-range one included) keeps the ordinary clamp,
-# so a corrupt value degrades to a REAL interval rather than to a silent mode change.
+# The cadence's DECLARED range and its third state. The range is the clamp the key has always had
+# (`5..86400`); `MANUAL_INTERVAL_SEC = 0` is the SENTINEL that selects "manual only" — NOT a second
+# config key, so the setting keeps ONE home. `resolve_interval_sec()` is the PURE reader: exactly 0 means
+# manual, every other value (a missing, negative, non-numeric or out-of-range one included) keeps the
+# ordinary clamp, so a corrupt value degrades to a REAL interval rather than to a silent mode change.
 MANUAL_INTERVAL_SEC = 0        # the sentinel: no round starts by itself
 MIN_INTERVAL_SEC = 5
 MAX_INTERVAL_SEC = 86400
@@ -116,20 +50,17 @@ DEFAULT_MAX_PARALLEL = 16      # default for the status_max_parallel key (ROADMA
 MAX_PARALLEL_LIMIT = 64        # clamp ceiling (dialog spinbox and validator — one range)
 LARGE_MAP_THRESHOLD = 50       # N > 50 nodes → round interval doubles ("N > ~50")
 
-# v1.5rc3 (ROADMAP task 3): status FRESHNESS. A status is a fact with a timestamp, and
-# the map must not present an old fact as a current one. The threshold is a FLOOR as
-# well as a multiple: `max(2 × the effective interval, STALE_MIN_SEC)` — with the 30 s
-# default that is 90 s, and a user who shortens the interval to 5 s still gets a
-# meaningful "this is old" (10 s would be noise, not a signal). Freshness NEVER changes
-# a status and never starts a round: it only repaints the mark and the tooltip line
-# (see ServerNode.refresh_freshness).
+# The status FRESHNESS: a status is a fact with a timestamp and the map must not present an old fact as
+# a current one. The threshold is a FLOOR as well as a multiple — `max(2 × the effective interval,
+# STALE_MIN_SEC)`, i.e. 90 s at the 30 s default, and a user who shortens the interval to 5 s still
+# gets a meaningful "this is old" (10 s would be noise, not a signal). Freshness NEVER changes a status
+# and never starts a round: it repaints the mark and the tooltip line (`ServerNode.refresh_freshness`).
 STALE_MIN_SEC = 90.0
 
-# v1.6.6 (ROADMAP task 1): the horizon of the MANUAL mode. "Two missed rounds" is not a
-# sentence that means anything where there are no rounds, and marking a 90-second-old manual
-# check stale would be noise rather than a signal — so the manual mode answers this DECLARED
-# horizon instead. It is deliberately LONG (one day): the age of a status is the only clock
-# the manual mode has, and it has to be patient enough to be a signal and short enough that a
+# The horizon of the MANUAL mode. "Two missed rounds" is not a sentence that means anything where there
+# are no rounds, and marking a 90-second-old manual check stale would be noise rather than a signal — so
+# the manual mode answers this DECLARED horizon instead. It is deliberately LONG (one day): the age of a
+# status is the only clock the manual mode has, patient enough to be a signal and short enough that a
 # green card is never presented as a current fact for a whole week.
 MANUAL_STALE_SEC = 86400.0
 
@@ -751,7 +682,7 @@ class StatusChecker(QObject):
         flag is set, the executor stops accepting new probes (the submitted ones
         run out their network timeout); then the thread is waited on with a margin of
         ceil(N/max_parallel) × timeout + 2 s (v1.1.2 final: the round is parallel —
-        the margin used to be computed sequentially as N × timeout).
+        the margin is ceil(N/max_parallel) × timeout, not N × timeout).
         """
         self._enabled = False  # v1.6.6: a stopped checker is not resumed by set_manual_only(False)
         self._timer.stop()

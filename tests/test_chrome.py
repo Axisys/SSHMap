@@ -1,39 +1,12 @@
 # -*- coding: utf-8 -*-
 """v1.5rc4 — Density, focus & findability: the chrome answers the same questions as the map.
 
-The LAST rc of the 1.5 line. v1.5rc1 fixed the palette, v1.5rc2 gave every meaning a
-second channel and v1.5rc3 answered "how do I start"; this release makes the CHROME itself
-work at any window width and gives the keyboard a visible home.
-
-  §1 THE STATUS BAR has an overflow policy: below the MEASURED `status_bar_needed_width()` the
-     "Servers / Connections" totals are given up, while the three CLICKABLE status
-     counters and the zoom percentage STAY (the v1.4.5 counters are the interactive part)
-     and the multi-input plaque belongs to its mode, never to a resize. ONE pure decision
-     (`is_compact`) + ONE method on the window, so three widths are three assertions;
-  §2 THE TOOLBAR stopped repeating the sidebar and the palette (the pinned keep-set:
-     file new/open/save, center, fit, undo/redo and the four view toggles) and OVERFLOWS
-     on a narrow window — a "»" menu carrying the very same QActions instead of a squeezed
-     button row (the second pinned decision: overflow, not wrapping);
-  §3 THE SETTINGS SEARCH: one field filters the rows and the pages by their TRANSLATED
-     labels, a hit switches to its tab and highlights the row, Enter walks the hits. The
-     acceptance asks for a key living on EACH of the eight tabs — this file asks for it;
-  §4 THE HOTKEYS TAB became navigable: a filter (name OR current sequence), grouping by
-     family with a caption row per family, a counts header ("with a key" / "assignable")
-     and the assignment hint — while `ui/hotkey_registry.py` stays the only source;
-  §5 THE VISIBLE FOCUS of the three keyboard domains (map / sidebar / terminal): ONE
-     indicator (`ui/focus_ring.py`), ONE colour (`theme.ACCENT_STRONG` — the v1.5rc1 ink
-     role, never a new tone) and one state per domain that follows the real focus events;
-  §6 THE KEYBOARD WALK on the map: Tab/Shift+Tab walk the cards in reading order, the
-     arrows move the selection to the geometrically nearest card, Enter opens per the
-     pinned `ui_node_double_click` semantics, Esc clears — all on `MapView`, all through
-     the window's ordinary selection path;
-  §7 THE OVERLAY PRIORITY: the legend yields to the first-run hint, the minimap yields to
-     the open search bar, the collapse diamond is never covered — decided in ONE place from
-     the live geometry, and the temporary suppression never touches `ui_legend`;
-  §8 the release state (version, i18n parity + the 13 new keys, the registry families).
-
-Run: python tests/test_chrome.py   (from the project root) or python tests/run_all.py
-"""
+The last rc of the 1.5 line: it makes the CHROME itself work at any window width and gives the keyboard
+a visible home. §1 the status bar's overflow policy (below the measured `status_bar_needed_width()` the
+totals are given up while the clickable counters and the zoom STAY; ONE pure `is_compact`); §2 the
+toolbar's pinned keep-set and its "»" overflow menu (the same QActions, never a squeezed row); §3 the
+settings search (one field filters the rows and the pages by their translated labels); §4 the navigable
+"Hotkeys" tab (filter, family grouping, counts) with the registry still the only source; §5 the visible focus of the three keyboard domains (`ui/focus_ring.py`, `theme.ACCENT_STRONG`); §6 the keyboard walk on the map (Tab/Shift+Tab, the arrows, Enter, Esc); §7 the overlay priority; §8 the release state and i18n."""
 import os
 
 from _common import (bootstrap, check, finish, check_i18n_parity, check_i18n_format,

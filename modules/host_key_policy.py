@@ -1,28 +1,22 @@
-"""SSH host key policy (AUDIT v0.7.2, high #4 — MITM risk of AutoAddPolicy).
+"""SSH host key policy — the answer to the MITM risk of `paramiko.AutoAddPolicy()` (AGENTS.md §4.4).
 
-Instead of `paramiko.AutoAddPolicy()` (which silently accepts any host key), the
-application uses its own known_hosts store in `~/.sshmap/known_hosts`:
+Instead of silently accepting any host key, the application keeps its OWN known_hosts store in
+`~/.sshmap/known_hosts`: on the FIRST connection to a server the key is accepted, its SHA256 fingerprint is
+logged and the entry is saved (pinning it for the future), and on every LATER connection the received key
+is compared with the stored one. A mismatch makes paramiko itself raise `BadHostKeyException` during
+`connect()` — the possible man-in-the-middle case — and the calling code shows the error.
 
-* first connection to a server — the key is accepted, the SHA256 fingerprint is
-  logged, and the entry is saved to the file (pinning for the future);
-* subsequent connections — the received key is compared with the stored one. On
-  a mismatch paramiko itself raises `BadHostKeyException` during connect()
-  (possible "man in the middle" attack); the calling code shows the error.
-
-The class implements the paramiko policy interface via duck typing
-(`missing_host_key`, `check`) and imports paramiko lazily in the methods: the
-module can be imported even where paramiko is not yet needed (headless tests).
-The exception — the compatibility block below: it imports only the known_hosts
-store submodule (without a full `import paramiko`) and is needed at module level
-to pick the class name.
-"""
+The class implements the paramiko policy interface by duck typing (`missing_host_key`, `check`) and imports
+paramiko LAZILY inside the methods, so the module can be imported where paramiko is not needed yet
+(headless tests). The one exception is the compatibility block below: it imports only the known_hosts store
+submodule (without a full `import paramiko`), because the class name has to be picked at module level."""
 
 import base64
 import hashlib
 import os
 
 # paramiko compatibility: up to 5.x the module was called paramiko.host_keys,
-# in paramiko 5.0+ it was renamed to paramiko.hostkeys (the old name was removed).
+# in paramiko 5.0+ it is named paramiko.hostkeys (the old name is gone).
 # Note: this is NOT a lazy `import paramiko` — it only pulls the hostkeys submodule.
 try:
     import paramiko.hostkeys as _pk_hostkeys
@@ -158,7 +152,7 @@ class SshKnownHostsPolicy:
         """Attach the policy and the known keys to the SSHClient before connect()."""
         client.set_missing_host_key_policy(self)
         store = self.load_store()
-        # paramiko 5.0: SSHClient.add_host_key() was removed — write to client.get_host_keys().
+        # paramiko 5.0: SSHClient.add_host_key() is gone — write to client.get_host_keys().
         try:
             client_keys = client.get_host_keys()
         except Exception:

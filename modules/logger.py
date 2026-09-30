@@ -1,20 +1,15 @@
-"""Centralized logging for SSH Map.
+"""Centralized logging for SSH Map — the ONE place that owns the logger tree.
 
 Usage in any module:
     from modules.logger import get_logger
     log = get_logger(__name__)
     log.info("Server added", extra={"server": "web-1"})
-    log.error("Connection failed", exc_info=True)
 
-All logs go to: ~/.sshmap/logs/ (created automatically)
+Every log goes to `~/.sshmap/logs/` (created automatically): the rotating FILE handler is the durable
+record, plus a console handler for WARNING and above that skips a GUI launch without streams (pythonw.exe).
 
-v1.5.2 (ROADMAP task 1): a THIRD handler is installed beside the file and console
-ones — `activity_log.ActivityLogHandler`, the thin tap that pushes every record into
-the in-memory ring the activity panel renders (`modules/activity_log.py`). It is
-installed HERE, in the ONE place that already owns the logger tree, so no module has to
-know that a panel exists; the ring itself is memory-only, so `setup_logging()` stays the
-only durable destination (~/.sshmap/logs/sshmap.log).
-"""
+A THIRD handler is installed beside them — `activity_log.ActivityLogHandler`, the thin tap that pushes every
+record into the in-memory ring the activity panel renders. It is installed HERE, in the one place that already owns the logger tree, so no module has to know that a panel exists; the ring is memory-only, which leaves the log file the only durable destination."""
 
 import logging
 import os
@@ -74,11 +69,10 @@ def setup_logging(level: int = logging.DEBUG) -> logging.Logger:
     root_logger.addHandler(file_handler)
 
     # ── Console handler (WARNING+: only warnings and errors) ──
-    # v1.6.1 (ROADMAP task 5): a GUI started by pythonw.exe has NO console — `sys.stdout`
-    # AND `sys.stderr` are None, and `StreamHandler(None)` then writes into a None stream,
-    # so every WARNING+ died inside `emit()` → `handleError()`. Take the first stream that
-    # really EXISTS and install no console handler when neither does: the rotating FILE
-    # handler is the durable record either way, and setup_logging() never raises.
+    # A GUI started by `pythonw.exe` has NO console — `sys.stdout` AND `sys.stderr` are None, and
+    # `StreamHandler(None)` then writes into a None stream, so every WARNING+ died inside `emit()` →
+    # `handleError()`. Take the first stream that really EXISTS and install no console handler when
+    # neither does: the rotating FILE handler is the durable record, and `setup_logging()` never raises.
     console_stream = _console_stream()
     if console_stream is not None:
         console_handler = logging.StreamHandler(console_stream)

@@ -1,47 +1,12 @@
 # -*- coding: utf-8 -*-
-"""v1.2.3 — Multi-input (broadcast of the active session's keystrokes to all other open sessions, ROADMAP v1.2.3).
+"""Multi-input: broadcasting the active session's keystrokes to the other sessions.
 
-The thematic test of the release v1.2.3 (the "new thematic file" convention): offscreen,
-ALL without the network — the fake threads with the same API as SSHTerminalThread (the test seam
-ST.SSHTerminalThread). The architecture: all the user input goes through one
-point — TerminalWidget.keyPressEvent() → _send(bytes) → terminal_thread.send_data();
-the hub (modules/multi_input.py, the singleton of the process) hangs on exactly this point.
+Offscreen, NO network (the fake threads). Pins the ONE input point
+(`keyPressEvent → _send → send_data`), the hub's receiver filter, the per-session exclusion and
+the three paths that deliberately bypass the broadcast.
+Contract — `AGENTS.md` §4.3; mechanism — `DOCUMENTATION.md` §14d.
 
-§1 The hub unit (MultiInputHub/_thread_alive): the listeners are notified ONLY on the real
-   state change; the toggle; the broadcast — the source is skipped (no echo), the dead
-   threads are filtered, a dead C++ object in the registry does not crash the broadcast; the reset.
-
-§2 The enabling of the mode via MainWindow: 3 sessions (the window mode); the checkable QAction
-   "View" (_toggle_multi_input(True)) → the checkmark + the F12 shortcut (the ApplicationShortcut,
-   lives only in the mode), the plaque of the status bar "MULTI: N sessions" with the counter
-   and the exit button, the tab badges "MULTI · <alias>", the frame of the QTabWidget (objectName),
-   the title prefix of the window terminal.multi_title_prefix, the status message.
-
-§3 The broadcast at the single input point (task 1): a key in the active widget →
-   the same bytes into send_data() of ALL the other threads; the source receives exactly once
-   (the bytes from the keyboard, not from the output — no echo by definition); the mode is disabled
-   → no duplicates (the behavior of v1.2.2).
-
-§4 The F12 exit (task 3): in the mode — F12 does NOT reach the shell (the RC2 mapping \x1b[24~
-   is paused), the mode is disabled, the shortcut is removed from the QAction; outside the mode —
-   F12 goes to the shell as \x1b[24~ (the mapping is restored). Esc is NOT the exit:
-   in the mode it is duplicated into the shell as \x1b (like any input).
-
-§5 The Ctrl+V (the bracketed paste) in the multi mode is also duplicated (task 4): a single block
-   \x1b[200~…\x1b[201~ into all the threads (otherwise the "typed text" would not be everywhere).
-
-§6 The dead session (task 4): the closed window is removed from the registry by the regular path
-   (destroyed → _forget_terminal_window), the counter of the plaque is updated, the broadcast
-   continues into the remaining ones; a dead thread (channel closed) receives no bytes.
-
-§7 The test seam: the explicit multi_hub in the constructor of TerminalWidget — the isolation from
-   the singleton of the application (the broadcast goes through its own hub, the application is not touched).
-
-§8 The i18n parity en/ru/zh (411 = 404 + 7: terminal.multi_* ×4, view.multi_input,
-   status.multi_enabled/disabled) + the release state (the pin _common.py).
-
-Run:  python tests/test_multi_input.py   (from the project root) or python tests/run_all.py
-"""
+Run: python tests/test_multi_input.py   (from the project root) or python tests/run_all.py"""
 import sys
 
 from _common import (bootstrap, check, finish, load_i18n_langs, check_i18n_parity,

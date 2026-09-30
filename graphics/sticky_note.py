@@ -1,29 +1,15 @@
-"""Sticky Notes — free-standing text notes on the map (v0.7.2).
+"""Sticky notes — free-standing text notes on the map (AGENTS.md §4.2; DOCUMENTATION.md §20).
 
-A QGraphicsProxyWidget with a QTextEdit inside: the note is both a scene
-graphics object (draggable, resizable by the corner) and a real input widget
-(double click — edit mode, like regular sticky notes).
+A QGraphicsProxyWidget holding a QTextEdit, so a note is BOTH a scene object (draggable, resizable by the
+bottom-right corner) and a real input widget (a double click enters edit mode).
 
-Why manual mouse handling instead of ItemIsMovable: QGraphicsProxyWidget
-forwards events to the child QTextEdit, and it "eats" them (cursor/selection),
-so a scene-level drag in Qt does not start. Two-mode behavior:
-
-    normal    — left click+drag moves the note, the bottom-right corner —
-                resizes it; the widget has no focus (does not intercept input);
-    edit mode — double click enables StrongFocus on the QTextEdit and events
-                are passed on (caret placement, selection); focusOut returns
-                the note to normal mode.
-
-Keyboard Delete removes the selected note only when the focus is NOT inside
-the editor (in edit mode keys go to the widget — Delete erases characters).
-
-v1.2.4-fix (tester feedback): an attached note can be moved — a drag does NOT
-detach it, the anchor line follows live (dragUpdated signal → the scene
-recomputes the offset and the path); detaching — via the context menu / undo /
-deleting the server. The note body is drawn in paint() as a rounded rect
-(the editor is transparent) — QSS border-radius alone does not clip the widget
-background, and the corners "stuck out" as a square.
-"""
+The mouse is handled manually because `ItemIsMovable` cannot work here: a QGraphicsProxyWidget forwards
+events to the child QTextEdit, which "eats" them for its cursor and selection, so a scene-level drag never
+starts. Hence the two modes — NORMAL (a left drag moves the note, the corner resizes it, and the widget
+holds no focus so it intercepts nothing) and EDIT (a double click enables `StrongFocus` on the editor and
+the events are passed on for caret placement and selection; `focusOut` returns to normal). The keyboard
+`Delete` removes the selected note only while the focus is NOT inside the editor, where Delete must erase
+characters. An ATTACHED note can be moved: a drag does not detach it, and the anchor line follows live (`dragUpdated` → the scene recomputes the offset and the path); detaching goes through the context menu, undo or the removal of the server. The body is painted in `paint()` as a rounded rect (the editor stays transparent), because a QSS `border-radius` alone does not clip a widget background."""
 import uuid
 from typing import Optional, Tuple
 
@@ -58,7 +44,7 @@ def _t(key: str) -> str:
 class StickyNote(QGraphicsProxyWidget):
     """A note on the map: dragging, resize by the corner, double click — text.
 
-    v1.2.4-fix: an attached note can be moved (a drag does not detach it) — the anchor
+    an attached note can be moved (a drag does not detach it) — the anchor
     line follows live via dragUpdated → MapScene.on_note_drag_updated.
     """
 
@@ -66,7 +52,7 @@ class StickyNote(QGraphicsProxyWidget):
     MAX_W, MAX_H = 1200.0, 800.0
     CORNER_HIT = 16.0      # "grab the corner" zone for resize (px from the bottom-right)
 
-    # v1.2.4-fix: a muted palette on tester feedback (the classic
+    # a muted palette on tester feedback (the classic
     # #fef08a/#ca8a04 is too bright); it reads on the dark map but does not "cut in".
     # v1.4.3 (ROADMAP task 5): LIVE module constants — the note palette is the
     # same in DARK and LIGHT (a yellow sticky fits both), but the reads go
@@ -74,15 +60,15 @@ class StickyNote(QGraphicsProxyWidget):
     BG_COLOR = theme.ThemeValue(lambda: theme.NOTE_BG)
     BORDER_COLOR = theme.ThemeValue(lambda: theme.NOTE_BORDER)
     TEXT_COLOR = theme.ThemeValue(lambda: theme.NOTE_TEXT)
-    CORNER_RADIUS = theme.RADIUS_NOTE   # rounding of the note window corners (v1.2.4-fix: was 4 px)
+    CORNER_RADIUS = theme.RADIUS_NOTE   # rounding of the note window corners (was 4 px)
 
     textEdited = Signal()  # the text changed (MainWindow marks the project dirty)
     moved = Signal()       # the note was moved with the mouse (also a dirty reason)
     # v1.2.4: attaching to a server — signals for MainWindow
     attachRequested = Signal(object)  # release over a ServerNode → the window attaches the note
-    detachRequested = Signal()        # fallback path; never emitted from a drag (v1.2.4-fix:
+    detachRequested = Signal()        # fallback path; never emitted from a drag (
                                       # dragging an attached note moves it, detach — menu/undo)
-    # v1.2.4-fix: live geometry during a drag (move AND resize), every step —
+    # live geometry during a drag (move AND resize), every step —
     # the scene recomputes the anchor offset and the anchor-line path of the attached note
     dragUpdated = Signal(object)  # emitted with the note itself (self)
 
@@ -96,7 +82,7 @@ class StickyNote(QGraphicsProxyWidget):
         # v1.2.4: the id of the attached server (None — a free note); state on the item,
         # serialized via to_dict() (the "server_id" key is written only when set)
         self.server_id: Optional[str] = None
-        # v1.2.4-fix: the note's position offset from the node anchor (top-right corner + 12 px).
+        # the note's position offset from the node anchor (top-right corner + 12 px).
         # (0,0) — the note is exactly at the anchor (a fresh attach/menu); !=0 — the user moved
         # the attached note. Driven by MapScene (on_note_drag_updated / attach keep_position);
         # not serialized — on load it is computed from the stored x/y.
@@ -108,7 +94,7 @@ class StickyNote(QGraphicsProxyWidget):
         self._moved_this_drag = False
 
         # ── Editor look (the sticker) ────────────────────────
-        # v1.2.4-fix: the background/border/rounding is drawn by this item's paint() (see it),
+        # the background/border/rounding is drawn by this item's paint() (see it),
         # the editor — TEXT ONLY on a transparent background. A QSS background alone
         # is not clipped to border-radius (the widget background is drawn as a square) — the
         # rounded corners "stuck out" as a square beyond the border.
@@ -254,7 +240,7 @@ class StickyNote(QGraphicsProxyWidget):
                 delta = scene_pos - self._drag_start_scene
                 if not self._moved_this_drag and abs(delta.x()) + abs(delta.y()) > 1.0:
                     self._moved_this_drag = True
-                    # v1.2.4-fix: dragging an attached note does NOT detach it (tester
+                    # dragging an attached note does NOT detach it (tester
                     # feedback) — the note can be moved, the anchor line follows live
                 self.prepareGeometryChange()
                 # Incremental shift (the start is updated) — no cumulative drift
@@ -267,7 +253,7 @@ class StickyNote(QGraphicsProxyWidget):
                 if abs(cur_local.x() - start_local.x()) + abs(cur_local.y() - start_local.y()) > 1.0:
                     self.set_note_size(w0 + (cur_local.x() - start_local.x()),
                                        h0 + (cur_local.y() - start_local.y()))
-            # v1.2.4-fix: live geometry — the scene updates the offset/line of the attached note
+            # live geometry — the scene updates the offset/line of the attached note
             try:
                 self.dragUpdated.emit(self)
             except RuntimeError:  # Qt teardown
@@ -285,7 +271,7 @@ class StickyNote(QGraphicsProxyWidget):
                 self.moved.emit()  # a move — an unsaved change
                 # v1.2.4 (D6): release over a ServerNode → attach to it. items()
                 # (not itemAt) — the note itself is under the cursor, the node may be UNDER it.
-                # v1.2.4-fix: for an ALREADY attached note this is re-attaching to ANOTHER node
+                # for an ALREADY attached note this is re-attaching to ANOTHER node
                 # (server_id != node.data.id); releasing over its OWN node — a no-op
                 # (the note stays where it was dragged to).
                 node = self._find_node_at_release(event.scenePos())
@@ -323,7 +309,7 @@ class StickyNote(QGraphicsProxyWidget):
         return None
 
     def paint(self, painter: QPainter, option, widget=None):
-        """The note body — a rounded rect (v1.2.4-fix), then the transparent editor.
+        """The note body — a rounded rect , then the transparent editor.
 
         QGraphicsProxyWidget draws ONLY the widget image; the QSS background of the
         QTextEdit is not clipped to border-radius (the background is drawn as a square,

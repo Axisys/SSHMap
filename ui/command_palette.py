@@ -1,29 +1,16 @@
 # -*- coding: utf-8 -*-
-"""v0.9.2: Command palette (Ctrl+K).
+"""The command palette (Ctrl+K) — mouse-free quick actions (DOCUMENTATION.md §26).
 
-Mouse-free quick actions: fuzzy search across all application actions
-(menu items) + project servers (select → center the map on the node).
+A frameless `QDialog` with an input line on top and a QListWidget of results: fuzzy search across every
+application action (the menu QActions already carry the i18n text and the slots) plus a dynamic SERVERS
+block rebuilt on each open (selecting one centres the map on its node). Filtering is a plain subsequence
+match — "cns" finds "Connect via SSH" — and the tighter the match, the higher the rank; Enter runs the
+first or selected row and Esc closes the palette.
 
-Design:
-- CommandPalette(QDialog, Qt.Popup-style frameless window): input line
-  on top + a QListWidget with results.
-- Commands are collected from the main window's QActions (the menus
-  already carry i18n and slots) plus a dynamic servers block (rebuilt
-  on every open).
-- Filtering is simple subsequence fuzzy matching (no external deps):
-  "cns" matches "Connect via SSH"; the tighter the match, the higher
-  the rank.
-- Enter runs the first/selected command; Esc closes the palette.
-
-v1.5rc3 (ROADMAP task 4): an EMPTY query is the first screen, so it opens with a
-bounded **"Start here"** block — the actions this session already ran (newest first),
-then the declared frequent set (`START_HERE_ACTION_IDS`) — and only then the ordinary
-alphabetical list. The block is a caption row plus at most `START_HERE_MAX` commands;
-the commands it offers are not repeated below it.
-
-i18n: keys palette.* × en/ru/zh; action names are taken from the
-already-translated QAction texts (no duplicate translations).
-"""
+An EMPTY query is the first screen, so the palette opens with a bounded "Start here" block — the actions
+this session already ran (newest first) and then the declared frequent set (`START_HERE_ACTION_IDS`) —
+and only after it the ordinary alphabetical list. The block is a caption row plus at most
+`START_HERE_MAX` commands, and the commands it offers are not repeated below it. The keys are `palette.*` (en/ru/zh) and the action names are taken from the already-translated QAction texts, so no translation is duplicated."""
 
 from PySide6.QtCore import Qt, QPoint
 from PySide6.QtWidgets import (
@@ -33,8 +20,8 @@ from PySide6.QtWidgets import (
 
 try:
     # Package-style run (from the project root).
-    # v0.9.4-fix: i18n exports t(), not translate() — the old import
-    # silently failed and the palette showed raw keys instead of
+    # i18n exports t(), not translate() — importing translate raises, and the palette
+    # would then show raw keys instead of
     # translations.
     from i18n import t as _translate
 except Exception:  # pragma: no cover - flat run
@@ -66,12 +53,11 @@ except ImportError:
 # v1.4rc3: the glyph of each palette section (a plugin command is not a core action).
 _ICON_BY_KIND = {"server": "add_server", "plugin": "plugin"}
 
-# ── v1.5rc3 (ROADMAP task 4): the "Start here" block ───────────────────────────────
-# On an EMPTY query the palette used to be a plain alphabetical list of everything.
-# The first screen now offers the handful of actions a user actually starts with —
-# the ones they ran in this session first (recent), then the declared frequent set —
-# under one header, before the alphabetical rest. Both lists are bounded, so the block
-# answers "where do I begin" instead of "here are 60 rows".
+# ── the "Start here" block ───────────────────────────────
+# On an EMPTY query the palette is not a plain alphabetical list of everything: the first screen offers
+# the handful of actions a user actually starts with — the ones they ran first in this session (recent),
+# then the declared frequent set — under one header, before the alphabetical rest. Both lists are
+# bounded, so the block answers "where do I begin" instead of "here are 60 rows".
 START_HERE_ACTION_IDS = (
     "file.new", "file.open", "file.save",
     "edit.add_server", "edit.add_connection",
@@ -216,12 +202,10 @@ class CommandPalette(QDialog):
                     by_action.setdefault(action_id, entry)
 
         bar = self.mw.menuBar()
-        # v0.9.8 bugfix (PySide6 6.11): keep the top-level QAction wrappers
-        # in a list until the walk is finished — when a Python QAction
-        # wrapper with an attached QMenu dies, PySide6 destroys the
-        # underlying C++ menu (MainWindow._qaction_guard holds the same
-        # guard globally; this is a local safety net for windows
-        # without it).
+        # PySide6 6.11: keep the top-level QAction wrappers in a list until the walk is finished — when a
+        # Python QAction wrapper with an attached QMenu dies, PySide6 destroys the underlying C++ menu
+        # (`MainWindow._qaction_guard` holds the same guard globally; this is a local safety net for
+        # windows without it). See gotcha #9.
         tops = list(bar.actions())
         for top in tops:
             child = top.menu()
@@ -249,13 +233,11 @@ class CommandPalette(QDialog):
             cmds.append((label, "server",
                          lambda n=node: self._reveal_node(n)))
 
-        # 3) v1.4rc3 (plugin foundation, task 7): the commands contributed by plugins.
-        # The section comes AFTER the core ones, so a plugin can never shadow a built-in
-        # command (PLUGINS.md §3). The manager calls `register_commands` synchronously
-        # (a UI hook, budget 200 ms) and hands back frozen records; the callback is run
-        # through the manager too (`call_hook_wrapped`), so an exception in plugin code
-        # is a log line + a status-bar report, never a crash of the palette. `text` is
-        # the AUTHOR's string — not an i18n key (PLUGINS.md §7).
+        # 3) The commands contributed by plugins. The section comes AFTER the core ones, so a plugin can
+        # never shadow a built-in command (`PLUGINS.md` §3). The manager calls `register_commands`
+        # synchronously (a UI hook, budget 200 ms) and hands back frozen records; the callback runs
+        # through the manager too (`call_hook_wrapped`), so an exception in plugin code is a log line +
+        # a status-bar report, never a crash of the palette. `text` is the AUTHOR's string (§7).
         plugin_manager = getattr(self.mw, "_plugin_manager", None)
         if plugin_manager is not None:
             try:
@@ -415,7 +397,7 @@ class CommandPalette(QDialog):
                 and unmanaged.blocked_registry_action(action_id, self._gate_target):
             item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEnabled)
             item.setToolTip(unmanaged.refusal_text(_t, label))
-        # v0.9.3 fix: the "🖥/⚡" emojis were removed — the project
+        # v0.9.3 fix: no "🖥/⚡" emojis — the project
         # deliberately moved to vector icons (ui/icons.py,
         # Segoe UI Emoji renders poorly).
         # v1.4rc3: the plugin commands get the puzzle glyph of the "Plugins" menu.
@@ -430,7 +412,7 @@ class CommandPalette(QDialog):
         return item
 
     def refresh_theme(self):
-        """v1.4.3-fix: re-apply the theme to the OPEN palette.
+        """re-apply the theme to the OPEN palette.
 
         The rows are rebuilt from `get_icon()` on every open, so a palette that is
         CLOSED follows the theme by itself. An OPEN one holds QListWidgetItems with

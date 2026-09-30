@@ -1,36 +1,11 @@
 """v1.3.3.1 — Live i18n: the containers follow a language switch + the checks of the policy.
 
-ROADMAP v1.3.3.1 (tasks 1-6):
-  #1 `retranslate()` in the terminal containers (`modules/sftp_tab.py`,
-     `modules/terminal_page.py`, `modules/terminal_dock.py`, `modules/ssh_terminal.py`,
-     `modules/command_library.py`) + ONE loop in `MainWindow._apply_ui_translations()`;
-     ZERO new translation keys beyond `lang.reload` / `status.language_reloaded`;
-  #2 the language files: `encoding="utf-8-sig"` (a Notepad "UTF-8 with BOM" file loads)
-     and the META key `"partial": true` (loads and works; the parity check reports it
-     as a WARNING, a file without the key stays STRICT);
-  #3 the language list without a restart — the `Help → Language` submenu is rebuilt
-     from `get_available_languages()` on `aboutToShow`, the settings combo refreshes
-     at open, and the explicit `lang.reload` item rescans the files;
-  #4 the checker: the SET of `{placeholder}` names and the COUNT of `\\n` vs en —
-     plus the real defect it found (`i18n/zh.json` → `dialog.manage_profiles_desc`
-     carried 0 line breaks against en's 1);
-  #5 the counter/baseline GUARD over the real `README.md` / `ROADMAP.md`;
-  #6 backfill + the note-debounce hotfix (`_note_edit_pending` flushed by `_do_save()`
-     and by `closeEvent` before the "unsaved changes" question).
-
-Sections:
-  §1 the containers follow the language switch (windows mode, the REAL `_switch_language()`);
-  §2 the dock + the SFTP tab + the command-library panel follow it too;
-  §3 the language files: BOM, `"partial"`, the meta keys;
-  §4 the language list without a restart (submenu rebuild, settings combo, `lang.reload`);
-  §5 placeholders and line breaks — the helpers and the end-to-end checker runs;
-  §6 the counter/baseline guards over README.md / ROADMAP.md;
-  §7 zh.json's missing line break (the defect task 4 found) + the release state;
-  §8 the note-debounce hotfix (Ctrl+S inside the 600 ms debounce);
-  §9 the release state (the pins of tests/_common.py).
-
-Run: python tests/test_i18n_live.py   (from the project root) or python tests/run_all.py
-"""
+The release added `retranslate()` to the terminal containers (`sftp_tab`, `terminal_page`,
+`terminal_dock`, `ssh_terminal`, `command_library`) plus ONE loop in
+`MainWindow._apply_ui_translations()`, with ZERO new keys beyond `lang.reload` /
+`status.language_reloaded`, and it closed the note-debounce hotfix (`_note_edit_pending` flushed by
+`_do_save()` and by `closeEvent` before the "unsaved changes" question).
+§1 the containers follow the switch in windows mode; §2 the dock, the SFTP tab and the macro panel too; §3 the files (BOM, `"partial"`, the meta keys); §4 the language list without a restart (the submenu rebuild on `aboutToShow`, the settings combo, `lang.reload`); §5 placeholders and line breaks end to end; §6 the counter guards over README.md / ROADMAP.md; §7 zh.json's missing break + the release state."""
 # tags: slow
 import importlib.util
 import io
@@ -648,12 +623,9 @@ for _doc in ("README.md", "ROADMAP.md"):
 # header said 458" drift form: an out-of-chain figure).
 _roadmap = _read_doc("ROADMAP.md")
 _figures = sorted({int(m.group(1)) for m in I18N_PARITY_FIGURE_RE.finditer(_roadmap)})
-# v1.4.7: the 1.4 line is CLOSED (v1.4.7 is its last planned version), and the frozen
-# contract of the 1.5 line deliberately pins no per-rc key counts — so the baseline in the
-# header is the only parity figure the plan owns today. The guard therefore drops the
-# "at least two figures" half (it was satisfied by the planned v1.4.7 section, which the
-# release removed) and keeps EVERY other property: the figure is the pin, the chain is
-# non-decreasing and no figure is a stale outlier.
+# The baseline in the header of the plan is the parity figure the guard reads: the figure IS the pin,
+# the chain is non-decreasing and no figure is a stale outlier. A per-rc key count is deliberately not
+# part of the contract, so the guard needs no "at least two figures" rule.
 check("ROADMAP.md quotes the key-count baseline (a released section is removed from the plan)",
       len(_figures) >= 1, f"quoted={_figures}")
 check(f"ROADMAP.md: the header baseline is the pin ({EXPECTED_I18N_KEYS})",
@@ -829,8 +801,10 @@ check("the pin counts the keys of the SHIPPED release (v1.5.2 added THIRTEEN —
       "while the other pane is previewing — 862 + 1 = 863; v1.7.1 adds FOUR: the Files panel toggle "
       "of the terminal window, its tooltip and the two tooltips of the panel's fold — 863 + 4 = 867; "
       "v1.7.1.1 moves that mode into the settings hub and adds THREE: the row of the Files display "
-      "mode and its two values (the tab and the panel) — 867 + 3 = 870)",
-      EXPECTED_I18N_KEYS == 863 + 4 + 3, str(EXPECTED_I18N_KEYS))
+      "mode and its two values (the tab and the panel) — 867 + 3 = 870; v1.7.1.2 adds FOUR: the "
+      "device row of the disk question with its precedence hint, the card's one-line device list "
+      "and the sentence of a chosen device the listing does not hold — 870 + 4 = 874)",
+      EXPECTED_I18N_KEYS == 863 + 4 + 3 + 4, str(EXPECTED_I18N_KEYS))
 check_release_state(ROOT)
 for _code in i18n_lang_codes(ROOT):
     check(f"i18n/{_code}.json carries the v1.5 node.status.emulated marker",

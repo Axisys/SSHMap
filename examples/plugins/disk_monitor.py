@@ -2,34 +2,15 @@
 """SSH Map example plugin — the Disk Space Monitor (the first USEFUL example).
 
 This file is an EXAMPLE, not a shipped plugin (see `examples/README.md`): copy it into
-`~/.sshmap/plugins/` and use `Plugins → Reload`. It demonstrates the one design every
-real plugin needs — **a collector and a reporter are two different hooks**:
+`~/.sshmap/plugins/` and use "Plugins → Reload". It demonstrates the design every real plugin needs —
+a COLLECTOR and a REPORTER are two different hooks:
 
-* `run_on_nodes(nodes, ctx)` — the COLLECTOR. `Plugins → "Run on selected servers"`
-  (or a command of your own that calls the same hook) runs `df -hP` on every node the
-  user selected through `ctx.run_command()`, parses the WORST percentage per node,
-  writes the answer into this plugin's own cache atomically and reports a line in the
-  status bar. The SSH work is the CORE's: credentials, transport, per-node timeout and
-  "one node's failure never stops the others" all live in the core (`PLUGINS.md` §5) —
-  this plugin owns no SSH code at all.
-* `status_probe(node)` — the REPORTER. It runs inside the ORDINARY status round: one
-  call per node, every `status_interval_sec`, on a pool worker. It therefore reads the
-  cache and NOTHING else — an SSH call here would hammer the servers and would bypass
-  the core's credential resolver. The core merges the answer with the SSH probe and
-  keeps the WORSE by severity, so a full disk turns the card `warn` even while the SSH
-  probe says `online`, and a full disk can never hide an `offline` host.
-
-What a user sees in API v1: the card turns **`warn`** and the tooltip carries the
-offending mount point and its percentage. A plugin CANNOT recolour a card or add a tag —
-`PluginNode` is a frozen `{id, alias, host, port, user}` and the context has no
-node-mutation service, by design (`PLUGINS.md` §6); that limitation is recorded in the
-ROADMAP as the argued candidate for API v2.
-
-**A plugin never imports the core** (`modules.*`, `i18n.*`, `ui.*`): an installed
-application does not have this repository on `sys.path`. Everything arrives through
-`ctx` and the hook arguments, and the plugin's own strings are the AUTHOR's
-(`PLUGINS.md` §7).
-"""
+* `run_on_nodes(nodes, ctx)` — the collector: `df -hP` on every selected node through
+  `ctx.run_command()`, the WORST percentage per node parsed, the answer written atomically into this
+  plugin's own cache and a line reported in the status bar. The SSH work is the CORE's (credentials,
+  transport, per-node timeout, "one failure never stops the others"), so the plugin owns no SSH code.
+* `status_probe(node)` — the reporter: it runs inside the ORDINARY status round, once per node, so it
+  reads the cache and NOTHING else (an SSH call here would hammer the servers and bypass the core's credential resolver). The core merges it with the SSH probe and keeps the WORSE by severity, so a full disk turns the card `warn` while the SSH probe says `online` — and never hides an `offline` host. A plugin cannot recolour a card or add a tag (`PluginNode` is frozen and the context has no mutation service, by design), and it never imports the core: an installed application has no repository on `sys.path`, so everything arrives through `ctx` and the hook arguments."""
 
 import json
 import os

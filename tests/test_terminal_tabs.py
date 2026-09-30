@@ -1,39 +1,12 @@
 # -*- coding: utf-8 -*-
 """v1.2.1 — Multiple SSH sessions as tabs in one terminal window (ROADMAP v1.2.1).
 
-The thematic test of the release v1.2.1 (the "new thematic file" convention): offscreen,
-ALL without the network — the fake threads with the same API as SSHTerminalThread (the test seam
-ST.SSHTerminalThread).
-
-§1 The window structure: SSHTerminalWindow receives the QTabWidget of the pages (the central
-   widget session_tabs), the closable tabs; the title of the tab — the alias of the node, the tooltip —
-   terminal.tab_close_tooltip; the WA_DeleteOnClose/the title are kept; the compat attributes —
-   the live references to the ACTIVE tab (win.page = the current tab).
-
-§2 A new session = a new tab (the existing "connect to the node" path):
-   MainWindow._spawn_terminal_window for the already open node → the same window + the second tab
-   (the status message terminal.session_new_tab); another node — a new window.
-
-§3 The tab close = the existing cleanup logic on the page: the "ask" gate confirm_close
-   → the single teardown shutdown (the thread is stopped, _shut_down); the close of one tab does NOT
-   affect the neighbor (the session lives and types); the close of the LAST tab closes
-   the window (the WA_DeleteOnClose E2E); the cross on the tab (tabCloseRequested) — the same path.
-
-§4 The error path in the tabbed window: the error_signal on one tab → QMessageBox.critical +
-   only THIS tab is closed; the neighboring session lives and types.
-
-§5 The limit "4 own terminals" (terminal_max_open) is counted by SESSIONS in all the windows:
-   2 tabs (one window) + 1 session (another window) = the limit; Cancel → None, Close →
-   the oldest session (_force_close) — its tab is closed, and the window with the neighboring session lives.
-
-§6 The "status bar" bridge — only the active tab: the messages of the inactive tabs do not reach
-   the status bar; on the tab switch the bridge reconnects; the SFTP progress bar follows
-   the state of the active tab.
-
-§7 The i18n parity (400 = 398 + 2 terminal.*) + the release state (the pin _common.py).
-
-Run:  python tests/test_terminal_tabs.py   (from the project root) or python tests/run_all.py
-"""
+The topical test of the release: offscreen, no network (fake threads with the `ST.SSHTerminalThread` seam).
+§1 the window structure (`session_tabs`, the closable tabs, the alias as the title, the compat
+`win.page` = the ACTIVE tab); §2 a new session = a new tab (the same window for a node already open);
+§3 the close path (`confirm_close` → the idempotent `shutdown()`, the last tab closes the window);
+§4 the error path (only ITS tab closes); §5 the `terminal_max_open` limit counted by SESSIONS;
+§6 the status-bar bridge follows the ACTIVE tab; §7 the i18n parity and the release state."""
 import json
 import os
 import sys

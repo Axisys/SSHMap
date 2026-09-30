@@ -1,29 +1,12 @@
 # -*- coding: utf-8 -*-
 """v1.6.2 — the terminal that stops lying: a dead session, the DEC graphics, the column, the cursor.
 
-(ROADMAP v1.6.2, tasks 1–4. The fork provenance of task 2 stays in `tests/test_pyte_fork.py`;
-this file proves the BEHAVIOUR through the application's own seams.)
-
-§1 The session that says it ended (task 1). The recv loop of `modules/ssh_terminal.py` is driven
-   against a fake paramiko client/transport/channel (the `paramiko.SSHClient` seam), and the two
-   ways a session really ends are BOTH measured: an EOF (`recv()` answering `b""` — the shape the
-   report measured at 7 534 475 calls in 1.5 s) and a peer that vanished without a FIN (the
-   transport dies under the loop — what OpenSSH's keepalive turns a silently dead TCP into).
-   Each ends the loop inside the budget, reaches `closed_signal` (the ONE status line the session
-   writes: `terminal.session_closed`) and the EOF path does NOT spin (a bounded `recv()` count).
-§2 The DEC graphics charset (task 2) — through `TerminalScreen`, the production seam:
-   `ESC ( 0` + the ASCII letters of a frame become box drawing, `ESC ( B` puts the letters back,
-   SI/SO really switch G0/G1.
-§3 The History tab's Command column (task 3) — the DECLARED default, a stored width that wins,
-   the debounced write of a real drag, the SECOND panel that comes back with it, the corrupt
-   value and the construction guard that never overwrites what the user stored.
-§4 The cursor (task 4) — the three shapes and their geometry, the SHIPPED default (the thin bar),
-   the `terminal_cursor_style` key and its validation, the canvas that really receives it, and
-   the "Terminal" tab that carries the choice.
-§5 The release state.
-
-Run: python tests/test_terminal_truth.py   (from the project root) or python tests/run_all.py
-"""
+The fork's provenance stays in `tests/test_pyte_fork.py`; this file proves the BEHAVIOUR through the
+application's own seams.
+§1 the session that SAYS it ended: the recv loop of `modules/ssh_terminal.py` is driven against a fake
+paramiko client/transport/channel and BOTH real endings are measured — an EOF (`recv()` answering `b""`,
+the shape the report measured at 7 534 475 calls in 1.5 s) and a peer that vanished without a FIN (what
+OpenSSH's keepalive turns a silently dead TCP into). Each leaves the loop inside the budget, reaches `closed_signal` (the ONE status line) and the EOF path does NOT spin. §2 the DEC graphics charset through `TerminalScreen`: `ESC ( 0` plus the ASCII letters become box drawing, `ESC ( B` puts them back, SI/SO really switch G0/G1. §3 the History tab's Command column: the DECLARED default, a stored width that wins, the debounced write of a real drag, the corrupt value and the construction guard. §4 the cursor: the three shapes and their geometry, the SHIPPED default, the `terminal_cursor_style` key and its validation, and the "Terminal" tab that carries the choice. §5 the release state."""
 import sys
 import threading
 import time

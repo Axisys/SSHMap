@@ -1,25 +1,11 @@
 """v1.1.2 final — Parallel status probes (release theme, ROADMAP v1.1.2 final).
 
-The acceptance test of the series: the fake probes (the monkeypatched probe_ssh) without the network:
-  * the counting of the parallel calls (max_active ≤ max_parallel and > 1),
-    the round is shorter than the sequential one;
-  * the results arrive AS THEY BECOME READY (not in the order of the target list);
-  * the semantics of _busy are unchanged: True during the round, a repeated start_round()
-    is ignored, after round_finished False and a new round starts;
-  * the cancellation (stop()) on a parallel round: the exit within one timeout, not
-    ceil(N/mp) × timeout; the ones cancelled before the probe start give no result;
-  * the status_max_parallel key: the default 16, the clamp 1..64, the broken values → the default,
-    set_max_parallel on the fly;
-  * the soft auto-interval (task 3): N > LARGE_MAP_THRESHOLD (50) → the interval
-    is doubled (effective_interval_ms, the timer is updated after the round and in
-    set_interval), the E2E hint in the MainWindow status bar;
-  * the "Statuses" dialog: the max_parallel spin (1..64, the prefill from the config),
-    collect() — 18 keys (+status_max_parallel);
-  * i18n: +2 keys × en/ru/zh — the parity 375 → 377;
-  * the release state: APP_VERSION == "1.1.3", the pyproject cross-check, the requirements header.
-
-Run: python tests/test_status_parallel.py   (from the project root) or python tests/run_all.py
-"""
+The acceptance test of the series, on fake probes (a monkeypatched `probe_ssh`) and without the network:
+the counting of the parallel calls (`max_active` ≤ `max_parallel` and > 1) with the round shorter than the
+sequential one; the results arriving AS THEY BECOME READY rather than in the order of the target list;
+`_busy` keeping its semantics (True during the round, a repeated `start_round()` ignored, `round_finished`
+→ False and a new round starting); the cancellation on a parallel round (the exit within ONE timeout, not
+`ceil(N/mp) × timeout`, and the ones cancelled before their probe start give no result); the `status_max_parallel` key (default 16, the clamp 1..64, a broken value → the default, `set_max_parallel` live); the soft auto-interval (N > `LARGE_MAP_THRESHOLD` → the interval doubled through `effective_interval_ms`) with the E2E hint in the status bar; the "Statuses" dialog's spin and `collect()`; the two new keys in every language; and the release state (the version against `pyproject` and the requirements header)."""
 import os
 import sys
 import threading

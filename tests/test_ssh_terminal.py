@@ -1,23 +1,11 @@
-"""Regression tests v0.8.1 — four fixes:
+"""Regression tests v0.8.1 — four fixes.
 
-  #3 the terminal did not print   — output_signal = Signal(str) got the bytes;
-                              now Signal(bytes), pyte gets the raw data,
-                              the screen renders (the E2E check of the window).
-  #1 "Add server" crashed on bool.x — QAction.triggered sends checked=bool
-                              into _add_server(at_scene_pos); the position is accepted
-                              only if it is a point of the scene.
-  #2 the RMB→SSH crashed on bool.setSelected — the closures of the MapView context menu
-                              now take `checked` as the first parameter
-                              (the real path is checked: contextMenuEvent →
-                              QMenu → trigger()).
-  #4 the fingerprint "unavailable"/the wrong SHA256 — paramiko>=5 asbytes() returns
-                              the raw wire bytes, not base64.
-
-v1.2.9: §3c the keyboard — through TerminalWidget (the deprecated SSHTerminalTextEdit
-is removed together with the HTML path; the same semantics: printable/Return/Backspace → the channel).
-
-Run:  python tests/test_ssh_terminal.py   (from the project root) or python tests/run_all.py
-"""
+#3 the terminal did not print: `output_signal` was `Signal(str)` while it received bytes — it is
+`Signal(bytes)` now, pyte gets the raw data and the screen renders (the E2E check of the window).
+#1 "Add server" crashed on `bool.x`: `QAction.triggered` sends `checked=bool` into
+`_add_server(at_scene_pos)`, so a position is accepted only if it really is a point of the scene.
+#2 the RMB→SSH path crashed on `bool.setSelected`: the closures of the `MapView` context menu now take
+`checked` as their first parameter, and the real path (contextMenuEvent → QMenu → `trigger()`) is checked. #4 the fingerprint "unavailable" and the wrong SHA256: `paramiko>=5` `asbytes()` returns the raw wire bytes, not base64. Later the keyboard section moved to `TerminalWidget`, because the deprecated `SSHTerminalTextEdit` and its HTML path are gone — the semantics are unchanged (printable / Return / Backspace reach the channel)."""
 import os, sys, hashlib, traceback
 
 from _common import bootstrap, check, finish, wait_until
@@ -38,7 +26,7 @@ def _key(text="", key_code=None):
 
 # ════════════════════════════════════════════════════════════
 # #3a. bytes signal: end-to-end delivery from the QThread to the GUI thread
-#      (this very path used to give "Shiboken::Conversions ... Cannot copy-convert (bytes)")
+#      (this very path would give "Shiboken::Conversions ... Cannot copy-convert (bytes)")
 # ════════════════════════════════════════════════════════════
 print("== terminal signal (bug #3) ==")
 from modules.ssh_terminal import SSHTerminalThread

@@ -1,37 +1,12 @@
 # -*- coding: utf-8 -*-
 """v1.5rc5 — the review batch (hardening): the batch-level checks of the nine defects.
 
-The fifth slot of the 1.5 line is a HARDENING batch, not a theme: the v1.5rc4 review of the
-SHIPPED interface (the server card, the floating panels, the first-run screen, the terminal
-dock) reproduced nine defects that are independent of the line's contract. The ledger with
-the probes is `AUDIT_PENDING.md` (`N1`–`N8`, plus `N4b`); the fixes touch no colour, no
-encoding, no panel rule and no i18n key (the 643 pin of that slot stayed).
-
-This file carries the checks that have NO topical home — the ones the ledger assigns to a
-new file (`tests/test_audit_v1210.py` is the precedent):
-
-  §1 N4  — a connection failure of the ONE-SHOT worker (`SSHWorker`) is localized:
-           `socket.gaierror` / `socket.timeout` / `NoValidConnectionsError` are `OSError`,
-           not `SSHException`, so they used to reach the generic handler of `run()` and were
-           displayed VERBATIM in English while "Test connection" answered in the user's
-           language. Checked under `en` AND `ru`.
-  §2 N4b — the SAME mapping in the INTERACTIVE terminal (`SSHTerminalThread`), which had no
-           localized branch at all — the primary "Connect" path. Plus the composer
-           (`terminal_page._show_error`) that prepends the translated prefix.
-  §3 N7  — the first-run hint must not paint OVER its own two buttons. A RENDER-based check:
-           `isVisible()` / `geometry()` / `visibleRegion()` cannot see this defect (the card
-           sets WA_NoSystemBackground rather than WA_OpaquePaintEvent), so the pixel at each
-           button's centre is read from a real `grab()`.
-  §4 N8  — a collapsed command-library panel releases its width to the terminal (§36 cap +
-           the explicit hand-over), and the cap lives ONLY while collapsed (Qt gotcha #13).
-  §5 the release state (version, i18n parity — NO new key) for v1.5rc5.
-
-The regressions with a topical home live there instead: N2 §3 of `tests/test_sftp_ops.py`,
-N3 `tests/test_sftp_syntax.py`, N5 `tests/test_tags.py`, N6 §1b/§1c of
-`tests/test_map_bigpicture.py`, N1 the about section of `tests/test_actions_keyboard.py`.
-
-Run: python tests/test_audit_v15rc5.py   (from the project root) or python tests/run_all.py
-"""
+A HARDENING batch, not a theme: the review of the SHIPPED interface reproduced nine defects that are
+independent of the line's contract (the ledger with the probes is `AUDIT_PENDING.md`, `N1`–`N8` plus
+`N4b`), and the fixes touch no colour, no encoding, no panel rule and no i18n key. This file carries the
+checks that have NO topical home (the `tests/test_audit_v1210.py` precedent).
+§1 N4 the one-shot worker's connection failure is LOCALIZED (`socket.gaierror` / `socket.timeout` /
+`NoValidConnectionsError` are `OSError`, not `SSHException`), checked under en AND ru; §2 N4b the same mapping in the interactive terminal (the primary "Connect" path) plus the composer; §3 N7 the first-run hint must not paint OVER its own buttons — a RENDER-based check, because `isVisible()` / `geometry()` / `visibleRegion()` cannot see it; §4 N8 a collapsed macro panel releases its width (the cap lives ONLY while collapsed, Qt gotcha #13). The regressions with a topical home live there instead: N2 in `test_sftp_ops`, N3 in `test_sftp_syntax`, N5 in `test_tags`, N6 in `test_map_bigpicture`, N1 in `test_actions_keyboard`. §5 is the release state (version, i18n parity — NO new key)."""
 import os
 import socket
 import sys

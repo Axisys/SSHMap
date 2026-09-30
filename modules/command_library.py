@@ -1,38 +1,16 @@
 # -*- coding: utf-8 -*-
-"""v1.3 (ROADMAP v1.3): "Terminal macros" — the command/script library of the terminal panel.
+""""Terminal macros" — the command/script library of the terminal panel (DOCUMENTATION.md §14e).
 
-Module composition:
-  * CommandLibraryStore — the ~/.sshmap/commands.json store (pure Python, no Qt):
-    an atomic write of the WHOLE document (tmp + fsync + os.replace, the i18n.save_config
-    pattern, but WITHOUT merge — the file belongs entirely to this module); first run
-    (no file) — a seed of 5 examples with seeded: true; a corrupt file / a foreign type —
-    a log line + an EMPTY library (never raises and does NOT re-seed an existing file — user data is never overwritten);
-  * CommandLibraryPanel — the panel left of the session tabs in both containers
-    (SSHTerminalWindow and TerminalDockContent): the search + the "category → command" tree +
-    the Add/Edit/Delete buttons; a double click or Enter on a command — the send of
-    the macro to the ACTIVE session (page.widget.send_macro → a direct terminal_thread.send_data(),
-    NOT via MultiInputHub.broadcast — the pre-approved ROADMAP v1.3 decision: an addressed
-    action, not a broadcast); the collapse into a thin strip (the v1.2.4.1 technique) — the state
-    in a single config key ui_cmdlib_collapsed for BOTH containers (a merge write via
-    i18n.save_config; the terminal_wheel pattern: the config only, not in SettingsDialog.collect());
-  * CommandLibraryDialog — the add/edit dialog (name/category/command/enabled);
-    OK is blocked until the name and the command are non-empty.
-
-Data: the document {"seeded": true, "commands": [{id, name, command, category, enabled}]}.
-The two containers (window + dock) may live over the SAME file: the panel re-reads the file in
-showEvent and after local changes; live synchronization between the panels — backlog.
-
-Test seams: the store with an explicit path= (the panel constructor accepts store=); QMessageBox
-and QMenu are taken as module attributes at call time (monkeypatch CL.QMessageBox works);
-the context menu is built by the _build_context_menu(item) method — the tests trigger the QActions
-without menu.exec().
-
-Import discipline: ui.main_window is NOT imported (a cycle: main_window → the terminal
-containers → this module) — the "◇" diamond and the collapse strip are duplicated locally
-(the v1.2.4.1 technique, colors from ui/theme.py). session_tabs — a duck-typed QTabWidget
-(a constructor parameter / set_session_tabs); send_macro is called dynamically on
-page.widget — the panel does not know about TerminalSessionPage.
-"""
+`CommandLibraryStore` owns `~/.sshmap/commands.json` — pure Python, no Qt: an atomic write of the WHOLE
+document (tmp + fsync + `os.replace`) and deliberately NO merge, because the file belongs to this module
+alone. The first run seeds five examples (`seeded: true`); a corrupt file or a foreign type is a log line
+plus an EMPTY library — never a raise, never a re-seed of an existing file (user data is not overwritten).
+`CommandLibraryPanel` is the panel left of the session tabs in BOTH containers
+(`SSHTerminalWindow` and `TerminalDockContent`): the search, the "category → command" tree, the
+Add/Edit/Delete buttons, the collapse into a thin strip whose state is the ONE key `ui_cmdlib_collapsed`
+(a merge write, `collect()` untouched), and a double click / Enter that sends the macro to the ACTIVE
+session (`page.widget.send_macro` → `terminal_thread.send_data()`, never the multi-input broadcast — an
+addressed action, the pinned decision). `CommandLibraryDialog` is the add/edit dialog. Test seams: the store takes an explicit `path=`, the panel a `store=`; `QMessageBox` / `QMenu` are module attributes read at call time; `_build_context_menu(item)` lets a test trigger the QActions without `menu.exec()`. Import discipline: the window module is NOT imported (a cycle), the collapse strip is duplicated locally with the theme's colours, and `session_tabs` / `send_macro` are duck-typed."""
 
 import json
 import os
@@ -249,7 +227,7 @@ class CommandLibraryStore:
 def _diamond_icon(size: int = 20):
     """A vector "◇" diamond on a size×size canvas (the panel collapse button).
 
-    A local copy of the ui/main_window._diamond_icon() technique (v1.2.4.1-fix):
+    A local copy of the ui/main_window._diamond_icon() technique :
     a QPainterPath on a transparent QPixmap, colors — ui/theme.py. The duplication is deliberate:
     command_library does not import ui.main_window (a cycle)."""
     pm = QPixmap(size, size)
@@ -547,12 +525,11 @@ class CommandLibraryPanel(QWidget):
         self._strip.setToolTip(t("terminal.cmdlib.expand_tooltip"))
         layout.addWidget(self._strip)
 
-        # The expanded body. The minimum width is 86 (not the "convenient" 180): the total
-        # minimum of the terminal window — 546 (the session tabs) + the panel + the margin ≈ 636,
-        # which is BELOW 640 — the saved v1.2.x window geometry (e.g. 640×480) is restored
-        # without a clamp to a larger size (checked: body min 96 → the window clamps to 646).
-        # By default the panel is wider (sizeHint ≈ 270); 86 — only the lower bound
-        # of the QSplitter divider drag.
+        # The expanded body. The minimum width is 86 (not a "convenient" 180): the total minimum of the
+        # terminal window — 546 (the session tabs) + the panel + the margin ≈ 636 — stays BELOW 640, so the
+        # saved v1.2.x window geometry (e.g. 640×480) is restored without a clamp to a larger size (checked:
+        # a body min of 96 clamps the window to 646). By default the panel is wider (`sizeHint` ≈ 270);
+        # 86 is only the lower bound of the QSplitter divider drag.
         self._body = QWidget(self)
         self._body.setMinimumWidth(86)
         bl = QVBoxLayout(self._body)
@@ -588,7 +565,7 @@ class CommandLibraryPanel(QWidget):
         self.tree.entry_entered.connect(self._activate_item)
         # The POLICY is what makes the signal exist: with the default `Qt.DefaultContextMenu`
         # the right click is a contextMenuEvent this widget ignores, so it travels up to the
-        # container — which is why the documented "right-click the library" gesture used to do
+        # container — which is why the documented "right-click the library" gesture does
         # nothing here (and answered "Split Terminal" in the terminal window).
         self.tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.tree.customContextMenuRequested.connect(self._on_context_menu)

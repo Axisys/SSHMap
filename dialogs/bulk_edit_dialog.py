@@ -1,28 +1,16 @@
 # -*- coding: utf-8 -*-
-"""v1.6 (ROADMAP task 1): the BULK EDIT of the selection.
+"""The BULK EDIT of the selection (AGENTS.md §4.2; DOCUMENTATION.md §50).
 
-A map of hundreds of cards needs a way to say "these twelve servers are production
-now" in one gesture. This dialog is the ask; the answer is ONE undo command
-(`modules/undo_commands.CmdEditSelected`, the `CmdAddRemoveNodeBatch` precedent — per
-node before/after values, one entry in the stack).
+A map of hundreds of cards needs a way to say "these twelve servers are production now" in one gesture.
+This dialog is the ask; the answer is ONE undo command (`modules/undo_commands.CmdEditSelected`, the
+`CmdAddRemoveNodeBatch` precedent — per-node before/after values, one entry in the stack).
 
-**Every field is TRI-STATE, and "leave unchanged" is the DEFAULT.** The three states
-are the only vocabulary the dialog has:
+Every field is TRI-STATE and "leave unchanged" is the DEFAULT: `unchanged` means the field is not touched
+on ANY node (so a per-server value survives a bulk edit of the other two), `set` means every selected node
+gets the value typed here, and `clear` means every selected node loses the field.
 
-  * ``unchanged`` — the field is not touched on ANY node (nothing is written, so a
-    per-server value survives a bulk edit of the other two fields);
-  * ``set``       — every selected node gets the value typed here;
-  * ``clear``     — every selected node loses the field.
-
-The dialog is deliberately dumb: it collects three states and hands them over. The
-PURE half that turns them into real values — `bulk_change_values()` — sits next to it,
-so the round trip is testable without a window, and `changes_for()` is what tells the
-window that a node would really change (a node whose new triple equals its old one
-never enters the command).
-
-The fields are exactly the three per-server fields the v1.6 plan names (tags, comment,
-quick launch): the hardware facts and the identity of a server are not a bulk material.
-"""
+The dialog is deliberately dumb — it collects three states and hands them over. The PURE half that turns
+them into real values (`bulk_change_values()`) sits next to it, so the round trip is testable without a window, and `changes_for()` is what tells the window that a node would really change (a node whose new triple equals its old one never enters the command). The fields are exactly the three per-server ones the plan names — tags, comment and quick launch: the hardware facts and the identity of a server are not bulk material."""
 import copy
 from typing import List, Optional
 

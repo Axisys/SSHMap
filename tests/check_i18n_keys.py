@@ -1,39 +1,15 @@
-"""The i18n completeness check: the discovered languages vs en + the keys used in the code.
+"""The i18n completeness check: the discovered languages vs en plus the keys used in the code (§17).
 
-Four parts (all must be clean for exit code 0):
+  1. PARITY — every `i18n/*.json` is discovered (the file name is the code) and a built-in language
+     must cover 100% of en's keys STRICTLY, with the translation-key count equal to the pin
+     `EXPECTED_I18N_KEYS` (`tests/_common.py`). Meta keys are not translations: "name" is skipped and
+     `"partial": true` turns the missing keys and the count into a WARNING (an EXTRA key stays a defect)
+     and every file is read "utf-8-sig".
 
-  1. PARITY (v1.3.3): auto-discovery of EVERY i18n/*.json (the file name is the
-     language code — no hardcoded list) + the parity policy: a built-in language
-     must cover 100% of en's keys — STRICT parity (no missing, no extra) — and the
-     count of the translation keys must match the pin EXPECTED_I18N_KEYS
-     (tests/_common.py; the same discovery/parity helpers the topical tests use).
-     The meta keys are NOT translations: "name" (the language name in its own
-     language) is skipped here, and "partial": true (v1.3.3.1) marks a DELIBERATELY
-     incomplete file — its missing keys and its count become a WARNING, not a defect
-     (an extra key stays a defect: a key en does not have is a typo/dead weight).
-     Every file is read as "utf-8-sig", so a Notepad "UTF-8 with BOM" file loads.
-
-  2. FORMAT (v1.3.3.1, ROADMAP task 4): two defect types the key parity cannot see —
-     the SET of `{placeholder}` names and the COUNT of `\\n` line breaks of every
-     translation against en. A dropped `{alias}` renders a literal brace in the UI;
-     a lost line break silently reshapes a dialog. Helpers — tests/_common.py
-     (`placeholder_names` / `newline_count` / `i18n_format_problems`).
-
-  3. USED KEYS (as before): every t('key') in the code must exist in en — and, by
-     parity, in every other language.
-
-  4. FALLBACK LITERALS (v1.6.1, ROADMAP task 2): the code-side twin of the §4.5 rule
-     "with i18n unavailable the UI behaves exactly like English". An AST walk over the
-     application source compares the else-branch of every
-     `t("key") if <the declared availability flag> else "<literal>"` with the `en.json`
-     value of the same key, and does the same for every `*_FALLBACKS` dict TABLE. The
-     walk keys on the DECLARED flag — a value-carrying ternary
-     (`_t("key") if conflicts else ""`) is not a candidate at all — and on the DECLARED
-     table name; the pure function is `fallback_literal_problems(source, en)`.
-
-Run:  python tests/check_i18n_keys.py   (exit code 0 = all the keys are in place)
-Catches the class of the bugs of the former AUDIT.md #9 ("the raw keys in the UI"; the decoding of the items — in the changelog family).
-"""
+  2. FORMAT — the SET of `{placeholder}` names and the COUNT of `\n` breaks of every translation
+     against en; 3. USED KEYS — every `t('key')` in the code exists in en (and by parity in all).
+  4. FALLBACK LITERALS — an AST walk compares the else-branch of every declared availability
+     ternary and every `*_FALLBACKS` table with `en.json`: `fallback_literal_problems(source, en)`."""
 import ast
 import os
 import re
@@ -187,7 +163,7 @@ def collect_fallback_problems(root, en):
 
 def main(root=None):
     """Run both parts; return the exit code (0 = all the keys are in place)."""
-    # v0.9.4-fix: UTF-8 stdout on cp1251 consoles
+    # UTF-8 stdout on cp1251 consoles
     for stream in (sys.stdout, sys.stderr):
         try:
             stream.reconfigure(encoding="utf-8", errors="replace")

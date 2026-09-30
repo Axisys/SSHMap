@@ -1,46 +1,12 @@
 # -*- coding: utf-8 -*-
-"""v1.3.3.2 — SFTP as a file manager: the operations + a transfer that does not lose data.
+"""SFTP as a file manager: the operations and an atomic (loss-free) transfer.
 
-ROADMAP v1.3.3.2, tasks 1–6. The tab of v1.1.3 could only upload and download, and both
-directions opened the destination with "wb" — an existing file was silently truncated on
-the server and on the local disk alike. This version closes the operations gap and the
-data-loss gap:
+Offscreen, NO network (the fake SFTP of `_fakes.py`). Pins mkdir / rename / delete in the ONE
+worker queue, the overwrite conflict, the `<name>.part` + commit discipline in BOTH directions,
+and the rule that a failing task never kills the queue.
+Contract — `DOCUMENTATION.md` §14f.
 
-  1. the file operations mkdir/rename/delete join the SAME worker queue (the client stays
-     single-threaded; a failing operation reports task_error and the queue lives on) and
-     the tree gets a context menu — New folder / Rename / Delete / Copy remote path;
-  2. the overwrite conflict (the deferred v1.3 promise): Overwrite / Skip / Rename /
-     "Apply to all" for upload AND download, a cancelled dialog = skip;
-  3. the download is ATOMIC: `<dest>.part` + os.replace — a cancelled one leaves the
-     destination byte-identical;
-  6. the upload is ATOMIC: `<remote>.part` + rename (posix-rename when the server knows
-     it) — an interrupted upload never truncates the existing remote file.
-
-Everything is checked offscreen and without the network: the in-memory fake SFTP of
-tests/_fakes.py (which learned mkdir/rmdir/remove/rename/posix_rename in the same
-release) + the synthetic drag events (the test_sftp_dnd.py delivery pattern: the drag is
-delivered by direct virtual calls, the drop through `eventFilter` with the TREE VIEWPORT
-as the source — exactly the widget Qt delivers a real drop to).
-
-Sections:
-  1. The worker: mkdir / rename / delete — the fake FS and the listing.
-  2. A failing operation → task_error and the NEXT task still runs.
-  3. Atomic upload: a cancelled one leaves the old remote file intact, the commit works
-     with and without posix-rename; v1.5rc5 (N2): a failed RETRY after the cleared
-     destination KEEPS the `.part` file (the only surviving copy) and names it.
-  4. Atomic download: no `.part` after a success, a cancelled one leaves the destination
-     byte-identical.
-  5. The context menu (the `_build_context_menu(item)` seam) — the four operations.
-  6. The operations through the tab: New folder / Rename / Delete / Copy remote path,
-     with the listing refresh and the validation of the name.
-  7. The conflict dialog: Overwrite / Skip / Rename / Apply-to-all over a batch, a
-     cancelled dialog, and the same for the download direction.
-  8. A drop onto a DIRECTORY ROW uploads into THAT directory (the pre-flight listing).
-  9. Drag-out: the mime carries the remote path; the tree is drag-enabled.
- 10. i18n (17 new keys × en/ru/zh/de) + the release state.
-
-Run:  python tests/test_sftp_ops.py   (from the project root) or python tests/run_all.py
-"""
+Run: python tests/test_sftp_ops.py   (from the project root) or python tests/run_all.py"""
 import os
 import sys
 import time
@@ -396,7 +362,7 @@ worker3.shutdown(wait_ms=2000)
 
 # ── v1.5rc5 (N2): a failing RETRY after the cleared destination keeps the .part ──
 # The v3 fallback clears the destination and renames again; when THAT rename fails
-# too, both the old file and the upload used to disappear. "Litter beats loss": the
+# too, both the old file and the upload would disappear. "Litter beats loss": the
 # provisional file must survive, and the error must name it.
 
 fs3b = FakeSftpFS()

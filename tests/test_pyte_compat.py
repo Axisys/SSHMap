@@ -1,31 +1,12 @@
 # -*- coding: utf-8 -*-
 """v1.2.11 — Terminal: pyte 0.8.2 compatibility (private SGR + LNM).
 
-(ROADMAP v1.2.11, the PYTE82_AUDIT.md pack A.)
-
-Headless (without Qt): the subclass SshmapHistoryScreen(pyte.HistoryScreen) in
-modules/terminal_screen.py — two overrides:
-  * the private SGR (CSI ? … m) are ignored: the verified fact #12 — in pyte 0.8.2
-    \x1b[?4m (Vim 9+, the upstream issue #202) → the TypeError from feed(), and the tail of the chunk
-    AFTER the sequence is lost (the parser is reset; the except Exception: return
-    in _on_output swallows the exception). In master the fix is already merged (PR #203, 2025-09-02) —
-    the override with the same semantics stays until the pin is raised to pyte 0.8.3;
-  * LNM (mode 20) is on by default: a bare LF = CR+LF (the xterm behavior).
-    Screen.reset() resets the mode to _DEFAULT_MODE WITHOUT LNM → the explicit restoration
-    in __init__ and in reset() (after the RIS ESC c); the explicit \x1b[20h/\x1b[20l (SM/RM 20)
-    from the remote program still work.
-
-The note: in PYTE82_AUDIT.md/ROADMAP the sequences are written as \x1b[2h/\x1b[2l —
-a typo of the plan; the LNM is mode 20 (pyte.modes.LNM = 20), and pyte 0.8.2 toggles it
-exactly by SM/RM 20 (verified by a run: \x1b[2l touches bit 2, not 20).
-
-v1.2.12 (the correction): the RIS is ESC c (\x1bc), NOT ESC [ c (\x1b[c) — the last
-pyte 0.8.2 parses it as the CSI DA (report_device_attributes, a no-op): verified by a run,
-\x1b[c does not call the Screen.reset() at all. The check "the LNM after the RIS" below is corrected
-to the real bytes + the fact about \x1b[c is pinned down (before the check was a false positive).
-
-Run: python tests/test_pyte_compat.py   (from the project root) or python tests/run_all.py
-"""
+Headless (no Qt): `SshmapHistoryScreen(pyte.HistoryScreen)` in `modules/terminal_screen.py` has two
+overrides. (1) Private SGR (`CSI ? … m`) are IGNORED — the verified fact of `MANIFEST.md`: in pyte 0.8.2
+`\x1b[?4m` (Vim 9+, upstream issue #202) raises a TypeError out of `feed()` and the tail of the chunk is
+lost (the parser is reset and `_on_output`'s `except Exception: return` swallows it). Upstream merged the
+fix (PR #203), and the override with the same semantics stays until the pin rises to pyte 0.8.3.
+(2) LNM (mode 20) is ON by default, so a bare LF is CR+LF (the xterm behaviour): `Screen.reset()` restores `_DEFAULT_MODE` without LNM, hence the explicit restoration in `__init__` and in `reset()`, while an explicit `\x1b[20h` / `\x1b[20l` from the remote program still works. Note the plan's typo: the sequences are written there as `\x1b[2h` / `\x1b[2l`, but LNM is mode 20, and the RIS is `ESC c` (`\x1bc`) — NOT the CSI DA `\x1b[c`, which does not call `Screen.reset()` at all."""
 import sys
 
 from _common import (bootstrap, check, finish, load_i18n_langs, check_i18n_parity,

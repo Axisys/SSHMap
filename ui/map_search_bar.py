@@ -1,21 +1,15 @@
 # -*- coding: utf-8 -*-
-"""v0.9.8 — map search bar (Ctrl+F): floating panel over the canvas.
+"""The map search bar (Ctrl+F) — a floating panel over the canvas (DOCUMENTATION.md §29).
 
-ROADMAP v0.9.8:
-  #1 Ctrl+F → search bar over the canvas: highlight matching nodes
-     (alias/host/ip/comment).
-  #2 Enter/Shift+Enter — move between results with centering and a
-     brief accent frame (reveal_flash, the set_status pulse pattern).
-  #3 Non-matching nodes are dimmed (focus/dim) so matches are read
-     instantly.
+Ctrl+F opens the bar over the canvas and highlights the matching nodes (alias / host / ip / comment);
+Enter and Shift+Enter move between the results, centring the view and flashing a brief accent frame
+(`reveal_flash`, the status-pulse pattern); the non-matching nodes are DIMMED (`focus` / `dim`), so the
+matches are read at once.
 
-The widget holds NO search logic: it only accepts input and emits
-signals — which nodes match, what to dim and where to center is decided
-by MainWindow (single source of truth — ui/main_window.py). The dark
-theme follows the app palette (theme.WINDOW_BG card background,
-theme.ACCENT accent, theme.TEXT_PRIMARY text — the same colors the
-nodes use; v1.2.5: central theme constants in ui/theme.py).
-"""
+The widget holds NO search logic: it only accepts input and emits signals — which nodes match, what to dim
+and where to centre is decided by `MainWindow`, the single source of truth. The look follows the app
+palette (`theme.WINDOW_BG` for the card, `theme.ACCENT`, `theme.TEXT_PRIMARY` — the very tones the nodes
+use, with the central theme constants in `ui/theme.py`)."""
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QKeyEvent

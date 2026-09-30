@@ -1,35 +1,12 @@
 # -*- coding: utf-8 -*-
 """v1.1.3 — SFTP tab in the terminal window (ROADMAP v1.1.3, tasks 1–5).
 
-The theme of the release: a new worker thread with the task queue (list/upload/download)
-over the live transport + the UI tab [Terminal | Files]. ALL the checks —
-without the network: a fake SFTPClient with an in-memory FS (the same API surface as
-paramiko: listdir_attr/open/close/get_channel; the errors — the IOError "No such
-file", like SSH_FX_NO_SUCH_FILE).
-
-The sections:
-  1. The fake FS + the worker: two uploads STRICTLY sequentially,
-     the progress signals in order (the monotonicity, the final == total, the content).
-  2. The path error → the error signal WITHOUT the queue crash (the listing of a nonexistent
-     directory, the upload into a nonexistent directory; the following tasks work).
-  3. The cancel: the flag between the operations — the current transfer is interrupted on the chunk,
-     the queue is skipped with task_cancelled, the worker lives, the flag auto-resets.
-     v1.3.3.2 rewrite of the pinned check: the upload is ATOMIC — a cancelled upload
-     leaves the EXISTING remote file byte-identical and no `.part` file behind.
-  4. The shutdown: the idle (fast) and during the transfer (within the wait budget),
-     the SFTPClient is closed, the queue_* after the stop — None.
-  5. The SftpTab offscreen: the listing/navigation without the network ("..", the directory enter,
-     the Refresh, the stalking filter of the stale answers), the upload/download of the selected
-     (the QFileDialog is patched), the "Cancel" button on the transfers.
-  6. The SSHTerminalWindow offscreen: the QTabWidget [Terminal | Files], the lazy
-     open_sftp() on the same transport, the connected_signal pickup, the
-     open_sftp error → the status bar, the progress in the status bar, the closeEvent teardown.
-  7. i18n: 21 keys sftp.* × en/ru/zh, the parity 377 → 398.
-  8. The release state: APP_VERSION == "1.1.3", the pyproject cross-check, the
-     requirements header.
-
-Run:  python tests/test_sftp_tab.py   (from the project root) or python tests/run_all.py
-"""
+The theme: a worker thread with the task queue (list/upload/download) over the LIVE transport plus the
+`Terminal | Files` tab. Everything is checked WITHOUT the network, on a fake `SFTPClient` with an
+in-memory FS (the paramiko API surface: listdir_attr/open/close/get_channel, and the IOError
+"No such file" like SSH_FX_NO_SUCH_FILE).
+§1 the fake FS and the worker (two uploads STRICTLY sequentially, the progress signals monotonic, the
+final == the total); §2 a path error signals without crashing the queue; §3 the cancel flag (the current transfer is interrupted on the chunk, the queue skips with `task_cancelled`, and a cancelled upload leaves the EXISTING remote file byte-identical — the atomic write); §4 the shutdown (idle and mid-transfer); §5 the tab offscreen (navigation, the stale-answer filter, upload/download, Cancel); §6 the window offscreen (the lazy `open_sftp()` on the same transport, the connected pickup, the teardown); §7 the i18n keys and §8 the release state."""
 import os
 import sys
 import time

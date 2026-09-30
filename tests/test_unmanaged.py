@@ -1,38 +1,12 @@
 # -*- coding: utf-8 -*-
 """v1.6.5 — the neighbours on the map: a card for a server you do not administer.
 
-The topical file of the release (ROADMAP v1.6.5). ONE flag, `ServerData.unmanaged`, and the
-whole card follows it: no credentials and no keyring entry, no SSH verb, no probe round, an
-honest "not monitored" mark instead of a status, and ONE opt-in exception (an ICMP check the
-card itself must allow).
-
-Sections:
-  §1 the FLAG and the serialization (task 1): the two additive booleans, the coercion of a
-     hand-edited junk value, a project written before the release loading as MANAGED and a
-     byte-equal round trip;
-  §2 the DIALOG (tasks 1/5): the checkbox that disables AND clears the credential family,
-     the stash that gives it back, the opt-in ping (OFF by default, usable only while the
-     box is ticked) and `get_data()` refusing to build a credential for such a card;
-  §3 the CARD (task 2): the chip in the free band, the declared priority against the
-     environment chip and the emulated marker, the hardware lines absent by construction,
-     the measured height formula holding in BOTH densities and the tooltip in words;
-  §4 the HONEST STATUS (task 3): every unmanaged id in the checker's skip set, a fake round
-     probing none of them, and the card read as UNCHECKED — never as trouble;
-  §5 the ONE ACTION GATE (task 4): the pure table, the map menu, the sidebar menu, the
-     permanent Edit items, the command palette and EVERY entry point refusing; a URL quick
-     launch still opening;
-  §6 the OPT-IN PING (task 5): refused with the flag off, the ICMP thread alone with it on,
-     and the answer landing as a MANUAL line on the card — never as a status;
-  §7 the inventory table (task 6): the Status cell saying "not monitored", its sort rank and
-     `LIST_COLUMNS` still holding thirteen columns;
-  §8 the DEMO card + the release state (task 6): the unmanaged neighbour of the example map,
-     the pins and the i18n parity of the eleven new keys.
-
-Hermetic by construction: the window is built with NO status checker and every thread that
-would open a socket (the probe, the collector, the ICMP ping) is replaced by a double.
-
-Run:  python tests/test_unmanaged.py   (from the project root) or python tests/run_all.py
-"""
+The topical file of the release: ONE flag, `ServerData.unmanaged`, and the whole card follows it — no
+credentials and no keyring entry, no SSH verb, no probe round, an honest "not monitored" mark instead of
+a status, and ONE opt-in exception (an ICMP check the card itself must allow). Hermetic: the window is
+built with NO status checker and every thread that would open a socket (probe, collector, ICMP) is a double.
+§1 the flag and its serialization (additive booleans, coercion of junk, an older project loads MANAGED);
+§2 the dialog (the checkbox that disables AND clears the credentials, the stash that gives them back, the opt-in ping); §3 the card (the chip in the free band, no hardware lines, the height formula intact); §4 the honest status (every unmanaged id in the checker's skip set); §5 the ONE action gate; §6 the opt-in ping landing as a MANUAL line; §7 the inventory cell and its sort rank; §8 the demo card + pins."""
 import io
 import json
 import os
@@ -812,8 +786,10 @@ check("§8 the i18n pin moved by the ELEVEN keys of this release and by the ELEV
       "the tree-over-its-bound sentence, v1.7rc3 adds 9: the hint row, the walk and the "
       "preview that opens in the other pane, and v1.7.1 adds 4: the Files panel toggle of "
       "the terminal window with its tooltip and the two tooltips of its fold, and v1.7.1.1 "
-      "adds 3: the settings hub's Files display mode with its two values",
-      EXPECTED_I18N_KEYS == 811 + 17 + 13 + 5 + 8 + 9 + 4 + 3, str(EXPECTED_I18N_KEYS))
+      "adds 3: the settings hub's Files display mode with its two values, and v1.7.1.2 adds "
+      "4: the device choice of the disk row with its tooltip, the card's device list and the "
+      "sentence of a device the listing lost",
+      EXPECTED_I18N_KEYS == 811 + 17 + 13 + 5 + 8 + 9 + 4 + 3 + 4, str(EXPECTED_I18N_KEYS))
 _missing = {code: [k for k in NEW_KEYS if not str(data.get(k) or "").strip()]
             for code, data in LANGS.items()}
 check(f"§8 the {len(NEW_KEYS)} keys of v1.6.5 are present and non-empty in every language",

@@ -1,52 +1,12 @@
 # -*- coding: utf-8 -*-
-"""v1.2.8 — D&D of files from Windows Explorer into the SFTP tab (ROADMAP v1.2.8).
+"""Drag & drop of files from the desktop into the SFTP tab.
 
-The theme of the release: the SftpTab accepts the drop of the files (the URLs from QMimeData) → the upload through
-the worker queue of v1.1.3 into the CURRENT shown directory; several files =
-the sequential tasks of the queue; the progress — in the status bar of the window (the responsibility
-of the window, not the tab); the errors (no connection / no permission / the path error) —
-the error signal WITHOUT the queue crash.
+Offscreen, NO network (the fake SFTP of `_fakes.py`). Pins the drop of local URLs into the
+directory UNDER THE CURSOR (a file row or empty space = the current directory), the sequential
+queue tasks for several files, and the refusal hints (no connection, a non-file).
+Contract — `DOCUMENTATION.md` §14f.
 
-ALL the checks — without the network: a fake SFTPClient with an in-memory FS (the same surface
-of the API as paramiko: listdir_attr/open/close/get_channel; the errors — the IOError
-"No such file" like the SSH_FX_NO_SUCH_FILE and the PermissionError "Permission denied")
-+ the simulation of the drag via the synthetic QDragEnterEvent/QDropEvent with the QMimeData
-(the URLs of the real local files from the working folder of the test).
-
-The offscreen nuance (established by the probing, PySide6 6.11): the synthetic drag events
-do NOT pass through the real DnD path of the Qt notify() (the childAt/spontaneous — their
-delivery to the widgets under the cursor is not available from Python and bypasses the event filters),
-therefore the delivery in the test — by the direct virtual calls
-(`tab.dragEnterEvent(ev)` / `tab.dropEvent(ev)`) and the direct
-`tab.eventFilter(child, ev)` for the routing of the events from the CHILDREN. This is exactly the
-logic of the handlers that serves the real drop from the Explorer:
-in the production Qt delivers the event to the widget under the cursor (the tree/viewport/the buttons —
-to the children of the tab), the eventFilter forwards it to the handlers of the TAB ITSELF
-(see the docstring of modules/sftp_tab.py, v1.2.8).
-
-The sections:
-  1. _local_files(mime): the filtering of the URLs (files/directories/non-local/
-     nonexistent/empty).
-  2. The drag simulation on the tab: the dragEnter accepts with the files / rejects without;
-     the drop → the uploads go through the worker queue STRICTLY sequentially,
-     the progress signals in order (the monotonicity, the final == total), the content on
-     the "server", the hint drop_queued (count+dir); the target = the CURRENT directory.
-  3. The routing via eventFilter: the drag events on the children (the viewport of the tree,
-     the button) are forwarded and consumed (True), the non-drag events pass
-     by (False), the foreign widgets are not touched; the drop on a child = the same
-     result as on the tab itself; an empty drop (only the directories) —
-     the hint drop_no_files. v1.3.3.2 (ROADMAP task 4): the drop TARGET is the
-     directory under the cursor — a directory row (incl. "..") is the destination,
-     a file row and empty space keep the current directory.
-  4. The errors via the drop path: no connection → waiting_connection + nothing
-     into the queue; the remote directory vanished / no write permission → task_error,
-     the queue lives, the following drops finish.
-  5. i18n: sftp.drop_queued/sftp.drop_no_files × en/ru/zh (translated,
-     the {count}/{dir} formatting), the parity 427.
-  6. The release state (the pins — tests/_common.py).
-
-Run:  python tests/test_sftp_dnd.py   (from the project root) or python tests/run_all.py
-"""
+Run: python tests/test_sftp_dnd.py   (from the project root) or python tests/run_all.py"""
 import os
 import sys
 

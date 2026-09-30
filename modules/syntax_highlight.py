@@ -1,52 +1,16 @@
 # -*- coding: utf-8 -*-
-"""Syntax highlighting of the read-only SFTP viewer (v1.4.7, ROADMAP v1.4.7).
+"""Syntax highlighting of the read-only SFTP viewer (DOCUMENTATION.md §38): the tokenizers, the
+honesty rule and the ONE lazily built highlighter.
 
-The viewer of `modules/sftp_tab.py` made a file READABLE ("is this the config I
-think it is?"); this module makes it SKIMMABLE. It is deliberately small and
-deliberately dumb:
-
-  * **no new dependency** — the whole feature is the standard library (`json`,
-    `xml.etree.ElementTree`, `re`) plus `QSyntaxHighlighter` from PySide6;
-  * **the honesty rule (a hint must not lie).** The EXTENSION is a hint, the
-    CONTENT is the verdict: a `.json` is coloured as JSON only after
-    `json.loads` accepted it and a `.xml` only after `ElementTree` did — content
-    that does not parse degrades to the language-agnostic number-only mode
-    instead of being coloured with a grammar that does not describe it. YAML has
-    no standard-library parser (PyYAML is a dependency — not allowed), so YAML
-    highlighting is a HEURISTIC and the viewer header says so
-    (`sftp.viewer.syntax_heuristic`, the `encoding_note` pattern);
-  * **colours only, never bold/italic** — the palette changes foreground colours
-    alone, so highlighting can be applied LAZILY to the visible blocks (task 4 of
-    the plan) without disturbing the document layout. This is a skimmer, not an
-    IDE: no parsing library, no grammar files, no folding, no completion.
-
-Layout of the module:
-
-    SYNTAX_ROLES / role constants — the vocabulary (`number`, `string`, `key`,
-        `keyword`, `comment`, `tag`, `attribute`, `punctuation`); the palette
-        field of a role is `syntax_<role>` on `ui.theme.Theme`
-        (`syntax_field()` / `theme.Theme.syntax_colors` — the topical test pins
-        the two halves against each other);
-    detect_syntax(path, text)   — the pure, Qt-free verdict;
-    tokenize_line(...)          — the pure, Qt-free tokenizer (rules as DATA:
-        `(start, length, role)` spans, no paint code);
-    create_highlighter(document) — the ONE thin `QSyntaxHighlighter` subclass,
-        built LAZILY (the import sits inside the factory), which is what keeps
-        this module importable — and the tokenizers testable — without Qt (the
-        `ui/theme.py` contract of the same project).
-
-**The YAML limitation is documented, not hidden.** The line rules understand
-comments, `key:`, list markers, quoted scalars, `|`/`>` block scalars (through
-the block state), booleans/nulls and numbers. They do NOT parse anchors/aliases,
-tags (`!!str`), multi-line flow collections (`[a,` / `b]` spread over lines) or
-the full block-scalar indentation rules: a block scalar simply ends at the first
-non-blank line that is not indented deeper than the line the `|` stood on.
-Since v1.5rc5 (N3) the block state opens only for a REAL indicator — one that
-begins the value and is followed by nothing but whitespace (and the optional
-chomping/indentation indicators) — so the two residual cases are plain scalars
-that CONTAIN the character: a `|`/`>` in value position with other text
-(`cmd: echo a | grep b`) and a `|`/`>` that ENDS a plain scalar (`cmd: echo a |`).
-"""
+`detect_syntax(path, text)` is the PURE verdict — the EXTENSION is a hint, the CONTENT is the
+verdict: a `.json`/`.xml` is coloured only after a real parse accepted it, otherwise it degrades to
+the language-agnostic number-only mode; YAML has no standard-library parser, so it is a documented
+HEURISTIC (`sftp.viewer.syntax_heuristic`). Foreground tones only — never bold/italic — which is what
+lets the FORMATTING be applied lazily to the blocks around the viewport while the STATE stays complete.
+`tokenize_line(...)` returns sorted, non-overlapping `(start, length, role)` spans over `SYNTAX_ROLES`
+(the palette field of a role is `syntax_<role>` on `ui.theme.Theme`); `create_highlighter(document)`
+builds the ONE thin `QSyntaxHighlighter` subclass LAZILY, keeping this module — and the tokenizers —
+importable and testable without Qt."""
 
 import json
 import posixpath
@@ -181,20 +145,16 @@ def _parses_xml(text) -> bool:
     return True
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-# The tokenizers — pure functions: (line, state) → (spans, state)
-# ══════════════════════════════════════════════════════════════════════════════
-#
-# A span is `(start, length, role)`; the spans of a line are sorted by `start`
-# and never overlap. Nothing here knows about Qt, a font or a colour — the
-# highlighter at the bottom of the file only turns a role into a QTextCharFormat.
+# ═══ The tokenizers — pure functions: (line, state) → (spans, state) ═══
+# A span is `(start, length, role)`; the spans of a line are sorted by `start` and never overlap.
+# Nothing here knows about Qt, a font or a colour — the highlighter at the bottom of the file only
+# turns a role into a `QTextCharFormat` (`DOCUMENTATION.md` §38).
 
-# A NUMBER is a standalone token: not glued to a letter, a dot or a hyphen. That
-# single rule is what keeps the mode truthful on the four cases the plan names —
-# `abc123` (an identifier), `1.2.3` (a version), `2026-09-28` (a date) and
-# `10GB` (a size with a glued unit) stay plain, while `42`, `-5`, `3.14` and
-# `1.5e-3` are numbers. A thousands separator (`1,000`) is NOT understood: a
-# comma is a delimiter here, because `1, 2, 3` must keep its digits coloured.
+# A NUMBER is a standalone token: not glued to a letter, a dot or a hyphen. That single rule keeps the
+# mode truthful on the four cases the plan names — `abc123` (an identifier), `1.2.3` (a version),
+# `2026-09-28` (a date) and `10GB` (a size with a glued unit) stay plain, while `42`, `-5`, `3.14` and
+# `1.5e-3` are numbers. A thousands separator (`1,000`) is NOT understood: a comma is a delimiter here,
+# because `1, 2, 3` must keep its digits coloured.
 _NUMBER_RE = re.compile(
     r"(?<![\w.\-])([+-]?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)(?![\w.\-])")
 
@@ -595,17 +555,11 @@ def _yaml_key_end(line, start, content_end):
     return None
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-# The highlighter — ONE QSyntaxHighlighter subclass, built lazily
-# ══════════════════════════════════════════════════════════════════════════════
-#
-# Why a factory instead of a module-level class: this module must stay
-# importable — and the tokenizers above runnable — without PySide6 (the
-# `ui/theme.py` contract; `tests/test_sftp_syntax.py` pins it with the AST).
-# Why the visible-window machinery: a 1 MB file is ~20 000 blocks and
-# `setPlainText()` marks every one of them dirty, so the FORMATTING (the
-# expensive half) is applied only around the viewport, while the cheap block
-# STATE is still computed for every line (the next line's state depends on it).
+# ═══ The highlighter — ONE QSyntaxHighlighter subclass, built by a factory ═══
+# The factory keeps this module (and the tokenizers above) importable without PySide6 —
+# `tests/test_sftp_syntax.py` pins it with the AST. The FORMATTING is applied only around
+# the viewport while the block STATE stays complete for every line, because the next
+# line's state depends on it (`DOCUMENTATION.md` §38).
 
 _HIGHLIGHTER_CLASS = None
 

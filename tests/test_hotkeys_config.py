@@ -1,41 +1,12 @@
 # -*- coding: utf-8 -*-
 """v1.3.2 — Configurable hotkeys (QKeySequenceEdit, action registry): the release's test.
 
-ROADMAP v1.3.2:
-  #1 The action registry (ui/hotkey_registry.py) — ONE declarative list
-     {action_id: {label_i18n_key, default_sequence}} covering every existing global
-     action; menu QActions/QShortcuts are created FROM it (no literal sequence is
-     scattered across the modules);
-  #2 The "Hotkeys" tab of SettingsDialog — a table [action | hotkey] with a
-     QKeySequenceEdit per row; an empty sequence = the hotkey is disabled (the action
-     stays available from the menu); two actions with the same sequence → both rows
-     marked + a warning, saving is still possible;
-  #3 Storage & application — the "hotkeys" key of ~/.sshmap/config.json (a dict
-     action_id → "Ctrl+K", merge-write); applied at startup (after the UI construction)
-     and live after the dialog's OK without a restart (QAction.setShortcut /
-     QShortcut.setKey); an unknown key / a broken value → the default;
-  #4 F12 multi-input — the sequence is configurable, the "install ONLY while the mode
-     is on" rule (v1.2.3/v1.2.4-fix) is preserved;
-  #5 The scope boundary — the terminal canvas's own keys (F1–F12, Ctrl+C/D/Z, arrows)
-     are NOT in the registry (pinned in DOCUMENTATION.md; checked here as "no orphans").
-  #6 i18n keys settings.hotkeys.* / settings.tab.hotkeys × en/ru/zh — parity 453 → 458.
-
-v1.3.3.3 (ROADMAP task 1–4) grew the registry from 18 to 40 actions: `file.save_as`
-gained Ctrl+Shift+S, the zoom family (Ctrl+0 / Ctrl+= / Ctrl+-) became actions, and the
-remaining global actions (the exports, the backups, center/collapse/expand, the
-selection operations, profile/logs/exit) entered the registry with an EMPTY default —
-the "no hotkey, but assignable" value. This file keeps covering the STORAGE +
-APPLICATION contract for the grown registry; the completeness audit, the real
-shortcut firing and the dialog's reset button live in tests/test_actions_keyboard.py.
-v1.3.3.7 added `file.export_svg` (the SVG export) as one more empty-default action — 41.
-v1.4rc1 added `plugins.reload` (the plugin re-discovery) — 42, 20 of them empty-default.
-v1.4rc3 added `plugins.run_on_nodes` (the `run_on_nodes` hook for the selection) — 43,
-21 of them empty-default.
-v1.4.1 added `file.import_ssh_config` (the second import path, File menu) — 44,
-22 of them empty-default.
-
-Run: python tests/test_hotkeys_config.py   (from the project root) or python tests/run_all.py
-"""
+The contract this file covers: the registry of `ui/hotkey_registry.py` (ONE declarative list the menu
+QActions/QShortcuts are created FROM), the "Hotkeys" tab (a `QKeySequenceEdit` per row; an empty
+sequence DISABLES the hotkey while the action stays on the menu; a duplicate marks both rows and warns,
+saving is still possible), the STORAGE and APPLICATION of the `hotkeys` key of `~/.sshmap/config.json`
+(startup + the dialog's OK; an unknown id or a broken value → the default), the scope boundary (the
+canvas's own keys are NOT in the registry) and the audit that lives in `tests/test_actions_keyboard.py`."""
 import json
 import os
 import re
@@ -523,7 +494,7 @@ check("multi: the mode is on → the default F12 is installed",
       and mw6.act_multi_input.shortcut() == QKeySequence("F12"))
 mw6._toggle_multi_input(False)
 app.processEvents()
-check("multi: leaving the mode removes the key again (the v1.2.3/v1.2.4-fix rule)",
+check("multi: leaving the mode removes the key again (the v1.2.3 rule)",
       action_sequences(mw6, "view.multi_input") == [""])
 
 write_cfg({"hotkeys": {"view.multi_input": "Ctrl+M"}})

@@ -2,26 +2,11 @@
 """v1.5.6 — the customer requests: the Export menu, a third first-run button, environment
 icons, buttons that look like buttons.
 
-The **sixth patch ON the released 1.5**, and four changes asked for by the people who run the
-shipped line. The topical file of the release; the mechanism lives in `DOCUMENTATION.md` and
-the history in `CHANGELOG_HISTORY_V1571.md` (v1.5.6).
-
-  §1 the EXPORT MENU: a top-level container BETWEEN "Edit" and "Profile" that takes every
-     export of the application, with the SAME actions, ids and `file.*` keys (a `hotkeys`
-     value of `config.json` is keyed by the ACTION ID, so a rename would drop a user's
-     binding), while File keeps the project's life;
-  §2 the THIRD DOOR of the first screen: "open an existing map" between the primary action
-     and the demo, wired to the window's ORDINARY project-open path;
-  §3 the ENVIRONMENT moves from the 5 px left strip into the card's own ICON (the primary
-     tag's tone) in both card modes — a card without tags keeps its neutral tone;
-  §4 the badge chip is CENTRED ON THE ALIAS ROW (the alias owns the left side, the marks and
-     the chevron the right) and still elides or hides when the room is short;
-  §5 the two collapse "◇" become BUTTONS: a frame from the ONE QSS registry entry, the map
-     button bigger and still inside the view;
-  §6 the release state (the version, the two keys in every language, the unchanged contract).
-
-Run: python tests/test_ui_requests.py   (from the project root) or python tests/run_all.py
-"""
+The sixth patch ON the released 1.5 and the topical file of the release: four changes asked for by the
+people who run the shipped line (the mechanism is in `DOCUMENTATION.md`, the history in the 1.5 changelog).
+§1 the EXPORT MENU — a top-level container BETWEEN "Edit" and "Profile" holding every export of the
+application with the SAME actions, ids and `file.*` keys (a `hotkeys` value of `config.json` is keyed by
+the ACTION ID, so a rename would silently drop a user's binding), while File keeps the project's life; §2 the THIRD DOOR of the first screen ("open an existing map", wired to the window's ORDINARY project-open path); §3 the ENVIRONMENT moves from the 5 px left strip into the card's own ICON (the primary tag's tone, in both card modes; a card without tags keeps its neutral tone); §4 the badge chip is CENTRED ON THE ALIAS ROW (the alias owns the left, the marks and the chevron the right) and still elides or hides when the room is short; §5 the two collapse "◇" become BUTTONS with a frame from the ONE QSS registry entry, the map's button bigger and still inside the view; §6 the release state (the version, the two keys in every language and the unchanged contract)."""
 import os
 import re
 
@@ -466,7 +451,7 @@ check("§5 v1.5.6 ...and it is raised out of the corner (a different level from 
       and _map_btn.y() != _side_btn.geometry().y(),
       f"map y={_map_btn.y()} sidebar y={_side_btn.geometry().y()} viewport bottom={_vp.bottom()}")
 # The reported defect: with content on the map the scrollbars appear — and the button must not
-# be drawn over them (it used to sit in the VIEW's corner, which includes both).
+# be drawn over them (the VIEW's corner includes both).
 for _i in range(4):
     win.scene.add_server(ServerData(id=f"uic-scroll-{_i}", alias=f"node-{_i}", host="10.0.0.9",
                                     user="root", x=_i * 700.0, y=_i * 500.0))

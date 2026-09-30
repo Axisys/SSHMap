@@ -1,56 +1,15 @@
-"""SshMixin — the "SSH connections and terminal windows" cluster.
+"""`SshMixin` — the SSH connections and terminal windows cluster (AGENTS.md §4.1, §4.3).
 
-v1.1.4 (ROADMAP v1.1.4, task 3): extracted from ui/main_window.py as part of the
-"main_window.py hygiene" series. The "module + callbacks" pattern (precedents:
-the v0.9.9.4 sidebar, the v0.9.9.3 diagnostics): the mixin — methods only,
-MainWindow remains the facade, the public API is unchanged; method names and
-call sites were not touched.
+Methods only: `MainWindow` stays the facade and the public API is unchanged. The mixin never
+imports this window's module (cycle, `ui/main_window.py`) — it duck-types the instance, and
+`SSHTerminalWindow` / `SSHConnectDialog` / `_ext_term` are resolved on the facade module at call
+time (`host_attr`), which is also the test seam for swapping them in an offscreen run.
 
-The cluster also takes in the whole "Quick launch" block
-(``_open_quick_launch_dialog``, ``_run_quick_launch_entry``, ``_quick_launch_url``,
-``_quick_launch_command``) — it lives on the same connect/terminal path
-(initial_command).
-
-v1.1.3 (SFTP) has already been released — the sftp_worker.py/sftp_tab.py code is
-in place, so the SSH cluster moves together with it (ROADMAP "Order").
-
-Ownership of shared state (AUDIT §3, pinned down by this comment):
-  * ``self._terminal_windows`` — registry of open terminal SESSIONS
-    (v1.2: TerminalSessionPage from modules/terminal_page.py, not windows — the
-    node's green dot goes out only when ALL of the node's sessions are closed;
-    the "4 of your own terminals" limit is counted by sessions across all
-    windows; v1.2.1: one window can host several of the node's sessions as
-    tabs — _spawn_terminal_window reuses the node's live window via
-    window.add_session(), otherwise creates a new window; v1.2.2: in "tabs"
-    mode (terminal_mode) sessions open as a TAB in the "Terminals" dock —
-    _ensure_terminals_dock; the registry/limit/green dot are still counted by
-    SESSIONS regardless of the container; v1.2.3: the same registry is the
-    provider of the multi-input hub modules/multi_input.py (broadcasting input
-    to all open sessions));
-    **v1.3.3.5 (ROADMAP task 2): the registry also holds the terminal SPLIT
-    PANES** — the second pane of a terminal window (modules/ssh_terminal.py) is a
-    real session (it keeps the node's green dot, it joins the multi-input
-    broadcast, it is torn down by the same loops) and it is marked
-    `page._is_split_pane`, so `_limit_terminal_sessions()` (the terminal_max_open
-    limit + the "close the oldest" candidate) and `_find_terminal_window_for()`
-    skip it — a pane is a second shell INSIDE a session, never a reason to refuse
-    the user a new terminal. The window hands its pane over through the
-    duck-typed host hook `_adopt_split_session()` (the window looks it up on its
-    PARENT — no import of ui.main_window from modules/*);
-  * ``self._terminals_dock`` — the "Terminals" dock (v1.2.2, lazy creation;
-    modules/terminal_dock.TerminalsDock), None until the "tabs" mode was used;
-  * ``self._ssh_connected_nodes`` — ids of nodes with an active session (green dot);
-  * ``self._info_collectors`` — registry of SystemInfoCollector by server_id (v1.5.3:
-    the ONE per-node guard of the info family, written by `_track_info_collector()` and
-    asked by `_info_is_busy()` — the single-node path AND the batch obey it);
-  * ``self._info_batch`` — the bounded queue behind "gather information for the
-    selection / all" (v1.5.3, ROADMAP task 2; `services/info_batch.py`).
-The mixin does NOT import ui.main_window (cycle) — only duck-typing on the
-instance; SSHTerminalWindow/SSHConnectDialog/_ext_term are taken from the
-facade module at call time (host_attr) — a test seam for swapping
-``MW.SSHTerminalWindow``/``MW.SSHConnectDialog``/``MW._ext_term`` (otherwise
-an offscreen run would hang on the real modals).
-"""
+Shared state it owns: `_terminal_windows` — the registry of open terminal SESSIONS (the green
+dot, the `terminal_max_open` limit and the multi-input provider are counted by SESSIONS whatever
+the container; the SPLIT PANES join it and the limit and `_find_terminal_window_for()` skip
+them); `_terminals_dock` (the "tabs"-mode dock); `_ssh_connected_nodes`; `_info_collectors` and
+`_info_batch`. It also owns the quick-launch block, the split/adopt hooks and the report."""
 import copy
 from typing import TYPE_CHECKING
 
@@ -268,7 +227,7 @@ class SshMixin:
             self._forget_terminal_window(oldest)  # immediately from the registry (destroyed still on its way)
         node.update_appearance()
         node.set_ssh_connected(True)
-        self._ssh_connected_nodes.add(node.data.id)  # v0.9.4-fix: indicator reset on terminal close
+        self._ssh_connected_nodes.add(node.data.id)  # indicator reset on terminal close
         if mode == "tabs":
             # v1.2.2 (task 2): a new session -> the "Terminals" dock on the map
             # (lazy creation / repeated show). Open "windows"-mode windows keep
@@ -321,13 +280,13 @@ class SshMixin:
         return terminal_window
 
     def _apply_ssh_dialog_fields(self, node_id: str, user: str, key_path: str, ssh_port: int):
-        """v1.0-fix (audit #2): apply user/key/port from the SSH dialog to the node
+        """apply user/key/port from the SSH dialog to the node
         via the undo stack + a dirty marker (single path).
 
         Used by the regular connect (_run_ssh_connect) and "Open in external
-        terminal" (SSHConnectDialog._open_external): the latter used to write
-        directly to node.data — Ctrl+Z did not roll it back, on close without
-        Ctrl+S the changes were lost without a "save?" dialog, and the card did
+        terminal" (SSHConnectDialog._open_external): the latter writes through
+        the same helper — otherwise Ctrl+Z does not roll it back, a close without
+        Ctrl+S loses the changes without a "save?" dialog, and the card does
         not redraw the SSH:<port> line.
         """
         from modules.undo_commands import CmdEditNodeData
@@ -370,15 +329,11 @@ class SshMixin:
             dlg.password_edit.setText(prefill_password)
         if dlg.exec() != QDialog.Accepted:
             return
-        # v0.9.4-fix: edits to user/key_path/ssh_port from the dialog go through
-        # the undo stack and mark the project dirty (previously they were written
-        # directly to node.data — lost on exit without Ctrl+S and not rolled
-        # back). v1.0-fix (audit #2): a single helper _apply_ssh_dialog_fields —
-        # "Open in external terminal" uses it too. v1.1.2RC1 (N1): this is now
-        # the REAL sole field write on the regular path — the dialog
-        # (_on_worker_success) no longer writes to node.data itself, so old/new
-        # here differ and CmdEditNodeData is pushed: Ctrl+Z rolls back the
-        # user/key/port change made by a successful connect.
+        # Edits to user/key_path/ssh_port from the dialog go through the undo stack and mark the project
+        # dirty — ONE helper `_apply_ssh_dialog_fields`; "Open in external terminal" uses it too. This is
+        # the REAL sole field write on the regular path — `_on_worker_success` never writes to
+        # `node.data` itself — so old/new differ here and `CmdEditNodeData` is pushed: Ctrl+Z rolls back
+        # the user/key/port change made by a successful connect.
         self._apply_ssh_dialog_fields(
             node.data.id, dlg.user_edit.text().strip(),
             dlg.key_path_edit.text().strip(), dlg.port_edit.value())
@@ -677,8 +632,16 @@ class SshMixin:
             d.cpu = f"{info['cpu_cores']} core"
         if info.get("ram_gb"):
             d.ram = info["ram_gb"]
-        if info.get("disk_gb"):
+        # The DEVICE choice speaks for `disk` when the node made one: the capacity `lsblk -d`
+        # answered for the named device, or NOTHING when the listing does not hold it — a
+        # vanished device is REPORTED below and the card never shows another disk's number. A
+        # collection silent about a device leaves the figure alone, exactly like the mount pair.
+        if "disk_device_note" in info:
+            d.disk = str(info.get("disk_gb") or "")
+        elif info.get("disk_gb"):
             d.disk = info["disk_gb"]
+        if "disk_devices" in info:
+            d.disk_devices = [str(entry) for entry in (info.get("disk_devices") or [])]
         # v1.6.6 (ROADMAP task 5): the DATA-mount family, written as ONE unit by this same
         # path. A collection that says anything about a mount — an ANSWER or a NAMED refusal —
         # writes all three answers, so a refusal CLEARS them: the pair is never a stale figure
@@ -709,12 +672,15 @@ class SshMixin:
         return True
 
     def _report_disk_note(self, data, info: dict) -> None:
-        """v1.6.6 (ROADMAP task 4): the status-bar sentence of a refused data mount.
+        """v1.6.6 (ROADMAP task 4): the status-bar sentence of an unanswered REQUEST.
 
-        The collection's own report half — a share refused BY NAME, or a requested path that is
-        not on the host. `disk_refusal_kind()` is the ONE classifier of the note the collector
-        wrote, so the window never re-invents it, and this method never raises: a report is a
-        side channel and must not break the write of the values that DID arrive.
+        The collection's own report half — a share refused BY NAME, a requested path that is
+        not on the host, or a DEVICE the `lsblk` listing does not hold. `disk_refusal_kind()`
+        is the ONE classifier of the note the collector wrote, so the window never re-invents
+        it, and this method never raises: a report is a side channel and must not break the
+        write of the values that DID arrive. When both requests fail in one collection the
+        DEVICE sentence is the one left on screen — it is the figure the card is about — while
+        both lines are already in the log and the activity ring.
         """
         try:
             if not isinstance(info, dict):
@@ -722,21 +688,24 @@ class SshMixin:
             try:
                 from services.system_info_collector import (
                     disk_refusal_kind, resolve_disk_mount,
-                    DISK_REFUSAL_NETWORK, DISK_REFUSAL_NONE)
+                    DISK_REFUSAL_NETWORK, DISK_REFUSAL_DEVICE, DISK_REFUSAL_NONE)
             except ImportError:  # flat layout
                 from system_info_collector import (
                     disk_refusal_kind, resolve_disk_mount,
-                    DISK_REFUSAL_NETWORK, DISK_REFUSAL_NONE)
+                    DISK_REFUSAL_NETWORK, DISK_REFUSAL_DEVICE, DISK_REFUSAL_NONE)
             kind = disk_refusal_kind(info.get("disk_note"))
-            if kind == DISK_REFUSAL_NONE:
-                return
-            mount = resolve_disk_mount(getattr(data, "disk_mount", ""))
-            if kind == DISK_REFUSAL_NETWORK:
-                text = self.t("status.disk_mount_network", alias=data.alias, mount=mount,
-                              type=str(info.get("disk_note") or ""))
-            else:
-                text = self.t("status.disk_mount_missing", alias=data.alias, mount=mount)
-            self.statusBar().showMessage(text, 8000)
+            if kind != DISK_REFUSAL_NONE:
+                mount = resolve_disk_mount(getattr(data, "disk_mount", ""))
+                if kind == DISK_REFUSAL_NETWORK:
+                    text = self.t("status.disk_mount_network", alias=data.alias, mount=mount,
+                                  type=str(info.get("disk_note") or ""))
+                else:
+                    text = self.t("status.disk_mount_missing", alias=data.alias, mount=mount)
+                self.statusBar().showMessage(text, 8000)
+            if disk_refusal_kind(info.get("disk_device_note")) == DISK_REFUSAL_DEVICE:
+                self.statusBar().showMessage(
+                    self.t("status.disk_device_missing", alias=data.alias,
+                           device=str(getattr(data, "disk_device", "") or "").strip()), 8000)
         except (RuntimeError, AttributeError, ImportError):
             pass  # Qt teardown / a stripped window — the values are already written
 
@@ -903,7 +872,7 @@ class SshMixin:
         except Exception:
             pass
         if self.log:
-            # v1.0-fix: the "name" key cannot go into extra — it is a built-in
+            # the "name" key cannot go into extra — it is a built-in
             # LogRecord attribute (the logger name), makeRecord() dies with
             # KeyError; hence the spurious "Quick launch failed" after a
             # successful URL open.
@@ -943,7 +912,7 @@ class SshMixin:
         else:
             self._run_ssh_connect(node, prefill_password="", initial_command=cmd)
         if self.log:
-            # v1.0-fix: the same KeyError — the "name" key is reserved by LogRecord.
+            # the same KeyError — the "name" key is reserved by LogRecord.
             self.log.info("Quick launch command started",
                           extra={"alias": data.alias, "ql_name": name})
 
@@ -952,7 +921,7 @@ class SshMixin:
         (TerminalSessionPage), not windows — a window can also come here
         (resolved to its .page).
 
-        v0.9.4-fix: the terminal was closed -> dim the node's green SSH dot
+        the terminal was closed -> dim the node's green SSH dot
         (previously the indicator burned forever after the first connect).
         Since v1.2 the dot goes out only when ALL of the node's sessions are
         closed — counted by the registry's sessions.
@@ -975,29 +944,26 @@ class SshMixin:
                         node.set_ssh_connected(False)
         except RuntimeError:
             pass  # C++ object already destroyed during teardown — fine
-        # v1.2.3 (ROADMAP task 4): a dead session was removed from the registry
+        # v1.2.3 (ROADMAP task 4): a dead session is dropped from the registry
         # on the regular path — the "MULTI: N sessions" plaque counter is
         # updated, the broadcast keeps working for the rest (dead threads are
         # additionally filtered by the hub by liveness).
         self._multi_refresh_ui()
 
-    # ── v1.2.3: multi-input (ROADMAP v1.2.3) ────────────────────────────────
-    # The mode state lives in the hub modules/multi_input.py (a process
-    # singleton), which MainWindow holds as self._multi_hub and passes to
-    # TerminalWidget by default; the registry of open sessions — provider =
-    # self._terminal_windows (the same one as for the green dot / the limit).
-    # Methods here: the UI reaction to a state change and the registry hooks.
-    # The broadcast itself lives at the single input point
-    # (TerminalWidget._send -> hub.broadcast) — the mixin does not touch it.
+    # ── multi-input ──────────────────────────────────────────────────────────
+    # The mode state lives in the hub `modules/multi_input.py` (a process singleton), held by
+    # MainWindow as `self._multi_hub`; the registry of open sessions is the provider
+    # `self._terminal_windows` (the green dot / the limit one). The methods here are the UI reaction
+    # to a state change and the registry hooks — the broadcast lives at the single input point.
 
     def _toggle_multi_input(self, checked=None):
         """v1.2.3 (tasks 2/3): toggle multi-input — the "View" menu item
-        (a checkable QAction; v1.2.4-fix: wired to toggled(bool) — in PySide6 6.11
+        (a checkable QAction; wired to toggled(bool) — in PySide6 6.11
         triggered via QMenu.addAction(text, slot) does NOT pass the state to
         the Python slot) or the exit button on the plaque (an explicit False).
 
-        checked=None — a REAL toggle (the fallback path for no-arg calls; before
-        v1.2.4-fix there was a no-op "keep the current state" branch here);
+        checked=None — a REAL toggle (the fallback path for no-arg calls) — there is
+        no silent "keep the current state" branch;
         True/False — an explicit state. The hub itself notifies the listeners
         -> _on_multi_changed (UI)."""
         hub = getattr(self, "_multi_hub", None)
@@ -1009,7 +975,7 @@ class SshMixin:
     def _sync_multi_shortcut(self):
         """v1.2.3 -> v1.3.2 (ROADMAP task 4): the multi-input sequence on the QAction.
 
-        The RULE is unchanged since v1.2.3/v1.2.4-fix — the sequence is installed ONLY
+        The RULE is unchanged since v1.2.3/ the sequence is installed ONLY
         while the mode is on (QAction has no setShortcutEnabled; an empty QKeySequence
         = no shortcut, so the key falls through to the shell / the focused widget);
         only the literal "F12" became configurable: the value comes from the hotkey
@@ -1098,8 +1064,8 @@ class SshMixin:
     def _multi_participant_count(self) -> int:
         """v1.3.3.4 (ROADMAP task 5): the sessions the broadcast actually reaches.
 
-        The plaque used to say "MULTI: N sessions" with N = the whole registry, which
-        promised an excluded session the bytes it will never get. The count now comes
+        The count never comes from the whole registry, which
+        would promise an excluded session the bytes it never gets; it comes
         from the hub (`participant_count`), which skips the sessions whose canvas
         carries `multi_excluded`; the hub is asked with the LIVE registry, so the
         counter follows both a new/closed session and an exclusion toggle. Without a

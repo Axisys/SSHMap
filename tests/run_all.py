@@ -1,44 +1,11 @@
 """A single run of all the tests of SSHMap (parallel).
 
-ROADMAP "Preparation for 1.0": the task "the single runner" (mandatory before v1.0) — executed
-early in v0.9.9.2: smoke_test.py + all the regression_v*.py + check_i18n_keys.py are replaced
-by a single run over the thematic files tests/test_*.py.
-
 Run from the project root:
     python tests/run_all.py                 # all test_*.py + check_i18n_keys.py, the auto workers
-    python tests/run_all.py --workers 8     # the number of the workers (1 = sequential)
-    python tests/run_all.py keyring         # only the files whose name contains the substring
-    python tests/run_all.py --fast          # the daily profile: without the tags slow/network
-    python tests/run_all.py --tag network   # only the files with this tag
-    python tests/run_all.py --failed-only   # only the files that failed in the previous run
-    python tests/run_all.py --junit [PATH]  # the JUnit XML (by default test-results/junit.xml)
+    python tests/run_all.py --fast | --tag network | --failed-only | --junit | keyring | --workers N
 
-The schedule (v1.4.1): the workers default to the cores (capped by WORKER_CAP = 16) and the files
-are submitted LONGEST FIRST — the run is WAIT-bound (a "slow" file spends 6–27 % of its wall time
-on the CPU, the rest is Qt event-loop waiting), so the core count is the cheap win and the LPT
-order shaves off the tail. Measured on 16 cores: 8 workers alphabetical = 20.2 s,
-8 + longest-first = 17.7 s, 16 alphabetical = 13.9 s, 16 + longest-first = 11.2 s.
-
-The tags of the files: the comment `# tags: slow network` in the header of the file (the first such
-line in the first 40 lines). The known tags:
-    slow    — deliberately long wait budgets/teardown (part of the specification, not a "slowdown");
-    network — the file contains a real network section. The section is executed ONLY with
-              the explicit choice of `--tag network`: the runner passes the tag to the child process
-              through the env SSHMAP_TEST_TAGS, and the test switches to the real mode
-              (for example, test_diagnostics.py — the real ping TEST-NET-1). The regular
-              run of such a file — hermetic (without the network, fast).
---fast excludes the files with slow OR network; --tag NAME chooses the files with the tag NAME.
-
-The artifacts of the run (gitignored, the test-results/ folder):
-    junit.xml      — the JUnit report per file (CI: parsed by the standard tools);
-    last_run.json  — the cache of the statuses for --failed-only (updated after each run).
-
-Every file — a separate process (the isolation of HOME/offscreen does the bootstrap() inside).
-The files are independent: the working folder per file is passed via SSHMAP_TEST_WORKDIR
-(otherwise the parallel bootstrap() would clobber the shared _tmp_testdata), the run folder
-is created in %TEMP% and removed on the finish.
-exit code 0 = everything green; at the end — the table of the results (sorted by name).
-"""
+The workers default to the cores (capped by WORKER_CAP = 16) and the files go LONGEST FIRST, because
+the run is WAIT-bound; the artifacts (test-results/) are junit.xml and last_run.json."""
 import json
 import os
 import re

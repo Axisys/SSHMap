@@ -1,24 +1,11 @@
 """v1.6 — the map at scale: bulk editing, density, arrangement and the connections out.
 
-ROADMAP v1.6 (the release's topical file):
-  #1 the BULK EDIT of the selection — `dialogs/bulk_edit_dialog.py`, the tri-state fields
-     and ONE `CmdEditSelected` (apply → undo → every node byte-equal);
-  #2 the CARD DENSITY — the `density` value of the nested `theme` config object and the
-     compact branch of `ServerNode.update_appearance()` (the height formula and the free
-     band hold in BOTH modes);
-  #3 the PARALLEL LINKS between one endpoint pair — the offset index owned by `MapScene`,
-     the distinct path AND hit zone of three links, and the duplicate that is no longer
-     refused in silence;
-  #4 the BACKGROUND image joins the undo stack — `CmdMoveBackground` / `CmdResizeBackground`;
-  #5 the CONNECTION report — the columns declared once, the rows built by the pure
-     `storage/export_connections.py` and quoted by the SHARED RFC-4180 writer;
-  #6 the AUTO-ARRANGEMENT of a group's members — the pure `arrange_positions()`, the three
-     modes, ONE `CmdArrangeGroup` and the folded-group refusal;
-  #7 the ACTIVITY panel's toolbar mirror — the fifth member of the view cluster, taken in
-     both directions.
-
-Run: python tests/test_map_scale.py   (from the project root) or python tests/run_all.py
-"""
+§1 the BULK EDIT of the selection (`dialogs/bulk_edit_dialog.py`, the tri-state fields and ONE
+`CmdEditSelected`: apply → undo → every node byte-equal); §2 the CARD DENSITY (the `density` value of the
+nested `theme` config object and the compact branch of `ServerNode.update_appearance()`, with the height
+formula and the free band holding in BOTH modes); §3 the PARALLEL LINKS between one endpoint pair (the
+offset index owned by `MapScene`, the distinct path and hit zone of three links, and the duplicate that is
+no longer refused in silence); §4 the BACKGROUND image joining the undo stack (`CmdMoveBackground` / `CmdResizeBackground`); §5 the CONNECTION report (the columns declared once, the rows produced by the pure `storage/export_connections.py` and quoted by the SHARED RFC-4180 writer); §6 the AUTO-ARRANGEMENT of a group's members (the pure `arrange_positions()`, the three modes, ONE `CmdArrangeGroup` and the folded-group refusal); §7 the ACTIVITY panel's toolbar mirror."""
 import copy
 import json
 import os
