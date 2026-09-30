@@ -22,6 +22,7 @@ from modules.plugin_context import PluginNode, PluginRunResult, node_record
 COMMAND_TIMEOUT_S = 30.0      # per-node budget (connect + command) — the `timeout=` default
 STOP_WAIT_MS = 1500           # the wait budget of `stop()` (the v1.2 orphan-registry budget)
 OUTPUT_MAX = 1_000_000        # a cap on the captured stdout/stderr (bytes of text)
+OUTPUT_CHUNK = 32_768         # the bounded read of ONE channel (the cap is applied WHILE reading)
 ERROR_MAX = 300               # an error text is a tooltip line, not a log dump
 
 
@@ -29,6 +30,48 @@ def _short(text, limit: int = ERROR_MAX) -> str:
     """One-line, length-capped text (a result travels to a status bar and a tooltip)."""
     flat = " ".join(str(text or "").split())
     return flat[:limit] + "…" if len(flat) > limit else flat
+
+
+def _read_capped(stream, limit: int = OUTPUT_MAX):
+    """Drain ONE stream in bounded chunks, stopping AT `limit` → `(text, complete)`.
+
+    `read()` without a size asks for everything and lets the producer decide how much memory
+    the application spends: paramiko replenishes the channel window on every read, so an
+    endless producer (`cat /dev/zero`) or an ordinary `cat` of a multi-GB log is stopped by
+    nothing. The channel is therefore drained `OUTPUT_CHUNK` bytes at a time and the loop ends
+    the moment the cap is reached — the bytes past it are never read, never decoded and never
+    buffered. Decoding happens ONCE over the capped bytes, so a multi-byte character split
+    across two reads stays whole. `complete` is False when the cap — not EOF — ended the read,
+    i.e. the producer may still be running (which is what `_exit_code()` has to know).
+    """
+    buf = bytearray()
+    channel = getattr(stream, "channel", None)
+    recv = getattr(channel, "recv", None)
+    while len(buf) < limit:
+        want = min(OUTPUT_CHUNK, limit - len(buf))
+        chunk = recv(want) if callable(recv) else stream.read(want)
+        if not chunk:
+            return bytes(buf).decode("utf-8", errors="replace")[:limit], True
+        buf.extend(chunk)
+    return bytes(buf).decode("utf-8", errors="replace")[:limit], False
+
+
+def _exit_code(channel, timeout: float = COMMAND_TIMEOUT_S) -> int:
+    """The command's exit status, asked in a BOUNDED way (the declared `-1` when unavailable).
+
+    `recv_exit_status()` waits forever by its own documentation, and a producer whose output
+    was truncated at the cap is exactly the case where the process is still blocked on a full
+    window — so waiting for a status that cannot come would hand the unbounded wait back. The
+    status is taken once it is really there and the wait is bounded by the command's own
+    budget; a channel without a `status_event` (a foreign/fake transport) keeps the plain call.
+    """
+    try:
+        event = getattr(channel, "status_event", None)
+        if event is not None and not event.wait(max(0.0, float(timeout))):
+            return -1
+        return int(channel.recv_exit_status())
+    except Exception:  # noqa: BLE001 — a channel without a status
+        return -1
 
 
 def default_credentials(node: PluginNode, node_facts: Optional[Dict[str, dict]] = None) -> dict:
@@ -93,12 +136,12 @@ def run_command_over_ssh(node: PluginNode, command: str, timeout: float = COMMAN
             stdin.close()
         except Exception:  # noqa: BLE001 — a closed stdin is not an error
             pass
-        output = stdout.read().decode("utf-8", errors="replace")[:OUTPUT_MAX]
-        error_out = stderr.read().decode("utf-8", errors="replace")[:OUTPUT_MAX]
-        try:
-            exit_code = int(stdout.channel.recv_exit_status())
-        except Exception:  # noqa: BLE001 — a channel without a status
-            exit_code = -1
+        output, complete = _read_capped(stdout)
+        # A stream the cap stopped is a producer that may still be running (its channel window
+        # is full), so the error stream is not waited for — only its already-buffered text is
+        # read; an EOF on stdout is the process's own word that both streams are done.
+        error_out = _read_capped(stderr)[0] if complete else ""
+        exit_code = _exit_code(stdout.channel, timeout)
         if error_out.strip() and not output.strip():
             # A command that wrote only to stderr still ran: the text goes into `error`
             # (the plugin's only place for it) but the exit code is the truth.

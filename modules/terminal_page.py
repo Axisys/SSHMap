@@ -1130,10 +1130,24 @@ class TerminalSessionPage(QWidget):
         if widget is None:
             return False
         try:
-            QTimer.singleShot(0, widget.setFocus)
+            QTimer.singleShot(0, self._claim_focus_now)
         except RuntimeError:
             return False  # Qt teardown — the canvas is already destroyed
         return True
+
+    def _claim_focus_now(self):
+        """The deferred half of `claim_focus()` — called by the event loop, GUARDS itself.
+
+        The canvas may die between the schedule and the fire (the `WA_DeleteOnClose` race), and
+        the callback is the only place the failure can be caught: an `except RuntimeError`
+        around `singleShot()` protects the bound-method creation, never its invocation. A bare
+        Qt method handed to the loop would let the exception escape whatever pumped the events
+        (the `_sync_grid` shape is the rule).
+        """
+        try:
+            self.widget.setFocus()
+        except RuntimeError:
+            pass  # the C++ object was already destroyed
 
     def showEvent(self, event):
         """v1.5.7: the first SHOW re-computes the grid, so a session never depends on a

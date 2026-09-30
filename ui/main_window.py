@@ -7023,4 +7023,5 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
             else:
                 subprocess.call(["xdg-open", path])
         except Exception as e:
-            QMessageBox.warning(self, self.t("dialog.open_logs"), f"Failed to open:{e}")
+            QMessageBox.warning(self, self.t("dialog.open_logs"),
+                                self.t("msg.open_failed", error=e))

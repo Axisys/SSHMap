@@ -6,7 +6,7 @@ rc1 discovered the plugins and rendered the menu; rc2 makes the core CALL into t
 Qt plugin system — and this file is the executable specification of that half.
 §1 `PluginContext` — the read-only surface (`plugin_id` / `api_version` / `app_version` / `log`) and the
 node record `{id, alias, host, port, user}`, nothing else; §2 the services: `ctx.status()` (a signal to the
-window behind the token guard) and `ctx.run_command()` (the managed SSH worker, per-node callbacks, "never throws"); §3 the status merge: `status_probe` joined with the SSH probe — the worse by severity, the details concatenated, an unknown kind or a broken answer ignored; §4 the `StatusChecker` seam: a round WITH a provider (the merged status, the detail signal, `last_detail()`) and a round WITHOUT one (byte-for-byte the old probe); §5 Main Thread isolation: the 200 ms UI-hook budget, the 1500 ms wait budget of a headless hook, the orphan registry, the self-cleanup of managed workers, the Qt guard and the "never throws" wrapper; §6 the window wiring (the token-guarded status line, the hook reports, the node registry, the tooltip detail); §7 the frozen contract and the release state."""
+window behind the token guard) and `ctx.run_command()` (the managed SSH worker, per-node callbacks, "never throws"); §3 the status merge: `status_probe` joined with the SSH probe — the worse by severity, the details concatenated, an unknown kind or a broken answer ignored; §4 the `StatusChecker` seam: a round WITH a provider (the merged status, the detail signal, `last_detail()`) and a round WITHOUT one (byte-for-byte the old probe); §5 Main Thread isolation: the 200 ms UI-hook budget, the 1500 ms wait budget of a headless hook, the orphan registry, the self-cleanup of managed workers, the Qt guard and the "never throws" wrapper; §6 the window wiring (the token-guarded status line, the hook reports, the node registry, the tooltip detail); §7 the bounded capture of the default transport (`OUTPUT_MAX` is a LIMIT, not a slice) and §8 the frozen contract and the release state."""
 import logging
 import os
 import sys
@@ -678,7 +678,139 @@ clear_cfg()
 clean_plugins()
 
 # ════════════════════════════════════════════════════════════════════════════
-print("== §7 the frozen contract + the release state ==")
+print("== §7 the runner's capture stops AT its cap ==")
+# ════════════════════════════════════════════════════════════════════════════
+
+import paramiko as _paramiko  # noqa: E402
+import modules.host_key_policy as _HKP  # noqa: E402
+
+_CAP_TOTAL = 40 * PR.OUTPUT_MAX   # a producer of many times the cap (the `cat` of a big log)
+
+
+class _CapChannel:
+    """A paramiko Channel surface: `total` bytes, and a record of every `recv(n)`."""
+
+    def __init__(self, total, exit_code=7, status_ready=True):
+        self.total, self.pos, self.calls = int(total), 0, []
+        self.exit_code_value = int(exit_code)
+        self.status_event = threading.Event()
+        if status_ready:
+            self.status_event.set()
+
+    def recv(self, n):
+        self.calls.append(int(n))
+        if self.pos >= self.total:
+            return b""
+        take = min(int(n), self.total - self.pos)
+        self.pos += take
+        return b"x" * take
+
+    def recv_exit_status(self):
+        return self.exit_code_value
+
+
+class _CapStream:
+    """The stream wrapper: a `read()` WITHOUT a size is the unbound read this section bans."""
+
+    def __init__(self, channel):
+        self.channel = channel
+
+    def read(self, *args):
+        raise AssertionError("the stream was read without a bounded size")
+
+
+class _CapStdin:
+    def close(self):
+        pass
+
+
+class _CapClient:
+    """A minimal `paramiko.SSHClient` for ONE `exec_command` (no socket, no auth)."""
+
+    last = None
+    OUT_TOTAL = None        # None → many times the cap
+    ERR_TOTAL = 0
+    EXIT_CODE = 7
+    STATUS_READY = True     # False → the exit status never arrives (a blocked producer)
+
+    def __init__(self, *a, **k):
+        total = _CAP_TOTAL if self.OUT_TOTAL is None else int(self.OUT_TOTAL)
+        self.out = _CapChannel(total, exit_code=self.EXIT_CODE,
+                               status_ready=self.STATUS_READY)
+        self.err = _CapChannel(self.ERR_TOTAL, exit_code=0)
+        self.closed = False
+        _CapClient.last = self
+
+    def connect(self, **kw):
+        pass
+
+    def exec_command(self, command, timeout=None):
+        self.timeout = timeout
+        return _CapStdin(), _CapStream(self.out), _CapStream(self.err)
+
+    def close(self):
+        self.closed = True
+
+
+_ORIG_SSHCLIENT, _ORIG_POLICY = _paramiko.SSHClient, _HKP.SshKnownHostsPolicy
+_HKP.SshKnownHostsPolicy = type("_CapPolicy", (), {
+    "__init__": lambda s, *a, **k: None, "apply_to_client": lambda s, c: None})
+
+
+def run_capped(**cls_attrs):
+    """Run the REAL transport over the fake client; returns (result, client)."""
+    saved = {k: getattr(_CapClient, k) for k in cls_attrs}
+    for k, v in cls_attrs.items():
+        setattr(_CapClient, k, v)
+    _paramiko.SSHClient = _CapClient
+    try:
+        result = PR.run_command_over_ssh(
+            PC.node_record({"id": "cap", "alias": "cap", "host": "127.0.0.1", "user": "root"}),
+            "cat /dev/zero", timeout=0.2)
+    finally:
+        _paramiko.SSHClient = _ORIG_SSHCLIENT
+        for k, v in saved.items():
+            setattr(_CapClient, k, v)
+    return result, _CapClient.last
+
+
+_cap_res, _cap_client = run_capped(OUT_TOTAL=None, EXIT_CODE=7, STATUS_READY=True)
+_cap_ch = _cap_client.out
+check("the cap is not raised — `OUTPUT_MAX` keeps its declared value",
+      PR.OUTPUT_MAX == 1_000_000, str(PR.OUTPUT_MAX))
+check("the producer was NEVER read past the cap (the whole stream is not materialised)",
+      _cap_ch.pos <= PR.OUTPUT_MAX + PR.OUTPUT_CHUNK < _CAP_TOTAL,
+      f"read {_cap_ch.pos} of {_CAP_TOTAL}")
+check("…and every single read was BOUNDED (no `read()` without a size)",
+      bool(_cap_ch.calls) and all(0 < n <= PR.OUTPUT_CHUNK for n in _cap_ch.calls),
+      str(_cap_ch.calls[:4]))
+check("the command really ran on more than one bounded chunk",
+      len(_cap_ch.calls) > 1, str(len(_cap_ch.calls)))
+check("the result keeps exactly the cap and not one byte more",
+      len(_cap_res.output) == PR.OUTPUT_MAX, str(len(_cap_res.output)))
+check("…and the exit code is still reported (the channel's own status)",
+      _cap_res.exit_code == 7, str(_cap_res.exit_code))
+check("the transport is closed behind the still-running producer (the ONE `finally`)",
+      _cap_client.closed is True)
+
+# a producer we stopped reading may be blocked on a full window, so a status that never
+# arrives must NOT hand the unbounded wait back — the declared -1, within the budget.
+_bounded_res, _bounded_client = run_capped(OUT_TOTAL=None, STATUS_READY=False)
+check("a truncated producer whose status never arrives is the declared -1, bounded "
+      "(no wait for ever)",
+      _bounded_res.exit_code == -1 and _bounded_client.closed is True,
+      str(_bounded_res.exit_code))
+
+# the ordinary command (output under the cap) is byte-for-byte the shipped reading
+_small_res, _small_client = run_capped(OUT_TOTAL=100, ERR_TOTAL=0, EXIT_CODE=0)
+check("a command under the cap still returns its whole output and its exit code",
+      _small_res.output == "x" * 100 and _small_res.exit_code == 0
+      and _small_client.out.pos == 100,
+      f"{len(_small_res.output)} bytes, exit {_small_res.exit_code}")
+
+
+# ════════════════════════════════════════════════════════════════════════════
+print("== §8 the frozen contract + the release state ==")
 # ════════════════════════════════════════════════════════════════════════════
 
 with open(PLUGINS_MD, encoding="utf-8") as f:

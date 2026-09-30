@@ -161,4 +161,16 @@ if getattr(win, "_status_checker", None) is not None:
     win._status_checker.stop()
     win._status_checker.set_servers([])
 
+# ── the deferred first round: the slot GUARDS itself (the 2 s singleShot cannot be un-armed) ──
+import shiboken6
+dead = StatusChecker(parent=None)
+shiboken6.delete(dead)          # the window that owns the checker closed inside the 2 s window
+_escaped = None
+try:
+    dead._deferred_first_round()
+except RuntimeError as exc:     # a timer slot that raises escapes whatever pumped the events
+    _escaped = exc
+check("a deferred first round whose checker already died is silent (the slot guards itself)",
+      _escaped is None, repr(_escaped))
+
 finish()

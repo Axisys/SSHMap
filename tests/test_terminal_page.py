@@ -567,7 +567,67 @@ clear_cfg()
 
 
 # ════════════════════════════════════════════════════════════
-# 6. i18n parity + release state
+# 6. A deferred call whose owner died is SILENT (`claim_focus()` guards itself)
+# ════════════════════════════════════════════════════════════
+print("== a deferred call whose owner died is silent ==")
+
+import shiboken6  # noqa: E402 — the REAL C++ death, the way PySide6 reports it
+
+
+class _FocusTarget:
+    """A canvas stand-in recording the claim (the deferred half must reach the canvas)."""
+
+    def __init__(self):
+        self.focused = 0
+
+    def setFocus(self):
+        self.focused += 1
+
+
+_p_live = make_page("defer-live")
+_p_live.widget = _FocusTarget()
+check("claim_focus() still claims the keyboard (the shipped behaviour)",
+      _p_live.claim_focus() is True)
+app.processEvents()
+check("…and the claim arrives on the canvas FROM the event loop (not at call time)",
+      _p_live.widget.focused == 1, str(_p_live.widget.focused))
+
+# the canvas dies between the schedule and the fire (the WA_DeleteOnClose race the mode is full of)
+_p_race = make_page("defer-race")
+check("the claim is armed while the canvas is still ALIVE (the ordinary path)",
+      _p_race.claim_focus() is True)
+shiboken6.delete(_p_race.widget)   # …and dies before the timer fires
+_escaped = None
+try:
+    app.processEvents()
+except RuntimeError as exc:   # the exception LEAVES the pump — how the whole suite pumps events
+    _escaped = exc
+check("the deferred setFocus of a canvas that died BEFORE the fire does not escape the event pump",
+      _escaped is None, repr(_escaped))
+_control_escaped = None
+try:
+    _p_race._sync_grid()
+except RuntimeError as exc:
+    _control_escaped = exc
+check("…and the shipped guarded shape (_sync_grid) stays quiet on the SAME dead page "
+      "(the control)",
+      _control_escaped is None, repr(_control_escaped))
+
+# a canvas that is ALREADY gone when the claim is armed: the call site never touches it
+_p_dead = make_page("defer-dead")
+shiboken6.delete(_p_dead.widget)
+_dead_armed = None
+try:
+    _dead_armed = _p_dead.claim_focus()
+    app.processEvents()
+except RuntimeError as exc:
+    _dead_armed = exc
+check("a claim armed on an already-dead canvas is safe end to end (armed, then silent)",
+      _dead_armed is True, repr(_dead_armed))
+
+
+# ════════════════════════════════════════════════════════════
+# 7. i18n parity + release state
 # ════════════════════════════════════════════════════════════
 print("== i18n parity + release state ==")
 

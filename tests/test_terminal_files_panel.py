@@ -583,9 +583,48 @@ clear_cfg()
 
 
 # ════════════════════════════════════════════════════════════
-# 10. The chrome (live i18n) and the release state
+# 10. A panel that dies inside its own open (the teardown race)
 # ════════════════════════════════════════════════════════════
-print("== 10. live i18n and the release state ==")
+print("== 10. a panel that dies inside its own open leaves no state behind ==")
+
+clear_cfg()
+_win_race = hold(ST.SSHTerminalWindow(ServerData(id="fp-race", alias="race", host="10.70.6.1",
+                                                user="root"), None, password="pw"))
+_win_race.show()
+app.processEvents()
+_page_race = _win_race.session_tabs.widget(0)
+check("the race scenario starts from the shipped look (3 tabs, the mode off)",
+      [_page_race.tabs.tabText(i) for i in range(_page_race.tabs.count())]
+      == ["Terminal", "Files", "History"] and _win_race.files_panel_on is False)
+# the panel's C++ object dies with the window — PySide6 reports the first touch like this
+_win_race.files_panel.set_collapsed = lambda *a, **k: (_ for _ in ()).throw(
+    RuntimeError("Internal C++ object (_FilesPanel) already deleted."))
+_win_race.set_files_panel_enabled(True)   # the user's click, into the dying panel
+app.processEvents()
+check("the window does NOT claim the panel is on (the flag is not left behind)",
+      _win_race.files_panel_on is False)
+check("…and the View action is not checked over a panel that is not there",
+      _win_race.act_files_panel.isChecked() is False)
+check("…and the panel is really hidden", _win_race.files_panel.isHidden())
+check("…every session got its Files tab BACK (no widget stranded in the panel)",
+      [_page_race.tabs.tabText(i) for i in range(_page_race.tabs.count())]
+      == ["Terminal", "Files", "History"]
+      and _page_race.tabs.indexOf(_page_race.sftp_tab) == 1)
+check("…and the page's own half of the mode agrees with reality",
+      _page_race.files_panel_on is False and _win_race.files_panel.stack.count() == 0)
+# the ONE switch is idempotent afterwards: the next press reports the same truth
+_win_race.set_files_panel_enabled(True)
+app.processEvents()
+check("a second press of the switch is refused the same way (the state stays honest)",
+      _win_race.files_panel_on is False and _win_race.act_files_panel.isChecked() is False)
+del _win_race.files_panel.set_collapsed   # the instance shadow goes, the class method is back
+close_window(_win_race)
+
+
+# ════════════════════════════════════════════════════════════
+# 11. The chrome (live i18n) and the release state
+# ════════════════════════════════════════════════════════════
+print("== 11. live i18n and the release state ==")
 
 LANGS = load_i18n_langs(ROOT)
 check_i18n_parity(LANGS)
@@ -659,16 +698,16 @@ app.processEvents()
 close_window(_win_i18n)
 
 check_release_state(ROOT)
-check("§10 EXPECTED_APP_VERSION is the release this file describes (the 1.7.1 patch)",
+check("§11 EXPECTED_APP_VERSION is the release this file describes (the 1.7.1 patch)",
       releases_at_least(EXPECTED_APP_VERSION, "1.7.1")
       and re.fullmatch(r"1\.7(?:rc\d+|(?:\.\d+){1,2})?", EXPECTED_APP_VERSION) is not None,
       EXPECTED_APP_VERSION)
-check("§10 the pin counts the shipped release (863 + the 4 keys of the Files panel"
+check("§11 the pin counts the shipped release (863 + the 4 keys of the Files panel"
       " + the 3 of the Files display mode + the 4 of the v1.7.1.2 device choice)",
       EXPECTED_I18N_KEYS == 863 + 4 + 3 + 4, str(EXPECTED_I18N_KEYS))
-check("§10 VERSION_FORMAT stays `0.9` (the mode lives in config.json, not in the project file)",
+check("§11 VERSION_FORMAT stays `0.9` (the mode lives in config.json, not in the project file)",
       __import__("version").VERSION_FORMAT == "0.9")
-check("§10 no new dependency was added for the panel (the four pinned ones)",
+check("§11 no new dependency was added for the panel (the four pinned ones)",
       all(f"{d}>=" in open("requirements.txt", encoding="utf-8").read()
           for d in ("PySide6", "paramiko", "keyring", "wcwidth")))
 

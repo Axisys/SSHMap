@@ -1,15 +1,15 @@
 """The i18n completeness check: the discovered languages vs en plus the keys used in the code (§17).
 
-  1. PARITY — every `i18n/*.json` is discovered (the file name is the code) and a built-in language
-     must cover 100% of en's keys STRICTLY, with the translation-key count equal to the pin
-     `EXPECTED_I18N_KEYS` (`tests/_common.py`). Meta keys are not translations: "name" is skipped and
-     `"partial": true` turns the missing keys and the count into a WARNING (an EXTRA key stays a defect)
-     and every file is read "utf-8-sig".
-
+  1. PARITY — every `i18n/*.json` is discovered (the file name is the code) and a built-in language must
+     cover 100% of en STRICTLY, with the count equal to the pin `EXPECTED_I18N_KEYS` (`tests/_common.py`).
+     Meta keys are not translations: "name" is skipped and `"partial": true` turns the missing keys and
+     the count into a WARNING (an EXTRA key stays a defect); every file is read "utf-8-sig".
   2. FORMAT — the SET of `{placeholder}` names and the COUNT of `\n` breaks of every translation
      against en; 3. USED KEYS — every `t('key')` in the code exists in en (and by parity in all).
-  4. FALLBACK LITERALS — an AST walk compares the else-branch of every declared availability
-     ternary and every `*_FALLBACKS` table with `en.json`: `fallback_literal_problems(source, en)`."""
+  4. FALLBACK LITERALS — `fallback_literal_problems(source, en)`: the else-branch of every declared
+     availability ternary and every `*_FALLBACKS` table vs `en.json`; 5. REFUSAL BODIES —
+     `refusal_body_problems(source, function)` over `REFUSAL_SITES`: a DECLARED refusal's dialog body
+     must be a `t('key')` call, never a literal (a key that already exists is invisible to §3/§4)."""
 import ast
 import os
 import re
@@ -161,6 +161,68 @@ def collect_fallback_problems(root, en):
     return sorted(set(problems))
 
 
+# ── 5. v1.7.1.3: the dialog BODY of a declared refusal is a KEY, not a literal ──
+
+#: The DECLARED refusal sites — `(relative path, function name)`. The NAME is the declaration,
+#: exactly like `*_FALLBACKS`: a site is listed here once, and its body is then audited.
+REFUSAL_SITES = (("ui/main_window.py", "_open_log_file"),)
+
+#: The dialog entry points whose TEXT argument is the body (`QMessageBox.<kind>(parent, title, body)`).
+MESSAGEBOX_KINDS = ("warning", "information", "critical", "question")
+
+
+def refusal_body_problems(source, func_name, path=""):
+    """The dialog bodies of ONE function that are NOT a `t('key')` call (pure).
+
+    A translated TITLE beside an English body speaks two languages at once, and `en.json`
+    usually already carries the sentence (the key is simply unused) — which is exactly why
+    §3 cannot see it (it only wants keys that EXIST) and §4 cannot either (a ternary or a
+    table is another shape). `path` only labels the problems.
+    """
+    problems = []
+    try:
+        tree = ast.parse(source)
+    except SyntaxError as e:  # a syntactically broken source is not this check's business
+        return [f"{path}: cannot parse ({e})"]
+    func = next((n for n in ast.walk(tree)
+                 if isinstance(n, ast.FunctionDef) and n.name == func_name), None)
+    if func is None:
+        return [f"{path}: no {func_name}() — the declared refusal site is gone"]
+    found = False
+    for node in ast.walk(func):
+        if not isinstance(node, ast.Call) or getattr(node.func, "attr", None) not in MESSAGEBOX_KINDS:
+            continue
+        if len(node.args) < 3:      # a two-argument dialog carries no body of its own
+            continue
+        found = True
+        if _call_key(node.args[2]) is None:
+            problems.append(f"{path}:{node.lineno} {func_name}(): the dialog BODY is not a "
+                            f"translated key")
+    if not found:
+        problems.append(f"{path}: {func_name}() has no dialog any more")
+    return sorted(set(problems))
+
+
+def collect_refusal_problems(root, sites=REFUSAL_SITES):
+    """`refusal_body_problems` over the DECLARED refusal sites of the project.
+
+    A site whose FILE is absent is skipped: a minimal or synthetic root (the fake projects of
+    the topical test) carries no application source at all, exactly like its used-keys part.
+    """
+    problems = []
+    for rel, func_name in sites:
+        path = os.path.join(root, *rel.split("/"))
+        if not os.path.exists(path):
+            continue
+        try:
+            src = open(path, encoding="utf-8").read()
+        except OSError as e:
+            problems.append(f"{rel}: cannot read ({e})")
+            continue
+        problems.extend(refusal_body_problems(src, func_name, rel))
+    return sorted(set(problems))
+
+
 def main(root=None):
     """Run both parts; return the exit code (0 = all the keys are in place)."""
     # UTF-8 stdout on cp1251 consoles
@@ -234,9 +296,18 @@ def main(root=None):
         print("    ", p)
     problems_total += len(fallback_problems)
 
+    # ── 5. v1.7.1.3: the dialog bodies of the declared refusals ──
+    refusal_problems = collect_refusal_problems(root)
+    print("\n== the dialog bodies of the declared refusals: "
+          f"{len(refusal_problems)} problem(s) ==")
+    for p in refusal_problems:
+        print("    ", p)
+    problems_total += len(refusal_problems)
+
     print(f"\ntotal defects: {problems_total} (parity: {len(problems)}, "
           f"format: {format_total}, used keys: {missing_total}, "
-          f"fallback literals: {len(fallback_problems)})")
+          f"fallback literals: {len(fallback_problems)}, "
+          f"refusal bodies: {len(refusal_problems)})")
     if warnings:
         print(f"warnings (partial languages, not defects): {len(warnings)}")
     return 1 if problems_total else 0

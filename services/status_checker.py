@@ -652,10 +652,17 @@ class StatusChecker(QObject):
         mode exists to keep. The slot therefore re-asks the mode when it FIRES instead of
         being cancelled: a callback on a dangling object is impossible, and "manual only"
         means the same thing whenever it was selected.
+
+        The fire itself is inside the guard: the checker is a QObject and the window that owns
+        it may be gone by then (`WA_DeleteOnClose`), and an exception raised out of a timer slot
+        escapes whatever pumped the events — the `TerminalSessionPage._sync_grid` shape.
         """
-        if self._manual_only:
-            return
-        self.start_round()
+        try:
+            if self._manual_only:
+                return
+            self.start_round()
+        except RuntimeError:
+            pass  # the C++ object was already destroyed
 
     def start(self):
         """Enable periodic checks + the first round a bit after startup.

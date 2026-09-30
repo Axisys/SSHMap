@@ -1797,7 +1797,11 @@ class SSHTerminalWindow(QMainWindow):
             self.files_panel.set_collapsed(self.files_panel.is_collapsed(), persist=False)
             self.files_panel.show()
         except RuntimeError:
-            return   # Qt teardown — the panel is already gone
+            # Qt teardown — the panel died inside its own open: the ONE teardown path puts the
+            # flag, the attached widgets and the kept two-pane state back where reality is,
+            # because the caller renders `_files_panel_on` as the action's checkmark.
+            self._close_files_panel()
+            return
         self._refresh_files_panel_current()
         self._apply_files_panel_sizes()
         # the layout of a just-shown member settles after the event cycle (the page's own
@@ -1818,7 +1822,10 @@ class SSHTerminalWindow(QMainWindow):
         self._files_panel_on = False
         for page in self._tab_pages():
             self._release_files_panel_page(page)
-        self.files_panel.release_floors()
+        try:
+            self.files_panel.release_floors()
+        except RuntimeError:
+            pass   # the panel's own floor is gone with it; the window's is reset below
         try:
             self.files_panel.hide()
         except RuntimeError:

@@ -285,6 +285,26 @@ _extra_root = make_fake_project("check_extra", lambda d: d.update({"zz.extra": "
 _rc, _out = run_check_script(_checker, _extra_root)
 check("an extra key in a discovered language → FAIL (strict parity)", _rc == 1, _out[-400:])
 
+# §5b: the REFUSAL bodies — a literal beside a translated title is a defect (§5 of the checker)
+_LITERAL_SRC = ("class W:\n"
+                "    def _open_log_file(self):\n"
+                "        try:\n"
+                "            open('x')\n"
+                "        except Exception as e:\n"
+                "            QMessageBox.warning(self, self.t('dialog.open_logs'),\n"
+                "                                f'Failed to open:{e}')\n")
+_KEYED_SRC = _LITERAL_SRC.replace("f'Failed to open:{e}'", "self.t('msg.open_failed', error=e)")
+check("the refusal audit flags a dialog BODY that is a literal, not a key",
+      len(_checker.refusal_body_problems(_LITERAL_SRC, "_open_log_file", "synthetic")) == 1,
+      str(_checker.refusal_body_problems(_LITERAL_SRC, "_open_log_file", "synthetic")))
+check("…and accepts the same body written as the shipped key",
+      _checker.refusal_body_problems(_KEYED_SRC, "_open_log_file", "synthetic") == [])
+check("…and a declared site that vanished is reported, not silently skipped",
+      len(_checker.refusal_body_problems(_KEYED_SRC, "_open_other_file", "synthetic")) == 1)
+check("the real project declares its refusal sites (the audit has something to read)",
+      _checker.collect_refusal_problems(ROOT) == []
+      and bool(_checker.REFUSAL_SITES))
+
 # ════════════════════════════════════════════════════════════════════════════
 print("== §6 the UI shows the JSON name (the settings hub) + the release state ==")
 # ════════════════════════════════════════════════════════════════════════════

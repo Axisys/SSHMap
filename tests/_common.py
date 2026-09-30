@@ -239,7 +239,7 @@ def clear_cfg(*extra_paths: str) -> None:
 # in 12 i18n files + the APP_VERSION/requirements pins in 7 release-state sections).
 # The misses of the keys themselves against the code are caught by check_i18n_keys.py.
 # ─────────────────────────────────────────────────────────────────────────────
-EXPECTED_APP_VERSION = "1.7.1.2"  # the current release (a sentinel: it catches "a bump to the wrong version")
+EXPECTED_APP_VERSION = "1.7.1.3"  # the current release (a sentinel: it catches "a bump to the wrong version")
 EXPECTED_I18N_KEYS = 874        # the parity of the TRANSLATION keys of every language file vs en (the
                                 # "name"/"partial" meta keys are excluded) — ONE number per release; the
                                 # per-release counts live in the changelog family, never here
