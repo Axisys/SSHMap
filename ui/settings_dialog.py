@@ -903,6 +903,9 @@ class SettingsDialog(QDialog):
         self.mode_combo = QComboBox()
         self.mode_combo.addItem(_t("settings.terminal.mode.windows"), "windows")
         self.mode_combo.addItem(_t("settings.terminal.mode.tabs"), "tabs")
+        # v1.7.2 (task 4): the THIRD mode — every new session joins the last live terminal window
+        # as its next tab (one window that collects them), whatever node it belongs to.
+        self.mode_combo.addItem(_t("settings.terminal.mode.single"), "single")
         idx = next((i for i in range(self.mode_combo.count())
                     if self.mode_combo.itemData(i) == cfg["mode"]), 0)
         self.mode_combo.setCurrentIndex(idx)
@@ -1975,6 +1978,7 @@ class SettingsDialog(QDialog):
             key = {
                 "windows": "settings.terminal.mode.windows",
                 "tabs": "settings.terminal.mode.tabs",
+                "single": "settings.terminal.mode.single",
             }.get(mid)
             if key:
                 self.mode_combo.setItemText(i, _t(key))

@@ -803,8 +803,10 @@ check("the pin counts the keys of the SHIPPED release (v1.5.2 added THIRTEEN —
       "v1.7.1.1 moves that mode into the settings hub and adds THREE: the row of the Files display "
       "mode and its two values (the tab and the panel) — 867 + 3 = 870; v1.7.1.2 adds FOUR: the "
       "device row of the disk question with its precedence hint, the card's one-line device list "
-      "and the sentence of a chosen device the listing does not hold — 870 + 4 = 874)",
-      EXPECTED_I18N_KEYS == 863 + 4 + 3 + 4, str(EXPECTED_I18N_KEYS))
+      "and the sentence of a chosen device the listing does not hold — 870 + 4 = 874; v1.7.2 adds "
+      "FOUR: the third row of the display mode (the single window), the merge action and its one "
+      "closing report, and the remote title of a session's tab tooltip — 874 + 4 = 878)",
+      EXPECTED_I18N_KEYS == 863 + 4 + 3 + 4 + 4, str(EXPECTED_I18N_KEYS))
 check_release_state(ROOT)
 for _code in i18n_lang_codes(ROOT):
     check(f"i18n/{_code}.json carries the v1.5 node.status.emulated marker",

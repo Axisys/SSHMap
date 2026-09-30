@@ -374,6 +374,19 @@ class TerminalScreen:
             self.columns, self.lines = columns, lines
             self.screen.resize(lines, columns)
 
+    def title(self) -> str:
+        """The window title the REMOTE program set (`OSC 0` / `OSC 2`), read under the lock.
+
+        pyte's `Screen.set_title()` has always stored it in `screen.title`; this is the ONE reader
+        the application uses (the session's tab tooltip and the container title, `AGENTS.md` §4.3).
+        Never raises — a dying screen answers "".
+        """
+        try:
+            with self._lock:
+                return str(getattr(self.screen, "title", "") or "")
+        except Exception:  # noqa: BLE001 — a title is cosmetic
+            return ""
+
     # ── v1.6.4 (ROADMAP task 5): the scrollback mode ───────────────────────────
 
     def scroll_mode_id(self) -> str:

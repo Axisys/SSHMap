@@ -157,6 +157,26 @@ def activity_tab_icon(on: bool) -> QIcon:
     return icon
 
 
+def session_tab_tooltip(page, t) -> str:
+    """The tab tooltip of ONE session — the activity sentence plus the REMOTE title.
+
+    The tooltip is the shipped SECOND channel of the activity mark (marked → "new output", otherwise
+    "close session"), and v1.7.2 adds the title the remote program set over `OSC 0`/`OSC 2` as its
+    own line: the tab TEXT stays the node alias, so this is where "which of my eight shells is this?"
+    is answered. A page without a remote title (or without the property) gets the shipped sentence
+    alone. Never raises.
+    """
+    head = t("terminal.tab_new_output") if getattr(page, "has_activity", False) \
+        else t("terminal.tab_close_tooltip")
+    try:
+        remote = str(getattr(page, "remote_title", "") or "").strip()
+    except RuntimeError:
+        remote = ""      # Qt teardown — the page is already gone
+    if not remote:
+        return head
+    return f"{head}\n{t('terminal.tab_remote_title', title=remote)}"
+
+
 def render_session_activity(tabs, page, t) -> bool:
     """Draw (or clear) the activity mark + the tooltip of ONE session's tab. Never raises.
 
@@ -164,10 +184,10 @@ def render_session_activity(tabs, page, t) -> bool:
     A page without a tab (the SPLIT PANE) answers False — it has no tab strip to mark, and the
     amber frame of the pane is the multi-input's own channel, not this one's.
 
-    The tooltip is the mark's SECOND channel: while marked it says what the dot means, and an
-    unmarked tab carries the ordinary "close session" text back. Re-applying is idempotent, so
-    the same helper serves the first paint, the clear-on-focus, a language switch and a theme
-    switch.
+    The tooltip is the mark's SECOND channel: while marked it says what the dot means, an
+    unmarked tab carries the ordinary "close session" text back, and a remote title travels on
+    its own line (`session_tab_tooltip()`). Re-applying is idempotent, so the same helper serves
+    the first paint, the clear-on-focus, a language switch, a theme switch and a title change.
     """
     try:
         index = tabs.indexOf(page)
@@ -175,8 +195,7 @@ def render_session_activity(tabs, page, t) -> bool:
             return False
         on = bool(getattr(page, "has_activity", False))
         tabs.setTabIcon(index, activity_tab_icon(on))
-        tabs.setTabToolTip(index, t("terminal.tab_new_output") if on
-                           else t("terminal.tab_close_tooltip"))
+        tabs.setTabToolTip(index, session_tab_tooltip(page, t))
         return True
     except RuntimeError:
         return False   # Qt teardown — the tab strip is already gone
@@ -446,6 +465,10 @@ class TerminalSessionPage(QWidget):
         # HOST's status surface alone (the `status_message` bridge below).
         self._session_status = ""
         self._with_status_line = bool(with_status_line)
+        # v1.7.2 (task 6): the title the REMOTE program set (`OSC 0`/`OSC 2`, pyte's
+        # `Screen.set_title`). Cached here because the host re-renders its surfaces only when it
+        # really CHANGED; the reader is `TerminalScreen.title()` under the screen's lock.
+        self._remote_title = ""
 
         t = get_translator()
         layout = QVBoxLayout(self)
@@ -909,6 +932,41 @@ class TerminalSessionPage(QWidget):
         """Is there output this session produced while it was not the visible one?"""
         return bool(self._activity)
 
+    # ── v1.7.2 (task 6): the title the REMOTE program set (OSC 0/OSC 2) ─────────
+
+    @property
+    def remote_title(self) -> str:
+        """The window title the remote program asked for ("" — it never set one).
+
+        pyte's `Screen.set_title()` has always stored `OSC 0`/`OSC 2`; this is the ONE reader the
+        application has, and the host's tab tooltip and container title are its consumers (§4.3).
+        """
+        return self._remote_title
+
+    def _sync_remote_title(self) -> bool:
+        """Refresh the cached remote title; True when it really CHANGED.
+
+        Called from the session's SINGLE output path (`_on_output`) right after pyte consumed the
+        chunk: a title arrives WITH output, so the check belongs there and nowhere else. The host is
+        notified through the duck-typed `session_title_changed(page)` — the same host contract every
+        other page callback uses. Never raises.
+        """
+        try:
+            title = str(self.tscreen.title() or "").strip()
+        except (RuntimeError, AttributeError):
+            return False      # Qt teardown / a screen without the reader — nothing to sync
+        if title == self._remote_title:
+            return False
+        self._remote_title = title
+        host = getattr(self, "_host_window", None)
+        hook = getattr(host, "session_title_changed", None)
+        if callable(hook):
+            try:
+                hook(self)
+            except RuntimeError:
+                pass          # Qt teardown — no tab strip and no title left to re-render
+        return True
+
     def ensure_sftp_worker(self):
         """The SFTP worker of this session, started lazily — or None (v1.5.7).
 
@@ -1240,6 +1298,13 @@ class TerminalSessionPage(QWidget):
         # at says so in its tab strip; the host decides what "visible" means).
         try:
             self.note_output()
+        except RuntimeError:
+            pass  # the C++ object was already destroyed (a WA_DeleteOnClose close race)
+        # v1.7.2 (task 6): the remote title (`OSC 0`/`OSC 2`) rides on the SAME path — pyte has
+        # just consumed the chunk, so a title it carried is one property read away, and the host
+        # is told only when it really changed.
+        try:
+            self._sync_remote_title()
         except RuntimeError:
             pass  # the C++ object was already destroyed (a WA_DeleteOnClose close race)
         try:

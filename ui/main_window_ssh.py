@@ -85,6 +85,104 @@ class SshMixin:
                 continue  # C++ object removed during teardown — keep looking
         return None
 
+    def _last_terminal_window(self):
+        """v1.7.2 (task 4): the LAST live terminal WINDOW — the `"single"` mode's one container.
+
+        The mode's whole point: a new session joins the window that is already open instead of
+        creating another one, WHATEVER node it belongs to (the per-node rule of
+        `_find_terminal_window_for()` is deliberately bypassed by the mode). The dock is not a
+        window (`CONTAINER_KIND`), and a container that cannot take a session is skipped — so the
+        answer is either a real `SSHTerminalWindow` or None (a fresh window is then created).
+        """
+        try:
+            from modules.terminal_split import container_windows
+        except ImportError:  # flat launch from the project root
+            from ..modules.terminal_split import container_windows
+        windows = container_windows(getattr(self, "_terminal_windows", []))
+        for win in reversed(windows):
+            try:
+                if callable(getattr(win, "add_session", None)):
+                    return win
+            except RuntimeError:
+                continue   # C++ teardown — keep looking
+        return None
+
+    def _merge_terminal_windows(self, target) -> tuple:
+        """v1.7.2 (task 5): move every OTHER live terminal window's sessions INTO `target`.
+
+        The registry owns the containers (a session knows its host), so the walk — and the one
+        question "which window is a terminal window" (`CONTAINER_KIND`) — lives here. The move is
+        `take_session()` / `adopt_session()`: the SESSION OBJECTS do not change, so the scrollback,
+        the command history, the transcript and the SFTP worker of every page survive, and the
+        registry keeps them exactly where they were.
+
+        A source window's SPLIT is closed FIRST through its own `confirm_close()` gate ("one split
+        per container" is the invariant a move must not break); a Cancel keeps THAT window out of
+        the merge and leaves it exactly as it was. The limit is deliberately NOT re-asked: a merge
+        MOVES sessions and never creates one. The emptied source window is closed (WA_DeleteOnClose)
+        once its last tab has left. Returns `(sessions_moved, windows_closed)`.
+        """
+        try:
+            from modules.terminal_split import container_windows
+        except ImportError:  # flat launch from the project root
+            from ..modules.terminal_split import container_windows
+        sources = [w for w in container_windows(getattr(self, "_terminal_windows", []))
+                   if w is not target]
+        moved = 0
+        closed = 0
+        for src in sources:
+            split = getattr(src, "split", None)
+            if split is not None and getattr(split, "pane", None) is not None:
+                try:
+                    if not split.set_enabled(False):
+                        continue   # the "ask" gate was cancelled — this window stays untouched
+                except Exception:  # noqa: BLE001 — a broken source must not stop the merge
+                    continue
+            while True:
+                try:
+                    page = src.session_tabs.widget(0)
+                except Exception:  # noqa: BLE001 — the source died mid-merge
+                    page = None
+                if page is None:
+                    break
+                try:
+                    if not src.take_session(page):
+                        break
+                except Exception:  # noqa: BLE001 — one page must not stop the rest
+                    break
+                try:
+                    adopted = bool(target.adopt_session(page))
+                except Exception:  # noqa: BLE001 — a broken target tab is not a lost page
+                    adopted = False
+                if not adopted:
+                    # The page is already out of the source: put it BACK rather than leave a
+                    # parentless session behind (the move is all-or-nothing per page).
+                    try:
+                        page.setParent(src.session_tabs)
+                        src.session_tabs.addTab(page, src._session_tab_title(page))
+                    except Exception:  # noqa: BLE001 — nothing left to restore it into
+                        pass
+                    break
+                moved += 1
+            try:
+                left = src.session_tabs.count()
+            except Exception:  # noqa: BLE001 — the source died mid-merge
+                left = 0
+            if left:
+                continue   # a page could not be taken — the window keeps what is left of it
+            try:
+                src.close()   # every tab has left — WA_DeleteOnClose takes the empty window away
+                closed += 1
+            except Exception:  # noqa: BLE001 — a dead source is not a merge failure
+                pass
+        if moved or closed:
+            try:
+                self.statusBar().showMessage(
+                    self.t("terminal.merge_report", sessions=moved, windows=closed), 6000)
+            except Exception:  # noqa: BLE001 — the report is cosmetic during teardown
+                pass
+        return moved, closed
+
     def _limit_terminal_sessions(self):
         """v1.3.3.5 (ROADMAP task 2): the sessions the terminal_max_open limit counts.
 
@@ -191,6 +289,12 @@ class SshMixin:
         sessions go to the chosen mode, open windows/dock keep living as they
         are until closed.
 
+        v1.7.2 (task 4): the THIRD mode, "single" — every new session joins the LAST live terminal
+        window as its next tab, whatever node it belongs to. The per-NODE reuse rule of
+        `_find_terminal_window_for()` is bypassed BY THE MODE, because one window is shared by every
+        node there; the tab strip, the activity marks, the close cross, the status bridges and the
+        `terminal_max_open` limit stay the shipped ones.
+
         v1.6.5 (ROADMAP task 4): the terminal (and with it the SFTP tab of the same
         session) is an SSH verb — an UNMANAGED card is refused HERE, which is the one
         choke point every terminal path (connect, quick launch, split, the dock) goes
@@ -204,7 +308,7 @@ class SshMixin:
             from ..modules.ssh_terminal import load_terminal_settings as _load_ts
         ts_cfg = _load_ts()
         max_open = ts_cfg["max_open"]
-        mode = ts_cfg["mode"]   # v1.2.2: "windows" (default, current behavior) | "tabs"
+        mode = ts_cfg["mode"]   # "windows" (default) | "tabs" (the dock) | "single" (one window)
         # v1.3.3.5 (ROADMAP task 2): counted over the sessions the limit really owns —
         # the SPLIT PANES are excluded (a pane is a second shell inside a session the
         # user already opened, not a new terminal), and the "close the oldest" candidate
@@ -248,11 +352,12 @@ class SshMixin:
             win_cls = host_attr(self, "SSHTerminalWindow")
             if win_cls is None:
                 raise RuntimeError("SSHTerminalWindow is not available in the MainWindow module")
-            # v1.2.1 (task 1): a new session = a new tab — if the node already
-            # has a live terminal window, open the session there (the tab title
-            # — the node's alias); otherwise — a new window with a single tab
-            # (v1.2 behavior).
-            existing = self._find_terminal_window_for(node.data.id)
+            # A new session = a new tab: the node's own live window takes it, otherwise a fresh
+            # window is created. v1.7.2 (task 4): the "single" mode asks for the LAST live window
+            # and for ANY node — the shape of `_find_terminal_window_for()` without its per-node
+            # rule.
+            existing = (self._last_terminal_window() if mode == "single"
+                        else self._find_terminal_window_for(node.data.id))
             if existing is not None and hasattr(existing, "add_session"):
                 page = existing.add_session(
                     node.data, password=password, initial_command=initial_command)

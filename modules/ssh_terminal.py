@@ -52,6 +52,22 @@ try:
 except ImportError:
     from modules.terminal_page import TerminalSessionPage
 
+# v1.7.2 (ROADMAP v1.7.2, task 1): the SPLIT is ONE controller shared by both containers — the
+# window and the dock. The window keeps the shipped surface as DELEGATES (`split_host`,
+# `_v_splitter`, `_split_on`, `split_pane`, `act_split`, `btn_split`, `set_split_enabled()`) and the
+# SPLIT_* constants + `load_split_settings` are re-exported HERE, because this module is the live
+# namespace the shipped tests read them from (the seam note at the top of the file).
+try:
+    from .terminal_split import (TerminalSplit, SPLIT_CONFIG_BOOL, SPLIT_CONFIG_RATIO,
+                                 SPLIT_RATIO_DEFAULT, SPLIT_RATIO_MIN, SPLIT_RATIO_MAX,
+                                 SPLIT_MIN_ROWS, load_split_settings, find_host_hook,
+                                 CONTAINER_WINDOW)
+except ImportError:
+    from terminal_split import (TerminalSplit, SPLIT_CONFIG_BOOL, SPLIT_CONFIG_RATIO,
+                                SPLIT_RATIO_DEFAULT, SPLIT_RATIO_MIN, SPLIT_RATIO_MAX,
+                                SPLIT_MIN_ROWS, load_split_settings, find_host_hook,
+                                CONTAINER_WINDOW)
+
 # v1.6.4 (ROADMAP task 4): the ACTIVITY mark of an inactive session — the rendering is shared
 # by BOTH containers (the window and the dock), which is why it lives in the page's module.
 try:
@@ -74,7 +90,7 @@ from PySide6.QtCore import Qt, QThread, Signal, QEvent, QTimer
 from PySide6.QtGui import QAction
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QMessageBox, QStackedWidget, QTabWidget, QProgressBar,
-    QSplitter, QPushButton, QToolButton, QWidget, QHBoxLayout, QVBoxLayout, QMenu, QLabel,
+    QSplitter, QToolButton, QWidget, QHBoxLayout, QVBoxLayout, QMenu, QLabel,
 )
 
 try:  # v1.4.3 (ROADMAP task 4): the ONE QSS registry (the status texts below)
@@ -110,6 +126,10 @@ def get_translator():
 # every channel — which is what makes a peer that vanished without a FIN visible at all.
 TERMINAL_KEEPALIVE_SEC = 30
 
+#: The accepted values of `terminal_mode`, the DEFAULT first. `"single"` (v1.7.2) makes every new
+#: session join the LAST live terminal window as its next tab — one window that collects them all.
+TERMINAL_MODES = ("windows", "tabs", "single")
+
 # ── the terminal_* keys of `~/.sshmap/config.json` ───────────────────────────
 # All keys are OPTIONAL and a config without them behaves exactly like the shipped defaults:
 # palette "default", the system monospace at pt 10, the scrollback depth
@@ -130,7 +150,7 @@ def load_terminal_settings():
        "scroll": str,             # v1.6.4 (task 5): "live" (default) | "pin" — new output
                                   #            pulls the view to the live line, or holds it still
        "follow_cwd": bool,        # v1.6.3 (task 5): follow the shell's directory (OSC 7)
-       "mode": str}               # v1.2.2: "windows" (default) | "tabs" — display mode
+       "mode": str}               # v1.2.2: "windows" (default) | "tabs" | "single" — display mode
     Invalid values (a foreign type, out of range) → default. Never raises.
     """
     defaults = {"palette": None, "font_family": "", "font_size": None,
@@ -203,66 +223,21 @@ def load_terminal_settings():
     if isinstance(v, bool):
         defaults["follow_cwd"] = v
 
-    # v1.2.2 (ROADMAP task 1): terminal display mode — "windows" (default,
-    # current behaviour: separate SSHTerminalWindow windows) | "tabs"
-    # (the "Terminals" QDockWidget in MainWindow, a QTabWidget of
-    # TerminalSessionPage). Validation follows the pattern of the other keys:
-    # a corrupt value / a foreign type → default.
+    # The display mode: "windows" (separate SSHTerminalWindow windows) | "tabs" (the "Terminals"
+    # QDockWidget in MainWindow) | "single" (v1.7.2: every session joins the LAST live terminal
+    # window as its next tab, whatever node it belongs to). Validation — the other keys' rule:
+    # a corrupt value / a foreign type → the default.
     v = cfg.get("terminal_mode")
-    if isinstance(v, str) and v.strip().lower() in ("windows", "tabs"):
+    if isinstance(v, str) and v.strip().lower() in TERMINAL_MODES:
         defaults["mode"] = v.strip().lower()   # corrupt/foreign → "windows" (default)
 
     return defaults
 
 
 # ── the terminal SPLIT ────────────────────────────
-# The window's session area is a VERTICAL QSplitter: the session tabs on top and the split host (a
-# SECOND full session of the SAME node) below. The state and the ratio live in `~/.sshmap/config.json` —
-# the ratio is a FRACTION of the height, so a window resize keeps the proportion; the pixel floor is
-# derived from the canvas metrics (`SPLIT_MIN_ROWS` rows + the pane's own chrome), never a magic number.
-SPLIT_CONFIG_BOOL = "ui_terminal_split"          # bool — the pane was open at the last close
-SPLIT_CONFIG_RATIO = "ui_terminal_split_ratio"   # float — the pane's share of the height
-SPLIT_RATIO_DEFAULT = 0.25                       # the ROADMAP default (a quarter of the height)
-SPLIT_RATIO_MIN = 0.10
-SPLIT_RATIO_MAX = 0.75
-SPLIT_MIN_ROWS = 4                               # the floor: 4 rows of the canvas (ROADMAP task 3a)
-
-
-def load_split_settings():
-    """v1.3.3.5 (ROADMAP task 5): the split state/ratio from ~/.sshmap/config.json.
-
-    Source — i18n.load_config() (never raises, {} on error); all keys are optional and
-    the defaults equal today's single-pane behaviour. Returns:
-      {"split": bool,          # was the pane open at the last close (default False)
-       "ratio": float}         # the pane's share of the height (default 0.25, clamped
-                               # to SPLIT_RATIO_MIN..SPLIT_RATIO_MAX)
-    A foreign type (a string "true", a bool where a float is expected, a non-finite
-    number) → the default: a broken config must never open a second session or squeeze
-    the panes into unusability. Never raises.
-    """
-    defaults = {"split": False, "ratio": SPLIT_RATIO_DEFAULT}
-    try:
-        from i18n import load_config
-    except Exception:
-        return dict(defaults)
-    try:
-        cfg = load_config()
-    except Exception:  # noqa: BLE001 — a broken config store must not break the window
-        return dict(defaults)
-
-    v = cfg.get(SPLIT_CONFIG_BOOL)
-    if isinstance(v, bool):
-        defaults["split"] = v           # only a real JSON bool counts
-
-    v = cfg.get(SPLIT_CONFIG_RATIO)
-    if isinstance(v, (int, float)) and not isinstance(v, bool):
-        try:
-            ratio = float(v)
-        except (TypeError, ValueError):
-            ratio = SPLIT_RATIO_DEFAULT
-        if ratio == ratio and ratio not in (float("inf"), float("-inf")):  # not NaN/inf
-            defaults["ratio"] = max(SPLIT_RATIO_MIN, min(SPLIT_RATIO_MAX, ratio))
-    return defaults
+# The session area of BOTH containers is a VERTICAL QSplitter [session_tabs | split_host] holding a
+# SECOND full session of the SAME node; the controller and the two config keys live in
+# `modules/terminal_split.py`, imported above because this module is the family's live namespace.
 
 
 # ── the FILES PANEL — the right half of the window ───────────────────────────────
@@ -927,6 +902,10 @@ class SSHTerminalWindow(QMainWindow):
     provider still count it — ui/main_window_ssh.py).
     """
 
+    #: The container KIND a session registry can filter on (`terminal_split.container_windows`):
+    #: the merge and the `"single"` mode collect terminal WINDOWS and never the dock.
+    CONTAINER_KIND = CONTAINER_WINDOW
+
     def __init__(self, server_data: ServerData, parent=None, password: str = None,
                  initial_command: str = ""):
         super().__init__(parent)
@@ -940,10 +919,7 @@ class SSHTerminalWindow(QMainWindow):
 
         # v1.3.3.5: the split state — BEFORE the layout (add_session() below may ask
         # for the restore and the page property reads the pane).
-        self._split_pane = None
-        self._split_on = False
         self._split_config = load_split_settings()
-        self._split_ratio = self._split_config["ratio"]
 
         t = get_translator()
         self.setWindowTitle(t("terminal.window_title", alias=server_data.alias, host=server_data.host))
@@ -970,22 +946,12 @@ class SSHTerminalWindow(QMainWindow):
         self.session_tabs.tabCloseRequested.connect(self._on_tab_close_requested)
         self.session_tabs.currentChanged.connect(self._on_current_tab_changed)
 
-        # The SPLIT — the session area becomes a VERTICAL QSplitter [session_tabs | split_host]; the host
-        # holds the second session and is HIDDEN until the split is on (a hidden splitter member costs no
-        # geometry, so the single-pane look is preserved). NOT collapsible on either side (the divider can
-        # never "lose" a pane) and the floors are applied with `setMinimumHeight` + `setSizes` only —
-        # Qt gotcha #13: `setMaximum*` on a splitter member breaks the size accounting after hide/show.
-        self.split_host = QWidget()
-        _split_layout = QVBoxLayout(self.split_host)
-        _split_layout.setContentsMargins(0, 0, 0, 0)
-        _split_layout.setSpacing(0)
-        self._v_splitter = QSplitter(Qt.Orientation.Vertical)
-        self._v_splitter.addWidget(self.session_tabs)
-        self._v_splitter.addWidget(self.split_host)
-        self._v_splitter.setCollapsible(0, False)
-        self._v_splitter.setCollapsible(1, False)
-        self._v_splitter.splitterMoved.connect(self._on_split_moved)
-        self.split_host.hide()
+        # The SPLIT — v1.7.2 moves the furniture into `modules/terminal_split.py`, instantiated
+        # here: `_v_splitter` is [session_tabs | split_host] and the shipped names below are
+        # DELEGATES of the controller (the "a shipped name resolves on the owner" rule).
+        self.split = TerminalSplit(self)
+        self.split_host = self.split.host
+        self._v_splitter = self.split.splitter
 
         # The "Terminal Macros" panel to the left of the session tabs —
         # QSplitter [cmdlib_panel | QSplitter(session_tabs | split_host)]. A double-click /
@@ -1020,18 +986,10 @@ class SSHTerminalWindow(QMainWindow):
 
         # ONE checkable action (`terminal.split`) drives BOTH surfaces — the BUTTON in the
         # right corner of the tab bar and the window's context-menu item — and carries NO
-        # keyboard shortcut. The button is a plain QPushButton (PySide6 has no
-        # `setDefaultAction`), so it is wired by hand and the ACTION stays the single source
-        # of truth (`DOCUMENTATION.md` §14g).
-        self.act_split = QAction(t("terminal.split"), self)
-        self.act_split.setCheckable(True)
-        self.act_split.setToolTip(t("terminal.split_tooltip"))
-        self.act_split.toggled.connect(self._sync_split_button)
-        self.act_split.toggled.connect(self.set_split_enabled)
-        self.btn_split = QPushButton(t("terminal.split"))
-        self.btn_split.setCheckable(True)
-        self.btn_split.setToolTip(t("terminal.split_tooltip"))
-        self.btn_split.clicked.connect(self._on_split_button_clicked)
+        # keyboard shortcut. The action, the button and their wiring belong to the controller
+        # (`modules/terminal_split.py`), so a second container builds the same construct
+        # (`DOCUMENTATION.md` §14g).
+        self.act_split, self.btn_split = self.split.build_action()
         # The right corner of the session tab bar — the natural place of a per-session
         # action (the left side belongs to the command panel). A tab bar has ONE corner
         # widget, so the corner is a container holding the shipped PAIR: the split button
@@ -1041,6 +999,10 @@ class SSHTerminalWindow(QMainWindow):
         self.act_files_panel.setCheckable(True)
         self.act_files_panel.setToolTip(t("terminal.files_panel_tooltip"))
         self.act_files_panel.toggled.connect(self.set_files_panel_enabled)
+        # v1.7.2 (task 5): the MERGE — every OTHER live terminal window's sessions move into
+        # THIS one (context-menu item only; no registry sequence, no fourth corner button).
+        self.act_merge = QAction(t("terminal.merge_windows"), self)
+        self.act_merge.triggered.connect(self._on_merge_windows)
         self.commander = CommanderCorner(self, split_button=self.btn_split)
         self.commander.act.toggled.connect(self._on_commander_toggled)
         self.session_tabs.setCornerWidget(self.commander, Qt.Corner.TopRightCorner)
@@ -1104,51 +1066,23 @@ class SSHTerminalWindow(QMainWindow):
         already has an i18n key (ZERO new keys); the module translator is looked up at
         call time, so its cache needs no invalidation.
 
-        The multi-input title prefix is PRESERVED: while the mode is on the title is
-        `terminal.multi_title_prefix + base` (the base is rebuilt here and re-prefixed),
-        otherwise the plain base title is restored. Never raises — the dead-C++-object
-        discipline of every container method.
+        v1.7.2 (tasks 3/6): the SPLIT action's label and tooltip are the controller's (one label,
+        one tooltip, two views, plus the owner's alias), and the window title names the session ON
+        SCREEN — a shared window cannot keep naming the first one. Never raises.
         """
         t = get_translator()
-        data = getattr(self, "server_data", None)
-        base = t("terminal.window_title",
-                 alias=getattr(data, "alias", "?"), host=getattr(data, "host", ""))
-        # v1.2.3: the multi-input prefix lives on the window title (multi_input.py);
-        # the base is recomputed here, so the prefix is re-added instead of lost.
-        prefixed = False
-        try:
-            from .multi_input import get_hub as _get_hub
-        except ImportError:  # flat launch from the project root
+        # v1.2.3: the multi-input prefix lives on the window title (multi_input.py); the base is
+        # recomputed from the session ON SCREEN, so the prefix is re-added instead of lost.
+        self._refresh_window_title()
+        # v1.3.3.5: the split action (the tab-bar BUTTON and the context-menu item).
+        self.split.retranslate()
+        # v1.7.2 (task 5): the merge item of the context menu.
+        act_merge = getattr(self, "act_merge", None)
+        if act_merge is not None:
             try:
-                from multi_input import get_hub as _get_hub
-            except ImportError:
-                _get_hub = None
-        if _get_hub is not None:
-            try:
-                prefixed = bool(_get_hub().active)
-            except Exception:  # noqa: BLE001 — the hub must not break the re-text
-                prefixed = False
-        self._multi_base_title = base
-        try:
-            self.setWindowTitle((t("terminal.multi_title_prefix") + base) if prefixed else base)
-        except RuntimeError:
-            return  # the C++ object was already destroyed (a close race)
-        # v1.3.3.5: the split action (the tab-bar BUTTON and the context-menu item) —
-        # one label, one tooltip, two views.
-        act = getattr(self, "act_split", None)
-        if act is not None:
-            try:
-                act.setText(t("terminal.split"))
-                act.setToolTip(t("terminal.split_tooltip"))
+                act_merge.setText(t("terminal.merge_windows"))
             except RuntimeError:
                 pass  # Qt teardown — the action is already destroyed
-        btn = getattr(self, "btn_split", None)
-        if btn is not None:
-            try:
-                btn.setText(t("terminal.split"))
-                btn.setToolTip(t("terminal.split_tooltip"))
-            except RuntimeError:
-                pass  # Qt teardown — the button is already destroyed
         # v1.7.1.1: the Files panel switch — ONE label and ONE tooltip, and ONE view left:
         # the window's context-menu item (the corner button is gone; the mode lives in the
         # settings hub). The panel's own chrome re-texts itself below.
@@ -1302,7 +1236,7 @@ class SSHTerminalWindow(QMainWindow):
             password=password, initial_command=initial_command)
         page.set_host_window(self)
         self._wire_page(page)
-        idx = self.session_tabs.addTab(page, server_data.alias)
+        idx = self.session_tabs.addTab(page, self._session_tab_title(page))
         # Qt: addTab makes only the FIRST tab current — activate the new one
         # explicitly (currentChanged → the signal bridge to the status bar).
         self.session_tabs.setCurrentIndex(idx)
@@ -1370,12 +1304,39 @@ class SSHTerminalWindow(QMainWindow):
 
     @property
     def split_pane(self):
-        """v1.3.3.5: the live split pane (None while the split is off).
+        """The live split pane (None while the split is off) — a DELEGATE of the controller.
 
         The container exposes it for the multi-input highlight
         (modules/multi_input.py walks the session tabs and reaches the pane here).
         """
-        return getattr(self, "_split_pane", None)
+        return self.split.pane
+
+    @property
+    def _split_pane(self):
+        """The controller's pane under the name every shipped caller and test reads."""
+        return self.split.pane
+
+    @_split_pane.setter
+    def _split_pane(self, value):
+        self.split.pane = value
+
+    @property
+    def _split_on(self):
+        """Is a pane open at all (the pane survives a tab switch to a foreign session)."""
+        return self.split.on
+
+    @_split_on.setter
+    def _split_on(self, value):
+        self.split.on = bool(value)
+
+    @property
+    def _split_ratio(self):
+        """The pane's share of the height, remembered across opens."""
+        return self.split.ratio
+
+    @_split_ratio.setter
+    def _split_ratio(self, value):
+        self.split.ratio = float(value)
 
     def active_session(self):
         """v1.3.3.5 (ROADMAP task 6): the session the USER is working in — the focused
@@ -1393,7 +1354,7 @@ class SSHTerminalWindow(QMainWindow):
         pane that the user clicked has it; `hasFocus()` on the pane itself would not
         see its children). RuntimeError on a dead C++ object → None (teardown).
         """
-        pane = getattr(self, "_split_pane", None)
+        pane = self.split.pane
         if pane is None:
             return None
         try:
@@ -1409,109 +1370,27 @@ class SSHTerminalWindow(QMainWindow):
             return None
         return None
 
-    def set_split_enabled(self, on: bool):
-        """v1.3.3.5 (ROADMAP tasks 1/2/3): the ONE split action — on/off.
+    def set_split_enabled(self, on: bool) -> bool:
+        """v1.3.3.5 (ROADMAP tasks 1/2/3) + v1.7.2 (task 3): the ONE split switch.
 
-        ON — the pane is created (a REAL second session of the same node: a fresh
-        SSHTerminalThread with the parent's credentials, WITHOUT the parent's Quick
-        Launch command and WITHOUT forcing the SFTP worker), the host is shown and the
-        sizes come from the stored ratio (default 0.25 of the height).
-        OFF — the "ask" gate of the pane (`page.confirm_close()`, the SAME gate every
-        other session close uses) and the single teardown `page.shutdown()`; a Cancel
-        leaves the pane open and puts the checkmark back without re-entering this slot.
-        Called from `act_split.toggled` and from close_page (a pane's own close path).
+        ON — the pane is created for the ACTIVE session (a REAL second session of the same node: a
+        fresh SSHTerminalThread with that session's credentials, WITHOUT its Quick Launch command
+        and WITHOUT forcing the SFTP worker), the host is shown and the sizes come from the stored
+        ratio (default 0.25 of the height). A press while a FOREIGN session owns the pane MOVES it
+        (the old pane passes its own gate first). OFF — the "ask" gate of the pane
+        (`page.confirm_close()`, the SAME gate every other session close uses) and the single
+        teardown `page.shutdown()`; a Cancel leaves the pane open and puts the checkmark back
+        without re-entering this slot. Returns True when the requested state was reached.
         """
-        on = bool(on)
-        if on == self._split_on:
-            # an internal path (the pane's own close/error) already moved the state —
-            # only the checkmark has to catch up (blocked signals, no recursion)
-            self._set_split_action_checked(on)
-            return
-        if on:
-            self._open_split_pane()
-            if self._split_pane is None:
-                self._split_on = False
-                self._set_split_action_checked(False)
-                return   # the pane could not be created — the checkmark goes back
-        else:
-            if not self._close_split_pane():
-                self._set_split_action_checked(True)
-                return  # the "ask" gate was cancelled — the pane stays
-        self._split_on = on
-        self._set_split_action_checked(on)
+        return self.split.set_enabled(on)
 
     def _open_split_pane(self):
         """Create and show the split pane (idempotent — already open ⇒ no-op)."""
-        if self._split_pane is not None:
-            return
-        pane = self.add_session(
-            self._split_server_data(),
-            password=self._split_password(),
-            initial_command="",   # the parent's Quick Launch is NOT re-sent (ROADMAP task 4)
-            split=True)
-        self._split_pane = pane
-        self._split_on = True   # BEFORE show(): the resize events of the layout arrive first
-        try:
-            self.split_host.show()
-        except RuntimeError:
-            return  # C++ teardown — nothing to show
-        self._apply_split_sizes()
-        # the layout of a just-shown pane settles after the event cycle (the page's own
-        # singleShot(0) grid sync is the same pattern) — a second pass on the real size.
-        try:
-            QTimer.singleShot(0, self._apply_split_sizes)
-        except RuntimeError:
-            pass  # teardown race — the immediate pass above already ran
-        self._register_split_session(pane)
-        # v1.4.7 follow-up: the pane has NO status surface of its own (no status line,
-        # no tab strip), so its live state is rendered as the SECOND text of this
-        # window's status bar — connected here, dropped with the pane below.
-        try:
-            pane.status_message.connect(self._on_split_status_message)
-        except (RuntimeError, AttributeError):
-            pass  # a test double / a teardown race — the pane simply has no line
-        self._on_split_status_message(pane.session_status, 0)
-        # v1.3.3.5: the new pane's canvas takes the focus (TerminalSessionPage.__init__)
-        # — the bridge follows it right away (no FocusIn event is guaranteed).
-        self._refresh_bridge()
+        return self.split.open_pane()
 
     def _close_split_pane(self) -> bool:
         """Tear the pane down; False — the "ask" gate was cancelled (the pane stays)."""
-        pane = getattr(self, "_split_pane", None)
-        if pane is None:
-            self.split_host.hide()
-            self._split_on = False
-            return True
-        try:
-            if not pane.confirm_close():
-                return False
-        except RuntimeError:
-            pass  # C++ teardown — close without asking (as everywhere else)
-        # v1.4.7 follow-up: the pane's line leaves the status bar together with the pane.
-        self._hide_split_status(pane)
-        try:
-            pane.shutdown()
-        except Exception:  # noqa: BLE001 — teardown robustness
-            pass
-        self._split_pane = None
-        self._split_on = False
-        self._reset_split_floors(pane)
-        try:
-            self.split_host.layout().removeWidget(pane)
-        except (RuntimeError, AttributeError):
-            pass  # the host was already destroyed (a close race)
-        try:
-            pane.setParent(None)
-            pane.deleteLater()
-        except RuntimeError:
-            pass  # teardown race — the page dies with its parent anyway
-        try:
-            self.split_host.hide()
-        except RuntimeError:
-            pass
-        # the bridge returns to the ACTIVE tab (the pane it pointed at is gone)
-        self._refresh_bridge()
-        return True
+        return self.split.close_pane()
 
     def _wire_page(self, page):
         """v1.3.3.5 (ROADMAP task 6): let the window follow the FOCUS of a canvas.
@@ -1542,9 +1421,13 @@ class SSHTerminalWindow(QMainWindow):
 
         Idempotent and cheap (`_set_bridged_page` returns immediately when the page did
         not change), so the signal may be connected once per terminal window without
-        guarding for ancestry first.
+        guarding for ancestry first. v1.7.2: the split action and the window title are
+        re-read here too — the whole "who owns the pane / whose name is on the window"
+        answer follows the keyboard, not the tab strip.
         """
         self._refresh_bridge()
+        self.split.sync_owner()
+        self._refresh_window_title()
 
     def _refresh_bridge(self):
         """v1.3.3.5 (ROADMAP task 6): the bridge target — the FOCUSED pane if the
@@ -1569,47 +1452,52 @@ class SSHTerminalWindow(QMainWindow):
             pages = [self.session_tabs.widget(i) for i in range(self.session_tabs.count())]
         except RuntimeError:
             pages = []  # the C++ object was already destroyed (a close race)
-        pane = getattr(self, "_split_pane", None)
+        pane = self.split.pane
         if pane is not None:
             pages.append(pane)
         return [p for p in pages if p is not None]
 
-    def _split_server_data(self):
-        """The node of the pane — the ACTIVE tab's data (fallback: the window's)."""
-        try:
-            page = self.session_tabs.currentWidget()
-        except RuntimeError:
-            page = None
+    def split_server_data(self, page=None):
+        """The node of the pane — the OWNER session's data (fallback: the window's)."""
+        if page is None:
+            try:
+                page = self.session_tabs.currentWidget()
+            except RuntimeError:
+                page = None
         data = getattr(page, "server_data", None)
         return data if data is not None else self.server_data
 
+    def split_password(self, page=None):
+        """The credentials of the pane — the SAME node, the SAME password as its own session
+        (the explicit one the session was created with is kept on the thread; the model itself
+        never carries it, AUDIT v0.7.2 medium #7)."""
+        if page is None:
+            try:
+                page = self.session_tabs.currentWidget()
+            except RuntimeError:
+                page = None
+        thread = getattr(page, "terminal_thread", None)
+        return getattr(thread, "password", "") or ""
+
+    def _split_server_data(self):
+        """v1.3.3.5 compat reader: the node of the pane (see `split_server_data`)."""
+        return self.split_server_data()
+
     def _split_password(self):
-        """The credentials of the pane — the SAME node, the SAME password as the parent
-        session (the explicit one the window was created with is kept on the thread;
-        the model itself never carries it, AUDIT v0.7.2 medium #7)."""
-        try:
-            page = self.session_tabs.currentWidget()
-            thread = getattr(page, "terminal_thread", None)
-            return getattr(thread, "password", "") or ""
-        except RuntimeError:
-            return ""
+        """v1.3.3.5 compat reader: the credentials of the pane (see `split_password`)."""
+        return self.split_password()
 
     def _session_sink(self):
-        """v1.3.3.5 (ROADMAP task 2): the host's session-registry hook.
+        """v1.3.3.5 (ROADMAP task 2): the host's session-registry hook, on the PARENT CHAIN.
 
         The pane is a real session (green dot, multi-input) that was NOT created by
         `SshMixin._spawn_terminal_window`, so it must reach `MainWindow._terminal_windows`
-        through the host. The hook is duck-typed on the PARENT of the window (the
-        MainWindow in `terminal_mode = "windows"`) — no import of ui.main_window from
-        modules/* (the cycle rule) and no extra constructor argument (a test window may
-        be created with parent=None: the pane then simply lives and dies with it).
+        through the host — duck-typed, because `modules/*` never imports `ui.main_window`
+        (the cycle rule) and a test window may be created with parent=None (the pane then
+        simply lives and dies with it). v1.7.2: the walk is what lets the DOCK reach the
+        same hook through `TerminalsDock` without a constructor argument.
         """
-        try:
-            host = self.parent()
-        except RuntimeError:
-            return None
-        fn = getattr(host, "_adopt_split_session", None)
-        return fn if callable(fn) else None
+        return find_host_hook(self, "_adopt_split_session")
 
     def _register_split_session(self, page):
         """Hand the pane to the host registry (a no-op without a host — see above)."""
@@ -1621,53 +1509,45 @@ class SSHTerminalWindow(QMainWindow):
         except Exception:  # noqa: BLE001 — the registry must never break the split
             pass
 
+    def _attach_split_pane(self, pane) -> bool:
+        """The container's half of "the pane is open": its status text and the keyboard bridge.
+
+        The pane has NO status line and NO tab strip of its own, so its live state is rendered as
+        the SECOND text of this window's status bar — connected here, dropped in
+        `_detach_split_pane`. The canvas of a fresh pane takes the focus
+        (`TerminalSessionPage.__init__`), so the bridge follows it right away (no FocusIn event is
+        guaranteed). Never raises.
+        """
+        try:
+            pane.status_message.connect(self._on_split_status_message)
+        except (RuntimeError, AttributeError):
+            pass  # a test double / a teardown race — the pane simply has no line
+        try:
+            self._on_split_status_message(pane.session_status, 0)
+        except (RuntimeError, AttributeError):
+            pass  # a test double without the property — no line to render
+        self._refresh_bridge()
+        return True
+
+    def _detach_split_pane(self, pane) -> bool:
+        """The pane's line leaves the status bar together with the pane (idempotent)."""
+        self._hide_split_status(pane)
+        return True
+
     def _set_split_action_checked(self, checked: bool):
         """Set the action's checkmark (and the BUTTON mirroring it) WITHOUT re-entering
         the slot — the "ask" gate of the pane: a Cancel must leave the pane open and the
         control pressed."""
-        checked = bool(checked)
-        act = getattr(self, "act_split", None)
-        if act is not None:
-            try:
-                act.blockSignals(True)
-                act.setChecked(checked)
-                act.blockSignals(False)
-            except RuntimeError:
-                pass  # teardown — the action is gone
-        self._sync_split_button(checked)
+        self.split.sync_action(checked)
 
     def _sync_split_button(self, checked=None):
-        """Keep the corner BUTTON in step with the ONE action.
-
-        A QPushButton has no `setDefaultAction` in PySide6, so the mirror is explicit:
-        the action's `toggled` is the source and this slot (plus
-        `_set_split_action_checked`, where the action's signals are blocked) writes the
-        button's state. Idempotent and teardown-safe — never raises.
-        """
-        btn = getattr(self, "btn_split", None)
-        act = getattr(self, "act_split", None)
-        if btn is None or act is None:
-            return
-        try:
-            if checked is None:
-                checked = bool(act.isChecked())
-            btn.blockSignals(True)
-            btn.setChecked(bool(checked))
-            btn.blockSignals(False)
-        except RuntimeError:
-            pass  # teardown — the button is gone
+        """Keep the corner BUTTON in step with the ONE action (idempotent, never raises)."""
+        self.split.sync_button(checked)
 
     def _on_split_button_clicked(self, _checked=False):
         """The BUTTON asks the ACTION (one source of truth): the click does not change
         the state itself — `set_split_enabled()` does, through the action's `toggled`."""
-        act = getattr(self, "act_split", None)
-        btn = getattr(self, "btn_split", None)
-        if act is None or btn is None:
-            return
-        try:
-            act.setChecked(bool(btn.isChecked()))
-        except RuntimeError:
-            pass  # teardown — the action is gone
+        self.split.on_button_clicked(_checked)
 
     # ── the Files Commander of the ACTIVE session ──
     # The two-pane view lives on the PAGE (`page.sftp_tab`, the `SftpTab` container), while the control
@@ -2018,153 +1898,60 @@ class SSHTerminalWindow(QMainWindow):
     def _split_min_height(self) -> int:
         """v1.3.3.5 (ROADMAP task 3a): the size floor of the bottom pane, in PIXELS.
 
-        The floor is BUILT, not guessed: the canvas of the pane gets a minimum height of
-        `SPLIT_MIN_ROWS` rows measured from the live cell metrics (`widget.cell_size`,
-        never a magic pixel number) and the pane's own CHROME is measured from the live
-        geometry (`pane.height() - pane.widget.height()` — the layout margins and the
-        QTabWidget frame; before the first layout the frame and the margins are the
-        fallback). **v1.4.7 follow-up:** the pane no longer pays for a status line or a
-        tab strip, so the chrome is what is left of the frame. The SFTP tab's own size
-        hint is deliberately NOT the reference: it is a property of a tab the user may
-        never open, and the ROADMAP fixes the floor at a few ROWS. The result is
-        returned AND installed as an explicit `minimumHeight` on both panes by
-        `_apply_split_sizes` (an explicit minimum overrides `minimumSizeHint` — that is
-        what turns the floor into the splitter's own limit). Never raises.
+        The floor is BUILT, not guessed (`SPLIT_MIN_ROWS` rows measured from the live cell
+        metrics + the pane's own CHROME measured from the live geometry) and installed as an
+        explicit `minimumHeight` (an explicit minimum overrides `minimumSizeHint` — that is
+        what turns the floor into the splitter's own limit). The arithmetic is the
+        controller's (`TerminalSplit.min_height`, `DOCUMENTATION.md` §14g). Never raises.
         """
-        pane = getattr(self, "_split_pane", None)
-        if pane is None:
-            return 0
-        row_h = 16
-        try:
-            row_h = max(1, int(pane.widget.cell_size[1]))
-        except (RuntimeError, AttributeError, TypeError, IndexError):
-            row_h = 16   # a dying C++ object — a sane default for the single pass
-        canvas_floor = int(row_h * SPLIT_MIN_ROWS)
-        try:
-            pane.widget.setMinimumHeight(canvas_floor)
-        except (RuntimeError, AttributeError):
-            pass  # C++ teardown — the splitter floor below is best-effort then
-        chrome = 0
-        try:
-            chrome = int(pane.height()) - int(pane.widget.height())
-        except (RuntimeError, TypeError):
-            chrome = 0
-        if chrome <= 0:
-            try:
-                bar = pane.tabs.tabBar()
-                bar_h = 0 if bar.isHidden() else int(bar.sizeHint().height())
-                chrome = bar_h + 16   # + the layout margins and the QTabWidget frame
-            except (RuntimeError, AttributeError, TypeError):
-                chrome = 0
-        return canvas_floor + max(0, chrome)
+        return self.split.min_height()
 
     def _current_split_ratio(self):
         """The pane's CURRENT share of the splitter height (None — nothing to measure).
 
-        None while the split is OFF (`_split_pane is None`) or while the host is hidden
-        (its size is 0): a ratio measured on a hidden member would be 0 and would
-        OVERWRITE the proportion the user left behind — the last real proportion (the
-        value restored on the next window) is kept instead.
+        None while the split is OFF or while the host is hidden (its size is 0): a ratio
+        measured on a hidden member would be 0 and would OVERWRITE the proportion the user
+        left behind — the last real proportion is kept instead.
         """
-        if getattr(self, "_split_pane", None) is None:
-            return None
-        try:
-            sizes = self._v_splitter.sizes()
-        except RuntimeError:
-            return None
-        if len(sizes) < 2:
-            return None
-        total = sum(sizes)
-        if total <= 0 or sizes[1] <= 0:
-            return None
-        return sizes[1] / float(total)
+        return self.split.current_ratio()
 
     def _on_split_moved(self, _pos=None, _index=None):
         """v1.3.3.5 (ROADMAP task 3a): the user dragged the divider — the new
         proportion becomes THE ratio, so the next window resize keeps it (the explicit
         drag is respected; the clamp only guards the unusable extremes)."""
-        ratio = self._current_split_ratio()
-        if ratio is None:
-            return
-        self._split_ratio = max(SPLIT_RATIO_MIN, min(SPLIT_RATIO_MAX, ratio))
+        return self.split.on_moved(_pos, _index)
 
     def _apply_split_sizes(self):
         """v1.3.3.5 (ROADMAP task 3a): the two geometry answers of the split.
 
-        (1) The pane is a FRACTION of the height (`_split_ratio`), so a window resize
-            keeps the proportion — applied on open, on every resize and after the user
-            drags the divider;
-        (2) both panes get a FLOOR of a few rows (`_split_min_height`), so the divider
-            can never collapse one of them into unusability — the floor is expressed as
-            `setMinimumHeight` + `setSizes` (Qt gotcha #13 forbids `setMaximum*` on a
-            splitter member). A window too short for two floors splits evenly instead of
-            producing negative sizes. Never raises.
+        (1) The pane is a FRACTION of the height, so a window resize keeps the proportion —
+            applied on open, on every resize and after the user drags the divider;
+        (2) both panes get a FLOOR of a few rows, so the divider can never collapse one of
+            them into unusability — the floor is expressed as `setMinimumHeight` + `setSizes`
+            (Qt gotcha #13 forbids `setMaximum*` on a splitter member). The arithmetic is the
+            controller's (`TerminalSplit.apply_sizes`, `DOCUMENTATION.md` §14g).
         """
-        if getattr(self, "_split_pane", None) is None:
-            return
-        try:
-            total = self._v_splitter.height() - self._v_splitter.handleWidth()
-        except RuntimeError:
-            return
-        if total <= 0:
-            return  # not laid out yet (the deferred pass / the resize will do it)
-        floor = self._split_min_height()
-        bottom = int(round(total * self._split_ratio))
-        if total > 2 * floor:
-            bottom = max(floor, min(bottom, total - floor))
-        else:
-            bottom = max(1, total // 2)   # too short for two floors — split evenly
-        top = max(1, total - bottom)
-        try:
-            self.split_host.setMinimumHeight(floor)
-            self.session_tabs.setMinimumHeight(floor)
-            self._v_splitter.setSizes([top, bottom])
-        except RuntimeError:
-            pass  # C++ teardown — nothing to size
+        return self.split.apply_sizes()
 
     def _reset_split_floors(self, pane=None):
-        """Drop the floors of `_apply_split_sizes` with the pane (the single-pane
-        look — and the window's minimum size — of v1.3.3.4 is restored exactly).
-
-        `pane` is passed explicitly by `_close_split_pane` (there the pane is already
-        detached from `self._split_pane`).
-        """
-        if pane is None:
-            pane = getattr(self, "_split_pane", None)
-        try:
-            if pane is not None:
-                pane.widget.setMinimumHeight(0)
-        except (RuntimeError, AttributeError):
-            pass  # C++ teardown — nothing to reset
-        try:
-            self.split_host.setMinimumHeight(0)
-            self.session_tabs.setMinimumHeight(0)
-        except RuntimeError:
-            pass  # C++ teardown — nothing to reset
+        """Drop the floors of `_apply_split_sizes` with the pane (the single-pane window
+        minimum returns exactly). `pane` is passed explicitly by the close path, where the
+        pane is already detached from the controller's state."""
+        return self.split.reset_floors(pane)
 
     def _save_split_state(self, extra: dict = None) -> dict:
-        """v1.3.3.5 (ROADMAP task 5): the split state/ratio as CONFIG keys.
+        """v1.3.3.5 (ROADMAP task 5): the window's persistence payload for ONE `save_config()`.
 
-        Returns the extra top-level keys of the geometry write (`ui_terminal_split` +
-        `ui_terminal_split_ratio`, the ratio re-read from the live splitter and
-        clamped), so `closeEvent` merges them into its SINGLE save_config() call —
-        the restore path stays one call per window.
+        Returns the extra top-level keys of the geometry write — the split's two
+        (`ui_terminal_split` + `ui_terminal_split_ratio`, from the controller), the Files
+        panel's FOLD (UI state, the `ui_cmdlib_collapsed` rule; the MODE is the settings hub's
+        `terminal_files_mode` and is deliberately NOT written back) and the Files Commander
+        state/ratio of the ACTIVE session — so `closeEvent` merges them into its SINGLE write.
         """
-        ratio = self._current_split_ratio()
-        if ratio is not None:
-            self._split_ratio = max(SPLIT_RATIO_MIN, min(SPLIT_RATIO_MAX, ratio))
-        payload = {
-            SPLIT_CONFIG_BOOL: bool(getattr(self, "_split_on", False)),
-            SPLIT_CONFIG_RATIO: round(float(self._split_ratio), 4),
-            # v1.7.1.1 (ROADMAP v1.7.1.1): the panel's FOLD is the only Files-panel state the
-            # window still owns (UI state, the `ui_cmdlib_collapsed` rule). The MODE is the
-            # settings hub's `terminal_files_mode` and is NOT written back: a live toggle of
-            # the context-menu item must not silently rewrite the application's preference.
-            FILES_PANEL_CONFIG_COLLAPSED: bool(self.files_panel.is_collapsed()),
-        }
+        payload = dict(self.split.state_payload())
+        payload[FILES_PANEL_CONFIG_COLLAPSED] = bool(self.files_panel.is_collapsed())
         # v1.7rc1 (ROADMAP v1.7rc1, task 5): the Files Commander state/ratio of the ACTIVE
-        # session ride along in the very same write — ONE save_config() per window, exactly
-        # like the split's two keys above (the `extra` convention of window_geometry). While
+        # session ride along in the very same write — ONE save_config() per window. While
         # the keyboard sits in the SPLIT PANE the bridged page has no Files tab, so the mode
         # of the ACTIVE TAB is written instead: the window remembers a session's state.
         tab = self._commander_tab()
@@ -2192,8 +1979,8 @@ class SSHTerminalWindow(QMainWindow):
         (the proportion is kept, the floors hold). The pane's own canvas resize — and
         therefore the PTY debounce — is handled inside the page (its eventFilter)."""
         super().resizeEvent(event)
-        if getattr(self, "_split_on", False):
-            self._apply_split_sizes()
+        if self.split.on:
+            self.split.apply_sizes()
 
     # ── v1.3.3.5: the context menu of the window (the second view of the action) ──
 
@@ -2215,6 +2002,13 @@ class SSHTerminalWindow(QMainWindow):
         act_panel = getattr(self, "act_files_panel", None)
         if act_panel is not None:
             menu.addAction(act_panel)
+        # v1.7.2 (task 5): the MERGE — this window collects the sessions of the other ones. A
+        # context-menu item only: the corner's budget is three labels (AGENTS.md §4.12) and the
+        # action carries no registry sequence.
+        act_merge = getattr(self, "act_merge", None)
+        if act_merge is not None:
+            menu.addSeparator()
+            menu.addAction(act_merge)
         return menu
 
     def contextMenuEvent(self, event):
@@ -2240,6 +2034,10 @@ class SSHTerminalWindow(QMainWindow):
         # its own viewer. Done BEFORE the split-pane branch below — a pane that holds the
         # keyboard must not freeze the tree of the tab the user just switched to.
         self._refresh_files_panel_current()
+        # v1.7.2 (task 3): the split action mirrors the ACTIVE session and the window title names
+        # it — re-read on EVERY tab change, before the focused-pane branch returns.
+        self.split.sync_owner()
+        self._refresh_window_title()
         # v1.3.3.5: the ACTIVE TAB is the fallback — while the keyboard focus sits in
         # the split pane, switching tabs does not steal the bridge from it.
         if self.focused_split_pane() is not None:
@@ -2402,6 +2200,140 @@ class SSHTerminalWindow(QMainWindow):
                 self._sftp_progress.setRange(0, 0)   # total unknown — busy
         except RuntimeError:
             pass
+
+    # ── v1.7.2 (tasks 5/6): the merge, the on-screen title and the remote title ──
+
+    def _on_merge_windows(self, _checked=False):
+        """`act_merge.triggered` → the host's merge of the other windows into THIS one.
+
+        The registry and the "which window is a terminal window" question belong to the host
+        (`SshMixin._merge_terminal_windows`, `ui/main_window_ssh.py`) — the window only asks,
+        through the parent chain, so `modules/*` still imports no window module (§4.1).
+        """
+        sink = find_host_hook(self, "_merge_terminal_windows")
+        if sink is None:
+            return
+        try:
+            sink(self)
+        except Exception:  # noqa: BLE001 — a merge failure must never break the window
+            pass
+
+    def tab_pages(self) -> list:
+        """The sessions that CARRY A TAB, in tab order (the split pane is not one)."""
+        try:
+            pages = [self.session_tabs.widget(i) for i in range(self.session_tabs.count())]
+        except RuntimeError:
+            return []    # the C++ object was already destroyed (a close race)
+        return [p for p in pages if p is not None]
+
+    def take_session(self, page) -> bool:
+        """Hand ONE tab session over to another container WITHOUT tearing it down.
+
+        The page keeps its thread, its pyte screen, its scrollback, its command history, its
+        transcript and its SFTP worker — a move is a RE-PARENTING, which is exactly what makes
+        `Merge Windows` affordable. The Files widget goes back to its own tab strip first (the
+        panel owns it while the mode is on) and the tab is removed WITHOUT the `close_page()`
+        teardown. Never raises; False — the page is not a tab of this window.
+        """
+        try:
+            index = self.session_tabs.indexOf(page)
+        except RuntimeError:
+            return False
+        if index < 0:
+            return False
+        self._release_files_panel_page(page)
+        self._commander_kept.pop(getattr(page, "sftp_tab", None), None)
+        try:
+            self.session_tabs.removeTab(index)
+        except RuntimeError:
+            return False
+        try:
+            page.setParent(None)
+        except RuntimeError:
+            pass
+        return True
+
+    def adopt_session(self, page) -> bool:
+        """Take ONE session over from another container as the NEXT tab of this window."""
+        if page is None:
+            return False
+        t = get_translator()
+        try:
+            page.setParent(self.session_tabs)
+        except RuntimeError:
+            return False
+        page.set_host_window(self)
+        self._wire_page(page)
+        try:
+            index = self.session_tabs.addTab(page, self._session_tab_title(page))
+        except RuntimeError:
+            return False
+        render_session_activity(self.session_tabs, page, t)
+        if self._files_panel_on:
+            self._attach_files_panel_page(page)
+        try:
+            self.session_tabs.setCurrentIndex(index)
+        except RuntimeError:
+            pass
+        return True
+
+    def _session_tab_title(self, page) -> str:
+        """The tab TEXT of a session — always the node alias (the remote title is the tooltip)."""
+        data = getattr(page, "server_data", None)
+        return str(getattr(data, "alias", "") or self.server_data.alias)
+
+    def _title_page(self):
+        """The session the window title NAMES — the one on screen (the focused pane wins)."""
+        return self.page
+
+    def _refresh_window_title(self):
+        """Re-text the window title for the session ON SCREEN (the merged window's answer).
+
+        A window that collects sessions cannot name the FIRST session any more: the base title is
+        rebuilt from the session the keyboard is in (`terminal.window_title`), and the REMOTE title
+        the program set over `OSC 0`/`OSC 2` is preferred when it exists — "SSH Terminal" then says
+        which of the eight shells the user is looking at. The multi-input prefix is preserved
+        (`_multi_base_title` keeps the base for `apply_container_highlight`). Never raises.
+        """
+        t = get_translator()
+        page = self._title_page()
+        data = getattr(page, "server_data", None) or getattr(self, "server_data", None)
+        alias = str(getattr(data, "alias", "") or "?")
+        host = str(getattr(data, "host", "") or "")
+        remote = str(getattr(page, "remote_title", "") or "")
+        base = t("terminal.window_title", alias=remote or alias, host=host)
+        prefixed = False
+        try:
+            from .multi_input import get_hub as _get_hub
+        except ImportError:  # flat launch from the project root
+            try:
+                from multi_input import get_hub as _get_hub
+            except ImportError:
+                _get_hub = None
+        if _get_hub is not None:
+            try:
+                prefixed = bool(_get_hub().active)
+            except Exception:  # noqa: BLE001 — the hub must not break the title
+                prefixed = False
+        self._multi_base_title = base
+        try:
+            self.setWindowTitle((t("terminal.multi_title_prefix") + base) if prefixed else base)
+        except RuntimeError:
+            pass   # the C++ object was already destroyed (a close race)
+
+    def session_title_changed(self, page):
+        """The remote program set a NEW title (`OSC 0`/`OSC 2`) — refresh the two surfaces.
+
+        The tab TOOLTIP carries the remote title as its second line (the shipped second channel of
+        the activity mark, re-rendered by the ONE shared helper) and the window title prefers it
+        while `page` is the session on screen. Never raises.
+        """
+        try:
+            render_session_activity(self.session_tabs, page, get_translator())
+        except RuntimeError:
+            pass   # Qt teardown — the tab strip is already gone
+        if page is self._title_page():
+            self._refresh_window_title()
 
     # ── v1.2: compat attributes — the session lives on the page (live links) ─
 

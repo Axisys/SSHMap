@@ -191,6 +191,7 @@ of the file itself.
 | `test_tags.py` | — | Regression v0.9.4: server tags/color labels. |
 | `test_terminal_acceptance.py` | — | v1.0 — Terminal v1, final: full acceptance of all RCs + terminal_* config (ROADMAP tasks 9–10). |
 | `test_terminal_colors.py` | — | v1.0RC1 — the color engine + per-cell canvas (ROADMAP v1.0RC1). |
+| `test_terminal_containers.py` | — | v1.7.2 — Terminal containers: the split in the dock, the single window, the merge and the titles. |
 | `test_terminal_dock.py` | — | Terminals docked in the map window (`terminal_mode`: windows/tabs). |
 | `test_terminal_ergonomics.py` | — | v1.6.4 — the cheap batch: the thread names, the marked secret, the Ctrl+wheel zoom and the activity dot. |
 | `test_terminal_files_panel.py` | — | The Files tree as a right-hand panel of a standalone terminal window. |

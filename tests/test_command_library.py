@@ -283,11 +283,12 @@ dc = TerminalDockContent()
 dc.resize(700, 400)
 dc.show()
 app.processEvents()
-check("the dock: the splitter [cmdlib_panel | session_tabs] is in the layout",
+check("the dock: the splitter [cmdlib_panel | V(session_tabs | split_host)] is in the layout",
       isinstance(dc.layout().itemAt(0).widget(), QSplitter))
 spD = dc.layout().itemAt(0).widget()
-check("the dock: splitter.widget(0)=panel, widget(1)=session_tabs",
-      spD.widget(0) is dc.cmdlib_panel and spD.widget(1) is dc.session_tabs)
+check("the dock: splitter.widget(0)=panel, widget(1)=the session area's own vertical splitter",
+      spD.widget(0) is dc.cmdlib_panel and spD.widget(1) is dc._v_splitter
+      and dc._v_splitter.widget(0) is dc.session_tabs)
 check("the dock: setCollapsible(False) on both sides",
       not spD.isCollapsible(0) and not spD.isCollapsible(1))
 check("the dock: it honours the shared key (it starts collapsed)", dc.cmdlib_panel.is_collapsed() is True)

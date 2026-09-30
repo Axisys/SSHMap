@@ -576,8 +576,8 @@ check("the pin counts the shipped keys (+29 of v1.5.7: the tab, the panel chrome
       "with their reports and refusals, + the marked secret of v1.6.4) — "
       "708 + 29 + 41 + 4 + 4 + 3 + 11 + 11 + 17 + 13 + 5 + 8 = 854 (+9 of v1.7rc3 = 863,"
       " +4 of the v1.7.1 Files panel = 867, +3 of the v1.7.1.1 Files display mode = 870,"
-      " +4 of the v1.7.1.2 device choice = 874)",
-      EXPECTED_I18N_KEYS == 863 + 4 + 3 + 4, str(EXPECTED_I18N_KEYS))
+      " +4 of the v1.7.1.2 device choice = 874, +4 of v1.7.2 = 878)",
+      EXPECTED_I18N_KEYS == 863 + 4 + 3 + 4 + 4, str(EXPECTED_I18N_KEYS))
 check_release_state(ROOT)
 
 _langs = load_i18n_langs(ROOT)

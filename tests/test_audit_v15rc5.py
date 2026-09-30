@@ -16,6 +16,7 @@ from _common import (bootstrap, check, finish, load_i18n_langs, check_i18n_parit
 
 ROOT, WORK = bootstrap()  # BEFORE the app module imports (HOME isolation, offscreen, faulthandler)
 
+from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import QApplication
 
@@ -298,6 +299,12 @@ _win2.show()
 app.processEvents()
 
 _dock = _win2._ensure_terminals_dock()
+app.processEvents()
+# The dock's tab-bar CORNER holds TWO controls since v1.7.2 (the split button beside the Commander),
+# and a QPushButton's minimumSizeHint IS its sizeHint — so the dock has a width FLOOR that the 520 px
+# default now sits under. The hand-over this section audits is about the macro panel, not about that
+# floor, so the dock is given room to be wider than its floor before anything is measured.
+_win2.resizeDocks([_dock], [900], Qt.Orientation.Horizontal)
 app.processEvents()
 _dc = _dock.content
 _panel = _dc.cmdlib_panel

@@ -345,9 +345,9 @@ check("'Terminal': the history depth from 0 (0 = the scrollback is off)",
 check("'Terminal': the close behavior (close/ask)",
       [dlg.close_behavior_combo.itemData(i) for i in range(dlg.close_behavior_combo.count())]
       == ["close", "ask"])
-check("'Terminal': the display mode (windows/tabs, v1.2.2)",
+check("'Terminal': the display mode (windows/tabs/single — v1.7.2 adds the third)",
       [dlg.mode_combo.itemData(i) for i in range(dlg.mode_combo.count())]
-      == ["windows", "tabs"] and dlg.mode_combo.currentData() == "windows")
+      == ["windows", "tabs", "single"] and dlg.mode_combo.currentData() == "windows")
 check("'Status Checks': the interval (≥5 s) + the probe timeout (≤60 s)",
       dlg.status_interval_spin.minimum() >= 5 and dlg.probe_timeout_spin.maximum() <= 60.0)
 check("'Autosave': the on/off checkbox + the interval + the number of backups",
