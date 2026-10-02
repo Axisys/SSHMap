@@ -478,9 +478,9 @@ actions = [a for a in menu.actions() if not a.isSeparator()]
 labels = [a.text() for a in actions]
 expected = [i18n.t("sftp.op.new_folder"), i18n.t("sftp.op.rename"),
             i18n.t("sftp.op.delete"), i18n.t("sftp.op.copy_path"),
-            i18n.t("sftp.refresh")]
-check("the context menu carries the four operations + Refresh", labels == expected,
-      f"labels={labels}")
+            i18n.t("sftp.send.menu"), i18n.t("sftp.refresh")]
+check("the context menu carries the four operations + the Send-to submenu + Refresh",
+      labels == expected, f"labels={labels}")
 check("on a real row Rename/Delete/Copy are enabled",
       all(a.isEnabled() for a in actions[:4]), f"got={[a.isEnabled() for a in actions]}")
 check("New folder is always available (the current directory is the target)",

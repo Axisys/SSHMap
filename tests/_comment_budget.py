@@ -44,7 +44,7 @@ BLOCK_BUDGET_LINES = 5     # a comment block in the body: the invariant + the po
 
 # ── The pins (the debt measured when the ratchet was introduced; LOWER them, never raise) ─────
 NARRATIVE_PIN = 0          # HISTORY_MARKERS matches in the code text — the goal state, reached by §7 step 5
-HEADER_LINES_PIN = 1949    # module docstring lines, all files — RAISED for v1.7.2 with its reason in
+HEADER_LINES_PIN = 1967    # module docstring lines, all files — RAISED for v1.7.3 with its reason in
                            # `CHANGELOG_DETAILS.md` (a new module and its topical test file each need a
                            # header); every other pin is untouched and still only goes DOWN
 MAX_HEADER_PIN = 12        # the longest module docstring — the budget itself

@@ -41,9 +41,10 @@ except ImportError:
     from modules.sftp_tab import SftpTab, format_size
 
 try:  # v1.5.7 (ROADMAP task 1): the per-server COMMAND history (the third tab)
-    from .command_history import CommandHistoryPanel, CommandHistoryStore
+    from .command_history import CommandHistoryPanel, CommandHistoryStore, history_key
 except ImportError:
-    from modules.command_history import CommandHistoryPanel, CommandHistoryStore
+    from modules.command_history import (CommandHistoryPanel, CommandHistoryStore,
+                                         history_key)
 
 try:  # v1.2.5: the central theme (status labels — ui/theme.py)
     from ..ui import theme
@@ -554,6 +555,13 @@ class TerminalSessionPage(QWidget):
         self.tabs.addTab(self.widget, t("sftp.tab_terminal"))
         self.sftp_tab = SftpTab() if self._with_sftp else None
         if self.sftp_tab is not None:
+            # v1.7.3 (ROADMAP v1.7.3, task 1/2): the container is TOLD who this session is — the
+            # `history_key()` of the server (the per-server directory memory is filed under it) and
+            # the `(host, ssh_port)` pair that decides the same-host (server-side) send path.
+            self.sftp_tab.set_session_info(key=history_key(getattr(server_data, "id", "")),
+                                           label=getattr(server_data, "alias", "") or "",
+                                           host=getattr(server_data, "host", "") or "",
+                                           port=getattr(server_data, "ssh_port", 22))
             self.tabs.addTab(self.sftp_tab, t("sftp.tab_files"))
 
         # The COMMAND history — the THIRD tab of the session (`Terminal | Files | History`), one

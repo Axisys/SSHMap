@@ -1969,6 +1969,17 @@ class SSHTerminalWindow(QMainWindow):
             # is what the user really had — a close must not cost them the two-pane view.
             if self._commander_kept.get(tab):
                 payload[COMMANDER_CONFIG_BOOL] = True
+        # v1.7.3 (ROADMAP v1.7.3, task 2): the per-server directory memory of EVERY session of this
+        # container rides in the same write. It is an application-level map, so it is collected from
+        # every tab (MERGE-on-write in the container) instead of the active one overwriting the rest.
+        for page in self._tab_pages():
+            merge = getattr(getattr(page, "sftp_tab", None), "merge_dirs_into", None)
+            if not callable(merge):
+                continue
+            try:
+                merge(payload)
+            except (RuntimeError, AttributeError):
+                continue  # a teardown race — the other tabs still contribute
         if isinstance(extra, dict):
             extra.update(payload)
             return extra

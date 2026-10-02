@@ -805,8 +805,11 @@ check("the pin counts the keys of the SHIPPED release (v1.5.2 added THIRTEEN —
       "device row of the disk question with its precedence hint, the card's one-line device list "
       "and the sentence of a chosen device the listing does not hold — 870 + 4 = 874; v1.7.2 adds "
       "FOUR: the third row of the display mode (the single window), the merge action and its one "
-      "closing report, and the remote title of a session's tab tooltip — 874 + 4 = 878)",
-      EXPECTED_I18N_KEYS == 863 + 4 + 3 + 4 + 4, str(EXPECTED_I18N_KEYS))
+      "closing report, and the remote title of a session's tab tooltip — 874 + 4 = 878; v1.7.3 adds "
+      "NINETEEN: the Send-to row and its dialog, the busy / progress / done / failed reports, the "
+      "two-sided conflict facts, the remembered-folder sentence, the two drop refusals and the Word "
+      "wrap row — 878 + 19 = 897)",
+      EXPECTED_I18N_KEYS == 863 + 4 + 3 + 4 + 4 + 19, str(EXPECTED_I18N_KEYS))
 check_release_state(ROOT)
 for _code in i18n_lang_codes(ROOT):
     check(f"i18n/{_code}.json carries the v1.5 node.status.emulated marker",

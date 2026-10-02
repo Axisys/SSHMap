@@ -600,8 +600,8 @@ check("§6 the reused keys the editor reports with are the quick-launch ones (no
            "msg.ql_no_browser")))
 check_i18n_parity(langs)
 check_i18n_format(langs)
-check("§6 the pin counts the SHIPPED release (811 + the 17 keys of v1.6.7 + the 13 of v1.6.8 + the 5 of v1.7rc1 + the 8 of v1.7rc2 + the 9 of v1.7rc3 + the 4 of v1.7.1 + the 3 of v1.7.1.1 + the 4 of the v1.7.1.2 device choice + the 4 of v1.7.2: the third row of the display mode (the single window), the merge action with its one closing report and the remote title of a tab)",
-      EXPECTED_I18N_KEYS == 811 + 17 + 13 + 5 + 8 + 9 + 4 + 3 + 4 + 4, str(EXPECTED_I18N_KEYS))
+check("§6 the pin counts the SHIPPED release (811 + the 17 keys of v1.6.7 + the 13 of v1.6.8 + the 5 of v1.7rc1 + the 8 of v1.7rc2 + the 9 of v1.7rc3 + the 4 of v1.7.1 + the 3 of v1.7.1.1 + the 4 of the v1.7.1.2 device choice + the 4 of v1.7.2: the third row of the display mode (the single window), the merge action with its one closing report and the remote title of a tab + the 19 of v1.7.3: the Send-to row and its dialog, the busy/progress/done/failed reports, the two-sided conflict facts, the remembered-folder sentence, the two drop refusals and Word wrap)",
+      EXPECTED_I18N_KEYS == 811 + 17 + 13 + 5 + 8 + 9 + 4 + 3 + 4 + 4 + 19, str(EXPECTED_I18N_KEYS))
 check("§6 EXPECTED_APP_VERSION is the release this file describes",
       releases_at_least(EXPECTED_APP_VERSION, "1.7"), EXPECTED_APP_VERSION)
 check_release_state(ROOT)

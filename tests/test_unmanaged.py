@@ -790,8 +790,10 @@ check("§8 the i18n pin moved by the ELEVEN keys of this release and by the ELEV
       "4: the device choice of the disk row with its tooltip, the card's device list and the "
       "sentence of a device the listing lost, and v1.7.2 adds 4: the third row of the display "
       "mode (the single window), the merge action with its one closing report and the remote "
-      "title of a tab",
-      EXPECTED_I18N_KEYS == 811 + 17 + 13 + 5 + 8 + 9 + 4 + 3 + 4 + 4, str(EXPECTED_I18N_KEYS))
+      "title of a tab, and v1.7.3 adds 19: the Send-to row and its dialog, the busy/progress/done/"
+      "failed reports, the two-sided conflict facts, the remembered-folder sentence, the two drop"
+      " refusals and the Word wrap row",
+      EXPECTED_I18N_KEYS == 811 + 17 + 13 + 5 + 8 + 9 + 4 + 3 + 4 + 4 + 19, str(EXPECTED_I18N_KEYS))
 _missing = {code: [k for k in NEW_KEYS if not str(data.get(k) or "").strip()]
             for code, data in LANGS.items()}
 check(f"§8 the {len(NEW_KEYS)} keys of v1.6.5 are present and non-empty in every language",

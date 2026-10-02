@@ -85,6 +85,72 @@ class SshMixin:
                 continue  # C++ object removed during teardown — keep looking
         return None
 
+    def _send_session_targets(self, exclude_key=""):
+        """v1.7.3 (ROADMAP v1.7.3, task 1): the sessions a file may be SENT to — the provider.
+
+        The registry owns the sessions, so the walk lives here and a Files container finds it
+        through the parent chain (`find_host_hook`, the `_adopt_split_session` precedent): the pane
+        never imports this window (§4.1). A session is offered when it can really RECEIVE a file —
+        it has a Files container AND a live SFTP worker (a session whose Files tab was never opened
+        has no channel), and it is not the caller itself (`exclude_key` is the sender's own
+        `history_key()`). A SPLIT PANE is not a Files session at all. Never raises: one broken
+        session must not hide the others.
+        """
+        try:
+            from modules.sftp_send import endpoint_from_tab
+        except ImportError:  # flat launch from the project root
+            from ..modules.sftp_send import endpoint_from_tab
+        try:
+            from modules.command_history import history_key
+        except ImportError:  # flat launch from the project root
+            from ..modules.command_history import history_key
+        targets = []
+        for session in list(getattr(self, "_terminal_windows", [])):
+            try:
+                if getattr(session, "_is_split_pane", False):
+                    continue
+                tab = getattr(session, "sftp_tab", None)
+                worker = getattr(session, "_sftp_worker", None)
+                if tab is None or worker is None:
+                    continue
+                data = getattr(session, "server_data", None)
+                key = history_key(getattr(data, "id", ""))
+                if not key or key == str(exclude_key or ""):
+                    continue
+                targets.append(endpoint_from_tab(
+                    tab, key=key, label=getattr(data, "alias", "") or "",
+                    host=getattr(data, "host", "") or "",
+                    port=getattr(data, "ssh_port", 22), worker=worker))
+            except Exception:  # noqa: BLE001 — one dead session never hides the rest
+                continue
+        return targets
+
+    def _save_remembered_dirs(self):
+        """v1.7.3 (ROADMAP v1.7.3, task 2): write the per-server directory memory of every session.
+
+        The map is APPLICATION-level, so it is collected from every live Files container — the
+        windows AND the dock — into ONE merged write (each container merges its own entries into
+        the LIVE config, so no session can overwrite another's). Called from `closeEvent`, next to
+        the geometry, with the same "must not block closing" rule. Never raises.
+        """
+        try:
+            from i18n import save_config
+        except Exception:  # noqa: BLE001 — a build without i18n has no memory to write
+            return
+        payload = {}
+        for session in list(getattr(self, "_terminal_windows", [])):
+            try:
+                merge = getattr(getattr(session, "sftp_tab", None), "merge_dirs_into", None)
+                if callable(merge):
+                    merge(payload)
+            except Exception:  # noqa: BLE001 — one broken session must not lose the others
+                continue
+        if payload:
+            try:
+                save_config(payload)
+            except Exception:  # noqa: BLE001 — the memory is not worth a failed close
+                pass
+
     def _last_terminal_window(self):
         """v1.7.2 (task 4): the LAST live terminal WINDOW — the `"single"` mode's one container.
 

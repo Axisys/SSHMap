@@ -2097,6 +2097,15 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
         except Exception:  # noqa: BLE001 — the widths must not block closing
             pass
 
+        # v1.7.3 (ROADMAP v1.7.3, task 2): the per-server directory memory of EVERY live Files
+        # container — the terminal windows and the dock alike — goes out in ONE merged write here,
+        # because the map is application-level and the close is the one moment every session is
+        # still alive. Same rule as the geometry above: it must never block the close.
+        try:
+            self._save_remembered_dirs()
+        except Exception:  # noqa: BLE001 — the memory must not block closing
+            pass
+
         # v0.9.7: autosave stops BEFORE the dialog — while the user decides
         # (Save/Discard/Cancel) no writes to ~/.sshmap/autosave are needed.
         try:

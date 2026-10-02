@@ -11,6 +11,7 @@ The pane-scoped keys (`F3`/`F5`/`F6`/`F7`/`F8` as `Qt.WidgetWithChildrenShortcut
 plus `Tab`/`Shift+Tab` and the walk keys of `_on_pane_key()`) leave the canvas's claim on the F-keys
 intact; the Commander spends ONE button row (the first pane) and the second pane's line on the key
 hints, and a preview opens IN THE OTHER PANE. Contract — `SFTP_PANES.md`; mechanism — §38, §59-§63."""
+import json
 import os
 import posixpath
 from datetime import datetime
@@ -71,6 +72,16 @@ try:  # v1.4.7 (ROADMAP task 4): detection + tokenizers + the ONE highlighter
     from . import syntax_highlight as syntax
 except ImportError:
     import syntax_highlight as syntax
+
+try:  # v1.7.3 (ROADMAP v1.7.3, task 1): the cross-session relay and its dialog
+    from . import sftp_send as send
+except ImportError:  # flat launch from the project root
+    import sftp_send as send
+
+try:  # v1.7.3 (ROADMAP v1.7.3, task 1): the parent-chain host hook of the Send-to provider
+    from .terminal_split import find_host_hook
+except ImportError:  # flat launch from the project root
+    from terminal_split import find_host_hook
 
 
 # ── the Files Commander — the pane model ───────────
@@ -133,6 +144,128 @@ BUTTONS_BAR_MIN_WIDTH = 0
 #: The worker signals a pane binds (the container owns the worker, the pane its slots).
 WORKER_SIGNAL_NAMES = ("list_ready", "task_started", "task_done", "task_error",
                        "task_cancelled", "read_ready", "normalize_ready")
+
+#: v1.7.3: the per-server directory memory. ONE key of `~/.sshmap/config.json` holds a map
+#: `{server key: directory}` (`history_key()` is the key), written by the window's close and read
+#: when a pane is built; the map outlives the servers it names, so it is BOUNDED and evicted
+#: oldest-first. A restored path is a HINT: a directory the server refuses falls back to the
+#: shipped opening rule with ONE status line.
+DIRS_CONFIG = "ui_sftp_dirs"
+MAX_REMEMBERED_DIRS = 32
+
+#: v1.7.3: the reader's WORD WRAP — ONE global boolean (`terminal_wheel`'s validation rule): the
+#: extension is a HINT, the value is a real JSON bool or the default.
+VIEWER_WRAP_CONFIG = "ui_viewer_wrap"
+
+#: v1.7.3: the drag payload of a row that started INSIDE a Files pane. The remote path alone
+#: cannot say WHICH pane (two servers show the same path), so the private type carries the session
+#: key, the pane's identity and the path while `text/plain` keeps the plain path for every foreign
+#: consumer (a terminal, an editor, a chat window).
+PANE_DRAG_MIME = "application/x-sshmap-pane-row"
+
+
+def load_remembered_dirs() -> dict:
+    """The per-server directory map from `~/.sshmap/config.json` ({} — nothing to restore).
+
+    FOREIGN content answers `{}` rather than a guess (a string where a map is expected, an entry
+    whose path is not absolute): a broken config must never navigate a pane anywhere. Never raises.
+    """
+    try:
+        from i18n import load_config
+    except Exception:  # noqa: BLE001 — a build without i18n keeps no memory
+        return {}
+    try:
+        raw = (load_config() or {}).get(DIRS_CONFIG)
+    except Exception:  # noqa: BLE001 — a broken config store must not break a pane
+        return {}
+    return sanitize_dirs(raw)
+
+
+def sanitize_dirs(raw) -> dict:
+    """The usable entries of a stored map: a string key and an ABSOLUTE path, or nothing."""
+    out = {}
+    if not isinstance(raw, dict):
+        return out
+    for key, path in raw.items():
+        name, value = str(key or ""), str(path or "")
+        if name and value.startswith("/"):
+            out[name] = value
+    return out
+
+
+def remember_dir(mapping, key, path, limit: int = MAX_REMEMBERED_DIRS) -> dict:
+    """Move ONE `{server key: directory}` entry to the END, evicting the OLDEST over the cap (PURE).
+
+    Insertion order IS the age, so the eviction needs no timestamp and the map stays a plain JSON
+    object; a blank key or a relative path changes NOTHING (a remote directory is absolute).
+    """
+    out = dict(mapping or {})
+    name, value = str(key or ""), str(path or "")
+    if name and value.startswith("/"):
+        out.pop(name, None)
+        out[name] = value
+    while len(out) > max(1, int(limit)):
+        out.pop(next(iter(out)))
+    return out
+
+
+def remembered_dir_for(mapping, key) -> str:
+    """The directory remembered for ONE server key ("" — never visited / no memory)."""
+    try:
+        return str((mapping or {}).get(str(key or "")) or "")
+    except Exception:  # noqa: BLE001 — a foreign mapping is simply "no memory"
+        return ""
+
+
+def resolve_viewer_wrap(cfg: dict = None) -> bool:
+    """The reader's word wrap as a PURE value (v1.7.3).
+
+    Only a real JSON `true`/`false` counts; anything else — a string `"true"`, a number, a missing
+    key, an unreadable config — answers the DEFAULT (`False`: the shipped no-wrap look).
+    """
+    if not isinstance(cfg, dict):
+        try:
+            from i18n import load_config
+        except Exception:  # noqa: BLE001 — a build without i18n keeps the default
+            return False
+        try:
+            cfg = load_config() or {}
+        except Exception:  # noqa: BLE001 — a broken config store keeps the default
+            cfg = {}
+    value = cfg.get(VIEWER_WRAP_CONFIG) if isinstance(cfg, dict) else None
+    return value if isinstance(value, bool) else False
+
+
+def save_viewer_wrap(on) -> bool:
+    """Write the ONE word-wrap key (merge-write; False — the config could not be written)."""
+    try:
+        from i18n import save_config
+    except Exception:  # noqa: BLE001 — a build without i18n cannot remember it
+        return False
+    try:
+        return bool(save_config({VIEWER_WRAP_CONFIG: bool(on)}))
+    except Exception:  # noqa: BLE001 — a write failure must not break the reader
+        return False
+
+
+def pane_payload(mime_data):
+    """The `{session, pane, path}` payload of a drag that started inside a pane (None — foreign).
+
+    A malformed payload (not JSON, not an object, no path) is a FOREIGN drag: the pane then behaves
+    exactly as it did before the private type existed.
+    """
+    if mime_data is None or not mime_data.hasFormat(PANE_DRAG_MIME):
+        return None
+    try:
+        data = json.loads(bytes(mime_data.data(PANE_DRAG_MIME)).decode("utf-8"))
+    except (ValueError, TypeError, UnicodeDecodeError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    path = str(data.get("path") or "")
+    if not path:
+        return None
+    return {"session": str(data.get("session") or ""), "pane": data.get("pane"), "path": path}
 
 
 def load_commander_settings():
@@ -257,7 +390,7 @@ def preview_block_reason(path: str, size, facts=None) -> str:
     return ""
 
 
-def ask_conflict(parent, name: str, target: str, remaining: int = 0):
+def ask_conflict(parent, name: str, target: str, remaining: int = 0, facts: str = ""):
     """v1.3.3.2 (ROADMAP task 2): the overwrite question for ONE item of a batch.
 
     Returns `(action, apply_all)`, where action is one of
@@ -272,6 +405,9 @@ def ask_conflict(parent, name: str, target: str, remaining: int = 0):
     `remaining` is the number of conflicts still to come in this batch — "Apply to
     all" is offered only when there is anything left to apply it to.
 
+    `facts` is the ONE optional line the cross-session send adds (v1.7.3): both sides'
+    size and date, rendered as the message box's informative text when it is non-empty.
+
     The QMessageBox is taken as a MODULE ATTRIBUTE at call time
     (`STAB.QMessageBox = <fake>` is the test seam — the command-library pattern);
     the pane's `_ask_conflict()` is the caller, so a test can also replace the whole
@@ -284,6 +420,11 @@ def ask_conflict(parent, name: str, target: str, remaining: int = 0):
     except Exception:   # noqa: BLE001 — an exotic Qt build without the enum
         pass
     box.setText(_t("sftp.conflict.message", name=name, target=target))
+    if facts:
+        try:
+            box.setInformativeText(str(facts))
+        except Exception:   # noqa: BLE001 — a build without the setter keeps the question
+            pass
     btn_over = box.addButton(_t("sftp.conflict.overwrite"),
                              QMessageBox.ButtonRole.AcceptRole)
     box.addButton(_t("sftp.conflict.skip"),
@@ -351,6 +492,7 @@ class _SftpTree(QTreeWidget):
         super().__init__(parent)
         self.focus_in = None   # a zero-argument callable — set by the owning pane
         self.pane_key = None   # a one-argument callable (the key event) — set by the pane
+        self.pane = None       # v1.7.3: the pane this tree lists (the drag payload's identity)
 
     def keyPressEvent(self, event):
         """Hand the key to the pane first (v1.7rc3); False — Qt's own tree behaviour."""
@@ -398,9 +540,12 @@ class _SftpTree(QTreeWidget):
         drag.exec(Qt.DropAction.CopyAction)
 
     def drag_mime(self, item):
-        """The drag payload of a row: the remote path as text/plain.
+        """The drag payload of a row: the remote path as text/plain, plus the PANE identity.
 
-        None — nothing to drag (no row / a row without a path).
+        None — nothing to drag (no row / a row without a path). v1.7.3: the private
+        `PANE_DRAG_MIME` carries `{session, pane, path}` so a drop INSIDE a pane can tell which
+        pane the row came from (two servers can show the same path) and refuse a foreign session —
+        while `text/plain` keeps the plain path for every foreign target.
         """
         if item is None:
             return None
@@ -409,6 +554,10 @@ class _SftpTree(QTreeWidget):
             return None
         mime = QMimeData()
         mime.setText(str(path))
+        pane = self.pane
+        if pane is not None:
+            payload = {"session": pane.session_key(), "pane": id(pane), "path": str(path)}
+            mime.setData(PANE_DRAG_MIME, json.dumps(payload).encode("utf-8"))
         return mime
 
     def focusInEvent(self, event):
@@ -474,6 +623,10 @@ class _SftpPane(QWidget):
     # neighbours are already done).
     VIEWER_LAZY_MARGIN = syntax.VIEWER_LAZY_MARGIN
 
+    # v1.7.3: the multiplier of that margin while the reader WRAPS — one block is several visual
+    # rows there, so the window has to reach further to cover the same distance on the screen.
+    WRAP_MARGIN_FACTOR = 2
+
     # Local hints in the window's status bar (waiting for connection, no selection).
     # Worker errors/progress are shown by the window itself via its signals.
     message = Signal(str)
@@ -508,6 +661,9 @@ class _SftpPane(QWidget):
         # drop on a directory row — task_id → (target dir, local files).
         self._op_tasks = {}
         self._pending_batches = {}
+        # v1.7.3: the pane-to-pane drops whose target directory is NOT on the screen — the task id
+        # of the pre-flight listing → (the (source, name) pairs, the kind, the destination).
+        self._pending_drops = {}
         self._drag_source = None      # the widget the current drag event came from
         # v1.7rc3: the viewer's MOVE (the mc preview of the two-pane view). `_viewer_home` is the
         # pane the viewer widget belongs to, and the pane currently CARRYING it is the one whose
@@ -535,6 +691,13 @@ class _SftpPane(QWidget):
         self._op_batches = {}
         self._batches = {}
         self._batch_seq = 0
+        # v1.7.3 (ROADMAP v1.7.3, task 2): the remembered directory of this session — the hint the
+        # FIRST transport of each pane opens, and the flag that keeps a second list from re-asking.
+        self._restored = False
+        self._restore_dir = ""
+        # v1.7.3 (ROADMAP v1.7.3, task 4): the reader's word wrap — ONE global setting, read at
+        # construction so both panes and every session agree.
+        self._viewer_wrap = resolve_viewer_wrap()
         # v1.7rc1: the pane-scoped keys (the F-actions) and the ACTIVE-pane ring.
         self._pane_actions = []
         self._ring = focus_ring.FocusRing(styled_widget=None) if focus_ring is not None else None
@@ -655,6 +818,10 @@ class _SftpPane(QWidget):
         self.viewer_text = QPlainTextEdit()
         self.viewer_text.setReadOnly(True)          # v1.3.1: read-only (editing is rejected)
         self.viewer_text.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap)
+        # v1.7.3: the reader's OWN context menu — Qt's standard one PLUS the "Word wrap" row, which
+        # is why the menu is built by a method (the `_build_context_menu` test seam).
+        self.viewer_text.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.viewer_text.customContextMenuRequested.connect(self._on_viewer_menu)
         self.viewer_text.setFont(
             QFontDatabase.systemFont(QFontDatabase.SystemFont.FixedFont))
         # v1.4.7: the lazy hook — updateRequest fires on a scroll AND on a
@@ -662,6 +829,7 @@ class _SftpPane(QWidget):
         self.viewer_text.updateRequest.connect(self._on_viewer_update_request)
         viewer_box.addWidget(self.viewer_text, 1)
         self.viewer.hide()
+        self.set_viewer_wrap(self._viewer_wrap, persist=False)
 
         self.splitter = QSplitter(Qt.Orientation.Horizontal)
         self.splitter.addWidget(self.tree)
@@ -691,6 +859,8 @@ class _SftpPane(QWidget):
         self._build_pane_shortcuts()
         # v1.7rc3: the tree hands its keys to the pane (the walk of the two-pane view).
         self.tree.pane_key = self._on_pane_key
+        # v1.7.3: the tree hands out the pane's IDENTITY with a dragged row (the pane-to-pane drop).
+        self.tree.pane = self
         if self._ring is not None:
             self._ring.styled_widget = self.tree
             self._ring.apply()
@@ -701,6 +871,13 @@ class _SftpPane(QWidget):
     def worker(self):
         """The SHARED worker — the CONTAINER owns the binding (SFTP_PANES.md §2)."""
         return self._container.worker
+
+    def session_key(self) -> str:
+        """The stable identity of the SESSION this pane lists (the container's, v1.7.3)."""
+        try:
+            return str(self._container.session_key() or "")
+        except (AttributeError, RuntimeError):
+            return ""
 
     def activate(self):
         """Tell the container that the keyboard entered THIS pane (the ACTIVE pane)."""
@@ -1124,6 +1301,8 @@ class _SftpPane(QWidget):
         # transport that was asked — a new worker starts with a clean bookkeeping.
         self._op_tasks.clear()
         self._pending_batches.clear()
+        # v1.7.3: the dropped rows waiting for a listing belong to ONE transport as well.
+        self._pending_drops.clear()
         # v1.6.3: the address bar's tasks and the completer's listings belong to ONE
         # transport as well (a normalize of the previous server must not navigate THIS one).
         self._normalize_tasks.clear()
@@ -1165,7 +1344,19 @@ class _SftpPane(QWidget):
                   self.btn_download):
             b.setEnabled(True)
         self.path_label.setReadOnly(False)
-        self._relist(self._current_dir)
+        # v1.7.3 (task 2): the FIRST transport of this pane opens the directory the server was
+        # left in (ONE per-server key, a HINT): the answer may be a refusal, and `_on_task_error`
+        # then says so and falls back to the shipped opening rule.
+        start = self._current_dir
+        try:
+            hint = "" if self._restored else self._container.remembered_dir()
+        except (AttributeError, RuntimeError):
+            hint = ""   # a foreign container without the memory — the shipped opening rule
+        if hint:
+            self._restored = True
+            self._restore_dir = hint
+            start = hint
+        self._relist(start)
 
     def _disconnect_worker(self, worker):
         """Drop this pane's slots from a worker (idempotent — a not-connected slot is a no-op)."""
@@ -1414,6 +1605,13 @@ class _SftpPane(QWidget):
             self.message.emit(
                 _t("sftp.drop_queued", count=len(files), dir=target))
             return
+        # v1.7.3: the pre-flight listing of a PANE-to-pane drop — the same rule as above, for the
+        # copy/move batch whose destination is not the directory on the screen.
+        dropped = self._pending_drops.pop(task_id, None)
+        if dropped is not None:
+            items, kind, target = dropped
+            self._queue_transfer_batch(items, kind, target, {e["name"] for e in entries})
+            return
         requested = self._pending_lists.pop(task_id, None)
         # Staleness filter: render only the response for the CURRENT directory
         # (navigation or Refresh while an old listing was in flight — ignored).
@@ -1436,6 +1634,10 @@ class _SftpPane(QWidget):
         for e in entries:
             self._add_entry_item(e)
         self._focus_first_row()
+        # v1.7.3 (task 2): a directory the SERVER really answered for is what memory keeps — and
+        # the restored hint has arrived, so it is no longer pending.
+        self._restore_dir = ""
+        self._container.remember_dir(self._current_dir)
 
     def _focus_first_row(self):
         """Put the CURSOR on the first navigable row of a freshly rendered listing.
@@ -1655,8 +1857,20 @@ class _SftpPane(QWidget):
             # v1.3.3.2: the pre-flight listing of a drop on a row failed (the
             # directory vanished / no permission) — the batch is dropped, the pane
             # reports the reason instead of uploading into nowhere.
+            failed_dir = self._pending_lists.pop(task_id, None)
+            # v1.7.3 (task 2): the REMEMBERED directory may be the one that is gone — a restored
+            # path is a hint, so the pane says so and opens the shipped starting directory.
+            if failed_dir and failed_dir == self._restore_dir:
+                self._restore_dir = ""
+                self._restored = True
+                self.message.emit(_t("sftp.dir_missing", path=failed_dir, fallback="/"))
+                self._relist("/")
+                self._on_task_finished(task_id)
+                return
             pending = self._pending_batches.pop(task_id, None)
             if pending is not None:
+                self.message.emit(_t("sftp.op.error", error=message))
+            if self._pending_drops.pop(task_id, None) is not None:
                 self.message.emit(_t("sftp.op.error", error=message))
         self._on_task_finished(task_id)
 
@@ -1895,6 +2109,88 @@ class _SftpPane(QWidget):
                 self._highlighter = None
         return self._highlighter
 
+    # ── v1.7.3 (task 4): the reader's word wrap ─────────────────────────────
+
+    def _build_viewer_menu(self):
+        """The reader's menu: Qt's OWN standard one PLUS the ONE app row (`Word wrap`).
+
+        `createStandardContextMenu()` carries Copy / Select All translated by Qt itself (no i18n
+        key of ours), so the app row is APPENDED after a separator — the same seam shape as
+        `_build_context_menu()`: the tests trigger the QAction directly and never run `exec()`.
+        """
+        menu = self.viewer_text.createStandardContextMenu()
+        menu.addSeparator()
+        act = QAction(_t("sftp.viewer.word_wrap"), menu)
+        act.setCheckable(True)
+        act.setChecked(bool(self._viewer_wrap))
+        act.toggled.connect(self._on_wrap_toggled)
+        menu.addAction(act)
+        self._wrap_action = act
+        return menu
+
+    def _on_viewer_menu(self, pos):
+        """Show the reader's menu at the click (the event is the only caller of the seam)."""
+        try:
+            menu = self._build_viewer_menu()
+            menu.exec(self.viewer_text.viewport().mapToGlobal(pos))
+            menu.deleteLater()
+        except RuntimeError:
+            return   # Qt teardown — the panel is already gone
+
+    def _on_wrap_toggled(self, on: bool):
+        """The row was toggled: the CONTAINER owns the ONE global setting (v1.7.3)."""
+        apply_all = getattr(self._container, "apply_viewer_wrap", None)
+        if callable(apply_all):
+            try:
+                apply_all(bool(on))
+                return
+            except RuntimeError:
+                return   # Qt teardown — nothing left to re-text
+        self.set_viewer_wrap(on)
+
+    def _apply_viewer_wrap(self):
+        """Write the mode into the widget and re-run the lazy pass (the wrap changes the window).
+
+        Never raises: a viewer without the enum (an exotic Qt build) keeps the shipped no-wrap look.
+        """
+        mode = (QPlainTextEdit.LineWrapMode.WidgetWidth if self._viewer_wrap
+                else QPlainTextEdit.LineWrapMode.NoWrap)
+        try:
+            self.viewer_text.setLineWrapMode(mode)
+        except (RuntimeError, AttributeError):
+            return
+        self._highlight_range = None
+        self._highlight_visible(force=True)
+
+    def set_viewer_wrap(self, on, persist: bool = True) -> bool:
+        """Set the reader's word wrap for THIS pane (the container walks the rest)."""
+        self._viewer_wrap = bool(on)
+        self._apply_viewer_wrap()
+        act = getattr(self, "_wrap_action", None)
+        if act is not None:
+            try:
+                act.setChecked(self._viewer_wrap)
+            except RuntimeError:
+                pass   # Qt teardown — the menu is already gone
+        if persist:
+            return save_viewer_wrap(self._viewer_wrap)
+        return True
+
+    @property
+    def viewer_wrap(self) -> bool:
+        """Is the reader wrapping long lines (the topical seam)?"""
+        return bool(self._viewer_wrap)
+
+    def _lazy_margin(self) -> int:
+        """The blocks the lazy window keeps around the viewport.
+
+        Under wrapping ONE block covers SEVERAL visual rows, so the block margin is widened: the
+        same visual distance stays formatted around the viewport (the measured seam of the mode).
+        """
+        if self._viewer_wrap:
+            return self.VIEWER_LAZY_MARGIN * self.WRAP_MARGIN_FACTOR
+        return self.VIEWER_LAZY_MARGIN
+
     def _viewer_block_range(self):
         """The block numbers on the screen → `(first, last)`, or None.
 
@@ -1936,8 +2232,9 @@ class _SftpPane(QWidget):
         window = self._viewer_block_range()
         if window is None:
             return 0
-        first = max(0, window[0] - self.VIEWER_LAZY_MARGIN)
-        last = window[1] + self.VIEWER_LAZY_MARGIN
+        margin = self._lazy_margin()
+        first = max(0, window[0] - margin)
+        last = window[1] + margin
         if not force and (first, last) == self._highlight_range:
             return 0
         self._highlight_range = (first, last)
@@ -2036,6 +2333,14 @@ class _SftpPane(QWidget):
         self._queue_downloads(items, local_dir)
 
     def _on_cancel(self):
+        # v1.7.3: a running `Send to…` is cancelled with the queue it uses — the relay drops its
+        # spool on the way out (a cancel must never leave a plaintext copy behind).
+        cancel_sends = getattr(self._container, "cancel_sends", None)
+        if callable(cancel_sends):
+            try:
+                cancel_sends()
+            except RuntimeError:
+                pass   # Qt teardown — the container is already gone
         if self.worker is not None:
             self.worker.cancel()
 
@@ -2059,9 +2364,9 @@ class _SftpPane(QWidget):
             pass  # the C++ object was already destroyed (a close race)
         return names
 
-    def _ask_conflict(self, name: str, target: str, remaining: int):
+    def _ask_conflict(self, name: str, target: str, remaining: int, facts: str = ""):
         """The overwrite question — a method so a test can replace the whole policy."""
-        return ask_conflict(self, name, target, remaining)
+        return ask_conflict(self, name, target, remaining, facts)
 
     def _conflict_decision(self, name: str, target: str, remaining: int):
         """The decision of ONE conflict → `(action, apply_all)`.
@@ -2218,6 +2523,9 @@ class _SftpPane(QWidget):
         is skipped, because copying or moving a file onto itself is not an operation. The
         overwrite/skip/rename question is asked through the SHIPPED machinery and its "apply
         to all" answer holds for the rest of this batch only.
+
+        v1.7.3: the body moved into `_queue_transfer_batch()` — the pane-to-pane drop needs
+        exactly the same batch over a SOURCE LIST that is not the selection.
         """
         worker = self.worker
         if worker is None:
@@ -2227,9 +2535,21 @@ class _SftpPane(QWidget):
         if not rows:
             self.message.emit(_t("sftp.cmd.no_selection"))
             return
-        target_dir = target_pane.current_dir
-        known = target_pane._names_in_current_dir()
         items = [(row.data(0, self.PATH_ROLE), row.text(0)) for row in rows]
+        self._queue_transfer_batch(items, kind, target_pane.current_dir,
+                                   target_pane._names_in_current_dir())
+
+    def _queue_transfer_batch(self, items: list, kind: str, target_dir: str, known: set):
+        """ONE copy/move batch of `(source, row_name)` pairs into `target_dir` (v1.7rc2/v1.7.3).
+
+        `known` is the destination's listing as it is on the screen (never a guess), the ".."
+        row and a pathless row are never part of a batch, a row that already IS the destination
+        is skipped, and the ONE closing report counts copied / skipped / failed.
+        """
+        worker = self.worker
+        if worker is None:
+            self.message.emit(_t("sftp.waiting_connection"))
+            return
         total = len(items)
         skipped = 0
         queued = []
@@ -2364,6 +2684,10 @@ class _SftpPane(QWidget):
         act_rename = menu.addAction(_t("sftp.op.rename"))
         act_delete = menu.addAction(_t("sftp.op.delete"))
         act_copy = menu.addAction(_t("sftp.op.copy_path"))
+        # v1.7.3 (task 1): `Send to ▸ <session>` — the rows of the sessions open RIGHT NOW.
+        sub = self._build_send_menu(item)
+        if sub is not None:
+            menu.addMenu(sub)
         menu.addSeparator()
         act_refresh = menu.addAction(_t("sftp.refresh"))
 
@@ -2379,6 +2703,53 @@ class _SftpPane(QWidget):
             act_delete.triggered.connect(lambda: self._op_delete(item))
             act_copy.triggered.connect(lambda: self._op_copy_path(item))
         return menu
+
+    # ── v1.7.3 (task 1): `Send to ▸ <session>` — the cross-session relay ──
+
+    def _build_send_menu(self, item):
+        """The `Send to ▸ <session>` submenu of one row (None — an empty space, no row at all).
+
+        The sessions come from the CONTAINER's provider, so this module never learns where a window
+        keeps its registry. A row that is not a FILE answers ONE sentence (a directory crosses
+        through the two panes, the relay carries files) and a session list that is empty says so
+        instead of offering a dead menu — both are DISABLED rows, which is the shipped hint rule.
+        """
+        if item is None or item is self._up_item or not item.data(0, self.PATH_ROLE):
+            return None
+        menu = QMenu(_t("sftp.send.menu"), self)
+        if item.data(0, self.ISDIR_ROLE):
+            menu.addAction(_t("sftp.send.no_file")).setEnabled(False)
+            return menu
+        targets = self._container.send_targets() if self._container is not None else []
+        if not targets:
+            menu.addAction(_t("sftp.send.no_targets")).setEnabled(False)
+            return menu
+        for target in targets:
+            label = target.label or target.host or "?"
+            act = menu.addAction(f"{label} ({target.directory or '/'})")
+            act.triggered.connect(lambda _checked=False, t=target, i=item: self._op_send_to(i, t))
+        return menu
+
+    def _op_send_to(self, item, target):
+        """Send ONE file row to another session (the size gate, then the container's relay)."""
+        if self.worker is None:
+            self.message.emit(_t("sftp.waiting_connection"))
+            return
+        path = item.data(0, self.PATH_ROLE) if item is not None else ""
+        if not path or (item is not None and item.data(0, self.ISDIR_ROLE)):
+            self.message.emit(_t("sftp.send.no_file"))
+            return
+        size = int(item.data(0, self.SIZE_ROLE) or 0)
+        # The declared ceiling is checked BEFORE anything is transferred (the ask's own number).
+        if not send.size_allowed(size):
+            self.message.emit(_t("sftp.send.too_big", name=posixpath.basename(path),
+                                 size=format_size(size), limit=format_size(send.MAX_SEND_BYTES)))
+            return
+        entry = {"path": path, "name": posixpath.basename(path), "size": size,
+                 "mtime": int(item.data(0, self.MTIME_ROLE) or 0)}
+        if self._container is None:
+            return
+        self._container.start_send(self, target, entry)
 
     def _op_new_folder(self):
         """New folder in the CURRENT directory (mkdir through the worker queue)."""
@@ -2511,20 +2882,76 @@ class _SftpPane(QWidget):
         return local_files(mime_data)
 
     def dragEnterEvent(self, event):
-        if local_files(event.mimeData()):
+        # v1.7.3: a row of ANOTHER Files pane is a payload of its own (the private mime type) —
+        # `local_files()` cannot see it and the drop below is a copy or a move.
+        if local_files(event.mimeData()) or pane_payload(event.mimeData()):
             event.acceptProposedAction()
 
     def dragMoveEvent(self, event):
         # Same answer as dragEnter — otherwise Qt will reset the action before Drop.
-        if local_files(event.mimeData()):
+        if local_files(event.mimeData()) or pane_payload(event.mimeData()):
             event.acceptProposedAction()
 
     def dropEvent(self, event):
+        # v1.7.3 (task 3): a row dragged out of a pane and dropped INTO a pane is the v1.7rc2
+        # copy (a MOVE with `Shift`) with a PANE as its destination.
+        payload = pane_payload(event.mimeData())
+        if payload is not None:
+            event.acceptProposedAction()
+            self._on_pane_drop(payload, event)
+            return
         target = self._drop_target_dir(event)
         files = local_files(event.mimeData())
         if files:
             event.acceptProposedAction()
         self._on_drop(files, target)
+
+    @staticmethod
+    def _drop_is_move(event) -> bool:
+        """Is this drop a MOVE? `Shift`+drop is one (the classic commander reading)."""
+        try:
+            if event.dropAction() == Qt.DropAction.MoveAction:
+                return True
+        except (AttributeError, RuntimeError):
+            pass   # an exotic event object without the action — the modifier decides
+        try:
+            return bool(event.modifiers() & Qt.KeyboardModifier.ShiftModifier)
+        except (AttributeError, RuntimeError):
+            return False
+
+    def _on_pane_drop(self, payload: dict, event):
+        """A row of a pane dropped into THIS pane: copy, or move with `Shift` (v1.7.3).
+
+        TWO refusals are declared and each answers ONE sentence: the row may come from THIS pane
+        (nothing to copy), and it may belong to ANOTHER session — there is no server-to-server
+        path, so a file crosses between servers through `Send to…`, never through a drag.
+        """
+        if payload.get("pane") == id(self):
+            self.message.emit(_t("sftp.cmd.drop_same_pane"))
+            return
+        if not self.session_key() or payload.get("session") != self.session_key():
+            self.message.emit(_t("sftp.cmd.drop_other_session"))
+            return
+        if self.worker is None:
+            self.message.emit(_t("sftp.waiting_connection"))
+            return
+        source = str(payload.get("path") or "")
+        if not source:
+            self.message.emit(_t("sftp.cmd.no_selection"))
+            return
+        items = [(source, posixpath.basename(source))]
+        kind = KIND_MOVE if self._drop_is_move(event) else KIND_COPY
+        target_dir = self._drop_target_dir(event) or self._current_dir
+        if target_dir == self._current_dir:
+            self._queue_transfer_batch(items, kind, target_dir, self._names_in_current_dir())
+            return
+        # The destination row is not on the screen: LIST it first (the shipped pre-flight rule) so
+        # the conflict question is the server's own answer.
+        task_id = self.worker.queue_list(target_dir)
+        if task_id is None:
+            self._queue_transfer_batch(items, kind, target_dir, set())
+            return
+        self._pending_drops[task_id] = (items, kind, target_dir)
 
     def _item_under(self, event):
         """The listing row under a drag event (None — empty space / outside the tree).
@@ -2753,7 +3180,7 @@ class SftpTab(QWidget):
         "_read_tasks", "_last_read", "_viewer_encoding", "_highlighter", "_viewer_language",
         "_highlight_range", "_blocked", "_blocked_icon_cache", "_op_tasks",
         "_pending_batches", "_drag_source", "_normalize_tasks", "_completer_lists",
-        "_completer_dir", "_op_batches", "_batches", "_batch_seq",
+        "_completer_dir", "_op_batches", "_batches", "_batch_seq", "_pending_drops",
     })
 
     # Local hints in the window's status bar (waiting for connection, no selection).
@@ -2778,6 +3205,20 @@ class SftpTab(QWidget):
         # v1.6.3/v1.7rc1: the follow state of the SESSION — the checkbox is a VIEW of it and
         # lives on the container (one OSC 7 report, one answer).
         self._follow_cwd = False
+        # v1.7.3 (task 1): the session's identity and the live sends. The KEY is the `history_key()`
+        # of the server (the per-server memory uses it too), the label/host/port are what the
+        # `Send to…` dialog prints and what decides the SAME-host (server-side) path; `_sends`
+        # holds ONE running send per TARGET session.
+        self._session_key = ""
+        self._session_label = ""
+        self._session_host = ""
+        self._session_port = None
+        self._sends = {}
+        # v1.7.3 (task 2): the per-server directory memory — the map read at construction (so a
+        # pane can restore a directory before anybody navigates) and the entries THIS container
+        # really moved, which are the ones its own write merges into the live config.
+        self._dirs = load_remembered_dirs()
+        self._dirs_touched = {}
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(6, 6, 6, 6)
@@ -2833,6 +3274,183 @@ class SftpTab(QWidget):
     def commander(self) -> bool:
         """The two-pane view is ON (the persisted `ui_sftp_commander` state)."""
         return bool(self._commander)
+
+    # ── v1.7.3 (task 1): the session's identity and the cross-session relay ──
+
+    def set_session_info(self, key: str = "", label: str = "", host: str = "", port=None):
+        """The SESSION this container lists (called once by the page that builds it).
+
+        The key is the `history_key()` of the server — the same fact the per-server directory
+        memory is filed under — and `(host, port)` is what turns a send into the server-side
+        `queue_copy()` path instead of a relay. A bare container (a unit test) simply has no
+        identity: no target is offered and no directory is remembered.
+        """
+        self._session_key = str(key or "")
+        self._session_label = str(label or "")
+        self._session_host = str(host or "")
+        self._session_port = port
+
+    def session_key(self) -> str:
+        """The stable identity of this session ("" — a container nobody identified)."""
+        return str(self._session_key or "")
+
+    def send_targets(self):
+        """The sessions `Send to ▸` offers — resolved through the PARENT CHAIN (v1.7.3).
+
+        The provider is the WINDOW's (`_send_session_targets`, the `_adopt_split_session`
+        precedent): `modules/*` never imports `ui.main_window` (§4.1), so the hook is found by
+        `find_host_hook()` and a detached container simply offers nothing. A target without a live
+        SFTP worker cannot receive a file and is skipped here, once, for every caller.
+        """
+        provider = find_host_hook(self, "_send_session_targets")
+        if not callable(provider):
+            return []
+        try:
+            targets = provider(self.session_key()) or []
+        except Exception:  # noqa: BLE001 — a broken provider must not break the menu
+            return []
+        return [t for t in targets if t is not None and getattr(t, "worker", None) is not None]
+
+    def start_send(self, pane, target, entry: dict) -> bool:
+        """Hand ONE row to the TARGET session's relay (v1.7.3). ONE send per session pair.
+
+        The conversation itself lives in `modules/sftp_send.py`; the container owns the two things
+        that must be true once per application state: the session's identity (the source endpoint)
+        and the guard that a second send to the same target is refused with ONE sentence while the
+        first one runs. The pane the user started from carries the reports.
+        """
+        if self._worker is None:
+            pane.message.emit(_t("sftp.waiting_connection"))
+            return False
+        if target is None or getattr(target, "worker", None) is None:
+            pane.message.emit(_t("sftp.send.no_targets"))
+            return False
+        key = str(getattr(target, "key", "") or "") or str(id(target))
+        if key in self._sends:
+            pane.message.emit(_t("sftp.send.busy",
+                                 alias=getattr(target, "label", "") or getattr(target, "host", "") or "?"))
+            return False
+        coordinator = send.SendCoordinator(self._source_endpoint(pane), target, entry, parent=self,
+                                           asker=self._send_asker(pane))
+        coordinator.report.connect(pane.message.emit)
+        coordinator.progress.connect(self._progress_reporter(pane, target, entry))
+        coordinator.finished.connect(
+            lambda result, p=pane, t=target, k=key: self._finish_send(p, t, k, result))
+        self._sends[key] = coordinator
+        if not coordinator.start():
+            self._sends.pop(key, None)
+            return False
+        return True
+
+    def _source_endpoint(self, pane) -> "send.SendEndpoint":
+        """The endpoint of THIS session: its identity, its worker and the pane's directory."""
+        return send.SendEndpoint(key=self.session_key(), label=self._session_label,
+                                 host=self._session_host, port=self._session_port,
+                                 worker=self._worker,
+                                 directory=(pane.current_dir if pane is not None else "/"))
+
+    @staticmethod
+    def _send_asker(pane):
+        """The pane's OWN overwrite question, adapted to the relay's `(parent, name, target, facts)`.
+
+        The pane keeps its `_ask_conflict()` seam (the tests replace it, and the shipped dialog behind
+        it), so the relay asks through the pane instead of reaching for `ask_conflict()` itself —
+        the container owns the session, the PANE owns the question. "Apply to all" is never offered
+        here: ONE file crosses per send.
+        """
+        def _ask(_parent, name, target_dir, facts=""):
+            try:
+                action, _apply_all = pane._ask_conflict(name, target_dir, 0, facts)
+            except Exception:  # noqa: BLE001 — a dialog must never break a transfer
+                return False
+            return action == "overwrite"
+
+        return _ask
+
+    def _progress_reporter(self, pane, target, entry):
+        """ONE composed progress line on the pane the user started from (1% steps at most)."""
+        alias = str(getattr(target, "label", "") or getattr(target, "host", "") or "?")
+        name = str(entry.get("name") or "")
+        state = {"pct": -1}
+
+        def _report(done: int, total: int):
+            pct = int(done * 100 / total) if total else 0
+            if pct == state["pct"]:
+                return   # one line per percent — a status bar is not a progress log
+            state["pct"] = pct
+            try:
+                pane.message.emit(_t("sftp.send.progress", name=name, alias=alias, pct=pct,
+                                     done=format_size(done), total=format_size(total)))
+            except RuntimeError:
+                return   # Qt teardown — the pane is already gone
+
+        return _report
+
+    def _finish_send(self, pane, target, key: str, result: dict):
+        """The ONE closing answer: forget the guard and re-list the directory that changed."""
+        self._sends.pop(key, None)
+        if not result.get("ok"):
+            return
+        refresh = getattr(target, "refresh", None)
+        if not callable(refresh):
+            return
+        try:
+            refresh(str(result.get("dir") or getattr(target, "directory", "") or ""))
+        except Exception:  # noqa: BLE001 — a stale listing is not a failed send
+            return
+
+    def cancel_sends(self):
+        """Cancel every send this container started (the pane's Cancel covers the relay too)."""
+        for coordinator in list(self._sends.values()):
+            try:
+                coordinator.cancel()
+            except Exception:  # noqa: BLE001 — a dead coordinator is already cancelled
+                continue
+
+    # ── v1.7.3 (task 2): the per-server directory memory ────────────────────
+
+    def remember_dir(self, path: str) -> bool:
+        """Remember the directory this session was left in (the server really answered for it)."""
+        key = self.session_key()
+        if not key or not str(path or "").startswith("/"):
+            return False
+        self._dirs = remember_dir(self._dirs, key, path)
+        self._dirs_touched = remember_dir(self._dirs_touched, key, path)
+        return True
+
+    def remembered_dir(self) -> str:
+        """The directory to OPEN with ("" — there is no memory / nobody identified this session)."""
+        return remembered_dir_for(self._dirs, self.session_key())
+
+    def merge_dirs_into(self, payload: dict = None) -> dict:
+        """Merge the per-server memory into the window's ONE config write (v1.7.3).
+
+        MERGE-on-write: the live config is re-read (another session may have moved meanwhile), this
+        container's own entries are filed into it, and the map — capped and evicted oldest-first —
+        rides out under ONE key. The commander's own payload is deliberately NOT touched here:
+        `SFTP_PANES.md` §5 declares those two keys, and a third one would change that contract.
+        """
+        out = dict(payload) if isinstance(payload, dict) else {}
+        current = out.get(DIRS_CONFIG)
+        if not isinstance(current, dict):
+            current = load_remembered_dirs()
+        merged = dict(current)
+        for key, path in self._dirs_touched.items():
+            merged = remember_dir(merged, key, path)
+        out[DIRS_CONFIG] = merged
+        return out
+
+    # ── v1.7.3 (task 4): the ONE global word-wrap setting ───────────────────
+
+    def apply_viewer_wrap(self, on) -> bool:
+        """Write the ONE word-wrap key and apply it to EVERY pane of this container (v1.7.3)."""
+        saved = save_viewer_wrap(bool(on))
+        for pane in list(self._panes):
+            try:
+                pane.set_viewer_wrap(on, persist=False)
+            except RuntimeError:
+                continue   # Qt teardown — the pane is already gone
+        return saved
 
     def other_pane(self, pane=None):
         """The pane that is NOT `pane` — the DESTINATION of F5/F6 (v1.7rc2).
@@ -3397,9 +4015,36 @@ class SftpTab(QWidget):
         except RuntimeError:
             return False  # Qt teardown — nothing to forward to
 
+    def _pane_under_drag(self, event):
+        """The pane the cursor is really OVER (None — nobody is under it).
+
+        The parent chain is not the answer: the v1.7.1 Files panel borrows the whole widget and a
+        Commander borrows its sibling's viewer, so the target is resolved from the WIDGET UNDER THE
+        CURSOR first and only then by ancestry (`_pane_for_widget` as the fallback). Never raises.
+        """
+        try:
+            try:
+                point = event.globalPosition().toPoint()
+            except AttributeError:   # an older event object without globalPosition()
+                point = event.globalPos()
+            widget = QApplication.widgetAt(point)
+        except (RuntimeError, AttributeError, TypeError):
+            widget = None
+        hops = 0
+        while widget is not None and hops < 32:
+            for pane in list(self._panes):
+                if widget is pane:
+                    return pane
+            try:
+                widget = widget.parentWidget()
+            except RuntimeError:
+                break
+            hops += 1
+        return None
+
     def _forward_drag(self, event, name: str):
-        """Deliver a drag event that reached the CONTAINER to the ACTIVE pane."""
-        pane = self._active_pane
+        """Deliver a drag event that reached the CONTAINER to the pane UNDER THE CURSOR."""
+        pane = self._pane_under_drag(event) or self._pane_for_widget(self._drag_source or self)
         if pane is None:
             return
         pane._drag_source = pane

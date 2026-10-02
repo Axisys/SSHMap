@@ -711,8 +711,10 @@ check("the version pin is the release this file describes",
       EXPECTED_APP_VERSION)
 check("the i18n pin counts the SHIPPED release (854 + the 9 keys of v1.7rc3"
       " + the 4 of the v1.7.1 Files panel + the 3 of the v1.7.1.1 Files display mode"
-      " + the 4 of the v1.7.1.2 device choice + the 4 of v1.7.2: the third row of the display mode (the single window), the merge action with its one closing report and the remote title of a tab)",
-      EXPECTED_I18N_KEYS == 854 + 9 + 4 + 3 + 4 + 4, str(EXPECTED_I18N_KEYS))
+      " + the 4 of the v1.7.1.2 device choice + the 4 of v1.7.2: the third row of the display mode (the single window), the merge action with its one closing report and the remote title of a tab"
+      " + the 19 of v1.7.3: the Send-to row and its dialog, the busy/progress/done/failed reports,"
+      " the two-sided conflict facts, the remembered-folder sentence, the two drop refusals and Word wrap)",
+      EXPECTED_I18N_KEYS == 854 + 9 + 4 + 3 + 4 + 4 + 19, str(EXPECTED_I18N_KEYS))
 check("VERSION_FORMAT did NOT move (the project schema is unchanged)",
       __import__("version").VERSION_FORMAT == "0.9")
 check("no new dependency was added for the walk (the four pinned ones)",

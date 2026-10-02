@@ -61,6 +61,20 @@ def main():
         # before the first card is built, so no card is ever born in the other mode.
         apply_density_setting(_saved_theme)
 
+        # v1.7.3 (ROADMAP v1.7.3, task 1): the cross-session relay spools ONE file under the OS
+        # temp — a crash must not leave a copy of a remote file behind, so the stale spools of a
+        # previous run are swept BEFORE the first window exists (a spool that outlives its run is
+        # swept here). Never fatal.
+        try:
+            try:
+                from modules.sftp_send import sweep_spools
+            except ImportError:
+                from .modules.sftp_send import sweep_spools
+            sweep_spools()
+        except Exception as e:
+            if log is not None:
+                log.warning(f"The spool sweep did not run: {e}")
+
         win = MainWindow()
         win.show()
 

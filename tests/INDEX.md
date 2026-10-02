@@ -125,6 +125,7 @@ of the file itself.
 | `test_ext_terminal_dialog.py` | — | Regression v0.9.9.2 — the external terminal UI (presets and reset to defaults). |
 | `test_external_terminal.py` | — | External (system) terminal v0.8.2: `modules/external_terminal.py` (a former smoke-test part). |
 | `test_facts_on_request.py` | — | v1.6.6 — the measurement you asked for: the status round you start, and the data mount that holds the capacity. |
+| `test_files_surface.py` | — | The Files surface (v1.7.3): the cross-session send, the per-server memory, the pane drop, the wrapping reader. |
 | `test_first_run.py` | — | v1.5rc3 — First run & confidence: the demo map, the undo affordance and the age of a status. |
 | `test_freshness.py` | — | v1.5.3 — freshness everywhere: the collected facts get an age, and a red card answers "why". |
 | `test_groups.py` | — | Node groups on the map v0.8.1 (the "v0.8.1 groups" part of the old smoke test). |

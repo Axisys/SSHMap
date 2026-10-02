@@ -704,8 +704,10 @@ check("§11 EXPECTED_APP_VERSION is the release this file describes (the 1.7.1 p
       EXPECTED_APP_VERSION)
 check("§11 the pin counts the shipped release (863 + the 4 keys of the Files panel"
       " + the 3 of the Files display mode + the 4 of the v1.7.1.2 device choice"
-      " + the 4 of the v1.7.2 containers)",
-      EXPECTED_I18N_KEYS == 863 + 4 + 3 + 4 + 4, str(EXPECTED_I18N_KEYS))
+      " + the 4 of the v1.7.2 containers + the 19 of v1.7.3: the Send-to row and its dialog,"
+      " the busy/progress/done/failed reports, the two-sided conflict facts, the remembered-folder"
+      " sentence, the two drop refusals and Word wrap)",
+      EXPECTED_I18N_KEYS == 863 + 4 + 3 + 4 + 4 + 19, str(EXPECTED_I18N_KEYS))
 check("§11 VERSION_FORMAT stays `0.9` (the mode lives in config.json, not in the project file)",
       __import__("version").VERSION_FORMAT == "0.9")
 check("§11 no new dependency was added for the panel (the four pinned ones)",
