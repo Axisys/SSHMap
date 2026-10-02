@@ -715,8 +715,9 @@ check("the i18n pin counts the SHIPPED release (854 + the 9 keys of v1.7rc3"
       " + the 19 of v1.7.3: the Send-to row and its dialog, the busy/progress/done/failed reports,"
       " the two-sided conflict facts, the remembered-folder sentence, the two drop refusals and Word wrap"
       " + the 17 of v1.7.4rc1: the local source switch of a pane, its two refusals, the permanent-"
-      " delete warning and the local file-surface sentences)",
-      EXPECTED_I18N_KEYS == 854 + 9 + 4 + 3 + 4 + 4 + 19 + 17, str(EXPECTED_I18N_KEYS))
+      " delete warning and the local file-surface sentences, and v1.7.4rc2 adds 1: the refusal of a"
+      " move that would cross the two sources)",
+      EXPECTED_I18N_KEYS == 854 + 9 + 4 + 3 + 4 + 4 + 19 + 17 + 1, str(EXPECTED_I18N_KEYS))
 check("VERSION_FORMAT did NOT move (the project schema is unchanged)",
       __import__("version").VERSION_FORMAT == "0.9")
 check("no new dependency was added for the walk (the four pinned ones)",

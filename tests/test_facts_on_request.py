@@ -967,8 +967,9 @@ check("§9 the i18n pin counts the SHIPPED release (811 + 17 of v1.6.7 + 13 of v
       " + the 19 of v1.7.3: the Send-to row and its dialog, the busy/progress/done/failed reports,"
       " the two-sided conflict facts, the remembered-folder sentence, the two drop refusals and Word wrap"
       " + the 17 of v1.7.4rc1: the local source switch of a pane, its two refusals, the permanent-"
-      " delete warning and the local file-surface sentences)",
-      EXPECTED_I18N_KEYS == 811 + 17 + 13 + 5 + 8 + 9 + 4 + 3 + 4 + 4 + 19 + 17, str(EXPECTED_I18N_KEYS))
+      " delete warning and the local file-surface sentences, and v1.7.4rc2 adds 1: the refusal of"
+      " a move that would cross the two sources)",
+      EXPECTED_I18N_KEYS == 811 + 17 + 13 + 5 + 8 + 9 + 4 + 3 + 4 + 4 + 19 + 17 + 1, str(EXPECTED_I18N_KEYS))
 check_i18n_parity(LANGS)
 check_i18n_format(LANGS)
 check("§9 the ELEVEN new keys are present and non-empty in every language",

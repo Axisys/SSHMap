@@ -811,8 +811,9 @@ check("the pin counts the keys of the SHIPPED release (v1.5.2 added THIRTEEN —
       "wrap row — 878 + 19 = 897; v1.7.4rc1 adds SEVENTEEN: the source switch of a pane (its "
       "label and its two values), the local wordings (\"This computer\" and the two structural "
       "refusals of the switch and of a transfer), the permanent-delete warning and the nine "
-      "refusal sentences of the local file surface — 897 + 17 = 914)",
-      EXPECTED_I18N_KEYS == 863 + 4 + 3 + 4 + 4 + 19 + 17, str(EXPECTED_I18N_KEYS))
+      "refusal sentences of the local file surface — 897 + 17 = 914; v1.7.4rc2 adds ONE: the "
+      "refusal of a move that would cross the two sources — 914 + 1 = 915)",
+      EXPECTED_I18N_KEYS == 863 + 4 + 3 + 4 + 4 + 19 + 17 + 1, str(EXPECTED_I18N_KEYS))
 check_release_state(ROOT)
 for _code in i18n_lang_codes(ROOT):
     check(f"i18n/{_code}.json carries the v1.5 node.status.emulated marker",

@@ -414,11 +414,15 @@ class SftpWorker(QThread):
 
     def queue_upload(self, local_path: str, remote_dir: str,
                      remote_name: str = "") -> Optional[int]:
-        """Upload a local file into a remote directory.
+        """Upload a local file — or a whole local DIRECTORY TREE — into a remote directory.
 
         remote_name — the destination file name (the conflict dialog's "Rename"
         answer); empty = the basename of the local file. The transfer is ATOMIC:
         it lands on `<target>.part` and is renamed on success (v1.3.3.2, task 6).
+
+        A DIRECTORY source is walked on the WORKER thread and carried as a whole
+        tree (v1.7.4rc2): the GUI never scans a local folder, and one row stays one
+        task — which is what keeps the cross-pane batch bookkeeping per source.
         """
         name = remote_name or os.path.basename(local_path)
         remote_path = posixpath.join(remote_dir or "/", name)
@@ -433,6 +437,10 @@ class SftpWorker(QThread):
         local_name — the name of the local copy (the conflict dialog's "Rename"
         answer); empty = the basename of the remote file. The transfer is ATOMIC:
         it lands on `<dest>.part` and is committed with os.replace (v1.3.3.2, task 3).
+
+        A remote DIRECTORY is walked on the WORKER thread and received as a whole
+        tree (v1.7.4rc2): a folder dropped on the local pane is a folder, exactly as
+        the remote pane receives one.
         """
         name = local_name or posixpath.basename(remote_path)
         local_path = os.path.join(local_dir or ".", name)
@@ -719,23 +727,48 @@ class SftpWorker(QThread):
         self._emit(self.list_ready, task.id, task.remote_path, entries)
 
     def _do_upload(self, task: _SftpTask):
-        """v1.3.3.2 (task 6): upload to `<target>.part`, then rename it into place.
+        """v1.3.3.2 (task 6): upload to `<target>.part`, then rename it into place — or a TREE.
 
         An interrupted upload (cancel, a dead network, a full disk) therefore never
         truncates the EXISTING remote file: the destination is untouched until the
         very last operation. The provisional file is dropped on any failure EXCEPT
         the one where the commit already cleared the destination (v1.5rc5, N2): then
         it is the only copy of the new bytes and is KEPT — see `_commit_upload()`.
+
+        v1.7.4rc2: a local DIRECTORY source is carried as a whole tree
+        (`_upload_tree`) — the local pane's F5 to a server has to behave like the
+        remote F5, because a folder is a folder on either side.
         """
+        if self._is_local_dir(task.local_path):
+            self._upload_tree(task)
+            return
         total = os.path.getsize(task.local_path)  # FileNotFoundError → task_error
-        temp = task.remote_path + PART_SUFFIX
+        self._upload_file(task, task.local_path, task.remote_path, total, 0)
+
+    @staticmethod
+    def _is_local_dir(path: str) -> bool:
+        """A LOCAL source that is a directory to walk — a symlink to one is not followed."""
+        try:
+            return os.path.isdir(path) and not os.path.islink(path)
+        except OSError:
+            return False
+
+    def _upload_file(self, task: _SftpTask, local_path: str, target: str,
+                     total: int, done_base: int) -> int:
+        """ONE file of an upload: the atomic body of v1.3.3.2, reusable by the tree walk.
+
+        `temp` + `_commit_upload()` are the ONE discipline of this direction: the
+        destination is untouched until the commit, and a failure that already cleared
+        it keeps the provisional file (`_UploadCommitError.temp_kept`).
+        """
+        temp = target + PART_SUFFIX
         # open() of a nonexistent directory / no permission → task_error (nothing
         # was created, nothing has to be cleaned up).
         remote_fh = self._sftp.open(temp, "wb")
         committed = False
         keep_temp = False
         try:
-            with open(task.local_path, "rb") as local:
+            with open(local_path, "rb") as local:
                 done = 0
                 while True:
                     self._check_cancel()
@@ -744,11 +777,12 @@ class SftpWorker(QThread):
                         break
                     remote_fh.write(chunk)
                     done += len(chunk)
-                    self._emit(self.progress, task.id, done, total)
+                    self._emit(self.progress, task.id, done_base + done, total)
             remote_fh.close()          # close the handle BEFORE the rename
             remote_fh = None
-            self._commit_upload(temp, task.remote_path)
+            self._commit_upload(temp, target)
             committed = True
+            return done
         except _UploadCommitError as e:
             # The commit failed AFTER the destination was cleared: the .part file
             # is the only surviving copy, so it must not be cleaned up.
@@ -762,6 +796,69 @@ class SftpWorker(QThread):
                     pass
             if not committed and not keep_temp:
                 self._remote_remove_quiet(temp)   # cancel/failure: no litter, no loss
+
+    def _upload_tree(self, task: _SftpTask):
+        """The RECURSIVE upload of one local directory (v1.7.4rc2, LOCAL_PANE.md §6).
+
+        The bounded walk of the LOCAL tree and the rules of the remote copy: directories created
+        BEFORE their contents, an existing destination MERGED INTO (a copy is additive by
+        construction), every FILE published atomically by `_upload_file`, and a failure reported
+        with the counters of what is already done. A directory SYMLINK is never followed, so the
+        tree that crosses is the tree the user pointed at.
+        """
+        entries = self._walk_local_tree(task.local_path)
+        task.total_size = sum(size for _path, is_dir, size in entries if not is_dir)
+        total = max(1, task.total_size)
+        self._ensure_dir(task.remote_path)
+        copied = 0
+        done = 0
+        for path, is_dir, _size in entries:
+            self._check_cancel()
+            rel = os.path.relpath(path, task.local_path).replace(os.sep, "/")
+            dest = posixpath.join(task.remote_path, rel)
+            if is_dir:
+                self._ensure_dir(dest)
+                continue
+            try:
+                done += self._upload_file(task, path, dest, total, done)
+            except _SftpCancelled:
+                raise
+            except Exception as e:   # noqa: BLE001 — one unreadable file must not hide the rest
+                raise _SftpPartial(copied, path, payload_log_text(str(e)) or str(e)) from e
+            copied += 1
+
+    def _walk_local_tree(self, root: str) -> list:
+        """The BOUNDED depth-first walk of one LOCAL tree (v1.7.4rc2) → pre-order entries.
+
+        The local twin of `_walk_tree`: `[(path, is_dir, size)]` with a directory always before
+        its contents, every entry against MAX_TREE_ENTRIES and the nesting against MAX_TREE_DEPTH
+        (`_SftpTreeTooBig` BEFORE a byte crosses), the cancellation checked on every directory. A
+        directory SYMLINK is SKIPPED — never followed (LOCAL_PANE.md §6) — while a file symlink is
+        listed as the file it is.
+        """
+        entries: list = []
+        self._walk_local_into(root, 0, entries)
+        return entries
+
+    def _walk_local_into(self, path: str, depth: int, entries: list):
+        """One level of `_walk_local_tree()` — the recursion with the declared bounds."""
+        self._check_cancel()
+        if depth > MAX_TREE_DEPTH:
+            raise _SftpTreeTooBig()
+        for name in sorted(os.listdir(path)):
+            full = os.path.join(path, name)
+            try:
+                is_dir = os.path.isdir(full)
+                if is_dir and os.path.islink(full):
+                    continue
+                size = 0 if is_dir else os.path.getsize(full)
+            except OSError:
+                continue   # an entry the OS refuses to read is skipped, never a broken walk
+            entries.append((full, is_dir, int(size)))
+            if len(entries) > MAX_TREE_ENTRIES:
+                raise _SftpTreeTooBig()
+            if is_dir:
+                self._walk_local_into(full, depth + 1, entries)
 
     def _commit_upload(self, temp: str, target: str):
         """Publish the finished provisional file as the destination (task 6).
@@ -808,9 +905,22 @@ class SftpWorker(QThread):
 
         A cancelled or failed download leaves the destination byte-identical to
         what it was; the provisional file is removed (never left on the disk).
+
+        v1.7.4rc2: a remote DIRECTORY source is carried as a whole tree
+        (`_download_tree`) — the local pane receives a folder the way the remote
+        pane copies one.
         """
-        remote_fh = self._sftp.open(task.remote_path, "rb")  # no file → error
-        temp = task.local_path + PART_SUFFIX
+        if self._dir_ok(task.remote_path):
+            self._download_tree(task)
+            return
+        self._download_file(task, task.remote_path, task.local_path,
+                            int(task.total_size or 0), 0)
+
+    def _download_file(self, task: _SftpTask, remote_path: str, local_path: str,
+                       total: int, done_base: int) -> int:
+        """ONE file of a download: the atomic body of v1.3.3.2, reusable by the tree walk."""
+        remote_fh = self._sftp.open(remote_path, "rb")  # no file → error
+        temp = local_path + PART_SUFFIX
         committed = False
         try:
             with open(temp, "wb") as local:
@@ -822,11 +932,12 @@ class SftpWorker(QThread):
                         break
                     local.write(chunk)
                     done += len(chunk)
-                    self._emit(self.progress, task.id, done, task.total_size)
+                    self._emit(self.progress, task.id, done_base + done, total)
                 local.flush()
                 os.fsync(local.fileno())   # the data on the disk BEFORE the replace
-            os.replace(temp, task.local_path)   # same directory → atomic
+            os.replace(temp, local_path)   # same directory → atomic
             committed = True
+            return done
         finally:
             try:
                 remote_fh.close()
@@ -837,6 +948,38 @@ class SftpWorker(QThread):
                     os.remove(temp)
                 except OSError:
                     pass   # never created / already gone — nothing to clean
+
+    def _download_tree(self, task: _SftpTask):
+        """The RECURSIVE download of one remote directory (v1.7.4rc2, LOCAL_PANE.md §6).
+
+        The bounded walk of the REMOTE tree and the rules of the remote copy: directories created
+        on the OS disk before their contents, an existing destination directory MERGED INTO, every
+        FILE published atomically by `_download_file`, and a failure reported with the counters of
+        what is already done. The bytes of the whole tree are ONE progress line.
+        """
+        entries = self._walk_tree(task.remote_path)
+        task.total_size = sum(size for _path, is_dir, size in entries if not is_dir)
+        total = max(1, task.total_size)
+        os.makedirs(task.local_path, exist_ok=True)
+        copied = 0
+        done = 0
+        for path, is_dir, _size in entries:
+            self._check_cancel()
+            rel = posixpath.relpath(path, task.remote_path)
+            dest = os.path.join(task.local_path, *rel.split("/"))
+            if is_dir:
+                try:
+                    os.makedirs(dest, exist_ok=True)
+                except OSError as e:
+                    raise _SftpPartial(copied, path, str(e)) from e
+                continue
+            try:
+                done += self._download_file(task, path, dest, total, done)
+            except _SftpCancelled:
+                raise
+            except Exception as e:   # noqa: BLE001 — one refused file must not hide the rest
+                raise _SftpPartial(copied, path, str(e)) from e
+            copied += 1
 
     # ── v1.3.3.2: the file operations (ROADMAP task 1) ───────────────────
 

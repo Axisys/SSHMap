@@ -139,7 +139,8 @@ of the file itself.
 | `test_language_folder.py` | — | v1.3.3.8 — the user language folder, the import/export manager and ONE `terminal_max_open` range. |
 | `test_last_mile.py` | — | v1.6.8 — The last mile, closing the line: the gesture the map already had, and the problem set it already knew. |
 | `test_list_mode.py` | — | v1.4.6 — List mode: collapsing the map = server parameters (ROADMAP v1.4.6). |
-| `test_local_pane.py` | — | The LOCAL pane (v1.7.4rc1): the provider seam, the two path dialects, the OS listing of the |
+| `test_local_pane.py` | — | The LOCAL pane (v1.7.4rc2): the provider seam, the two path dialects, the OS listing of the |
+| `test_local_pane_contract.py` | — | v1.7.4 — the LOCAL pane, the closing release: the CLAUSE AUDIT of the frozen contract |
 | `test_main_window_split.py` | — | v1.1.4: main_window.py hygiene — split into mixins (ROADMAP v1.1.4 acceptance). |
 | `test_map_bigpicture.py` | — | v1.4.2 — The big-picture map level: the minimap, the cached card drop-shadow, the group fold. |
 | `test_map_images.py` | — | v1.5.1 — map images: "Copy Map as Image" and the fixed-frame documentation poster. |

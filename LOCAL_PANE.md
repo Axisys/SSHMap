@@ -10,9 +10,11 @@
 > **What each slot ships.** **`v1.7.4rc1`:** the provider seam of §1, the path dialect of §2, the
 > LOCAL surface of §3 (listing, navigation, the address bar, the read-only preview) and the SOURCE
 > SWITCH of §4 with its two refusals — **a local pane browsed beside a remote one, transferring
-> nothing.** **`v1.7.4rc2`:** the cross-pane dispatch of §5, the recursive local side of §6 and the
-> drag & drop of §7. **`v1.7.4`:** the clause audit of this document, the topical files of both
-> slots and the line's documents.
+> nothing.** **`v1.7.4rc2` (SHIPPED):** the cross-pane dispatch of §5, the recursive local side of §6
+> and the drag & drop of §7 — the four source pairs move bytes. **`v1.7.4` (SHIPPED):** the clause audit
+> of this document (`tests/test_local_pane_contract.py`), the topical files of both slots and the line's
+> documents. **`v1.7.5` (the slot still open):** the pane's SOURCE HEADER LINE of §3 — the wording that
+> names what a pane reads — with the sortable listing and the preview ceiling of that release.
 >
 > **What does NOT move.** ONE transport, ONE `SftpWorker`, ONE queue, one authentication per
 > session (`SFTP_PANES.md` §1/§2 restated, not bent): the remote half of a pane is the shipped
@@ -96,7 +98,7 @@ cancels and waits, the thread NAMES itself and is registered as an orphan if it 
 | `queue_rename(path, new_name)` | `rename` | `task_done` | **SHIPPED** — in place: the name changes, the directory does not |
 | `queue_delete(path, is_dir)` | `delete` | `task_done` | **SHIPPED** — the permanent delete of §4's warning |
 | `cancel()` / `shutdown(wait_ms)` | — | `task_cancelled` for what was queued | **SHIPPED** |
-| `queue_upload` / `queue_download` / `queue_copy` / `queue_move` | — | — | **RESERVED for rc2** (§5/§6); rc1 binds no transfer through a local pane |
+| `queue_upload` / `queue_download` / `queue_copy` / `queue_move` | the four transfer doors — one copy engine, `shutil.copy2` through a `.part` + `os.replace`, a move in one volume and copy+delete across volumes | **SHIPPED in rc2** (§5/§6) |
 
 - **The row shape does not move**: the entry dicts are exactly the remote ones
   (`PATH_ROLE` / `ISDIR_ROLE` / `SIZE_ROLE` / `MTIME_ROLE`), so the tree, the "no preview" markers,
@@ -106,9 +108,16 @@ cancels and waits, the thread NAMES itself and is registered as an orphan if it 
   markers. **A directory symlink is REFUSED** with one sentence when it is entered — following it
   silently can walk out of the folder the user pointed at; a FILE symlink is listed and read as the
   file's content (the OS resolves it).
-- **The header and the buttons read "This computer"** (`sftp.local.this_computer`) instead of the
-  remote wording, and the Upload/Download buttons of a local pane are DISABLED in rc1 — a local
-  pane browses and reads, and nothing else yet.
+- **A pane NAMES ITS SOURCE in a header line** (`_SftpPane.header_label`, the pane's FIRST row, above the
+  address row): a pane that reads the OS disk shows `sftp.local.this_computer`, a pane that reads a
+  server shows the session's ALIAS (the label `set_session_info()` was given; `user@host` is the fallback
+  when the session was never identified). It is a VIEW of the source: re-texted by `retranslate()`,
+  re-styled by `refresh_theme()` through `status.sftp_row`, ONE line of height, and it takes neither the
+  keyboard walk of §4 nor the drop coordinates (a drop is resolved in the tree's viewport). The ADDRESS
+  BAR keeps the shipped wording — `sftp.waiting_connection` before a transport, the directory after one —
+  so "This computer" belongs to the header and never to the path. The BUTTONS keep their own labels
+  (Up / Refresh / Upload / Download / Cancel); the Upload/Download pair of a LOCAL pane is LIVE and runs
+  the local engine of §5 through the pane's own provider.
 - **Every refusal is ONE translated sentence, never a traceback and never an empty pane**: the
   provider reports a MACHINE code in `task_error` (`sftp_worker.task_payload()`'s shape, so the
   activity log has no JSON either), and the pane owns the sentence:
@@ -203,8 +212,8 @@ move's emptied directories removed last (deepest first), a directory symlink nev
   source switch, the local dialect sentences, the permanent-delete warning); `python tests/run_all.py`
   → exit 0 and `python tests/test_docs.py` green; no new dependency, no new colour field,
   `Theme.DARK` untouched, `VERSION_FORMAT` stays `0.9`.
-- **rc2** — the dispatch of §5, the recursion of §6 and the drag & drop of §7 with the topical rows
-  for both.
+- **rc2 (SHIPPED)** — the dispatch of §5, the recursion of §6 and the drag & drop of §7 with the topical
+  rows for both (`tests/test_local_pane.py`, 107 checks).
 - **`v1.7.4`** — the clause-by-clause audit of THIS document against the shipped code (one section
   per clause group), the line's documents (`CHANGELOG.md`, `DOCUMENTATION.md`, `AGENTS.md`
   §4.3/§4.24, `README.md` §1 and its Security & limitations sentence) and `ROADMAP.md` losing the

@@ -1108,10 +1108,11 @@ class TerminalSessionPage(QWidget):
         # BEFORE the worker/thread teardown (the panel never outlives the transport it
         # was read through). Idempotent; a destroyed C++ object must not block the close.
         # v1.3.3.5: a page without the SFTP tab (`with_sftp=False`) has no panel at all.
+        # `release()` is the tab's OWN teardown: it stops a LOCAL pane's provider (§4.8).
         sftp_tab = getattr(self, "sftp_tab", None)
         if sftp_tab is not None:
             try:
-                sftp_tab.close_viewer()
+                sftp_tab.release()
             except RuntimeError:
                 pass
 

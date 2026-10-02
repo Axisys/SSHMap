@@ -16,8 +16,8 @@ import os
 import posixpath
 from datetime import datetime
 
-from PySide6.QtCore import (QEvent, QItemSelectionModel, QMimeData, QSize, QStringListModel, Qt,
-                            Signal)
+from PySide6.QtCore import (QCoreApplication, QEvent, QItemSelectionModel, QMimeData, QSize,
+                            QStringListModel, Qt, QUrl, Signal)
 from PySide6.QtGui import (QAction, QColor, QDrag, QFontDatabase, QIcon,
                            QKeySequence, QPainter, QPixmap)
 from PySide6.QtWidgets import (
@@ -394,7 +394,9 @@ def pane_payload(mime_data):
     """The `{session, pane, path}` payload of a drag that started inside a pane (None — foreign).
 
     A malformed payload (not JSON, not an object, no path) is a FOREIGN drag: the pane then behaves
-    exactly as it did before the private type existed.
+    exactly as it did before the private type existed. v1.7.4rc2 adds the SOURCE dialect of the row
+    (`source`, `size`): a local row and a remote one carry paths of two different spellings, so a
+    drop resolves the basename with the dialect that really produced it.
     """
     if mime_data is None or not mime_data.hasFormat(PANE_DRAG_MIME):
         return None
@@ -407,7 +409,13 @@ def pane_payload(mime_data):
     path = str(data.get("path") or "")
     if not path:
         return None
-    return {"session": str(data.get("session") or ""), "pane": data.get("pane"), "path": path}
+    source = str(data.get("source") or SOURCE_REMOTE)
+    try:
+        size = int(data.get("size") or 0)
+    except (TypeError, ValueError):
+        size = 0
+    return {"session": str(data.get("session") or ""), "pane": data.get("pane"), "path": path,
+            "source": source if source in PANE_SOURCES else SOURCE_REMOTE, "size": size}
 
 
 def load_commander_settings():
@@ -682,12 +690,14 @@ class _SftpTree(QTreeWidget):
         drag.exec(Qt.DropAction.CopyAction)
 
     def drag_mime(self, item):
-        """The drag payload of a row: the remote path as text/plain, plus the PANE identity.
+        """The drag payload of a row: the path as text/plain, plus the PANE identity.
 
         None — nothing to drag (no row / a row without a path). v1.7.3: the private
         `PANE_DRAG_MIME` carries `{session, pane, path}` so a drop INSIDE a pane can tell which
         pane the row came from (two servers can show the same path) and refuse a foreign session —
-        while `text/plain` keeps the plain path for every foreign target.
+        while `text/plain` keeps the plain path for every foreign target. v1.7.4rc2: a LOCAL row
+        also hands out a real OS path (`text/uri-list`, the Explorer contract) and the payload
+        DECLARES its source dialect, so the drop never guesses which spelling it received.
         """
         if item is None:
             return None
@@ -698,8 +708,12 @@ class _SftpTree(QTreeWidget):
         mime.setText(str(path))
         pane = self.pane
         if pane is not None:
-            payload = {"session": pane.session_key(), "pane": id(pane), "path": str(path)}
+            payload = {"session": pane.session_key(), "pane": id(pane), "path": str(path),
+                       "source": pane.source,
+                       "size": int(item.data(0, _SftpPane.SIZE_ROLE) or 0)}
             mime.setData(PANE_DRAG_MIME, json.dumps(payload).encode("utf-8"))
+            if pane.source == SOURCE_LOCAL:
+                mime.setUrls([QUrl.fromLocalFile(str(path))])
         return mime
 
     def focusInEvent(self, event):
@@ -893,7 +907,9 @@ class _SftpPane(QWidget):
         self._op_tasks = {}
         self._pending_batches = {}
         # v1.7.3: the pane-to-pane drops whose target directory is NOT on the screen — the task id
-        # of the pre-flight listing → (the (source, name) pairs, the kind, the destination).
+        # of the pre-flight listing → (the (source, name, size) triples, the kind, the destination,
+        # the SOURCE dialect of the rows). v1.7.4rc2: the dialect rides along, because a local row
+        # and a remote one carry two spellings of "the same" path.
         self._pending_drops = {}
         self._drag_source = None      # the widget the current drag event came from
         # v1.7rc3: the viewer's MOVE (the mc preview of the two-pane view). `_viewer_home` is the
@@ -915,11 +931,12 @@ class _SftpPane(QWidget):
         self._normalize_tasks = {}
         self._completer_lists = {}
         self._completer_dir = None
-        # v1.7rc2: the copy/move BATCHES — `_op_batches` maps a queued task id to the
-        # batch it belongs to, `_batches` holds the counters of every batch still waiting
-        # for an answer, and `_batch_seq` numbers them. The counters are what makes ONE
-        # report ("copied / skipped / failed") possible over an asynchronous queue.
+        # v1.7rc2: the copy/move BATCHES — `_op_batches` maps a queued task id to its batch and
+        # `_batches` holds the counters that make ONE report over an asynchronous queue. v1.7.4rc2:
+        # `_op_targets` names the DESTINATION of a batch task (its pane and its directory), because
+        # the provider that ANSWERS may belong to the OTHER pane.
         self._op_batches = {}
+        self._op_targets = {}
         self._batches = {}
         self._batch_seq = 0
         # v1.7.3 (ROADMAP v1.7.3, task 2): the remembered directory of this session — the hint the
@@ -938,6 +955,13 @@ class _SftpPane(QWidget):
         # kept alive for the pane's whole life (a switch back and forth costs no thread).
         self._source = SOURCE_REMOTE
         self._local_provider = None
+        #: The provider this pane's slots are CONNECTED to (`bind_worker` is the ONE writer):
+        #: a disconnect asks for it by name, so a provider the pane never bound is never asked.
+        self._bound_provider = None
+        #: The local directory this pane really sat in — the OS look survives a round trip
+        #: through the server (LOCAL_PANE.md §4), while the REMOTE side is re-opened by the
+        #: session's own rule (the per-server memory, then "/").
+        self._local_dir = ""
         self._waiting = True   # no provider bound yet: the shipped "waiting for connection" state
 
         t = _t
@@ -1522,31 +1546,18 @@ class _SftpPane(QWidget):
             return
         self._on_item_double_clicked(item, 0)
 
-    def _refuse_cross_source(self, target) -> bool:
-        """True — a copy/move between the panes would cross the two SOURCES, and rc1 says so.
-
-        The dispatch of `v1.7.4rc2` is what makes the four cases run (LOCAL_PANE.md §5); until
-        then ANY pair involving a local pane answers ONE sentence instead of raising the
-        `NotImplementedError` of the reserved provider methods. `False` — both panes read the
-        same source and the shipped batch is exactly right.
-        """
-        if self.source == SOURCE_REMOTE and target.source == SOURCE_REMOTE:
-            return False
-        self.message.emit(_t("sftp.local.transfer_unavailable"))
-        return True
-
     def _cmd_copy(self):
         """`F5` — copy the current row (or the whole selection) to the OTHER pane's directory.
 
-        v1.7rc2: the reserved half of the frozen contract is shipped. With ONE pane there is
-        no destination, and the honest answer is ONE sentence (the corner control is what
-        opens the second pane) — never a silent no-op.
+        v1.7rc2 shipped the reserved half of the frozen contract; v1.7.4rc2 makes the
+        destination a SOURCE as well — `_remote_batch()` dispatches over the pair of
+        providers (LOCAL_PANE.md §5), so the file may cross to a server or come back from
+        one. With ONE pane there is no destination, and the honest answer is ONE sentence
+        (the corner control is what opens the second pane) — never a silent no-op.
         """
         target = self._container.other_pane(self)
         if target is None:
             self.message.emit(_t("sftp.cmd.copy_no_target"))
-            return
-        if self._refuse_cross_source(target):
             return
         self._remote_batch(KIND_COPY, target)
 
@@ -1556,12 +1567,12 @@ class _SftpPane(QWidget):
         The cross-directory MOVE (v1.7rc2) runs when the OTHER pane shows another
         directory; with a single pane — or when both panes are in the SAME directory — the
         shipped same-directory rename happens instead, so the key keeps the meaning it had
-        in the single-listing tab.
+        in the single-listing tab. A move that would cross the two SOURCES is refused by
+        the dispatch with ONE sentence (LOCAL_PANE.md §5 declares a copy there, and a
+        silent copy is not a move).
         """
         target = self._container.other_pane(self)
         if target is not None and not self.paths.same(target.current_dir, self._current_dir):
-            if self._refuse_cross_source(target):
-                return
             self._remote_batch(KIND_MOVE, target)
             return
         item = self._current_row()
@@ -1600,7 +1611,9 @@ class _SftpPane(QWidget):
         if source:
             self._source = SOURCE_LOCAL if str(source) == SOURCE_LOCAL else SOURCE_REMOTE
         old = old_worker if old_worker is not None else self._disconnect_current()
-        if new_worker is None and self._source == SOURCE_LOCAL:
+        if self._source == SOURCE_LOCAL:
+            # A LOCAL pane reads the OS disk and NOTHING else (LOCAL_PANE.md §1), however often the
+            # session re-binds its transport: the container's worker never lands on this pane.
             new_worker = self._ensure_local_provider()
         self._disconnect_worker(old)
         self._transfer_tasks.clear()
@@ -1619,6 +1632,7 @@ class _SftpPane(QWidget):
         # v1.7rc2: the batch bookkeeping belongs to ONE transport as well (an answer of
         # the previous server must not be counted into a batch of this one).
         self._op_batches.clear()
+        self._op_targets.clear()
         self._batches.clear()
         self.path_completer_model.setStringList([])
         # v1.3.1.1: the previewability facts belong to ONE transport/session — a new
@@ -1629,6 +1643,7 @@ class _SftpPane(QWidget):
 
         if new_worker is None:
             self._waiting = True
+            self._bound_provider = None
             self._current_dir = self.paths.root()
             self._pending_lists.clear()
             self.tree.clear()
@@ -1651,6 +1666,7 @@ class _SftpPane(QWidget):
             if sig is None or slot is None:
                 continue
             sig.connect(slot)
+        self._bound_provider = new_worker
         self._sync_transfer_availability()
         self.path_label.setReadOnly(False)
         self._sync_source_availability()
@@ -1669,15 +1685,30 @@ class _SftpPane(QWidget):
         self._relist(start)
 
     def _disconnect_worker(self, worker):
-        """Drop this pane's slots from a provider (idempotent — a not-connected slot is a no-op)."""
-        if worker is None:
+        """Drop this pane's slots from the provider it is REALLY bound to (idempotent).
+
+        The EXACT bound slot is what disconnects: `signal.disconnect(<the receiver QObject>)` is a
+        TypeError in PySide6 6.11, and swallowing it left the pane listening to the provider it had
+        just left — whose task ids then collided with the new one's. A provider this pane never
+        bound is not asked (`_bound_provider` is the ONE record of the connection).
+        """
+        if worker is None or worker is not self._bound_provider:
             return
+        self._bound_provider = None
+        # A QUEUED emission of the provider just left is delivered even after the disconnect (Qt
+        # does not cancel a posted call), and task ids are per provider: the late answer would pop
+        # the fresh entry of the new one. The pane's pending calls go with the provider.
+        try:
+            QCoreApplication.removePostedEvents(self, QEvent.Type.MetaCall)
+        except (RuntimeError, TypeError):
+            pass  # no event loop yet (a bare construction) — nothing is queued anyway
         for name in WORKER_SIGNAL_NAMES:
             sig = getattr(worker, name, None)
-            if sig is None:
+            slot = getattr(self, "_on_" + name, None)
+            if sig is None or slot is None:
                 continue
             try:
-                sig.disconnect(self)
+                sig.disconnect(slot)
             except (TypeError, RuntimeError):
                 pass  # no connection existed / the worker is already gone
 
@@ -1722,6 +1753,17 @@ class _SftpPane(QWidget):
         except RuntimeError:
             pass   # the C++ object is already gone
 
+    def header_text(self) -> str:
+        """The wording the pane's address bar opens with — the SOURCE's own (LOCAL_PANE.md §3).
+
+        A remote pane has no directory to show before its transport exists ("waiting for
+        connection"), while a local pane is never in that state: it names itself
+        (`sftp.local.this_computer`) until its own listing answers.
+        """
+        if self._source == SOURCE_LOCAL:
+            return _t("sftp.local.this_computer")
+        return _t("sftp.waiting_connection")
+
     def set_source(self, source: str, notify: bool = True) -> bool:
         """Switch this pane's DATA SOURCE and re-bind its provider (v1.7.4rc1).
 
@@ -1745,13 +1787,20 @@ class _SftpPane(QWidget):
             self._sync_source_availability()
             return False
         old = self._disconnect_current()
-        # The directory belongs to the SOURCE: the OS home for the first local look, the
-        # session's opening rule for the way back (never the other dialect's path).
-        keep = self._current_dir if target == SOURCE_REMOTE else ""
+        # The directory belongs to the SOURCE (LOCAL_PANE.md §4): the OS look this pane already
+        # had survives a round trip, while the way back is the session's opening rule — never the
+        # other dialect's path, and never the per-server memory on the OS disk.
+        if self._source == SOURCE_LOCAL and self._current_dir:
+            self._local_dir = self._current_dir
         self._source = target
-        self._current_dir = keep or self.paths.root()
-        self._restored = bool(keep)
-        self.bind_worker(old, None, source=target)
+        self._current_dir = self._local_dir if target == SOURCE_LOCAL and self._local_dir \
+            else self.paths.root()
+        self._restored = target == SOURCE_LOCAL
+        if target == SOURCE_LOCAL:
+            self._set_path_text(self.header_text())
+        # The way BACK re-binds the SESSION's transport (a remote pane IS the session's tree,
+        # §1): without it the pane would sit in the "waiting" state with an empty listing.
+        self.bind_worker(old, None if target == SOURCE_LOCAL else self.worker, source=target)
         self._sync_source_availability()
         return True
 
@@ -1782,19 +1831,18 @@ class _SftpPane(QWidget):
         _sync_source_switch(switch, self._source, enabled=enabled, available=available)
 
     def _sync_transfer_availability(self):
-        """Enable the shared row for a bound provider; a LOCAL pane keeps its transfers off.
+        """Enable the shared row for a bound provider (v1.7.4rc2: a local pane transfers too).
 
-        v1.7.4rc1 ships the local pane READ-ONLY in the transfer sense (LOCAL_PANE.md §3): a
-        local source browses, previews and edits its own names, and does not move a byte until
-        rc2's dispatch. The buttons therefore say so instead of opening a dialog that cannot end.
+        The row follows the PROVIDER and not the source: both panes move bytes now — a remote one
+        through the session's transport, a local one through its own engine (LOCAL_PANE.md §5/§6) —
+        and a pane with no provider at all keeps the shipped "waiting" row.
         """
         bound = not self._waiting and self.provider is not None
-        local = self._source == SOURCE_LOCAL
         try:
             self.btn_up.setEnabled(bound)
             self.btn_refresh.setEnabled(bound)
-            self.btn_upload.setEnabled(bound and not local)
-            self.btn_download.setEnabled(bound and not local)
+            self.btn_upload.setEnabled(bound)
+            self.btn_download.setEnabled(bound)
         except RuntimeError:
             pass  # Qt teardown — the row is already gone
 
@@ -2066,8 +2114,9 @@ class _SftpPane(QWidget):
         # copy/move batch whose destination is not the directory on the screen.
         dropped = self._pending_drops.pop(task_id, None)
         if dropped is not None:
-            items, kind, target = dropped
-            self._queue_transfer_batch(items, kind, target, {e["name"] for e in entries})
+            items, kind, target, src = dropped
+            self._queue_transfer_batch(items, kind, target, {e["name"] for e in entries},
+                                       self, src)
             return
         requested = self._pending_lists.pop(task_id, None)
         # Staleness filter: render only the response for the CURRENT directory (navigation or
@@ -2317,6 +2366,12 @@ class _SftpPane(QWidget):
                 self._answer_batch_task(task_id, "failed")
             else:
                 self.message.emit(self._op_error_text(message))
+        elif kind in ("upload", "download") and self.source == SOURCE_LOCAL \
+                and task_id in self._own_transfers:
+            # v1.7.4rc2: the LOCAL engine's transfers ride the PANE's own signal — there is no
+            # session page listening to it — so a refused local copy is said here, and only for
+            # a task THIS pane queued (a remote upload keeps the window's status line).
+            self.message.emit(self._op_error_text(message))
         elif kind == KIND_NORMALIZE:
             # v1.6.3: the address bar asked for a path the server cannot resolve — the bar
             # keeps the typed text (nothing navigated) and the reason is a sentence.
@@ -2337,8 +2392,9 @@ class _SftpPane(QWidget):
             if failed_dir and failed_dir == self._restore_dir:
                 self._restore_dir = ""
                 self._restored = True
-                self.message.emit(_t("sftp.dir_missing", path=failed_dir, fallback="/"))
-                self._relist("/")
+                self.message.emit(_t("sftp.dir_missing", path=failed_dir,
+                                     fallback=self.paths.root()))
+                self._relist(self.paths.root())
                 self._on_task_finished(task_id)
                 return
             pending = self._pending_batches.pop(task_id, None)
@@ -2794,8 +2850,6 @@ class _SftpPane(QWidget):
     def _on_upload(self):
         if self._refuse_without_provider():
             return
-        if self.source == SOURCE_LOCAL:
-            return   # v1.7.4rc1: a local pane transfers nothing yet (LOCAL_PANE.md §3)
         files, _ = QFileDialog.getOpenFileNames(
             self, _t("sftp.upload_dialog_title"))
         if not files:
@@ -2806,8 +2860,6 @@ class _SftpPane(QWidget):
     def _on_download(self):
         if self._refuse_without_provider():
             return
-        if self.source == SOURCE_LOCAL:
-            return   # v1.7.4rc1: a local pane transfers nothing yet (LOCAL_PANE.md §3)
         items = [i for i in self.tree.selectedItems()
                  if not i.data(0, self.ISDIR_ROLE)]
         if not items:
@@ -2917,14 +2969,16 @@ class _SftpPane(QWidget):
         body, the pre-flight listing for a drop on a directory row). "Apply to all"
         of the dialog is remembered for the REST of this batch only — the question is
         asked ONCE per batch, whichever pane started it.
+
+        v1.7.4rc2: the PROVIDER is the pane's own, so the same body runs for a local
+        pane as well (LOCAL_PANE.md §7): an Explorer drop on the OS disk is a LOCAL
+        copy of every file into the directory on the screen, and a drop on a remote
+        pane is the shipped upload.
         """
-        worker = self.worker
-        if worker is None:
+        provider = self.provider
+        if provider is None:
             self.message.emit(_t("sftp.waiting_connection"))
             return
-        if self.source == SOURCE_LOCAL:
-            self.message.emit(_t("sftp.local.transfer_unavailable"))
-            return   # v1.7.4rc1: the local pane moves no byte yet (LOCAL_PANE.md §3)
         apply_all = ""
         total = len(files)
         for index, local_path in enumerate(files):
@@ -2944,22 +2998,23 @@ class _SftpPane(QWidget):
                     if not new_name:
                         continue   # cancelled → this file is skipped
                     name = new_name
-            self._remember_transfer(worker.queue_upload(local_path, target_dir,
-                                                        remote_name=name))
+            self._remember_transfer(provider.queue_upload(local_path, target_dir,
+                                                          remote_name=name))
 
     def _queue_downloads(self, items: list, local_dir: str):
-        """Queue a batch of remote files into local_dir, resolving the conflicts.
+        """Queue a batch of local files into local_dir, resolving the conflicts.
 
         The local existence check is a plain `os.path.exists` — no listing and no
         network, so it can never be stale.
+
+        v1.7.4rc2: the provider is the pane's own here too, so a LOCAL pane's
+        "Download" is a copy into the chosen directory through the local engine
+        (LOCAL_PANE.md §5) — the signature of the provider method is the shipped one.
         """
-        worker = self.worker
-        if worker is None:
+        provider = self.provider
+        if provider is None:
             self.message.emit(_t("sftp.waiting_connection"))
             return
-        if self.source == SOURCE_LOCAL:
-            self.message.emit(_t("sftp.local.transfer_unavailable"))
-            return   # v1.7.4rc1: the local pane moves no byte yet (LOCAL_PANE.md §3)
         apply_all = ""
         total = len(items)
         for index, item in enumerate(items):
@@ -2980,9 +3035,9 @@ class _SftpPane(QWidget):
                     if not new_name:
                         continue
                     name = new_name
-            self._remember_transfer(worker.queue_download(remote_path, local_dir,
-                                                          item.data(0, self.SIZE_ROLE),
-                                                          local_name=name))
+            self._remember_transfer(provider.queue_download(remote_path, local_dir,
+                                                            item.data(0, self.SIZE_ROLE),
+                                                            local_name=name))
 
     def _remember_transfer(self, task_id):
         """v1.7rc1: remember a transfer THIS pane queued.
@@ -3025,52 +3080,95 @@ class _SftpPane(QWidget):
         """Queue ONE copy/move batch of the selection into the OTHER pane's directory.
 
         The destination directory IS the other pane's listing, so the conflict check needs
-        no listing of its own (the shipped `_names_in_current_dir()` rule: what the server
-        last answered for that directory). A DIRECTORY row is part of the batch — v1.7rc2
-        copies and moves trees recursively — and a row whose destination would be ITSELF
-        is skipped, because copying or moving a file onto itself is not an operation. The
+        no listing of its own (the shipped `_names_in_current_dir()` rule: what the source
+        last answered for that directory). A DIRECTORY row is part of the batch — a copy and
+        a move carry a tree recursively — and a row whose destination would be ITSELF is
+        skipped, because copying or moving a file onto itself is not an operation. The
         overwrite/skip/rename question is asked through the SHIPPED machinery and its "apply
         to all" answer holds for the rest of this batch only.
 
         v1.7.3: the body moved into `_queue_transfer_batch()` — the pane-to-pane drop needs
         exactly the same batch over a SOURCE LIST that is not the selection.
+
+        v1.7.4rc2: that body is the DISPATCH over the PAIR of providers (LOCAL_PANE.md §5) —
+        the ONE question, the shipped counters and the ONE closing report are the same for
+        all four cases, and only the provider that runs a transfer changes.
         """
-        worker = self.worker
-        if worker is None:
-            self.message.emit(_t("sftp.waiting_connection"))
-            return
-        if self._refuse_cross_source(target_pane):
-            return   # v1.7.4rc1: a pair involving a local pane transfers nothing yet
         rows = self._rows_for_batch()
         if not rows:
             self.message.emit(_t("sftp.cmd.no_selection"))
             return
-        items = [(row.data(0, self.PATH_ROLE), row.text(0)) for row in rows]
+        items = [(row.data(0, self.PATH_ROLE), row.text(0),
+                  int(row.data(0, self.SIZE_ROLE) or 0)) for row in rows]
         self._queue_transfer_batch(items, kind, target_pane.current_dir,
-                                   target_pane._names_in_current_dir())
+                                   target_pane._names_in_current_dir(), target_pane)
 
-    def _queue_transfer_batch(self, items: list, kind: str, target_dir: str, known: set):
-        """ONE copy/move batch of `(source, row_name)` pairs into `target_dir` (v1.7rc2/v1.7.3).
+    def _pane_source(self, pane) -> str:
+        """The source a pane reads — asked of the PANE, never assumed (v1.7.4rc2)."""
+        return SOURCE_LOCAL if getattr(pane, "source", SOURCE_REMOTE) == SOURCE_LOCAL \
+            else SOURCE_REMOTE
+
+    def _batch_provider(self, target_pane, src: str = ""):
+        """The provider that RUNS a batch from `src` into `target_pane` (v1.7.4rc2).
+
+        A REMOTE destination is always the SESSION's transport: the container's shipped worker
+        carries the source pane's own copy AND the bytes of a LOCAL source out (`queue_upload`) —
+        the local provider has no network, no credential and no channel. A LOCAL destination with
+        a local source is that pane's own engine; with a remote source the download half still
+        rides the session's worker (LOCAL_PANE.md §5).
+        """
+        src = str(src or self.source)
+        dst = self._pane_source(target_pane)
+        if dst == SOURCE_LOCAL and src == SOURCE_LOCAL:
+            return getattr(target_pane, "provider", None) or self.provider
+        return self.worker
+
+    def _queue_transfer_batch(self, items: list, kind: str, target_dir: str, known: set,
+                              target_pane=None, source: str = ""):
+        """ONE copy/move batch of `(source, row_name, size)` triples into `target_dir`.
 
         `known` is the destination's listing as it is on the screen (never a guess), the ".."
         row and a pathless row are never part of a batch, a row that already IS the destination
         is skipped, and the ONE closing report counts copied / skipped / failed.
+
+        v1.7.4rc2: a task id belongs to the PROVIDER that queued it, so the destination (its pane
+        and its directory) is remembered per task in `_op_targets` and the answer re-lists the
+        pane that really changed through ITS OWN dialect — a remote answer never re-lists a local
+        pane and the other way round. `source` names where the ITEMS came from when the DESTINATION
+        pane queues them (a pane-to-pane drop): the dialect of a row's path is the dialect of the
+        pane that produced it, never the one that received it.
         """
-        worker = self.worker
-        if worker is None:
+        target_pane = target_pane if target_pane is not None else self
+        src = SOURCE_LOCAL if str(source or self.source) == SOURCE_LOCAL else SOURCE_REMOTE
+        dst = self._pane_source(target_pane)
+        if kind == KIND_MOVE and src != dst:
+            # LOCAL_PANE.md §5 declares an upload / a download for a transfer that CROSSES the two
+            # sources and a move only INSIDE one of them: a silent copy where the user asked for a
+            # move is worse than ONE sentence, and F5 is right there for the copy.
+            self.message.emit(_t("sftp.local.move_cross_source"))
+            return
+        provider = self._batch_provider(target_pane, src)
+        if provider is None:
             self.message.emit(_t("sftp.waiting_connection"))
             return
+        # The answers of a batch arrive at the pane BOUND to the provider that runs it (§1), so a
+        # cross-source upload is COUNTED by the remote pane while the conflict question and the
+        # report stay where the user acted: a local pane never hears the session's transport.
+        owner = self
+        if provider is not self.provider:
+            owner = self._container.pane_for_provider(provider) or self
         total = len(items)
         skipped = 0
         queued = []
         apply_all = ""
-        paths = self.paths
-        for index, (source, row_name) in enumerate(items):
-            if not source:
+        src_paths = dialect_for(src)
+        dest_paths = target_pane.paths
+        for index, (source_path, row_name, size) in enumerate(items):
+            if not source_path:
                 skipped += 1
                 continue
-            name = paths.basename(source)
-            if paths.same(paths.join(target_dir, name), source):
+            name = src_paths.basename(source_path) or str(row_name or "")
+            if dest_paths.same(dest_paths.join(target_dir, name), source_path):
                 skipped += 1   # the row already IS the destination — never an operation
                 continue
             if name in known:
@@ -3090,24 +3188,42 @@ class _SftpPane(QWidget):
                         skipped += 1
                         continue
                     name = new_name
-            queued.append((source, name))
-        batch_id = self._open_batch(kind, len(queued), skipped)
-        for source, name in queued:
-            if kind == KIND_COPY:
-                task_id = worker.queue_copy(source, target_dir, name)
-            else:
-                task_id = worker.queue_move(source, target_dir, name)
+            queued.append((source_path, name, int(size or 0)))
+        batch_id = owner._open_batch(kind, len(queued), skipped)
+        for source_path, name, size in queued:
+            task_id = self._queue_batch_item(provider, src, dst, kind, source_path, target_dir,
+                                             name, size)
             if task_id is None:
-                self._count_batch(batch_id, "failed")   # the worker is gone — still an answer
+                owner._count_batch(batch_id, "failed")   # the provider is gone — still an answer
                 continue
-            self._op_batches[task_id] = batch_id
-            self._queue_op(task_id, kind)
-            if kind == KIND_COPY:
-                self._remember_transfer(task_id)   # the progress bar + the Cancel button
+            owner._op_batches[task_id] = batch_id
+            owner._op_targets[task_id] = (target_pane, target_dir)
+            owner._queue_op(task_id, kind)
+            if kind == KIND_COPY or src != dst:
+                # the progress bar + the Cancel button: a copy always reports, and a cross-source
+                # transfer is an upload / a download whatever the batch calls it (v1.7.4rc2).
+                self._remember_transfer(task_id)
         if not queued:
-            self._finish_batch(batch_id)   # everything was skipped — the report says so
+            owner._finish_batch(batch_id)   # everything was skipped — the report says so
             return
         self.message.emit(_t("sftp.cmd.batch_started", count=len(queued), dir=target_dir))
+
+    def _queue_batch_item(self, provider, src: str, dst: str, kind: str, source: str,
+                          target_dir: str, name: str, size: int):
+        """Queue ONE item of a batch on the provider that owns the SOURCE (LOCAL_PANE.md §5).
+
+        Three cases use three SHIPPED methods and no new transport: local→remote is the session
+        worker's `queue_upload`, remote→local its `queue_download` (atomic, `<name>.part`), and a
+        pair of one source is the shipped copy / move of that provider — the remote `queue_copy` /
+        `queue_move` or the local engine of `modules/local_fs_worker.py`.
+        """
+        if dst == SOURCE_REMOTE and src == SOURCE_LOCAL:
+            return provider.queue_upload(source, target_dir, remote_name=name)
+        if dst == SOURCE_LOCAL and src == SOURCE_REMOTE:
+            return provider.queue_download(source, target_dir, size, local_name=name)
+        if kind == KIND_COPY:
+            return provider.queue_copy(source, target_dir, name)
+        return provider.queue_move(source, target_dir, name)
 
     def _open_batch(self, kind: str, total: int, skipped: int) -> int:
         """Open a batch record and return its id (the counters of ONE report, v1.7rc2)."""
@@ -3152,8 +3268,10 @@ class _SftpPane(QWidget):
 
         The worker reports a MACHINE payload for the three cases it knows (`parse_task_payload`):
         a PARTIALLY transferred tree (with its counters), a REFUSED cross-directory rename (the
-        sentence names the fallback: copy + delete) and a tree over its declared bound. Any
-        other message is the server's own error and goes through the shipped `sftp.op.error`.
+        sentence names the fallback: copy + delete) and a tree over its declared bound.
+
+        v1.7.4rc2: a copy or a move of the OS DISK travels the same way from the local engine, so
+        its own codes are rendered through the ONE local table before the generic sentence.
         """
         data = parse_task_payload(message)
         code = data.get("code") if data else None
@@ -3167,6 +3285,8 @@ class _SftpPane(QWidget):
         if code == TREE_ERROR_TOO_BIG:
             return _t("sftp.cmd.tree_too_big",
                       limit=int(data.get("limit") or MAX_TREE_ENTRIES))
+        if code in local_fs.LOCAL_ERROR_KEYS:
+            return local_error_text(message)
         return _t("sftp.op.error", error=message)
 
     # ── v1.3.3.2: the file operations (ROADMAP task 1) ───────────────────
@@ -3242,13 +3362,19 @@ class _SftpPane(QWidget):
         return menu
 
     def _op_send_to(self, item, target):
-        """Send ONE file row to another session (the size gate, then the container's relay)."""
+        """Send ONE file row to another session (the size gate, then the container's relay).
+
+        A LOCAL row is refused with ONE sentence: the relay carries a row of a SERVER (its legs
+        are the session's shipped download/upload pair), while a file of the OS disk crosses
+        through the two panes with F5 (LOCAL_PANE.md §5) — two doors, each saying which one is
+        which instead of quietly doing the wrong thing.
+        """
         if self.worker is None:
             self.message.emit(_t("sftp.waiting_connection"))
             return
         if self.source == SOURCE_LOCAL:
             self.message.emit(_t("sftp.local.transfer_unavailable"))
-            return   # v1.7.4rc1: a local file crosses to a server through rc2's dispatch
+            return
         path = item.data(0, self.PATH_ROLE) if item is not None else ""
         if not path or (item is not None and item.data(0, self.ISDIR_ROLE)):
             self.message.emit(_t("sftp.send.no_file"))
@@ -3439,6 +3565,11 @@ class _SftpPane(QWidget):
         TWO refusals are declared and each answers ONE sentence: the row may come from THIS pane
         (nothing to copy), and it may belong to ANOTHER session — there is no server-to-server
         path, so a file crosses between servers through `Send to…`, never through a drag.
+
+        v1.7.4rc2: the payload DECLARES its source dialect, so the row's name is read with the
+        dialect that really produced the path (a local path spells its separators the OS way) and
+        the pre-flight listing of a destination that is not on the screen goes to THIS pane's
+        provider — a local directory is the OS's business, never the session's.
         """
         if payload.get("pane") == id(self):
             self.message.emit(_t("sftp.cmd.drop_same_pane"))
@@ -3446,26 +3577,30 @@ class _SftpPane(QWidget):
         if not self.session_key() or payload.get("session") != self.session_key():
             self.message.emit(_t("sftp.cmd.drop_other_session"))
             return
-        if self.worker is None:
-            self.message.emit(_t("sftp.waiting_connection"))
-            return
         source = str(payload.get("path") or "")
         if not source:
             self.message.emit(_t("sftp.cmd.no_selection"))
             return
-        items = [(source, posixpath.basename(source))]
+        provider = self.provider
+        if provider is None:
+            self.message.emit(_t("sftp.waiting_connection"))
+            return
+        items = [(source, dialect_for(payload.get("source")).basename(source),
+                  int(payload.get("size") or 0))]
+        src = payload.get("source") or SOURCE_REMOTE
         kind = KIND_MOVE if self._drop_is_move(event) else KIND_COPY
         target_dir = self._drop_target_dir(event) or self._current_dir
-        if target_dir == self._current_dir:
-            self._queue_transfer_batch(items, kind, target_dir, self._names_in_current_dir())
+        if self.paths.same(target_dir, self._current_dir):
+            self._queue_transfer_batch(items, kind, target_dir, self._names_in_current_dir(),
+                                       self, src)
             return
         # The destination row is not on the screen: LIST it first (the shipped pre-flight rule) so
-        # the conflict question is the server's own answer.
-        task_id = self.worker.queue_list(target_dir)
+        # the conflict question is the source's own answer.
+        task_id = provider.queue_list(target_dir)
         if task_id is None:
-            self._queue_transfer_batch(items, kind, target_dir, set())
+            self._queue_transfer_batch(items, kind, target_dir, set(), self, src)
             return
-        self._pending_drops[task_id] = (items, kind, target_dir)
+        self._pending_drops[task_id] = (items, kind, target_dir, src)
 
     def _item_under(self, event):
         """The listing row under a drag event (None — empty space / outside the tree).
@@ -3504,21 +3639,26 @@ class _SftpPane(QWidget):
         The conflict check must not be a guess, so a target directory that is NOT on
         the screen is LISTED first (a "list" task of the same queue) and the batch is
         queued when the answer arrives — see `_on_list_ready`.
+
+        v1.7.4rc2: the queue is THIS pane's PROVIDER, so a drop of Explorer files on the local
+        pane is a LOCAL copy of every file into the directory on the screen, while a drop on a
+        remote pane stays the shipped upload (LOCAL_PANE.md §7).
         """
         target = target_dir or self._current_dir
         if not files:
             # No local files in the drag (directories/other data).
             self.message.emit(_t("sftp.drop_no_files"))
             return
-        if self.worker is None:
+        provider = self.provider
+        if provider is None:
             self.message.emit(_t("sftp.waiting_connection"))
             return
-        if target == self._current_dir:
-            # The listing on the screen IS the answer of the server for that
+        if self.paths.same(target, self._current_dir):
+            # The listing on the screen IS the answer of the source for that
             # directory — the conflict check needs nothing else.
             self._queue_uploads(files, target, self._names_in_current_dir())
         else:
-            task_id = self.worker.queue_list(target)
+            task_id = provider.queue_list(target)
             if task_id is not None:
                 self._pending_batches[task_id] = (target, files)
                 return   # the hint + the uploads follow the listing answer
@@ -3539,21 +3679,30 @@ class _SftpPane(QWidget):
         v1.7rc2: a remote copy/move reports through its BATCH (one closing report instead
         of one line per file) and re-lists EVERY pane showing a directory it touched — the
         destination changed, and a move also emptied the source.
+
+        v1.7.4rc2: the re-list goes to the pane that really CHANGED, through ITS OWN dialect
+        (`_op_targets`, LOCAL_PANE.md §5): `detail` is a local path when the destination is the
+        OS disk, so the shipped `posixpath.dirname()` would send a remote pane to a Windows path.
         """
         kind = self._op_tasks.pop(task_id, None)
         if kind in (KIND_COPY, KIND_MOVE):
-            if self.source == SOURCE_REMOTE:
-                self._container.relist_dir(posixpath.dirname(detail))
-            else:
-                # A LOCAL pane owns the listing it changed (LOCAL_PANE.md §1): the container's
-                # re-list is the SESSION's, and the OS disk is nobody's server.
-                self._relist(self._current_dir)
+            pane, dest_dir = self._op_targets.get(task_id) or (None, "")
+            pane = pane if pane is not None else self
+            try:
+                changed = pane.paths.dirname(detail) or dest_dir
+            except (RuntimeError, AttributeError):
+                changed = dest_dir
+            self._container.relist_pane(pane, changed)
             if kind == KIND_MOVE:
-                if self.source == SOURCE_REMOTE:
-                    self._container.relist_dir(self._current_dir)
-                else:
-                    self._relist(self._current_dir)
+                self._container.relist_pane(self, self._current_dir)
             self._answer_batch_task(task_id, "done")
+            self._on_task_finished(task_id)
+            return
+        if kind is None and self.source == SOURCE_LOCAL and task_id in self._own_transfers:
+            # v1.7.4rc2: a LOCAL transfer (its kind never enters `_op_tasks` — only an OPERATION does)
+            # changed the directory ON THE SCREEN, and no session page re-lists the OS disk, so the
+            # pane refreshes itself.
+            self._relist(self._current_dir)
             self._on_task_finished(task_id)
             return
         if kind is not None:
@@ -3578,6 +3727,8 @@ class _SftpPane(QWidget):
         # v1.6.3: the same for the address bar's tasks and the completer's listings.
         self._normalize_tasks.pop(task_id, None)
         self._completer_lists.pop(task_id, None)
+        # v1.7.4rc2: the destination of a batch task is forgotten with its answer.
+        self._op_targets.pop(task_id, None)
         self._own_transfers.discard(task_id)
         if task_id in self._transfer_tasks:
             self._transfer_tasks.discard(task_id)
@@ -3719,6 +3870,7 @@ class SftpTab(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._worker = None
+        self._released = False
         self._panes = []
         self._pane_b = None
         self._active_pane = None
@@ -3986,6 +4138,23 @@ class SftpTab(QWidget):
                 return other
         return None
 
+    def pane_for_provider(self, provider):
+        """The pane whose slots are BOUND to `provider` (`None` — no pane holds it, v1.7.4).
+
+        ONE pane answers ONE provider (§1), so a batch that runs on a provider the pane that
+        STARTED it no longer holds — a local pane uploading through the session's transport — is
+        COUNTED by the pane bound to that transport.
+        """
+        if provider is None:
+            return None
+        for pane in list(self._panes):
+            try:
+                if pane._bound_provider is provider:
+                    return pane
+            except RuntimeError:
+                continue   # Qt teardown — that pane is already gone
+        return None
+
     def relist_dir(self, path: str):
         """Re-list EVERY pane that is SHOWING `path` (v1.7rc2).
 
@@ -4003,6 +4172,30 @@ class SftpTab(QWidget):
                     pane._relist(path)
             except RuntimeError:
                 continue   # Qt teardown — the pane is already gone
+
+    def relist_pane(self, pane, path: str):
+        """Re-list the ONE listing a finished transfer really CHANGED (v1.7.4rc2).
+
+        The destination of a batch answers through the dialect of the pane it belongs to: a REMOTE
+        path keeps the shipped rule (`relist_dir` re-lists every remote pane showing it, and the
+        copy may have been started in either one), while a LOCAL path belongs to the pane whose
+        provider owns it and to nobody else — the OS disk is nobody's server, and re-listing
+        another pane there would navigate it to a path of the wrong dialect.
+        """
+        if not path or pane is None:
+            return
+        try:
+            local = getattr(pane, "source", SOURCE_REMOTE) == SOURCE_LOCAL
+        except RuntimeError:
+            return   # Qt teardown — the pane is already gone
+        if not local:
+            self.relist_dir(path)
+            return
+        try:
+            if pane in list(self._panes) and pane.paths.same(pane.current_dir, path):
+                pane._relist(path)
+        except (RuntimeError, AttributeError):
+            return   # Qt teardown — the pane is already gone
 
     # ── v1.7.4rc1: the source of a pane (LOCAL_PANE.md §4) ───────────────
 
@@ -4446,6 +4639,27 @@ class SftpTab(QWidget):
     def worker(self):
         """The bound SftpWorker (None before the connection / after it died)."""
         return self._worker
+
+    def release(self):
+        """The container is going away: stop EVERY pane's provider and drop its preview.
+
+        The tab's ONE teardown door (the page's idempotent `shutdown()` calls it, and so does a
+        pane that leaves): a LOCAL pane owns a QThread of its own (`LOCAL_PANE.md` §1), and a
+        thread that is still running when the widget tree dies takes the process with it
+        (AGENTS.md §4.8). Idempotent, never raises, and the SESSION's worker is NOT touched.
+        """
+        if self._released:
+            return
+        self._released = True
+        for pane in list(self._panes):
+            try:
+                self._close_viewer_of(pane)
+            except Exception:  # noqa: BLE001 — teardown robustness
+                pass
+            try:
+                pane.release()
+            except Exception:  # noqa: BLE001 — teardown robustness
+                pass
 
     # ── v1.6.3: the follow switch (a SESSION state, the container's) ─────
 

@@ -2,14 +2,15 @@
 """The LOCAL file provider of a Commander pane — ONE thread with a FIFO queue over the OS disk.
 
 It answers the SAME method names and signals as `modules/sftp_worker.SftpWorker`, so a pane binds
-either provider without branching (LOCAL_PANE.md §1); the ssh surface it does NOT bind (upload,
-download, copy, move) is declared RESERVED for `v1.7.4rc2`. The read policy, the row shape and the
-bounds are the SHIPPED ones, imported instead of copied. Every refusal travels as a MACHINE code
-(`task_payload()`) — this module holds no UI string, no credential and no network."""
+either provider without branching (LOCAL_PANE.md §1). The read policy, the row shape and the
+transfer rules are the SHIPPED ones, imported instead of copied: the four transfer methods are the
+LOCAL engine (§5/§6) — `shutil.copy2` through a `.part` + `os.replace`, a move inside one volume and
+copy+delete across volumes; every refusal travels as a MACHINE code (`task_payload()`)."""
 
 import logging
 import os
 import queue
+import shutil
 import threading
 from typing import List, Optional
 
@@ -25,19 +26,19 @@ except ImportError:
             return logging.getLogger(name)
 
 try:  # the shipped task vocabulary, the read policy and the machine payloads (never copied)
-    from .sftp_worker import (KIND_DELETE, KIND_LIST, KIND_MKDIR, KIND_NORMALIZE,
-                              KIND_READ, KIND_RENAME, MAX_READ_BYTES, READ_ERROR_BINARY,
-                              READ_ERROR_TOO_LARGE, classify_extension, task_payload)
+    from .sftp_worker import (KIND_COPY, KIND_DELETE, KIND_DOWNLOAD, KIND_LIST, KIND_MKDIR,
+                              KIND_MOVE, KIND_NORMALIZE, KIND_READ, KIND_RENAME, KIND_UPLOAD,
+                              MAX_READ_BYTES, MAX_TREE_DEPTH, MAX_TREE_ENTRIES, PART_SUFFIX,
+                              PARTIAL_CODE, READ_ERROR_BINARY, READ_ERROR_TOO_LARGE,
+                              TREE_ERROR_TOO_BIG, classify_extension, task_payload)
 except ImportError:
-    from sftp_worker import (KIND_DELETE, KIND_LIST, KIND_MKDIR, KIND_NORMALIZE,  # type: ignore
-                             KIND_READ, KIND_RENAME, MAX_READ_BYTES, READ_ERROR_BINARY,
-                             READ_ERROR_TOO_LARGE, classify_extension, task_payload)
+    from sftp_worker import (KIND_COPY, KIND_DELETE, KIND_DOWNLOAD, KIND_LIST,  # type: ignore
+                             KIND_MKDIR, KIND_MOVE, KIND_NORMALIZE, KIND_READ, KIND_RENAME,
+                             KIND_UPLOAD, MAX_READ_BYTES, MAX_TREE_DEPTH, MAX_TREE_ENTRIES,
+                             PART_SUFFIX, PARTIAL_CODE, READ_ERROR_BINARY, READ_ERROR_TOO_LARGE,
+                             TREE_ERROR_TOO_BIG, classify_extension, task_payload)
 
 log = get_logger(__name__)
-
-# The transfer vocabulary of the pane that a local pane deliberately does NOT bind in rc1 —
-# `RESERVED_METHODS` is the declaration, `NotImplementedError` is what a caller really gets.
-RESERVED_METHODS = ("queue_upload", "queue_download", "queue_copy", "queue_move")
 
 # The read chunk: the shipped 32 KB (one `progress` step per chunk, cancellation between them).
 CHUNK_SIZE = 32768
@@ -168,11 +169,12 @@ class _LocalCancelled(Exception):
 
 
 class _LocalRefusal(Exception):
-    """Internal: a declared refusal of the local surface → its machine code."""
+    """Internal: a declared refusal of the local surface → its machine code (+ a short detail)."""
 
-    def __init__(self, code: str):
+    def __init__(self, code: str, error: str = ""):
         super().__init__(code)
         self.code = code
+        self.error = str(error or "")
 
 
 class _LocalRead(Exception):
@@ -183,9 +185,35 @@ class _LocalRead(Exception):
         self.code = code
 
 
+class _LocalPayload(Exception):
+    """Internal: an exception whose own text IS the machine payload of the `task_error`."""
+
+    payload = ""
+
+    def __str__(self):
+        return self.payload
+
+
+class _LocalPartial(_LocalPayload):
+    """Internal: a tree stopped in the middle — the SHIPPED `PARTIAL_CODE` payload (§6)."""
+
+    def __init__(self, copied: int, path: str, error: str = ""):
+        self.payload = task_payload(PARTIAL_CODE, copied=int(copied), path=str(path),
+                                    error=str(error or ""))
+        super().__init__(self.payload)
+
+
+class _LocalTreeTooBig(_LocalPayload):
+    """Internal: the walk hit MAX_TREE_ENTRIES / MAX_TREE_DEPTH (the SHIPPED refusal)."""
+
+    def __init__(self):
+        self.payload = task_payload(TREE_ERROR_TOO_BIG, limit=MAX_TREE_ENTRIES)
+        super().__init__(self.payload)
+
+
 class _LocalTask:
-    """A queue task. `path` is the subject, `path2` the second endpoint (a rename target),
-    `is_dir` the kind a delete needs."""
+    """A queue task. `path` is the subject, `path2` the second endpoint (a rename or a transfer
+    destination), `is_dir` the kind a delete needs."""
 
     __slots__ = ("id", "kind", "label", "path", "path2", "is_dir", "total_size")
 
@@ -205,16 +233,26 @@ _orphan_providers: List["LocalFsWorker"] = []
 
 
 def register_orphan_local_provider(worker: "LocalFsWorker"):
-    """Hold a still-running LocalFsWorker until finished() (idempotent)."""
-    if worker not in _orphan_providers:
-        _orphan_providers.append(worker)
+    """Hold a still-running LocalFsWorker until finished() (idempotent).
 
-        def _drop(_=None, w=worker):
-            try:
-                _orphan_providers.remove(w)
-            except ValueError:
-                pass  # already removed (a double finished — does not happen in practice)
-        worker.finished.connect(_drop)
+    The worker is DETACHED from its QObject parent FIRST: it was created under the pane, the
+    pane dies with the window, and a parented thread dies with it however firmly this registry
+    holds it (AGENTS.md §4.8).
+    """
+    if worker in _orphan_providers:
+        return
+    try:
+        worker.setParent(None)
+    except RuntimeError:
+        pass  # the C++ object is already gone
+    _orphan_providers.append(worker)
+
+    def _drop(_=None, w=worker):
+        try:
+            _orphan_providers.remove(w)
+        except ValueError:
+            pass  # already removed (a double finished — does not happen in practice)
+    worker.finished.connect(_drop)
 
 
 class LocalFsWorker(QThread):
@@ -281,21 +319,57 @@ class LocalFsWorker(QThread):
         return self._queue_task(_LocalTask(
             self._next_id, KIND_DELETE, target, path=target, is_dir=is_dir))
 
-    def queue_upload(self, *args, **kwargs) -> Optional[int]:
-        """RESERVED for `v1.7.4rc2` (the cross-pane dispatch, LOCAL_PANE.md §5)."""
-        raise NotImplementedError(RESERVED_METHODS[0])
+    def queue_upload(self, local_path: str, target_dir: str,
+                     remote_name: str = "") -> Optional[int]:
+        """Copy a local FILE or DIRECTORY into a local directory (the pane's Upload door).
 
-    def queue_download(self, *args, **kwargs) -> Optional[int]:
-        """RESERVED for `v1.7.4rc2` (the cross-pane dispatch, LOCAL_PANE.md §5)."""
-        raise NotImplementedError(RESERVED_METHODS[1])
+        The name and the signature are the shipped worker's, so the pane's batch needs no branch
+        (LOCAL_PANE.md §1): the third argument is the destination name, and a DIRECTORY source is
+        carried as a whole tree (LOCAL_PANE.md §6).
+        """
+        name = remote_name or os.path.basename(str(local_path or ""))
+        target = os.path.join(str(target_dir or "") or self.root, name)
+        return self._queue_task(_LocalTask(
+            self._next_id, KIND_UPLOAD, name, path=str(local_path or ""), path2=target))
 
-    def queue_copy(self, *args, **kwargs) -> Optional[int]:
-        """RESERVED for `v1.7.4rc2` (the local copy engine, LOCAL_PANE.md §5)."""
-        raise NotImplementedError(RESERVED_METHODS[2])
+    def queue_download(self, path: str, local_dir: str, total_size: int = 0,
+                       local_name: str = "") -> Optional[int]:
+        """Copy a local FILE or DIRECTORY out into another local directory (the Download door).
 
-    def queue_move(self, *args, **kwargs) -> Optional[int]:
-        """RESERVED for `v1.7.4rc2` (the local move engine, LOCAL_PANE.md §5)."""
-        raise NotImplementedError(RESERVED_METHODS[3])
+        The local pane's "download" reads the OS disk on both ends, so it is the same engine: the
+        signature is the shipped worker's and `total_size` is a hint of the caller (the engine
+        measures what it really copies).
+        """
+        name = local_name or os.path.basename(str(path or ""))
+        target = os.path.join(str(local_dir or "."), name)
+        return self._queue_task(_LocalTask(
+            self._next_id, KIND_DOWNLOAD, name, path=str(path or ""), path2=target,
+            total_size=int(total_size or 0)))
+
+    def queue_copy(self, source: str, target_dir: str, name: str = "") -> Optional[int]:
+        """Copy a local FILE or a whole DIRECTORY TREE into a local directory (§5/§6).
+
+        The destination is `<target_dir>/<name>`, `name` defaulting to the source's basename. Every
+        FILE is published atomically (`<target>.part` + `os.replace`) and an existing destination
+        directory is MERGED INTO — a copy is additive by construction, never a delete.
+        """
+        target = os.path.join(str(target_dir or "") or self.root,
+                              name or os.path.basename(str(source or "")))
+        return self._queue_task(_LocalTask(
+            self._next_id, KIND_COPY, os.path.basename(str(source or "")),
+            path=str(source or ""), path2=target))
+
+    def queue_move(self, source: str, target_dir: str, name: str = "") -> Optional[int]:
+        """Move a local FILE or a whole DIRECTORY TREE into a local directory (§5/§6).
+
+        ONE rename inside a volume (the whole tree when the destination is not there yet), entry by
+        entry across volumes, and the emptied source directories removed last, deepest first.
+        """
+        target = os.path.join(str(target_dir or "") or self.root,
+                              name or os.path.basename(str(source or "")))
+        return self._queue_task(_LocalTask(
+            self._next_id, KIND_MOVE, os.path.basename(str(source or "")),
+            path=str(source or ""), path2=target))
 
     def cancel(self):
         """Cancel the current operation and everything still queued (the shipped auto-reset)."""
@@ -351,8 +425,10 @@ class LocalFsWorker(QThread):
             except _LocalRead as e:
                 # The SHIPPED read contract: a bare machine code, never a payload.
                 self._emit(self.task_error, task.id, task.kind, e.code)
+            except _LocalPayload as e:
+                self._emit(self.task_error, task.id, task.kind, str(e))
             except _LocalRefusal as e:
-                self._emit(self.task_error, task.id, task.kind, task_payload(e.code))
+                self._emit(self.task_error, task.id, task.kind, task_payload(e.code, error=e.error))
             except Exception as e:  # noqa: BLE001 — a refusal never kills the queue
                 self._emit(self.task_error, task.id, task.kind, local_error_payload(e))
 
@@ -369,15 +445,19 @@ class LocalFsWorker(QThread):
             self._do_rename(task)
         elif task.kind == KIND_DELETE:
             self._do_delete(task)
+        elif task.kind in (KIND_COPY, KIND_UPLOAD, KIND_DOWNLOAD):
+            self._do_copy(task)
+        elif task.kind == KIND_MOVE:
+            self._do_move(task)
         else:
             raise ValueError("unsupported local task kind: %s" % (task.kind,))
 
     @staticmethod
     def _detail_of(task: _LocalTask) -> str:
-        """The declared `detail` of a finished task: the new directory, the new name, the subject."""
+        """The declared `detail` of a finished task: the new directory, the new NAME, the target."""
         if task.kind == KIND_MKDIR:
             return task.path
-        if task.kind == KIND_RENAME:
+        if task.kind in (KIND_RENAME, KIND_COPY, KIND_MOVE, KIND_UPLOAD, KIND_DOWNLOAD):
             return task.path2
         return task.path
 
@@ -452,6 +532,195 @@ class LocalFsWorker(QThread):
 
     def _do_delete(self, task: _LocalTask):
         if task.is_dir:
-            os.rmdir(task.path)   # NEVER recursive here: a tree delete is rc2's business
+            os.rmdir(task.path)   # ONE empty directory: the tree cleanup belongs to `_move_tree`
         else:
             os.remove(task.path)
+
+    # ── the transfer engine (LOCAL_PANE.md §5/§6) ────────────────────────
+
+    def _do_copy(self, task: _LocalTask):
+        """Copy ONE local file — or a whole local TREE — into `task.path2` (§5)."""
+        source, target = task.path, task.path2
+        self._refuse_symlinked_dir(source)
+        if os.path.isdir(source):
+            self._copy_tree(task, source, target)
+            return
+        size = int(os.path.getsize(source) or 0)   # a missing source → the OS's own refusal
+        task.total_size = size
+        self._copy_file(task, source, target, size, 0)
+
+    def _copy_tree(self, task: _LocalTask, source: str, target: str):
+        """The RECURSIVE local copy (§6): the shipped bounds, every file atomic and additive.
+
+        The walk is bounded BEFORE anything is written (one sentence beats a half-copied tree),
+        directories are created ahead of their contents, an existing destination directory is
+        MERGED INTO (a copy never deletes), and a failure stops the walk with the counters of what
+        is already done (`_LocalPartial`). The bytes of the whole tree are ONE progress line.
+        """
+        entries = self._walk_tree(source)
+        task.total_size = sum(size for _path, is_dir, size in entries if not is_dir)
+        total = max(1, task.total_size)
+        os.makedirs(target, exist_ok=True)
+        copied = 0
+        done = 0
+        for path, is_dir, _size in entries:
+            self._check_cancel()
+            dest = os.path.join(target, os.path.relpath(path, source))
+            if is_dir:
+                os.makedirs(dest, exist_ok=True)
+                continue
+            try:
+                done += self._copy_file(task, path, dest, total, done)
+            except _LocalCancelled:
+                raise
+            except Exception as e:   # noqa: BLE001 — one unreadable file must not hide the rest
+                raise _LocalPartial(copied, path, str(e)) from e
+            copied += 1
+
+    def _copy_file(self, task: _LocalTask, source: str, target: str, total: int,
+                   done_base: int) -> int:
+        """ONE file of a copy: `shutil.copy2` onto `<target>.part`, then `os.replace` (§5).
+
+        The destination is UNTOUCHED until the very last operation, so an interrupted copy leaves
+        it byte-identical and the provisional file is dropped, never left on the disk. A
+        destination that is a DIRECTORY is refused — the OS would silently write the file INTO it.
+        """
+        if os.path.isdir(target):
+            raise _LocalRefusal(LOCAL_IS_DIR, os.path.basename(target))
+        temp = target + PART_SUFFIX
+        committed = False
+        try:
+            self._check_cancel()
+            shutil.copy2(source, temp)   # keeps the mode and the mtime of the original
+            os.replace(temp, target)
+            committed = True
+        finally:
+            if not committed:
+                self._remove_quiet(temp)
+        size = int(os.path.getsize(target) or 0)
+        self._emit(self.progress, task.id, done_base + size, total)
+        return size
+
+    def _do_move(self, task: _LocalTask):
+        """Move ONE local file — or a whole local TREE — into `task.path2` (§5/§6).
+
+        A file, and a directory whose destination is not there yet, moves in ONE `os.rename` —
+        atomic inside a volume — while across volumes the entry-by-entry walk does copy+delete. A
+        directory whose destination ALREADY exists is merged into entry by entry, and its emptied
+        source directories are removed last, deepest first: a directory that still holds something
+        simply STAYS, which the listing then shows.
+        """
+        source, target = task.path, task.path2
+        self._refuse_symlinked_dir(source)
+        if os.path.isdir(source):
+            if not os.path.exists(target):
+                try:
+                    os.rename(source, target)
+                    task.total_size = 1
+                    self._emit(self.progress, task.id, 1, 1)
+                    return
+                except OSError:
+                    pass   # another volume — the walk below is the honest fallback
+            self._move_tree(task, source, target)
+            return
+        size = int(os.path.getsize(source) or 0)   # a missing source → the OS's own refusal
+        task.total_size = size
+        self._move_file(source, target)
+        self._emit(self.progress, task.id, size, size)
+
+    def _move_file(self, source: str, target: str):
+        """Move ONE file: `shutil.move` renames inside a volume and copies+deletes across them."""
+        if os.path.isdir(target):
+            raise _LocalRefusal(LOCAL_IS_DIR, os.path.basename(target))
+        self._check_cancel()
+        shutil.move(source, target)
+
+    def _move_tree(self, task: _LocalTask, source: str, target: str):
+        """The RECURSIVE local move into an EXISTING destination directory (§6).
+
+        The same bounded walk and the same cancel points as the copy: every file moves into place,
+        every directory is created on the target when missing, and the SOURCE directories go at the
+        end, deepest first. A failure stops the walk with the counters already done.
+        """
+        entries = self._walk_tree(source)
+        task.total_size = len(entries)
+        total = max(1, len(entries))
+        os.makedirs(target, exist_ok=True)
+        moved = 0
+        dirs = []
+        for index, (path, is_dir, _size) in enumerate(entries):
+            self._check_cancel()
+            dest = os.path.join(target, os.path.relpath(path, source))
+            self._emit(self.progress, task.id, index + 1, total)
+            if is_dir:
+                dirs.append(path)
+                os.makedirs(dest, exist_ok=True)
+                continue
+            try:
+                self._move_file(path, dest)
+            except _LocalCancelled:
+                raise
+            except Exception as e:   # noqa: BLE001 — one refusal must not hide the rest
+                raise _LocalPartial(moved, path, str(e)) from e
+            moved += 1
+        for path in sorted(dirs, key=len, reverse=True):
+            self._rmdir_quiet(path)
+        self._rmdir_quiet(source)
+
+    @staticmethod
+    def _refuse_symlinked_dir(path: str):
+        """A directory SYMLINK is never followed (§3/§6): walking one leaves the folder asked for."""
+        if os.path.islink(path) and os.path.isdir(path):
+            raise _LocalRefusal(LOCAL_SYMLINK_DIR)
+
+    def _walk_tree(self, root: str) -> list:
+        """The BOUNDED depth-first walk of one local tree (§6) → pre-order entries.
+
+        Answers `[(path, is_dir, size)]` with a directory ALWAYS before its contents, so a copy can
+        create the parent first. Every entry counts against MAX_TREE_ENTRIES and the nesting against
+        MAX_TREE_DEPTH — a tree over a bound is refused BEFORE anything is written — and the
+        cancellation is checked on every directory. A directory SYMLINK is SKIPPED, never followed;
+        a file symlink is listed as the file it is.
+        """
+        entries: list = []
+        self._walk_into(root, 0, entries)
+        return entries
+
+    def _walk_into(self, path: str, depth: int, entries: list):
+        """One level of `_walk_tree()` — the recursion with the declared bounds."""
+        self._check_cancel()
+        if depth > MAX_TREE_DEPTH:
+            raise _LocalTreeTooBig()
+        for name in sorted(os.listdir(path)):
+            full = os.path.join(path, name)
+            try:
+                is_link = os.path.islink(full)
+                is_dir = os.path.isdir(full)
+                if is_dir and is_link:
+                    continue
+                size = 0 if is_dir else os.path.getsize(full)
+            except OSError:
+                continue   # an entry the OS refuses to read is skipped, never a broken walk
+            entries.append((full, is_dir, int(size)))
+            if len(entries) > MAX_TREE_ENTRIES:
+                raise _LocalTreeTooBig()
+            if is_dir:
+                self._walk_into(full, depth + 1, entries)
+
+    @staticmethod
+    def _remove_quiet(path: str) -> bool:
+        """Best-effort removal of a PROVISIONAL local path (never masks the real error)."""
+        try:
+            os.remove(path)
+            return True
+        except OSError:
+            return False
+
+    @staticmethod
+    def _rmdir_quiet(path: str) -> bool:
+        """Best-effort removal of an EMPTY local directory: one that still holds something stays."""
+        try:
+            os.rmdir(path)
+            return True
+        except OSError:
+            return False

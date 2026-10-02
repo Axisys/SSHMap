@@ -1,23 +1,25 @@
 # -*- coding: utf-8 -*-
-"""The LOCAL pane (v1.7.4rc1): the provider seam, the two path dialects, the OS listing of the
-second Commander pane and the source switch with its two structural refusals.
+"""The LOCAL pane (v1.7.4rc2): the provider seam, the two path dialects, the OS listing of the
+second Commander pane, the source switch, the four-case cross-pane dispatch, the recursive local
+engine and the drag & drop in both directions.
 
 Offscreen, no network. The remote half runs over the fake SFTP surface of `_fakes.py`; the local
 half runs over a REAL tree inside an isolated HOME, because the provider is the OS itself.
-Contract — `LOCAL_PANE.md` §1–§4; mechanism — `DOCUMENTATION.md` §64.
-
+Contract — `LOCAL_PANE.md` §1–§7; mechanism — `DOCUMENTATION.md` §67.
 Run: python tests/test_local_pane.py   (from the project root) or python tests/run_all.py"""
 import os
 import re
+import shutil
 import sys
 
-from _common import (bootstrap, check, finish, wait_until, load_i18n_langs, check_i18n_parity,
-                     check_i18n_format, check_release_state, clear_cfg, releases_at_least,
-                     EXPECTED_APP_VERSION, EXPECTED_I18N_KEYS)
+from _common import (bootstrap, check, finish, wait_until, wait_for, load_i18n_langs,
+                     check_i18n_parity, check_i18n_format, check_release_state, clear_cfg,
+                     releases_at_least, EXPECTED_APP_VERSION, EXPECTED_I18N_KEYS)
 
 ROOT, WORK = bootstrap()  # BEFORE the app module imports (the HOME isolation)
 
-from PySide6.QtWidgets import QApplication
+from PySide6.QtCore import QPointF
+from PySide6.QtWidgets import QApplication, QWidget
 
 app = QApplication(sys.argv)
 
@@ -25,13 +27,17 @@ import i18n
 import modules.local_fs_worker as LFW
 import modules.sftp_tab as STAB
 import modules.sftp_worker as SW
-from modules.sftp_tab import (LOCAL_PATHS, POSIX_PATHS, SOURCE_LOCAL, SOURCE_REMOTE, PathDialect,
-                              SftpTab, dialect_for, local_error_text)
-from modules.sftp_worker import KIND_DELETE, KIND_LIST, KIND_MKDIR, KIND_NORMALIZE, KIND_READ, \
-    KIND_RENAME, MAX_READ_BYTES, READ_ERROR_BINARY, READ_ERROR_TOO_LARGE, SftpWorker, \
+import modules.ssh_terminal as ST
+from modules.sftp_tab import (LOCAL_PATHS, PANE_DRAG_MIME, POSIX_PATHS, SOURCE_LOCAL, SOURCE_REMOTE,
+                              PathDialect, SftpTab, dialect_for, local_error_text, pane_payload)
+from modules.sftp_worker import KIND_COPY, KIND_DELETE, KIND_LIST, KIND_MKDIR, KIND_MOVE, \
+    KIND_NORMALIZE, KIND_READ, KIND_RENAME, MAX_READ_BYTES, MAX_TREE_ENTRIES, PARTIAL_CODE, \
+    PART_SUFFIX, READ_ERROR_BINARY, READ_ERROR_TOO_LARGE, SftpWorker, TREE_ERROR_TOO_BIG, \
     parse_task_payload
+from modules.terminal_page import TerminalSessionPage
+from models.server import ServerData
 
-from _fakes import EventLog, FakeSftpClient, FakeSftpFS, wire_worker
+from _fakes import EventLog, FakeSftpClient, FakeSftpFS, FakeSSHThread, wire_worker
 
 
 # ════════════════════════════════════════════════════════════
@@ -44,7 +50,6 @@ TREE = os.path.join(WORK, "local_tree")
 def build_tree():
     """A small OS tree: two files, a nested file, a hidden file and a binary one."""
     if os.path.isdir(TREE):
-        import shutil
         shutil.rmtree(TREE, ignore_errors=True)
     os.makedirs(os.path.join(TREE, "sub", "deep"))
     with open(os.path.join(TREE, "alpha.txt"), "wb") as f:
@@ -60,6 +65,28 @@ def build_tree():
     with open(os.path.join(TREE, "sub", "deep", "leaf.txt"), "wb") as f:
         f.write(b"leaf\n")
     return TREE
+
+
+def read_bytes(path):
+    """The bytes of a file, or None when it is not there (a missing read is a FAILED check)."""
+    try:
+        with open(path, "rb") as f:
+            return f.read()
+    except OSError:
+        return None
+
+
+def fresh_dir(name, *files):
+    """A clean directory under WORK, optionally with `(relative path, bytes)` files in it."""
+    path = os.path.join(WORK, name)
+    shutil.rmtree(path, ignore_errors=True)
+    os.makedirs(path)
+    for rel, data in files:
+        full = os.path.join(path, rel)
+        os.makedirs(os.path.dirname(full), exist_ok=True)
+        with open(full, "wb") as f:
+            f.write(data)
+    return path
 
 
 def make_provider(root=None):
@@ -240,18 +267,6 @@ _rmdir2 = provider.queue_delete(os.path.join(TREE, "fresh"), True)
 wait_until(lambda: bool(plog.of_kind("done", _rmdir2)), timeout_ms=5000)
 check("§3 ...and an EMPTY one really goes", not os.path.exists(os.path.join(TREE, "fresh")))
 
-check("§3 the four TRANSFER methods are RESERVED, not silently wrong",
-      all(callable(getattr(provider, name, None)) for name in LFW.RESERVED_METHODS)
-      and LFW.RESERVED_METHODS == ("queue_upload", "queue_download", "queue_copy", "queue_move"))
-_raised = 0
-for _name in LFW.RESERVED_METHODS:
-    try:
-        getattr(provider, _name)("a", "b")
-    except NotImplementedError:
-        _raised += 1
-check("§3 each of them raises `NotImplementedError` (rc2 is what binds them)",
-      _raised == len(LFW.RESERVED_METHODS), str(_raised))
-
 check("§3 the provider NAMES its thread (AGENTS.md §4.8)",
       provider.objectName() == "LocalFsWorker")
 
@@ -263,6 +278,117 @@ check("§3 the code holds no UI sentence — every refusal is an i18n KEY of the
 
 provider.shutdown()
 check("§3 `shutdown()` stops the thread inside its budget", not provider.isRunning())
+
+print("== 3b. the local transfer engine (LOCAL_PANE.md §5/§6) ==")
+
+check("§5 the four transfer doors are BOUND and share the shipped vocabulary",
+      all(callable(getattr(LFW.LocalFsWorker, name, None))
+          for name in ("queue_upload", "queue_download", "queue_copy", "queue_move"))
+      and not hasattr(LFW, "RESERVED_METHODS")
+      and LFW.KIND_COPY == KIND_COPY and LFW.KIND_MOVE == KIND_MOVE
+      and LFW.PART_SUFFIX == PART_SUFFIX)
+
+eng, elog = make_provider()
+_SRC = fresh_dir("eng_src", ("a.txt", b"A" * 10), ("sub/leaf.txt", b"leaf\n"),
+                 ("sub/deep.txt", b"deep\n"))
+_DST = fresh_dir("eng_dst")
+
+_t = eng.queue_copy(os.path.join(_SRC, "a.txt"), _DST, "a.txt")
+wait_until(lambda: bool(elog.of_kind("done", _t)), timeout_ms=5000)
+check("§5 a file COPY is byte-for-byte and leaves the source alone",
+      read_bytes(os.path.join(_DST, "a.txt")) == b"A" * 10
+      and read_bytes(os.path.join(_SRC, "a.txt")) == b"A" * 10,
+      str(elog.of_kind("done", _t))[:120])
+check("§5 ...and the atomic commit leaves NO `.part` file behind",
+      not [n for n in os.listdir(_DST) if n.endswith(PART_SUFFIX)], str(os.listdir(_DST)))
+
+_t = eng.queue_copy(os.path.join(_SRC, "sub"), _DST, "sub")
+wait_until(lambda: bool(elog.of_kind("done", _t)), timeout_ms=5000)
+check("§6 a DIRECTORY source is carried as a whole tree (nested files included)",
+      read_bytes(os.path.join(_DST, "sub", "leaf.txt")) == b"leaf\n"
+      and read_bytes(os.path.join(_DST, "sub", "deep.txt")) == b"deep\n",
+      str(sorted(os.listdir(_DST))))
+
+with open(os.path.join(_DST, "sub", "keep.txt"), "wb") as f:
+    f.write(b"keep\n")
+_t = eng.queue_copy(os.path.join(_SRC, "sub"), _DST, "sub")
+wait_until(lambda: bool(elog.of_kind("done", _t)), timeout_ms=5000)
+check("§6 ...and a copy is ADDITIVE: an existing destination is merged into, never emptied",
+      read_bytes(os.path.join(_DST, "sub", "keep.txt")) == b"keep\n"
+      and read_bytes(os.path.join(_DST, "sub", "leaf.txt")) == b"leaf\n")
+
+_MOVE_DST = fresh_dir("eng_move")
+_t = eng.queue_move(os.path.join(_SRC, "sub"), _MOVE_DST, "sub")
+wait_until(lambda: bool(elog.of_kind("done", _t)), timeout_ms=5000)
+check("§6 a DIRECTORY move carries the tree and removes the emptied source (deepest first)",
+      read_bytes(os.path.join(_MOVE_DST, "sub", "leaf.txt")) == b"leaf\n"
+      and read_bytes(os.path.join(_MOVE_DST, "sub", "deep.txt")) == b"deep\n"
+      and not os.path.exists(os.path.join(_SRC, "sub")),
+      f"src_left={os.path.exists(os.path.join(_SRC, 'sub'))}")
+
+_t = eng.queue_move(os.path.join(_SRC, "a.txt"), _MOVE_DST, "moved.txt")
+wait_until(lambda: bool(elog.of_kind("done", _t)), timeout_ms=5000)
+check("§5 a file MOVE lands under the new name and the original is gone (one volume)",
+      read_bytes(os.path.join(_MOVE_DST, "moved.txt")) == b"A" * 10
+      and not os.path.exists(os.path.join(_SRC, "a.txt")))
+
+_PART_SRC = fresh_dir("part_src", ("one.txt", b"1"), ("two.txt", b"2"))
+_PART_DST = fresh_dir("part_dst", ("tree/two.txt/inside.txt", b"x"))
+_t = eng.queue_copy(_PART_SRC, _PART_DST, "tree")
+wait_until(lambda: bool(elog.of_kind("error", _t)), timeout_ms=5000)
+_part = parse_task_payload((elog.of_kind("error", _t) or [("", "", "", "")])[0][3]) or {}
+check("§6 an INTERRUPTED tree is REPORTED with the shipped partial payload and its counters",
+      _part.get("code") == PARTIAL_CODE and int(_part.get("copied") or 0) == 1,
+      str(elog.of_kind("error", _t))[:160])
+check("§6 ...while what was really copied BEFORE the failure stays (never rolled back)",
+      read_bytes(os.path.join(_PART_DST, "tree", "one.txt")) == b"1",
+      str(sorted(os.listdir(os.path.join(_PART_DST, "tree")))) if
+      os.path.isdir(os.path.join(_PART_DST, "tree")) else "no tree")
+
+_BOUNDS_SRC = fresh_dir("bounds_src", *[(f"f{i}.txt", b"x") for i in range(8)])
+_pin_entries, _pin_depth = LFW.MAX_TREE_ENTRIES, LFW.MAX_TREE_DEPTH
+LFW.MAX_TREE_ENTRIES = 4
+try:
+    _t = eng.queue_copy(_BOUNDS_SRC, fresh_dir("bounds_dst"), "tree")
+    wait_until(lambda: bool(elog.of_kind("error", _t)), timeout_ms=5000)
+    _bound = parse_task_payload((elog.of_kind("error", _t) or [("", "", "", "")])[0][3]) or {}
+    check("§6 the walk is BOUNDED by the shipped MAX_TREE_ENTRIES (and says so once)",
+          _bound.get("code") == TREE_ERROR_TOO_BIG
+          and int(_bound.get("limit") or 0) == LFW.MAX_TREE_ENTRIES,
+          str(_bound)[:140])
+finally:
+    LFW.MAX_TREE_ENTRIES, LFW.MAX_TREE_DEPTH = _pin_entries, _pin_depth
+
+_LINK_SRC = fresh_dir("link_src", ("real/inside.txt", b"in"))
+_SYMLINK_OK = True
+try:
+    os.symlink(os.path.join(_LINK_SRC, "real"), os.path.join(_LINK_SRC, "link"))
+except (OSError, NotImplementedError, AttributeError):
+    _SYMLINK_OK = False   # Windows without the privilege: the rule is asserted over the walk
+if _SYMLINK_OK:
+    _LINK_DST = fresh_dir("link_dst")
+    _t = eng.queue_copy(_LINK_SRC, _LINK_DST, "tree")
+    wait_until(lambda: bool(elog.of_kind("done", _t)) or bool(elog.of_kind("error", _t)),
+               timeout_ms=5000)
+    check("§6 a directory SYMLINK inside a tree is never followed (it is skipped)",
+          not os.path.exists(os.path.join(_LINK_DST, "tree", "link"))
+          and read_bytes(os.path.join(_LINK_DST, "tree", "real", "inside.txt")) == b"in",
+          str(sorted(os.listdir(os.path.join(_LINK_DST, "tree")))))
+
+_UP_DST = fresh_dir("eng_up")
+_t = eng.queue_upload(os.path.join(_LINK_SRC, "real"), _UP_DST, "up")
+wait_until(lambda: bool(elog.of_kind("done", _t)), timeout_ms=5000)
+check("§5 the Upload door of a local pane is the same engine (a copy into the directory)",
+      read_bytes(os.path.join(_UP_DST, "up", "inside.txt")) == b"in")
+
+_DL_DST = fresh_dir("eng_dl")
+_t = eng.queue_download(os.path.join(_UP_DST, "up", "inside.txt"), _DL_DST, 2, local_name="out.txt")
+wait_until(lambda: bool(elog.of_kind("done", _t)), timeout_ms=5000)
+check("§5 the Download door reads the OS disk and writes it back under the asked name",
+      read_bytes(os.path.join(_DL_DST, "out.txt")) == b"in")
+
+eng.shutdown()
+check("§5 the engine thread stops inside its budget", not eng.isRunning())
 
 print("== 4. the source switch and the pane's provider (LOCAL_PANE.md §1/§4) ==")
 
@@ -321,9 +447,9 @@ check("§3 the local pane LISTS the OS home (its opening rule)",
       and pane_r.path_label.text() == pane_r.current_dir,
       f"{pane_r.current_dir!r} vs {pane_r.path_label.text()!r}")
 
-check("§3 the transfer buttons of a local pane are OFF (rc1 moves no byte)",
+check("§3 the transfer buttons of a local pane are ON (rc2 moves bytes through its own provider)",
       pane_r.btn_up.isEnabled() and pane_r.btn_refresh.isEnabled()
-      and pane_r.btn_upload.isEnabled() is False and pane_r.btn_download.isEnabled() is False)
+      and pane_r.btn_upload.isEnabled() and pane_r.btn_download.isEnabled())
 
 pane_r._relist(TREE)
 wait_until(lambda: pane_r.tree.topLevelItemCount() >= 2, timeout_ms=5000)
@@ -381,26 +507,29 @@ print("== 5. the two refusals and the permanent-delete warning (LOCAL_PANE.md §
 
 _msgs = []
 tab.message.connect(_msgs.append)
+_local_before = pane_r.current_dir      # the OS directory this pane really sits in
 _ok_back = tab.set_pane_source(pane_r, SOURCE_REMOTE)
-wait_until(lambda: os.path.normcase(pane_r.current_dir) == "/", timeout_ms=5000)
 check("§4 the switch BACK adopts the remote source and its own opening rule",
       _ok_back is True and pane_r.source == SOURCE_REMOTE
       and pane_r.provider is worker and pane_r.paths is POSIX_PATHS
-      and pane_r._local_provider is not None and pane_r._local_provider.isRunning())
+      and pane_r._local_provider is not None and pane_r._local_provider.isRunning()
+      and pane_r.current_dir == "/" and pane_r._waiting is False,
+      f"dir={pane_r.current_dir!r} waiting={pane_r._waiting}")
+check("§4 ...and the way back RE-BINDS the session's transport (a blank pane is the defect)",
+      pane_r._waiting is False
+      and wait_for(lambda: pane_r.tree.topLevelItemCount() >= 1, timeout_ms=5000),
+      f"rows={pane_r.tree.topLevelItemCount()} waiting={pane_r._waiting}")
+check("§4 ...and the OS look this pane had SURVIVES the round trip",
+      tab.set_pane_source(pane_r, SOURCE_LOCAL) is True
+      and pane_r.source == SOURCE_LOCAL
+      and os.path.normcase(pane_r.current_dir) == os.path.normcase(_local_before),
+      f"{pane_r.current_dir!r} vs {_local_before!r}")
+check("§4 ...and its provider is the SAME thread it had before (one per pane, never recreated)",
+      pane_r._local_provider is not None and pane_r._local_provider.isRunning())
 
-tab.set_pane_source(pane_r, SOURCE_LOCAL)
-wait_until(lambda: os.path.normcase(pane_r.current_dir) == os.path.normcase(os.path.expanduser("~")),
-           timeout_ms=5000)
 check("§4 the provider of the FIRST pane is NEVER the local one",
       tab.panes[0].source == SOURCE_REMOTE and tab.panes[0]._local_provider is None
       and tab.panes[0].provider is worker)
-
-pane_r._relist(TREE)
-wait_until(lambda: pane_r.tree.topLevelItemCount() >= 2, timeout_ms=5000)
-_msgs.clear()
-pane_r._cmd_copy()
-check("§4 a COPY onto a local pane says ONE sentence instead of moving bytes (rc1)",
-      _msgs[-1:] == [i18n.t("sftp.local.transfer_unavailable")], str(_msgs)[-140:])
 
 _ok_dup = tab.set_pane_source(pane_r, SOURCE_LOCAL)
 check("§4 a switch to the source that already holds is a NO-OP that answers True",
@@ -447,7 +576,291 @@ check("§4 the two-pane mode OFF destroys the local pane and its provider stops"
 check("§4 ...while the FIRST pane keeps the session's transport",
       tab.panes[0].provider is worker)
 
-print("== 6. the machine codes and their sentences (LOCAL_PANE.md §3) ==")
+print("== 6. the cross-pane dispatch — the four cases (LOCAL_PANE.md §5) ==")
+
+_fs2 = FakeSftpFS()
+_fs2.add_dir("/home")
+_fs2.add_dir("/home/box")
+_fs2.add_file("/home/box/deep.txt", b"deep\n")
+_fs2.add_file("/home/remote.txt", b"R" * 8)
+_fs2.add_dir("/other")
+_dtab, _dworker, _dlog = make_remote_tab(_fs2)
+_dtab.set_session_info(key="local-pane-session", label="Test", host="192.0.2.10", port=22)
+wait_until(lambda: _dtab.tree.topLevelItemCount() >= 1, timeout_ms=5000)
+_rpane, _lpane = _dtab.panes[0], _dtab.panes[1]
+_dtab.set_pane_source(_lpane, SOURCE_LOCAL)
+wait_until(lambda: _lpane.source == SOURCE_LOCAL, timeout_ms=5000)
+
+_ddispatched = []
+
+
+class _RecordingProvider:
+    """The four doors of a provider, recorded — the DISPATCH table read without a transport."""
+
+    def __init__(self):
+        self.calls = []
+
+    def _log(self, name, args):
+        self.calls.append((name, args))
+        return 1000 + len(self.calls)
+
+    def queue_upload(self, *a, **kw):
+        return self._log("upload", (a, kw))
+
+    def queue_download(self, *a, **kw):
+        return self._log("download", (a, kw))
+
+    def queue_copy(self, *a, **kw):
+        return self._log("copy", (a, kw))
+
+    def queue_move(self, *a, **kw):
+        return self._log("move", (a, kw))
+
+
+_rec = _RecordingProvider()
+_rr = _lpane._queue_batch_item(_rec, SOURCE_LOCAL, SOURCE_REMOTE, KIND_COPY, "/local/a.txt",
+                               "/srv/dir", "a.txt", 5)
+check("§5 local→remote is the SESSION worker's `queue_upload` (a copy, with the asked name)",
+      _rec.calls[-1][0] == "upload" and _rec.calls[-1][1][0] == ("/local/a.txt", "/srv/dir")
+      and _rec.calls[-1][1][1].get("remote_name") == "a.txt" and _rr == 1001)
+_rr = _lpane._queue_batch_item(_rec, SOURCE_REMOTE, SOURCE_LOCAL, KIND_COPY, "/srv/a.txt",
+                               "/local/dir", "a.txt", 7)
+check("§5 remote→local is the SHIPPED `queue_download` (atomic on the OS disk)",
+      _rec.calls[-1][0] == "download" and _rec.calls[-1][1][0] == ("/srv/a.txt", "/local/dir", 7)
+      and _rec.calls[-1][1][1].get("local_name") == "a.txt")
+_rr = _lpane._queue_batch_item(_rec, SOURCE_REMOTE, SOURCE_REMOTE, KIND_MOVE, "/srv/a", "/srv/b",
+                               "a", 0)
+check("§5 remote→remote keeps the SHIPPED `queue_move` / `queue_copy` (untouched)",
+      _rec.calls[-1][0] == "move" and _rec.calls[-1][1][0] == ("/srv/a", "/srv/b", "a"))
+_rr = _lpane._queue_batch_item(_rec, SOURCE_LOCAL, SOURCE_LOCAL, KIND_COPY, "/local/a", "/local/b",
+                               "a", 0)
+check("§5 local→local is the LOCAL engine of `modules/local_fs_worker.py`",
+      _rec.calls[-1][0] == "copy" and _rec.calls[-1][1][0] == ("/local/a", "/local/b", "a"))
+
+_dmsgs = []
+_dtab.message.connect(_dmsgs.append)
+_dmsgs.clear()
+_before = set(_fs2.files)
+_lpane._queue_transfer_batch([("/local/x.txt", "x.txt", 3)], KIND_MOVE, "/srv", set(), _rpane)
+check("§5 a MOVE that would cross the two sources is REFUSED with ONE sentence (never a copy)",
+      _dmsgs[-1:] == [i18n.t("sftp.local.move_cross_source")] and set(_fs2.files) == _before,
+      str(_dmsgs)[-140:])
+
+# ── the two directions over the REAL providers (fake SFTP + the OS disk) ──
+_UP_SRC = fresh_dir("disp_src", ("report.txt", b"REPORT" * 3))
+_UP_DST = fresh_dir("disp_dst")
+_lpane._relist(_UP_SRC)
+wait_until(lambda: item_by_name(_lpane, "report.txt") is not None, timeout_ms=5000)
+_rpane._relist("/home")
+wait_until(lambda: item_by_name(_rpane, "box") is not None, timeout_ms=5000)
+_lpane.tree.setCurrentItem(item_by_name(_lpane, "report.txt"))
+_dmsgs.clear()
+_lpane._cmd_copy()
+_ok_up = wait_for(lambda: "/home/report.txt" in _fs2.files, timeout_ms=5000)
+check("§5 F5 from the LOCAL pane puts the file on the SERVER byte for byte",
+      _ok_up and bytes(_fs2.files["/home/report.txt"]) == b"REPORT" * 3, str(sorted(_fs2.files)))
+check("§5 ...the local ORIGINAL stays (F5 is a copy) and no `.part` is left on the server",
+      read_bytes(os.path.join(_UP_SRC, "report.txt")) == b"REPORT" * 3
+      and "/home/report.txt.part" not in _fs2.files, str(sorted(_fs2.files)))
+check("§5 ...and the batch closes with the SHIPPED report (one line for the whole run)",
+      any(str(m).startswith(i18n.t("sftp.cmd.copy_report", done=1, skipped=0, failed=0))
+          for m in _dmsgs), str(_dmsgs)[-160:])
+
+_lpane._relist(_UP_DST)
+wait_until(lambda: _lpane.current_dir == _UP_DST, timeout_ms=5000)
+_rpane.tree.setCurrentItem(item_by_name(_rpane, "remote.txt"))
+_dmsgs.clear()
+_rpane._cmd_copy()
+_ok_down = wait_for(lambda: os.path.exists(os.path.join(_UP_DST, "remote.txt")),
+                           timeout_ms=5000)
+check("§5 F5 from the REMOTE pane brings the file into the local directory byte for byte",
+      _ok_down and read_bytes(os.path.join(_UP_DST, "remote.txt")) == b"R" * 8,
+      str(sorted(os.listdir(_UP_DST))))
+check("§5 ...atomically: the local destination is committed, never a `.part`",
+      not [n for n in os.listdir(_UP_DST) if n.endswith(PART_SUFFIX)], str(os.listdir(_UP_DST)))
+
+# ── a DIRECTORY through the pair (the recursion of §6) ──
+_lpane._relist(_UP_DST)
+wait_until(lambda: _lpane.current_dir == _UP_DST, timeout_ms=5000)
+_rpane.tree.setCurrentItem(item_by_name(_rpane, "box"))
+_dmsgs.clear()
+_rpane._cmd_copy()
+_ok_tree = wait_for(lambda: read_bytes(os.path.join(_UP_DST, "box", "deep.txt")) == b"deep\n",
+                           timeout_ms=5000)
+check("§6 a remote DIRECTORY crosses to the OS disk as a whole TREE",
+      _ok_tree, str(sorted(os.listdir(_UP_DST))))
+
+_LTREE_SRC = fresh_dir("disp_tree", ("top.txt", b"top\n"), ("inner/one.txt", b"1\n"),
+                       ("inner/two.txt", b"2\n"))
+_lpane._relist(_LTREE_SRC)
+wait_until(lambda: item_by_name(_lpane, "inner") is not None, timeout_ms=5000)
+_lpane.tree.setCurrentItem(item_by_name(_lpane, "inner"))
+_dmsgs.clear()
+_lpane._cmd_copy()
+_ok_ltree = wait_for(lambda: "/home/inner/two.txt" in _fs2.files, timeout_ms=5000)
+check("§6 ...and a LOCAL DIRECTORY crosses to the server as a whole TREE",
+      _ok_ltree and bytes(_fs2.files["/home/inner/one.txt"]) == b"1\n"
+      and bytes(_fs2.files["/home/inner/two.txt"]) == b"2\n", str(sorted(_fs2.files)))
+
+_dmsgs.clear()
+_lpane.tree.setCurrentItem(item_by_name(_lpane, "top.txt"))
+_lpane._cmd_move_rename()
+check("§5 F6 across the two sources answers ONE sentence instead of silently copying",
+      _dmsgs[-1:] == [i18n.t("sftp.local.move_cross_source")], str(_dmsgs)[-140:])
+
+print("== 7. the drag & drop in both directions (LOCAL_PANE.md §7) ==")
+
+
+class _DropEvent:
+    """A minimal drag event: a position outside the rows, no `Shift`, a Copy proposal."""
+
+    def __init__(self, shift=False, move=False):
+        self._shift = shift
+        self._move = move
+
+    def position(self):
+        return QPointF(-4.0, -4.0)
+
+    def pos(self):
+        return self.position().toPoint()
+
+    def modifiers(self):
+        from PySide6.QtCore import Qt as _Qt
+        return _Qt.KeyboardModifier.ShiftModifier if self._shift else _Qt.KeyboardModifier.NoModifier
+
+    def dropAction(self):
+        from PySide6.QtCore import Qt as _Qt
+        return _Qt.DropAction.MoveAction if self._move else _Qt.DropAction.CopyAction
+
+    def acceptProposedAction(self):
+        pass
+
+
+_lpane._relist(_LTREE_SRC)
+wait_until(lambda: item_by_name(_lpane, "top.txt") is not None, timeout_ms=5000)
+_l_top = os.path.join(_LTREE_SRC, "top.txt")
+_l_mime = _lpane.tree.drag_mime(item_by_name(_lpane, "top.txt"))
+check("§7 a LOCAL row dragged OUT hands a real OS path (`text/uri-list` beside `text/plain`)",
+      _l_mime is not None and _l_mime.text() == _l_top and _l_mime.hasFormat(PANE_DRAG_MIME)
+      and _l_mime.hasUrls() and _l_mime.hasFormat("text/uri-list")
+      and os.path.normcase(os.path.normpath(_l_mime.urls()[0].toLocalFile()))
+      == os.path.normcase(os.path.normpath(_l_top)),
+      str([u.toLocalFile() for u in _l_mime.urls()]) if _l_mime else "no mime")
+_l_payload = pane_payload(_l_mime)
+check("§7 ...and the payload DECLARES the source dialect and the size",
+      _l_payload is not None and _l_payload["source"] == SOURCE_LOCAL
+      and _l_payload["size"] == 4 and _l_payload["path"] == os.path.join(_LTREE_SRC, "top.txt"),
+      str(_l_payload))
+
+_rpane._relist("/home")
+wait_until(lambda: item_by_name(_rpane, "remote.txt") is not None, timeout_ms=5000)
+_r_mime = _rpane.tree.drag_mime(item_by_name(_rpane, "remote.txt"))
+_r_payload = pane_payload(_r_mime)
+check("§7 a REMOTE row keeps the shipped payload and offers NO OS path to Explorer",
+      _r_payload is not None and _r_payload["source"] == SOURCE_REMOTE
+      and not _r_mime.hasUrls()
+      and _r_payload["path"] == "/home/remote.txt" and _r_payload["size"] == 8,
+      str(_r_payload))
+
+_UP_DROP = fresh_dir("drop_dst")
+_lpane._relist(_UP_DROP)
+wait_until(lambda: _lpane.current_dir == _UP_DROP, timeout_ms=5000)
+_before = set(_fs2.files)
+_lpane._on_drop([os.path.join(_LTREE_SRC, "top.txt")], _UP_DROP)
+_ok_local_drop = wait_for(lambda: read_bytes(os.path.join(_UP_DROP, "top.txt")) == b"top\n",
+                                 timeout_ms=5000)
+check("§7 a drop of Explorer files on the LOCAL pane is a LOCAL copy, never an upload",
+      _ok_local_drop and set(_fs2.files) == _before, str(sorted(_fs2.files)))
+check("§7 ...and the local listing shows the new row (the local engine is nobody's server)",
+      wait_for(lambda: item_by_name(_lpane, "top.txt") is not None, timeout_ms=5000),
+      f"rows={[_lpane.tree.topLevelItem(i).text(0) for i in range(_lpane.tree.topLevelItemCount())]}")
+
+# a name the OS already holds as a DIRECTORY: the local copy is refused, and the pane SAYS so
+# (the local engine's refusals ride the pane's OWN signal — no session page listens to it).
+# The conflict seam answers "overwrite": a real dialog would block offscreen, and the refusal
+# below is the ENGINE's, not the question's.
+os.remove(os.path.join(_UP_DROP, "top.txt"))
+os.makedirs(os.path.join(_UP_DROP, "top.txt"))
+_lpane._relist(_UP_DROP)
+wait_until(lambda: item_by_name(_lpane, "top.txt") is not None, timeout_ms=5000)
+_clash_msgs = []
+_lpane.message.connect(_clash_msgs.append)
+_orig_ask = _lpane._ask_conflict
+_lpane._ask_conflict = lambda name, target, remaining=0, facts="": ("overwrite", False)
+try:
+    _lpane._on_drop([os.path.join(_LTREE_SRC, "top.txt")], _UP_DROP)
+    _clash_text = i18n.t("sftp.local.is_dir", error="top.txt")
+    check("§7 a refused LOCAL transfer is a translated sentence, never a silent no-op",
+          wait_for(lambda: _clash_text in _clash_msgs, timeout_ms=5000), str(_clash_msgs)[-200:])
+finally:
+    _lpane._ask_conflict = _orig_ask
+
+_rpane._relist("/other")
+wait_until(lambda: _rpane.current_dir == "/other", timeout_ms=5000)
+_rpane._on_drop([os.path.join(_LTREE_SRC, "top.txt")], "/other")
+check("§7 ...while a drop on the REMOTE pane stays the shipped upload",
+      wait_for(lambda: "/other/top.txt" in _fs2.files, timeout_ms=5000)
+      and bytes(_fs2.files["/other/top.txt"]) == b"top\n", str(sorted(_fs2.files)))
+
+# the payload that travels BETWEEN the panes: a LOCAL row onto the REMOTE pane.
+# Every destination below is a FRESH directory: an existing name would raise the shipped
+# overwrite question, which blocks on a real dialog (the seam is covered by test_files_surface).
+_fs2.add_dir("/inbox")
+_rpane._relist("/inbox")
+wait_until(lambda: _rpane.current_dir == "/inbox", timeout_ms=5000)
+_dmsgs.clear()
+_rpane._on_pane_drop(_l_payload, _DropEvent())
+check("§7 a LOCAL row dropped on the REMOTE pane is an UPLOAD named by the SOURCE dialect",
+      wait_for(lambda: "/inbox/top.txt" in _fs2.files, timeout_ms=5000)
+      and bytes(_fs2.files["/inbox/top.txt"]) == b"top\n"
+      and any(str(m).startswith("Copied:") for m in _dmsgs), str(_dmsgs)[-160:])
+
+# and the other way: a REMOTE row onto the LOCAL pane
+_DOWN_DROP = fresh_dir("drop_in")
+_lpane._relist(_DOWN_DROP)
+wait_until(lambda: _lpane.current_dir == _DOWN_DROP, timeout_ms=5000)
+_rpane._relist("/home")
+wait_until(lambda: item_by_name(_rpane, "remote.txt") is not None, timeout_ms=5000)
+_dmsgs.clear()
+_lpane._on_pane_drop(_r_payload, _DropEvent())
+check("§7 a REMOTE row dropped on the LOCAL pane is a DOWNLOAD into the pane's directory",
+      wait_for(lambda: read_bytes(os.path.join(_DOWN_DROP, "remote.txt")) == b"R" * 8,
+               timeout_ms=5000)
+      and any(str(m).startswith("Copied:") for m in _dmsgs), str(_dmsgs)[-160:])
+
+_dmsgs.clear()
+_lpane._on_pane_drop(_r_payload, _DropEvent(shift=True))
+check("§7 a SHIFT drop between the two sources is the refused cross-source MOVE (ONE sentence)",
+      _dmsgs[-1:] == [i18n.t("sftp.local.move_cross_source")]
+      and len([n for n in os.listdir(_DOWN_DROP) if n == "remote.txt"]) == 1, str(_dmsgs)[-140:])
+
+_dmsgs.clear()
+_rpane._on_pane_drop(_r_payload, _DropEvent())
+check("§7 a row dropped back on its OWN pane is refused with the shipped sentence",
+      _dmsgs[-1:] == [i18n.t("sftp.cmd.drop_same_pane")], str(_dmsgs)[-140:])
+
+# ── the CONTAINER's teardown: the ONE door the page calls (AGENTS.md §4.8) ──
+_local_prov = _lpane._local_provider
+check("§1 the local pane holds a LIVE provider before the teardown (the crash needs one)",
+      _local_prov is not None and _local_prov.isRunning(), str(_local_prov))
+
+_dtab.release()
+check("§1 `SftpTab.release()` stops the local pane's thread — a QThread never outlives its widget",
+      _local_prov.isRunning() is False and _lpane._local_provider is None,
+      f"running={_local_prov.isRunning()}")
+check("§1 ...while the SESSION's transport stays the page's business (bound and still running)",
+      _rpane.provider is _dworker and _dworker.isRunning())
+try:
+    _dtab.release()
+    _release_twice = True
+except Exception as e:  # noqa: BLE001 — an idempotent teardown never raises
+    _release_twice = False
+    print("   a second release() raised:", e)
+check("§1 ...and a second `release()` is an idempotent no-op", _release_twice)
+
+_dworker.shutdown()
+
+print("== 8. the machine codes and their sentences (LOCAL_PANE.md §3) ==")
 
 check("§3 every declared code really renders a sentence of the SHIPPED language set",
       all(local_error_text(LFW.task_payload(code, error="boom")) for code in LFW.LOCAL_ERROR_KEYS))
@@ -464,14 +877,14 @@ check("§3 the local skipped-entries note is declared once with its own key",
       and LFW.LOCAL_ERROR_KEYS[LFW.KIND_LIST_PARTIAL] == "sftp.local.skipped"
       and parse_task_payload(LFW.task_payload(LFW.KIND_LIST_PARTIAL, count=2, names="a, b"))["count"] == 2)
 
-print("== 7. i18n and the release state ==")
+print("== 9. i18n and the release state ==")
 
 LANGS = load_i18n_langs(ROOT)
 check_i18n_parity(LANGS)
 check_i18n_format(LANGS)
 NEW_KEYS = [k for k in LANGS["en"] if k.startswith("sftp.local.")]
-check(f"the {len(NEW_KEYS)} keys of v1.7.4rc1 are present and non-empty in EVERY language",
-      len(NEW_KEYS) == 17
+check(f"the {len(NEW_KEYS)} keys of the local pane are present and non-empty in EVERY language",
+      len(NEW_KEYS) == 18
       and all(str(data.get(k) or "").strip() for k in NEW_KEYS for data in LANGS.values()),
       f"{len(NEW_KEYS)} keys")
 check("the switch's values are TRANSLATED (never the raw key or the English literal)",
@@ -489,9 +902,9 @@ check("...and the second value of the pair exists in every language",
 
 check_release_state(ROOT)
 check("the version pin is the release this file describes",
-      releases_at_least(EXPECTED_APP_VERSION, "1.7.4rc1"), EXPECTED_APP_VERSION)
-check("the i18n pin counts the SHIPPED release (897 + the 17 keys of v1.7.4rc1)",
-      EXPECTED_I18N_KEYS == 897 + 17, str(EXPECTED_I18N_KEYS))
+      releases_at_least(EXPECTED_APP_VERSION, "1.7.4"), EXPECTED_APP_VERSION)
+check("the i18n pin counts the SHIPPED release (897 + the 17 of v1.7.4rc1 + the 1 of v1.7.4rc2)",
+      EXPECTED_I18N_KEYS == 897 + 17 + 1, str(EXPECTED_I18N_KEYS))
 check("VERSION_FORMAT did NOT move (a path is never written into a project)",
       __import__("version").VERSION_FORMAT == "0.9")
 check("no new dependency was added for the local pane (the four pinned ones)",
@@ -500,13 +913,61 @@ check("no new dependency was added for the local pane (the four pinned ones)",
 check("the frozen contract of this line is in the repository (LOCAL_PANE.md)",
       os.path.exists(os.path.join(ROOT, "LOCAL_PANE.md")))
 
-_wrap = re.search(r"^RESERVED_METHODS = \(([^)]*)\)",
-                  open(os.path.join(ROOT, "modules", "local_fs_worker.py"),
-                       encoding="utf-8").read(), re.M)
-check("the reserved surface is DECLARED in one tuple the pane can read",
-      _wrap is not None
-      and [p.strip().strip('"') for p in _wrap.group(1).split(",") if p.strip()]
-      == list(LFW.RESERVED_METHODS), _wrap.group(1) if _wrap else "not found")
+_src_text = open(os.path.join(ROOT, "modules", "local_fs_worker.py"), encoding="utf-8").read()
+check("the engine is the DECLARED one (`shutil.copy2` through a `.part` + `os.replace`)",
+      "shutil.copy2" in _src_text and PART_SUFFIX in _src_text
+      and re.search(r"^PART_SUFFIX = ", open(os.path.join(ROOT, "modules", "sftp_worker.py"),
+                                             encoding="utf-8").read(), re.M) is not None)
+check("...and the transfer doors are the SHIPPED names, not a new vocabulary",
+      all(f"def {name}(" in _src_text
+          for name in ("queue_upload", "queue_download", "queue_copy", "queue_move")))
+
+print("== 10. the PAGE teardown and the orphan registry (AGENTS.md §4.8) ==")
+
+# The field crash: a session is closed (the window's X / the MainWindow shutdown) while its
+# SECOND pane reads the OS disk. `TerminalSessionPage.shutdown()` is the ONE teardown path, so
+# the invariant is asserted on it: after the call no LocalFsWorker of that session is running —
+# a thread still running when the widget tree dies aborts the whole application.
+_orig_thread_cls = ST.SSHTerminalThread
+ST.SSHTerminalThread = FakeSSHThread
+_page = None
+_pprov = None
+try:
+    _page = TerminalSessionPage(ServerData(id="lp-page", alias="lp-page", host="192.0.2.99",
+                                           user="root"))
+    _page.sftp_tab.set_commander(True)
+    _ppane = _page.sftp_tab.panes[1]
+    _page.sftp_tab.set_pane_source(_ppane, SOURCE_LOCAL)
+    wait_until(lambda: _ppane._local_provider is not None, timeout_ms=5000)
+    _pprov = _ppane._local_provider
+    _page.shutdown()
+    check("§1 the page's SINGLE teardown stops the local pane's thread (the field crash)",
+          _pprov is not None and _pprov.isRunning() is False and _ppane._local_provider is None
+          and not LFW._orphan_providers,
+          f"running={_pprov.isRunning() if _pprov else None} orphans={len(LFW._orphan_providers)}")
+    try:
+        _page.shutdown()
+        _page_twice = True
+    except Exception as e:  # noqa: BLE001 — the idempotent teardown never raises
+        _page_twice = False
+        print("   a second page shutdown() raised:", e)
+    check("§1 ...and the page's `shutdown()` stays idempotent with a LOCAL pane bound", _page_twice)
+finally:
+    ST.SSHTerminalThread = _orig_thread_cls
+
+# A provider that OUTLIVED its wait budget: the registry must DETACH it from the pane that is
+# about to die, or the parent destroys the thread it is holding for (the same abort, later).
+_holder = QWidget()
+_orphan = LFW.LocalFsWorker(root=TREE, parent=_holder)
+_orphan.start()
+LFW.register_orphan_local_provider(_orphan)
+check("§1 a provider that outlives its wait budget is DETACHED from its dying pane",
+      _orphan.parent() is None and _orphan in LFW._orphan_providers,
+      f"parent={_orphan.parent()} orphans={len(LFW._orphan_providers)}")
+_orphan.shutdown(2500)
+check("§1 ...and the registry drops it the moment it really finished",
+      wait_for(lambda: _orphan not in LFW._orphan_providers, timeout_ms=8000),
+      f"orphans={len(LFW._orphan_providers)}")
 
 tab.set_worker(None)
 worker.shutdown()
