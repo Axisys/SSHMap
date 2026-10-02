@@ -587,7 +587,7 @@ check_release_state(ROOT)
 check("§5 EXPECTED_APP_VERSION is the shipped release (v1.5.2 was the second patch on 1.5;"
       " the pin quotes the CURRENT one — the 1.7 line, its feature follow-up included)",
       releases_at_least(EXPECTED_APP_VERSION, "1.7")
-      and re.fullmatch(r"1\.7(?:rc\d+|(?:\.\d+){1,2})?", EXPECTED_APP_VERSION) is not None)
+      and re.fullmatch(r"1\.7(?:\.\d+){0,2}(?:rc\d+)?", EXPECTED_APP_VERSION) is not None)
 check("§5 the i18n pin counts the shipped release (v1.5.2's 661 + v1.5.3's twenty"
       " + v1.5.4's eleven + v1.5.5's fourteen + v1.5.6's two + v1.5.7's twenty-nine"
       " + v1.6's forty-one + v1.6.2's four + v1.6.3's four + v1.6.4's three"

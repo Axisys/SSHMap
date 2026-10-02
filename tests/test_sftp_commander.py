@@ -242,8 +242,9 @@ check("the drag payload helper stays a CLASS method (the shipped suite reads it 
 check("the CONTAINER owns the follow switch (a session state, printed once)",
       tab_one.chk_follow_cwd.parent() is tab_one
       and not hasattr(pane_a, "chk_follow_cwd"))
-check("the pane owns no worker of its own — the binding is the container's",
-      "_worker" not in pane_a.__dict__ and pane_a.worker is None)
+check("the REMOTE pane owns no worker of its own — the binding is the container's (LOCAL_PANE.md §1)",
+      "_worker" not in pane_a.__dict__ and pane_a.worker is None
+      and pane_a.source == "remote" and pane_a.provider is None)
 
 # the pane-scoped keys: WidgetWithChildrenShortcut, ON the pane, F4 REFUSED
 _keys = [seq for seq, _slot in PANE_SHORTCUTS]
@@ -718,7 +719,7 @@ i18n.set_language("en")
 
 check_release_state(ROOT)
 check("the version pin is the release this file describes",
-      re.fullmatch(r"1\.7(?:rc\d+|(?:\.\d+){1,2})?", EXPECTED_APP_VERSION) is not None,
+      re.fullmatch(r"1\.7(?:\.\d+){0,2}(?:rc\d+)?", EXPECTED_APP_VERSION) is not None,
       EXPECTED_APP_VERSION)
 check("the i18n pin counts the SHIPPED release (846 + the 8 keys of v1.7rc2 + later additions)",
       EXPECTED_I18N_KEYS >= 846 + 8 == 854, str(EXPECTED_I18N_KEYS))

@@ -102,9 +102,20 @@ check("§1 a pane owns the whole of ONE listing (its bookkeeping and its viewer)
       and hasattr(bare.panes[0], "path_label") and hasattr(bare.panes[0], "viewer")
       and bare.panes[0].tree is not bare.panes[0].viewer,
       f"missing={_missing_pane}")
-check("§1 ...and the pane carries NO worker of its own (the binding is the container's)",
-      "worker" not in bare.panes[0].__dict__ and isinstance(type(bare.panes[0]).worker, property),
+check("§1 ...and a REMOTE pane carries NO worker of its own (the binding is the container's)",
+      "worker" not in bare.panes[0].__dict__ and isinstance(type(bare.panes[0]).worker, property)
+      and "_worker" not in bare.panes[0].__dict__,
       str(sorted(bare.panes[0].__dict__))[:120])
+# v1.7.4rc1 (LOCAL_PANE.md §1): the LOCAL source is the ONE exception to the clause above — its
+# provider is not the container's, so a pane OWNS an object of its own exactly then. This is a
+# recorded DECISION of the open line, asserted beside the shipped sentence instead of bending it.
+check("§1 ...while a LOCAL pane's provider is its OWN (`_local_provider`, LOCAL_PANE.md §1)",
+      bare.panes[0].source == "remote"
+      and "_local_provider" in bare.panes[0].__dict__
+      and bare.panes[0]._local_provider is None
+      and isinstance(type(bare.panes[0]).provider, property)
+      and callable(getattr(bare.panes[0], "set_source", None))
+      and callable(getattr(SftpTab, "can_use_local", None)))
 check("§1 the pane list and the mode are the CONTAINER's own attributes (never forwarded)",
       "panes" not in SftpTab.PANE_STATE and "tree" not in SftpTab.PANE_STATE
       and all(n in SftpTab.PANE_STATE for n in PANE_OWNED),

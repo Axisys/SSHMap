@@ -23,7 +23,7 @@ from PySide6.QtGui import (QAction, QColor, QDrag, QFontDatabase, QIcon,
 from PySide6.QtWidgets import (
     QApplication, QCheckBox, QCompleter, QFileDialog, QHBoxLayout, QInputDialog,
     QLabel, QLineEdit, QMenu, QMessageBox, QPlainTextEdit, QPushButton, QSplitter,
-    QStyle, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget,
+    QStyle, QToolButton, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget,
 )
 
 try:
@@ -82,6 +82,11 @@ try:  # v1.7.3 (ROADMAP v1.7.3, task 1): the parent-chain host hook of the Send-
     from .terminal_split import find_host_hook
 except ImportError:  # flat launch from the project root
     from terminal_split import find_host_hook
+
+try:  # v1.7.4rc1: the LOCAL provider of a pane and the machine codes of its refusals
+    from . import local_fs_worker as local_fs
+except ImportError:  # flat launch from the project root
+    import local_fs_worker as local_fs
 
 
 # ── the Files Commander — the pane model ───────────
@@ -162,6 +167,143 @@ VIEWER_WRAP_CONFIG = "ui_viewer_wrap"
 #: key, the pane's identity and the path while `text/plain` keeps the plain path for every foreign
 #: consumer (a terminal, an editor, a chat window).
 PANE_DRAG_MIME = "application/x-sshmap-pane-row"
+
+#: v1.7.4rc1: the two DATA SOURCES of a pane. A pane is typed to ONE of them (its provider);
+#: `SOURCE_REMOTE` is the session's own transport (`SftpTab._worker`) and `SOURCE_LOCAL` is the OS
+#: disk of this machine, read through `modules/local_fs_worker.py` on its OWN thread. The source is
+#: a property of the PANE (LOCAL_PANE.md §1), never of the container: ONE pane of the Commander may
+#: read the local disk while the other one reads the server.
+SOURCE_REMOTE = "remote"
+SOURCE_LOCAL = "local"
+PANE_SOURCES = (SOURCE_REMOTE, SOURCE_LOCAL)
+
+#: The local pane's control and the sentence of its two structural refusals — declared ONCE.
+LOCAL_SOURCE_LABEL = "sftp.local.source"
+LOCAL_UNAVAILABLE_HINT = "sftp.local.unavailable"
+
+
+def _win_standard_path(path: str) -> str:
+    """`os.path.normcase` on every OS (a PURE helper, so the dialect stays testable everywhere).
+
+    The LOCAL dialect is case-insensitive on Windows and case-SENSITIVE elsewhere; the shipped
+    `os.path.normcase` is an identity on POSIX, so it is used directly and the fallback keeps the
+    same answer when the platform module cannot be asked.
+    """
+    try:
+        return os.path.normcase(str(path or ""))
+    except Exception:  # noqa: BLE001 — never break a listing over a path comparison
+        return str(path or "")
+
+
+class PathDialect:
+    """The PATH RULES of one data source — the ONE adapter a pane resolves paths through.
+
+    A remote pane speaks POSIX (`posixpath`, the "/" root) and a LOCAL pane speaks the OS disk
+    (backslashes, a drive or UNC root, case-insensitive names). Every join, split, root test and
+    name comparison of the pane goes through its dialect, so a second dialect costs ONE object and
+    not a second pane (LOCAL_PANE.md §2). PURE: no Qt, no IO, no i18n.
+    """
+
+    def __init__(self, kind: str, label: str):
+        self.kind = str(kind)
+        self.label = str(label)
+
+    @property
+    def is_local(self) -> bool:
+        return self.kind == SOURCE_LOCAL
+
+    @property
+    def separator(self) -> str:
+        """The character that continues INTO a directory (the completer's trailing one)."""
+        return "\\" if self.is_local else "/"
+
+    def dirname(self, path: str) -> str:
+        """The parent of `path` — "" at the root (the root itself for the LOCAL dialect)."""
+        text = str(path or "")
+        if self.is_local:
+            return os.path.dirname(text)
+        return posixpath.dirname(text)
+
+    def join(self, base: str, name: str) -> str:
+        """`base` + `name` as ONE path."""
+        text, child = str(base or ""), str(name or "")
+        if self.is_local:
+            return os.path.join(text, child)
+        return posixpath.join(text or "/", child)
+
+    def basename(self, path: str) -> str:
+        """The LAST component of `path` (the name a row, a dialog or a sentence shows)."""
+        text = str(path or "")
+        if self.is_local:
+            return os.path.basename(text)
+        return posixpath.basename(text)
+
+    def is_root(self, path: str) -> bool:
+        """Is `path` a ROOT (nothing above it)? A bare drive name and `~` are NOT.
+
+        For the LOCAL dialect a root is the path its own parent already is — a drive root
+        (`C:\\`), a UNC share root, `/` — which is exactly what the pane's "go up" test needs:
+        answering True for the bare `C:` would send the listing to the process's current
+        directory of that drive, and answering False for `C:\\` would render a ".." row that
+        cannot be resolved.
+        """
+        text = str(path or "")
+        if not text:
+            return False
+        if self.is_local:
+            if not os.path.isabs(text):
+                return False
+            return os.path.dirname(text) == text
+        return text == "/"
+
+    def is_absolute(self, path: str) -> bool:
+        """Is `path` already anchored? `~` counts as absolute: it resolves to a home."""
+        text = str(path or "")
+        if text.startswith("~"):
+            return True
+        if self.is_local:
+            return os.path.isabs(text)
+        return text.startswith("/")
+
+    def same(self, left: str, right: str) -> bool:
+        """Are the two paths the SAME subject? Case-insensitively on the OS disk."""
+        if self.is_local:
+            return _win_standard_path(left) == _win_standard_path(right)
+        return str(left or "") == str(right or "")
+
+    def root(self) -> str:
+        """The value a LOCAL pane opens with when nothing else is known — the OS home."""
+        return os.path.expanduser("~") if self.is_local else "/"
+
+
+#: The two dialects, declared ONCE (the pane resolves one from its source).
+POSIX_PATHS = PathDialect(SOURCE_REMOTE, "/")
+LOCAL_PATHS = PathDialect(SOURCE_LOCAL, os.sep)
+
+
+def dialect_for(source: str) -> PathDialect:
+    """The dialect of a pane's SOURCE (`SOURCE_REMOTE` unless the source really is local)."""
+    return LOCAL_PATHS if str(source or "") == SOURCE_LOCAL else POSIX_PATHS
+
+
+def local_error_text(message: str) -> str:
+    """A LOCAL `task_error` payload → its translated sentence (a plain message passes through).
+
+    The provider names the MACHINE code and the OS's own text (LOCAL_PANE.md §3); the sentence is
+    the tab's, so a refusal reads like every other message of the window. A payload the tab does
+    not know falls back to the shipped generic operation sentence.
+    """
+    data = parse_task_payload(message)
+    if not data:
+        return _t("sftp.op.error", error=message)
+    code = str(data.get("code") or "")
+    if code == local_fs.KIND_LIST_PARTIAL:
+        return _t(local_fs.LOCAL_ERROR_KEYS[local_fs.KIND_LIST_PARTIAL],
+                  count=int(data.get("count") or 0), names=str(data.get("names") or ""))
+    key = local_fs.LOCAL_ERROR_KEYS.get(code)
+    if not key:
+        return _t("sftp.op.error", error=str(data.get("error") or message))
+    return _t(key, error=str(data.get("error") or ""))
 
 
 def load_remembered_dirs() -> dict:
@@ -591,6 +733,95 @@ class _ButtonRow(QWidget):
         return QSize(BUTTONS_BAR_MIN_WIDTH, height)
 
 
+class _SourceSwitch(QWidget):
+    """The `Server | Local` control of the pane's address row (v1.7.4rc1, LOCAL_PANE.md §4).
+
+    ONE checkable pair driving ONE state (the `CommanderCorner` discipline: the two buttons are
+    views of `source`, so the look can never disagree with the provider the pane bound), and the
+    label spells out WHAT is being switched — the pane's own source, not the session's. The widget
+    only EMITS: the container decides whether the local source is available at all.
+    """
+
+    changed = Signal(str)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._source = SOURCE_REMOTE
+        row = QHBoxLayout(self)
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(2)
+        self.lbl = QLabel(_t(LOCAL_SOURCE_LABEL))
+        _apply_status_style(self.lbl, "status.sftp_row")
+        row.addWidget(self.lbl)
+        self.btn_server = QToolButton()
+        self.btn_local = QToolButton()
+        for button, source, key in ((self.btn_server, SOURCE_REMOTE, "sftp.local.server"),
+                                    (self.btn_local, SOURCE_LOCAL, "sftp.local.local")):
+            button.setText(_t(key))
+            button.setCheckable(True)
+            button.setAutoRaise(True)
+            button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+            button.clicked.connect(lambda _checked=False, s=source: self._on_clicked(s))
+            row.addWidget(button)
+        self.apply(SOURCE_REMOTE)
+
+    def _on_clicked(self, source: str):
+        if source == self._source:
+            self.apply(source)   # a click on the state that already holds — the look is re-synced
+            return
+        self.changed.emit(source)
+
+    def source(self) -> str:
+        return self._source
+
+    def apply(self, source: str):
+        """Show ONE source as the live one (the state is written HERE and nowhere else)."""
+        self._source = SOURCE_LOCAL if str(source) == SOURCE_LOCAL else SOURCE_REMOTE
+        for button, value in ((self.btn_server, SOURCE_REMOTE), (self.btn_local, SOURCE_LOCAL)):
+            try:
+                button.setChecked(self._source == value)
+            except RuntimeError:
+                pass  # Qt teardown — the button is already gone
+
+    def set_available(self, enabled: bool, available: bool = True):
+        """Enable/disable the pair and say WHY through the tooltip (never a silent dead control).
+
+        The WIDGET itself is disabled as well as its parts, so the whole control reads as one
+        (a disabled container with enabled children would be an ambiguous answer).
+        """
+        on = bool(enabled) and bool(available)
+        for widget in (self, self.lbl, self.btn_server, self.btn_local):
+            try:
+                widget.setEnabled(on)
+            except RuntimeError:
+                continue
+        try:
+            self.setToolTip("" if available else _t(LOCAL_UNAVAILABLE_HINT))
+        except RuntimeError:
+            pass
+
+    def retranslate(self):
+        try:
+            self.lbl.setText(_t(LOCAL_SOURCE_LABEL))
+            self.btn_server.setText(_t("sftp.local.server"))
+            self.btn_local.setText(_t("sftp.local.local"))
+            self.apply(self._source)
+        except RuntimeError:
+            pass  # Qt teardown
+
+
+def _sync_source_switch(switch, source: str, enabled: bool = True, available: bool = True):
+    """Show a source and the availability of the switch (the ONE call of every state change)."""
+    if switch is None:
+        return
+    try:
+        if source:
+            switch.apply(source)
+        switch.set_available(enabled, available)
+    except (RuntimeError, AttributeError):
+        pass  # Qt teardown / a bare stub in a unit test — never raises
+
+
 class _SftpPane(QWidget):
     """v1.7rc1 (ROADMAP v1.7rc1, task 2): ONE directory pane of the "Files" tab.
 
@@ -701,6 +932,13 @@ class _SftpPane(QWidget):
         # v1.7rc1: the pane-scoped keys (the F-actions) and the ACTIVE-pane ring.
         self._pane_actions = []
         self._ring = focus_ring.FocusRing(styled_widget=None) if focus_ring is not None else None
+        # v1.7.4rc1: the DATA SOURCE of this pane (LOCAL_PANE.md §1). The provider is the object
+        # the pane binds — the container's shipped worker for a remote pane, and ONE
+        # `LocalFsWorker` of its own for a local one, created on the first switch to Local and
+        # kept alive for the pane's whole life (a switch back and forth costs no thread).
+        self._source = SOURCE_REMOTE
+        self._local_provider = None
+        self._waiting = True   # no provider bound yet: the shipped "waiting for connection" state
 
         t = _t
         outer = QVBoxLayout(self)
@@ -725,7 +963,19 @@ class _SftpPane(QWidget):
         self.path_completer.setCompletionMode(QCompleter.CompletionMode.PopupCompletion)
         self.path_completer.setCompletionRole(Qt.ItemDataRole.DisplayRole)
         self.path_label.setCompleter(self.path_completer)
-        outer.addWidget(self.path_label)
+        # v1.7.4rc1: the SOURCE SWITCH of the pane (LOCAL_PANE.md §4) — the leading control of the
+        # address row, a one-line pair so it costs the bar no height. It is the SECOND pane's
+        # control alone: the first pane is the session's own remote tree, the local source is what
+        # makes the OTHER side of a commander a choice, and with one pane there is no other side.
+        self.source_switch = _SourceSwitch()
+        self.source_switch.changed.connect(self._on_source_switch)
+        path_row = QHBoxLayout()
+        path_row.setContentsMargins(0, 0, 0, 0)
+        path_row.setSpacing(6)
+        path_row.addWidget(self.source_switch, 0)
+        path_row.addWidget(self.path_label, 1)
+        outer.addLayout(path_row)
+        _sync_source_switch(self.source_switch, self._source, enabled=False, available=False)
 
         # Buttons: navigation | operations.
         bar = QHBoxLayout()
@@ -868,8 +1118,34 @@ class _SftpPane(QWidget):
     # ── v1.7rc1: the pane identity, the ACTIVE-pane hook and the pane-scoped keys ──
 
     @property
+    def source(self) -> str:
+        """This pane's DATA SOURCE (`SOURCE_REMOTE` | `SOURCE_LOCAL`, LOCAL_PANE.md §1)."""
+        return self._source
+
+    @property
+    def paths(self) -> PathDialect:
+        """The path rules of this pane's source — every join, split and root test goes through it."""
+        return dialect_for(self._source)
+
+    @property
+    def provider(self):
+        """The object this pane binds (the shipped worker, or the pane's own local provider).
+
+        `None` — no provider yet: a remote pane waiting for the session's connection. A LOCAL pane
+        always has one, which is why the waiting state is a REMOTE state.
+        """
+        if self._source == SOURCE_LOCAL:
+            return self._local_provider
+        return self.worker
+
+    @property
     def worker(self):
-        """The SHARED worker — the CONTAINER owns the binding (SFTP_PANES.md §2)."""
+        """The SHARED transport worker — the CONTAINER owns the binding (SFTP_PANES.md §2).
+
+        A LOCAL pane reads the OS disk through its OWN provider and never through this one: the
+        property answers the session's worker whatever the source, so a remote call site keeps
+        its shipped meaning (LOCAL_PANE.md §1).
+        """
         return self._container.worker
 
     def session_key(self) -> str:
@@ -979,6 +1255,11 @@ class _SftpPane(QWidget):
         try:
             self.buttons_bar.setVisible(not secondary and not borrowed)
             self.hints_label.setVisible(secondary and not borrowed)
+            # v1.7.4rc1: the source switch belongs to the ADDRESS ROW, so it is visible exactly
+            # while that row is — a pane carrying a borrowed preview is a panel and shows neither.
+            switch = getattr(self, "source_switch", None)
+            if switch is not None:
+                switch.setVisible(not borrowed)
             if secondary:
                 self.hints_label.setText(self.hint_text())
                 self.hints_label.setToolTip(self.hint_text())
@@ -989,6 +1270,9 @@ class _SftpPane(QWidget):
                     self.hints_label.setFixedHeight(height)
         except (RuntimeError, AttributeError):
             pass  # Qt teardown / a pane built before the row exists
+        # The availability of the local source follows the ROLE of the pane (LOCAL_PANE.md §4):
+        # only the second pane of the two-pane view may switch it.
+        self._sync_source_availability()
 
     def focus_listing(self):
         """Give the keyboard to this pane's listing (the mc/far walk's landing point).
@@ -1210,8 +1494,8 @@ class _SftpPane(QWidget):
             return False
         if not item.data(0, self.ISDIR_ROLE):
             return False
-        parent = posixpath.dirname(self._current_dir)
-        if not parent or parent == self._current_dir:
+        parent = self.paths.dirname(self._current_dir)
+        if not parent or self.paths.same(parent, self._current_dir):
             return False
         self._relist(parent)
         return True
@@ -1238,6 +1522,19 @@ class _SftpPane(QWidget):
             return
         self._on_item_double_clicked(item, 0)
 
+    def _refuse_cross_source(self, target) -> bool:
+        """True — a copy/move between the panes would cross the two SOURCES, and rc1 says so.
+
+        The dispatch of `v1.7.4rc2` is what makes the four cases run (LOCAL_PANE.md §5); until
+        then ANY pair involving a local pane answers ONE sentence instead of raising the
+        `NotImplementedError` of the reserved provider methods. `False` — both panes read the
+        same source and the shipped batch is exactly right.
+        """
+        if self.source == SOURCE_REMOTE and target.source == SOURCE_REMOTE:
+            return False
+        self.message.emit(_t("sftp.local.transfer_unavailable"))
+        return True
+
     def _cmd_copy(self):
         """`F5` — copy the current row (or the whole selection) to the OTHER pane's directory.
 
@@ -1248,6 +1545,8 @@ class _SftpPane(QWidget):
         target = self._container.other_pane(self)
         if target is None:
             self.message.emit(_t("sftp.cmd.copy_no_target"))
+            return
+        if self._refuse_cross_source(target):
             return
         self._remote_batch(KIND_COPY, target)
 
@@ -1260,7 +1559,9 @@ class _SftpPane(QWidget):
         in the single-listing tab.
         """
         target = self._container.other_pane(self)
-        if target is not None and target.current_dir != self._current_dir:
+        if target is not None and not self.paths.same(target.current_dir, self._current_dir):
+            if self._refuse_cross_source(target):
+                return
             self._remote_batch(KIND_MOVE, target)
             return
         item = self._current_row()
@@ -1283,18 +1584,25 @@ class _SftpPane(QWidget):
 
     # ── Worker binding (the container calls these) ───────────────────────
 
-    def bind_worker(self, old_worker, new_worker):
-        """Bind/unbind the SHARED worker: `None` — the "waiting for connection" state.
+    def bind_worker(self, old_worker, new_worker, source: str = ""):
+        """Bind/unbind the pane's PROVIDER: `None` — the "waiting for connection" state.
 
-        The OLD worker is passed explicitly because the container has already replaced its
+        The OLD provider is passed explicitly because the container has already replaced its
         own reference when this runs — the pane must disconnect from the transport it was
         really listening to, not from the new one.
 
-        A pane's bookkeeping belongs to ONE transport, so every task map is cleared here: a
+        A pane's bookkeeping belongs to ONE provider, so every task map is cleared here: a
         listing, a read, an operation or a completer answer of the previous server must
-        never land in this one.
+        never land in this one. The `source` keyword (v1.7.4rc1) is what a SWITCH passes: the
+        pane adopts the source and binds the provider that goes with it, while the container's
+        own call (`bind_worker(None, worker)`) keeps every pane on the source it holds.
         """
-        self._disconnect_worker(old_worker)
+        if source:
+            self._source = SOURCE_LOCAL if str(source) == SOURCE_LOCAL else SOURCE_REMOTE
+        old = old_worker if old_worker is not None else self._disconnect_current()
+        if new_worker is None and self._source == SOURCE_LOCAL:
+            new_worker = self._ensure_local_provider()
+        self._disconnect_worker(old)
         self._transfer_tasks.clear()
         self._own_transfers.clear()
         # v1.3.3.2: the operation answers and the pre-flight listings belong to the
@@ -1320,7 +1628,8 @@ class _SftpPane(QWidget):
         self.btn_cancel.setEnabled(False)
 
         if new_worker is None:
-            self._current_dir = "/"
+            self._waiting = True
+            self._current_dir = self.paths.root()
             self._pending_lists.clear()
             self.tree.clear()
             self._up_item = None
@@ -1332,18 +1641,19 @@ class _SftpPane(QWidget):
             for b in (self.btn_up, self.btn_refresh, self.btn_upload,
                       self.btn_download):
                 b.setEnabled(False)
+            self._sync_source_availability()
             return
 
+        self._waiting = False
         for name in WORKER_SIGNAL_NAMES:
             sig = getattr(new_worker, name, None)
             slot = getattr(self, "_on_" + name, None)
             if sig is None or slot is None:
                 continue
             sig.connect(slot)
-        for b in (self.btn_up, self.btn_refresh, self.btn_upload,
-                  self.btn_download):
-            b.setEnabled(True)
+        self._sync_transfer_availability()
         self.path_label.setReadOnly(False)
+        self._sync_source_availability()
         # v1.7.3 (task 2): the FIRST transport of this pane opens the directory the server was
         # left in (ONE per-server key, a HINT): the answer may be a refusal, and `_on_task_error`
         # then says so and falls back to the shipped opening rule.
@@ -1359,7 +1669,7 @@ class _SftpPane(QWidget):
         self._relist(start)
 
     def _disconnect_worker(self, worker):
-        """Drop this pane's slots from a worker (idempotent — a not-connected slot is a no-op)."""
+        """Drop this pane's slots from a provider (idempotent — a not-connected slot is a no-op)."""
         if worker is None:
             return
         for name in WORKER_SIGNAL_NAMES:
@@ -1371,9 +1681,127 @@ class _SftpPane(QWidget):
             except (TypeError, RuntimeError):
                 pass  # no connection existed / the worker is already gone
 
+    def _disconnect_current(self):
+        """The provider this pane is REALLY bound to — read BEFORE a source change (v1.7.4rc1).
+
+        The shipped `worker` property answers the container's transport whatever the source, so
+        a local pane needs this to find the object it must disconnect from.
+        """
+        return self.provider
+
+    def _ensure_local_provider(self):
+        """The pane's OWN provider, created once and kept for the pane's whole life.
+
+        The thread starts with the first Local switch (a pane that never goes local costs no
+        thread at all) and lives until `release()`: a switch back and forth therefore keeps the
+        local directory, the listing and the costs of nothing.
+        """
+        if self._local_provider is None:
+            self._local_provider = local_fs.LocalFsWorker(root=self.paths.root(), parent=self)
+            self._local_provider.start()
+        return self._local_provider
+
+    def shutdown_provider(self):
+        """Stop the pane's local provider (the pane is going away). Never raises.
+
+        A thread that outlives its wait budget is registered as an ORPHAN instead of being left
+        to GC (`AGENTS.md` §4.8); the shipped worker of the session belongs to the page and is
+        NOT touched here.
+        """
+        provider = self._local_provider
+        self._local_provider = None
+        if provider is None:
+            return
+        try:
+            provider.shutdown(local_fs.LOCAL_SHUTDOWN_WAIT_MS)
+        except Exception:  # noqa: BLE001 — teardown robustness
+            pass
+        try:
+            if provider.isRunning():
+                local_fs.register_orphan_local_provider(provider)
+        except RuntimeError:
+            pass   # the C++ object is already gone
+
+    def set_source(self, source: str, notify: bool = True) -> bool:
+        """Switch this pane's DATA SOURCE and re-bind its provider (v1.7.4rc1).
+
+        The pane's own bookkeeping belongs to ONE provider, so the switch goes through the SAME
+        `bind_worker()` path a new connection takes: the old provider is disconnected, every task
+        map is cleared and the new provider is bound and listed. `False` — the switch was refused
+        (the source is unknown, or it is not allowed on this pane at all), and the caller puts its
+        control back; a refusal that is asked for is SAID, never a silent no-op.
+        """
+        target = SOURCE_LOCAL if str(source or "") == SOURCE_LOCAL else SOURCE_REMOTE
+        if target == self._source:
+            self._sync_source_availability()
+            return True
+        allowed = True
+        can_use = getattr(self._container, "can_use_local", None)
+        if target == SOURCE_LOCAL and callable(can_use):
+            allowed = bool(can_use(self))
+        if not allowed:
+            if notify:
+                self.message.emit(_t(LOCAL_UNAVAILABLE_HINT))
+            self._sync_source_availability()
+            return False
+        old = self._disconnect_current()
+        # The directory belongs to the SOURCE: the OS home for the first local look, the
+        # session's opening rule for the way back (never the other dialect's path).
+        keep = self._current_dir if target == SOURCE_REMOTE else ""
+        self._source = target
+        self._current_dir = keep or self.paths.root()
+        self._restored = bool(keep)
+        self.bind_worker(old, None, source=target)
+        self._sync_source_availability()
+        return True
+
+    def _on_source_switch(self, source: str):
+        """The switch widget asked for a source: try it and put the control back on a refusal."""
+        if not self.set_source(source):
+            self._sync_source_availability()
+
+    def _sync_source_availability(self):
+        """Show the pane's source on its switch and say whether it may be switched at all.
+
+        The LOCAL source is refused for the FIRST pane and while the container holds ONE pane
+        (LOCAL_PANE.md §4): the commander is what makes "the other side" a concept. The switch
+        itself stays visible in the shipped look — it is the pane's own control — and is simply
+        not offered until it can do something.
+        """
+        switch = getattr(self, "source_switch", None)
+        if switch is None:
+            return
+        enabled = bool(getattr(self, "_secondary", False))
+        available = True
+        can_use = getattr(self._container, "can_use_local", None)
+        if callable(can_use):
+            try:
+                available = bool(can_use(self))
+            except (RuntimeError, AttributeError):
+                available = True
+        _sync_source_switch(switch, self._source, enabled=enabled, available=available)
+
+    def _sync_transfer_availability(self):
+        """Enable the shared row for a bound provider; a LOCAL pane keeps its transfers off.
+
+        v1.7.4rc1 ships the local pane READ-ONLY in the transfer sense (LOCAL_PANE.md §3): a
+        local source browses, previews and edits its own names, and does not move a byte until
+        rc2's dispatch. The buttons therefore say so instead of opening a dialog that cannot end.
+        """
+        bound = not self._waiting and self.provider is not None
+        local = self._source == SOURCE_LOCAL
+        try:
+            self.btn_up.setEnabled(bound)
+            self.btn_refresh.setEnabled(bound)
+            self.btn_upload.setEnabled(bound and not local)
+            self.btn_download.setEnabled(bound and not local)
+        except RuntimeError:
+            pass  # Qt teardown — the row is already gone
+
     def release(self):
-        """Detach the pane: unbind the worker and drop the preview (the pane is going away)."""
-        self._disconnect_worker(self.worker)
+        """Detach the pane: unbind the provider, stop a local one and drop the preview."""
+        self._disconnect_worker(self._disconnect_current())
+        self.shutdown_provider()
         self.close_viewer()
 
     # ── v1.3.3.1 (ROADMAP task 1): live i18n — re-text on a language switch ──
@@ -1400,6 +1828,12 @@ class _SftpPane(QWidget):
                 _apply_status_style(widget, "status.sftp_row")
             except RuntimeError:
                 continue  # Qt teardown — this label is already destroyed
+        switch = getattr(self, "source_switch", None)
+        if switch is not None:
+            try:
+                _apply_status_style(switch.lbl, "status.sftp_row")
+            except RuntimeError:
+                pass  # Qt teardown — the switch is already gone
         if self._ring is not None:
             try:
                 self._ring.refresh_theme()
@@ -1443,6 +1877,12 @@ class _SftpPane(QWidget):
             self.btn_viewer_close.setToolTip(_t("sftp.viewer.close_tooltip"))
             # v1.6.3: the address bar's placeholder.
             self.path_label.setPlaceholderText(_t("sftp.path_placeholder"))
+            # v1.7.4rc1: the source switch of the pane (its label, its two buttons and the
+            # availability tooltip) is UI text like every other row of this bar.
+            switch = getattr(self, "source_switch", None)
+            if switch is not None:
+                switch.retranslate()
+                self._sync_source_availability()
             # v1.7rc3: the hint row of the SECOND pane (five `sftp.hint.*` keys + the pane
             # toggle, the mark key and the open key) — re-read in the active language. The
             # row is re-elided by the layout on the next pass, so nothing else is needed.
@@ -1469,10 +1909,16 @@ class _SftpPane(QWidget):
     # ── Navigation and listing ───────────────────────────────────────────
 
     def go_up(self):
-        """".." — one level up (no-op from "/")."""
-        if self._current_dir == "/":
+        """".." — one level up (a no-op AT the root of this pane's source).
+
+        The root test and the parent are the DIALECT's (v1.7.4rc1): `/` for a remote pane,
+        a drive or a UNC share for a local one, so "go up" can never land on a path of the
+        other source's spelling (LOCAL_PANE.md §2).
+        """
+        paths = self.paths
+        if paths.is_root(self._current_dir):
             return
-        parent = posixpath.dirname(self._current_dir) or "/"
+        parent = paths.dirname(self._current_dir) or paths.root()
         self._relist(parent)
 
     def _navigate(self, path: str):
@@ -1487,8 +1933,11 @@ class _SftpPane(QWidget):
         error), a directory already on the screen is a no-op, and everything else goes
         through the ORDINARY `_relist()` — the same listing, the same staleness filter and
         the same `message` signal a click uses. Returns True when the view moved.
+
+        v1.7.4rc1: a LOCAL pane NEVER follows — the report is a remote shell's path, so the
+        follow stays the remote panes' alone (LOCAL_PANE.md §4).
         """
-        if self.worker is None:
+        if self._waiting or self.provider is None or self.source == SOURCE_LOCAL:
             return False
         target = str(path or "")
         if not target.startswith("/") or "\x00" in target or target == self._current_dir:
@@ -1497,15 +1946,17 @@ class _SftpPane(QWidget):
         return True
 
     def _relist(self, path: str):
-        """Redraw the listing for the new current directory."""
-        self._current_dir = path or "/"
+        """Redraw the listing for the new current directory OF THIS PANE'S SOURCE."""
+        paths = self.paths
+        self._current_dir = str(path or "") or paths.root()
         self.tree.clear()
         self._up_item = None
         self._set_path_text(self._current_dir)
-        self.btn_up.setEnabled(self._current_dir != "/")
-        if self.worker is None:
+        self.btn_up.setEnabled(not paths.is_root(self._current_dir))
+        provider = self.provider
+        if provider is None:
             return
-        tid = self.worker.queue_list(self._current_dir)
+        tid = provider.queue_list(self._current_dir)
         if tid is not None:
             self._pending_lists[tid] = self._current_dir
 
@@ -1524,20 +1975,22 @@ class _SftpPane(QWidget):
             pass  # Qt teardown — the bar is already destroyed
 
     def _on_path_entered(self):
-        """Enter in the address bar: navigate through the SERVER's own resolution.
+        """Enter in the address bar: navigate through the SOURCE's own resolution.
 
-        The text goes to the worker AS TYPED (a `~`, a relative path, a symlink are the
-        remote's business — a local guess would be a second, worse truth); a path the server
-        cannot resolve answers `task_error` and is reported through the `message` signal,
-        never as a traceback. The bar keeps the typed text until the answer arrives, so a
-        failure leaves the user with what they typed.
+        The text goes to the provider AS TYPED (a `~`, a relative path, a symlink are the
+        source's business — a local guess would be a second, worse truth): the session's server
+        for a remote pane, and the OS itself for a local one (`LocalFsWorker.queue_normalize`,
+        LOCAL_PANE.md §2). A path that cannot be resolved answers `task_error` and is reported
+        through the `message` signal, never as a traceback. The bar keeps the typed text until
+        the answer arrives, so a failure leaves the user with what they typed.
         """
-        if self.worker is None:
+        provider = self.provider
+        if provider is None:
             return
         typed = self.path_label.text() or ""
         if not typed.strip() or typed.strip() == _t("sftp.waiting_connection"):
             return
-        tid = self.worker.queue_normalize(typed, self._current_dir)
+        tid = provider.queue_normalize(typed, self._current_dir)
         if tid is not None:
             self._normalize_tasks[tid] = typed
 
@@ -1555,34 +2008,38 @@ class _SftpPane(QWidget):
 
         The directory part of what is being typed decides the listing — at most ONE
         `queue_list()` per directory CHANGE (a keystroke inside the same directory costs
-        nothing), its answer fills the model with the directories first (a trailing `/`
+        nothing), its answer fills the model with the directories first (a trailing separator
         makes the completion continue into them) and the files after. A relative directory
         is resolved against the directory on the screen, exactly as Enter will resolve it.
+        The split, the join and the separator are the DIALECT's (v1.7.4rc1), so a local pane
+        completes `C:\\Users\\` the way the OS spells it (LOCAL_PANE.md §2).
         """
-        if self.worker is None:
+        provider = self.provider
+        if provider is None:
             return
-        directory = posixpath.dirname(text)
-        if not directory:
-            directory = self._current_dir
-        elif not directory.startswith(("/", "~")):
-            directory = posixpath.join(self._current_dir, directory)
+        paths = self.paths
+        split = paths.dirname(text)
+        directory = split or self._current_dir
+        if split and not paths.is_absolute(split):
+            directory = paths.join(self._current_dir, split)
         try:
-            self.path_completer.setCompletionPrefix(posixpath.basename(text))
+            self.path_completer.setCompletionPrefix(paths.basename(text))
         except RuntimeError:
             return  # Qt teardown
         if directory == self._completer_dir:
             return
         self._completer_dir = directory
-        tid = self.worker.queue_list(directory)
+        tid = provider.queue_list(directory)
         if tid is not None:
             self._completer_lists[tid] = directory
 
     def _fill_completer(self, entries: list):
-        """The completion model: directories first with a trailing `/`, then the files."""
+        """The completion model: directories first with a trailing SEPARATOR, then the files."""
+        mark = self.paths.separator
         names = sorted(
-            [(str(e.get("name", "")) + "/") if e.get("is_dir") else str(e.get("name", ""))
+            [(str(e.get("name", "")) + mark) if e.get("is_dir") else str(e.get("name", ""))
              for e in entries if e.get("name")],
-            key=lambda n: (not n.endswith("/"), n.lower()))
+            key=lambda n: (not n.endswith(mark), n.lower()))
         try:
             self.path_completer_model.setStringList(names)
         except RuntimeError:
@@ -1613,20 +2070,20 @@ class _SftpPane(QWidget):
             self._queue_transfer_batch(items, kind, target, {e["name"] for e in entries})
             return
         requested = self._pending_lists.pop(task_id, None)
-        # Staleness filter: render only the response for the CURRENT directory
-        # (navigation or Refresh while an old listing was in flight — ignored).
-        # v1.7rc1: a task id of the OTHER pane is not in this pane's map at all, so the
-        # two panes list independently over the one worker (task ids are unique).
-        if requested is None or requested != self._current_dir \
-                or remote_dir != self._current_dir:
+        # Staleness filter: render only the response for the CURRENT directory (navigation or
+        # Refresh while an old listing was in flight — ignored), compared through the DIALECT:
+        # the OS disk is case-insensitive, so `c:\users` IS `C:\Users` (LOCAL_PANE.md §2).
+        paths = self.paths
+        if requested is None or not paths.same(requested, self._current_dir) \
+                or not paths.same(remote_dir, self._current_dir):
             return
         self.tree.clear()
         self._up_item = None
-        if self._current_dir != "/":
+        if not paths.is_root(self._current_dir):
             up = QTreeWidgetItem(self.tree)
             up.setText(0, "..")
             up.setIcon(0, self._dir_icon())
-            up.setData(0, self.PATH_ROLE, posixpath.dirname(self._current_dir) or "/")
+            up.setData(0, self.PATH_ROLE, paths.dirname(self._current_dir) or paths.root())
             up.setData(0, self.ISDIR_ROLE, True)
             up.setData(0, self.SIZE_ROLE, 0)
             up.setData(0, self.MTIME_ROLE, 0)
@@ -1635,9 +2092,11 @@ class _SftpPane(QWidget):
             self._add_entry_item(e)
         self._focus_first_row()
         # v1.7.3 (task 2): a directory the SERVER really answered for is what memory keeps — and
-        # the restored hint has arrived, so it is no longer pending.
+        # the restored hint has arrived, so it is no longer pending. A LOCAL pane has no
+        # per-server memory: its directory belongs to the OS, not to a server (LOCAL_PANE.md §4).
         self._restore_dir = ""
-        self._container.remember_dir(self._current_dir)
+        if self.source == SOURCE_REMOTE:
+            self._container.remember_dir(self._current_dir)
 
     def _focus_first_row(self):
         """Put the CURSOR on the first navigable row of a freshly rendered listing.
@@ -1659,7 +2118,7 @@ class _SftpPane(QWidget):
             pass  # Qt teardown — nothing to focus
 
     def _add_entry_item(self, entry: dict) -> QTreeWidgetItem:
-        full = posixpath.join(self._current_dir, entry["name"])
+        full = self.paths.join(self._current_dir, entry["name"])
         item = QTreeWidgetItem(self.tree)
         item.setText(0, entry["name"])
         item.setIcon(0, self._dir_icon() if entry["is_dir"] else self._file_icon())
@@ -1769,8 +2228,12 @@ class _SftpPane(QWidget):
         v1.7rc3: in the TWO-PANE view the preview is shown WHERE THE OTHER PANE IS (the mc
         behaviour) and THIS pane keeps the keyboard and the cursor; the reading pane stays the
         owner of the task and of the message, so a refusal is reported exactly as before.
+
+        v1.7.4rc1: the read goes to THIS pane's provider, so a LOCAL file previews through the
+        SHIPPED read policy unchanged (LOCAL_PANE.md §3).
         """
-        if self.worker is None:
+        provider = self.provider
+        if provider is None:
             self.message.emit(_t("sftp.waiting_connection"))
             return
         path = item.data(0, self.PATH_ROLE)
@@ -1786,12 +2249,12 @@ class _SftpPane(QWidget):
         # is MOVED to the other pane only once the content is there (`_show_viewer()`): a read the
         # worker refuses must not leave the other pane dressed as a panel that shows nothing.
         self._container.close_preview()
-        tid = self.worker.queue_read(path, int(item.data(0, self.SIZE_ROLE) or 0))
+        tid = provider.queue_read(path, int(item.data(0, self.SIZE_ROLE) or 0))
         if tid is None:
             return  # the worker is finished — there is nobody to read
         self._read_tasks[tid] = path
         self._last_read = tid
-        self.viewer_label.setText(_t("sftp.viewer.reading", name=posixpath.basename(path)))
+        self.viewer_label.setText(_t("sftp.viewer.reading", name=self.paths.basename(path)))
 
     def _on_read_ready(self, task_id: int, remote_path: str, data: bytes):
         """The read answer (already on the GUI thread): render it in the panel."""
@@ -1821,7 +2284,15 @@ class _SftpPane(QWidget):
         v1.7rc1: the ONE worker signals EVERY pane, so a pane that does not own the task
         returns at once — otherwise the other pane would report a stranger's failure (or
         draw a stranger's row).
+
+        v1.7.4rc1: a LOCAL provider reports its refusals as MACHINE payloads too, so the
+        operation and normalize branches of a local pane render `local_error_text()` — the
+        listing note of a skipped entry (`KIND_LIST_PARTIAL`) is the one answer that is NOT a
+        failure and comes BEFORE every task map (the listing itself has already arrived).
         """
+        if kind == local_fs.KIND_LIST_PARTIAL:
+            self.message.emit(local_error_text(message))
+            return
         if kind == KIND_READ:
             if task_id not in self._read_tasks:
                 return   # another pane's read (or the command history's) — not ours
@@ -1845,14 +2316,17 @@ class _SftpPane(QWidget):
                 self.message.emit(self._remote_error_text(message))
                 self._answer_batch_task(task_id, "failed")
             else:
-                self.message.emit(_t("sftp.op.error", error=message))
+                self.message.emit(self._op_error_text(message))
         elif kind == KIND_NORMALIZE:
             # v1.6.3: the address bar asked for a path the server cannot resolve — the bar
             # keeps the typed text (nothing navigated) and the reason is a sentence.
             typed = self._normalize_tasks.pop(task_id, None)
             if typed is None:
                 return   # another pane's normalize
-            self.message.emit(_t("sftp.path_error", path=typed, error=message))
+            self.message.emit(_t("sftp.path_error", path=typed, error=message)
+                              if self.source == SOURCE_REMOTE
+                              else _t("sftp.path_error", path=typed,
+                                      error=local_error_text(message)))
         elif kind == "list":
             # v1.3.3.2: the pre-flight listing of a drop on a row failed (the
             # directory vanished / no permission) — the batch is dropped, the pane
@@ -1869,10 +2343,21 @@ class _SftpPane(QWidget):
                 return
             pending = self._pending_batches.pop(task_id, None)
             if pending is not None:
-                self.message.emit(_t("sftp.op.error", error=message))
+                self.message.emit(self._op_error_text(message))
             if self._pending_drops.pop(task_id, None) is not None:
-                self.message.emit(_t("sftp.op.error", error=message))
+                self.message.emit(self._op_error_text(message))
         self._on_task_finished(task_id)
+
+    def _op_error_text(self, message: str) -> str:
+        """The sentence of a failed operation, in the source's own vocabulary (v1.7.4rc1).
+
+        A LOCAL refusal is a machine payload with the OS's own text inside it, and the one place
+        that knows how to spell it is `local_error_text()`; a remote task_error is already the
+        server's sentence and goes through the shipped generic key unchanged.
+        """
+        if self.source == SOURCE_LOCAL:
+            return local_error_text(message)
+        return _t("sftp.op.error", error=message)
 
     def _read_error_text(self, code: str, path: str = "") -> str:
         """READ_ERROR_* → the translated hint.
@@ -2307,9 +2792,10 @@ class _SftpPane(QWidget):
     # ── Operations (buttons) ─────────────────────────────────────────────
 
     def _on_upload(self):
-        if self.worker is None:
-            self.message.emit(_t("sftp.waiting_connection"))
+        if self._refuse_without_provider():
             return
+        if self.source == SOURCE_LOCAL:
+            return   # v1.7.4rc1: a local pane transfers nothing yet (LOCAL_PANE.md §3)
         files, _ = QFileDialog.getOpenFileNames(
             self, _t("sftp.upload_dialog_title"))
         if not files:
@@ -2318,9 +2804,10 @@ class _SftpPane(QWidget):
                             self._names_in_current_dir())
 
     def _on_download(self):
-        if self.worker is None:
-            self.message.emit(_t("sftp.waiting_connection"))
+        if self._refuse_without_provider():
             return
+        if self.source == SOURCE_LOCAL:
+            return   # v1.7.4rc1: a local pane transfers nothing yet (LOCAL_PANE.md §3)
         items = [i for i in self.tree.selectedItems()
                  if not i.data(0, self.ISDIR_ROLE)]
         if not items:
@@ -2332,6 +2819,17 @@ class _SftpPane(QWidget):
             return
         self._queue_downloads(items, local_dir)
 
+    def _refuse_without_provider(self) -> bool:
+        """No bound provider → the shipped "waiting" sentence, and True (the caller returns).
+
+        A LOCAL pane always has its provider, so this is the REMOTE pane's waiting state
+        (`SFTP_PANES.md` §1, unchanged); `_waiting` is the declared flag the path bar follows.
+        """
+        if self._waiting or self.provider is None:
+            self.message.emit(_t("sftp.waiting_connection"))
+            return True
+        return False
+
     def _on_cancel(self):
         # v1.7.3: a running `Send to…` is cancelled with the queue it uses — the relay drops its
         # spool on the way out (a cancel must never leave a plaintext copy behind).
@@ -2341,8 +2839,12 @@ class _SftpPane(QWidget):
                 cancel_sends()
             except RuntimeError:
                 pass   # Qt teardown — the container is already gone
-        if self.worker is not None:
-            self.worker.cancel()
+        provider = self.provider
+        if provider is not None:
+            try:
+                provider.cancel()
+            except (RuntimeError, AttributeError):
+                pass   # Qt teardown — the provider is already gone
 
     # ── v1.3.3.2: the batch + the overwrite conflict (ROADMAP task 2) ────
 
@@ -2420,6 +2922,9 @@ class _SftpPane(QWidget):
         if worker is None:
             self.message.emit(_t("sftp.waiting_connection"))
             return
+        if self.source == SOURCE_LOCAL:
+            self.message.emit(_t("sftp.local.transfer_unavailable"))
+            return   # v1.7.4rc1: the local pane moves no byte yet (LOCAL_PANE.md §3)
         apply_all = ""
         total = len(files)
         for index, local_path in enumerate(files):
@@ -2452,11 +2957,14 @@ class _SftpPane(QWidget):
         if worker is None:
             self.message.emit(_t("sftp.waiting_connection"))
             return
+        if self.source == SOURCE_LOCAL:
+            self.message.emit(_t("sftp.local.transfer_unavailable"))
+            return   # v1.7.4rc1: the local pane moves no byte yet (LOCAL_PANE.md §3)
         apply_all = ""
         total = len(items)
         for index, item in enumerate(items):
             remote_path = item.data(0, self.PATH_ROLE)
-            name = posixpath.basename(remote_path)
+            name = self.paths.basename(remote_path)
             if os.path.exists(os.path.join(local_dir, name)):
                 if apply_all:
                     action = apply_all
@@ -2531,6 +3039,8 @@ class _SftpPane(QWidget):
         if worker is None:
             self.message.emit(_t("sftp.waiting_connection"))
             return
+        if self._refuse_cross_source(target_pane):
+            return   # v1.7.4rc1: a pair involving a local pane transfers nothing yet
         rows = self._rows_for_batch()
         if not rows:
             self.message.emit(_t("sftp.cmd.no_selection"))
@@ -2554,12 +3064,13 @@ class _SftpPane(QWidget):
         skipped = 0
         queued = []
         apply_all = ""
+        paths = self.paths
         for index, (source, row_name) in enumerate(items):
             if not source:
                 skipped += 1
                 continue
-            name = posixpath.basename(source)
-            if posixpath.join(target_dir or "/", name) == source:
+            name = paths.basename(source)
+            if paths.same(paths.join(target_dir, name), source):
                 skipped += 1   # the row already IS the destination — never an operation
                 continue
             if name in known:
@@ -2649,7 +3160,7 @@ class _SftpPane(QWidget):
         if code == PARTIAL_CODE:
             copied = data.get("copied", 0)
             path = str(data.get("path") or "")
-            return _t("sftp.cmd.partial", name=posixpath.basename(path) or path,
+            return _t("sftp.cmd.partial", name=self.paths.basename(path) or path,
                       copied=copied, error=str(data.get("error") or ""))
         if code == MOVE_ERROR_REFUSED:
             return _t("sftp.cmd.move_refused", error=str(data.get("error") or ""))
@@ -2735,6 +3246,9 @@ class _SftpPane(QWidget):
         if self.worker is None:
             self.message.emit(_t("sftp.waiting_connection"))
             return
+        if self.source == SOURCE_LOCAL:
+            self.message.emit(_t("sftp.local.transfer_unavailable"))
+            return   # v1.7.4rc1: a local file crosses to a server through rc2's dispatch
         path = item.data(0, self.PATH_ROLE) if item is not None else ""
         if not path or (item is not None and item.data(0, self.ISDIR_ROLE)):
             self.message.emit(_t("sftp.send.no_file"))
@@ -2742,60 +3256,60 @@ class _SftpPane(QWidget):
         size = int(item.data(0, self.SIZE_ROLE) or 0)
         # The declared ceiling is checked BEFORE anything is transferred (the ask's own number).
         if not send.size_allowed(size):
-            self.message.emit(_t("sftp.send.too_big", name=posixpath.basename(path),
+            self.message.emit(_t("sftp.send.too_big", name=self.paths.basename(path),
                                  size=format_size(size), limit=format_size(send.MAX_SEND_BYTES)))
             return
-        entry = {"path": path, "name": posixpath.basename(path), "size": size,
+        entry = {"path": path, "name": self.paths.basename(path), "size": size,
                  "mtime": int(item.data(0, self.MTIME_ROLE) or 0)}
         if self._container is None:
             return
         self._container.start_send(self, target, entry)
 
     def _op_new_folder(self):
-        """New folder in the CURRENT directory (mkdir through the worker queue)."""
-        if self.worker is None:
-            self.message.emit(_t("sftp.waiting_connection"))
+        """New folder in the CURRENT directory (mkdir through THIS pane's provider queue)."""
+        if self._refuse_without_provider():
             return
         name = self._prompt_name(_t("sftp.op.new_folder"))
         if not name:
             return
-        self._queue_op(self.worker.queue_mkdir(self._current_dir, name), KIND_MKDIR)
+        self._queue_op(self.provider.queue_mkdir(self._current_dir, name), KIND_MKDIR)
 
     def _op_rename(self, item):
         """Rename a row inside its own directory (only the NAME changes)."""
-        if self.worker is None:
-            self.message.emit(_t("sftp.waiting_connection"))
+        if self._refuse_without_provider():
             return
         path = item.data(0, self.PATH_ROLE)
         if not path:
             return
-        current = posixpath.basename(path)
+        current = self.paths.basename(path)
         name = self._prompt_name(_t("sftp.op.rename"), current)
         if not name or name == current:
             return   # cancelled, or the name did not change — nothing to do
-        self._queue_op(self.worker.queue_rename(path, name), KIND_RENAME)
+        self._queue_op(self.provider.queue_rename(path, name), KIND_RENAME)
 
     def _op_delete(self, item):
         """Delete a row — with a confirmation (QMessageBox — a module attribute).
 
-        A directory is removed with rmdir: a NON-EMPTY one reports the server's
-        error (recursive delete is not in this version).
+        A directory is removed with rmdir: a NON-EMPTY one reports the provider's error
+        (a recursive delete is not in this version). v1.7.4rc1: the confirmation of a LOCAL
+        row SAYS that the delete is permanent — there is no recycle bin (LOCAL_PANE.md §4).
         """
-        if self.worker is None:
-            self.message.emit(_t("sftp.waiting_connection"))
+        if self._refuse_without_provider():
             return
         path = item.data(0, self.PATH_ROLE)
         if not path:
             return
         is_dir = bool(item.data(0, self.ISDIR_ROLE))
+        key = "sftp.local.delete_confirm" if self.source == SOURCE_LOCAL \
+            else "sftp.op.delete_confirm"
         box = QMessageBox   # the monkeypatch STAB.QMessageBox works in the tests
         reply = box.question(
             self, _t("sftp.op.delete"),
-            _t("sftp.op.delete_confirm", name=posixpath.basename(path)),
+            _t(key, name=self.paths.basename(path)),
             box.Yes | box.No, box.No)
         if reply != box.Yes:
             return
-        self._queue_op(self.worker.queue_delete(path, is_dir), KIND_DELETE)
+        self._queue_op(self.provider.queue_delete(path, is_dir), KIND_DELETE)
 
     def _op_copy_path(self, item):
         """Copy the REMOTE path of the row to the clipboard (never a URL)."""
@@ -3028,9 +3542,17 @@ class _SftpPane(QWidget):
         """
         kind = self._op_tasks.pop(task_id, None)
         if kind in (KIND_COPY, KIND_MOVE):
-            self._container.relist_dir(posixpath.dirname(detail))
+            if self.source == SOURCE_REMOTE:
+                self._container.relist_dir(posixpath.dirname(detail))
+            else:
+                # A LOCAL pane owns the listing it changed (LOCAL_PANE.md §1): the container's
+                # re-list is the SESSION's, and the OS disk is nobody's server.
+                self._relist(self._current_dir)
             if kind == KIND_MOVE:
-                self._container.relist_dir(self._current_dir)
+                if self.source == SOURCE_REMOTE:
+                    self._container.relist_dir(self._current_dir)
+                else:
+                    self._relist(self._current_dir)
             self._answer_batch_task(task_id, "done")
             self._on_task_finished(task_id)
             return
@@ -3475,10 +3997,49 @@ class SftpTab(QWidget):
             return
         for pane in list(self._panes):
             try:
+                if pane.source != SOURCE_REMOTE:
+                    continue   # v1.7.4rc1: a LOCAL pane owns its listing (LOCAL_PANE.md §1)
                 if pane.current_dir == path:
                     pane._relist(path)
             except RuntimeError:
                 continue   # Qt teardown — the pane is already gone
+
+    # ── v1.7.4rc1: the source of a pane (LOCAL_PANE.md §4) ───────────────
+
+    def can_use_local(self, pane) -> bool:
+        """May THIS pane read the OS disk? The ONE question the switch and the pane ask.
+
+        TWO conditions, both structural (LOCAL_PANE.md §4): the container must hold TWO panes —
+        the Commander is what makes "the other side" a concept, so with one pane there is
+        nothing to browse the local disk BESIDE — and the pane must be the SECOND one, because
+        the first is the SESSION's own remote tree (the cwd follow, the `Send to…` provider and
+        the Files panel all address it).
+
+        A single-pane view of a SESSION (`terminal_mode = "tabs"`'s dock and the v1.7.1 Files
+        PANEL) therefore answers False by construction: it holds ONE pane, and the ask is refused
+        with ONE sentence instead of a dead control.
+        """
+        if pane is None or pane not in self._panes:
+            return False
+        if len(self._panes) < 2:
+            return False
+        return pane is not self._panes[0]
+
+    def pane_source(self, pane) -> str:
+        """The source a pane reads (`SOURCE_REMOTE` for a pane this container does not hold)."""
+        try:
+            return str(pane.source)
+        except (AttributeError, RuntimeError):
+            return SOURCE_REMOTE
+
+    def set_pane_source(self, pane, source: str, notify: bool = True) -> bool:
+        """Switch ONE pane's source through the pane (the container's door, v1.7.4rc1)."""
+        if pane is None or pane not in self._panes:
+            return False
+        try:
+            return bool(pane.set_source(source, notify=notify))
+        except (RuntimeError, AttributeError):
+            return False
 
     def set_active_pane(self, pane) -> bool:
         """Make `pane` the ACTIVE pane; True — the state really changed.
@@ -3698,6 +4259,10 @@ class SftpTab(QWidget):
         and a listing that walks under the keyboard is worse than no follow — the owner (the
         session) is told through `follow_cwd_changed`, so the checkbox and the session state
         cannot diverge.
+
+        v1.7.4rc1: the SECOND pane is also the ONE pane whose source may be switched to the OS
+        disk (LOCAL_PANE.md §4) — the switch is enabled by `_sync_hint_rows()` below, which is
+        why the pane is created and then told its role.
 
         OFF — the second pane is torn down; the FIRST one keeps its directory, its listing
         and its viewer.

@@ -808,8 +808,11 @@ check("the pin counts the keys of the SHIPPED release (v1.5.2 added THIRTEEN —
       "closing report, and the remote title of a session's tab tooltip — 874 + 4 = 878; v1.7.3 adds "
       "NINETEEN: the Send-to row and its dialog, the busy / progress / done / failed reports, the "
       "two-sided conflict facts, the remembered-folder sentence, the two drop refusals and the Word "
-      "wrap row — 878 + 19 = 897)",
-      EXPECTED_I18N_KEYS == 863 + 4 + 3 + 4 + 4 + 19, str(EXPECTED_I18N_KEYS))
+      "wrap row — 878 + 19 = 897; v1.7.4rc1 adds SEVENTEEN: the source switch of a pane (its "
+      "label and its two values), the local wordings (\"This computer\" and the two structural "
+      "refusals of the switch and of a transfer), the permanent-delete warning and the nine "
+      "refusal sentences of the local file surface — 897 + 17 = 914)",
+      EXPECTED_I18N_KEYS == 863 + 4 + 3 + 4 + 4 + 19 + 17, str(EXPECTED_I18N_KEYS))
 check_release_state(ROOT)
 for _code in i18n_lang_codes(ROOT):
     check(f"i18n/{_code}.json carries the v1.5 node.status.emulated marker",

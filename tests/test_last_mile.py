@@ -661,8 +661,10 @@ check("§7 the pin counts the SHIPPED release (828 + the 13 keys of v1.6.8"
       " + the 5 of v1.7rc1 + the 8 of v1.7rc2 + the 9 of v1.7rc3 + the 4 of v1.7.1"
       " + the 3 of v1.7.1.1 + the 4 of the v1.7.1.2 device choice + the 4 of v1.7.2: the third row of the display mode (the single window), the merge action with its one closing report and the remote title of a tab"
       " + the 19 of v1.7.3: the Send-to row and its dialog, the busy/progress/done/failed reports,"
-      " the two-sided conflict facts, the remembered-folder sentence, the two drop refusals and Word wrap)",
-      EXPECTED_I18N_KEYS >= 854 and EXPECTED_I18N_KEYS == 828 + 13 + 5 + 8 + 9 + 4 + 3 + 4 + 4 + 19,
+      " the two-sided conflict facts, the remembered-folder sentence, the two drop refusals and Word wrap"
+      " + the 17 of v1.7.4rc1: the local source switch of a pane, its two refusals, the permanent-"
+      " delete warning and the local file-surface sentences)",
+      EXPECTED_I18N_KEYS >= 854 and EXPECTED_I18N_KEYS == 828 + 13 + 5 + 8 + 9 + 4 + 3 + 4 + 4 + 19 + 17,
       str(EXPECTED_I18N_KEYS))
 check("§7 EXPECTED_APP_VERSION is the release this file describes",
       releases_at_least(EXPECTED_APP_VERSION, "1.7"), EXPECTED_APP_VERSION)

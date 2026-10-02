@@ -280,7 +280,7 @@ check_release_state(ROOT)
 check("§4 the pin quotes the SHIPPED version (v1.7 opened the 1.7 line with Files Commander;"
       " v1.7.1 is its feature follow-up)",
       releases_at_least(EXPECTED_APP_VERSION, "1.7")
-      and re.fullmatch(r"1\.7(?:rc\d+|(?:\.\d+){1,2})?", EXPECTED_APP_VERSION) is not None)
+      and re.fullmatch(r"1\.7(?:\.\d+){0,2}(?:rc\d+)?", EXPECTED_APP_VERSION) is not None)
 check("§4 the i18n pin moved on by the closing release's ONE key, v1.5.1's four, v1.5.2's "
       "thirteen (the activity panel's chrome), v1.5.3's twenty (the freshness family), "
       "v1.5.4's eleven (the aggregate, the lens and the filter plaque), v1.5.5's fourteen "
