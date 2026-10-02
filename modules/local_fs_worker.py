@@ -29,14 +29,15 @@ try:  # the shipped task vocabulary, the read policy and the machine payloads (n
     from .sftp_worker import (KIND_COPY, KIND_DELETE, KIND_DOWNLOAD, KIND_LIST, KIND_MKDIR,
                               KIND_MOVE, KIND_NORMALIZE, KIND_READ, KIND_RENAME, KIND_UPLOAD,
                               MAX_READ_BYTES, MAX_TREE_DEPTH, MAX_TREE_ENTRIES, PART_SUFFIX,
-                              PARTIAL_CODE, READ_ERROR_BINARY, READ_ERROR_TOO_LARGE,
+                              PARTIAL_CODE, READ_CAP_NONE, READ_ERROR_BINARY, READ_ERROR_TOO_LARGE,
                               TREE_ERROR_TOO_BIG, classify_extension, task_payload)
 except ImportError:
     from sftp_worker import (KIND_COPY, KIND_DELETE, KIND_DOWNLOAD, KIND_LIST,  # type: ignore
                              KIND_MKDIR, KIND_MOVE, KIND_NORMALIZE, KIND_READ, KIND_RENAME,
                              KIND_UPLOAD, MAX_READ_BYTES, MAX_TREE_DEPTH, MAX_TREE_ENTRIES,
-                             PART_SUFFIX, PARTIAL_CODE, READ_ERROR_BINARY, READ_ERROR_TOO_LARGE,
-                             TREE_ERROR_TOO_BIG, classify_extension, task_payload)
+                             PART_SUFFIX, PARTIAL_CODE, READ_CAP_NONE, READ_ERROR_BINARY,
+                             READ_ERROR_TOO_LARGE, TREE_ERROR_TOO_BIG, classify_extension,
+                             task_payload)
 
 log = get_logger(__name__)
 
@@ -213,12 +214,14 @@ class _LocalTreeTooBig(_LocalPayload):
 
 class _LocalTask:
     """A queue task. `path` is the subject, `path2` the second endpoint (a rename or a transfer
-    destination), `is_dir` the kind a delete needs."""
+    destination), `is_dir` the kind a delete needs, `max_bytes` the ceiling of a READ task
+    (v1.7.5 — `READ_CAP_NONE` keeps the shipped refusal, a positive cap TRUNCATES at it)."""
 
-    __slots__ = ("id", "kind", "label", "path", "path2", "is_dir", "total_size")
+    __slots__ = ("id", "kind", "label", "path", "path2", "is_dir", "total_size", "max_bytes")
 
     def __init__(self, task_id: int, kind: str, label: str, path: str = "",
-                 path2: str = "", is_dir: bool = False, total_size: int = 0):
+                 path2: str = "", is_dir: bool = False, total_size: int = 0,
+                 max_bytes: int = READ_CAP_NONE):
         self.id = task_id
         self.kind = kind
         self.label = label
@@ -226,6 +229,7 @@ class _LocalTask:
         self.path2 = path2
         self.is_dir = bool(is_dir)
         self.total_size = int(total_size or 0)
+        self.max_bytes = int(max_bytes or READ_CAP_NONE)
 
 
 # ── Orphan registry (the `_orphan_workers` pattern of the shipped worker, AGENTS.md §4.8) ──
@@ -296,11 +300,17 @@ class LocalFsWorker(QThread):
         return self._queue_task(_LocalTask(
             self._next_id, KIND_NORMALIZE, requested, path=requested, path2=str(base_dir or "")))
 
-    def queue_read(self, path: str, total_size: int = 0) -> Optional[int]:
-        """Read a text file into memory (the SHIPPED policy: the extension, the NULL byte, the cap)."""
+    def queue_read(self, path: str, total_size: int = 0,
+                   max_bytes: int = READ_CAP_NONE) -> Optional[int]:
+        """Read a text file into memory (the SHIPPED policy: the extension, the NULL byte, the cap).
+
+        v1.7.5: `max_bytes` is the SHIPPED task field the pane resolved — a positive cap TRUNCATES
+        the read at it, `READ_CAP_NONE` keeps the refusal (the two providers answer the same rule).
+        """
         target = str(path or "")
         return self._queue_task(_LocalTask(
-            self._next_id, KIND_READ, target, path=target, total_size=total_size))
+            self._next_id, KIND_READ, target, path=target, total_size=total_size,
+            max_bytes=max_bytes))
 
     def queue_mkdir(self, directory: str, name: str) -> Optional[int]:
         """Create ONE directory inside a directory (the child name is validated by the pane)."""
@@ -497,8 +507,19 @@ class LocalFsWorker(QThread):
         self._emit(self.normalize_ready, task.id, task.path, resolved)
 
     def _do_read(self, task: _LocalTask):
-        """The SHIPPED read policy, unchanged: the extension, the NULL byte, the cap, 32 KB chunks."""
-        if int(task.total_size or 0) > MAX_READ_BYTES:
+        """The SHIPPED read policy, unchanged: the extension, the NULL byte, the cap, 32 KB chunks.
+
+        v1.7.5: the cap is the TASK's — a positive `max_bytes` TRUNCATES the read at exactly that
+        many bytes (never a refusal), `READ_CAP_NONE` keeps the shipped `too_large` refusal. The
+        rule is the remote worker's, so the two providers cannot drift apart.
+        """
+        try:
+            cap = int(task.max_bytes or READ_CAP_NONE)
+        except (TypeError, ValueError):
+            cap = READ_CAP_NONE
+        truncating = cap > 0
+        limit = cap if truncating else MAX_READ_BYTES
+        if not truncating and int(task.total_size or 0) > limit:
             raise _LocalRead(READ_ERROR_TOO_LARGE)
         if classify_extension(task.path) == "binary":
             raise _LocalRead(READ_ERROR_BINARY)
@@ -509,13 +530,18 @@ class LocalFsWorker(QThread):
         with open(task.path, "rb") as fh:
             while True:
                 self._check_cancel()
-                chunk = fh.read(CHUNK_SIZE)
+                # A truncating task never asks for a byte beyond its ceiling; an exact task keeps
+                # the shipped guard, which trips on the chunk that crosses MAX_READ_BYTES.
+                want = CHUNK_SIZE if not truncating else min(CHUNK_SIZE, limit - done)
+                if want <= 0:
+                    break
+                chunk = fh.read(want)
                 if not chunk:
                     break
                 if not chunks and b"\x00" in chunk:
                     raise _LocalRead(READ_ERROR_BINARY)
                 done += len(chunk)
-                if done > MAX_READ_BYTES:
+                if not truncating and done > limit:
                     raise _LocalRead(READ_ERROR_TOO_LARGE)
                 chunks.append(chunk)
                 self._emit(self.progress, task.id, done, int(task.total_size or 0))

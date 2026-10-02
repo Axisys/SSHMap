@@ -401,8 +401,8 @@ check("§4 the two actions live in the File family (the Hotkeys tab's grouping d
       HR.action_family("file.copy_map") == "file" and HR.action_family("file.docs_frame") == "file")
 
 _hub = SettingsDialog(None)
-check("§4 no new config key from this section (the hub collects 23)",
-      len(_hub.collect()) == 24, str(len(_hub.collect())))
+check("§4 no new config key from this section (the hub collects 25)",
+      len(_hub.collect()) == 25, str(len(_hub.collect())))
 _hub.close()
 check("§4 no new theme field (the palette is the v1.5rc1 one)",
       len(dataclasses.fields(theme.Theme)) == 60)

@@ -561,7 +561,10 @@ class TerminalSessionPage(QWidget):
             self.sftp_tab.set_session_info(key=history_key(getattr(server_data, "id", "")),
                                            label=getattr(server_data, "alias", "") or "",
                                            host=getattr(server_data, "host", "") or "",
-                                           port=getattr(server_data, "ssh_port", 22))
+                                           port=getattr(server_data, "ssh_port", 22),
+                                           # v1.7.5: the pane's SOURCE header line falls back to
+                                           # `user@host` when the session has no alias.
+                                           user=getattr(server_data, "user", "") or "")
             self.tabs.addTab(self.sftp_tab, t("sftp.tab_files"))
 
         # The COMMAND history — the THIRD tab of the session (`Terminal | Files | History`), one

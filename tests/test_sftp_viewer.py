@@ -380,10 +380,9 @@ check("the helper: an ordinary text file is not marked",
 check("the helper: a known-binary extension is marked 'binary' (the case does not matter)",
       preview_block_reason("/home/image.png", 10) == READ_ERROR_BINARY
       and preview_block_reason("/home/A.PNG", 10) == READ_ERROR_BINARY)
-check("the helper: a file over the limit is marked 'too_large'",
-      preview_block_reason("/home/big.log", MAX_READ_BYTES + 1) == READ_ERROR_TOO_LARGE)
-check("the helper: exactly the limit is NOT marked (1 MB is readable)",
-      preview_block_reason("/home/big.log", MAX_READ_BYTES) == "")
+check("the helper: v1.7.5 — the SIZE is no longer a reason: the cap TRUNCATES, never refuses",
+      preview_block_reason("/home/big.log", MAX_READ_BYTES + 1) == ""
+      and preview_block_reason("/home/big.log", MAX_READ_BYTES * 4096) == "")
 check("the helper: a broken/absent size never marks a row",
       preview_block_reason("/home/a.txt", None) == ""
       and preview_block_reason("/home/a.txt", "?") == "")
@@ -409,11 +408,11 @@ check("the plain file glyph does not carry the marker colour (no false positives
       not icon_blocked(plain_icon))
 check("the listing marks a known-binary file (the tooltip = the i18n 'binary' text)",
       mark_png.toolTip(0) == i18n.t("sftp.viewer.binary"), f"tip={mark_png.toolTip(0)!r}")
-check("the listing marks a file over 1 MB (the tooltip = the i18n 'too large' text)",
-      mark_big.toolTip(0) == i18n.t("sftp.viewer.too_large", limit=format_size(MAX_READ_BYTES)),
+check("v1.7.5: a file over the cap carries NO marker (its preview is truncated, not refused)",
+      mark_big.toolTip(0) == "" and not icon_blocked(mark_big.icon(0)),
       f"tip={mark_big.toolTip(0)!r}")
 check("a marked row carries a RE-COLOURED glyph (the theme's 'no preview' tone)",
-      icon_blocked(mark_png.icon(0)) and icon_blocked(mark_big.icon(0))
+      icon_blocked(mark_png.icon(0))
       and theme.SFTP_PREVIEW_BLOCKED == theme.STATUS_WARN,
       f"colour={theme.SFTP_PREVIEW_BLOCKED}")
 check("the marked glyph is built once (cached)",
@@ -466,12 +465,22 @@ check("the .png was not opened at all", "/home/image.png" not in client4.opened_
 
 msgs.clear()
 tab._on_item_double_clicked(item_by_name(tab, "big.log"), 0)
-wait_until(lambda: msgs, timeout_ms=5000)
-check("a file over 1 MB → the i18n 'larger than the limit' message",
-      msgs == [i18n.t("sftp.viewer.too_large", limit=format_size(MAX_READ_BYTES))],
-      f"msgs={msgs}")
-check("the oversized refusal showed NO panel", tab.viewer.isHidden())
-check("the oversized file was not read", "/home/big.log" not in client4.opened_paths())
+wait_until(lambda: not tab.viewer.isHidden(), timeout_ms=10000)
+check("v1.7.5: a file over the cap OPENS — truncated at the ceiling, never refused",
+      tab.viewer.isHidden() is False
+      and len(tab.viewer_text.toPlainText()) == MAX_READ_BYTES
+      and not msgs, f"msgs={msgs} len={len(tab.viewer_text.toPlainText())}")
+check("v1.7.5: the header says WHICH part of the file is on the screen ('the first N of M')",
+      i18n.t("sftp.viewer.too_large", limit=format_size(MAX_READ_BYTES)) not in tab.viewer_label.text()
+      and i18n.t("sftp.viewer.truncated", shown=format_size(MAX_READ_BYTES),
+                 total=format_size(MAX_READ_BYTES + 5)) in tab.viewer_label.text(),
+      f"got={tab.viewer_label.text()!r}")
+check("v1.7.5: the oversized file WAS read — on the worker thread",
+      "/home/big.log" in client4.opened_paths()
+      and all(tid != MAIN_THREAD_IDENT for _p, tid in client4.opens))
+check("v1.7.5: the read task carried the pane's ceiling (the worker reads no config)",
+      tab.viewer_cap() == MAX_READ_BYTES)
+tab.close_viewer()
 
 # The tab still works after the refusals (the listing is rebuilt) — and the marks
 # of the refreshed listing are still there (the fact + the guess are recomputed).
@@ -484,8 +493,7 @@ check("a re-listing keeps the learned mark",
       and icon_blocked(item_by_name(tab, "sneaky.txt").icon(0)))
 check("a re-listing keeps the guessed marks",
       item_by_name(tab, "image.png").toolTip(0) == i18n.t("sftp.viewer.binary")
-      and item_by_name(tab, "big.log").toolTip(0)
-      == i18n.t("sftp.viewer.too_large", limit=format_size(MAX_READ_BYTES)))
+      and item_by_name(tab, "big.log").toolTip(0) == "")
 check("a successful read leaves no mark behind (a.txt was previewed in §4)",
       item_by_name(tab, "a.txt").toolTip(0) == ""
       and tab._blocked.get("/home/a.txt") is None)

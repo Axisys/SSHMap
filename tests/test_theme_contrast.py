@@ -521,7 +521,7 @@ check("§7 choosing `auto` emits the platform's instance live (a stubbed LIGHT h
 check("§7 collect() keeps the appearance as ONE nested key (the hub is at 23 keys)",
       _dlg.collect()["theme"] == {"mode": "auto", "accent": _dlg._accent_hex, "motion": True,
                                   "density": "normal"}
-      and len(_dlg.collect()) == 24,
+      and len(_dlg.collect()) == 25,
       str(_dlg.collect()["theme"]))
 from ui import motion as motion_mod  # noqa: E402
 _was_motion = motion_mod.motion_enabled()

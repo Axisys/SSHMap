@@ -400,8 +400,8 @@ check("§6 the swatch presets are derived from their hues (no second hardcoded p
 
 clear_cfg()
 dlg = SettingsDialog(None)
-check("§6 the hub has the 'Appearance' tab right after 'General' (8 tabs total)",
-      dlg.tabs.count() == 8
+check("§6 the hub has the 'Appearance' tab right after 'General' (9 tabs total)",
+      dlg.tabs.count() == 9
       and dlg.tabs.tabText(1) == dlg.tabs.tabText(1)  # a label exists
       and dlg.tabs.tabText(1) != dlg.tabs.tabText(2),
       str([dlg.tabs.tabText(i) for i in range(dlg.tabs.count())]))
@@ -419,7 +419,7 @@ check("§6 the swatch carries its colour in the QSS (the user sees the accent be
 check("§6 collect() carries the theme as ONE nested key (the appearance choice)",
       dlg.collect()["theme"] == {"mode": "dark", "accent": "#38bdf8", "motion": True,
                                  "density": "normal"}
-      and len(dlg.collect()) == 24,
+      and len(dlg.collect()) == 25,
       str(sorted(dlg.collect())))
 
 # The live application: the tab emits a Theme instance the moment a control moves.

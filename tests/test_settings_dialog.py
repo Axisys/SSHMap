@@ -286,20 +286,20 @@ finally:
     clear_cfg(LEGACY_PATH)
 
 # ════════════════════════════════════════════════════════════
-# 7. The dialog: 7 tabs (v1.3.2: + Hotkeys), widgets, prefill from the config, collect/OK/Cancel
+# 7. The dialog: 9 tabs (v1.3.2: + Hotkeys; v1.7.5: + Files), widgets, prefill, collect/OK/Cancel
 # ════════════════════════════════════════════════════════════
 print("== settings dialog ==")
 clear_cfg(LEGACY_PATH)
 dlg = SettingsDialog(None)
-check("a QTabWidget with 8 tabs (v1.3.2: + Hotkeys; v1.4.3: + Appearance)",
-      dlg.tabs.count() == 8, str(dlg.tabs.count()))
+check("a QTabWidget with 9 tabs (+ the v1.7.5 'Files' tab)",
+      dlg.tabs.count() == 9, str(dlg.tabs.count()))
 expected_tabs = [i18n.t(k) for k in ("settings.tab.general", "settings.tab.appearance",
-                                     "settings.tab.terminal",
+                                     "settings.tab.terminal", "settings.tab.files",
                                      "settings.tab.statuses", "settings.tab.autosave",
                                      "settings.tab.map", "settings.tab.hotkeys",
                                      "settings.tab.language")]
 got_tabs = [dlg.tabs.tabText(i) for i in range(dlg.tabs.count())]
-check("the tab order: General / Appearance / Terminal / Status Checks / Autosave / Map / Hotkeys / Language",
+check("the tab order: General / Appearance / Terminal / Files / Status Checks / Autosave / Map / Hotkeys / Language",
       got_tabs == expected_tabs, str(got_tabs))
 
 # v1.3.3.3 (task 3/4): the "Hotkeys" tab grew to the FULL action registry (~40 rows, most
@@ -384,20 +384,19 @@ check("'Autosave' reflects the config (off / 120 s / 3 backups)",
       not dlg2.autosave_enabled_chk.isChecked() and dlg2.autosave_interval_spin.value() == 120
       and dlg2.backup_count_spin.value() == 3)
 
-# collect(): exactly 24 config.json keys (10 in v1.1 + 7 in v1.1.1 + 1 in v1.1.2 final
-# + 1 in v1.2.2 — terminal_mode + 1 in v1.3.2 — hotkeys + 1 in v1.3.3.8 —
-# terminal_wheel, which closes the "config-only key" category + 1 in v1.6.2 —
-# terminal_cursor_style + 1 in v1.7.1.1 — terminal_files_mode), the types are correct
-# (language is NOT included — it is immediate)
+# collect() carries the 25 keys the hub owns (+1 per release: terminal_mode, hotkeys,
+# terminal_wheel, terminal_cursor_style, terminal_files_mode, ui_viewer_max_bytes); the types are
+# correct and the language is NOT included — it is immediate.
 dlg2.close_behavior_combo.setCurrentIndex(1)  # ask
 dlg2.status_interval_spin.setValue(60)
 dlg2.probe_timeout_spin.setValue(4.5)
 c = dlg2.collect()
-check("collect(): exactly 24 config.json keys (+ terminal_files_mode, v1.7.1.1)",
+check("collect(): exactly 25 config.json keys (+ ui_viewer_max_bytes, v1.7.5)",
       set(c) == {"external_terminal", "terminal_mode", "terminal_palette",
                  "terminal_font_size",
                  "terminal_history_lines", "terminal_close_behavior",
                  "terminal_wheel", "terminal_cursor_style", "terminal_files_mode",
+                 "ui_viewer_max_bytes",
                  "status_interval_sec", "status_probe_timeout_sec", "status_max_parallel",
                  "autosave_enabled", "autosave_interval_sec", "backup_count",
                  "ui_font_family", "ui_font_size", "terminal_font",
@@ -411,12 +410,37 @@ check("collect(): the types (int/float/bool/str) and the changed values",
       and c["terminal_close_behavior"] == "ask" and c["status_interval_sec"] == 60
       and abs(c["status_probe_timeout_sec"] - 4.5) < 1e-9, str(c))
 
+# v1.7.5: the "Files" tab — the reader's ceiling (the slider + the value box + the warning).
+import modules.sftp_tab as _STAB   # the ONE home of the cap and its range
+
+check("'Files': the value box and the slider carry the SHIPPED default (1 MiB) in ONE range",
+      dlg.viewer_max_spin.value() == 1 and dlg.viewer_max_slider.value() == 1
+      and dlg.viewer_max_spin.maximum() == dlg.viewer_max_slider.maximum()
+      == _STAB.VIEWER_MAX_BYTES_MAX // _STAB.VIEWER_MAX_BYTES_STEP,
+      f"spin={dlg.viewer_max_spin.value()} max={dlg.viewer_max_spin.maximum()}")
+check("'Files': collect() writes the value in BYTES (the module's own field)",
+      c["ui_viewer_max_bytes"] == _STAB.VIEWER_MAX_BYTES_MIN,
+      str(c["ui_viewer_max_bytes"]))
+dlg.viewer_max_slider.setValue(5)
+check("'Files': the slider moves the BOX (one number, two views)",
+      dlg.viewer_max_spin.value() == 5)
+check("'Files': the warning appears above the declared threshold and not below",
+      dlg.viewer_max_warning.isHidden() is False)
+dlg.viewer_max_spin.setValue(2)
+check("'Files': ...and it is hidden below it (the row is one number, not two)",
+      dlg.viewer_max_warning.isHidden() is True)
+dlg.viewer_max_spin.setValue(250)
+check("'Files': the slider's hard top is the module's 250 MiB",
+      dlg.viewer_max_bytes() == _STAB.VIEWER_MAX_BYTES_MAX,
+      str(dlg.viewer_max_bytes()))
+dlg.viewer_max_spin.setValue(1)
+
 # OK: a merged write to config.json + the applied signal
 applied = []
 dlg2.applied.connect(lambda: applied.append(1))
 dlg2._on_accept()
 cfg = read_cfg()
-check("OK: all the 24 keys are written into config.json",
+check("OK: all the 25 keys are written into config.json",
       cfg is not None and all(k in cfg for k in c), str(cfg))
 check("OK: the merge — the foreign keys are kept (language/terminal_font)",
       cfg.get("language") == "ru" and cfg.get("terminal_font") == "Consolas", str(cfg))

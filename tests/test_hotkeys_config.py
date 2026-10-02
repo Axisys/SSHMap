@@ -307,12 +307,12 @@ print("== 3. the settings dialog ==")
 
 clear_cfg()
 dlg = SettingsDialog(None)
-check("dialog: 8 tabs (v1.4.3: + Appearance) with 'Hotkeys' between 'Map' and 'Language'",
-      dlg.tabs.count() == 8
+check("dialog: 9 tabs (+ the v1.7.5 'Files' page) with 'Hotkeys' between 'Map' and 'Language'",
+      dlg.tabs.count() == 9
       and dlg.tabs.tabText(1) == t("settings.tab.appearance")
-      and dlg.tabs.tabText(5) == t("settings.tab.map")
-      and dlg.tabs.tabText(6) == t("settings.tab.hotkeys")
-      and dlg.tabs.tabText(7) == t("settings.tab.language"),
+      and dlg.tabs.tabText(6) == t("settings.tab.map")
+      and dlg.tabs.tabText(7) == t("settings.tab.hotkeys")
+      and dlg.tabs.tabText(8) == t("settings.tab.language"),
       str([dlg.tabs.tabText(i) for i in range(dlg.tabs.count())]))
 def hotkey_row_ids(dlg):
     """The action ids in TABLE order (v1.5rc4: the table is grouped by family, so the
@@ -366,8 +366,8 @@ collected = dlg.collect()
 check("dialog: saving is still possible — collect() carries the conflicting values",
       collected["hotkeys"]["file.new"] == "Ctrl+N"
       and collected["hotkeys"]["edit.duplicate"] == "Ctrl+N")
-check("dialog: collect() has exactly 23 config.json keys (+ terminal_cursor_style, v1.6.2)",
-      len(collected) == 24 and "hotkeys" in collected and "theme" in collected,
+check("dialog: collect() has exactly 25 config.json keys (+ the v1.7.5 Files page)",
+      len(collected) == 25 and "hotkeys" in collected and "theme" in collected,
       str(sorted(collected)))
 
 # Disabling a hotkey through the table (an empty QKeySequenceEdit)
@@ -397,12 +397,12 @@ check("dialog: prefilled from ~/.sshmap/config.json",
       and dlg2.hotkey_edits["file.open"].keySequence().toString() == "Ctrl+O")
 
 # The i18n of the dialog's own strings (a language switch inside the open dialog)
-tab_titles = [dlg2.tabs.tabText(i) for i in range(8)]
+tab_titles = [dlg2.tabs.tabText(i) for i in range(dlg2.tabs.count())]
 i18n.set_language("ru")
 dlg2.retranslate()
 check("dialog: retranslate() updates the tab, the headers, the reset button and the row names",
-      dlg2.tabs.tabText(6) == i18n.t("settings.tab.hotkeys")
-      and dlg2.tabs.tabText(6) != tab_titles[6]
+      dlg2.tabs.tabText(7) == i18n.t("settings.tab.hotkeys")
+      and dlg2.tabs.tabText(7) != tab_titles[7]
       and dlg2.hotkeys_table.horizontalHeaderItem(0).text() == i18n.t("settings.hotkeys.action")
       and dlg2.reset_hotkeys_btn.text() == i18n.t("settings.hotkeys.reset")
       and dlg2.hotkeys_table.item(dlg2.hotkey_row("file.new"), 0).text()

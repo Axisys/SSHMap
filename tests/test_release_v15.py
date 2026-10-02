@@ -313,8 +313,8 @@ check("§4 ...and its four translations are SHORT enough not to be elided there"
       str({c: len(_langs[c]["node.status.emulated"]) for c in sorted(_langs)}))
 
 _hub = SettingsDialog(make_main())
-check("§4 no new config key from this section (the settings hub collects 23)",
-      len(_hub.collect()) == 24, str(len(_hub.collect())))
+check("§4 no new config key from this section (the settings hub collects 25)",
+      len(_hub.collect()) == 25, str(len(_hub.collect())))
 _hub.close()
 check("§4 no new action and no new empty default of THIS release (the registry grew with "
       "the two v1.5.1 File actions, the v1.5.2 View item, the v1.5.3 freshness pair and the "

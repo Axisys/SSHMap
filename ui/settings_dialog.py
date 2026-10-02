@@ -20,7 +20,7 @@ from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QFormLayout, QTabWidget, QWidget,
     QLabel, QComboBox, QSpinBox, QDoubleSpinBox, QLineEdit, QCheckBox,
     QPushButton, QMessageBox, QTableWidget, QTableWidgetItem, QHeaderView,
-    QAbstractItemView, QKeySequenceEdit, QFileDialog,
+    QAbstractItemView, QKeySequenceEdit, QFileDialog, QSlider,
 )
 
 try:  # v1.2.5: central theme (colors/radii/fonts — ui/theme.py); no literals in the UI code
@@ -78,6 +78,22 @@ def _log_dialog(message: str) -> None:
         get_logger("ui.settings_dialog").warning(message)
     except Exception:  # noqa: BLE001 — logging must never break the dialog
         pass
+
+
+def _viewer_max_module():
+    """`modules.sftp_tab` — the ONE home of the reader's ceiling and its range (v1.7.5).
+
+    Imported lazily (the module imports `ui.theme`, never this dialog) and answered as `None`
+    when the build has no Files surface at all: the "Files" tab then simply does not exist.
+    """
+    try:
+        from ..modules import sftp_tab
+    except ImportError:
+        try:
+            from modules import sftp_tab
+        except ImportError:
+            return None
+    return sftp_tab
 
 
 # v1.3.3.8 (ROADMAP task 2): the technical detail behind a refused language file.
@@ -353,6 +369,7 @@ class SettingsDialog(QDialog):
         self._build_general_tab()
         self._build_appearance_tab()   # v1.4.3 (ROADMAP task 6)
         self._build_terminal_tab()
+        self._build_files_tab()   # v1.7.5 (ROADMAP v1.7.5, task 2): the reader's ceiling
         self._build_statuses_tab()
         self._build_autosave_tab()
         self._build_map_tab()
@@ -1014,6 +1031,98 @@ class SettingsDialog(QDialog):
 
         self._register_form_rows(tab, form)   # v1.5rc4: the searchable rows of this tab
         self.tabs.addTab(tab, _t("settings.tab.terminal"))
+
+    # ── "Files" tab (v1.7.5: the reader's ceiling) ────────────────────────────
+
+    def _build_files_tab(self):
+        """The Files surface's own settings — the READER'S CEILING (v1.7.5).
+
+        The cap is a SETTING and not a control of the pane (the `terminal_files_mode` precedent):
+        it belongs to every pane of every session at once, so it lives in the hub. The slider and
+        the value box are ONE number — each is a view of the other, written through ONE slot with
+        the signals guarded — and the WARNING above `VIEWER_MAX_BYTES_WARN` says why a big cap is
+        a cost: the reader is a `QPlainTextEdit`, and tens of megabytes of text are seconds of
+        freeze. The range and the default come from the module that READS them, never from here.
+        """
+        sftp = _viewer_max_module()
+        tab = QWidget()
+        form = QFormLayout(tab)
+        if sftp is None:   # a build without the Files surface: the tab exists and says nothing
+            self.tabs.addTab(tab, _t("settings.tab.files"))
+            return
+        step = max(1, int(sftp.VIEWER_MAX_BYTES_STEP))
+        self._viewer_max_step = step
+        top = max(1, int(sftp.VIEWER_MAX_BYTES_MAX) // step)
+        warn = max(1, int(sftp.VIEWER_MAX_BYTES_WARN) // step)
+        self._viewer_max_warn_mib = warn
+        mib = max(1, min(top, int(sftp.resolve_viewer_max_bytes()) // step))
+        self._viewer_max_mib = mib
+
+        self.viewer_max_slider = QSlider(Qt.Orientation.Horizontal)
+        self.viewer_max_slider.setRange(1, top)
+        self.viewer_max_slider.setSingleStep(1)
+        self.viewer_max_slider.setPageStep(4)
+        self.viewer_max_spin = QSpinBox()
+        self.viewer_max_spin.setRange(1, top)
+        row = QHBoxLayout()
+        row.addWidget(self.viewer_max_slider, 1)
+        row.addWidget(self.viewer_max_spin, 0)
+        self._lbl_viewer_max = QLabel(_t("settings.files.max_bytes"))
+        form.addRow(self._lbl_viewer_max, row)
+
+        # The warning is a VIEW of the value (never a second number): it appears exactly above the
+        # declared threshold and is deliberately NOT part of the search index (a hidden hint is not
+        # a row, and the search hides rows).
+        self.viewer_max_warning = QLabel(_t("settings.files.max_bytes_warning"))
+        self.viewer_max_warning.setWordWrap(True)
+        form.addRow(self.viewer_max_warning)
+
+        self.viewer_max_slider.valueChanged.connect(self._on_viewer_max_changed)
+        self.viewer_max_spin.valueChanged.connect(self._on_viewer_max_changed)
+        self._sync_viewer_max_widgets(mib)
+        self._register_search_entry(tab, self._lbl_viewer_max,
+                                    [self._lbl_viewer_max, self.viewer_max_slider,
+                                     self.viewer_max_spin])
+        self.tabs.addTab(tab, _t("settings.tab.files"))
+
+    def _on_viewer_max_changed(self, value):
+        """The slider OR the box moved: mirror the number and re-read the warning (never raises)."""
+        try:
+            self._sync_viewer_max_widgets(int(value))
+        except (TypeError, ValueError, RuntimeError):
+            pass
+
+    def _sync_viewer_max_widgets(self, mib: int):
+        """Make BOTH controls show `mib` and show/hide the warning (the ONE writer of the row)."""
+        mib = int(mib)
+        self._viewer_max_mib = mib
+        for widget, setter in ((getattr(self, "viewer_max_slider", None), "setValue"),
+                               (getattr(self, "viewer_max_spin", None), "setValue")):
+            if widget is None:
+                continue
+            try:
+                if int(widget.value()) != mib:
+                    widget.blockSignals(True)
+                    try:
+                        getattr(widget, setter)(mib)
+                    finally:
+                        widget.blockSignals(False)
+            except (RuntimeError, AttributeError, TypeError):
+                continue   # Qt teardown / a dialog built without the row
+        warning = getattr(self, "viewer_max_warning", None)
+        if warning is not None:
+            try:
+                warning.setVisible(mib > int(getattr(self, "_viewer_max_warn_mib", 3)))
+            except RuntimeError:
+                pass  # Qt teardown — the label is already gone
+
+    def viewer_max_bytes(self) -> int:
+        """The collected CEILING in BYTES (the value box speaks MiB — the row's own unit)."""
+        try:
+            mib = int(self.viewer_max_spin.value())
+        except (AttributeError, RuntimeError, TypeError, ValueError):
+            return int(getattr(self, "_viewer_max_step", 1024 * 1024) or 1024 * 1024)
+        return mib * int(getattr(self, "_viewer_max_step", 1024 * 1024) or 1024 * 1024)
 
     # ── "Statuses" tab (the StatusChecker probe interval + timeout) ─────────────
 
@@ -1845,6 +1954,10 @@ class SettingsDialog(QDialog):
         fixed ids). It owns the Files panel's MODE, which the terminal window would
         otherwise write for itself as the legacy `ui_files_panel` (read once as the
         migration source, never written again). 23 → 24 UI-facing keys.
+        v1.7.5 (ROADMAP v1.7.5, task 2): +1 key — ui_viewer_max_bytes (the reader's
+        CEILING, in BYTES, of the new "Files" tab; the slider and the value box give a
+        value inside the module's declared range, so it is valid by construction).
+        24 → 25 UI-facing keys.
         """
         return {
             "external_terminal": self.ext_term_combo.currentData() or "auto",
@@ -1853,6 +1966,10 @@ class SettingsDialog(QDialog):
             # v1.7.1.1 (ROADMAP v1.7.1.1): where the Files tree lives — "tab" | "panel";
             # the 24th UI-facing key, and the ONE owner of the Files panel's MODE
             "terminal_files_mode": self.files_mode_combo.currentData() or "tab",
+            # v1.7.5 (ROADMAP v1.7.5, task 2): the reader's ceiling in bytes — the ONE owner
+            # of the cap every pane hands to its read tasks ("Files" tab; the pane re-reads
+            # it, so a change invalidates its "no preview" facts).
+            "ui_viewer_max_bytes": self.viewer_max_bytes(),
             "terminal_palette": self.palette_combo.currentData() or "default",
             "terminal_font_size": int(self.font_size_spin.value()),
             "terminal_history_lines": int(self.history_spin.value()),
@@ -1934,11 +2051,18 @@ class SettingsDialog(QDialog):
         self.tabs.setTabText(0, _t("settings.tab.general"))
         self.tabs.setTabText(1, _t("settings.tab.appearance"))   # v1.4.3
         self.tabs.setTabText(2, _t("settings.tab.terminal"))
-        self.tabs.setTabText(3, _t("settings.tab.statuses"))
-        self.tabs.setTabText(4, _t("settings.tab.autosave"))
-        self.tabs.setTabText(5, _t("settings.tab.map"))
-        self.tabs.setTabText(6, _t("settings.tab.hotkeys"))   # v1.3.2
-        self.tabs.setTabText(7, _t("settings.tab.language"))
+        self.tabs.setTabText(3, _t("settings.tab.files"))   # v1.7.5
+        self.tabs.setTabText(4, _t("settings.tab.statuses"))
+        self.tabs.setTabText(5, _t("settings.tab.autosave"))
+        self.tabs.setTabText(6, _t("settings.tab.map"))
+        self.tabs.setTabText(7, _t("settings.tab.hotkeys"))   # v1.3.2
+        self.tabs.setTabText(8, _t("settings.tab.language"))
+        # v1.7.5: the "Files" tab's own row + its warning.
+        try:
+            self._lbl_viewer_max.setText(_t("settings.files.max_bytes"))
+            self.viewer_max_warning.setText(_t("settings.files.max_bytes_warning"))
+        except (AttributeError, RuntimeError):
+            pass  # Qt teardown / a build without the Files surface
 
         # v1.4.3 (ROADMAP task 6): the "Appearance" tab
         self._lbl_theme_mode.setText(_t("settings.appearance.mode"))

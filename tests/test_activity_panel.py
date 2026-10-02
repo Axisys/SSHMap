@@ -636,8 +636,8 @@ check("§5 ...and it is a CHECKABLE View item (the owner of the persisted state)
 from ui.settings_dialog import SettingsDialog  # noqa: E402
 
 _hub = SettingsDialog(None)
-check("§5 the new config key is UI STATE, not a preference (the hub collects 23)",
-      len(_hub.collect()) == 24 and "ui_activity_panel" not in _hub.collect(),
+check("§5 the new config key is UI STATE, not a preference (the hub collects 25)",
+      len(_hub.collect()) == 25 and "ui_activity_panel" not in _hub.collect(),
       str(sorted(_hub.collect()))[:120])
 _hub.close()
 import dataclasses  # noqa: E402

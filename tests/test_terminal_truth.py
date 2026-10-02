@@ -540,9 +540,9 @@ check("the 'Terminal' tab offers the three shapes (block / bar / underline)",
       _ids == ["bar", "block", "underline"], str(_ids))
 check("the combo opens on the STORED shape", _dlg.cursor_combo.currentData() == "underline",
       str(_dlg.cursor_combo.currentData()))
-check("collect() carries terminal_cursor_style (the 23rd UI-facing key)",
+check("collect() carries terminal_cursor_style (the 25th UI-facing key)",
       _dlg.collect().get("terminal_cursor_style") == "underline"
-      and len(_dlg.collect()) == 24, str(len(_dlg.collect())))
+      and len(_dlg.collect()) == 25, str(len(_dlg.collect())))
 check("the tab's label and its three values are translated (not the raw key)",
       _dlg._lbl_cursor.text() not in ("", "settings.terminal.cursor"),
       _dlg._lbl_cursor.text())

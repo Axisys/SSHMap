@@ -162,6 +162,24 @@ MAX_REMEMBERED_DIRS = 32
 #: extension is a HINT, the value is a real JSON bool or the default.
 VIEWER_WRAP_CONFIG = "ui_viewer_wrap"
 
+#: v1.7.5: the reader's CEILING as a SETTING — the reader truncates at the cap instead of refusing
+#: the file, so `MAX_READ_BYTES` (the shipped read policy) is the DEFAULT and the FLOOR of this key
+#: while the slider's top is a DECLARED 250 MiB. The pane resolves the cap ONCE and hands it to the
+#: task (`_SftpTask.max_bytes`), so the worker never reads a config (AGENTS.md §4.8, §4.15).
+VIEWER_MAX_BYTES_CONFIG = "ui_viewer_max_bytes"
+VIEWER_MAX_BYTES_MIN = MAX_READ_BYTES            # 1 MiB — the shipped policy is the smallest cap
+VIEWER_MAX_BYTES_MAX = 250 * 1024 * 1024         # the slider's hard top
+VIEWER_MAX_BYTES_STEP = 1024 * 1024              # one step of the slider and of the value box
+#: Above this the settings page WARNS: a `QPlainTextEdit` fed tens of megabytes is seconds of freeze.
+VIEWER_MAX_BYTES_WARN = 3 * 1024 * 1024
+
+#: v1.7.5: the LISTING's sort state is a VIEW state of the session (the pane's listing is rebuilt on
+#: every navigation), never a config key: the column the header click chose and its direction. The
+#: default IS the provider's own order (directories first, then case-insensitive by name), which is
+#: why a listing nobody sorted is not re-ordered at all.
+SORT_DEFAULT_COLUMN = 0
+SORT_COLUMNS = (0, 1, 2)   # Name | Size | Modified — the three real sort keys of the pane
+
 #: v1.7.3: the drag payload of a row that started INSIDE a Files pane. The remote path alone
 #: cannot say WHICH pane (two servers show the same path), so the private type carries the session
 #: key, the pane's identity and the path while `text/plain` keeps the plain path for every foreign
@@ -390,6 +408,55 @@ def save_viewer_wrap(on) -> bool:
         return False
 
 
+def clamp_viewer_max_bytes(value) -> int:
+    """PURE: a cap into the DECLARED range `[VIEWER_MAX_BYTES_MIN, VIEWER_MAX_BYTES_MAX]`.
+
+    A foreign value (a string, `None`, a bool, a negative number) answers the DEFAULT — the
+    shipped `MAX_READ_BYTES`. The range is ONE declaration, so the slider, the value box and
+    the reader can never disagree about what a legal cap is.
+    """
+    if isinstance(value, bool):
+        return VIEWER_MAX_BYTES_MIN
+    try:
+        number = int(value)
+    except (TypeError, ValueError):
+        return VIEWER_MAX_BYTES_MIN
+    return max(VIEWER_MAX_BYTES_MIN, min(VIEWER_MAX_BYTES_MAX, number))
+
+
+def resolve_viewer_max_bytes(cfg: dict = None) -> int:
+    """The reader's ceiling as a PURE value (v1.7.5): the config's cap, clamped, else the default.
+
+    Only a real number counts; a missing key, a string, a bool or an unreadable config answers
+    `MAX_READ_BYTES` — the shipped read policy is what a user who never touched the setting has.
+    """
+    if not isinstance(cfg, dict):
+        try:
+            from i18n import load_config
+        except Exception:  # noqa: BLE001 — a build without i18n keeps the default
+            return VIEWER_MAX_BYTES_MIN
+        try:
+            cfg = load_config() or {}
+        except Exception:  # noqa: BLE001 — a broken config store keeps the default
+            cfg = {}
+    value = cfg.get(VIEWER_MAX_BYTES_CONFIG) if isinstance(cfg, dict) else None
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return VIEWER_MAX_BYTES_MIN
+    return clamp_viewer_max_bytes(value)
+
+
+def save_viewer_max_bytes(value) -> bool:
+    """Write the ONE cap key, CLAMPED (merge-write; False — the config could not be written)."""
+    try:
+        from i18n import save_config
+    except Exception:  # noqa: BLE001 — a build without i18n cannot remember it
+        return False
+    try:
+        return bool(save_config({VIEWER_MAX_BYTES_CONFIG: clamp_viewer_max_bytes(value)}))
+    except Exception:  # noqa: BLE001 — a write failure must not break the reader
+        return False
+
+
 def pane_payload(mime_data):
     """The `{session, pane, path}` payload of a drag that started inside a pane (None — foreign).
 
@@ -507,7 +574,7 @@ def decode_text(data: bytes):
         return data.decode("latin-1", errors="replace"), "latin-1"
 
 
-def preview_block_reason(path: str, size, facts=None) -> str:
+def preview_block_reason(path: str, size=0, facts=None) -> str:
     """v1.3.1.1: will the viewer refuse this file? "" (no) | "binary" | "too_large".
 
     The order of the answers is the point of this function — from the certain to
@@ -518,26 +585,49 @@ def preview_block_reason(path: str, size, facts=None) -> str:
          wins. A `.txt` with a null byte looks like text by name and is refused by
          the worker — the row is marked only after the attempt, and from then on
          the mark is the truth;
-      2. the SIZE from the listing (always known, never a guess): over
-         MAX_READ_BYTES the task is refused before the file is opened;
-      3. the extension (a GUESS — the null-byte screen can still refuse the file,
+      2. the extension (a GUESS — the null-byte screen can still refuse the file,
          and a file with an unknown/absent extension usually reads fine).
 
-    A broken/absent size is treated as unknown (0) — it never marks a row.
+    **`size` is accepted for the callers' shape and is deliberately NOT a reason**
+    (v1.7.5): the read is TRUNCATED at the configured ceiling, never refused, so a
+    file over the cap opens with its first `cap` bytes and the panel says how much
+    of how many it shows (`sftp.viewer.truncated`). A `too_large` FACT of a real
+    read attempt still marks the row; the size alone does not.
     """
     if facts:
         known = facts.get(path)
         if known:
             return known
-    try:
-        size = int(size or 0)
-    except (TypeError, ValueError):
-        size = 0
-    if size > MAX_READ_BYTES:
-        return READ_ERROR_TOO_LARGE
     if classify_extension(path) == "binary":
         return READ_ERROR_BINARY
     return ""
+
+
+def row_path(item) -> str:
+    """The FULL path a listing row carries in its PATH_ROLE ("" — no role, a dead item). PURE."""
+    try:
+        return str(item.data(0, _SftpPane.PATH_ROLE) or "")
+    except (RuntimeError, AttributeError):
+        return ""
+
+
+def row_name(item) -> str:
+    """The NAME a listing row sorts by — the basename of its PATH_ROLE, in EITHER dialect (PURE).
+
+    The sort key is read off the ROLE and never off the widget text, so the comparison cannot be
+    moved by a re-text pass; the split accepts both separators because a LOCAL row and a REMOTE one
+    spell the same shape of path two ways (LOCAL_PANE.md §2).
+    """
+    path = row_path(item)
+    for separator in ("/", "\\"):
+        if separator in path:
+            path = path.rsplit(separator, 1)[-1]
+    if path:
+        return path
+    try:
+        return str(item.text(0) or "")
+    except (RuntimeError, AttributeError):
+        return ""
 
 
 def ask_conflict(parent, name: str, target: str, remaining: int = 0, facts: str = ""):
@@ -614,6 +704,86 @@ def local_files(mime_data) -> list:
         if os.path.isfile(path):
             out.append(path)
     return out
+
+
+class _SftpRowItem(QTreeWidgetItem):
+    """ONE row of a pane's listing, ordered by the ROLES (v1.7.5 — the sortable listing).
+
+    `QTreeWidget`'s own item ordering is the ONLY sorter (`sortItems()` calls this `__lt__` through
+    the tree's model), so the sorting costs no re-listing and no second sort table. The order is
+    declared in the ROLES, which both SOURCES fill identically, so a LOCAL pane sorts exactly like a
+    remote one (`LOCAL_PANE.md` §3) and a column that means nothing for a directory keeps the two
+    GROUP rules intact:
+
+      * the ".." row (`pinned`) is FIRST whatever the column and the direction;
+      * DIRECTORIES stay grouped ABOVE the files, whatever the column and the direction;
+      * inside one group the chosen COLUMN decides, then the path breaks a tie deterministically.
+
+    Two rules the pane must keep for this to hold: Qt is always asked for `AscendingOrder` (its
+    `DescendingOrder` REVERSES the comparator, which would put the files above the directories) and
+    the real direction lives on the PANE (`_sort_column` / `_sort_desc`), where this comparison
+    reads it.
+    """
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        #: the ".." row — the ONE row no order may move (rule 1).
+        self.pinned = False
+
+    def sort_state(self):
+        """`(column, descending)` of the pane this row is listed by — the DECLARED view state."""
+        pane = getattr(self.treeWidget(), "pane", None)
+        if pane is None:
+            return SORT_DEFAULT_COLUMN, False
+        column = getattr(pane, "_sort_column", SORT_DEFAULT_COLUMN)
+        try:
+            column = int(column)
+        except (TypeError, ValueError):
+            column = SORT_DEFAULT_COLUMN
+        return (column if column in SORT_COLUMNS else SORT_DEFAULT_COLUMN,
+                bool(getattr(pane, "_sort_desc", False)))
+
+    def group_rank(self) -> int:
+        """The GROUP of a row: 0 — the pinned ".." row, 1 — a directory, 2 — a file."""
+        if getattr(self, "pinned", False):
+            return 0
+        try:
+            return 1 if self.data(0, _SftpPane.ISDIR_ROLE) else 2
+        except (RuntimeError, AttributeError):
+            return 2
+
+    def sort_key(self, column: int):
+        """The value of THIS row in `column`: the NAME, the SIZE or the MTIME, read off the ROLES."""
+        pane = _SftpPane
+        role = {1: pane.SIZE_ROLE, 2: pane.MTIME_ROLE}.get(int(column))
+        if role is not None:
+            try:
+                return int(self.data(0, role) or 0)
+            except (RuntimeError, AttributeError, TypeError, ValueError):
+                return 0
+        try:
+            # `lower()` is the provider's own key (`local_entries`, the worker's listing), so the
+            # default order of a fresh listing and a click on the Name header agree to the character.
+            return row_name(self).lower()
+        except (RuntimeError, AttributeError):
+            return ""
+
+    def __lt__(self, other) -> bool:
+        if not isinstance(other, _SftpRowItem):
+            return False
+        mine, theirs = self.group_rank(), other.group_rank()
+        if mine != theirs:
+            return mine < theirs          # the two GROUP rules, whatever the direction
+        if mine == 0:
+            return False                  # two pinned rows — the ".." row never moves
+        column, descending = self.sort_state()
+        my_key = self.sort_key(column)
+        other_key = other.sort_key(column)
+        if my_key == other_key:
+            # A stable tie-break: the full PATH of the row, so two rows that share a size or an
+            # mtime keep ONE deterministic order (the direction applies to it as well).
+            my_key, other_key = row_path(self), row_path(other)
+        return (my_key > other_key) if descending else (my_key < other_key)
 
 
 class _SftpTree(QTreeWidget):
@@ -946,6 +1116,15 @@ class _SftpPane(QWidget):
         # v1.7.3 (ROADMAP v1.7.3, task 4): the reader's word wrap — ONE global setting, read at
         # construction so both panes and every session agree.
         self._viewer_wrap = resolve_viewer_wrap()
+        # v1.7.5: the reader's CEILING — the SAME "one global setting, resolved ONCE" rule as the
+        # wrap above. The value travels into every read task, so the worker never reads a config.
+        self._viewer_cap = resolve_viewer_max_bytes()
+        # v1.7.5: the LISTING's sort — a VIEW state of this pane (never a config key): the column
+        # the header click chose and its direction. The default IS the provider's own order
+        # (directories first, then case-insensitive by name), so a listing nobody sorted stays
+        # exactly as the source answered it.
+        self._sort_column = SORT_DEFAULT_COLUMN
+        self._sort_desc = False
         # v1.7rc1: the pane-scoped keys (the F-actions) and the ACTIVE-pane ring.
         self._pane_actions = []
         self._ring = focus_ring.FocusRing(styled_widget=None) if focus_ring is not None else None
@@ -968,6 +1147,18 @@ class _SftpPane(QWidget):
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
         outer.setSpacing(4)
+
+        # v1.7.5 (LOCAL_PANE.md §3): the pane's SOURCE HEADER LINE — the FIRST row, naming WHAT
+        # this pane READS ("This computer" for the OS disk, the session's alias for a server). It
+        # is a VIEW of the source: ONE line, never focusable, never a drop target — the keyboard
+        # walk of §4 belongs to the tree and a drop is resolved in the tree's viewport.
+        self.header_label = QLabel("")
+        _apply_status_style(self.header_label, "status.sftp_row")
+        self.header_label.setWordWrap(False)
+        self.header_label.setTextFormat(Qt.TextFormat.PlainText)
+        self.header_label.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        outer.addWidget(self.header_label)
+        self._sync_header()
 
         # Path row — the current directory (the "address bar").
         # v1.6.3 (ROADMAP task 4): it is an EDITABLE QLineEdit now — Enter navigates through
@@ -1045,6 +1236,15 @@ class _SftpPane(QWidget):
         self.tree.setColumnCount(3)
         self.tree.setHeaderLabels([t("sftp.column_name"), t("sftp.column_size"),
                                    t("sftp.column_modified")])
+        # v1.7.5: the header is a real SORT CONTROL. Qt's automatic sorting stays OFF: it sorts with
+        # the direction it is given, and `DescendingOrder` REVERSES the comparator — which would drop
+        # the files above the directories and break the two GROUP rules of `_SftpRowItem`. The pane
+        # drives `sortItems()` itself, always ASCENDING, and sets the arrow afterwards with the
+        # signals blocked.
+        self.tree.header().setSectionsClickable(True)
+        self.tree.header().setSortIndicatorShown(True)
+        self.tree.header().setSortIndicator(SORT_DEFAULT_COLUMN, Qt.SortOrder.AscendingOrder)
+        self.tree.header().sectionClicked.connect(self._on_header_clicked)
         self.tree.setRootIsDecorated(True)
         self.tree.setSelectionMode(QTreeWidget.SelectionMode.ExtendedSelection)
         self.tree.setColumnWidth(0, 320)
@@ -1753,17 +1953,6 @@ class _SftpPane(QWidget):
         except RuntimeError:
             pass   # the C++ object is already gone
 
-    def header_text(self) -> str:
-        """The wording the pane's address bar opens with — the SOURCE's own (LOCAL_PANE.md §3).
-
-        A remote pane has no directory to show before its transport exists ("waiting for
-        connection"), while a local pane is never in that state: it names itself
-        (`sftp.local.this_computer`) until its own listing answers.
-        """
-        if self._source == SOURCE_LOCAL:
-            return _t("sftp.local.this_computer")
-        return _t("sftp.waiting_connection")
-
     def set_source(self, source: str, notify: bool = True) -> bool:
         """Switch this pane's DATA SOURCE and re-bind its provider (v1.7.4rc1).
 
@@ -1796,8 +1985,11 @@ class _SftpPane(QWidget):
         self._current_dir = self._local_dir if target == SOURCE_LOCAL and self._local_dir \
             else self.paths.root()
         self._restored = target == SOURCE_LOCAL
-        if target == SOURCE_LOCAL:
-            self._set_path_text(self.header_text())
+        # v1.7.5: the header line names the SOURCE — it moves with the switch, while the ADDRESS BAR
+        # keeps the shipped wording (the current directory; `bind_worker` writes the waiting line
+        # when there is no transport), so "This computer" never lands in a path.
+        self._sync_header()
+        self._set_path_text(self._current_dir)
         # The way BACK re-binds the SESSION's transport (a remote pane IS the session's tree,
         # §1): without it the pane would sit in the "waiting" state with an empty listing.
         self.bind_worker(old, None if target == SOURCE_LOCAL else self.worker, source=target)
@@ -1869,7 +2061,8 @@ class _SftpPane(QWidget):
         """
         for widget in (getattr(self, "path_label", None),
                        getattr(self, "viewer_label", None),
-                       getattr(self, "hints_label", None)):
+                       getattr(self, "hints_label", None),
+                       getattr(self, "header_label", None)):
             if widget is None:
                 continue
             try:
@@ -1935,6 +2128,9 @@ class _SftpPane(QWidget):
             # toggle, the mark key and the open key) — re-read in the active language. The
             # row is re-elided by the layout on the next pass, so nothing else is needed.
             self._sync_secondary_ui()
+            # v1.7.5: the SOURCE header line — its local wording is the shipped key, and an alias
+            # is data that is simply put back unchanged (never translated).
+            self._sync_header()
             # The row markers carry the refusal text in the tooltip — re-text the
             # rows of the CURRENT listing that are really marked (the facts of this
             # session; the marker itself is re-applied by the next listing).
@@ -2129,7 +2325,8 @@ class _SftpPane(QWidget):
         self.tree.clear()
         self._up_item = None
         if not paths.is_root(self._current_dir):
-            up = QTreeWidgetItem(self.tree)
+            up = _SftpRowItem(self.tree)
+            up.pinned = True          # v1.7.5: the ONE row no sort order may move
             up.setText(0, "..")
             up.setIcon(0, self._dir_icon())
             up.setData(0, self.PATH_ROLE, paths.dirname(self._current_dir) or paths.root())
@@ -2139,6 +2336,10 @@ class _SftpPane(QWidget):
             self._up_item = up
         for e in entries:
             self._add_entry_item(e)
+        # v1.7.5: the rows arrive in the PROVIDER's order (directories first, then case-insensitive
+        # by name) — which IS the default sort — so only a pane the user really sorted is re-ordered.
+        if not self._sort_is_default():
+            self.apply_sort()
         self._focus_first_row()
         # v1.7.3 (task 2): a directory the SERVER really answered for is what memory keeps — and
         # the restored hint has arrived, so it is no longer pending. A LOCAL pane has no
@@ -2168,7 +2369,7 @@ class _SftpPane(QWidget):
 
     def _add_entry_item(self, entry: dict) -> QTreeWidgetItem:
         full = self.paths.join(self._current_dir, entry["name"])
-        item = QTreeWidgetItem(self.tree)
+        item = _SftpRowItem(self.tree)
         item.setText(0, entry["name"])
         item.setIcon(0, self._dir_icon() if entry["is_dir"] else self._file_icon())
         item.setData(0, self.PATH_ROLE, full)
@@ -2212,7 +2413,7 @@ class _SftpPane(QWidget):
     def _blocked_tooltip(self, reason: str) -> str:
         """The reason of a marked row — the SAME texts the refusal itself shows."""
         if reason == READ_ERROR_TOO_LARGE:
-            return _t("sftp.viewer.too_large", limit=format_size(MAX_READ_BYTES))
+            return _t("sftp.viewer.too_large", limit=format_size(self.viewer_cap()))
         return _t("sftp.viewer.binary")
 
     def _blocked_icon(self):
@@ -2251,6 +2452,145 @@ class _SftpPane(QWidget):
                     return
         except RuntimeError:
             pass  # the C++ object was already destroyed (a close race)
+
+    # ── v1.7.5: the SOURCE HEADER LINE and the SORTABLE LISTING ──────────
+
+    def header_text(self) -> str:
+        """The pane's SOURCE HEADER LINE — the wording that names WHAT this pane reads (§3).
+
+        A pane that reads the OS disk names itself (`sftp.local.this_computer`); a pane that reads a
+        server names the SESSION (its alias — the label `set_session_info()` was given), with
+        `user@host` as the fallback when the session was never identified and the shipped "waiting
+        for connection" line when the pane belongs to nobody at all. An alias is DATA: it is never
+        translated (no i18n key — the local wording is the shipped one).
+        """
+        if self._source == SOURCE_LOCAL:
+            return _t("sftp.local.this_computer")
+        # The container's THREE readers answer "" for a pane nobody identified (a bare unit test),
+        # so a foreign container needs no branch here — it is duck-typed like every other hook.
+        try:
+            label = self._container.session_label()
+            user = self._container.session_user()
+            host = self._container.session_host()
+        except (AttributeError, RuntimeError):
+            return _t("sftp.waiting_connection")
+        if label:
+            return str(label)
+        if user and host:
+            return f"{user}@{host}"
+        if host:
+            return str(host)
+        return _t("sftp.waiting_connection")
+
+    def _sync_header(self):
+        """Show the SOURCE of this pane in its header line (the ONE writer of the widget). Never raises."""
+        label = getattr(self, "header_label", None)
+        if label is None:
+            return
+        try:
+            text = self.header_text()
+        except (AttributeError, RuntimeError, TypeError):
+            return
+        try:
+            label.setText(text)
+            label.setToolTip(text)
+        except RuntimeError:
+            pass  # Qt teardown — the label is already gone
+
+    def source_header_label(self):
+        """The header widget itself (the test seam of the clause above)."""
+        return getattr(self, "header_label", None)
+
+    def _on_header_clicked(self, column):
+        """A click on a column header — the pane's ONE sort switch (v1.7.5).
+
+        The same column flips the direction, another column starts ascending — the commander rule.
+        Nothing else changes: the listing is NOT re-listed (the rows are already in memory) and no
+        second sort table exists (the comparison lives on the ROW class).
+        """
+        try:
+            column = int(column)
+        except (TypeError, ValueError):
+            return
+        if column not in SORT_COLUMNS:
+            return
+        if column == self._sort_column:
+            self._sort_desc = not self._sort_desc
+        else:
+            self._sort_column, self._sort_desc = column, False
+        self.apply_sort()
+
+    def apply_sort(self):
+        """Order the rows THE PANE'S WAY and show the direction on the header arrow.
+
+        `sortItems()` is always asked for ASCENDING (the comparison on `_SftpRowItem` carries the
+        real direction and the two GROUP rules); the indicator is then set to the REAL direction
+        with the signals BLOCKED, so Qt's own handler cannot re-sort with the reversed comparator.
+        Never raises.
+        """
+        tree = getattr(self, "tree", None)
+        if tree is None:
+            return
+        try:
+            tree.sortItems(self._sort_column, Qt.SortOrder.AscendingOrder)
+        except (RuntimeError, TypeError, ValueError):
+            return  # Qt teardown / an unsortable column — the listing keeps its order
+        try:
+            header = tree.header()
+            header.blockSignals(True)
+            try:
+                header.setSortIndicatorShown(True)
+                header.setSortIndicator(
+                    self._sort_column,
+                    Qt.SortOrder.DescendingOrder if self._sort_desc
+                    else Qt.SortOrder.AscendingOrder)
+            finally:
+                header.blockSignals(False)
+        except (RuntimeError, AttributeError):
+            pass  # Qt teardown — the arrow is cosmetic, the order is already right
+
+    def _sort_is_default(self) -> bool:
+        """True — the pane's order IS the provider's own (no re-sort needed after a listing)."""
+        return (self._sort_column, self._sort_desc) == (SORT_DEFAULT_COLUMN, False)
+
+    # ── v1.7.5: the preview ceiling of THIS pane ─────────────────────────
+
+    def viewer_cap(self) -> int:
+        """The ceiling every read of this pane is TRUNCATED at (the resolved setting)."""
+        return int(getattr(self, "_viewer_cap", 0) or VIEWER_MAX_BYTES_MIN)
+
+    def set_viewer_max_bytes(self, value) -> int:
+        """Apply a new ceiling to THIS pane and re-read the marks (v1.7.5).
+
+        The per-session "no preview" FACTS are dropped: a size verdict is a fact of the CAP that
+        produced it, so a read attempt that answered under the old ceiling says nothing about the
+        new one. Every row of the listing is re-marked from the (now clean) state.
+        """
+        self._viewer_cap = clamp_viewer_max_bytes(value)
+        self._blocked.clear()
+        self._mark_rows()
+        return self._viewer_cap
+
+    def _mark_rows(self):
+        """Re-apply the preview marker of EVERY row of the listing on the screen. Never raises."""
+        try:
+            for index in range(self.tree.topLevelItemCount()):
+                item = self.tree.topLevelItem(index)
+                if item is not None:
+                    self._apply_preview_marker(item, item.data(0, self.PATH_ROLE))
+        except RuntimeError:
+            pass  # Qt teardown — the tree is already gone
+
+    def _known_size(self, path: str) -> int:
+        """The size the CURRENT listing knows for `path` (0 — the path is not on the screen)."""
+        try:
+            for index in range(self.tree.topLevelItemCount()):
+                item = self.tree.topLevelItem(index)
+                if item is not None and item.data(0, self.PATH_ROLE) == path:
+                    return int(item.data(0, self.SIZE_ROLE) or 0)
+        except (RuntimeError, TypeError, ValueError):
+            pass
+        return 0
 
     # ── Tree events ──────────────────────────────────────────────────────
 
@@ -2298,7 +2638,10 @@ class _SftpPane(QWidget):
         # is MOVED to the other pane only once the content is there (`_show_viewer()`): a read the
         # worker refuses must not leave the other pane dressed as a panel that shows nothing.
         self._container.close_preview()
-        tid = provider.queue_read(path, int(item.data(0, self.SIZE_ROLE) or 0))
+        # v1.7.5: the pane RESOLVES the ceiling and hands it to the task — the worker reads no
+        # config (and truncates at it instead of refusing the file).
+        tid = provider.queue_read(path, int(item.data(0, self.SIZE_ROLE) or 0),
+                                  max_bytes=self.viewer_cap())
         if tid is None:
             return  # the worker is finished — there is nobody to read
         self._read_tasks[tid] = path
@@ -2421,11 +2764,14 @@ class _SftpPane(QWidget):
         Any OTHER message is a real failure reported by the worker (a path or
         permission error, str(exception)) — it goes through the same translated
         line with the file name, so the reader always gets a readable sentence.
+
+        v1.7.5: a `too_large` verdict names the pane's OWN ceiling — the read is truncated at it,
+        so this answer can only come from a read that could not be truncated.
         """
         if code == READ_ERROR_BINARY:
             return _t("sftp.viewer.binary")
         if code == READ_ERROR_TOO_LARGE:
-            return _t("sftp.viewer.too_large", limit=format_size(MAX_READ_BYTES))
+            return _t("sftp.viewer.too_large", limit=format_size(self.viewer_cap()))
         return _t("sftp.viewer.read_failed",
                   name=posixpath.basename(path) if path else "?",
                   error=code or "unknown error")
@@ -2443,9 +2789,18 @@ class _SftpPane(QWidget):
         (`present_viewer_in()`), so the share is computed for the splitter that really carries it
         and the READING pane keeps the keyboard (its listing stays under the cursor while the
         preview appears beside it — the mc behaviour).
+
+        v1.7.5: the header's SIZE becomes the truncation notice when the read stopped at the
+        ceiling — the listing knows the real size, so the panel can say how much of how many it
+        shows (`sftp.viewer.truncated`) instead of presenting a part as the whole.
         """
         language = syntax.detect_syntax(path, text)
-        head = _t("sftp.viewer.header", path=path, size=format_size(size))
+        size_text = format_size(size)
+        total = self._known_size(path)
+        if int(total or 0) > int(size or 0):
+            size_text = _t("sftp.viewer.truncated", shown=format_size(size),
+                           total=format_size(total))
+        head = _t("sftp.viewer.header", path=path, size=size_text)
         if encoding != "utf-8":
             head = f"{head} · {_t('sftp.viewer.encoding_note', encoding=encoding)}"
         if syntax.is_heuristic(language):
@@ -3486,6 +3841,10 @@ class _SftpPane(QWidget):
         # more), so a key typed into the open panel still reaches the walk (`AGENTS.md` §4.24).
         mine = (obj is self or obj is self._container or self.isAncestorOf(obj)
                 or obj is self.viewer or self.viewer.isAncestorOf(obj))
+        # v1.7.5: the SOURCE header line takes no drop — it is a view of the source, not a target,
+        # so a drag over it is left to Qt (a drop is resolved in the tree's viewport, §3).
+        if etype in self._DRAG_TYPES and obj is getattr(self, "header_label", None):
+            return False
         if etype in self._DRAG_TYPES and mine:
             self._drag_source = obj
             try:
@@ -3854,6 +4213,8 @@ class SftpTab(QWidget):
         "_highlight_range", "_blocked", "_blocked_icon_cache", "_op_tasks",
         "_pending_batches", "_drag_source", "_normalize_tasks", "_completer_lists",
         "_completer_dir", "_op_batches", "_batches", "_batch_seq", "_pending_drops",
+        # v1.7.5: the listing's sort (a view state) and the reader's ceiling belong to the PANE.
+        "_sort_column", "_sort_desc", "_viewer_cap",
     })
 
     # Local hints in the window's status bar (waiting for connection, no selection).
@@ -3887,6 +4248,8 @@ class SftpTab(QWidget):
         self._session_label = ""
         self._session_host = ""
         self._session_port = None
+        #: v1.7.5: the login user — the `user@host` fallback of a pane's SOURCE header line.
+        self._session_user = ""
         self._sends = {}
         # v1.7.3 (task 2): the per-server directory memory — the map read at construction (so a
         # pane can restore a directory before anybody navigates) and the entries THIS container
@@ -3951,22 +4314,65 @@ class SftpTab(QWidget):
 
     # ── v1.7.3 (task 1): the session's identity and the cross-session relay ──
 
-    def set_session_info(self, key: str = "", label: str = "", host: str = "", port=None):
+    def set_session_info(self, key: str = "", label: str = "", host: str = "", port=None,
+                         user: str = ""):
         """The SESSION this container lists (called once by the page that builds it).
 
         The key is the `history_key()` of the server — the same fact the per-server directory
         memory is filed under — and `(host, port)` is what turns a send into the server-side
         `queue_copy()` path instead of a relay. A bare container (a unit test) simply has no
         identity: no target is offered and no directory is remembered.
+
+        v1.7.5: `user` joins the identity because the pane's SOURCE HEADER LINE falls back to
+        `user@host` when the session was never identified (LOCAL_PANE.md §3) — and every pane
+        re-reads its header here, which is what makes the line say the session it belongs to.
         """
         self._session_key = str(key or "")
         self._session_label = str(label or "")
         self._session_host = str(host or "")
         self._session_port = port
+        self._session_user = str(user or "")
+        self._sync_pane_headers()
 
+    #: The session identity the pane's header line reads — ONE reader per fact (v1.7.5).
     def session_key(self) -> str:
         """The stable identity of this session ("" — a container nobody identified)."""
         return str(self._session_key or "")
+
+    def session_label(self) -> str:
+        """The session's ALIAS (`set_session_info`), or "" when it was never identified."""
+        return str(self._session_label or "")
+
+    def session_user(self) -> str:
+        """The login user of the session (the `user@host` fallback of the header line)."""
+        return str(self._session_user or "")
+
+    def session_host(self) -> str:
+        """The host of the session (the `user@host` fallback of the header line)."""
+        return str(self._session_host or "")
+
+    def _sync_pane_headers(self):
+        """Let every pane re-read its SOURCE header line (the identity just changed). Never raises."""
+        for pane in list(self._panes):
+            try:
+                pane._sync_header()
+            except (RuntimeError, AttributeError):
+                pass  # Qt teardown / a bare stub — the line keeps what it has
+
+    def apply_viewer_max_bytes(self, value) -> int:
+        """Apply a new preview CEILING to every pane of this container (v1.7.5).
+
+        The settings hub owns the key (it writes it on OK); the live containers are told here, so
+        an OPEN tab reads with the new cap at once and the "no preview" facts of the old one are
+        dropped pane by pane (`set_viewer_max_bytes`). Never raises.
+        """
+        cap = clamp_viewer_max_bytes(value)
+        for pane in list(self._panes):
+            try:
+                cap = pane.set_viewer_max_bytes(cap)
+            except (RuntimeError, AttributeError):
+                pass  # Qt teardown / a bare stub — the pane keeps its own
+        return cap
 
     def send_targets(self):
         """The sessions `Send to ▸` offers — resolved through the PARENT CHAIN (v1.7.3).

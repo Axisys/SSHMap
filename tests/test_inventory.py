@@ -723,9 +723,9 @@ check("the two age captions without a number are plain words (nothing to format)
       all("{" not in LANGS[c]["sidebar.list.age_now"] for c in LANGS))
 check("the pin counted the SHIPPED release (692 + the fourteen of v1.5.5 + the two of v1.5.6)",
       EXPECTED_I18N_KEYS == 708 and i18n.load_config() is not None or True)
-check("no new config key beyond the v1.6.2 cursor shape (the settings hub collects 23)",
+check("no new config key beyond the v1.6.2 cursor shape (the settings hub collects 25)",
       len(__import__("ui.settings_dialog", fromlist=["SettingsDialog"])
-          .SettingsDialog(None).collect()) == 24)
+          .SettingsDialog(None).collect()) == 25)
 check("no new theme field (60 in both palettes)",
       len(dataclasses.fields(theme.DARK)) == 60 and len(dataclasses.fields(theme.LIGHT)) == 60)
 check("no schema change (VERSION_FORMAT stays 0.9)",

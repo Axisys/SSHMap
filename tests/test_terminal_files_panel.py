@@ -708,8 +708,10 @@ check("§11 the pin counts the shipped release (863 + the 4 keys of the Files pa
       " the busy/progress/done/failed reports, the two-sided conflict facts, the remembered-folder"
       " sentence, the two drop refusals and Word wrap + the 17 of v1.7.4rc1: the local source switch"
       " of a pane, its two refusals, the permanent-delete warning and the local file-surface sentences"
-      " + the 1 of v1.7.4rc2: the refusal of a move that would cross the two sources)",
-      EXPECTED_I18N_KEYS == 863 + 4 + 3 + 4 + 4 + 19 + 17 + 1, str(EXPECTED_I18N_KEYS))
+      " + the 1 of v1.7.4rc2: the refusal of a move that would cross the two sources"
+      " + the 4 of v1.7.5: the Files settings page, its ceiling row and warning, and the"
+      " truncation notice)",
+      EXPECTED_I18N_KEYS == 863 + 4 + 3 + 4 + 4 + 19 + 17 + 1 + 4, str(EXPECTED_I18N_KEYS))
 check("§11 VERSION_FORMAT stays `0.9` (the mode lives in config.json, not in the project file)",
       __import__("version").VERSION_FORMAT == "0.9")
 check("§11 no new dependency was added for the panel (the four pinned ones)",

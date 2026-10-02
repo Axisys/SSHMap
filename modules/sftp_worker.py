@@ -175,12 +175,13 @@ def task_log_line(kind: str, label: str, outcome: str = OUTCOME_DONE, error: str
 # on success). One constant so the two halves cannot drift apart.
 PART_SUFFIX = ".part"
 
-# ── v1.3.1 (ROADMAP task 2): the viewer's hard limit ─────────────────────────
-# A larger file is NOT read at all (not even partially): the task fails with
-# task_error(READ_ERROR_TOO_LARGE) at the very start when the size is known from
-# the listing, and mid-read when the size was unknown (the guard is checked on
-# every chunk, so at most one chunk beyond the limit is ever requested).
+#: v1.7.5: the DECLARED read policy — the DEFAULT of the `ui_viewer_max_bytes` setting and the point
+#: a task with NO cap (`READ_CAP_NONE`) is REFUSED at. A task that carries a positive `max_bytes` is
+#: TRUNCATED at that cap instead, and the pane (never the worker) resolves it from the config.
 MAX_READ_BYTES = 1024 * 1024
+
+#: The declared "no truncation" cap of a read task — over `MAX_READ_BYTES` it is REFUSED (v1.7.5).
+READ_CAP_NONE = 0
 
 # ── v1.3.1 (ROADMAP task 3): the text/binary heuristic ───────────────────────
 # The extension lists are a FAST PATH, not the decision: a known-binary extension
@@ -336,13 +337,18 @@ class _SftpTask:
       copy     : remote_path = the SOURCE, remote_path2 = the destination path
                  (v1.7rc2; total_size is filled by the walk/stat INSIDE the worker)
       move     : remote_path = the SOURCE, remote_path2 = the destination path (v1.7rc2)
+
+    `max_bytes` (v1.7.5) is the CEILING of a "read" task: `READ_CAP_NONE` keeps the shipped
+    refusal over `MAX_READ_BYTES`, any positive cap TRUNCATES the read at exactly that many bytes
+    (the pane resolved it from the `ui_viewer_max_bytes` setting — the worker reads no config).
     """
     __slots__ = ("id", "kind", "label", "remote_path", "remote_path2",
-                 "local_path", "total_size", "detail", "is_dir")
+                 "local_path", "total_size", "detail", "is_dir", "max_bytes")
 
     def __init__(self, task_id: int, kind: str, label: str, remote_path: str,
                  local_path: str = "", total_size: int = 0, detail: str = "",
-                 remote_path2: str = "", is_dir: bool = False):
+                 remote_path2: str = "", is_dir: bool = False,
+                 max_bytes: int = READ_CAP_NONE):
         self.id = task_id
         self.kind = kind
         self.label = label          # for the GUI (file name / directory path)
@@ -352,6 +358,7 @@ class _SftpTask:
         self.total_size = total_size  # 0 — unknown (indeterminate progress)
         self.detail = detail
         self.is_dir = bool(is_dir)  # delete: rmdir instead of remove
+        self.max_bytes = int(max_bytes or READ_CAP_NONE)   # v1.7.5: the viewer's ceiling
 
 
 # ── Orphan-worker registry (the _orphan_threads pattern, ssh_terminal.py N4) ───
@@ -480,7 +487,8 @@ class SftpWorker(QThread):
             self._next_id, KIND_DELETE, posixpath.basename(remote_path),
             remote_path=remote_path, detail=remote_path, is_dir=bool(is_dir)))
 
-    def queue_read(self, remote_path: str, total_size: int = 0) -> Optional[int]:
+    def queue_read(self, remote_path: str, total_size: int = 0,
+                   max_bytes: int = READ_CAP_NONE) -> Optional[int]:
         """v1.3.1 (ROADMAP task 2): read a remote file into memory for the viewer.
 
         total_size — the size from the listing (0 — unknown): it is only a fast
@@ -490,11 +498,14 @@ class SftpWorker(QThread):
         v1.5.7: a `~/`-prefixed path is resolved against the server's home inside the
         worker thread (`_expand_home`) — the caller (the command history's "Import from
         the server…") asks for `~/.bash_history` and never touches the network itself.
+        v1.7.5: `max_bytes` is the CEILING the caller resolved (the pane's
+        `ui_viewer_max_bytes`): the read is TRUNCATED at it, never refused. The default
+        `READ_CAP_NONE` keeps the shipped refusal above `MAX_READ_BYTES`.
         """
         return self._queue_task(_SftpTask(
             self._next_id, KIND_READ, posixpath.basename(remote_path),
             remote_path=remote_path, total_size=int(total_size or 0),
-            detail=remote_path))
+            detail=remote_path, max_bytes=max_bytes))
 
     def queue_copy(self, source: str, target_dir: str, name: str = "") -> Optional[int]:
         """v1.7rc2 (ROADMAP v1.7rc2, task 1): copy a remote FILE or a whole DIRECTORY TREE.
@@ -1398,16 +1409,23 @@ class SftpWorker(QThread):
 
         The download pattern (32 KB chunks, cancellation and progress between the
         chunks), but the result is kept in memory and published as read_ready.
-        A hard limit MAX_READ_BYTES: a larger file is not read AT ALL — when the
-        size is known from the listing the task is refused before opening it, and
-        an unknown size trips the guard on the chunk that crosses the limit.
-        The null-byte screen runs on the FIRST chunk (a binary file stops after
+        The limit is the TASK's (v1.7.5): a task that carries a `max_bytes` ceiling is TRUNCATED
+        at it — the bytes beyond it are never requested and the caller learns how much it got from
+        the answer's length — while a task with `READ_CAP_NONE` keeps the shipped refusal (with a
+        known size the file is not opened at all, an unknown size trips the guard on the chunk that
+        crosses the limit). The null-byte screen runs on the FIRST chunk (a binary file stops after
         one chunk, before anything is decoded or shown).
         v1.5.7: a `~/`-prefixed path is expanded on this thread first (`_expand_home`), so the
         command history can ask for the server's `~/.bash_history`; the ANSWER keeps the path
         the caller asked for, so a panel matches its own task by the name it sent.
         """
-        if int(task.total_size or 0) > MAX_READ_BYTES:
+        try:
+            cap = int(task.max_bytes or READ_CAP_NONE)
+        except (TypeError, ValueError):
+            cap = READ_CAP_NONE
+        truncating = cap > 0
+        limit = cap if truncating else MAX_READ_BYTES
+        if not truncating and int(task.total_size or 0) > limit:
             raise _SftpReadTooLarge()
         remote_path = self._expand_home(task.remote_path)
         if classify_extension(remote_path) == "binary":
@@ -1418,13 +1436,18 @@ class SftpWorker(QThread):
             done = 0
             while True:
                 self._check_cancel()
-                chunk = remote_fh.read(CHUNK_SIZE)
+                # A truncating task never asks for a byte beyond its ceiling; an exact task keeps
+                # the shipped guard, which trips on the chunk that crosses MAX_READ_BYTES.
+                want = CHUNK_SIZE if not truncating else min(CHUNK_SIZE, limit - done)
+                if want <= 0:
+                    break
+                chunk = remote_fh.read(want)
                 if not chunk:
                     break
                 if not chunks and b"\x00" in chunk:
                     raise _SftpReadBinary()
                 done += len(chunk)
-                if done > MAX_READ_BYTES:
+                if not truncating and done > limit:
                     raise _SftpReadTooLarge()
                 chunks.append(chunk)
                 self._emit(self.progress, task.id, done, int(task.total_size or 0))

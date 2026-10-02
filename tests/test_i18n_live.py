@@ -149,6 +149,32 @@ def click_of(container, expected_key: str) -> bool:
     return want in texts_of(container).values()
 
 
+def source_header_texts(*containers) -> tuple:
+    """The panes' SOURCE HEADER LINES on screen (v1.7.5, LOCAL_PANE.md §3).
+
+    A session ALIAS — and the `user@host` fallback — is DATA, not a translation: it reads the same
+    in every language (like the path in the address bar), so the sweep must not call it a leftover.
+    The LOCAL wording of that line IS a translated key and is deliberately left in the sweep. Every
+    pane is found by WIDGET ancestry, so a page, the dock and a detached Files panel all answer.
+    """
+    try:
+        from modules.sftp_tab import _SftpPane
+    except ImportError:  # flat launch from the project root
+        from sshmap.modules.sftp_tab import _SftpPane
+    out = []
+    for container in containers:
+        try:
+            panes = container.findChildren(_SftpPane)
+        except (RuntimeError, AttributeError):
+            continue
+        for pane in panes:
+            try:
+                out.append(pane.header_text())
+            except (RuntimeError, AttributeError):
+                continue   # Qt teardown / a bare stub — nothing to exclude
+    return tuple(out)
+
+
 def english_leftovers(container, exclude=()) -> dict:
     """The strings of a container that would be leftovers of the previous language.
 
@@ -217,7 +243,7 @@ ru_texts = texts_of(win)
 # and is deliberately not re-texted (see TerminalSessionPage.retranslate()).
 _STATUS_EN = (read_lang("en")["terminal.initializing"], read_lang("en")["terminal.session_closed"],
               read_lang("en")["terminal.error_prefix"])
-ru_leftovers = english_leftovers(win, exclude=_STATUS_EN)
+ru_leftovers = english_leftovers(win, exclude=_STATUS_EN + source_header_texts(mw, win))
 check("after ru NOT ONE container string stays in the old language (no ASCII-only leftovers)",
       not ru_leftovers, str(ru_leftovers)[:400])
 check("so the ru texts really differ from the en texts",
@@ -282,8 +308,9 @@ check("the dock page's command-library panel follows the language too",
       dock_content.cmdlib_panel.del_btn.text() == i18n.t("terminal.cmdlib.delete"),
       dock_content.cmdlib_panel.del_btn.text())
 check("the dock content carries no English leftover in ru",
-      not english_leftovers(dock_content, exclude=_STATUS_EN),
-      str(english_leftovers(dock_content, exclude=_STATUS_EN))[:400])
+      not english_leftovers(dock_content, exclude=_STATUS_EN + source_header_texts(mw, dock_content)),
+      str(english_leftovers(dock_content,
+                            exclude=_STATUS_EN + source_header_texts(mw, dock_content)))[:400])
 
 i18n.set_language("en")
 dock.retranslate()
@@ -812,8 +839,10 @@ check("the pin counts the keys of the SHIPPED release (v1.5.2 added THIRTEEN —
       "label and its two values), the local wordings (\"This computer\" and the two structural "
       "refusals of the switch and of a transfer), the permanent-delete warning and the nine "
       "refusal sentences of the local file surface — 897 + 17 = 914; v1.7.4rc2 adds ONE: the "
-      "refusal of a move that would cross the two sources — 914 + 1 = 915)",
-      EXPECTED_I18N_KEYS == 863 + 4 + 3 + 4 + 4 + 19 + 17 + 1, str(EXPECTED_I18N_KEYS))
+      "refusal of a move that would cross the two sources — 914 + 1 = 915; v1.7.5 adds FOUR: the "
+      "Files page of the settings hub with its ceiling row and its warning, and the "
+      "truncation notice of the reader — 915 + 4 = 919)",
+      EXPECTED_I18N_KEYS == 863 + 4 + 3 + 4 + 4 + 19 + 17 + 1 + 4, str(EXPECTED_I18N_KEYS))
 check_release_state(ROOT)
 for _code in i18n_lang_codes(ROOT):
     check(f"i18n/{_code}.json carries the v1.5 node.status.emulated marker",

@@ -278,20 +278,20 @@ check("§3 the field sits above the tabs and carries a translated placeholder",
       dlg.search_edit.placeholderText() == i18n.t("settings.search.placeholder")
       and dlg.layout().indexOf(dlg.search_edit) < dlg.layout().indexOf(dlg.tabs))
 
-# The acceptance: A KEY LIVING ON EACH OF THE EIGHT TABS.
+# The acceptance: A KEY LIVING ON EACH OF THE NINE TABS.
 _missing_tabs = []
 for _index in range(dlg.tabs.count()):
     _title = dlg.tabs.tabText(_index)
     _hits = dlg.search_settings(_title)
     if not _hits or dlg.tabs.currentIndex() != _index:
         _missing_tabs.append((_index, _title, len(_hits), dlg.tabs.currentIndex()))
-check("§3 the search finds a key living on EACH of the eight tabs (title = the page)",
+check("§3 the search finds a key living on EACH of the nine tabs (title = the page)",
       not _missing_tabs, str(_missing_tabs))
 
 _hits = dlg.search_settings(i18n.t("settings.statuses.interval"))
 check("§3 a ROW hit switches to its tab and reports itself",
-      len(_hits) == 1 and _hits[0][0] == 3
-      and dlg.tabs.currentIndex() == 3
+      len(_hits) == 1 and _hits[0][0] == 4
+      and dlg.tabs.currentIndex() == 4
       and i18n.t("settings.statuses.interval") in _hits[0][1],
       str(_hits))
 
@@ -695,8 +695,8 @@ check("§8 the registry grew by the panel/map toggles, the v1.5.3 freshness pair
       and len(HR.empty_default_action_ids()) == 38)
 
 _hub = SettingsDialog(None)
-check("§8 the hub's collect() carries 23 config.json keys (this section adds none)",
-      len(_hub.collect()) == 24)
+check("§8 the hub's collect() carries 25 config.json keys (this section adds none)",
+      len(_hub.collect()) == 25)
 _hub.close()
 
 finish()

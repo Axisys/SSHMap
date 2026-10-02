@@ -4405,6 +4405,24 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, QMainWindow):
             except (RuntimeError, AttributeError):
                 pass  # Qt teardown / a session without a widget — skip it
 
+        # v1.7.5 (ROADMAP v1.7.5, task 2): the reader's CEILING of the ALREADY OPEN sessions — the
+        # third live terminal-side setting (the font and the cursor above are its twins). Every open
+        # Files container is told, so its panes read with the new cap at once and the "no preview"
+        # facts of the old cap are dropped.
+        try:
+            try:
+                from modules.sftp_tab import resolve_viewer_max_bytes as _resolve_viewer_cap
+            except ImportError:
+                from ..modules.sftp_tab import resolve_viewer_max_bytes as _resolve_viewer_cap
+            _viewer_cap = _resolve_viewer_cap()
+            for s in list(getattr(self, "_terminal_windows", [])):
+                _apply_cap = getattr(getattr(s, "sftp_tab", None), "apply_viewer_max_bytes", None)
+                if callable(_apply_cap):
+                    _apply_cap(_viewer_cap)
+        except Exception as e:  # noqa: BLE001 — the cap must not break applying
+            if self.log:
+                self.log.warning(f"Apply viewer max bytes failed: {e}")
+
         # v1.1.1 (item 6): the "type on plaque" option — redraw the scene's connection labels
         try:
             for arrow in list(getattr(self.scene, "_arrows", [])):

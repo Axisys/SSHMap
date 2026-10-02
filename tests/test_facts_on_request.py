@@ -969,7 +969,7 @@ check("§9 the i18n pin counts the SHIPPED release (811 + 17 of v1.6.7 + 13 of v
       " + the 17 of v1.7.4rc1: the local source switch of a pane, its two refusals, the permanent-"
       " delete warning and the local file-surface sentences, and v1.7.4rc2 adds 1: the refusal of"
       " a move that would cross the two sources)",
-      EXPECTED_I18N_KEYS == 811 + 17 + 13 + 5 + 8 + 9 + 4 + 3 + 4 + 4 + 19 + 17 + 1, str(EXPECTED_I18N_KEYS))
+      EXPECTED_I18N_KEYS == 811 + 17 + 13 + 5 + 8 + 9 + 4 + 3 + 4 + 4 + 19 + 17 + 1 + 4, str(EXPECTED_I18N_KEYS))
 check_i18n_parity(LANGS)
 check_i18n_format(LANGS)
 check("§9 the ELEVEN new keys are present and non-empty in every language",
@@ -999,8 +999,8 @@ check("§9 the tooltip line renders {devices} and the sentence renders {device} 
 check("§9 the registry moved only by the closing release's ONE export action",
       len(HR.HOTKEY_ACTIONS) == 61 and len(HR.empty_default_action_ids()) == 38,
       f"{len(HR.HOTKEY_ACTIONS)}/{len(HR.empty_default_action_ids())}")
-check("§9 the settings hub still collects 23 keys (a per-card choice is not a new row)",
-      len(SettingsDialog(None).collect()) == 24)
+check("§9 the settings hub still collects 25 keys (a per-card choice is not a new row)",
+      len(SettingsDialog(None).collect()) == 25)
 check("§9 no new dependency (requirements.txt keeps its four)",
       len([ln for ln in open(os.path.join(ROOT, "requirements.txt"), encoding="utf-8")
            if ln.strip() and not ln.startswith("#")]) == 4
