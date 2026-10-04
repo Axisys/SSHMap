@@ -178,6 +178,35 @@ def sanitize_quick_launch(raw) -> list:
     return out
 
 
+# The schemes a quick-launch entry or a bookmark may hand to the OS opener. An ALLOWLIST, never a
+# wildcard: on Windows `webbrowser.open()` IS `os.startfile()` (ShellExecute on the raw string), so an
+# arbitrary value is a shell verb — a local path, a UNC path or any registered protocol handler.
+LAUNCHABLE_URL_SCHEMES = ("http", "https")
+URL_SCHEME_FALLBACK = "A link must start with http:// or https://"
+
+
+def url_scheme(value) -> str:
+    """The LOWERCASED scheme of a raw URL value ("" when the value carries none). PURE (v1.7.5.1).
+
+    `urlsplit` is the ONE parser: `startswith("http")` would accept `httpfoo://`, and a Windows drive
+    path (`C:\\x.exe`) parses as the scheme `c`. A value that cannot be parsed answers "".
+    """
+    try:
+        from urllib.parse import urlsplit
+        return (urlsplit(str(value if value is not None else "").strip()).scheme or "").lower()
+    except Exception:  # noqa: BLE001 — a malformed value is simply not launchable
+        return ""
+
+
+def is_launchable_url(value) -> bool:
+    """May this value be handed to the OS opener? PURE, and the ONE rule of every door (v1.7.5.1).
+
+    The opener (`SshMixin._quick_launch_url()`) and the three WRITERS (the quick-launch dialog, the
+    bookmark editor, the bulk-edit dialog) ask THIS question, so the rule cannot drift between them.
+    """
+    return url_scheme(value) in LAUNCHABLE_URL_SCHEMES
+
+
 def server_data_from_dict(raw: dict) -> ServerData:
     """Build a ServerData from a raw JSON dict.
 

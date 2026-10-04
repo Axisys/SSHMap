@@ -123,7 +123,10 @@ keychain on macOS; plaintext fallbacks are rejected. Without a secure backend th
 survive a restart. The external terminal is an OS `ssh` process: the password is entered there, never passed in argv.
 
 **Limitations:**
-- TOFU on first connect: a host key missing from `~/.sshmap/known_hosts` is accepted automatically (the fingerprint is logged). Protection kicks in when a recorded key changes - verify a critical host's first-connect fingerprint over a trusted channel.
+- TOFU on first connect: a host key missing from `~/.sshmap/known_hosts` is accepted automatically (the fingerprint is logged). Protection kicks in when a recorded key changes - verify a critical host's first-connect fingerprint over a trusted channel. That file is written atomically and re-read before every addition, so two connections never overwrite each other's keys; if it cannot be read, the session says so and runs **unpinned** instead of pretending the key was saved.
+- The external terminal hands `ssh` a command line, so a host, a user or a jump host is accepted only when it is a plain name (`letters, digits, . - _ : [ ]`); anything a shell or a terminal parser could read as its own syntax is refused with a sentence, and the built-in terminal has no such limit. A key path is never restricted - a path with `&` is legal and works.
+- A quick-launch link and a bookmark open `http://` and `https://` only. The OS opener accepts any registered protocol handler and, on Windows, `webbrowser.open()` *is* `os.startfile()`, so a value from a foreign project could otherwise run a local file or a URI handler; the entry itself is kept, only the open is refused.
+- A remote name is checked before it becomes a local path: a download whose server-side name is invalid on this system (a path separator, a reserved device name such as `NUL`, a trailing dot or space) is refused with a sentence instead of writing outside the chosen folder or into a device. On Linux the same names are legal and are accepted.
 - Undo/redo covers the map (nodes, connections, notes, groups, imports, bulk edits, background image, group arrangements) but not node statuses.
 - A host key change and an unreadable project are reported, never repaired silently; recovery means an autosave or backup slot.
 - Plugins run inside the application's process: a plugin with a broken C extension can take it down - install plugins you trust.
@@ -193,7 +196,7 @@ PySide6 / Qt 6 gotchas worth knowing before writing UI code:
 | `dialogs/` | Add/edit dialogs, connect, profiles, backups, imports, export options |
 | `ui/` | Main window and mixins, sidebar, theme, palette, panels, settings, hotkeys, icons |
 | `i18n/` | `en` (reference), `ru`, `zh`, `de` - one JSON file per language |
-| `tests/` | 122 test files, the parallel runner and the harness - map in `tests/INDEX.md` |
+| `tests/` | 123 test files, the parallel runner and the harness - map in `tests/INDEX.md` |
 | `examples/plugins/` | Two working example plugins, not installed and never auto-discovered |
 | `third_party/pyte/`, `third_party/pyte-patches/` | The managed pyte 0.8.2 fork: sdist plus explicit patches, provenance in the patches' `MANIFEST.md` |
 | `docs/` | The map image above, rendered from the example map |

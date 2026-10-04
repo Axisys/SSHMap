@@ -626,7 +626,8 @@ try:
     QApplication.clipboard().setText("pasted command")
     _wk._bracketed_paste()
     check("v1.6.4: a PASTE returns to the live line too (it goes through the same _send)",
-          _tsc.at_bottom() is True and len(_thr.sent) == 1 and _thr.sent[0].startswith(b"\x1b[200~"),
+          _tsc.at_bottom() is True and len(_thr.sent) == 1
+          and _thr.sent[0] == b"pasted command",
           f"{_tsc.at_bottom()} {_thr.sent!r}")
 
     _tsc.scroll_up()

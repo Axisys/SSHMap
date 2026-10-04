@@ -317,6 +317,12 @@ check("Ctrl+C without the selection → b'\\x03' (SIGINT)",
       win.terminal_thread.channel.sent[-1] == b"\x03",
       repr(win.terminal_thread.channel.sent[-1]))
 
+cb.setText("restart\nservice nginx")  # Ctrl+V — mode 2004 OFF → the RAW text (v1.7.5.1, N44)
+press_key(w, Qt.Key.Key_V, mod=CTRL)
+check("Ctrl+V: with mode 2004 OFF the clipboard goes RAW (the sudo/passwd case)",
+      win.terminal_thread.channel.sent[-1] == b"restart\nservice nginx",
+      repr(win.terminal_thread.channel.sent[-1]))
+win.tscreen.feed(b"\x1b[?2004h")      # the application ASKS for the wrapper
 cb.setText("restart\nservice nginx")  # Ctrl+V — a bracketed paste as a single block
 press_key(w, Qt.Key.Key_V, mod=CTRL)
 check("Ctrl+V: the clipboard goes as a SINGLE bracketed block (\\x1b[200~…\\x1b[201~)",

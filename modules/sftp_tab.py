@@ -57,16 +57,16 @@ try:  # v1.3.1: the viewer's shared constants (limit + task_error codes)
     from .sftp_worker import (KIND_COPY, KIND_DELETE, KIND_MKDIR, KIND_MOVE,
                               KIND_NORMALIZE, KIND_READ, KIND_RENAME,
                               MAX_READ_BYTES, MAX_TREE_ENTRIES, MOVE_ERROR_REFUSED,
-                              OP_KINDS, PARTIAL_CODE, READ_ERROR_BINARY,
+                              NAME_ERROR_UNSAFE, OP_KINDS, PARTIAL_CODE, READ_ERROR_BINARY,
                               READ_ERROR_TOO_LARGE, TREE_ERROR_TOO_BIG,
-                              classify_extension, parse_task_payload)
+                              classify_extension, local_name_problem, parse_task_payload)
 except ImportError:
     from sftp_worker import (KIND_COPY, KIND_DELETE, KIND_MKDIR, KIND_MOVE,
                              KIND_NORMALIZE, KIND_READ, KIND_RENAME,
                              MAX_READ_BYTES, MAX_TREE_ENTRIES, MOVE_ERROR_REFUSED,
-                             OP_KINDS, PARTIAL_CODE, READ_ERROR_BINARY,
+                             NAME_ERROR_UNSAFE, OP_KINDS, PARTIAL_CODE, READ_ERROR_BINARY,
                              READ_ERROR_TOO_LARGE, TREE_ERROR_TOO_BIG,
-                             classify_extension, parse_task_payload)
+                             classify_extension, local_name_problem, parse_task_payload)
 
 try:  # v1.4.7 (ROADMAP task 4): detection + tokenizers + the ONE highlighter
     from . import syntax_highlight as syntax
@@ -322,6 +322,18 @@ def local_error_text(message: str) -> str:
     if not key:
         return _t("sftp.op.error", error=str(data.get("error") or message))
     return _t(key, error=str(data.get("error") or ""))
+
+
+def name_refusal_text(message: str) -> str:
+    """A NAME_ERROR_UNSAFE payload → its translated sentence; "" — another message (v1.7.5.1).
+
+    ONE renderer for the two surfaces that can see the code (the pane's own message line and the
+    session's status line), so a refused download name reads the same wherever it is reported.
+    """
+    data = parse_task_payload(message)
+    if not data or str(data.get("code") or "") != NAME_ERROR_UNSAFE:
+        return ""
+    return _t("sftp.name_refused", name=str(data.get("name") or ""))
 
 
 def load_remembered_dirs() -> dict:
@@ -2752,8 +2764,21 @@ class _SftpPane(QWidget):
 
         A LOCAL refusal is a machine payload with the OS's own text inside it, and the one place
         that knows how to spell it is `local_error_text()`; a remote task_error is already the
-        server's sentence and goes through the shipped generic key unchanged.
+        server's sentence and goes through the shipped generic key unchanged. A REFUSED NAME
+        (v1.7.5.1, N40) is named in the user's language by the ONE `name_refusal_text()`, and a
+        DIRECTORY download that stopped in the middle (a `PARTIAL` payload) keeps its counters —
+        a refusal inside that payload is rendered by the same helper.
         """
+        refusal = name_refusal_text(message)
+        if refusal:
+            return refusal
+        data = parse_task_payload(message)
+        if data and str(data.get("code") or "") == PARTIAL_CODE:
+            path = str(data.get("path") or "")
+            failed = str(data.get("error") or "")
+            return _t("sftp.cmd.partial", name=self.paths.basename(path) or path,
+                      copied=int(data.get("copied") or 0),
+                      error=name_refusal_text(failed) or failed)
         if self.source == SOURCE_LOCAL:
             return local_error_text(message)
         return _t("sftp.op.error", error=message)
@@ -3302,6 +3327,10 @@ class _SftpPane(QWidget):
         Returns the validated name; "" — cancelled or invalid (empty, ".", "..",
         a path separator): the caller quietly does nothing. The worker never sees a
         name it would have to sanitize.
+
+        The separator rule is the REMOTE one (a POSIX server accepts `:` and a trailing dot); a
+        LOCAL pane asks the platform's OWN rule instead (v1.7.5.1, N40), so a name typed here can
+        no longer open an alternate data stream or lose its last character.
         """
         try:
             text, ok = QInputDialog.getText(self, title, _t("sftp.op.name_prompt"),
@@ -3311,6 +3340,11 @@ class _SftpPane(QWidget):
         if not ok:
             return ""
         name = (text or "").strip()
+        if self.source == SOURCE_LOCAL:
+            if local_name_problem(name):
+                self.message.emit(_t("sftp.op.invalid_name"))
+                return ""
+            return name
         if not name or name in (".", "..") or "/" in name or "\\" in name:
             self.message.emit(_t("sftp.op.invalid_name"))
             return ""
@@ -3375,6 +3409,15 @@ class _SftpPane(QWidget):
         for index, item in enumerate(items):
             remote_path = item.data(0, self.PATH_ROLE)
             name = self.paths.basename(remote_path)
+            # v1.7.5.1 (N40): a server-offered NAME that is PATH SYNTAX on this platform is refused
+            # BEFORE the conflict question and before a task is queued — the worker checks the same
+            # rule at `open()` (the authoritative gate), but a 500-file batch must not pay 500 round
+            # trips to learn what one PURE predicate knew. One sentence, and the batch goes on.
+            if self.source == SOURCE_REMOTE:
+                problem = local_name_problem(name)
+                if problem:
+                    self.message.emit(_t("sftp.name_refused", name=name))
+                    continue
             if os.path.exists(os.path.join(local_dir, name)):
                 if apply_all:
                     action = apply_all
@@ -3633,8 +3676,9 @@ class _SftpPane(QWidget):
         if code == PARTIAL_CODE:
             copied = data.get("copied", 0)
             path = str(data.get("path") or "")
+            failed = str(data.get("error") or "")
             return _t("sftp.cmd.partial", name=self.paths.basename(path) or path,
-                      copied=copied, error=str(data.get("error") or ""))
+                      copied=copied, error=name_refusal_text(failed) or failed)
         if code == MOVE_ERROR_REFUSED:
             return _t("sftp.cmd.move_refused", error=str(data.get("error") or ""))
         if code == TREE_ERROR_TOO_BIG:
@@ -3642,6 +3686,9 @@ class _SftpPane(QWidget):
                       limit=int(data.get("limit") or MAX_TREE_ENTRIES))
         if code in local_fs.LOCAL_ERROR_KEYS:
             return local_error_text(message)
+        refusal = name_refusal_text(message)
+        if refusal:
+            return refusal
         return _t("sftp.op.error", error=message)
 
     # ── v1.3.3.2: the file operations (ROADMAP task 1) ───────────────────

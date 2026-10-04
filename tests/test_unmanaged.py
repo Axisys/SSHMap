@@ -795,7 +795,7 @@ check("§8 the i18n pin moved by the ELEVEN keys of this release and by the ELEV
       " refusals and the Word wrap row, and v1.7.4rc1 adds 17: the local source switch of a pane,"
       " its two refusals, the permanent-delete warning and the local file-surface sentences, and"
       " v1.7.4rc2 adds 1: the refusal of a move that would cross the two sources",
-      EXPECTED_I18N_KEYS == 811 + 17 + 13 + 5 + 8 + 9 + 4 + 3 + 4 + 4 + 19 + 17 + 1 + 4, str(EXPECTED_I18N_KEYS))
+      EXPECTED_I18N_KEYS == 811 + 17 + 13 + 5 + 8 + 9 + 4 + 3 + 4 + 4 + 19 + 17 + 1 + 4 + 6, str(EXPECTED_I18N_KEYS))
 _missing = {code: [k for k in NEW_KEYS if not str(data.get(k) or "").strip()]
             for code, data in LANGS.items()}
 check(f"§8 the {len(NEW_KEYS)} keys of v1.6.5 are present and non-empty in every language",

@@ -175,11 +175,13 @@ def spool_path(name: str = "", token=None) -> str:
 
 
 def prepare_spool(path: str) -> bool:
-    """Create the spool's PROVISIONAL file with the tightest mode the platform offers.
+    """Claim the spool's name BEFORE the first leg; False — this send cannot start.
 
-    The download leg writes `<path>.part` and commits it with `os.replace`, so creating that
-    provisional file here is what gives the final spool its 0600 (a mode is kept across a
-    truncating open and across the replace; on Windows the platform decides).
+    The probe is what the relay's "spool" refusal is made of (the folder takes a file and the name
+    is free), and the provisional file it creates is the spool's twin, removed with it by
+    `drop_spool()`. The MODE of the committed spool comes from the WRITER: the download leg creates
+    its own provisional file with `SPOOL_FILE_MODE` (`queue_download(part_mode=…)`), because
+    `os.replace()` publishes that file's inode and the destination's mode does not survive it.
     """
     if not path:
         return False
@@ -194,7 +196,12 @@ def prepare_spool(path: str) -> bool:
 
 
 def drop_spool(path: str) -> int:
-    """Delete a spool file AND its provisional twin; returns how many files went. Never raises."""
+    """Delete a spool file AND its provisional twin; returns how many files went. Never raises.
+
+    The WORKER's own provisional name (`<spool>.<pid>-<task>.part`) is deliberately not named here:
+    it never outlives its task (the commit renames it, the failure and cancel paths remove it), and
+    a crash's leftover is the startup sweep's, which matches by PREFIX.
+    """
     removed = 0
     for candidate in (path, f"{path}{PART_SUFFIX}" if path else ""):
         if not candidate:
@@ -322,7 +329,8 @@ class SendRelay(QObject):
         self._bind(self.target.worker)
         task = worker.queue_download(source_path, os.path.dirname(self._spool),
                                      total_size=int(self.entry.get("size") or 0),
-                                     local_name=os.path.basename(self._spool))
+                                     local_name=os.path.basename(self._spool),
+                                     part_mode=SPOOL_FILE_MODE)
         return self._register(task, SEND_LEG_DOWNLOAD)
 
     def cancel(self):

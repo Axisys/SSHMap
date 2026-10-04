@@ -225,6 +225,9 @@ class FakeSftpFS:
     """An in-memory remote FS: dirs (a set of paths) + files (a dict path→bytes).
 
     deny_write — the file paths where open("wb") raises PermissionError ("no permission").
+    deny_write_prefixes (v1.7.5.1) — path PREFIXES that refuse a write: the provisional name of a
+    transfer now carries a writer token (`<target>.<pid>-<task>.part`), so a test cannot spell the
+    path it wants denied and names the target's prefix instead.
     deny_dirs (v1.3.3.2) — the DIRECTORIES that refuse new files/directories (a
     read-only directory: with the atomic upload of v1.3.3.2 the worker opens
     `<target>.part`, so a per-FILE denial would no longer model "no write permission").
@@ -232,12 +235,14 @@ class FakeSftpFS:
     the drop (a real-world race: the directory lives in the tree but vanishes on the server).
     """
 
-    def __init__(self, deny_write=frozenset(), deny_dirs=frozenset()):
+    def __init__(self, deny_write=frozenset(), deny_dirs=frozenset(),
+                 deny_write_prefixes=frozenset()):
         self.dirs = {"/"}
         self.files = {}
         self.mtimes = {}
         self.deny_write = set(deny_write)
         self.deny_dirs = set(deny_dirs)
+        self.deny_write_prefixes = tuple(deny_write_prefixes)
 
     def add_dir(self, path):
         self.dirs.add(_norm(path))
@@ -260,7 +265,12 @@ class FakeSftpFS:
 
 
 class FakeSftpFile:
-    """The file of the fake FS; the chunk_delay imitates the network delay per the chunk."""
+    """The file of the fake FS; the chunk_delay imitates the network delay per the chunk.
+
+    v1.7.5.1 (N53): open("wb") TRUNCATES, the way `SFTP_FLAG_WRITE|CREATE|TRUNC` does on a real
+    server — without it no test can see the overwrite a foreign provisional file would suffer, and
+    a regression of the writer token would be invisible to the whole suite.
+    """
 
     def __init__(self, fs, path, mode, chunk_delay=0.0):
         self._fs = fs
@@ -272,10 +282,16 @@ class FakeSftpFile:
             parent = posixpath.dirname(self._path)
             if parent not in fs.dirs:
                 raise IOError("No such file")
-            if self._path in fs.deny_write or parent in fs.deny_dirs:
+            if (self._path in fs.deny_write or parent in fs.deny_dirs
+                    or (fs.deny_write_prefixes
+                        and self._path.startswith(fs.deny_write_prefixes))):
                 raise PermissionError("Permission denied")
-            if self._path not in fs.files:
+            if "w" in mode:
+                fs.files[self._path] = bytearray()      # TRUNC — the real flag triple
+            elif self._path not in fs.files:
                 fs.files[self._path] = bytearray()
+            else:
+                self._pos = len(fs.files[self._path])   # "a" seeks to the end
         else:
             if self._path not in fs.files:
                 raise IOError("No such file")

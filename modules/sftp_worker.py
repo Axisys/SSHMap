@@ -85,6 +85,7 @@ MAX_TREE_DEPTH = 32
 PARTIAL_CODE = "partial"                # a TREE stopped in the middle (its counters ride along)
 MOVE_ERROR_REFUSED = "move_refused"     # the server refused a cross-directory rename
 TREE_ERROR_TOO_BIG = "tree_too_big"     # the walk hit MAX_TREE_ENTRIES / MAX_TREE_DEPTH
+NAME_ERROR_UNSAFE = "unsafe_local_name"  # v1.7.5.1 (N40): a server NAME that is local PATH syntax
 
 
 def task_payload(code: str, **fields) -> str:
@@ -133,13 +134,20 @@ def payload_log_text(message: str) -> str:
         return ""
     code = data.get("code")
     if code == PARTIAL_CODE:
+        # A tree stopped by a REFUSED NAME carries that refusal's own payload: it is rendered by
+        # THIS function too, so the record names the file and the reason instead of JSON.
+        failed = str(data.get("error", "?"))
         return ("partially done: %s file(s) transferred, failed at %s: %s"
-                % (data.get("copied", 0), data.get("path", "?"), data.get("error", "?")))
+                % (data.get("copied", 0), data.get("path", "?"),
+                   payload_log_text(failed) or failed))
     if code == MOVE_ERROR_REFUSED:
         return "the server refused the move: %s" % (data.get("error", "?"),)
     if code == TREE_ERROR_TOO_BIG:
         return "the tree exceeds the declared bound (%s entries / depth %s)" % (
             data.get("limit", MAX_TREE_ENTRIES), data.get("depth", MAX_TREE_DEPTH))
+    if code == NAME_ERROR_UNSAFE:
+        return ("the server's name %s cannot be a file name here (%s)"
+                % (data.get("name", "?"), data.get("reason", "?")))
     return json.dumps(data, ensure_ascii=False)
 
 
@@ -174,6 +182,150 @@ def task_log_line(kind: str, label: str, outcome: str = OUTCOME_DONE, error: str
 # (a local `<dest>.part` committed with os.replace, a remote `<target>.part` renamed
 # on success). One constant so the two halves cannot drift apart.
 PART_SUFFIX = ".part"
+
+
+def provisional_token(task_id=None, pid=None) -> str:
+    """The WRITER's mark in a provisional name (v1.7.5.1, N53): the process AND the task.
+
+    Without the mark the name is a PURE function of the destination, so a foreign half-written file
+    is truncated by the opening write and then DELETED by the failure cleanup — and two writers of
+    one target interleave into ONE file. The token makes "which `.part` is mine" a fact.
+    """
+    return "%d-%s" % (os.getpid() if pid is None else int(pid), task_id)
+
+
+def provisional_name(target: str, task_id=None, token: str = "") -> str:
+    """`<target>.<token>.part` — the provisional name of ONE writer. PURE.
+
+    The SUFFIX stays `PART_SUFFIX` (every reader and every regex knows `.part`); only the middle
+    gains the owner, and the commit, the cleanup and the `PARTIAL_CODE` message all read THIS
+    helper, so a name can never be cleaned up by an operation that did not create it.
+    """
+    mark = token or provisional_token(task_id)
+    return f"{target}.{mark}{PART_SUFFIX}"
+
+
+def _open_partial(path: str, mode: int = 0):
+    """Open a provisional file for writing, with the CALLER's permission when it asks for one.
+
+    `open(path, "wb")` applies the process umask, and the commit publishes the temporary file's own
+    inode, so a caller that must not leave a world-readable copy (the cross-session spool in the
+    SHARED OS temp) has to have the file CREATED with its mode — `mode = 0` is the platform default
+    and every ordinary transfer keeps the shipped `open()`. On Windows the platform decides.
+    """
+    if not mode:
+        return open(path, "wb")
+    fd = os.open(path, os.O_CREAT | os.O_WRONLY | os.O_TRUNC, int(mode))
+    return os.fdopen(fd, "wb")
+
+
+# ── v1.7.5.1 (N40): "may this server-offered NAME become a local PATH?" ──────────────────────────
+# Windows reads `\ : * ? " < > |`, a trailing dot/space and the reserved DEVICE names as PATH SYNTAX,
+# so a hostile remote name walks OUT of the chosen folder or writes somewhere else entirely. The rule
+# is PURE with the platform as an ARGUMENT, so a Linux user keeps `report:2024.csv` and `a\b.txt`.
+WINDOWS_ILLEGAL_CHARS = '\\/:*?"<>|'
+WINDOWS_RESERVED_STEMS = frozenset(
+    ["CON", "PRN", "AUX", "NUL"]
+    + [f"COM{i}" for i in range(1, 10)]
+    + [f"LPT{i}" for i in range(1, 10)]
+)
+
+
+def local_name_problem(name, windows=None) -> Optional[str]:
+    """Why this name must not become a local file name. PURE — the reason, or None.
+
+    Reasons: `empty`, `relative` (`.` / `..`), `characters`, `control` (0x00–0x1F), `reserved` (a
+    Windows device name, with or without an extension, any case), `trailing` (a dot or a space).
+    """
+    if windows is None:
+        windows = os.name == "nt"
+    text = str(name if name is not None else "")
+    if not text:
+        return "empty"
+    if text in (".", ".."):
+        return "relative"
+    if windows:
+        if any(ch in WINDOWS_ILLEGAL_CHARS for ch in text):
+            return "characters"
+        if any(ord(ch) < 32 for ch in text):
+            return "control"
+        stem = text.split(".")[0].rstrip(" .").upper()
+        if stem in WINDOWS_RESERVED_STEMS:
+            return "reserved"
+        if text[-1] in (" ", "."):
+            return "trailing"
+    else:
+        if "/" in text or any(ord(ch) < 32 for ch in text):
+            return "characters"
+    return None
+
+
+def local_containment_problem(dest, base) -> Optional[str]:
+    """Does `dest` really stay inside `base`? PURE apart from `realpath()` — `outside` when not.
+
+    `startswith()` is NOT this check: `os.path.join(dir, "..\\\\x")` still BEGINS with `dir` while
+    the bytes land in its parent. The belt is `os.path.commonpath((realpath(dest), realpath(base)))`
+    — it also catches what the name rule cannot see (a symlinked component pointing outside the
+    folder) and a cross-drive join, which `commonpath` refuses with `ValueError`.
+    """
+    try:
+        root = os.path.realpath(base or ".")
+        target = os.path.realpath(dest)
+        if os.path.commonpath((target, root)) != root:
+            return "outside"
+    except (ValueError, OSError):
+        return "outside"
+    return None
+
+
+def local_destination_problem(name, local_dir, windows=None) -> Optional[str]:
+    """The name rule PLUS the containment belt for `join(local_dir, name)`. PURE."""
+    problem = local_name_problem(name, windows=windows)
+    if problem:
+        return problem
+    return local_containment_problem(os.path.join(local_dir or ".", name), local_dir)
+
+
+class _SftpNameRefused(Exception):
+    """A server-offered NAME that must not become a local PATH (v1.7.5.1, N40).
+
+    The task_error payload names the file and the reason, and the pane renders the translated
+    sentence. The refusal is PER FILE: one row of a batch fails alone, and inside a TREE it stops
+    that one task through `_SftpPartial`, which carries the counters and this payload with them.
+    """
+
+    def __init__(self, name: str, reason: str):
+        self.name = str(name or "")
+        self.reason = str(reason or "")
+        super().__init__(task_payload(NAME_ERROR_UNSAFE, name=self.name, reason=self.reason))
+
+
+def is_directory_link(path: str) -> bool:
+    """Is this path a DIRECTORY that is really a LINK? PURE (v1.7.5.1, N55).
+
+    The contract is "a directory symlink is never followed" — we do not leave the folder the user
+    pointed at — and `os.path.islink()` alone does NOT see a Windows JUNCTION: its `lstat` reports
+    a plain directory (`S_IFLNK` is not set) while `FILE_ATTRIBUTE_REPARSE_POINT` is. On Python 3.12+
+    `os.path.isjunction()` is the portable spelling; on 3.11 the attribute test is the one that
+    works. A reparse point IS "a link" for the walk's purpose — the reverse traversal reads the
+    junction's TARGET, which is exactly the tree the user did not point at (and, for a MOVE, the
+    directories that would then be deleted).
+
+    Everything else (a missing path, a non-directory, an unreadable `lstat`) answers False, so the
+    caller keeps the shipped per-entry `except OSError` behaviour.
+    """
+    try:
+        if os.path.islink(path):
+            return True
+        isjunction = getattr(os.path, "isjunction", None)
+        if callable(isjunction):        # Python 3.12+
+            return bool(isjunction(path))
+        if not hasattr(os, "lstat"):
+            return False
+        attrs = getattr(os.lstat(path), "st_file_attributes", 0)
+        return bool(attrs & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0))
+    except OSError:
+        return False
 
 #: v1.7.5: the DECLARED read policy — the DEFAULT of the `ui_viewer_max_bytes` setting and the point
 #: a task with NO cap (`READ_CAP_NONE`) is REFUSED at. A task that carries a positive `max_bytes` is
@@ -341,14 +493,25 @@ class _SftpTask:
     `max_bytes` (v1.7.5) is the CEILING of a "read" task: `READ_CAP_NONE` keeps the shipped
     refusal over `MAX_READ_BYTES`, any positive cap TRUNCATES the read at exactly that many bytes
     (the pane resolved it from the `ui_viewer_max_bytes` setting — the worker reads no config).
+
+    `base_dir` (v1.7.5.1) is the folder the USER chose for a download: the containment belt of the
+    name rule needs it, because `os.path.join(local_dir, name)` has already LOST the base by the
+    time the task runs (`os.path.dirname(local_path)` of a `..\\x` join is the parent, not the
+    chosen folder).
+
+    `part_mode` (v1.7.5.1) is the PERMISSION the provisional file is CREATED with (`0` = the
+    platform default). A caller that puts a plaintext copy in the SHARED OS temp asks for the tight
+    one, and the mode has to come from the CREATE: `os.replace()` publishes the temporary file's own
+    inode, so a mode set on the destination does not survive the commit.
     """
     __slots__ = ("id", "kind", "label", "remote_path", "remote_path2",
-                 "local_path", "total_size", "detail", "is_dir", "max_bytes")
+                 "local_path", "total_size", "detail", "is_dir", "max_bytes", "base_dir",
+                 "part_mode")
 
     def __init__(self, task_id: int, kind: str, label: str, remote_path: str,
                  local_path: str = "", total_size: int = 0, detail: str = "",
                  remote_path2: str = "", is_dir: bool = False,
-                 max_bytes: int = READ_CAP_NONE):
+                 max_bytes: int = READ_CAP_NONE, base_dir: str = "", part_mode: int = 0):
         self.id = task_id
         self.kind = kind
         self.label = label          # for the GUI (file name / directory path)
@@ -359,6 +522,8 @@ class _SftpTask:
         self.detail = detail
         self.is_dir = bool(is_dir)  # delete: rmdir instead of remove
         self.max_bytes = int(max_bytes or READ_CAP_NONE)   # v1.7.5: the viewer's ceiling
+        self.base_dir = str(base_dir or "")                # v1.7.5.1: the user's download folder
+        self.part_mode = int(part_mode or 0)               # v1.7.5.1: 0 = the platform default
 
 
 # ── Orphan-worker registry (the _orphan_threads pattern, ssh_terminal.py N4) ───
@@ -438,12 +603,16 @@ class SftpWorker(QThread):
             local_path=local_path, detail=remote_path))
 
     def queue_download(self, remote_path: str, local_dir: str,
-                       total_size: int = 0, local_name: str = "") -> Optional[int]:
+                       total_size: int = 0, local_name: str = "",
+                       part_mode: int = 0) -> Optional[int]:
         """Download a remote file into a local directory.
 
         local_name — the name of the local copy (the conflict dialog's "Rename"
         answer); empty = the basename of the remote file. The transfer is ATOMIC:
         it lands on `<dest>.part` and is committed with os.replace (v1.3.3.2, task 3).
+
+        part_mode — the permission the provisional file is CREATED with (0 = the platform
+        default); a caller whose copy must not be readable by others asks for it (v1.7.5.1).
 
         A remote DIRECTORY is walked on the WORKER thread and received as a whole
         tree (v1.7.4rc2): a folder dropped on the local pane is a folder, exactly as
@@ -454,7 +623,8 @@ class SftpWorker(QThread):
         return self._queue_task(_SftpTask(
             self._next_id, KIND_DOWNLOAD, name, remote_path=remote_path,
             local_path=local_path, total_size=int(total_size or 0),
-            detail=local_path))
+            detail=local_path, base_dir=str(local_dir or "."),
+            part_mode=int(part_mode or 0)))
 
     def queue_mkdir(self, remote_dir: str, name: str) -> Optional[int]:
         """v1.3.3.2 (ROADMAP task 1): create a directory under remote_dir.
@@ -758,9 +928,10 @@ class SftpWorker(QThread):
 
     @staticmethod
     def _is_local_dir(path: str) -> bool:
-        """A LOCAL source that is a directory to walk — a symlink to one is not followed."""
+        """A LOCAL source that is a directory to walk — a link to one (junction included) is not
+        followed (`is_directory_link()`)."""
         try:
-            return os.path.isdir(path) and not os.path.islink(path)
+            return os.path.isdir(path) and not is_directory_link(path)
         except OSError:
             return False
 
@@ -772,7 +943,7 @@ class SftpWorker(QThread):
         destination is untouched until the commit, and a failure that already cleared
         it keeps the provisional file (`_UploadCommitError.temp_kept`).
         """
-        temp = target + PART_SUFFIX
+        temp = provisional_name(target, task.id)
         # open() of a nonexistent directory / no permission → task_error (nothing
         # was created, nothing has to be cleaned up).
         remote_fh = self._sftp.open(temp, "wb")
@@ -852,15 +1023,25 @@ class SftpWorker(QThread):
         return entries
 
     def _walk_local_into(self, path: str, depth: int, entries: list):
-        """One level of `_walk_local_tree()` — the recursion with the declared bounds."""
+        """One level of `_walk_local_tree()` — the recursion with the declared bounds.
+
+        Two rules (v1.7.5.1, N55): `is_directory_link()` sees a Windows JUNCTION as the link it is
+        (`os.path.islink()` does not), and `os.listdir()` sits INSIDE the guard, so ONE folder the OS
+        refuses to enumerate is a SKIPPED folder — not the end of the whole tree, which is what the
+        docstring above the shipped call already promised per ENTRY.
+        """
         self._check_cancel()
         if depth > MAX_TREE_DEPTH:
             raise _SftpTreeTooBig()
-        for name in sorted(os.listdir(path)):
+        try:
+            names = sorted(os.listdir(path))
+        except OSError:
+            return   # the folder itself is unreadable: skip it, never abort the walk
+        for name in names:
             full = os.path.join(path, name)
             try:
                 is_dir = os.path.isdir(full)
-                if is_dir and os.path.islink(full):
+                if is_dir and is_directory_link(full):
                     continue
                 size = 0 if is_dir else os.path.getsize(full)
             except OSError:
@@ -925,16 +1106,29 @@ class SftpWorker(QThread):
             self._download_tree(task)
             return
         self._download_file(task, task.remote_path, task.local_path,
-                            int(task.total_size or 0), 0)
+                            int(task.total_size or 0), 0,
+                            base_dir=task.base_dir or os.path.dirname(task.local_path),
+                            local_name=task.label)
 
     def _download_file(self, task: _SftpTask, remote_path: str, local_path: str,
-                       total: int, done_base: int) -> int:
-        """ONE file of a download: the atomic body of v1.3.3.2, reusable by the tree walk."""
+                       total: int, done_base: int, base_dir: str = "",
+                       local_name: str = "") -> int:
+        """ONE file of a download: the atomic body of v1.3.3.2, reusable by the tree walk.
+
+        The LAST MILE of the name rule (v1.7.5.1, N40): this is where `open()` happens, so the name
+        (the task's own LABEL — the conflict dialog's "Rename" answer included) and the containment
+        belt are checked HERE, before a byte is written — the only gate that cannot be bypassed. The
+        provisional file is CREATED with `task.part_mode`, which is what gives a spool its tight mode.
+        """
+        name = local_name or os.path.basename(local_path)
+        problem = local_destination_problem(name, base_dir or os.path.dirname(local_path))
+        if problem:
+            raise _SftpNameRefused(name, problem)
         remote_fh = self._sftp.open(remote_path, "rb")  # no file → error
-        temp = local_path + PART_SUFFIX
+        temp = provisional_name(local_path, task.id)
         committed = False
         try:
-            with open(temp, "wb") as local:
+            with _open_partial(temp, task.part_mode) as local:
                 done = 0
                 while True:
                     self._check_cancel()
@@ -967,6 +1161,9 @@ class SftpWorker(QThread):
         on the OS disk before their contents, an existing destination directory MERGED INTO, every
         FILE published atomically by `_download_file`, and a failure reported with the counters of
         what is already done. The bytes of the whole tree are ONE progress line.
+
+        EVERY per-entry failure — a REFUSED NAME included — leaves through `_SftpPartial`, the ONE
+        shape a stopped tree has: the tree is ONE task, so its failure carries how far it got.
         """
         entries = self._walk_tree(task.remote_path)
         task.total_size = sum(size for _path, is_dir, size in entries if not is_dir)
@@ -979,15 +1176,29 @@ class SftpWorker(QThread):
             rel = posixpath.relpath(path, task.remote_path)
             dest = os.path.join(task.local_path, *rel.split("/"))
             if is_dir:
+                # The belt is BEFORE `os.makedirs()`, which would MAKE a hostile `..` chain real
+                # (v1.7.5.1, N40). A FILE entry is judged by `_download_file()`'s own authoritative
+                # check, so the two never disagree and the name is examined once per entry.
+                problem = (local_name_problem(os.path.basename(dest))
+                           or local_containment_problem(dest, task.local_path))
+                if problem:
+                    raise _SftpPartial(copied, path, task_payload(
+                        NAME_ERROR_UNSAFE, name=os.path.basename(dest), reason=problem))
                 try:
                     os.makedirs(dest, exist_ok=True)
                 except OSError as e:
                     raise _SftpPartial(copied, path, str(e)) from e
                 continue
             try:
-                done += self._download_file(task, path, dest, total, done)
+                done += self._download_file(task, path, dest, total, done,
+                                            base_dir=task.local_path,
+                                            local_name=os.path.basename(dest))
             except _SftpCancelled:
                 raise
+            except _SftpNameRefused as e:
+                # ONE entry's name is the TREE's business, not the batch's: the refusal keeps its
+                # machine code INSIDE the partial payload, so the pane can still name it.
+                raise _SftpPartial(copied, path, str(e)) from e
             except Exception as e:   # noqa: BLE001 — one refused file must not hide the rest
                 raise _SftpPartial(copied, path, str(e)) from e
             copied += 1
@@ -1161,7 +1372,7 @@ class SftpWorker(QThread):
         """
         size = int(size or 0)
         total = int(total or 0) or size
-        temp = target + PART_SUFFIX
+        temp = provisional_name(target, task.id)
         remote_fh = None
         committed = False
         keep_temp = False

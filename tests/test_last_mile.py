@@ -665,7 +665,7 @@ check("§7 the pin counts the SHIPPED release (828 + the 13 keys of v1.6.8"
       " + the 17 of v1.7.4rc1: the local source switch of a pane, its two refusals, the permanent-"
       " delete warning and the local file-surface sentences, and v1.7.4rc2 adds 1: the refusal of a"
       " move that would cross the two sources)",
-      EXPECTED_I18N_KEYS >= 854 and EXPECTED_I18N_KEYS == 828 + 13 + 5 + 8 + 9 + 4 + 3 + 4 + 4 + 19 + 17 + 1 + 4,
+      EXPECTED_I18N_KEYS >= 854 and EXPECTED_I18N_KEYS == 828 + 13 + 5 + 8 + 9 + 4 + 3 + 4 + 4 + 19 + 17 + 1 + 4 + 6,
       str(EXPECTED_I18N_KEYS))
 check("§7 EXPECTED_APP_VERSION is the release this file describes",
       releases_at_least(EXPECTED_APP_VERSION, "1.7"), EXPECTED_APP_VERSION)

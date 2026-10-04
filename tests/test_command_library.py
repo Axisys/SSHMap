@@ -219,12 +219,19 @@ check("a single line: True + the exact bytes (df -h\\n)",
 awk_entry = next(e for e in w3.cmdlib_panel._entries if e["name"] == "Sum column (awk)")
 expected_awk = (b"\x1b[200~awk '{s+=$1} END {print \"total: \" s}' \\\n"
                 b"    /var/log/nginx/access.log\n\x1b[201~")
+raw_awk = (b"awk '{s+=$1} END {print \"total: \" s}' \\\n"
+           b"    /var/log/nginx/access.log\n")
+# v1.7.5.1 (N44): the wrapper is CONDITIONAL — it is the application's DECSET 2004 that asks for it.
+ok3 = page3.widget.send_macro(awk_entry["command"])
+check("multi-line: with the mode OFF the block goes RAW (the conservative default)",
+      ok3 is True and ch3.sent[-1] == raw_awk, repr(ch3.sent[-1]))
+page3.widget.tscreen.feed(b"\x1b[?2004h")
 ok2 = page3.widget.send_macro(awk_entry["command"])
 check("multi-line: True + the bracketed-paste block (the exact bytes)",
       ok2 is True and ch3.sent[-1] == expected_awk, repr(ch3.sent[-1]))
 ch3.closed = True
 check("a dead channel (closed=True) → False + 0 bytes",
-      page3.widget.send_macro("df -h") is False and len(ch3.sent) == 2)
+      page3.widget.send_macro("df -h") is False and len(ch3.sent) == 3)
 
 
 # ════════════════════════════════════════════════
@@ -326,6 +333,7 @@ check("the status sent_to({alias}) + a timeout of 4000",
       bool(msgs) and msgs[-1] == (i18n.t("terminal.cmdlib.sent_to", alias="send"), 4000), str(msgs))
 
 item_awk = find_child(panelS.tree, "Sum column (awk)")
+pageS.tscreen.feed(b"\x1b[?2004h")   # the shell ASKS for the wrapper (v1.7.5.1, N44)
 double_click_item(panelS.tree, item_awk)
 app.processEvents()
 check("multi-line: the bracketed-paste block is in the channel", chS.sent[-1] == expected_awk, repr(chS.sent[-1]))

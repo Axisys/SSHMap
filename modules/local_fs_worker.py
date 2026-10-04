@@ -28,16 +28,17 @@ except ImportError:
 try:  # the shipped task vocabulary, the read policy and the machine payloads (never copied)
     from .sftp_worker import (KIND_COPY, KIND_DELETE, KIND_DOWNLOAD, KIND_LIST, KIND_MKDIR,
                               KIND_MOVE, KIND_NORMALIZE, KIND_READ, KIND_RENAME, KIND_UPLOAD,
-                              MAX_READ_BYTES, MAX_TREE_DEPTH, MAX_TREE_ENTRIES, PART_SUFFIX,
+                              MAX_READ_BYTES, MAX_TREE_DEPTH, MAX_TREE_ENTRIES,
                               PARTIAL_CODE, READ_CAP_NONE, READ_ERROR_BINARY, READ_ERROR_TOO_LARGE,
-                              TREE_ERROR_TOO_BIG, classify_extension, task_payload)
+                              TREE_ERROR_TOO_BIG, classify_extension, is_directory_link,
+                              provisional_name, task_payload)
 except ImportError:
     from sftp_worker import (KIND_COPY, KIND_DELETE, KIND_DOWNLOAD, KIND_LIST,  # type: ignore
                              KIND_MKDIR, KIND_MOVE, KIND_NORMALIZE, KIND_READ, KIND_RENAME,
                              KIND_UPLOAD, MAX_READ_BYTES, MAX_TREE_DEPTH, MAX_TREE_ENTRIES,
-                             PART_SUFFIX, PARTIAL_CODE, READ_CAP_NONE, READ_ERROR_BINARY,
+                             PARTIAL_CODE, READ_CAP_NONE, READ_ERROR_BINARY,
                              READ_ERROR_TOO_LARGE, TREE_ERROR_TOO_BIG, classify_extension,
-                             task_payload)
+                             is_directory_link, provisional_name, task_payload)
 
 log = get_logger(__name__)
 
@@ -613,7 +614,7 @@ class LocalFsWorker(QThread):
         """
         if os.path.isdir(target):
             raise _LocalRefusal(LOCAL_IS_DIR, os.path.basename(target))
-        temp = target + PART_SUFFIX
+        temp = provisional_name(target, task.id)
         committed = False
         try:
             self._check_cancel()
@@ -695,8 +696,8 @@ class LocalFsWorker(QThread):
 
     @staticmethod
     def _refuse_symlinked_dir(path: str):
-        """A directory SYMLINK is never followed (§3/§6): walking one leaves the folder asked for."""
-        if os.path.islink(path) and os.path.isdir(path):
+        """A directory LINK is never followed (§3/§6) — a Windows junction included (N55)."""
+        if is_directory_link(path) and os.path.isdir(path):
             raise _LocalRefusal(LOCAL_SYMLINK_DIR)
 
     def _walk_tree(self, root: str) -> list:
@@ -713,16 +714,25 @@ class LocalFsWorker(QThread):
         return entries
 
     def _walk_into(self, path: str, depth: int, entries: list):
-        """One level of `_walk_tree()` — the recursion with the declared bounds."""
+        """One level of `_walk_tree()` — the recursion with the declared bounds.
+
+        `is_directory_link()` sees a Windows JUNCTION (`os.path.islink()` does not) and the
+        `os.listdir()` call sits INSIDE the guard (v1.7.5.1, N55): one folder the OS refuses to
+        enumerate is SKIPPED, not the end of the whole tree — which is what the per-entry rule
+        already promised.
+        """
         self._check_cancel()
         if depth > MAX_TREE_DEPTH:
             raise _LocalTreeTooBig()
-        for name in sorted(os.listdir(path)):
+        try:
+            names = sorted(os.listdir(path))
+        except OSError:
+            return   # the folder itself is unreadable: skip it, never abort the walk
+        for name in names:
             full = os.path.join(path, name)
             try:
-                is_link = os.path.islink(full)
                 is_dir = os.path.isdir(full)
-                if is_dir and is_link:
+                if is_dir and is_directory_link(full):
                     continue
                 size = 0 if is_dir else os.path.getsize(full)
             except OSError:

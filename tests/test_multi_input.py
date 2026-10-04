@@ -298,6 +298,15 @@ mw._toggle_multi_input(True)
 app.clipboard().setText("line1\nline2")
 clear_sent()
 w_a.keyPressEvent(key_event(Qt.Key.Key_V, "", Qt.KeyboardModifier.ControlModifier))
+raw = b"line1\nline2"
+check("Ctrl+V in the multi mode: mode 2004 OFF → the RAW block into ALL the threads (v1.7.5.1)",
+      threads["alpha"].channel.sent == [raw]
+      and threads["beta"].channel.sent == [raw]
+      and threads["gamma"].channel.sent == [raw],
+      f"alpha={threads['alpha'].channel.sent!r}")
+page_a.tscreen.feed(b"\x1b[?2004h")   # the application ASKS for the wrapper
+clear_sent()
+w_a.keyPressEvent(key_event(Qt.Key.Key_V, "", Qt.KeyboardModifier.ControlModifier))
 expected = b"\x1b[200~" + "line1\nline2".encode("utf-8") + b"\x1b[201~"
 check("Ctrl+V in the multi mode: a single bracketed-paste block into ALL the threads",
       threads["alpha"].channel.sent == [expected]

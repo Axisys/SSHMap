@@ -459,9 +459,15 @@ page.command_history.record(MULTI)
 page.history_tab.reload()
 _chan.sent.clear()
 page.history_tab.send_entry({"cmd": MULTI, "last": 0, "count": 1})
-check("the app's multi-line command is ONE entry and arrives as ONE bracketed paste",
+check("the app's multi-line command is ONE entry, sent RAW while mode 2004 is off (v1.7.5.1, N44)",
       MULTI in {e["cmd"] for e in page.history_tab.entries()}
-      and _chan.sent == [b"\x1b[200~awk '{s+=$1} END {print s}' \\\n    /var/log/x\n\x1b[201~"],
+      and _chan.sent == [b"awk '{s+=$1} END {print s}' \\\n    /var/log/x\n"],
+      str(_chan.sent))
+page.tscreen.feed(b"\x1b[?2004h")     # the application ASKS for the wrapper
+_chan.sent.clear()
+page.history_tab.send_entry({"cmd": MULTI, "last": 0, "count": 1})
+check("...and arrives as ONE bracketed paste once the shell asked for it",
+      _chan.sent == [b"\x1b[200~awk '{s+=$1} END {print s}' \\\n    /var/log/x\n\x1b[201~"],
       str(_chan.sent))
 
 # The macro-library path: CommandLibraryPanel calls TerminalWidget.send_macro directly
@@ -578,7 +584,7 @@ check("the pin counts the shipped keys (+29 of v1.5.7: the tab, the panel chrome
       " +4 of the v1.7.1 Files panel = 867, +3 of the v1.7.1.1 Files display mode = 870,"
       " +4 of the v1.7.1.2 device choice = 874, +4 of v1.7.2 = 878, +19 of v1.7.3 = 897,"
       " +17 of v1.7.4rc1 = 914, +1 of v1.7.4rc2 = 915)",
-      EXPECTED_I18N_KEYS == 863 + 4 + 3 + 4 + 4 + 19 + 17 + 1 + 4, str(EXPECTED_I18N_KEYS))
+      EXPECTED_I18N_KEYS == 863 + 4 + 3 + 4 + 4 + 19 + 17 + 1 + 4 + 6, str(EXPECTED_I18N_KEYS))
 check_release_state(ROOT)
 
 _langs = load_i18n_langs(ROOT)

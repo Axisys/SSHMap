@@ -1,19 +1,20 @@
 """SSH host key policy — the answer to the MITM risk of `paramiko.AutoAddPolicy()` (AGENTS.md §4.4).
 
 Instead of silently accepting any host key, the application keeps its OWN known_hosts store in
-`~/.sshmap/known_hosts`: on the FIRST connection to a server the key is accepted, its SHA256 fingerprint is
-logged and the entry is saved (pinning it for the future), and on every LATER connection the received key
-is compared with the stored one. A mismatch makes paramiko itself raise `BadHostKeyException` during
-`connect()` — the possible man-in-the-middle case — and the calling code shows the error.
+`~/.sshmap/known_hosts`: on the FIRST connection a key is accepted, its SHA256 fingerprint is logged
+and the entry is pinned, and on every LATER connection the received key is compared with the stored
+one — a mismatch makes paramiko itself raise `BadHostKeyException` during `connect()`.
 
-The class implements the paramiko policy interface by duck typing (`missing_host_key`, `check`) and imports
-paramiko LAZILY inside the methods, so the module can be imported where paramiko is not needed yet
-(headless tests). The one exception is the compatibility block below: it imports only the known_hosts store
-submodule (without a full `import paramiko`), because the class name has to be picked at module level."""
+The store has ONE owner, `KnownHostsStore`: every write re-reads the file, MERGES this session's
+entry and publishes the result with an atomic replace under a process-wide lock; a file that cannot
+be READ puts the store in the DECLARED "unpinned" state, which the caller reports.
+
+`SshKnownHostsPolicy` duck-types paramiko's policy interface; mechanism — `DOCUMENTATION.md` §16."""
 
 import base64
 import hashlib
 import os
+import threading
 
 # paramiko compatibility: up to 5.x the module was called paramiko.host_keys,
 # in paramiko 5.0+ it is named paramiko.hostkeys (the old name is gone).
@@ -77,6 +78,168 @@ def fingerprint(key) -> str:
     return "SHA256:" + base64.b64encode(digest).decode("ascii")
 
 
+class KnownHostsStore:
+    """The ONE owner of `~/.sshmap/known_hosts` (v1.7.5.1, N48).
+
+    Read-modify-write, never write-a-snapshot: `pin()` re-reads the file under the lock, merges the
+    entry and publishes it with `<path>.tmp` + `fsync` + `os.replace`, so a long-lived session can no
+    longer wipe a key pinned meanwhile and a crash can no longer leave a half file. A file that fails
+    to LOAD is never overwritten (it may be repairable) and puts the store into the DECLARED
+    "unpinned" state, which the caller reports to the user.
+
+    Cross-process writers are deliberately OUT of scope and declared: the lock is a `threading.Lock`
+    (this application instance), and the atomic replace is what keeps a second instance from seeing a
+    truncated file.
+    """
+
+    def __init__(self, path=None):
+        self._lock = threading.RLock()
+        self._path_override = path
+        self._loaded_once = False
+        self.load_failed = False
+        self.load_error = ""
+
+    # ── the path ─────────────────────────────────────────────
+
+    @property
+    def path(self) -> str:
+        """The store's path — the override of a test, otherwise the application's."""
+        return self._path_override or get_known_hosts_path()
+
+    # ── reading ──────────────────────────────────────────────
+
+    def read(self):
+        """A FRESH `HostKeys` read from the disk (an unreadable file answers an empty store).
+
+        `load_failed` is set when the file EXISTS and cannot be parsed: the caller must not
+        overwrite it, and the session is running unpinned — a fact the user is told.
+        """
+        store = _pk_hostkeys.HostKeys()
+        path = self.path
+        with self._lock:
+            self._loaded_once = True
+            try:
+                store.load(path)
+                self.load_failed = False
+                self.load_error = ""
+            except FileNotFoundError:
+                # No file yet — normal first run, an empty store is fine.
+                self.load_failed = False
+                self.load_error = ""
+            except Exception as e:  # noqa: BLE001 — a corrupt file must not break a connection
+                self.load_failed = True
+                self.load_error = str(e)
+                log = _log()
+                if log:
+                    log.error(
+                        "known_hosts file not loaded from %s: %s — the session runs UNPINNED "
+                        "(the file is left as it is; repair or rename it to pin host keys again)",
+                        path, e)
+        return store
+
+    def lookup(self, name: str):
+        """The `{keytype: PKey}` map recorded for one entry name (None — unknown host)."""
+        try:
+            return self.read().lookup(name)
+        except Exception:  # noqa: BLE001
+            return None
+
+    def entries(self) -> dict:
+        """Every recorded entry as plain `{host: {keytype: key}}` (never the live store object)."""
+        try:
+            return dict(self.read())
+        except Exception:  # noqa: BLE001
+            return {}
+
+    # ── writing ──────────────────────────────────────────────
+
+    def pin(self, name: str, keytype: str, key) -> bool:
+        """Record ONE host key and publish the merged file. False when nothing was written.
+
+        The whole read-merge-write runs under the lock, so eight simultaneous connections keep
+        eight entries instead of one — the merge is the point, an atomic write alone is not.
+        """
+        with self._lock:
+            store = self.read()
+            if self.load_failed:
+                return self._refuse_overwrite()
+            try:
+                store.add(name, keytype, key)
+                return self._write(store)
+            except Exception as e:  # noqa: BLE001 — a pin failure never breaks a connection
+                log = _log()
+                if log:
+                    log.error("Failed to save known_hosts (%s): %s", self.path, e)
+                return False
+
+    def save(self) -> bool:
+        """Re-read and publish the store unchanged (the shipped `save_store()` seam).
+
+        The refusal `pin()` makes holds for EVERY writer: a file that failed to LOAD is never
+        overwritten, because publishing an empty store over a file somebody could still repair is
+        exactly how the keys are lost. False — nothing was written.
+        """
+        with self._lock:
+            store = self.read()
+            if self.load_failed:
+                return self._refuse_overwrite()
+            return self._write(store)
+
+    def _refuse_overwrite(self) -> bool:
+        """The ONE answer (False) and the ONE log line of "this file is not ours to rewrite"."""
+        log = _log()
+        if log:
+            log.error(
+                "Refusing to overwrite known_hosts: the file failed to load "
+                "(possibly corrupted). Fix or remove the file manually.")
+        return False
+
+    def _write(self, store) -> bool:
+        """Atomic publish: the SAME directory, `<path>.tmp`, fsync, then `os.replace`."""
+        path = self.path
+        temp = path + ".tmp"
+        directory = os.path.dirname(path)
+        if directory:
+            os.makedirs(directory, exist_ok=True)
+        try:
+            # `HostKeys.save()` truncates and writes line by line — onto the TEMP name, which is
+            # exactly the shape that is safe for; nothing ever truncates the published file.
+            store.save(temp)
+            handle = os.open(temp, os.O_RDWR)
+            try:
+                os.fsync(handle)   # the bytes on the disk BEFORE the replace
+            finally:
+                os.close(handle)
+            os.replace(temp, path)
+            return True
+        except Exception as e:  # noqa: BLE001
+            log = _log()
+            if log:
+                log.error("Failed to publish known_hosts (%s): %s", path, e)
+            try:
+                os.remove(temp)
+            except OSError:
+                pass
+            return False
+
+
+#: The ONE process-wide store. `_store_override` is the test seam (`set_store()`), because a suite
+#: must never touch the user's real `~/.sshmap/known_hosts`.
+_store = KnownHostsStore()
+_store_override = None
+
+
+def get_store() -> KnownHostsStore:
+    """The store this process writes through (a test's override, otherwise the one owner)."""
+    return _store_override or _store
+
+
+def set_store(store) -> None:
+    """Install a store for the current process (tests). `set_store(None)` restores the owner."""
+    global _store_override
+    _store_override = store
+
+
 class SshKnownHostsPolicy:
     """Host key policy for `SSHClient.set_missing_host_key_policy()`.
 
@@ -91,10 +254,9 @@ class SshKnownHostsPolicy:
             self.port = max(1, min(65535, int(port or 22)))
         except (TypeError, ValueError):
             self.port = 22
-        self._store = None            # lazy paramiko.host_keys.HostKeys
-        self._load_failed = False     # True if the file exists but failed to load
         self.accepted_new_key = False  # True: a new host key was accepted in this session
         self.last_fingerprint = ""     # its fingerprint (for the user message)
+        self.pinned = False            # True: the accepted key really reached the store
 
     # ── known_hosts store ────────────────────────────────────
 
@@ -104,48 +266,35 @@ class SshKnownHostsPolicy:
             return "unknown"
         return f"[{self.hostname}]:{self.port}" if self.port != 22 else self.hostname
 
+    @property
+    def store(self) -> KnownHostsStore:
+        """The ONE store this policy reads and writes through."""
+        return get_store()
+
+    @property
+    def load_failed(self) -> bool:
+        """Is the store unreadable — i.e. is this session running UNPINNED?"""
+        return bool(self.store.load_failed)
+
     def load_store(self):
-        """Load known_hosts into memory (lazy paramiko import)."""
-        if self._store is None:
-            store = _pk_hostkeys.HostKeys()
-            path = get_known_hosts_path()
-            self._load_failed = False
-            try:
-                store.load(path)
-            except FileNotFoundError:
-                # No file yet — normal first run, an empty store is fine.
-                pass
-            except Exception as e:
-                # AUDIT v0.9.5.5 (security #2): the file EXISTS but is corrupted —
-                # work in memory with an empty store, but save_store() is forbidden,
-                # otherwise the first TOFU addition would wipe all pinned keys.
-                self._load_failed = True
-                log = _log()
-                if log:
-                    log.warning(f"known_hosts file not loaded from {path}: {e}")
-            self._store = store
-        return self._store
+        """The current store contents (a FRESH read — never a snapshot kept for the session's life)."""
+        try:
+            return self.store.read()
+        except Exception:  # noqa: BLE001
+            return _pk_hostkeys.HostKeys()
 
     def save_store(self) -> bool:
-        """Save known_hosts to disk. False on error (we do not break the connection)."""
-        if self._load_failed:
-            # Do not overwrite a corrupted file: let the user restore it manually.
-            log = _log()
-            if log:
-                log.error(
-                    "Refusing to overwrite known_hosts: the file failed to load "
-                    "(possibly corrupted). Fix or remove the file manually."
-                )
-            return False
+        """Re-read and publish the store (`save()`), False on a write error.
+
+        The store no longer caches a snapshot for the policy's life, so a save can never publish a
+        stale view — the shipped callers keep working and now mean "publish what is on the disk".
+        """
         try:
-            path = get_known_hosts_path()
-            os.makedirs(os.path.dirname(path), exist_ok=True)
-            self.load_store().save(path)
-            return True
-        except Exception as e:
+            return self.store.save()
+        except Exception as e:  # noqa: BLE001
             log = _log()
             if log:
-                log.error(f"Failed to save known_hosts ({get_known_hosts_path()}): {e}")
+                log.error(f"Failed to save known_hosts ({self.store.path}): {e}")
             return False
 
     def apply_to_client(self, client):
@@ -172,7 +321,12 @@ class SshKnownHostsPolicy:
     # ── paramiko HostKeyPolicy interface ─────────────────────
 
     def missing_host_key(self, client, hostname, key):
-        """First connection to a host: accept the key, log the fingerprint, save it."""
+        """First connection to a host: accept the key, log the fingerprint, pin it.
+
+        `pinned` answers whether the entry really reached the store: with an unreadable file the
+        key is accepted (TOFU) but NOTHING is remembered, and the caller must report that state
+        instead of the ordinary "new host key accepted" note.
+        """
         self.last_fingerprint = fingerprint(key)
         self.accepted_new_key = True
         log = _log()
@@ -183,13 +337,15 @@ class SshKnownHostsPolicy:
                 f"first connection; verify the fingerprint out-of-band."
             )
         try:
-            self.load_store().add(self._entry_name(), key.get_name(), key)
-        except Exception as e:
+            self.pinned = self.store.pin(self._entry_name(), key.get_name(), key)
+        except Exception as e:  # noqa: BLE001
+            self.pinned = False
             if log:
                 log.error(f"Failed to record new host key for {self.hostname}: {e}")
-        # save — best effort: the connection does not depend on the file write, but
-        # without it the pinning on the next start would be lost.
-        self.save_store()
+        if not self.pinned and log:
+            log.error(
+                "host key for %s:%s was accepted but NOT pinned — the host key store is "
+                "unreadable (%s)", self.hostname, self.port, self.store.load_error or "unknown")
 
     def check(self, hostname, key):
         """A guard method.
@@ -199,8 +355,7 @@ class SshKnownHostsPolicy:
         safety net for other versions/call paths.
         """
         import paramiko
-        store = self.load_store()
-        entry = store.get(hostname) or store.get(f"[{hostname}]:{self.port}")
+        entry = self.store.lookup(hostname) or self.store.lookup(f"[{hostname}]:{self.port}")
         if entry is None:
             return  # unknown host — missing_host_key will fire
         expected = entry.get(key.get_name())

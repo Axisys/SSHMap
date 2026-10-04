@@ -36,9 +36,10 @@ except ImportError:
     from modules.sftp_worker import OP_KINDS, SftpWorker, register_orphan_sftp_worker
 
 try:
-    from .sftp_tab import SftpTab, format_size
+    from .sftp_tab import SftpTab, format_size, name_refusal_text as sftp_name_refusal_text
 except ImportError:
-    from modules.sftp_tab import SftpTab, format_size
+    from modules.sftp_tab import (SftpTab, format_size,
+                                  name_refusal_text as sftp_name_refusal_text)
 
 try:  # v1.5.7 (ROADMAP task 1): the per-server COMMAND history (the third tab)
     from .command_history import CommandHistoryPanel, CommandHistoryStore, history_key
@@ -1939,6 +1940,12 @@ class TerminalSessionPage(QWidget):
         if kind in OP_KINDS:
             # v1.3.3.2: a file operation — the SFTP tab wraps the server's error in
             # its own translated line (the same no-duplication rule as for "read").
+            return
+        refusal = sftp_name_refusal_text(message)
+        if refusal:
+            # v1.7.5.1 (N40): a server name this platform cannot turn into a path — the ONE
+            # renderer of that payload, so the sentence is the user's language, not JSON.
+            self.status_message.emit(refusal, 8000)
             return
         prefix = t("terminal.error_prefix")
         self.status_message.emit(f"{prefix} {message}", 8000)

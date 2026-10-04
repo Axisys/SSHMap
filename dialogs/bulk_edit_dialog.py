@@ -15,13 +15,13 @@ import copy
 from typing import List, Optional
 
 try:  # v1.6: the quick-launch entry sanitizer (models/server.py)
-    from ..models.server import sanitize_quick_launch
+    from ..models.server import URL_SCHEME_FALLBACK, is_launchable_url, sanitize_quick_launch
 except ImportError:
-    from models.server import sanitize_quick_launch
+    from models.server import URL_SCHEME_FALLBACK, is_launchable_url, sanitize_quick_launch
 
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QGridLayout, QLabel, QLineEdit,
-    QComboBox, QDialogButtonBox,
+    QComboBox, QDialogButtonBox, QMessageBox,
 )
 
 #: The three states of every field (the vocabulary of `changes()`).
@@ -310,3 +310,26 @@ class BulkEditDialog(QDialog):
         etype = str(self.ql_type_combo.currentData() or "url")
         entries = sanitize_quick_launch([{"type": etype, "name": name, "value": value}])
         return entries[0] if entries else None
+
+    def url_scheme_refused(self) -> bool:
+        """Would the "replace" quick-launch row write a link the OPENER refuses? (v1.7.5.1)
+
+        The ONE scheme rule (`models.server.is_launchable_url`) is asked HERE as well, at the third
+        writer, so the bulk door cannot store a link the quick-launch editor would refuse and the
+        opener will not open. `command` entries are not links and are never judged by it.
+        """
+        if self.state_of(FIELD_QUICK_LAUNCH) != STATE_SET:
+            return False
+        if str(self.ql_type_combo.currentData() or "url") != "url":
+            return False
+        value = self.ql_value_edit.text().strip()
+        return bool(value) and not is_launchable_url(value)
+
+    def accept(self):
+        """Refuse an unusable link with ONE sentence instead of storing it."""
+        if self.url_scheme_refused():
+            QMessageBox.warning(self, self._tr("msg.error_title"),
+                                self._tr("validation.ql_url_scheme")
+                                if self._i18n_available else URL_SCHEME_FALLBACK)
+            return
+        super().accept()

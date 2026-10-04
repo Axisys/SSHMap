@@ -109,7 +109,7 @@ def get_translator():
     return _t_cache
 
 
-def build_macro_payload(text) -> bytes:
+def build_macro_payload(text, bracketed_paste: bool = True) -> bytes:
     """v1.3 (ROADMAP v1.3): a command library macro → the payload for the PTY. A pure function.
 
     A single-line macro — the raw text + a trailing \\n (the Quick Launch path
@@ -118,15 +118,36 @@ def build_macro_payload(text) -> bytes:
     GUARANTEED trailing \\n (the whole block arrives at the shell as ONE input,
     not as line-by-line execution — the semantics of _bracketed_paste());
     CRLF/CR are normalized to \\n. Empty/whitespace-only text — b""
-    (send_macro never sends such a payload). Never raises."""
+    (send_macro never sends such a payload). Never raises.
+
+    `bracketed_paste` (v1.7.5.1, N44) is the ADDITIVE argument the caller with a screen passes:
+    the wrapper is what the protocol asks for, so it is applied only while the application has
+    enabled DECSET 2004 (`TerminalScreen.bracketed_paste_enabled()`). The default stays True, which
+    is the shipped output for the callers that have no screen to ask.
+    """
     if not isinstance(text, str) or not text.strip():
         return b""
     norm = text.replace("\r\n", "\n").replace("\r", "\n")
     if "\n" in norm:
         if not norm.endswith("\n"):
             norm += "\n"   # the trailing \\n is guaranteed (without doubling)
+        if not bracketed_paste:
+            return norm.encode("utf-8")
         return b"\x1b[200~" + norm.encode("utf-8") + b"\x1b[201~"
     return norm.encode("utf-8") + b"\n"
+
+
+# The paste markers themselves, stripped from a clipboard before it is wrapped (v1.7.5.1, N44): a
+# clipboard carrying `\x1b[201~` would END the paste early and the rest would arrive as TYPED input.
+PASTE_MARKERS = ("\x1b[200~", "\x1b[201~")
+
+
+def strip_paste_markers(text) -> str:
+    """Drop the bracketed-paste markers from a clipboard. PURE — never a partial escape left behind."""
+    out = str(text if text is not None else "")
+    for marker in PASTE_MARKERS:
+        out = out.replace(marker, "")
+    return out
 
 
 from PySide6.QtCore import QEvent, Qt, QTimer
@@ -1210,7 +1231,15 @@ class TerminalWidget(QWidget):
 
     def _bracketed_paste(self):
         """Ctrl+V — the bracketed paste (carried over from v0.9.4): a multi-line clipboard
-        arrives at the shell as a SINGLE block, not as line-by-line input."""
+        arrives at the shell as a SINGLE block, not as line-by-line input.
+
+        v1.7.5.1 (N44): the wrapper is CONDITIONAL. It is applied only while the application on the
+        other end has enabled DECSET 2004 (read through the session's screen), because the protocol
+        asks for it — a `sudo`/`passwd` prompt reads the tty without readline and would otherwise
+        receive the escape bytes as part of the password. The clipboard is also stripped of the two
+        markers, so pasted content can never close the paste early and let the rest arrive as typed
+        input.
+        """
         clipboard = QApplication.clipboard()
         if clipboard is None:
             return
@@ -1218,10 +1247,29 @@ class TerminalWidget(QWidget):
         if not text:
             return
         try:
-            payload = text.replace("\r\n", "\n").replace("\r", "\n")
-            self._send(b"\x1b[200~" + payload.encode("utf-8") + b"\x1b[201~")
+            payload = strip_paste_markers(
+                text.replace("\r\n", "\n").replace("\r", "\n"))
+            data = payload.encode("utf-8")
+            if self._paste_mode_enabled():
+                data = b"\x1b[200~" + data + b"\x1b[201~"
+            self._send(data)
         except Exception:
             pass
+
+    def _paste_mode_enabled(self) -> bool:
+        """Has the remote application asked for the bracketed-paste wrapper? (v1.7.5.1, N44)
+
+        DEFAULT OFF: before the first prompt the mode is unknown, and RAW is the conservative
+        direction — a wrong wrapper corrupts a password, a missing one merely types the block.
+        """
+        screen = getattr(self, "tscreen", None)
+        reader = getattr(screen, "bracketed_paste_enabled", None)
+        if not callable(reader):
+            return False
+        try:
+            return bool(reader())
+        except Exception:  # noqa: BLE001 — a screen read must never break a paste
+            return False
 
     def send_macro(self, text) -> bool:
         """v1.3 (ROADMAP v1.3): send a command library macro to the PTY of THIS session.
@@ -1240,7 +1288,7 @@ class TerminalWidget(QWidget):
         The canvas stays Qt-light and knows no store: a hook that raises costs the history entry,
         never the send. Typed input is deliberately NOT recorded — the canvas sees raw bytes.
         """
-        payload = build_macro_payload(text)
+        payload = build_macro_payload(text, bracketed_paste=self._paste_mode_enabled())
         if not payload or self.terminal_thread is None:
             return False
         channel = getattr(self.terminal_thread, "channel", None)

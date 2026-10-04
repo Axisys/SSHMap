@@ -1,4 +1,5 @@
 import re
+import threading
 from typing import List
 
 try:
@@ -125,6 +126,12 @@ def get_translator():
 # ONLY writer touching an otherwise silent socket, and a socket error makes paramiko unlink
 # every channel — which is what makes a peer that vanished without a FIN visible at all.
 TERMINAL_KEEPALIVE_SEC = 30
+
+# The SEND path (AGENTS.md §4.3): `Channel.send()` is a PARTIAL write by contract (it answers the
+# bytes really put on the wire, clamped to `out_max_packet_size - 64`), so `send_data()` LOOPS on the
+# byte count and PARKS the remainder when the window is shut — `error_signal` reaches `_show_error()`,
+# which closes the session, so a bare `socket.timeout` must never travel there.
+MAX_SEND_QUEUE_BYTES = 8 * 1024 * 1024
 
 #: The accepted values of `terminal_mode`, the DEFAULT first. `"single"` (v1.7.2) makes every new
 #: session join the LAST live terminal window as its next tab — one window that collects them all.
@@ -702,6 +709,12 @@ class SSHTerminalThread(QThread):
         self.client = None
         self.channel = None
         self.running = True
+        # The bytes a send timeout parked (see MAX_SEND_QUEUE_BYTES). Written by the GUI thread
+        # (`send_data`) and by the session thread (`_flush_pending`); the lock serialises both the
+        # buffer and the channel writes, so two senders can never interleave inside one payload.
+        self._send_lock = threading.Lock()
+        self._pending = bytearray()
+        self._send_overflow_reported = False
 
     def run(self):
         import paramiko
@@ -716,11 +729,16 @@ class SSHTerminalThread(QThread):
             policy.apply_to_client(client)
 
             if self.key_path:
+                # v1.7.5.1 (N50 minimum): the KEY branch passes the password as well. paramiko
+                # treats `password` as an AUTH METHOD tried LAST, so it is what makes the main
+                # surface (terminal + the Files tab riding the same transport) authenticate on a
+                # host where the key alone is refused — the three diagnostic paths already did.
                 client.connect(
                     self.host,
                     username=self.user,
                     port=self.port,
                     key_filename=self.key_path,
+                    password=self.password or None,
                     timeout=15,
                     look_for_keys=False,
                     allow_agent=True,
@@ -769,6 +787,12 @@ class SSHTerminalThread(QThread):
                 note = t("ssh.host_key_new", host=self.host, fp=policy.last_fingerprint)
                 self.status_signal.emit(note if not note.startswith("[")
                                         else f"New host key accepted ({policy.last_fingerprint})")
+                if not policy.pinned:
+                    # v1.7.5.1 (N48): the store was unreadable, so NOTHING was remembered — the
+                    # session is running unpinned and the user must be told, not reassured.
+                    warn = t("ssh.host_key_unpinned", path=policy.store.path)
+                    self.status_signal.emit(warn if not warn.startswith("[")
+                                            else "WARNING: host key NOT saved")
 
             # The loop ends on THREE facts: `channel.closed`, `recv() == b""` (EOF) and
             # `eof_received` / `exit_status_ready()` — each a real end of the session. An EOF must
@@ -787,7 +811,10 @@ class SSHTerminalThread(QThread):
                           or self.channel.exit_status_ready()):
                         break                # the peer announced the end of the channel
                     else:
-                        self.msleep(30)
+                        # A send window a timeout parked bytes for may have opened: drain it here,
+                        # on the session thread, so the GUI-thread `send_data()` never waits.
+                        if not self._flush_pending():
+                            self.msleep(30)
                 except TimeoutError:
                     continue
                 except Exception as recv_error:
@@ -846,13 +873,109 @@ class SSHTerminalThread(QThread):
             self.closed_signal.emit()
 
     def send_data(self, data_bytes):
+        """The ONE input point of the session (AGENTS.md §4.3): ALL the bytes, or none lost.
+
+        Four facts this method owes, each documented in the audit ledger as `N43`:
+        the write LOOPS on the byte count (`channel.send()` truncates at ~32 KB by contract), it asks
+        the window (`send_ready()`) instead of WAITING for it, so the GUI thread never blocks on the
+        peer, a closed or window-less channel PARKS the remainder for the session thread instead of
+        emitting an error, and an error message is never EMPTY (`socket.timeout` carries no text,
+        and `_show_error()` would show a bare `Error: ` and close the session).
+        """
         if not data_bytes:
             return
-        if self.channel and not self.channel.closed:
+        if self.channel is None or self.channel.closed:
+            return
+        with self._send_lock:
+            if self._pending:
+                # A payload is already parked: keep the FIFO order, the drain owns the channel.
+                self._park(data_bytes)
+                return
             try:
-                self.channel.send(data_bytes)
-            except Exception as e:
-                self.error_signal.emit(str(e))
+                sent = self._write_all(data_bytes)
+            except Exception as e:  # noqa: BLE001 — the channel died mid-write
+                self.error_signal.emit(str(e) or type(e).__name__)
+                return
+            if sent < len(data_bytes):
+                self._park(data_bytes[sent:])
+
+    def _window_open(self) -> bool:
+        """Is there room in the channel's send window RIGHT NOW? Never waits (v1.7.5.1).
+
+        `Channel.send()` BLOCKS until the peer opens the window (up to the channel timeout, 0.2 s,
+        per call) — and this loop runs on the GUI thread for a keystroke and on the session thread
+        for the drain, so waiting here costs a frozen window or a stalled receive loop. `send_ready()`
+        is paramiko's own non-blocking answer to exactly this question; a channel without it (a test
+        double, an older client) is asked the shipped way, where the send timeout breaks the loop.
+        """
+        ready = getattr(self.channel, "send_ready", None)
+        if not callable(ready):
+            return True
+        try:
+            return bool(ready())
+        except Exception:  # noqa: BLE001 — a dead channel is `send()`'s answer, not this one
+            return True
+
+    def _write_all(self, data) -> int:
+        """Loop `channel.send()` while the window is OPEN and bytes are left; answer the count.
+
+        `TimeoutError` is the SEND timeout of the channel (the receive loop already treats it as a
+        normal "nothing yet"), so it BREAKS the loop and lets the caller park the remainder — it is
+        never an error. A `0` answer (a closed or `eof_sent` channel) breaks as well: the shipped
+        one-shot call dropped those bytes with no error at all.
+        """
+        channel = self.channel
+        sent = 0
+        total = len(data)
+        while sent < total:
+            if not self._window_open():
+                break          # the window is shut for now — the caller PARKS the remainder
+            try:
+                written = channel.send(data[sent:])
+            except TimeoutError:
+                break
+            if not written:
+                break
+            sent += written
+        return sent
+
+    def _park(self, data):
+        """Keep the unsent tail for the session thread's next drain. Caller holds `_send_lock`.
+
+        Bounded by MAX_SEND_QUEUE_BYTES: a queue that would overflow drops the OLDEST parked bytes
+        and says so ONCE on the status line — a silent drop and an `error_signal` are both wrong
+        (the second one closes the session).
+        """
+        self._pending.extend(data)
+        if len(self._pending) > MAX_SEND_QUEUE_BYTES:
+            del self._pending[:len(self._pending) - MAX_SEND_QUEUE_BYTES]
+            if not self._send_overflow_reported:
+                self._send_overflow_reported = True
+                try:
+                    self.status_signal.emit(get_translator()("terminal.send_queue_full"))
+                except Exception:  # noqa: BLE001 — a status line must never break a keystroke
+                    pass
+
+    def _flush_pending(self) -> bool:
+        """Write what the window refused. True when the window MOVED — the loop retries at once.
+
+        The drain is as non-blocking as the write that parked the bytes (`_window_open()`), so the
+        session thread's receive loop is never held behind a send window; a `False` answer is what
+        the loop's `msleep(30)` is for.
+        """
+        with self._send_lock:
+            if not self._pending:
+                return False
+            try:
+                sent = self._write_all(bytes(self._pending))
+            except Exception as e:  # noqa: BLE001 — an error here must not kill the loop
+                self.error_signal.emit(str(e) or type(e).__name__)
+                self._pending.clear()
+                return False
+            if sent:
+                del self._pending[:sent]
+                self._send_overflow_reported = False
+            return sent > 0
 
     def stop(self):
         self.running = False

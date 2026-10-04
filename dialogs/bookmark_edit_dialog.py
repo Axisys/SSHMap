@@ -24,6 +24,11 @@ try:  # the store the dialog writes through (the panel talks to the same one)
 except ImportError:  # flat layout: the project root is on sys.path
     from modules import bookmarks as BM
 
+try:  # the ONE scheme rule, shared with the quick-launch editor and the opener
+    from ..models.server import URL_SCHEME_FALLBACK, is_launchable_url
+except ImportError:
+    from models.server import URL_SCHEME_FALLBACK, is_launchable_url
+
 
 class BookmarkEditDialog(QDialog):
     """Add / edit / remove / reorder the application-level bookmarks.
@@ -184,9 +189,9 @@ class BookmarkEditDialog(QDialog):
             self._warn(self._tr("validation.ql_value_empty") if self._i18n_available
                        else "Value (URL or command) cannot be empty.")
             return
-        if not (value.lower().startswith("http://") or value.lower().startswith("https://")):
+        if not is_launchable_url(value):
             self._warn(self._tr("validation.ql_url_scheme") if self._i18n_available
-                       else "A link must start with http:// or https://")
+                       else URL_SCHEME_FALLBACK)
             return
         # The entry being EDITED is skipped: keeping its own name is not a duplicate.
         for index, entry in enumerate(self._entries):

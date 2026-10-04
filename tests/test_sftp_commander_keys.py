@@ -718,7 +718,7 @@ check("the i18n pin counts the SHIPPED release (854 + the 9 keys of v1.7rc3"
       " delete warning and the local file-surface sentences, and v1.7.4rc2 adds 1: the refusal of a"
       " move that would cross the two sources + the 4 of v1.7.5: the Files settings page, its"
       " ceiling row and its warning, and the truncation notice)",
-      EXPECTED_I18N_KEYS == 854 + 9 + 4 + 3 + 4 + 4 + 19 + 17 + 1 + 4, str(EXPECTED_I18N_KEYS))
+      EXPECTED_I18N_KEYS == 854 + 9 + 4 + 3 + 4 + 4 + 19 + 17 + 1 + 4 + 6, str(EXPECTED_I18N_KEYS))
 check("VERSION_FORMAT did NOT move (the project schema is unchanged)",
       __import__("version").VERSION_FORMAT == "0.9")
 check("no new dependency was added for the walk (the four pinned ones)",

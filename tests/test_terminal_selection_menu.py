@@ -296,12 +296,19 @@ check("the real RMB path: exec got the global coordinates of the event",
       bool(_ctx_exec_calls) and _ctx_exec_calls[0] == QPoint(567, 89),
       f"got={_ctx_exec_calls!r}")
 
-# Paste into the PTY — a bracketed-paste block (the same path as Ctrl+V; Acceptance: the bytes in the PTY)
+# Paste into the PTY — a bracketed-paste block while DECSET 2004 is ON (the same path as Ctrl+V;
+# Acceptance: the bytes in the PTY). With the mode OFF the block goes RAW (v1.7.5.1, N44).
 cb.setText("ls -la\r\npwd")
 sent.clear()
 menu = w._build_context_menu()
 act_paste = menu.actions()[3]
 check("Paste with a live thread → enabled", act_paste.isEnabled())
+act_paste.trigger()
+check("the Paste trigger with mode 2004 OFF → the RAW block (v1.7.5.1, N44)",
+      sent == [b"ls -la\npwd"], f"sent={sent!r}")
+w.tscreen.feed(b"\x1b[?2004h")
+cb.setText("ls -la\r\npwd")
+sent.clear()
 act_paste.trigger()
 check("the Paste trigger → exactly \\x1b[200~ls -la\\npwd\\x1b[201~ into the PTY",
       sent == [b"\x1b[200~ls -la\npwd\x1b[201~"], f"sent={sent!r}")

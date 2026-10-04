@@ -198,7 +198,7 @@ _c_con = ET.build_command("conhost", "h1", "root")
 check("N2: build_command('conhost') is an alias of build_command('cmd')",
       _c_con == _c_cmd, f"conhost={_c_con} cmd={_c_cmd}")
 check("N2: no command starts with conhost.exe anymore",
-      _c_con[0] == "cmd.exe", str(_c_con[:3]))
+      _c_con[0] != "cmd.exe" and _c_con[0] != "conhost.exe", str(_c_con[:3]))
 
 # (e) the dialog's combobox does not contain "conhost"
 _dlg_n2 = SSHConnectDialog(ServerData(id="n2srv00", alias="N2", host="10.0.0.2", user="u"), None)

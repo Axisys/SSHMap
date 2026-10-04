@@ -382,11 +382,12 @@ err_n2 = log3b.of_kind("error", tid_n2)
 check("N2: the failed commit is reported as task_error", bool(err_n2))
 check("N2: the destination WAS cleared (the old copy is gone)",
       "/srv/target.bin" not in fs3b.files, f"files={sorted(fs3b.files)}")
+_kept_parts = [p for p in fs3b.files if p.startswith("/srv/target.bin") and p.endswith(".part")]
 check("N2: the provisional file SURVIVED with the new bytes",
-      fs3b.files.get("/srv/target.bin" + PART_SUFFIX) == b"z" * 100,
+      len(_kept_parts) == 1 and fs3b.files[_kept_parts[0]] == b"z" * 100,
       f"files={sorted(fs3b.files)}")
 check("N2: the error names the kept provisional path",
-      bool(err_n2) and "/srv/target.bin" + PART_SUFFIX in err_n2[0][3],
+      bool(err_n2) and bool(_kept_parts) and _kept_parts[0] in err_n2[0][3],
       f"message={err_n2[0][3] if err_n2 else '<none>'}")
 worker3b.shutdown(wait_ms=2000)
 

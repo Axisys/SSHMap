@@ -931,9 +931,9 @@ check("the nestING bound refuses a too-deep tree with the same payload",
       f"err={err_d}")
 
 # the PARTIAL report: one file of the tree refuses the write, the rest is reported
-# (the atomic copy writes `<target>.part`, so a WRITE denial names the provisional path —
-# the same rule the `deny_dirs` note of tests/_fakes.py describes)
-fs_p = FakeSftpFS(deny_write={"/pcopy/ptree/zz.txt" + PART_SUFFIX})
+# (the atomic copy writes a provisional `<target>.<token>.part`, so a WRITE denial names the
+# target's PREFIX — the same rule the `deny_dirs` note of tests/_fakes.py describes)
+fs_p = FakeSftpFS(deny_write_prefixes={"/pcopy/ptree/zz.txt."})
 fs_p.add_dir("/ptree")
 fs_p.add_file("/ptree/aa.txt", b"aa")
 fs_p.add_file("/ptree/zz.txt", b"zz")

@@ -709,6 +709,22 @@ class TerminalScreen:
                     return n, (1006 << 5) in mode
             return 0, (1006 << 5) in mode
 
+    # ── v1.7.5.1 (N44): the bracketed-paste state ────────────────────────────
+    def bracketed_paste_enabled(self):
+        """Is bracketed paste (DECSET 2004) ON?
+
+        The wrapper `\\x1b[200~…\\x1b[201~` is what the PROTOCOL asks for, so the terminal wraps
+        only while the application has asked: `sudo`/`passwd`, `sh`/`dash` and every network CLI
+        read the tty without readline and would receive the escape bytes as part of the password,
+        while an interactive bash >= 5.1 turns the mode on itself and expects the wrapper.
+
+        The vendored pyte already STORES the mode (`set_mode(private=True)` shifts it left by 5 —
+        the same convention `mouse_tracking_mode()` relies on), so no fork patch is needed: this is
+        only a READER. Read under the same lock as feed(), because the SSH thread flips it.
+        """
+        with self._lock:
+            return (2004 << 5) in self.screen.mode
+
     # ── rendering for the GUI thread ───────────────────
     def snapshot(self):
         """v1.0RC1: a screen snapshot for the per-cell canvas (TerminalWidget, the GUI thread).

@@ -106,8 +106,8 @@ if sys.platform == "win32":
     got = detect_terminal()
     check("preset 'cmd' is honored by detect_terminal (launch path)", got == "cmd", f"got={got}")
     cmd = build_command("cmd", "10.1.1.5", "ops")
-    check("build_command('cmd', ...) starts with cmd.exe /c start",
-          cmd[0] == "cmd.exe" and cmd[1:3] == ["/c", "start"], f"cmd={cmd[:4]}")
+    check("build_command('cmd', ...) runs ssh.exe directly (no shell in between, v1.7.5.1)",
+          "cmd.exe" not in cmd and cmd[-1] == "ops@10.1.1.5" and cmd[-2] == "--", f"cmd={cmd[:4]}")
 else:
     found = next((c for c in TERMINAL_CHOICES_LINUX if c != "auto" and shutil.which(c)), None)
     if found is not None:

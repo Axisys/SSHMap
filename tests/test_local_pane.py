@@ -286,7 +286,7 @@ check("§5 the four transfer doors are BOUND and share the shipped vocabulary",
           for name in ("queue_upload", "queue_download", "queue_copy", "queue_move"))
       and not hasattr(LFW, "RESERVED_METHODS")
       and LFW.KIND_COPY == KIND_COPY and LFW.KIND_MOVE == KIND_MOVE
-      and LFW.PART_SUFFIX == PART_SUFFIX)
+      and LFW.provisional_name("/d/f.bin", 7).endswith(PART_SUFFIX))
 
 eng, elog = make_provider()
 _SRC = fresh_dir("eng_src", ("a.txt", b"A" * 10), ("sub/leaf.txt", b"leaf\n"),
@@ -905,8 +905,8 @@ check("the version pin is the release this file describes",
       releases_at_least(EXPECTED_APP_VERSION, "1.7.4"), EXPECTED_APP_VERSION)
 check("the i18n pin counts the SHIPPED release (897 + the 17 of v1.7.4rc1 + the 1 of v1.7.4rc2"
       " + the 4 of v1.7.5: the Files settings page with its ceiling row and warning, and the"
-      " truncation notice)",
-      EXPECTED_I18N_KEYS == 897 + 17 + 1 + 4, str(EXPECTED_I18N_KEYS))
+      " truncation notice + the 6 of v1.7.5.1)",
+      EXPECTED_I18N_KEYS == 897 + 17 + 1 + 4 + 6, str(EXPECTED_I18N_KEYS))
 check("VERSION_FORMAT did NOT move (a path is never written into a project)",
       __import__("version").VERSION_FORMAT == "0.9")
 check("no new dependency was added for the local pane (the four pinned ones)",
@@ -917,7 +917,7 @@ check("the frozen contract of this line is in the repository (LOCAL_PANE.md)",
 
 _src_text = open(os.path.join(ROOT, "modules", "local_fs_worker.py"), encoding="utf-8").read()
 check("the engine is the DECLARED one (`shutil.copy2` through a `.part` + `os.replace`)",
-      "shutil.copy2" in _src_text and PART_SUFFIX in _src_text
+      "shutil.copy2" in _src_text and "provisional_name" in _src_text
       and re.search(r"^PART_SUFFIX = ", open(os.path.join(ROOT, "modules", "sftp_worker.py"),
                                              encoding="utf-8").read(), re.M) is not None)
 check("...and the transfer doors are the SHIPPED names, not a new vocabulary",

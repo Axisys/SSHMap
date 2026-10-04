@@ -35,7 +35,10 @@ check("external_terminal module imports", _ET is not None)
 # 1) build_ssh_args: port/key/ConnectTimeout, we do not touch known_hosts
 _a = _ET.build_ssh_args("h1", "root")
 check("build_ssh_args: default port omitted",
-      _a == ["ssh", "-o", "ConnectTimeout=10", "root@h1"], str(_a))
+      _a == ["ssh", "-o", "ConnectTimeout=10", "--", "root@h1"], str(_a))
+check("v1.7.5.1: the address follows a `--` (an empty user cannot become an ssh OPTION)",
+      _a[-2] == "--" and _ET.build_ssh_args("-oProxyCommand=calc", "")[-2:] ==
+      ["--", "-oProxyCommand=calc"], str(_ET.build_ssh_args("-oProxyCommand=calc", "")))
 _a = _ET.build_ssh_args("h1", "root", port=2222, key_path="C:/k/k.pem")
 check("build_ssh_args: -p and -i present",
       "-p" in _a and "2222" in _a and "-i" in _a and "C:/k/k.pem" in _a, str(_a))
@@ -47,14 +50,15 @@ _c = _ET.build_command("windows_terminal", "h1", "root", port=2222)
 check("build_command windows_terminal: wt.exe + ssh args",
       _c[0] == "wt.exe" and "ssh" in _c and "2222" in _c, str(_c))
 _c = _ET.build_command("cmd", "h1", "root")
-check("build_command cmd: start with empty title",
-      _c[1] == "/c" and _c[2] == "start" and _c[3] == "", str(_c))
+check("v1.7.5.1: the cmd branch drops the shell (no cmd.exe, no `start`, no parser)",
+      "cmd.exe" not in _c and "start" not in _c and _c[1:] == _ET.build_ssh_args("h1", "root")[1:],
+      str(_c))
 # v1.1.2RC1 (N2): "conhost" is no longer a preset (conhost.exe is not a launcher) — build_command
 # accepts the old id as an alias for "cmd"; the command with conhost.exe is no longer assembled.
 _c = _ET.build_command("conhost", "h1", "root")
 check("build_command 'conhost' is an alias of 'cmd' (v1.1.2RC1 N2)",
-      _c == _ET.build_command("cmd", "h1", "root") and _c[0] == "cmd.exe"
-      and "/c" in _c and _c[-1] == "root@h1", str(_c))
+      _c == _ET.build_command("cmd", "h1", "root") and _c[0] != "cmd.exe"
+      and _c[-1] == "root@h1", str(_c))
 for tid in ("gnome-terminal", "x-terminal-emulator", "xfce4-terminal"):
     _c = _ET.build_command(tid, "h1", "root")
     check(f"build_command {tid}: bash -c with exec bash (window survives)",

@@ -27,6 +27,11 @@ try:  # v1.6.5 (ROADMAP task 4): the ONE predicate of the unmanaged gate
 except ImportError:  # flat launch from the project root
     from models.server import is_unmanaged as _is_unmanaged
 
+try:  # v1.7.5.1: the ONE URL-scheme rule (the opener and the three writers)
+    from ..models.server import is_launchable_url
+except ImportError:  # flat launch from the project root
+    from models.server import is_launchable_url
+
 try:  # v1.2.3 (ROADMAP v1.2.3): multi-input — highlight of the session containers
     from ..modules.multi_input import apply_container_highlight as _apply_multi_highlight
 except ImportError:
@@ -945,6 +950,14 @@ class SshMixin:
             elif err == "no_terminal":
                 QMessageBox.warning(self, self.t("msg.error_title"),
                                     self.t("ssh_ext.no_terminal"))
+            elif err in ("bad_host", "bad_user", "bad_jump"):
+                # v1.7.5.1: a value the OS ssh command line would read as ITS OWN syntax is
+                # refused here, with a sentence that says which one and what to do instead.
+                QMessageBox.warning(self, self.t("msg.error_title"),
+                                    self.t(f"ssh_ext.{err}"))
+                if self.log:
+                    self.log.warning("External terminal refused the target: %s (%s)",
+                                     err, data.host)
             else:
                 self.statusBar().showMessage(
                     self.t("ssh_ext.launch_failed"), 5000)
@@ -1024,8 +1037,21 @@ class SshMixin:
                                  self.t("msg.ql_open_failed", error=str(e)))
 
     def _quick_launch_url(self, url: str, name: str):
-        """URL entry — open in the default browser (stdlib webbrowser)."""
+        """URL entry — open in the default browser (stdlib webbrowser).
+
+        The SCHEME is judged BEFORE the OS sees the string (v1.7.5.1): on Windows the default
+        `webbrowser` backend IS `os.startfile()`, i.e. ShellExecute on the raw value, so a project
+        file (or a hand-edited `bookmarks.json`) could hand the OS a local path, a UNC path or any
+        registered protocol handler while the menu row shows an innocent NAME. `is_launchable_url()`
+        is the ONE rule, shared with the three writers, and a refusal is REPORTED, never silent.
+        """
         import webbrowser
+        if not is_launchable_url(url):
+            if self.log:
+                self.log.warning(f"Quick launch URL refused (scheme not allowed): {url!r}")
+            QMessageBox.warning(self, self.t("msg.error_title"),
+                                self.t("validation.ql_url_scheme"))
+            return
         try:
             ok = webbrowser.open(url)
         except Exception as e:  # noqa: BLE001

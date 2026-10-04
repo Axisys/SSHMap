@@ -11,9 +11,11 @@ The dialog pattern matches `AddServerDialog`: i18n through a try-import with an 
 from typing import List, Optional
 
 try:
-    from ..models.server import ServerData, sanitize_quick_launch
+    from ..models.server import (URL_SCHEME_FALLBACK, ServerData,
+                                 is_launchable_url, sanitize_quick_launch)
 except ImportError:
-    from models.server import ServerData, sanitize_quick_launch
+    from models.server import (URL_SCHEME_FALLBACK, ServerData,
+                               is_launchable_url, sanitize_quick_launch)
 
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
@@ -206,10 +208,9 @@ class QuickLaunchDialog(QDialog):
             self._warn(self._tr("validation.ql_value_empty") if self._i18n_available
                        else "Value (URL or command) cannot be empty.")
             return
-        if etype == "url" and not (value.lower().startswith("http://")
-                                   or value.lower().startswith("https://")):
+        if etype == "url" and not is_launchable_url(value):
             self._warn(self._tr("validation.ql_url_scheme") if self._i18n_available
-                       else "A link must start with http:// or https://")
+                       else URL_SCHEME_FALLBACK)
             return
         # No duplicate entries (type+name) — the entry already exists. The row being
         # EDITED is skipped: keeping its own name is not a duplicate of itself.

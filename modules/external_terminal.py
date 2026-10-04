@@ -13,6 +13,7 @@ Settings — the ONE `~/.sshmap/config.json` (the atomic write of `i18n.save_con
 `"x-terminal-emulator"` | `"gnome-terminal"` | `"konsole"` | `"xfce4-terminal"` | `"alacritty"` | `"kitty"`. There is deliberately NO `"conhost"` preset (conhost.exe is not a launcher: it does not accept `/c`), and the legacy value maps to `"cmd"` in `load_external_terminal_setting()` and in the migration. The preset picker is the SSHConnectDialog section and the "General" tab of the settings hub."""
 
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -200,12 +201,94 @@ def ssh_client_available() -> bool:
 
 # ── build_command ──────────────────────────────────────────────────
 
+# The ALLOWLIST of the two values that become the ssh command line (v1.7.5.1). The external terminal
+# hands a command LINE to a FOREIGN parser (`cmd.exe` reads `& | ^ < > ( ) %`, Windows Terminal `;`)
+# and `list2cmdline()` quotes only a space, a tab or a `"` — so a space-free foreign value travels
+# BARE and the parser acts on it. The rule belongs to THIS module, never to the model.
+HOST_ALLOWED_RE = re.compile(r"^[A-Za-z0-9._:\-\[\]]+$")
+USER_ALLOWED_RE = re.compile(r"^[A-Za-z0-9._\-]+$")
+
+# The refusal codes `validate_target()` answers (`connect_external()` returns them as its error_code).
+TARGET_BAD_HOST = "bad_host"
+TARGET_BAD_USER = "bad_user"
+TARGET_BAD_JUMP = "bad_jump"
+
+
+def host_problem(host: str) -> Optional[str]:
+    """Is this host unusable on a FOREIGN command line? PURE — the host itself, or None.
+
+    The allowlist is letters/digits plus `.`, `-`, `_`, `:` (a port-ridden name), `[`/`]` (an IPv6
+    literal). A value outside it — `10.0.0.5&calc`, `\\attacker\share`, a `%VAR%` — is what a
+    metacharacter needs, and it is refused here rather than escaped for two unknown parsers. A host
+    is never empty at the door (the window refuses an empty one first).
+    """
+    text = str(host or "").strip()
+    if not text:
+        return "empty"
+    if text.startswith("-"):
+        return "option"     # `-oProxyCommand=…` would become an ssh OPTION, not an address
+    if not HOST_ALLOWED_RE.match(text):
+        return "characters"
+    return None
+
+
+def user_problem(user: str) -> Optional[str]:
+    """Is this user name unusable on a FOREIGN command line? PURE — the reason, or None.
+
+    An EMPTY user is legal (the address is then the bare host). `[A-Za-z0-9._-]` is the whole
+    alphabet: a login name with a `&` or a `;` in it is the second half of the same injection.
+    """
+    text = str(user or "").strip()
+    if not text:
+        return None
+    if text.startswith("-"):
+        return "option"
+    if not USER_ALLOWED_RE.match(text):
+        return "characters"
+    return None
+
+
+def jump_problem(jump: str) -> Optional[str]:
+    """Is this `-J` value unusable on a FOREIGN command line? PURE — the reason, or None.
+
+    A jump spec is `[user@]host[:port]`, so it is judged by the same two rules (the ONE home of
+    each). Nothing in the UI passes a jump today, which is exactly why the check is free here.
+    """
+    text = str(jump or "").strip()
+    if not text:
+        return None
+    who, _, where = text.rpartition("@")
+    if who and user_problem(who):
+        return "characters"
+    if host_problem(where or text):
+        return "characters"
+    return None
+
+
+def validate_target(host: str, user: str = "", jump: Optional[str] = None) -> Optional[str]:
+    """The ONE gate of the external terminal: a refusal code, or None when the target is launchable.
+
+    Called by `connect_external()` — the choke point BOTH UI doors go through — and by
+    `build_command()` for a direct caller. It protects the branches whose parser this application
+    cannot control (the `wt` branch above all): an allowlist is the only reliable answer there.
+    """
+    if host_problem(host):
+        return TARGET_BAD_HOST
+    if user_problem(user):
+        return TARGET_BAD_USER
+    if jump_problem(jump or ""):
+        return TARGET_BAD_JUMP
+    return None
+
+
 def build_ssh_args(host: str, user: str, port: int = 22,
                    key_path: Optional[str] = None,
                    jump: Optional[str] = None) -> List[str]:
     """Arguments for the OS ssh client (without 'ssh' itself).
 
-    known_hosts — the system one (~/.ssh/known_hosts), NOT ~/.sshmap.
+    known_hosts — the system one (~/.ssh/known_hosts), NOT ~/.sshmap. A `--` closes the option list
+    BEFORE the address (v1.7.5.1): without it an empty user turns a `-o…` host into an ssh OPTION
+    (`ssh -oProxyCommand=calc`) — verified against the shipped OpenSSH, which accepts `--`.
     """
     args = ["ssh"]
     if port and int(port) != 22:
@@ -215,6 +298,7 @@ def build_ssh_args(host: str, user: str, port: int = 22,
     if jump:
         args += ["-J", jump]
     args += ["-o", "ConnectTimeout=10"]
+    args.append("--")
     args.append(f"{user}@{host}" if user else host)
     return args
 
@@ -266,18 +350,20 @@ def build_command(terminal: str, host: str, user: str, port: int = 22,
                   jump: Optional[str] = None) -> List[str]:
     """The full launch command for an external terminal running ssh inside.
 
-    - Windows Terminal: `wt.exe ssh ...`
-    - cmd:              `cmd /c start "" ssh ...` (the empty window title is a
-                        required positional argument of start)
-    - Linux gnome-terminal and relatives: `<term> -- bash -c "ssh ...; exec bash"`
+    - Windows Terminal: `wt.exe ssh …`
+    - cmd:              `<ssh.exe> ssh-args…` — launched DIRECTLY, with no `cmd.exe` in between
+                        (v1.7.5.1): `launch()` already opens a new console on Windows, so the window
+                        is the same one and the shell parser that would read `&`, `%`, `^`, `(` and
+                        `)` is simply absent. That also FIXES a legal key path such as
+                        `C:\\Keys\\R&D\\id`, which `cmd /c start` split at the `&`.
+    - Linux gnome-terminal and relatives: `<term> -- bash -c "ssh …; exec bash"`
       (the window does not close when the session drops).
     The password never enters the command (see the module docstring).
 
-    v1.1.2RC1 (N2): the "conhost" branch removed — the command `["conhost.exe",
-    "cmd.exe", "/c", ssh_exe]` was not working (conhost is not a launcher,
-    /c is not accepted; the old docstring "cmd/conhost: cmd /c start" disagreed
-    with the real branch). The old id "conhost" is mapped to "cmd" — the
-    cmd.exe window IS the classic conhost.
+    The `conhost` id is an alias of `cmd` (conhost.exe is not a launcher — it accepts no `/c`).
+    This function ASSEMBLES and does not judge: the allowlist lives at the DOORS
+    (`connect_external()` and `launch()`), because the POSIX branches here are correct by escaping
+    and a direct caller may legitimately exercise them.
     """
     # v1.1.2RC1 (N2): backward-compat for direct calls with the old id.
     if terminal == "conhost":
@@ -288,11 +374,9 @@ def build_command(terminal: str, host: str, user: str, port: int = 22,
     if terminal == "windows_terminal":
         return ["wt.exe"] + ssh_args
     if terminal == "cmd":
-        # `start "" prog args`: the empty title is mandatory, otherwise the first
-        # argument is eaten as the window title. We take the full path to ssh —
-        # `start` looks in the current directory first.
-        ssh_exe = _which("ssh") or "ssh"
-        return ["cmd.exe", "/c", "start", "", ssh_exe] + ssh_args[1:]
+        # The ssh binary itself, with no `cmd.exe` and no `start` in front of it: the new console
+        # comes from launch()'s CREATE_NEW_CONSOLE, which is what `start` was imitating.
+        return [_which("ssh") or "ssh"] + ssh_args[1:]
     if terminal == "open_terminal":  # macOS
         # `open -a Terminal bash -c ...` does not work — `open` does not pass arguments that way. The
         # correct way is osascript: open Terminal.app and run the command in it (the window survives the
@@ -342,6 +426,9 @@ def launch(command: Optional[List[str]] = None, host: str = "", user: str = "",
         if not host:
             log.error("launch() without command requires host")
             return False
+        if validate_target(host, user, jump):
+            log.error("External terminal refused the target (host/user/jump allowlist)")
+            return False
         term = detect_terminal()
         if not term:
             return False
@@ -382,11 +469,16 @@ def launch(command: Optional[List[str]] = None, host: str = "", user: str = "",
 def connect_external(host: str, user: str, port: int = 22,
                      key_path: Optional[str] = None,
                      jump: Optional[str] = None) -> tuple:
-    """The full path: detect → build → launch.
+    """The full path: validate → detect → build → launch.
 
     Returns (ok: bool, error_code: str|None):
-      error_code ∈ {None, 'no_ssh_client', 'no_terminal', 'popen_failed'}.
+      error_code ∈ {None, 'bad_host', 'bad_user', 'bad_jump', 'no_ssh_client', 'no_terminal',
+                    'popen_failed'}.
     """
+    problem = validate_target(host, user, jump)
+    if problem:
+        log.warning("External terminal refused the target: %s", problem)
+        return False, problem
     if not ssh_client_available():
         return False, "no_ssh_client"
     term = detect_terminal()

@@ -246,6 +246,19 @@ for _name in REFERENCE_DOCS:
     check(f"§2 {_name}: every registry-size figure is the live one or a chain successor",
           not _stale_registry, f"stale={_stale_registry}")
 
+# The TEST-FILE counter in every spelling these docs use. `tests/test_i18n_live.py` §6 owns the PUBLIC
+# form ("123 test files" in the README, via the shared `TEST_FILE_COUNTER_RE`); the reference docs write
+# it as "123 `test_*.py`", where the backtick before the word made that regex blind — and a quoted 118 /
+# 120 / 121 survived a whole line beside a live 123. Hence ONE tolerant pattern here, markdown included.
+_TESTFILE_FIGURE = re.compile(r"\b(\d+)\s+(?:topical\s+)?\**`?\**test[ _-]?(?:files?|\*\.py)`?\**")
+_N_TEST_FILES = len(glob.glob(os.path.join(ROOT, "tests", "test_*.py")))
+for _name in REFERENCE_DOCS + ("ROADMAP.md",):
+    _tests_text = _flat(os.path.join(ROOT, _name))
+    _quoted_tests = sorted({int(m.group(1)) for m in _TESTFILE_FIGURE.finditer(_tests_text)})
+    _stale_tests = _stale_figures(_tests_text, _TESTFILE_FIGURE, _N_TEST_FILES)
+    check(f"§2 {_name}: every test-file figure is the live one ({_N_TEST_FILES}) or a chain successor",
+          not _stale_tests, f"quoted={_quoted_tests} stale={_stale_tests}")
+
 
 # ════════════════════════════════════════════════════════════════════════════
 print("== §3 DOCUMENTATION.md is self-consistent ==")

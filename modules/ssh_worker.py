@@ -182,6 +182,11 @@ class SSHWorker(QThread):
             if policy.accepted_new_key and policy.last_fingerprint:
                 note = t("ssh.host_key_new", host=self.host, fp=policy.last_fingerprint)
                 msg += "\n" + (note if not note.startswith("[") else f"New host key accepted ({policy.last_fingerprint})")
+                if not policy.pinned:
+                    # v1.7.5.1 (N48): an unreadable store remembers nothing — say so.
+                    warn = t("ssh.host_key_unpinned", path=policy.store.path)
+                    msg += "\n" + (warn if not warn.startswith("[")
+                                   else "WARNING: host key NOT saved")
             self.success.emit(msg if not msg.startswith("[") else f"✓ Connected to {self.host}")
         except paramiko.BadHostKeyException as e:
             # AUDIT v0.7.2 (high #4): the stored host key changed — a likely MITM

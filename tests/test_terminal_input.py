@@ -240,8 +240,19 @@ cb = app.clipboard()
 cb.setText("one\r\ntwo\nthree")   # mixed EOL — normalized to \n
 sent.clear()
 press_key(w, Qt.Key.Key_V, mod=CTRL)
+check("Ctrl+V: mode 2004 OFF → the RAW block (v1.7.5.1, N44 — the sudo/passwd case)",
+      sent == [b"one\ntwo\nthree"], f"sent={sent!r}")
+scr.feed(b"\x1b[?2004h")          # the application ASKS for the wrapper
+cb.setText("one\r\ntwo\nthree")
+sent.clear()
+press_key(w, Qt.Key.Key_V, mod=CTRL)
 check("Ctrl+V: the multi-line buffer — a SINGLE block with the normalized line breaks",
       sent == [b"\x1b[200~one\ntwo\nthree\x1b[201~"], f"sent={sent!r}")
+cb.setText("echo SAFE\x1b[201~echo PWNED\n")
+sent.clear()
+press_key(w, Qt.Key.Key_V, mod=CTRL)
+check("Ctrl+V: the clipboard cannot close the paste early (the marker is stripped)",
+      sent == [b"\x1b[200~echo SAFEecho PWNED\n\x1b[201~"], f"sent={sent!r}")
 
 cb.setText("")
 sent.clear()
