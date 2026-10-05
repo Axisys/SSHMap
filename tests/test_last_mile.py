@@ -570,10 +570,12 @@ check("§6 audit 8: ONE mouse encoder, ONE routing predicate and the Shift local
 
 # (9) the terminal_scroll pin's USER-INTENT rule (v1.6.4)
 import modules.terminal_screen as TS  # noqa: E402
+from _common import canvas_func_body, canvas_func_owner  # noqa: E402
 
-_pin_src = _src("modules", "terminal_widget.py")
 check("§6 audit 9: the pin is released on USER INTENT (a keystroke) and never on output",
-      "def _release_pin" in _pin_src and "self._release_pin()" in _pin_src
+      canvas_func_owner("_release_pin", ROOT) == "modules/terminal_widget.py"
+      and "scroll_to_live" in canvas_func_body("_release_pin", ROOT)
+      and "self._release_pin()" in canvas_func_body("_send", ROOT)
       and TS.SCROLL_MODE_PIN == "pin" and TS.SCROLL_MODE_DEFAULT == "live"
       and TS.resolve_scroll_mode("nonsense") == TS.SCROLL_MODE_DEFAULT
       and callable(getattr(TS.SshmapHistoryScreen, "pin_begin", None)))
@@ -664,8 +666,8 @@ check("§7 the pin counts the SHIPPED release (828 + the 13 keys of v1.6.8"
       " the two-sided conflict facts, the remembered-folder sentence, the two drop refusals and Word wrap"
       " + the 17 of v1.7.4rc1: the local source switch of a pane, its two refusals, the permanent-"
       " delete warning and the local file-surface sentences, and v1.7.4rc2 adds 1: the refusal of a"
-      " move that would cross the two sources)",
-      EXPECTED_I18N_KEYS >= 854 and EXPECTED_I18N_KEYS == 828 + 13 + 5 + 8 + 9 + 4 + 3 + 4 + 4 + 19 + 17 + 1 + 4 + 6,
+      " move that would cross the two sources and v1.8 adds TWENTY: the elevated pane)",
+      EXPECTED_I18N_KEYS >= 854 and EXPECTED_I18N_KEYS == 828 + 13 + 5 + 8 + 9 + 4 + 3 + 4 + 4 + 19 + 17 + 1 + 4 + 6 + 20,
       str(EXPECTED_I18N_KEYS))
 check("§7 EXPECTED_APP_VERSION is the release this file describes",
       releases_at_least(EXPECTED_APP_VERSION, "1.7"), EXPECTED_APP_VERSION)

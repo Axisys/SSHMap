@@ -10,8 +10,9 @@ the ACTION ID, so a rename would silently drop a user's binding), while File kee
 import os
 import re
 
-from _common import (bootstrap, check, finish, check_i18n_parity, check_i18n_format,
-                     check_release_state, load_i18n_langs, EXPECTED_APP_VERSION,
+from _common import (VERSION_FORMAT_RE, bootstrap, check, finish, check_i18n_parity, check_i18n_format,
+                     check_release_state, load_i18n_langs, window_family_sources, window_func_body,
+                     window_func_owner, EXPECTED_APP_VERSION,
                      EXPECTED_I18N_KEYS,
                      releases_at_least)
 
@@ -117,9 +118,10 @@ check("§1 the action IDS survived the move (a `hotkeys` value is keyed by the i
       and all(aid in win._hotkey_targets and win._hotkey_targets[aid] for aid in _EXPORT_IDS))
 check("§1 ...and they stay in their `file.*` family (the Hotkeys tab groups them as before)",
       all(aid.startswith("file.") and action_family(aid) == "file" for aid in _EXPORT_IDS))
+_menubar_src = window_family_sources(ROOT)["ui/main_window_menubar.py"]
 check("§1 the export items are still created through the ONE menu builder (no hand-made row)",
-      all(f'"{aid}"' in _src("ui", "main_window.py") for aid in _EXPORT_IDS)
-      and "export_menu" in _src("ui", "main_window.py"))
+      all(f'"{aid}"' in _menubar_src for aid in _EXPORT_IDS)
+      and "export_menu" in _menubar_src)
 
 _project_ids = ("file.new", "file.open", "file.save", "file.save_as", "file.restore_autosave",
                 "file.backups", "file.import_servers", "file.import_ssh_config", "file.exit")
@@ -224,7 +226,7 @@ check("§2 ...and the opened project is the file's (the drop / File → Open sha
 check("§2 the door is wired by the WINDOW (the widget only emits)",
       hasattr(_overlay, "open_map_requested")
       and "open_map_requested.connect(self._open_project)"
-      in _src("ui", "main_window.py").replace(" ", ""))
+      in window_func_body("_setup_empty_state", ROOT).replace(" ", ""))
 
 win._new_project()
 app.processEvents()
@@ -419,8 +421,10 @@ check("§5 ...and the entry really paints a FRAME (a surface fill + a border + a
       and theme.THEME.surface_alt in theme_qss.style("collapse.button"),
       theme_qss.style("collapse.button")[:80])
 check("§5 the style is applied by ONE helper (no second copy of the QSS)",
-      _src("ui", "main_window.py").count("def _style_collapse_btn") == 1
-      and "theme_qss.refresh(btn, \"collapse.button\")" in _src("ui", "main_window.py"))
+      sum(src.count("def _style_collapse_btn")
+          for src in window_family_sources(ROOT).values()) == 1
+      and 'theme_qss.refresh(btn, "collapse.button")' in window_family_sources(ROOT)[
+          "ui/main_window_panels.py"])
 check("§5 the sidebar button stays in the panel's bottom row, the map's on the view",
       _side_btn.parentWidget() is win.sidebar and _map_btn.parentWidget() is win.view)
 check("§5 both still carry the diamond icon (the ink walk is unchanged)",
@@ -443,7 +447,8 @@ check("§5 v1.5.6 the corner is the VIEWPORT's (the frame and the SCROLLBARS are
       win.COLLAPSE_BTN_MARGIN > 0 and win.COLLAPSE_BTN_RAISE > 0
       and _map_btn.x() + _map_btn.width() <= _vp.right() + 1
       and _map_btn.y() + _map_btn.height() <= _vp.bottom() + 1
-      and "viewport().geometry()" in _src("ui", "main_window.py"),
+      and "viewport().geometry()" in window_func_body("_position_map_collapse_btn", ROOT,
+                                                      docstring=True),
       f"btn={_map_btn.geometry()} viewport={_vp}")
 check("§5 v1.5.6 ...and it is raised out of the corner (a different level from the sidebar's)",
       _map_btn.y() + _map_btn.height()
@@ -468,13 +473,15 @@ check("§5 v1.5.6 the button keeps clear of the SCROLLBARS that appear with cont
       and _map_btn.x() + _map_btn.width() <= win.view.viewport().geometry().right() + 1,
       f"btn={_map_btn.geometry()} vbar={_vbar.geometry()} hbar={_hbar.geometry()}")
 check("§5 ...the placement follows the ranges too (a scrollbar appearing resizes the viewport)",
-      "rangeChanged" in _src("ui", "main_window.py"))
+      "rangeChanged" in window_func_body("_setup_ui", ROOT))
 check("§5 it is still the bottom-right corner (the top is the minimap's)",
       _map_btn.y() > _view_h // 2 and _map_btn.x() + _map_btn.width() > _view_w // 2)
+_family_src = window_family_sources(ROOT)
 check("§5 the ONE position resolver owns the move (no second geometry owner)",
-      _src("ui", "main_window.py").count("def _position_map_collapse_btn") == 1
-      and _src("ui", "main_window.py").count("def _collapse_btn_candidates") == 1
-      and "_collapse_btn_candidates(" in _src("ui", "main_window.py"))
+      sum(src.count("def _position_map_collapse_btn") for src in _family_src.values()) == 1
+      and sum(src.count("def _collapse_btn_candidates") for src in _family_src.values()) == 1
+      and window_func_owner("_collapse_btn_candidates", ROOT) == "ui/main_window_overlays.py"
+      and "_collapse_btn_candidates(" in window_func_body("_position_map_collapse_btn", ROOT))
 
 theme_qss.apply_theme(theme.LIGHT, app=app, refresh_windows=False)
 win._refresh_icons()
@@ -514,7 +521,7 @@ check_i18n_parity(_langs)
 check_i18n_format(_langs)
 check("§6 EXPECTED_APP_VERSION is the shipped release (the pin quotes the CURRENT one)",
       releases_at_least(EXPECTED_APP_VERSION, "1.7")
-      and re.fullmatch(r"1\.7(?:\.\d+){0,2}(?:rc\d+)?", EXPECTED_APP_VERSION) is not None,
+      and VERSION_FORMAT_RE.fullmatch(EXPECTED_APP_VERSION) is not None,
       EXPECTED_APP_VERSION)
 check("§6 the pin counts the shipped release (708 + the 29 keys of v1.5.7 + the 41 of v1.6"
       " + the 4 of v1.6.2 + the 4 of v1.6.3 + the 3 of v1.6.4 + the 11 of v1.6.5"

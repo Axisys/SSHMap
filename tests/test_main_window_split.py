@@ -1,12 +1,13 @@
 # -*- coding: utf-8 -*-
-"""v1.1.4: main_window.py hygiene — split into mixins (ROADMAP v1.1.4 acceptance).
+"""v1.1.4: main_window.py hygiene — split into mixins (ROADMAP v1.1.4; the v1.8rc1/rc2/rc3 waves add nineteen).
 
-The thematic test of the split, offscreen, running each cluster through a real `MainWindow`.
-The STRUCTURE: every method of the plan is defined in `ProjectIOMixin` / `NodeOpsMixin` / `SshMixin` (and
-NOT in the window's own dict), the MRO is the planned one, the mixins never reach back into the facade
-module (the cycle), and the `host_attr` seam sees the swaps (`MW.<name> = Fake`).
-`ProjectIOMixin`: the save/load/restore chain (`_save_project_as` → `_autosave_tick` →
-`_restore_from_autosave` → `_load_project_at` in a second window). `NodeOpsMixin`: add, duplicate and delete with the fake dialog and the bool guard, plus the group delete. `SshMixin`: the ssh-dialog flow with fake dialogs and windows (the fields through the undo stack, the indicator, the window registry and `_forget_terminal_window`), plus the quick launch that lives in the same mixin."""
+The thematic test of the split, offscreen, running each cluster through a real `MainWindow`. The
+STRUCTURE: every method of the plan is defined in its own mixin (and NOT in the window's own dict), the
+MRO is the planned one, the mixins never reach back into the facade module (the cycle), and the
+`host_attr` seam sees the swaps (`MW.<name> = Fake`). Functionally: `ProjectIOMixin` — save/load/restore;
+`NodeOpsMixin` — add/duplicate/delete; `SshMixin` — the ssh-dialog flow and the quick launch; the two
+waves of the 1.8 line are pinned by the plan table alone.
+"""
 import json
 import os
 import re
@@ -32,6 +33,25 @@ import ui.main_window as MW
 import ui.main_window_project_io as PI
 import ui.main_window_node_ops as NO
 import ui.main_window_ssh as SS
+import ui.main_window_status as ST
+import ui.main_window_plugins as PL
+import ui.main_window_settings as SE
+import ui.main_window_scene as SC
+import ui.main_window_exports as EX
+import ui.main_window_overlays as OV
+import ui.main_window_minimap as MM
+import ui.main_window_legend as LG
+import ui.main_window_activity as AC
+import ui.main_window_bookmarks as BK
+import ui.main_window_sidebar as SB
+import ui.main_window_menubar as MB
+import ui.main_window_toolbar as TB
+import ui.main_window_statusbar as SBR
+import ui.main_window_panels as PN
+import ui.main_window_view as VW
+import ui.main_window_theme as TH
+import ui.main_window_i18n as I1
+import ui.main_window_layout as LY
 from ui.mixin_support import host_attr
 from _fakes import (FakeLineEdit as _FL, FakeSpinBox as _FS, FakeTermWin as _FakeTermWin,
                     QuestionStub)
@@ -61,11 +81,17 @@ def make_window():
 print("== 1. structure: clusters live in mixins ==")
 
 _mro = [c.__name__ for c in MW.MainWindow.__mro__]
-check("MRO: MainWindow → ProjectIOMixin → NodeOpsMixin → SshMixin → QMainWindow",
-      _mro[:5] == ["MainWindow", "ProjectIOMixin", "NodeOpsMixin", "SshMixin", "QMainWindow"],
-      str(_mro[:6]))
+check("MRO: MainWindow → ProjectIOMixin → NodeOpsMixin → SshMixin → the 1.8rc1/rc2/rc3 waves → QMainWindow",
+      _mro[:24] == ["MainWindow", "ProjectIOMixin", "NodeOpsMixin", "SshMixin", "StatusMixin",
+                    "PluginMixin", "SettingsMixin", "SceneCommandMixin", "ExportMixin", "OverlaysMixin",
+                    "MinimapMixin", "LegendMixin", "ActivityMixin", "BookmarksMixin", "SidebarMixin",
+                    "MenubarMixin", "ToolbarMixin", "StatusBarMixin", "PanelsMixin", "ViewMixin",
+                    "ThemeMixin", "I18nMixin", "LayoutMixin", "QMainWindow"],
+      str(_mro[:25]))
 
-# The full list of the plan methods (ROADMAP v1.1.4, tasks 1–3; quick launch — in the SSH cluster)
+# The full list of the plan methods (ROADMAP v1.1.4, tasks 1–3; quick launch — in the SSH cluster;
+# the 1.8rc1/rc2/rc3 waves — the five wave-1 clusters, the six floating-panel/panel clusters and the
+# EIGHT wave-3 clusters — while `_snap_panel` / `_saved_position` / `SNAP_PX` STAY in the facade)
 PLAN = {
     "ProjectIOMixin": [
         "_new_project", "_import_project_raw", "_open_project", "_load_project_at",
@@ -86,9 +112,107 @@ PLAN = {
         "_open_quick_launch_dialog", "_run_quick_launch_entry",
         "_quick_launch_url", "_quick_launch_command",
     ],
+    "StatusMixin": [
+        "_shutdown_status_checker", "start_status_checks", "_status_skip_ids", "_refuse_unmanaged",
+        "_sync_status_targets", "_on_node_status_detail", "_on_node_status_changed",
+        "_apply_node_freshness", "_refresh_status_freshness", "_apply_node_info_freshness",
+        "_freshness_tick",
+    ],
+    "PluginMixin": [
+        "start_plugin_discovery", "_reload_plugins", "_populate_plugin_items", "_sync_plugin_nodes",
+        "_plugin_records_with_hook", "_extend_node_context_menu", "_run_plugins_on_nodes",
+        "_plugin_tooltip", "_on_plugin_toggled", "_report_plugin_events", "_plugin_label",
+        "_on_plugin_status_requested", "_expire_plugin_status", "_on_plugin_hook_failed",
+        "_on_plugin_hook_timeout",
+    ],
+    "SettingsMixin": ["_apply_ui_options_from_config", "_apply_settings_from_dialog"],
+    "SceneCommandMixin": [
+        "_connect_note_signals", "_on_note_text_edited", "_add_note_at", "_remove_note",
+        "_attach_note_to_node", "_detach_note", "_commit_group_move", "_commit_group_resize",
+        "_connect_group_signals", "_toggle_group_collapsed", "_connect_background_signals",
+        "_commit_background_move", "_commit_background_resize", "_set_background_image",
+        "_remove_background_image", "_add_group_at", "_rename_group", "_remove_group",
+    ],
+    "ExportMixin": [
+        "_ask_export_palette", "_export_map_image", "_export_map_drawio", "_export_map_pdf",
+        "_export_map_svg", "_copy_map_image", "_export_docs_frame", "_list_report_rows",
+        "_report_table_unavailable", "_export_connections_table", "_export_problems_table",
+        "_copy_list_table", "_export_list_table",
+    ],
+    "OverlaysMixin": [
+        "_sync_overlay_priority", "_sync_legend_suppression", "legend_suppressed",
+        "_setup_filter_plaque", "_sync_filter_plaque", "_position_filter_plaque", "_on_filter_clear",
+        "_setup_map_search", "_toggle_map_search", "_open_map_search", "_close_map_search",
+        "_position_map_search_bar", "_map_search_nodes", "_on_map_search_query", "_map_search_step",
+        "_close_map_search_if_open", "_connect_hint_text", "_setup_empty_state", "_sync_empty_state",
+        "_position_empty_state", "_position_map_collapse_btn", "_overlay_panel_rects",
+        "_collapse_btn_candidates",
+    ],
+    "MinimapMixin": [
+        "_setup_minimap", "_read_minimap_settings", "_on_minimap_collapsed_changed", "_on_minimap_moved",
+        "_save_minimap_config", "_toggle_minimap", "_position_minimap", "_on_minimap_center",
+    ],
+    "LegendMixin": [
+        "_setup_legend", "_read_legend_settings", "_position_legend", "_toggle_legend",
+        "_on_legend_moved", "_on_legend_collapsed_changed", "_save_legend_config",
+    ],
+    "ActivityMixin": [
+        "_read_activity_visible", "_save_activity_config", "_setup_activity_panel",
+        "_record_activity_message", "_toggle_activity", "_on_activity_hidden",
+    ],
+    "BookmarksMixin": [
+        "_read_bookmarks_visible", "_read_bookmarks_settings", "_save_bookmarks_config",
+        "_setup_bookmarks_panel", "_position_bookmarks_panel", "_toggle_bookmarks",
+        "_on_bookmarks_moved", "_on_bookmarks_collapsed_changed", "_open_bookmarks_dialog",
+    ],
+    "SidebarMixin": [
+        "_on_tree_item_clicked", "_on_tree_item_double_click", "_on_sidebar_context_menu",
+        "_reveal_node_on_map", "refresh_sidebar", "_active_tag_filter", "_on_tag_filter_changed",
+        "_on_status_filter_clicked", "_update_sidebar_status_marker",
+    ],
+    "MenubarMixin": [
+        "_add_menu_action", "_setup_menubar", "_rebuild_qaction_guard", "_populate_language_menu",
+        "_reload_languages",
+    ],
+    "ToolbarMixin": [
+        "_setup_toolbar", "_toolbar_full_width", "_sync_toolbar_overflow",
+        "toolbar_overflow_active", "_mark_toolbar_mirror", "_wire_view_toolbar_button",
+        "_on_view_toolbar_toggled", "_sync_view_toolbar", "_panel_switch_actions",
+        "createPopupMenu",
+    ],
+    "StatusBarMixin": [
+        "_sync_status_bar_overflow", "_status_bar_permanent_widgets",
+        "_status_bar_overflow_needed", "status_bar_compact", "_update_counts_label",
+        "_sync_problems_chip", "_trouble_nodes", "_on_problems_chip_clicked",
+        "_set_problems_only", "problems_only",
+    ],
+    "PanelsMixin": [
+        "_toggle_sidebar", "_on_sidebar_toggled", "_on_map_toggled", "_reject_collapse_both",
+        "_set_panel_collapsed", "_sync_splitter_handle", "_sync_list_mode",
+        "_apply_collapsed_strip_sizes", "_apply_splitter_state_from_config", "_style_collapse_btn",
+    ],
+    "ViewMixin": [
+        "_focus_map", "_focus_domain_step", "_active_terminal_canvas", "_center_view",
+        "_fit_to_content", "_on_zoom_changed", "_reset_zoom", "_zoom_in", "_zoom_out",
+        "_iter_server_nodes", "_set_all_collapsed", "_collapse_all_servers", "_expand_all_servers",
+        "_select_node", "_fly_camera_to_node", "_on_hover_focus_changed",
+    ],
+    "ThemeMixin": [
+        "refresh_theme", "apply_theme", "_refresh_icons", "_install_color_scheme_watch",
+        "_theme_mode_from_config", "_on_system_color_scheme_changed",
+    ],
+    "I18nMixin": ["_apply_ui_translations", "_switch_language", "_register_i18n"],
+    "LayoutMixin": ["_setup_ui", "resizeEvent"],
 }
 
 _bad = []
+
+
+def _owner_of(obj):
+    """The `__qualname__` of a function OR of a property's getter (a mixin may own either)."""
+    return getattr(obj.fget if isinstance(obj, property) else obj, "__qualname__", "")
+
+
 for mixin_name, methods in PLAN.items():
     for m in methods:
         fn = getattr(MW.MainWindow, m, None)
@@ -96,19 +220,34 @@ for mixin_name, methods in PLAN.items():
             _bad.append(f"{m}: missing")
         elif m in MW.MainWindow.__dict__:
             _bad.append(f"{m}: still in MainWindow.__dict__")
-        elif fn.__qualname__.split(".")[0] != mixin_name:
-            _bad.append(f"{m}: owner {fn.__qualname__}")
+        elif _owner_of(fn).split(".")[0] != mixin_name:
+            _bad.append(f"{m}: owner {_owner_of(fn)}")
 check(f"all the planned methods ({sum(len(v) for v in PLAN.values())}) are defined in their own mixins",
       not _bad, "; ".join(_bad[:6]))
 
-# AUDIT §3: the mixins do NOT import main_window (a cycle) — duck typing only.
+# AUDIT §3: the mixins do NOT import main_window (a cycle) — duck typing only. A mixin MAY import a
+# SIBLING mixin (`main_window_scene` takes `_is_scene_point` from `main_window_node_ops`), so the gate
+# names the FACADE module itself and not the `main_window` prefix.
+_FACADE_IMPORT = re.compile(
+    r"^\s*(?:from\s+(?:\.{1,2}|ui\.)?main_window\s+import\b"
+    r"|from\s+(?:\.+|ui)\s+import\s+main_window\b"
+    r"|import\s+(?:ui\.)?main_window\b)")
+check("§3 the cycle gate is RED on the facade import it exists for (and blind to a sibling mixin)",
+      bool(_FACADE_IMPORT.match("from .main_window import MainWindow"))
+      and bool(_FACADE_IMPORT.match("import ui.main_window as MW"))
+      and bool(_FACADE_IMPORT.match("from . import main_window"))
+      and not _FACADE_IMPORT.match("from .main_window_node_ops import _is_scene_point"))
 _circ = []
-for mod in (PI, NO, SS):
+for mod in (PI, NO, SS, ST, PL, SE, SC, EX, OV, MM, LG, AC, BK, SB,
+            MB, TB, SBR, PN, VW, TH, I1, LY):
     with open(mod.__file__, encoding="utf-8") as f:
         for i, line in enumerate(f, 1):
-            if re.match(r"\s*(from|import)\b", line) and "main_window" in line:
+            if _FACADE_IMPORT.match(line):
                 _circ.append(f"{os.path.basename(mod.__file__)}:{i}: {line.strip()}")
 check("the mixins do not import main_window (no cycle)", not _circ, "; ".join(_circ))
+check("the shared snap machinery stayed in the facade (the three movable panels share it)",
+      all(name in MW.MainWindow.__dict__ for name in ("SNAP_PX", "_snap_panel", "_saved_position"))
+      and MW.MainWindow.SNAP_PX == 24)
 
 win0 = make_window()
 check("host_attr sees the facade module's attribute",

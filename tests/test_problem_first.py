@@ -12,7 +12,7 @@ import os
 import re
 import sys
 
-from _common import (bootstrap, check, finish, load_i18n_langs,
+from _common import (bootstrap, check, finish, load_i18n_langs, window_func_body,
                      EXPECTED_APP_VERSION, EXPECTED_I18N_KEYS, check_i18n_parity,
                      check_i18n_format, check_release_state,
                      releases_at_least)
@@ -452,9 +452,9 @@ check("§3 the search opens the plaque with a SEARCH row",
 check("§3 the plaque names the ACTIVE filters of the priority resolver too",
       any(rect == QRect(_plaque.geometry()) for rect in _win._overlay_panel_rects(_win.view)),
       f"{_plaque.geometry()} / {_win._overlay_panel_rects(_win.view)}")
-_resolver_src = open(os.path.join(ROOT, "ui", "main_window.py"), encoding="utf-8").read()
+_resolver_src = window_func_body("_overlay_panel_rects", ROOT)
 check("§3 ...because it joined `_overlay_panel_rects()` (the one floating-panel resolver)",
-      '"empty_state", "map_search", "minimap", "legend", "bookmark_panel",' in _resolver_src)
+      "'empty_state', 'map_search', 'minimap', 'legend', 'bookmark_panel'," in _resolver_src)
 
 _win._set_problems_only(True, announce=False)
 _win._status_filter = "offline"

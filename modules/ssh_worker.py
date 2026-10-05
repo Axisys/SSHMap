@@ -2,11 +2,6 @@ import socket
 from typing import Dict, Optional
 from PySide6.QtCore import QThread, Signal
 
-try:
-    from .host_key_policy import SshKnownHostsPolicy
-except ImportError:
-    from modules.host_key_policy import SshKnownHostsPolicy
-
 
 # Cached translator for this module (loaded once on first call)
 _t_cache = None
@@ -121,11 +116,13 @@ class SSHWorker(QThread):
         t = _get_translator()
         from services.credential_manager import get_credential_manager
 
-        # AUDIT v0.7.2 (high #4): known_hosts pinning instead of AutoAddPolicy:
-        # a new host key is accepted with its fingerprint logged; a changed one is rejected.
-        client = paramiko.SSHClient()
-        policy = SshKnownHostsPolicy(hostname=self.host, port=self.port)
-        policy.apply_to_client(client)
+        # v1.8rc6 (N50): the ONE connect builder (`AGENTS.md` §4.4) — the branch table, the
+        # known-hosts policy and the single `connect()` live in `modules/ssh_connect.py`; this
+        # site keeps only the credential resolution and the error reporting below.
+        try:
+            from .ssh_connect import CONNECT_TIMEOUT_S, connect_client
+        except ImportError:  # flat layout
+            from ssh_connect import CONNECT_TIMEOUT_S, connect_client
 
         # Resolve password: explicit arg > credential manager > key-based fallback
         final_password = self.password or ""
@@ -135,47 +132,17 @@ class SSHWorker(QThread):
             if cached_pw:
                 final_password = cached_pw
 
+        # The client is built BEFORE the try so the `finally: client.close()` below always has one.
+        client = paramiko.SSHClient()
         try:
-            if self.key_path:
-                # v1.2.10 (AUDIT auto #1): parity with SystemInfoCollector (system_info_collector.py:236-240) —
-                # if final_password is set (explicit argument or keyring, lines 127-132), pass it
-                # as a fallback: paramiko tries the key first, then the password. Before the fix
-                # "Connect over SSH" failed where "Gather information" worked. No password — None
-                # (paramiko skips it; the pure key path is unchanged).
-                client.connect(
-                    self.host,
-                    username=self.user,
-                    port=self.port,
-                    key_filename=self.key_path,
-                    password=final_password or None,
-                    timeout=15,
-                    look_for_keys=False,
-                    allow_agent=True,
-                )
-            elif final_password:
-                # v1.1.2RC1 (N5): parity with ssh_terminal.py — when attempting a password
-                # we do NOT probe local keys/ssh-agent (paramiko's True/True defaults
-                # added latency and could "pick up" a foreign key from the agent before
-                # the password attempt).
-                client.connect(
-                    self.host,
-                    username=self.user,
-                    password=final_password,
-                    port=self.port,
-                    timeout=15,
-                    look_for_keys=False,
-                    allow_agent=False,
-                )
-            else:
-                # Pure key-based / agent fallback
-                client.connect(
-                    self.host,
-                    username=self.user,
-                    port=self.port,
-                    timeout=15,
-                    look_for_keys=True,
-                    allow_agent=True,
-                )
+            # v1.2.10 (AUDIT auto #1): the KEY branch passes the resolved password as a
+            # FALLBACK — paramiko tries the key first and the password last. Before the fix
+            # "Connect over SSH" failed where "Gather information" worked. v1.1.2RC1 (N5): the
+            # PASSWORD branch passes look_for_keys=False/allow_agent=False, so no local key and
+            # no agent is polled before the attempt.
+            client, policy = connect_client(self.host, self.user, self.port,
+                                            password=final_password, key_path=self.key_path,
+                                            client=client, timeout=CONNECT_TIMEOUT_S)
 
             msg = t("ssh.connected_ok", host=self.host)
             # AUDIT v0.7.2 (high #4): first connection — warn about the accepted key

@@ -10,9 +10,9 @@ import os
 import re
 import sys
 
-from _common import (bootstrap, check, finish, wait_until, load_i18n_langs, check_i18n_parity,
-                     check_i18n_format, check_release_state, clear_cfg, releases_at_least,
-                     EXPECTED_APP_VERSION, EXPECTED_I18N_KEYS)
+from _common import (VERSION_FORMAT_RE, bootstrap, check, finish, wait_until, load_i18n_langs,
+                     check_i18n_parity, check_i18n_format, check_release_state, clear_cfg,
+                     releases_at_least, EXPECTED_APP_VERSION, EXPECTED_I18N_KEYS)
 
 ROOT, WORK = bootstrap()  # BEFORE the app module imports (the HOME isolation)
 
@@ -706,8 +706,9 @@ tab_i.set_worker(None)
 i18n.set_language("en")
 
 check_release_state(ROOT)
-check("the version pin is the release this file describes",
-      re.fullmatch(r"1\.7(?:\.\d+){0,2}(?:rc\d+)?", EXPECTED_APP_VERSION) is not None,
+check("the version pin is the release this file describes (its own line or a later one)",
+      releases_at_least(EXPECTED_APP_VERSION, "1.7")
+      and VERSION_FORMAT_RE.fullmatch(EXPECTED_APP_VERSION) is not None,
       EXPECTED_APP_VERSION)
 check("the i18n pin counts the SHIPPED release (854 + the 9 keys of v1.7rc3"
       " + the 4 of the v1.7.1 Files panel + the 3 of the v1.7.1.1 Files display mode"
@@ -718,7 +719,7 @@ check("the i18n pin counts the SHIPPED release (854 + the 9 keys of v1.7rc3"
       " delete warning and the local file-surface sentences, and v1.7.4rc2 adds 1: the refusal of a"
       " move that would cross the two sources + the 4 of v1.7.5: the Files settings page, its"
       " ceiling row and its warning, and the truncation notice)",
-      EXPECTED_I18N_KEYS == 854 + 9 + 4 + 3 + 4 + 4 + 19 + 17 + 1 + 4 + 6, str(EXPECTED_I18N_KEYS))
+      EXPECTED_I18N_KEYS == 854 + 9 + 4 + 3 + 4 + 4 + 19 + 17 + 1 + 4 + 6 + 20, str(EXPECTED_I18N_KEYS))
 check("VERSION_FORMAT did NOT move (the project schema is unchanged)",
       __import__("version").VERSION_FORMAT == "0.9")
 check("no new dependency was added for the walk (the four pinned ones)",

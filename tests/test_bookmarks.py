@@ -15,7 +15,8 @@ import webbrowser
 
 from _common import (bootstrap, check, finish, load_i18n_langs, check_i18n_parity,
                      check_i18n_format, check_release_state, clear_cfg, merge_cfg, read_cfg,
-                     write_cfg, EXPECTED_APP_VERSION, EXPECTED_I18N_KEYS,
+                     write_cfg, window_family_sources, window_func_body,
+                     EXPECTED_APP_VERSION, EXPECTED_I18N_KEYS,
                      releases_at_least)
 
 ROOT, WORK = bootstrap()  # BEFORE the app module imports (the HOME isolation inside)
@@ -94,7 +95,7 @@ print("== §1 the store: the file, the read, the merge-write ==")
 # ════════════════════════════════════════════════════════════════════════════
 
 _SRC = open(os.path.join(ROOT, "modules", "bookmarks.py"), encoding="utf-8").read()
-_MAIN_WINDOW_SRC = open(os.path.join(ROOT, "ui", "main_window.py"), encoding="utf-8").read()
+_BOOKMARKS_SRC = window_family_sources(ROOT)["ui/main_window_bookmarks.py"]
 check("§1 the store is headless (no PySide6 import — the module is pure Python)",
       "PySide6" not in _SRC)
 check("§1 the sanitizer of the PROJECT is reused (no second copy of the shape)",
@@ -305,10 +306,10 @@ check("§2 dragging the title band moves the panel and reports it",
       bool(_moved) and panel.pos().x() > win.BOOKMARKS_MARGIN,
       f"pos={panel.pos()} moved={_moved}")
 check("§2 the panel's UI state keys are the declared `ui_bookmarks*` family (the ui_legend rule)",
-      all(key in _MAIN_WINDOW_SRC
+      all(key in _BOOKMARKS_SRC
           for key in ("ui_bookmarks_panel", "ui_bookmarks_collapsed", "ui_bookmarks_position")))
 check("§2 the panel is the FOURTH floating panel of the priority resolver",
-      'getattr(self, "bookmark_panel", None)' in _MAIN_WINDOW_SRC)
+      "'legend', 'bookmark_panel'," in window_func_body("_overlay_panel_rects", ROOT))
 
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -600,8 +601,8 @@ check("§6 the reused keys the editor reports with are the quick-launch ones (no
            "msg.ql_no_browser")))
 check_i18n_parity(langs)
 check_i18n_format(langs)
-check("§6 the pin counts the SHIPPED release (811 + the 17 keys of v1.6.7 + the 13 of v1.6.8 + the 5 of v1.7rc1 + the 8 of v1.7rc2 + the 9 of v1.7rc3 + the 4 of v1.7.1 + the 3 of v1.7.1.1 + the 4 of the v1.7.1.2 device choice + the 4 of v1.7.2: the third row of the display mode (the single window), the merge action with its one closing report and the remote title of a tab + the 19 of v1.7.3: the Send-to row and its dialog, the busy/progress/done/failed reports, the two-sided conflict facts, the remembered-folder sentence, the two drop refusals and Word wrap + the 17 of v1.7.4rc1: the local source switch, its two refusals, the permanent-delete warning and the local file-surface sentences + the 1 of v1.7.4rc2: the refusal of a move that would cross the two sources + the 6 of v1.7.5.1: the three external-terminal refusals, the unpinned host-key warning, the send-queue notice and the refused download name)",
-      EXPECTED_I18N_KEYS == 811 + 17 + 13 + 5 + 8 + 9 + 4 + 3 + 4 + 4 + 19 + 17 + 1 + 4 + 6,
+check("§6 the pin counts the SHIPPED release (811 + the 17 keys of v1.6.7 + the 13 of v1.6.8 + the 5 of v1.7rc1 + the 8 of v1.7rc2 + the 9 of v1.7rc3 + the 4 of v1.7.1 + the 3 of v1.7.1.1 + the 4 of the v1.7.1.2 device choice + the 4 of v1.7.2: the third row of the display mode (the single window), the merge action with its one closing report and the remote title of a tab + the 19 of v1.7.3: the Send-to row and its dialog, the busy/progress/done/failed reports, the two-sided conflict facts, the remembered-folder sentence, the two drop refusals and Word wrap + the 17 of v1.7.4rc1: the local source switch, its two refusals, the permanent-delete warning and the local file-surface sentences + the 1 of v1.7.4rc2: the refusal of a move that would cross the two sources + the 6 of v1.7.5.1: the three external-terminal refusals, the unpinned host-key warning, the send-queue notice and the refused download name and v1.8 adds TWENTY: the elevated pane)",
+      EXPECTED_I18N_KEYS == 811 + 17 + 13 + 5 + 8 + 9 + 4 + 3 + 4 + 4 + 19 + 17 + 1 + 4 + 6 + 20,
       str(EXPECTED_I18N_KEYS))
 check("§6 EXPECTED_APP_VERSION is the release this file describes",
       releases_at_least(EXPECTED_APP_VERSION, "1.7"), EXPECTED_APP_VERSION)

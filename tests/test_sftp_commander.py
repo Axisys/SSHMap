@@ -13,9 +13,9 @@ import posixpath
 import re
 import sys
 
-from _common import (bootstrap, check, finish, wait_until, load_i18n_langs, check_i18n_parity,
-                     check_i18n_format, check_release_state, clear_cfg, read_cfg, releases_at_least,
-                     EXPECTED_APP_VERSION, EXPECTED_I18N_KEYS)
+from _common import (VERSION_FORMAT_RE, bootstrap, check, finish, wait_until, load_i18n_langs,
+                     check_i18n_parity, check_i18n_format, check_release_state, clear_cfg,
+                     read_cfg, releases_at_least, EXPECTED_APP_VERSION, EXPECTED_I18N_KEYS)
 
 ROOT, WORK = bootstrap()  # BEFORE the app module imports (the HOME isolation)
 
@@ -718,8 +718,9 @@ tab_i.set_worker(None)
 i18n.set_language("en")
 
 check_release_state(ROOT)
-check("the version pin is the release this file describes",
-      re.fullmatch(r"1\.7(?:\.\d+){0,2}(?:rc\d+)?", EXPECTED_APP_VERSION) is not None,
+check("the version pin is the release this file describes (its own line or a later one)",
+      releases_at_least(EXPECTED_APP_VERSION, "1.7")
+      and VERSION_FORMAT_RE.fullmatch(EXPECTED_APP_VERSION) is not None,
       EXPECTED_APP_VERSION)
 check("the i18n pin counts the SHIPPED release (846 + the 8 keys of v1.7rc2 + later additions)",
       EXPECTED_I18N_KEYS >= 846 + 8 == 854, str(EXPECTED_I18N_KEYS))

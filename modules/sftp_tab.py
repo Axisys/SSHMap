@@ -2,28 +2,26 @@
 """The Files tab of a terminal session — a CONTAINER of 1–2 PANES over ONE SFTP worker.
 
 `SftpTab` owns the single worker binding, the session's follow switch, the two panes and the ACTIVE
-pane; `_SftpPane` owns one listing (its address bar with the completer, its buttons, its tree, its
-viewer and its task bookkeeping) and binds the SHARED worker's signals, answering only the task ids IT
-queued — so the panes navigate independently, without a second worker or a second channel. The page
-talks to the container (`page.sftp_tab`); a shipped attribute read resolves on the ACTIVE pane.
+pane; `_SftpPane` is a FACADE whose clusters live in `sftp_pane_walk.py` (the pane-scoped keys and
+the mc/far walk), `sftp_pane_listing.py` (the listing, its navigation and its address bar),
+`sftp_pane_viewer.py` (the read-only preview), `sftp_pane_transfer.py` (the transfers, the conflict
+question and the batch copy/move) and `sftp_pane_dnd.py` (the drag & drop and the row context menu),
+over the PURE helpers of `sftp_pane_helpers.py`. A pane binds the SHARED worker's signals and answers
+only the task ids IT queued — so the panes navigate independently, without a second worker or a
+second channel. The page talks to the container (`page.sftp_tab`); a shipped attribute read resolves
+on the ACTIVE pane. Contract — `SFTP_PANES.md`; mechanism — §38, §59-§63."""
 
-The pane-scoped keys (`F3`/`F5`/`F6`/`F7`/`F8` as `Qt.WidgetWithChildrenShortcut` actions ON the pane,
-plus `Tab`/`Shift+Tab` and the walk keys of `_on_pane_key()`) leave the canvas's claim on the F-keys
-intact; the Commander spends ONE button row (the first pane) and the second pane's line on the key
-hints, and a preview opens IN THE OTHER PANE. Contract — `SFTP_PANES.md`; mechanism — §38, §59-§63."""
 import json
 import os
 import posixpath
-from datetime import datetime
 
-from PySide6.QtCore import (QCoreApplication, QEvent, QItemSelectionModel, QMimeData, QSize,
+from PySide6.QtCore import (QCoreApplication, QEvent, QMimeData, QSize,
                             QStringListModel, Qt, QUrl, Signal)
-from PySide6.QtGui import (QAction, QColor, QDrag, QFontDatabase, QIcon,
-                           QKeySequence, QPainter, QPixmap)
+from PySide6.QtGui import QAction, QDrag, QFontDatabase
 from PySide6.QtWidgets import (
     QApplication, QCheckBox, QCompleter, QFileDialog, QHBoxLayout, QInputDialog,
     QLabel, QLineEdit, QMenu, QMessageBox, QPlainTextEdit, QPushButton, QSplitter,
-    QStyle, QToolButton, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget,
+    QToolButton, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget,
 )
 
 try:
@@ -53,20 +51,14 @@ except ImportError:
     except ImportError:  # flat layout: the ui/ directory itself is on sys.path
         focus_ring = None
 
-try:  # v1.3.1: the viewer's shared constants (limit + task_error codes)
-    from .sftp_worker import (KIND_COPY, KIND_DELETE, KIND_MKDIR, KIND_MOVE,
-                              KIND_NORMALIZE, KIND_READ, KIND_RENAME,
-                              MAX_READ_BYTES, MAX_TREE_ENTRIES, MOVE_ERROR_REFUSED,
-                              NAME_ERROR_UNSAFE, OP_KINDS, PARTIAL_CODE, READ_ERROR_BINARY,
-                              READ_ERROR_TOO_LARGE, TREE_ERROR_TOO_BIG,
-                              classify_extension, local_name_problem, parse_task_payload)
+try:  # v1.3.1: the operation kinds THIS module still queues and the task payload readers
+    from .sftp_worker import (KIND_DELETE, KIND_MKDIR, KIND_RENAME, NAME_ERROR_UNSAFE,
+                              READ_ERROR_TOO_LARGE, SftpWorker, parse_task_payload,
+                              register_orphan_sftp_worker)
 except ImportError:
-    from sftp_worker import (KIND_COPY, KIND_DELETE, KIND_MKDIR, KIND_MOVE,
-                             KIND_NORMALIZE, KIND_READ, KIND_RENAME,
-                             MAX_READ_BYTES, MAX_TREE_ENTRIES, MOVE_ERROR_REFUSED,
-                             NAME_ERROR_UNSAFE, OP_KINDS, PARTIAL_CODE, READ_ERROR_BINARY,
-                             READ_ERROR_TOO_LARGE, TREE_ERROR_TOO_BIG,
-                             classify_extension, local_name_problem, parse_task_payload)
+    from sftp_worker import (KIND_DELETE, KIND_MKDIR, KIND_RENAME, NAME_ERROR_UNSAFE,
+                             READ_ERROR_TOO_LARGE, SftpWorker, parse_task_payload,
+                             register_orphan_sftp_worker)
 
 try:  # v1.4.7 (ROADMAP task 4): detection + tokenizers + the ONE highlighter
     from . import syntax_highlight as syntax
@@ -88,6 +80,48 @@ try:  # v1.7.4rc1: the LOCAL provider of a pane and the machine codes of its ref
 except ImportError:  # flat launch from the project root
     import local_fs_worker as local_fs
 
+try:  # v1.8: the ELEVATED provider of a pane — the handshake the pane starts
+    from .sftp_elevated import ElevatedHandshake
+except ImportError:  # flat launch from the project root
+    from sftp_elevated import ElevatedHandshake
+
+try:  # v1.8: the elevation dialogue (the pane resolves it as a facade global, the shipped seam)
+    from ..dialogs.elevated_dialog import ask_elevation
+except ImportError:  # flat launch from the project root
+    from dialogs.elevated_dialog import ask_elevation
+
+# v1.8rc4/rc5: `_SftpPane` is a FACADE over its pane mixins — the pane-scoped keys and the walk, the
+# listing with its address bar, the read-only preview, the transfers with the batch copy/move, and
+# the drag & drop with the row context menu. The module-level facts of a cluster travel WITH it and
+# are imported back here, so `modules.sftp_tab` keeps the shipped surface a caller and the suite
+# already read (`PANE_SHORTCUTS`, `SORT_COLUMNS`, `format_size`, `ask_conflict`, …).
+try:
+    from .sftp_pane_walk import (PANE_HINTS, PANE_SHORTCUTS, HINT_SEPARATOR,
+                                 SftpPaneWalkMixin)
+    from .sftp_pane_listing import (SORT_COLUMNS, SORT_DEFAULT_COLUMN,
+                                    SftpPaneListingMixin)
+    from .sftp_pane_viewer import (VIEWER_FREEZE_MS_PER_MB, VIEWER_MAX_BYTES_CONFIG,
+                                   VIEWER_MAX_BYTES_MAX, VIEWER_MAX_BYTES_MIN,
+                                   VIEWER_MAX_BYTES_STEP, VIEWER_MAX_BYTES_WARN,
+                                   SftpPaneViewerMixin, viewer_freeze_seconds)
+    from .sftp_pane_helpers import (ask_conflict, decode_text, format_mtime, format_size,
+                                    preview_block_reason)
+    from .sftp_pane_transfer import SftpPaneTransferMixin
+    from .sftp_pane_dnd import SftpPaneDndMixin
+    from .sftp_pane_elevated import SftpPaneElevatedMixin
+except ImportError:  # flat launch from the project root
+    from sftp_pane_walk import PANE_HINTS, PANE_SHORTCUTS, HINT_SEPARATOR, SftpPaneWalkMixin
+    from sftp_pane_listing import SORT_COLUMNS, SORT_DEFAULT_COLUMN, SftpPaneListingMixin
+    from sftp_pane_viewer import (VIEWER_FREEZE_MS_PER_MB, VIEWER_MAX_BYTES_CONFIG,
+                                  VIEWER_MAX_BYTES_MAX, VIEWER_MAX_BYTES_MIN,
+                                  VIEWER_MAX_BYTES_STEP, VIEWER_MAX_BYTES_WARN,
+                                  SftpPaneViewerMixin, viewer_freeze_seconds)
+    from sftp_pane_helpers import (ask_conflict, decode_text, format_mtime, format_size,
+                                   preview_block_reason)
+    from sftp_pane_transfer import SftpPaneTransferMixin
+    from sftp_pane_dnd import SftpPaneDndMixin
+    from sftp_pane_elevated import SftpPaneElevatedMixin
+
 
 # ── the Files Commander — the pane model ───────────
 # The state of the two-pane view lives in `~/.sshmap/config.json`, exactly like the terminal SPLIT's
@@ -104,40 +138,6 @@ COMMANDER_RATIO_MAX = 0.8
 #: while the mode is on (Qt gotcha #13 forbids `setMaximum*` on a splitter member) and
 #: dropped again when it goes off, so the single-pane look costs no floor at all.
 COMMANDER_MIN_PANE_PX = 200
-
-#: The pane-scoped key map (SFTP_PANES.md "The key map"). ONE `QAction` per row, owned
-#: by the PANE with `Qt.WidgetWithChildrenShortcut`: the key fires while the keyboard is
-#: inside THAT pane and nowhere else, so the terminal canvas keeps its own claim on the
-#: F-keys and the window's action registry stays the home of the GLOBAL actions (§4.9).
-#: `F4` is deliberately absent — the application has no remote editing at all.
-PANE_SHORTCUTS = (
-    ("F3", "_cmd_view"),
-    ("F5", "_cmd_copy"),
-    ("F6", "_cmd_move_rename"),
-    ("F7", "_cmd_mkdir"),
-    ("F8", "_cmd_delete"),
-)
-
-#: The ROW the SECOND pane shows where the first one keeps its buttons. In the two-pane view the
-#: shipped button row belongs to the FIRST pane (the mc/far look: the commander has ONE button row and
-#: the panes are nothing but listings), so the right pane spends that line on the key HINTS of the keys
-#: it really answers — the classic commander's bottom line. The pairs travel with `PANE_SHORTCUTS` (the
-#: same keys, in the same order) and the two that are not F-keys close the row. A tuple, never a table.
-PANE_HINTS = (
-    ("F3", "sftp.hint.view"),
-    ("F5", "sftp.hint.copy"),
-    ("F6", "sftp.hint.move"),
-    ("F7", "sftp.hint.mkdir"),
-    ("F8", "sftp.hint.delete"),
-    ("Tab", "sftp.cmd.switch_pane"),
-    ("Ins", "sftp.hint.mark"),
-    ("Enter", "sftp.hint.open"),
-)
-
-#: The hint row's own layout (v1.7rc3): the separator between two entries and the elide
-#: mode of the label — the row is ONE line and never grows with the pane's width or with
-#: the number of entries (a wrapped second line would move the listing under the cursor).
-HINT_SEPARATOR = "  ·  "
 
 #: The floor of the shared row of the pane (v1.7rc3), in pixels: the button row lives inside ONE
 #: wrapper widget (so the two-pane view can hide it as a unit) and a bare `QWidget` would report
@@ -162,24 +162,6 @@ MAX_REMEMBERED_DIRS = 32
 #: extension is a HINT, the value is a real JSON bool or the default.
 VIEWER_WRAP_CONFIG = "ui_viewer_wrap"
 
-#: v1.7.5: the reader's CEILING as a SETTING — the reader truncates at the cap instead of refusing
-#: the file, so `MAX_READ_BYTES` (the shipped read policy) is the DEFAULT and the FLOOR of this key
-#: while the slider's top is a DECLARED 250 MiB. The pane resolves the cap ONCE and hands it to the
-#: task (`_SftpTask.max_bytes`), so the worker never reads a config (AGENTS.md §4.8, §4.15).
-VIEWER_MAX_BYTES_CONFIG = "ui_viewer_max_bytes"
-VIEWER_MAX_BYTES_MIN = MAX_READ_BYTES            # 1 MiB — the shipped policy is the smallest cap
-VIEWER_MAX_BYTES_MAX = 250 * 1024 * 1024         # the slider's hard top
-VIEWER_MAX_BYTES_STEP = 1024 * 1024              # one step of the slider and of the value box
-#: Above this the settings page WARNS: a `QPlainTextEdit` fed tens of megabytes is seconds of freeze.
-VIEWER_MAX_BYTES_WARN = 3 * 1024 * 1024
-
-#: v1.7.5: the LISTING's sort state is a VIEW state of the session (the pane's listing is rebuilt on
-#: every navigation), never a config key: the column the header click chose and its direction. The
-#: default IS the provider's own order (directories first, then case-insensitive by name), which is
-#: why a listing nobody sorted is not re-ordered at all.
-SORT_DEFAULT_COLUMN = 0
-SORT_COLUMNS = (0, 1, 2)   # Name | Size | Modified — the three real sort keys of the pane
-
 #: v1.7.3: the drag payload of a row that started INSIDE a Files pane. The remote path alone
 #: cannot say WHICH pane (two servers show the same path), so the private type carries the session
 #: key, the pane's identity and the path while `text/plain` keeps the plain path for every foreign
@@ -195,9 +177,18 @@ SOURCE_REMOTE = "remote"
 SOURCE_LOCAL = "local"
 PANE_SOURCES = (SOURCE_REMOTE, SOURCE_LOCAL)
 
+#: v1.8: the THIRD position of a pane's SOURCE CONTROL — a REMOTE pane whose PROVIDER reads the
+#: server as another user (`ELEVATED_PANE.md` §1). It is deliberately NOT a third data source: the
+#: dialect stays POSIX, `PANE_SOURCES` keeps its pair and §5's four-pair dispatch keeps its rows.
+SOURCE_ELEVATED = "elevated"
+
 #: The local pane's control and the sentence of its two structural refusals — declared ONCE.
 LOCAL_SOURCE_LABEL = "sftp.local.source"
 LOCAL_UNAVAILABLE_HINT = "sftp.local.unavailable"
+
+#: v1.8: the elevated pane's third button of the SAME control (`ELEVATED_PANE.md` §4).
+ELEVATED_SOURCE_LABEL = "sftp.elevated.button"
+ELEVATED_SOURCE_TOOLTIP = "sftp.elevated.tooltip"
 
 
 def _win_standard_path(path: str) -> str:
@@ -543,76 +534,26 @@ def _apply_status_style(widget, key: str) -> None:
         widget.setStyleSheet(f"color: {theme.TEXT_MUTED}; padding: 2px 0;")
 
 
-def format_size(n) -> str:
-    """Human-readable size: 0 → "0 B", 1536 → "1.5 KB" (no locales)."""
-    try:
-        n = int(n)
-    except (TypeError, ValueError):
-        return "?"
-    if n < 0:
-        return "?"
-    value = float(n)
-    for unit in ("B", "KB", "MB", "GB"):
-        if value < 1024.0 or unit == "GB":
-            return f"{int(value)} B" if unit == "B" else f"{value:.1f} {unit}"
-        value /= 1024.0
-    return f"{value:.1f} TB"
+def read_was_truncated(data_len, cap, known_size=0) -> bool:
+    """PURE (N46): did a read stop at the pane's ceiling — i.e. is the tail cut?
 
-
-def format_mtime(ts) -> str:
-    """Local mtime time "%Y-%m-%d %H:%M"; broken/zero → ""."""
-    try:
-        ts = int(ts)
-    except (TypeError, ValueError):
-        return ""
-    if ts <= 0:
-        return ""
-    try:
-        return datetime.fromtimestamp(ts).strftime("%Y-%m-%d %H:%M")
-    except (OverflowError, OSError, ValueError):
-        return ""
-
-
-def decode_text(data: bytes):
-    """v1.3.1 (ROADMAP task 3): bytes → (text, encoding).
-
-    UTF-8 (BOM-aware — "utf-8-sig" strips an UTF-8 BOM) first; on a decode
-    failure the Latin-1 fallback, which never fails and always yields a string
-    (mojibake instead of an exception — the header carries the encoding note).
+    The listing's own size is the CERTAIN signal (`known_size > data_len` — the very condition the
+    panel already reports as `sftp.viewer.truncated`); the ceiling is the fallback for a file the
+    listing does not know, where a read that returned the whole cap can only have been cut. A file
+    the listing measures as COMPLETE is never called truncated, whatever the cap is.
     """
     try:
-        return data.decode("utf-8-sig"), "utf-8"
-    except UnicodeDecodeError:
-        return data.decode("latin-1", errors="replace"), "latin-1"
-
-
-def preview_block_reason(path: str, size=0, facts=None) -> str:
-    """v1.3.1.1: will the viewer refuse this file? "" (no) | "binary" | "too_large".
-
-    The order of the answers is the point of this function — from the certain to
-    the guessed:
-
-      1. `facts` — the results of REAL read attempts of this session (path →
-         reason): the worker is the only one who sees the content, so its verdict
-         wins. A `.txt` with a null byte looks like text by name and is refused by
-         the worker — the row is marked only after the attempt, and from then on
-         the mark is the truth;
-      2. the extension (a GUESS — the null-byte screen can still refuse the file,
-         and a file with an unknown/absent extension usually reads fine).
-
-    **`size` is accepted for the callers' shape and is deliberately NOT a reason**
-    (v1.7.5): the read is TRUNCATED at the configured ceiling, never refused, so a
-    file over the cap opens with its first `cap` bytes and the panel says how much
-    of how many it shows (`sftp.viewer.truncated`). A `too_large` FACT of a real
-    read attempt still marks the row; the size alone does not.
-    """
-    if facts:
-        known = facts.get(path)
-        if known:
-            return known
-    if classify_extension(path) == "binary":
-        return READ_ERROR_BINARY
-    return ""
+        known = int(known_size or 0)
+        length = int(data_len or 0)
+    except (TypeError, ValueError):
+        return False
+    if known > 0:
+        return known > length
+    try:
+        cap = int(cap or 0)
+    except (TypeError, ValueError):
+        return False
+    return cap > 0 and length >= cap
 
 
 def row_path(item) -> str:
@@ -640,62 +581,6 @@ def row_name(item) -> str:
         return str(item.text(0) or "")
     except (RuntimeError, AttributeError):
         return ""
-
-
-def ask_conflict(parent, name: str, target: str, remaining: int = 0, facts: str = ""):
-    """v1.3.3.2 (ROADMAP task 2): the overwrite question for ONE item of a batch.
-
-    Returns `(action, apply_all)`, where action is one of
-
-      * `"overwrite"` — replace the existing destination;
-      * `"skip"` — leave the destination alone and go on with the batch;
-      * `"rename"` — ask for another name (the caller prompts, then uploads /
-        downloads under it) — `apply_all` is never set for it: a batch rename needs
-        a name per file;
-      * a cancelled dialog (Esc / the window's X) is reported as `"skip"`.
-
-    `remaining` is the number of conflicts still to come in this batch — "Apply to
-    all" is offered only when there is anything left to apply it to.
-
-    `facts` is the ONE optional line the cross-session send adds (v1.7.3): both sides'
-    size and date, rendered as the message box's informative text when it is non-empty.
-
-    The QMessageBox is taken as a MODULE ATTRIBUTE at call time
-    (`STAB.QMessageBox = <fake>` is the test seam — the command-library pattern);
-    the pane's `_ask_conflict()` is the caller, so a test can also replace the whole
-    decision.
-    """
-    box = QMessageBox(parent)   # a module attribute — the monkeypatch seam
-    box.setWindowTitle(_t("sftp.conflict.title"))
-    try:
-        box.setIcon(QMessageBox.Icon.Question)
-    except Exception:   # noqa: BLE001 — an exotic Qt build without the enum
-        pass
-    box.setText(_t("sftp.conflict.message", name=name, target=target))
-    if facts:
-        try:
-            box.setInformativeText(str(facts))
-        except Exception:   # noqa: BLE001 — a build without the setter keeps the question
-            pass
-    btn_over = box.addButton(_t("sftp.conflict.overwrite"),
-                             QMessageBox.ButtonRole.AcceptRole)
-    box.addButton(_t("sftp.conflict.skip"),
-                  QMessageBox.ButtonRole.RejectRole)
-    btn_rename = box.addButton(_t("sftp.conflict.rename"),
-                               QMessageBox.ButtonRole.ActionRole)
-    check = QCheckBox(_t("sftp.conflict.apply_all"))
-    check.setEnabled(int(remaining or 0) > 0)
-    box.setCheckBox(check)
-    box.exec()
-    clicked = box.clickedButton()
-    if clicked is btn_over:
-        action = "overwrite"
-    elif clicked is btn_rename:
-        action = "rename"
-    else:
-        action = "skip"        # Skip, or a cancelled dialog (clickedButton() is None)
-    apply_all = bool(check.isChecked()) and action in ("overwrite", "skip")
-    return action, apply_all
 
 
 def local_files(mime_data) -> list:
@@ -930,12 +815,13 @@ class _ButtonRow(QWidget):
 
 
 class _SourceSwitch(QWidget):
-    """The `Server | Local` control of the pane's address row (v1.7.4rc1, LOCAL_PANE.md §4).
+    """The `Server | Local | Elevated` control of the pane's address row (v1.7.4rc1, LOCAL_PANE.md §4).
 
-    ONE checkable pair driving ONE state (the `CommanderCorner` discipline: the two buttons are
+    ONE checkable group driving ONE state (the `CommanderCorner` discipline: the buttons are
     views of `source`, so the look can never disagree with the provider the pane bound), and the
     label spells out WHAT is being switched — the pane's own source, not the session's. The widget
-    only EMITS: the container decides whether the local source is available at all.
+    only EMITS: the container decides whether the local and the elevated sources are available at
+    all, and the pane translates the elevated token into "a REMOTE pane whose provider is elevated".
     """
 
     changed = Signal(str)
@@ -951,14 +837,17 @@ class _SourceSwitch(QWidget):
         row.addWidget(self.lbl)
         self.btn_server = QToolButton()
         self.btn_local = QToolButton()
+        self.btn_elevated = QToolButton()
         for button, source, key in ((self.btn_server, SOURCE_REMOTE, "sftp.local.server"),
-                                    (self.btn_local, SOURCE_LOCAL, "sftp.local.local")):
+                                    (self.btn_local, SOURCE_LOCAL, "sftp.local.local"),
+                                    (self.btn_elevated, SOURCE_ELEVATED, ELEVATED_SOURCE_LABEL)):
             button.setText(_t(key))
             button.setCheckable(True)
             button.setAutoRaise(True)
             button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
             button.clicked.connect(lambda _checked=False, s=source: self._on_clicked(s))
             row.addWidget(button)
+        self.btn_elevated.setToolTip(_t(ELEVATED_SOURCE_TOOLTIP))
         self.apply(SOURCE_REMOTE)
 
     def _on_clicked(self, source: str):
@@ -972,21 +861,23 @@ class _SourceSwitch(QWidget):
 
     def apply(self, source: str):
         """Show ONE source as the live one (the state is written HERE and nowhere else)."""
-        self._source = SOURCE_LOCAL if str(source) == SOURCE_LOCAL else SOURCE_REMOTE
-        for button, value in ((self.btn_server, SOURCE_REMOTE), (self.btn_local, SOURCE_LOCAL)):
+        token = str(source or "")
+        self._source = token if token in (SOURCE_LOCAL, SOURCE_ELEVATED) else SOURCE_REMOTE
+        for button, value in ((self.btn_server, SOURCE_REMOTE), (self.btn_local, SOURCE_LOCAL),
+                              (self.btn_elevated, SOURCE_ELEVATED)):
             try:
                 button.setChecked(self._source == value)
             except RuntimeError:
                 pass  # Qt teardown — the button is already gone
 
     def set_available(self, enabled: bool, available: bool = True):
-        """Enable/disable the pair and say WHY through the tooltip (never a silent dead control).
+        """Enable/disable the group and say WHY through the tooltip (never a silent dead control).
 
         The WIDGET itself is disabled as well as its parts, so the whole control reads as one
         (a disabled container with enabled children would be an ambiguous answer).
         """
         on = bool(enabled) and bool(available)
-        for widget in (self, self.lbl, self.btn_server, self.btn_local):
+        for widget in (self, self.lbl, self.btn_server, self.btn_local, self.btn_elevated):
             try:
                 widget.setEnabled(on)
             except RuntimeError:
@@ -1001,6 +892,8 @@ class _SourceSwitch(QWidget):
             self.lbl.setText(_t(LOCAL_SOURCE_LABEL))
             self.btn_server.setText(_t("sftp.local.server"))
             self.btn_local.setText(_t("sftp.local.local"))
+            self.btn_elevated.setText(_t(ELEVATED_SOURCE_LABEL))
+            self.btn_elevated.setToolTip(_t(ELEVATED_SOURCE_TOOLTIP))
             self.apply(self._source)
         except RuntimeError:
             pass  # Qt teardown
@@ -1018,15 +911,23 @@ def _sync_source_switch(switch, source: str, enabled: bool = True, available: bo
         pass  # Qt teardown / a bare stub in a unit test — never raises
 
 
-class _SftpPane(QWidget):
-    """v1.7rc1 (ROADMAP v1.7rc1, task 2): ONE directory pane of the "Files" tab.
+class _SftpPane(SftpPaneWalkMixin, SftpPaneListingMixin, SftpPaneViewerMixin,
+                SftpPaneTransferMixin, SftpPaneDndMixin, SftpPaneElevatedMixin, QWidget):
+    """ONE directory pane of the "Files" tab — a FACADE over its six pane mixins.
 
-    The mechanical split of the shipped `SftpTab`: the address bar (an editable
-    `QLineEdit` whose Enter is answered by the SERVER), the button row, the listing tree
-    with drag-OUT and the "no preview" markers, the read-only preview viewer with its
-    lazy highlighter, and the D&D handlers of a drop INTO the pane. Everything a pane
-    owns is per-listing state; the WORKER is the container's (`self.worker` reads it), so
-    a second pane costs a second listing and never a second channel.
+    The facade keeps what ONE pane is: the assembly (`__init__` with the address bar, the button
+    row, the tree and the viewer widgets), the worker binding and the source switch, the file
+    operations, the copy/move batches, the context menu, the drag & drop handlers, the worker
+    slots and the theme/re-text walks. The clusters live in their own modules: the pane-scoped
+    keys and the mc/far walk (`sftp_pane_walk.py`), the listing and the address bar
+    (`sftp_pane_listing.py`), the read-only preview (`sftp_pane_viewer.py`), the transfers with
+    the batch copy/move (`sftp_pane_transfer.py`), the drag & drop with the row context menu
+    (`sftp_pane_dnd.py`) and the ELEVATED source (`sftp_pane_elevated.py`, `AGENTS.md` §4.25).
+
+    A mixin never imports this module — it duck-types the instance and resolves a facade global
+    through `host_attr()` at call time (`MODULE_FACADE_SEAMS` below DECLARES them, `AGENTS.md`
+    §4.1, §4.3). Everything a pane owns is per-listing state; the WORKER is the container's
+    (`self.worker` reads it), so a second pane costs a second listing and never a second channel.
 
     The pane answers only the task ids IT queued: the shared worker signals every pane,
     and the one that does not own a task returns without rendering or reporting anything
@@ -1037,22 +938,6 @@ class _SftpPane(QWidget):
     ISDIR_ROLE = Qt.ItemDataRole.UserRole + 1  # bool — is it a directory?
     SIZE_ROLE = Qt.ItemDataRole.UserRole + 2   # int — file size (0 for a directory)
     MTIME_ROLE = Qt.ItemDataRole.UserRole + 3  # int — unix mtime
-
-    # v1.3.1: the preview panel — the tree's share of the splitter on the first open.
-    VIEWER_TREE_SHARE = 0.45
-
-    # v1.3.1: the width the share above is measured against while the splitter is not laid out yet
-    # (a panel opened on a never-shown tab measured 0 — the share is computed for SOMETHING).
-    VIEWER_MIN_TOTAL_PX = 640
-
-    # v1.4.7: the blocks formatted AROUND the viewport on either side (the lazy
-    # window of the highlighter — a small scroll costs nothing because the
-    # neighbours are already done).
-    VIEWER_LAZY_MARGIN = syntax.VIEWER_LAZY_MARGIN
-
-    # v1.7.3: the multiplier of that margin while the reader WRAPS — one block is several visual
-    # rows there, so the window has to reach further to cover the same distance on the screen.
-    WRAP_MARGIN_FACTOR = 2
 
     # Local hints in the window's status bar (waiting for connection, no selection).
     # Worker errors/progress are shown by the window itself via its signals.
@@ -1153,6 +1038,15 @@ class _SftpPane(QWidget):
         #: through the server (LOCAL_PANE.md §4), while the REMOTE side is re-opened by the
         #: session's own rule (the per-server memory, then "/").
         self._local_dir = ""
+        # v1.8: the ELEVATED provider of this pane (ELEVATED_PANE.md §1) — the SHIPPED
+        # `SftpWorker` over the client the handshake opened as another user, plus its client (the
+        # object that closes the channel), the target user, the in-flight flag and the handshake
+        # thread. The SOURCE stays `SOURCE_REMOTE`; only the provider the pane binds changes.
+        self._elevated_provider = None
+        self._elevated_client = None
+        self._elevation_user = ""
+        self._elevation_pending = False
+        self._handshake = None
         self._waiting = True   # no provider bound yet: the shipped "waiting for connection" state
 
         t = _t
@@ -1351,7 +1245,7 @@ class _SftpPane(QWidget):
             self._ring.styled_widget = self.tree
             self._ring.apply()
 
-    # ── v1.7rc1: the pane identity, the ACTIVE-pane hook and the pane-scoped keys ──
+    # ── v1.7rc1: the pane identity and the ACTIVE-pane hook ──────────────
 
     @property
     def source(self) -> str:
@@ -1365,13 +1259,15 @@ class _SftpPane(QWidget):
 
     @property
     def provider(self):
-        """The object this pane binds (the shipped worker, or the pane's own local provider).
+        """The object this pane binds (the shipped worker, the local provider, or the elevated one).
 
         `None` — no provider yet: a remote pane waiting for the session's connection. A LOCAL pane
-        always has one, which is why the waiting state is a REMOTE state.
+        and an ELEVATED one always have theirs, which is why the waiting state is a REMOTE state.
         """
         if self._source == SOURCE_LOCAL:
             return self._local_provider
+        if self._elevated_provider is not None:
+            return self._elevated_provider
         return self.worker
 
     @property
@@ -1407,404 +1303,6 @@ class _SftpPane(QWidget):
         except RuntimeError:
             pass  # Qt teardown — the tree is already destroyed
 
-    def _build_pane_shortcuts(self):
-        """The pane-scoped key map: ONE `WidgetWithChildrenShortcut` action per row.
-
-        The context is what keeps the contract: the shortcut fires while the keyboard is
-        inside THIS pane, so `F5` typed into the terminal canvas never reaches the pane
-        and the canvas keeps sending it to the shell (§4.3).
-        """
-        for seq, slot_name in PANE_SHORTCUTS:
-            slot = getattr(self, slot_name, None)
-            if not callable(slot):
-                continue
-            act = QAction(self)
-            act.setShortcut(QKeySequence(seq))
-            act.setShortcutContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
-            act.triggered.connect(slot)
-            self.addAction(act)
-            self._pane_actions.append((seq, act))
-
-    def pane_shortcut(self, seq: str):
-        """The QAction of a pane-scoped key (None — the key is not part of the map)."""
-        for key, act in self._pane_actions:
-            if key == seq:
-                return act
-        return None
-
-    def set_pane_keys_enabled(self, on: bool):
-        """Arm/disarm the pane-scoped keys of THIS pane (v1.7). Never raises.
-
-        A pane CARRYING a borrowed panel is a PANEL and its own listing is off the screen
-        (`present_viewer_in()` hides the tree), so its `F3`-`F8` would act on rows nobody can see —
-        the keys are disarmed for as long as the panel is there and re-armed with the listing.
-        """
-        for _seq, act in self._pane_actions:
-            try:
-                act.setEnabled(bool(on))
-            except RuntimeError:
-                continue   # Qt teardown — the action's pane is already gone
-
-    # ── v1.7rc3: the SECOND pane — the button row that moves out, the hints that move in ──
-
-    @property
-    def secondary(self) -> bool:
-        """True — this pane is the RIGHT pane of the two-pane view. Set by the CONTAINER."""
-        return bool(self.__dict__.get("_secondary", False))
-
-    @secondary.setter
-    def secondary(self, on):
-        self._secondary = bool(on)
-        self._sync_secondary_ui()
-
-    def hint_text(self) -> str:
-        """The key hints of this pane as ONE line (the commander's bottom line).
-
-        Built from `PANE_HINTS` — the SAME keys the pane really binds (`PANE_SHORTCUTS`) plus
-        the three that are not `QAction`s (the pane toggle, the mark key and the open key) —
-        so the row can never advertise a key the pane does not answer, and a translation is
-        read at call time (a language switch re-texts through `retranslate()`).
-        """
-        parts = []
-        for key, label in PANE_HINTS:
-            try:
-                text = _t(label)
-            except Exception:  # noqa: BLE001 — a build without i18n keeps the key itself
-                text = label
-            parts.append(f"{key} {text}")
-        return HINT_SEPARATOR.join(parts)
-
-    def _sync_secondary_ui(self):
-        """Show the button row OR the hints row according to this pane's role. Never raises.
-
-        The two rows share ONE line of the layout: the pane that keeps the buttons hides the
-        hints, and the RIGHT pane of the two-pane view hides the buttons (the shipped row
-        belongs to the first pane — the mc/far look) and shows the hints. The row is never
-        BOTH and never NEITHER, so the listing never jumps by a line.
-
-        v1.7rc3: a pane CARRYING a borrowed preview (`_viewer_borrowed`) is a PANEL, not a
-        listing — it then shows NO row at all (and no address bar), because the row would act on
-        a listing nobody can see.
-        """
-        secondary = self.secondary
-        borrowed = bool(getattr(self, "_viewer_borrowed", False))
-        try:
-            self.buttons_bar.setVisible(not secondary and not borrowed)
-            self.hints_label.setVisible(secondary and not borrowed)
-            # v1.7.4rc1: the source switch belongs to the ADDRESS ROW, so it is visible exactly
-            # while that row is — a pane carrying a borrowed preview is a panel and shows neither.
-            switch = getattr(self, "source_switch", None)
-            if switch is not None:
-                switch.setVisible(not borrowed)
-            if secondary:
-                self.hints_label.setText(self.hint_text())
-                self.hints_label.setToolTip(self.hint_text())
-                # ONE line whose height is the button row's: switching panes must not resize the
-                # listing by a few pixels (the ring's rule: a state change never reflows).
-                height = self.buttons_bar.sizeHint().height()
-                if height > 0:
-                    self.hints_label.setFixedHeight(height)
-        except (RuntimeError, AttributeError):
-            pass  # Qt teardown / a pane built before the row exists
-        # The availability of the local source follows the ROLE of the pane (LOCAL_PANE.md §4):
-        # only the second pane of the two-pane view may switch it.
-        self._sync_source_availability()
-
-    def focus_listing(self):
-        """Give the keyboard to this pane's listing (the mc/far walk's landing point).
-
-        The tree is the pane's keyboard domain, so a pane switch lands there and the arrows
-        work at once; a listing with no current row gets its first navigable one, so `F3`/`F5`
-        and the walk have a subject. Never raises.
-        """
-        try:
-            self.tree.setFocus(Qt.FocusReason.OtherFocusReason)
-        except (RuntimeError, AttributeError):
-            return
-        try:
-            if self.tree.currentItem() is None:
-                count = self.tree.topLevelItemCount()
-                for i in range(count):
-                    item = self.tree.topLevelItem(i)
-                    if item is not None and item is not self._up_item:
-                        self.tree.setCurrentItem(item)
-                        break
-        except RuntimeError:
-            pass  # Qt teardown — nothing to select
-
-    def _step_current_row(self, delta: int):
-        """Move the current row by `delta` over the navigable rows of the listing.
-
-        Only the rows a batch can act on take part (the ".." row is skipped — it is navigation,
-        not a subject), which is what makes `Insert`/`Space` the mc/far MARK: the cursor walks
-        the files and never lands on "..".
-
-        Qt marks the row it is told to make CURRENT (`setCurrentItem` selects it and DROPS the
-        rest of the selection), which is exactly the wrong half for a MARK: the walk therefore
-        moves the CURRENT INDEX through the selection model (`CursorPosition` — no selection is
-        touched at all), so a marked row stays marked while the cursor travels over it. The
-        plain walk of `Enter`/`Left` never needs the selection half either. Never raises.
-        """
-        try:
-            rows = [self.tree.topLevelItem(i) for i in range(self.tree.topLevelItemCount())]
-        except RuntimeError:
-            return
-        rows = [r for r in rows if r is not None and r is not self._up_item]
-        current = self.tree.currentItem()
-        if not rows:
-            # an off-tree ".." row is the only thing on the screen: leave it, so a mark never
-            # stays parked on navigation
-            if current is self._up_item:
-                self._move_cursor(self.tree.topLevelItem(0) if self.tree.topLevelItemCount()
-                                  else None)
-            return
-        index = rows.index(current) if current in rows else -1
-        if index < 0:
-            index = 0 if delta > 0 else len(rows) - 1
-        else:
-            index = max(0, min(len(rows) - 1, index + delta))
-        self._move_cursor(rows[index])
-
-    def _move_cursor(self, item):
-        """Make `item` the CURRENT row WITHOUT touching the selection (v1.7rc3). Never raises.
-
-        `QTreeWidget.setCurrentItem()` selects the row and clears the rest of the selection —
-        fine for a click, fatal for a MARK (`Insert` would unmark what it just marked and every
-        earlier mark would be dropped on the next step). The cursor moves through the selection
-        model instead, which is what the tree's own keyboard walk uses internally.
-        """
-        if item is None:
-            return
-        try:
-            model = self.tree.selectionModel()
-            index = self.tree.indexFromItem(item)
-            if model is None or not index.isValid():
-                return
-            model.setCurrentIndex(index, QItemSelectionModel.SelectionFlag.NoUpdate)
-        except (RuntimeError, AttributeError):
-            pass  # Qt teardown — the model is gone
-
-    def _set_row_marked(self, item, marked: bool):
-        """Mark/unmark ONE row through the SELECTION MODEL (v1.7rc3). Never raises.
-
-        `QTreeWidgetItem.setSelected()` is the item-level API and it does not reliably update the
-        view's selection model on the CURRENT row (the mark of the row the cursor sits on is
-        exactly what `Insert` toggles, so it is the one that matters). The model is the storage
-        the batch READS (`tree.selectedItems()`), so the mark is written there.
-        """
-        if item is None:
-            return
-        try:
-            model = self.tree.selectionModel()
-            index = self.tree.indexFromItem(item)
-            if model is None or not index.isValid():
-                return
-            flag = (QItemSelectionModel.SelectionFlag.Select if marked
-                    else QItemSelectionModel.SelectionFlag.Deselect)
-            model.select(index, flag | QItemSelectionModel.SelectionFlag.Rows)
-        except (RuntimeError, AttributeError):
-            pass  # Qt teardown — the model is gone
-
-    def _row_marked(self, item) -> bool:
-        """True — THIS row carries the mark (read from the SAME selection model)."""
-        if item is None:
-            return False
-        try:
-            model = self.tree.selectionModel()
-            index = self.tree.indexFromItem(item)
-            if model is None or not index.isValid():
-                return False
-            return bool(model.isSelected(index))
-        except (RuntimeError, AttributeError):
-            return False
-
-    def _mark_current_row(self):
-        """v1.7rc3: `Insert`/`Space` — MARK the current row and step down (the mc/far mark).
-
-        The mark IS the tree's selection (`ExtendedSelection`), which is what the batch of
-        `F5`/`F6` reads (`_rows_for_batch()`), so marking needs no second state and no second
-        truth. The cursor travels through `_move_cursor()` (never `setCurrentItem`, which would
-        drop the marks already made), so the same key really means "mark" and "unmark" in turn.
-        With no row at all the pane answers the shipped "select a row first" sentence.
-        """
-        try:
-            item = self.tree.currentItem()
-        except RuntimeError:
-            return
-        if item is None or item is self._up_item or not item.data(0, self.PATH_ROLE):
-            self.message.emit(_t("sftp.cmd.no_selection"))
-            return
-        self._set_row_marked(item, not self._row_marked(item))
-        # The mark walks DOWN, like every commander: the next key marks the next row.
-        self._step_current_row(1)
-
-    def _on_pane_key(self, event) -> bool:
-        """v1.7rc3: the mc/far walk of the two-pane view; True — the pane consumed the key.
-
-        ONE decision point for every widget of the pane: the tree calls it from its own
-        `keyPressEvent`, the pane's `eventFilter` calls it for the address bar and the buttons,
-        so `Tab` switches the panes from wherever the keyboard is (the buttons of the SHIPPED
-        single-pane look sit in the tab order otherwise, and a `Tab` there would walk them one
-        by one instead of changing the pane).
-
-        Keys handled here: `Tab`/`Backtab` (the pane toggle), `Enter`/`Return` (the shipped
-        double-click), `Insert`/`Space` (the mark), `Backspace` (one level up), `Left` (leave
-        a directory for its parent row) and `Esc` (close the open preview — wherever it is
-        shown). Everything else falls through to Qt — the arrows, the type-ahead and the
-        selection modifiers are the tree's own and are deliberately not re-implemented.
-        """
-        if event is None or event.type() != QEvent.Type.KeyPress:
-            return False
-        try:
-            key = int(event.key())
-        except (AttributeError, TypeError, ValueError):
-            return False
-        mods = event.modifiers()
-        plain = mods in (Qt.KeyboardModifier.NoModifier, Qt.KeyboardModifier.KeypadModifier)
-        if key == int(Qt.Key.Key_Tab) and plain:
-            return self._switch_pane(back=False)
-        if key == int(Qt.Key.Key_Backtab) and mods in (
-                Qt.KeyboardModifier.NoModifier, Qt.KeyboardModifier.ShiftModifier):
-            return self._switch_pane(back=True)
-        if key == int(Qt.Key.Key_Escape) and mods == Qt.KeyboardModifier.NoModifier:
-            # v1.7rc3: `Esc` leaves the preview. The panel may belong to the OTHER pane (the
-            # mc preview of the two-pane view) — the container closes whichever one is open, so
-            # the key works from the listing the file was opened from. False with no preview:
-            # `Esc` stays the widget's own key (a completer popup, a dialog).
-            return self._container.close_preview()
-        if key in (int(Qt.Key.Key_Return), int(Qt.Key.Key_Enter)) and plain:
-            return self._open_current_row()
-        if key in (int(Qt.Key.Key_Insert), int(Qt.Key.Key_Space)) and plain:
-            self._mark_current_row()
-            return True
-        if key == int(Qt.Key.Key_Backspace) and plain:
-            self.go_up()
-            return True
-        if key == int(Qt.Key.Key_Left) and plain:
-            return self._leave_current_dir()
-        return False
-
-    def _switch_pane(self, back: bool) -> bool:
-        """`Tab`/`Shift+Tab` — the pane toggle; True — the key is CONSUMED (v1.7).
-
-        While the OTHER pane carries a borrowed panel there is no second LISTING to switch to — the
-        panel is not a listing — so the key is consumed and NOTHING moves: the reading pane keeps
-        its listing, its cursor and the keyboard (the contract's rule for the preview), instead of
-        the focus walking onto a widget nobody can see.
-        """
-        if self._container.preview_in_other_pane(self):
-            return True
-        return bool(self._container.focus_other_pane(self, back=back))
-
-    def _open_current_row(self) -> bool:
-        """`Enter` — the shipped double-click on the current row (True — there was a row).
-
-        A directory is entered, a file opens the read-only preview and ".." goes one level up;
-        with no row the pane answers the shipped sentence, exactly like `F3`.
-        """
-        try:
-            item = self.tree.currentItem()
-        except RuntimeError:
-            return True
-        if item is None:
-            self.message.emit(_t("sftp.cmd.no_selection"))
-            return True
-        if item is self._up_item:
-            self.go_up()
-            return True
-        self._on_item_double_clicked(item, 0)
-        return True
-
-    def _leave_current_dir(self) -> bool:
-        """`Left` — leave a directory for its parent row instead of collapsing it (mc/far).
-
-        True only when the current row IS a directory and its parent could be resolved: a file
-        row, ".." and "/" answer False, so `Left` keeps Qt's own behaviour there (the selection
-        moves one column left, which is what the shipped look does).
-        """
-        try:
-            item = self.tree.currentItem()
-        except RuntimeError:
-            return False
-        if item is None or item is self._up_item:
-            return False
-        if not item.data(0, self.ISDIR_ROLE):
-            return False
-        parent = self.paths.dirname(self._current_dir)
-        if not parent or self.paths.same(parent, self._current_dir):
-            return False
-        self._relist(parent)
-        return True
-
-    def _current_row(self):
-        """The row a pane-scoped key acts on: the CURRENT row of the listing (None — none)."""
-        try:
-            item = self.tree.currentItem()
-        except RuntimeError:
-            return None
-        if item is None or item is self._up_item or not item.data(0, self.PATH_ROLE):
-            return None
-        return item
-
-    def _cmd_view(self):
-        """`F3` — view: the double-click behaviour on the current row (a directory is
-        entered, a file opens the read-only preview, ".." goes up)."""
-        try:
-            item = self.tree.currentItem()
-        except RuntimeError:
-            return
-        if item is None:
-            self.message.emit(_t("sftp.cmd.no_selection"))
-            return
-        self._on_item_double_clicked(item, 0)
-
-    def _cmd_copy(self):
-        """`F5` — copy the current row (or the whole selection) to the OTHER pane's directory.
-
-        v1.7rc2 shipped the reserved half of the frozen contract; v1.7.4rc2 makes the
-        destination a SOURCE as well — `_remote_batch()` dispatches over the pair of
-        providers (LOCAL_PANE.md §5), so the file may cross to a server or come back from
-        one. With ONE pane there is no destination, and the honest answer is ONE sentence
-        (the corner control is what opens the second pane) — never a silent no-op.
-        """
-        target = self._container.other_pane(self)
-        if target is None:
-            self.message.emit(_t("sftp.cmd.copy_no_target"))
-            return
-        self._remote_batch(KIND_COPY, target)
-
-    def _cmd_move_rename(self):
-        """`F6` — move the row(s) to the other pane, or rename in place.
-
-        The cross-directory MOVE (v1.7rc2) runs when the OTHER pane shows another
-        directory; with a single pane — or when both panes are in the SAME directory — the
-        shipped same-directory rename happens instead, so the key keeps the meaning it had
-        in the single-listing tab. A move that would cross the two SOURCES is refused by
-        the dispatch with ONE sentence (LOCAL_PANE.md §5 declares a copy there, and a
-        silent copy is not a move).
-        """
-        target = self._container.other_pane(self)
-        if target is not None and not self.paths.same(target.current_dir, self._current_dir):
-            self._remote_batch(KIND_MOVE, target)
-            return
-        item = self._current_row()
-        if item is None:
-            self.message.emit(_t("sftp.cmd.no_selection"))
-            return
-        self._op_rename(item)
-
-    def _cmd_mkdir(self):
-        """`F7` — new folder in THIS pane's current directory."""
-        self._op_new_folder()
-
-    def _cmd_delete(self):
-        """`F8` — delete the current row (with the shipped confirmation)."""
-        item = self._current_row()
-        if item is None:
-            self.message.emit(_t("sftp.cmd.no_selection"))
-            return
-        self._op_delete(item)
-
     # ── Worker binding (the container calls these) ───────────────────────
 
     def bind_worker(self, old_worker, new_worker, source: str = ""):
@@ -1812,7 +1310,9 @@ class _SftpPane(QWidget):
 
         The OLD provider is passed explicitly because the container has already replaced its
         own reference when this runs — the pane must disconnect from the transport it was
-        really listening to, not from the new one.
+        really listening to, not from the new one. `_bound_provider` is the DECLARED record of
+        what this pane is really connected to, so it WINS over the argument: a pane that bound a
+        provider of its OWN (a LOCAL or an ELEVATED one) is never left listening to two.
 
         A pane's bookkeeping belongs to ONE provider, so every task map is cleared here: a
         listing, a read, an operation or a completer answer of the previous server must
@@ -1822,11 +1322,17 @@ class _SftpPane(QWidget):
         """
         if source:
             self._source = SOURCE_LOCAL if str(source) == SOURCE_LOCAL else SOURCE_REMOTE
-        old = old_worker if old_worker is not None else self._disconnect_current()
+        old = self._bound_provider if self._bound_provider is not None else old_worker
+        if old is None:
+            old = self._disconnect_current()
         if self._source == SOURCE_LOCAL:
             # A LOCAL pane reads the OS disk and NOTHING else (LOCAL_PANE.md §1), however often the
             # session re-binds its transport: the container's worker never lands on this pane.
             new_worker = self._ensure_local_provider()
+        elif self._elevated_provider is not None:
+            # The same rule for the ELEVATED pane (ELEVATED_PANE.md §1): its provider is the
+            # client of another user, and the session's transport never lands on it.
+            new_worker = self._elevated_provider
         self._disconnect_worker(old)
         self._transfer_tasks.clear()
         self._own_transfers.clear()
@@ -1973,8 +1479,19 @@ class _SftpPane(QWidget):
         map is cleared and the new provider is bound and listed. `False` — the switch was refused
         (the source is unknown, or it is not allowed on this pane at all), and the caller puts its
         control back; a refusal that is asked for is SAID, never a silent no-op.
+
+        v1.8: the control has a THIRD position. `SOURCE_ELEVATED` is the CLIENT's token and not a
+        data source (`ELEVATED_PANE.md` §1), so it is delegated to the elevation cluster and the
+        data source below stays the shipped pair.
         """
-        target = SOURCE_LOCAL if str(source or "") == SOURCE_LOCAL else SOURCE_REMOTE
+        token = str(source or "")
+        if token == SOURCE_ELEVATED:
+            return bool(self.begin_elevation(notify=notify))
+        target = SOURCE_LOCAL if token == SOURCE_LOCAL else SOURCE_REMOTE
+        if self._elevated_provider is not None or self._elevation_pending:
+            # A switch AWAY from the elevated source drops the elevation first (its provider and
+            # its client are not the session's), then continues on the shipped path.
+            return bool(self.leave_elevation(target, notify=notify))
         if target == self._source:
             self._sync_source_availability()
             return True
@@ -2016,10 +1533,10 @@ class _SftpPane(QWidget):
     def _sync_source_availability(self):
         """Show the pane's source on its switch and say whether it may be switched at all.
 
-        The LOCAL source is refused for the FIRST pane and while the container holds ONE pane
-        (LOCAL_PANE.md §4): the commander is what makes "the other side" a concept. The switch
-        itself stays visible in the shipped look — it is the pane's own control — and is simply
-        not offered until it can do something.
+        The LOCAL and the ELEVATED sources are refused for the FIRST pane and while the container
+        holds ONE pane (`LOCAL_PANE.md` §4, `ELEVATED_PANE.md` §4): the commander is what makes "the
+        other side" a concept. The switch itself stays visible in the shipped look — it is the
+        pane's own control — and is simply not offered until it can do something.
         """
         switch = getattr(self, "source_switch", None)
         if switch is None:
@@ -2032,7 +1549,7 @@ class _SftpPane(QWidget):
                 available = bool(can_use(self))
             except (RuntimeError, AttributeError):
                 available = True
-        _sync_source_switch(switch, self._source, enabled=enabled, available=available)
+        _sync_source_switch(switch, self._switch_state(), enabled=enabled, available=available)
 
     def _sync_transfer_availability(self):
         """Enable the shared row for a bound provider (v1.7.4rc2: a local pane transfers too).
@@ -2051,8 +1568,9 @@ class _SftpPane(QWidget):
             pass  # Qt teardown — the row is already gone
 
     def release(self):
-        """Detach the pane: unbind the provider, stop a local one and drop the preview."""
+        """Detach the pane: unbind the provider, stop a local or an ELEVATED one, drop the preview."""
         self._disconnect_worker(self._disconnect_current())
+        self.shutdown_elevated()
         self.shutdown_provider()
         self.close_viewer()
 
@@ -2157,1645 +1675,11 @@ class _SftpPane(QWidget):
         except RuntimeError:
             pass  # the C++ object was already destroyed (a close race)
 
-    @property
-    def current_dir(self) -> str:
-        """The currently shown directory (upload target) of THIS pane."""
-        return self._current_dir
-
-    # ── Navigation and listing ───────────────────────────────────────────
-
-    def go_up(self):
-        """".." — one level up (a no-op AT the root of this pane's source).
-
-        The root test and the parent are the DIALECT's (v1.7.4rc1): `/` for a remote pane,
-        a drive or a UNC share for a local one, so "go up" can never land on a path of the
-        other source's spelling (LOCAL_PANE.md §2).
-        """
-        paths = self.paths
-        if paths.is_root(self._current_dir):
-            return
-        parent = paths.dirname(self._current_dir) or paths.root()
-        self._relist(parent)
-
-    def _navigate(self, path: str):
-        """Enter a directory (double-click on a directory row)."""
-        self._relist(path)
-
-    def follow_directory(self, path: str) -> bool:
-        """v1.6.3 (ROADMAP task 5): the SHELL moved — move the listing with it.
-
-        The caller is the session's OSC 7 scanner, so the path comes from the remote: an
-        empty / relative / NUL-carrying report is refused here (a "no follow", never an
-        error), a directory already on the screen is a no-op, and everything else goes
-        through the ORDINARY `_relist()` — the same listing, the same staleness filter and
-        the same `message` signal a click uses. Returns True when the view moved.
-
-        v1.7.4rc1: a LOCAL pane NEVER follows — the report is a remote shell's path, so the
-        follow stays the remote panes' alone (LOCAL_PANE.md §4).
-        """
-        if self._waiting or self.provider is None or self.source == SOURCE_LOCAL:
-            return False
-        target = str(path or "")
-        if not target.startswith("/") or "\x00" in target or target == self._current_dir:
-            return False
-        self._relist(target)
-        return True
-
-    def _relist(self, path: str):
-        """Redraw the listing for the new current directory OF THIS PANE'S SOURCE."""
-        paths = self.paths
-        self._current_dir = str(path or "") or paths.root()
-        self.tree.clear()
-        self._up_item = None
-        self._set_path_text(self._current_dir)
-        self.btn_up.setEnabled(not paths.is_root(self._current_dir))
-        provider = self.provider
-        if provider is None:
-            return
-        tid = provider.queue_list(self._current_dir)
-        if tid is not None:
-            self._pending_lists[tid] = self._current_dir
-
-    # ── v1.6.3 (ROADMAP task 4): the address bar ─────────────────────────────
-
-    def _set_path_text(self, text: str):
-        """Write the address bar WITHOUT echoing it back as an edit.
-
-        `setText` on a QLineEdit does not emit `textEdited` (only `textChanged`), so no
-        loop exists — the guard is here because the completer's directory bookkeeping is
-        driven by `textEdited` alone and a programmatic write must never look like typing.
-        """
-        try:
-            self.path_label.setText(text or "")
-        except RuntimeError:
-            pass  # Qt teardown — the bar is already destroyed
-
-    def _on_path_entered(self):
-        """Enter in the address bar: navigate through the SOURCE's own resolution.
-
-        The text goes to the provider AS TYPED (a `~`, a relative path, a symlink are the
-        source's business — a local guess would be a second, worse truth): the session's server
-        for a remote pane, and the OS itself for a local one (`LocalFsWorker.queue_normalize`,
-        LOCAL_PANE.md §2). A path that cannot be resolved answers `task_error` and is reported
-        through the `message` signal, never as a traceback. The bar keeps the typed text until
-        the answer arrives, so a failure leaves the user with what they typed.
-        """
-        provider = self.provider
-        if provider is None:
-            return
-        typed = self.path_label.text() or ""
-        if not typed.strip() or typed.strip() == _t("sftp.waiting_connection"):
-            return
-        tid = provider.queue_normalize(typed, self._current_dir)
-        if tid is not None:
-            self._normalize_tasks[tid] = typed
-
-    def _on_normalize_ready(self, task_id: int, requested: str, resolved: str):
-        """The server's REALPATH of a typed path → navigate there (v1.6.3)."""
-        if self._normalize_tasks.pop(task_id, None) is None:
-            return   # not this pane's task (v1.7rc1: the shared worker signals every pane)
-        target = resolved or requested
-        if not target:
-            return
-        self._relist(target)
-
-    def _on_path_edited(self, text: str):
-        """Feed the completer from the SAME async listing the pane already uses.
-
-        The directory part of what is being typed decides the listing — at most ONE
-        `queue_list()` per directory CHANGE (a keystroke inside the same directory costs
-        nothing), its answer fills the model with the directories first (a trailing separator
-        makes the completion continue into them) and the files after. A relative directory
-        is resolved against the directory on the screen, exactly as Enter will resolve it.
-        The split, the join and the separator are the DIALECT's (v1.7.4rc1), so a local pane
-        completes `C:\\Users\\` the way the OS spells it (LOCAL_PANE.md §2).
-        """
-        provider = self.provider
-        if provider is None:
-            return
-        paths = self.paths
-        split = paths.dirname(text)
-        directory = split or self._current_dir
-        if split and not paths.is_absolute(split):
-            directory = paths.join(self._current_dir, split)
-        try:
-            self.path_completer.setCompletionPrefix(paths.basename(text))
-        except RuntimeError:
-            return  # Qt teardown
-        if directory == self._completer_dir:
-            return
-        self._completer_dir = directory
-        tid = provider.queue_list(directory)
-        if tid is not None:
-            self._completer_lists[tid] = directory
-
-    def _fill_completer(self, entries: list):
-        """The completion model: directories first with a trailing SEPARATOR, then the files."""
-        mark = self.paths.separator
-        names = sorted(
-            [(str(e.get("name", "")) + mark) if e.get("is_dir") else str(e.get("name", ""))
-             for e in entries if e.get("name")],
-            key=lambda n: (not n.endswith(mark), n.lower()))
-        try:
-            self.path_completer_model.setStringList(names)
-        except RuntimeError:
-            pass  # Qt teardown — the model is gone with the pane
-
-    def _on_list_ready(self, task_id: int, remote_dir: str, entries: list):
-        # v1.6.3: the completer's listing — it feeds the completion model and is NEVER
-        # rendered (that directory is not on the screen); it is checked FIRST, because the
-        # answer may belong to the directory the user is typing while the tree shows another.
-        if self._completer_lists.pop(task_id, None) is not None:
-            self._fill_completer(entries)
-            return
-        # v1.3.3.2: the pre-flight listing of a drop on a directory row — the answer
-        # is NOT rendered (that directory is not on the screen), it only feeds the
-        # conflict check of the batch that is waiting for it.
-        pending = self._pending_batches.pop(task_id, None)
-        if pending is not None:
-            target, files = pending
-            self._queue_uploads(files, target, {e["name"] for e in entries})
-            self.message.emit(
-                _t("sftp.drop_queued", count=len(files), dir=target))
-            return
-        # v1.7.3: the pre-flight listing of a PANE-to-pane drop — the same rule as above, for the
-        # copy/move batch whose destination is not the directory on the screen.
-        dropped = self._pending_drops.pop(task_id, None)
-        if dropped is not None:
-            items, kind, target, src = dropped
-            self._queue_transfer_batch(items, kind, target, {e["name"] for e in entries},
-                                       self, src)
-            return
-        requested = self._pending_lists.pop(task_id, None)
-        # Staleness filter: render only the response for the CURRENT directory (navigation or
-        # Refresh while an old listing was in flight — ignored), compared through the DIALECT:
-        # the OS disk is case-insensitive, so `c:\users` IS `C:\Users` (LOCAL_PANE.md §2).
-        paths = self.paths
-        if requested is None or not paths.same(requested, self._current_dir) \
-                or not paths.same(remote_dir, self._current_dir):
-            return
-        self.tree.clear()
-        self._up_item = None
-        if not paths.is_root(self._current_dir):
-            up = _SftpRowItem(self.tree)
-            up.pinned = True          # v1.7.5: the ONE row no sort order may move
-            up.setText(0, "..")
-            up.setIcon(0, self._dir_icon())
-            up.setData(0, self.PATH_ROLE, paths.dirname(self._current_dir) or paths.root())
-            up.setData(0, self.ISDIR_ROLE, True)
-            up.setData(0, self.SIZE_ROLE, 0)
-            up.setData(0, self.MTIME_ROLE, 0)
-            self._up_item = up
-        for e in entries:
-            self._add_entry_item(e)
-        # v1.7.5: the rows arrive in the PROVIDER's order (directories first, then case-insensitive
-        # by name) — which IS the default sort — so only a pane the user really sorted is re-ordered.
-        if not self._sort_is_default():
-            self.apply_sort()
-        self._focus_first_row()
-        # v1.7.3 (task 2): a directory the SERVER really answered for is what memory keeps — and
-        # the restored hint has arrived, so it is no longer pending. A LOCAL pane has no
-        # per-server memory: its directory belongs to the OS, not to a server (LOCAL_PANE.md §4).
-        self._restore_dir = ""
-        if self.source == SOURCE_REMOTE:
-            self._container.remember_dir(self._current_dir)
-
-    def _focus_first_row(self):
-        """Put the CURSOR on the first navigable row of a freshly rendered listing.
-
-        A commander is driven by the keyboard, so a listing that came back with no current row
-        would answer `Select a row first` to the first `F3`/`Enter` — the cursor lands on the
-        first file or directory instead (never on the ".." row, which is navigation). Called
-        after a listing is rendered; a row the user already picked is never moved. Never raises.
-        """
-        try:
-            if self.tree.currentItem() is not None:
-                return
-            for i in range(self.tree.topLevelItemCount()):
-                item = self.tree.topLevelItem(i)
-                if item is not None and item is not self._up_item and item.data(0, self.PATH_ROLE):
-                    self.tree.setCurrentItem(item)
-                    return
-        except RuntimeError:
-            pass  # Qt teardown — nothing to focus
-
-    def _add_entry_item(self, entry: dict) -> QTreeWidgetItem:
-        full = self.paths.join(self._current_dir, entry["name"])
-        item = _SftpRowItem(self.tree)
-        item.setText(0, entry["name"])
-        item.setIcon(0, self._dir_icon() if entry["is_dir"] else self._file_icon())
-        item.setData(0, self.PATH_ROLE, full)
-        item.setData(0, self.ISDIR_ROLE, bool(entry["is_dir"]))
-        item.setData(0, self.SIZE_ROLE, int(entry.get("size") or 0))
-        item.setData(0, self.MTIME_ROLE, int(entry.get("mtime") or 0))
-        item.setText(1, "" if entry["is_dir"] else format_size(entry.get("size")))
-        item.setText(2, "" if entry["is_dir"] else format_mtime(entry.get("mtime")))
-        self._apply_preview_marker(item, full)   # v1.3.1.1: "no preview" markers
-        return item
-
-    def _dir_icon(self):
-        return self.style().standardIcon(QStyle.StandardPixmap.SP_DirIcon)
-
-    def _file_icon(self):
-        return self.style().standardIcon(QStyle.StandardPixmap.SP_FileIcon)
-
-    # ── v1.3.1.1: the "no preview" markers of the listing ────────────────
-
-    def _apply_preview_marker(self, item: QTreeWidgetItem, path: str):
-        """Mark a row the viewer cannot preview (a recoloured file icon + the
-        reason in the tooltip); a previewable row is left with the plain icon and
-        without a tooltip (the call is idempotent — it also CLEARS a stale mark).
-
-        Directories are never marked. The name colour is deliberately untouched:
-        an explicit setForeground() would overcome the selection colours of the
-        style, while the recoloured glyph survives selection and does not rely on
-        the colour alone (the tooltip spells the reason out).
-        """
-        if item.data(0, self.ISDIR_ROLE):
-            return
-        reason = preview_block_reason(path, item.data(0, self.SIZE_ROLE),
-                                      self._blocked)
-        if not reason:
-            item.setIcon(0, self._file_icon())
-            item.setToolTip(0, "")
-            return
-        item.setIcon(0, self._blocked_icon())
-        item.setToolTip(0, self._blocked_tooltip(reason))
-
-    def _blocked_tooltip(self, reason: str) -> str:
-        """The reason of a marked row — the SAME texts the refusal itself shows."""
-        if reason == READ_ERROR_TOO_LARGE:
-            return _t("sftp.viewer.too_large", limit=format_size(self.viewer_cap()))
-        return _t("sftp.viewer.binary")
-
-    def _blocked_icon(self):
-        """The file icon of a marked row: the style's file glyph recoloured to the
-        theme's "no preview" tone (cached).
-
-        CompositionMode_SourceIn keeps the SHAPE and replaces the colour — the
-        marker is visible as a shape, not only as a colour. A style that returns
-        no pixmap for the standard icon (an exotic platform) falls back to the
-        plain glyph: the tooltip still explains the row.
-        """
-        if self._blocked_icon_cache is not None:
-            return self._blocked_icon_cache
-        base = self._file_icon()
-        pixmap = base.pixmap(16, 16)
-        if pixmap.isNull():
-            self._blocked_icon_cache = base
-            return self._blocked_icon_cache
-        pixmap = QPixmap(pixmap)   # a copy: the style may keep/share the pixmap
-        painter = QPainter(pixmap)
-        painter.setCompositionMode(
-            QPainter.CompositionMode.CompositionMode_SourceIn)
-        painter.fillRect(pixmap.rect(), QColor(theme.SFTP_PREVIEW_BLOCKED))
-        painter.end()
-        self._blocked_icon_cache = QIcon(pixmap)
-        return self._blocked_icon_cache
-
-    def _mark_row(self, path: str):
-        """Re-apply the marker of the row showing `path`; no such row in the
-        current listing (another directory / a refreshed one) — nothing to do."""
-        try:
-            for i in range(self.tree.topLevelItemCount()):
-                item = self.tree.topLevelItem(i)
-                if item.data(0, self.PATH_ROLE) == path:
-                    self._apply_preview_marker(item, path)
-                    return
-        except RuntimeError:
-            pass  # the C++ object was already destroyed (a close race)
-
-    # ── v1.7.5: the SOURCE HEADER LINE and the SORTABLE LISTING ──────────
-
-    def header_text(self) -> str:
-        """The pane's SOURCE HEADER LINE — the wording that names WHAT this pane reads (§3).
-
-        A pane that reads the OS disk names itself (`sftp.local.this_computer`); a pane that reads a
-        server names the SESSION (its alias — the label `set_session_info()` was given), with
-        `user@host` as the fallback when the session was never identified and the shipped "waiting
-        for connection" line when the pane belongs to nobody at all. An alias is DATA: it is never
-        translated (no i18n key — the local wording is the shipped one).
-        """
-        if self._source == SOURCE_LOCAL:
-            return _t("sftp.local.this_computer")
-        # The container's THREE readers answer "" for a pane nobody identified (a bare unit test),
-        # so a foreign container needs no branch here — it is duck-typed like every other hook.
-        try:
-            label = self._container.session_label()
-            user = self._container.session_user()
-            host = self._container.session_host()
-        except (AttributeError, RuntimeError):
-            return _t("sftp.waiting_connection")
-        if label:
-            return str(label)
-        if user and host:
-            return f"{user}@{host}"
-        if host:
-            return str(host)
-        return _t("sftp.waiting_connection")
-
-    def _sync_header(self):
-        """Show the SOURCE of this pane in its header line (the ONE writer of the widget). Never raises."""
-        label = getattr(self, "header_label", None)
-        if label is None:
-            return
-        try:
-            text = self.header_text()
-        except (AttributeError, RuntimeError, TypeError):
-            return
-        try:
-            label.setText(text)
-            label.setToolTip(text)
-        except RuntimeError:
-            pass  # Qt teardown — the label is already gone
-
-    def source_header_label(self):
-        """The header widget itself (the test seam of the clause above)."""
-        return getattr(self, "header_label", None)
-
-    def _on_header_clicked(self, column):
-        """A click on a column header — the pane's ONE sort switch (v1.7.5).
-
-        The same column flips the direction, another column starts ascending — the commander rule.
-        Nothing else changes: the listing is NOT re-listed (the rows are already in memory) and no
-        second sort table exists (the comparison lives on the ROW class).
-        """
-        try:
-            column = int(column)
-        except (TypeError, ValueError):
-            return
-        if column not in SORT_COLUMNS:
-            return
-        if column == self._sort_column:
-            self._sort_desc = not self._sort_desc
-        else:
-            self._sort_column, self._sort_desc = column, False
-        self.apply_sort()
-
-    def apply_sort(self):
-        """Order the rows THE PANE'S WAY and show the direction on the header arrow.
-
-        `sortItems()` is always asked for ASCENDING (the comparison on `_SftpRowItem` carries the
-        real direction and the two GROUP rules); the indicator is then set to the REAL direction
-        with the signals BLOCKED, so Qt's own handler cannot re-sort with the reversed comparator.
-        Never raises.
-        """
-        tree = getattr(self, "tree", None)
-        if tree is None:
-            return
-        try:
-            tree.sortItems(self._sort_column, Qt.SortOrder.AscendingOrder)
-        except (RuntimeError, TypeError, ValueError):
-            return  # Qt teardown / an unsortable column — the listing keeps its order
-        try:
-            header = tree.header()
-            header.blockSignals(True)
-            try:
-                header.setSortIndicatorShown(True)
-                header.setSortIndicator(
-                    self._sort_column,
-                    Qt.SortOrder.DescendingOrder if self._sort_desc
-                    else Qt.SortOrder.AscendingOrder)
-            finally:
-                header.blockSignals(False)
-        except (RuntimeError, AttributeError):
-            pass  # Qt teardown — the arrow is cosmetic, the order is already right
-
-    def _sort_is_default(self) -> bool:
-        """True — the pane's order IS the provider's own (no re-sort needed after a listing)."""
-        return (self._sort_column, self._sort_desc) == (SORT_DEFAULT_COLUMN, False)
-
-    # ── v1.7.5: the preview ceiling of THIS pane ─────────────────────────
-
-    def viewer_cap(self) -> int:
-        """The ceiling every read of this pane is TRUNCATED at (the resolved setting)."""
-        return int(getattr(self, "_viewer_cap", 0) or VIEWER_MAX_BYTES_MIN)
-
-    def set_viewer_max_bytes(self, value) -> int:
-        """Apply a new ceiling to THIS pane and re-read the marks (v1.7.5).
-
-        The per-session "no preview" FACTS are dropped: a size verdict is a fact of the CAP that
-        produced it, so a read attempt that answered under the old ceiling says nothing about the
-        new one. Every row of the listing is re-marked from the (now clean) state.
-        """
-        self._viewer_cap = clamp_viewer_max_bytes(value)
-        self._blocked.clear()
-        self._mark_rows()
-        return self._viewer_cap
-
-    def _mark_rows(self):
-        """Re-apply the preview marker of EVERY row of the listing on the screen. Never raises."""
-        try:
-            for index in range(self.tree.topLevelItemCount()):
-                item = self.tree.topLevelItem(index)
-                if item is not None:
-                    self._apply_preview_marker(item, item.data(0, self.PATH_ROLE))
-        except RuntimeError:
-            pass  # Qt teardown — the tree is already gone
-
-    def _known_size(self, path: str) -> int:
-        """The size the CURRENT listing knows for `path` (0 — the path is not on the screen)."""
-        try:
-            for index in range(self.tree.topLevelItemCount()):
-                item = self.tree.topLevelItem(index)
-                if item is not None and item.data(0, self.PATH_ROLE) == path:
-                    return int(item.data(0, self.SIZE_ROLE) or 0)
-        except (RuntimeError, TypeError, ValueError):
-            pass
-        return 0
-
-    # ── Tree events ──────────────────────────────────────────────────────
-
-    def _on_item_double_clicked(self, item: QTreeWidgetItem, _column: int):
-        if not item.data(0, self.ISDIR_ROLE):
-            self._open_viewer(item)   # v1.3.1: a file — the read-only preview
-            return
-        if item is self._up_item:
-            self.go_up()
-        else:
-            self._navigate(item.data(0, self.PATH_ROLE))
-
-    # ── v1.3.1: the preview panel (ROADMAP task 1) ───────────────────────
-
-    def _open_viewer(self, item: QTreeWidgetItem):
-        """A double click on a file → read it through the worker queue and show it.
-
-        The pane never touches the remote file itself: the read is a "read" task
-        of the existing queue (32 KB chunks, the limit and the binary check are
-        the worker's job), the answer arrives via read_ready. The panel opens
-        only when the answer is there — a refusal (binary / too large) stays a
-        message in the status bar (task_error → _on_task_error).
-
-        v1.7rc3: in the TWO-PANE view the preview is shown WHERE THE OTHER PANE IS (the mc
-        behaviour) and THIS pane keeps the keyboard and the cursor; the reading pane stays the
-        owner of the task and of the message, so a refusal is reported exactly as before.
-
-        v1.7.4rc1: the read goes to THIS pane's provider, so a LOCAL file previews through the
-        SHIPPED read policy unchanged (LOCAL_PANE.md §3).
-        """
-        provider = self.provider
-        if provider is None:
-            self.message.emit(_t("sftp.waiting_connection"))
-            return
-        path = item.data(0, self.PATH_ROLE)
-        # v1.7rc3: the GATE is asked first — ONE preview exists at a time, and a file opened while
-        # the OTHER pane shows a panel is refused with ONE sentence. A panel THIS pane owns is not
-        # in the way: the new file is read into it (walking the listing with F3 is the whole point
-        # of a commander, so a second open from the reading pane must never be refused as "busy").
-        if not self._container.preview_allowed(self):
-            return
-        # Opening a file ALWAYS starts from a clean look: a preview already open in the two-pane
-        # view (whichever pane lent or carries its panel) closes first, so a new preview can never
-        # share a splitter with the old one, and a re-open of the SAME file re-reads it. The panel
-        # is MOVED to the other pane only once the content is there (`_show_viewer()`): a read the
-        # worker refuses must not leave the other pane dressed as a panel that shows nothing.
-        self._container.close_preview()
-        # v1.7.5: the pane RESOLVES the ceiling and hands it to the task — the worker reads no
-        # config (and truncates at it instead of refusing the file).
-        tid = provider.queue_read(path, int(item.data(0, self.SIZE_ROLE) or 0),
-                                  max_bytes=self.viewer_cap())
-        if tid is None:
-            return  # the worker is finished — there is nobody to read
-        self._read_tasks[tid] = path
-        self._last_read = tid
-        self.viewer_label.setText(_t("sftp.viewer.reading", name=self.paths.basename(path)))
-
-    def _on_read_ready(self, task_id: int, remote_path: str, data: bytes):
-        """The read answer (already on the GUI thread): render it in the panel."""
-        path = self._read_tasks.pop(task_id, remote_path)
-        if task_id != self._last_read:
-            return  # an outdated answer (another file was opened since) — dropped
-        self._last_read = None
-        # v1.3.1.1: a successful read is a FACT too — drop a stale mark of this row
-        # (defensive: the two heuristics agree today, and the state must not drift).
-        if self._blocked.pop(path, None) is not None:
-            self._mark_row(path)
-        text, encoding = decode_text(bytes(data))
-        self._show_viewer(path, len(data), text, encoding)
-
-    def _on_task_error(self, task_id: int, kind: str, message: str):
-        """task_error: for a "read" task the message is a MACHINE code — the pane
-        turns it into an i18n hint (the window's status bar stays silent about
-        reads: terminal_page skips them, the pane owns the message).
-
-        The QUEUE is untouched (the worker contract): a refusal of one file does
-        not break the listing or the transfers.
-
-        v1.3.1.1: a refusal is also a FACT for the session — only the worker sees
-        the content, so its verdict marks the row (a null byte inside a `.txt`
-        cannot be guessed from the name) and the mark survives re-listing.
-
-        v1.7rc1: the ONE worker signals EVERY pane, so a pane that does not own the task
-        returns at once — otherwise the other pane would report a stranger's failure (or
-        draw a stranger's row).
-
-        v1.7.4rc1: a LOCAL provider reports its refusals as MACHINE payloads too, so the
-        operation and normalize branches of a local pane render `local_error_text()` — the
-        listing note of a skipped entry (`KIND_LIST_PARTIAL`) is the one answer that is NOT a
-        failure and comes BEFORE every task map (the listing itself has already arrived).
-        """
-        if kind == local_fs.KIND_LIST_PARTIAL:
-            self.message.emit(local_error_text(message))
-            return
-        if kind == KIND_READ:
-            if task_id not in self._read_tasks:
-                return   # another pane's read (or the command history's) — not ours
-            path = self._read_tasks.pop(task_id, "")
-            if task_id == self._last_read:
-                self._last_read = None
-            if path and message in (READ_ERROR_BINARY, READ_ERROR_TOO_LARGE):
-                self._blocked[path] = message
-                self._mark_row(path)
-            self.message.emit(self._read_error_text(message, path))
-        elif kind in OP_KINDS:
-            # v1.3.3.2: a file operation failed (the queue lives on) — the pane owns
-            # the message (the page stays silent about the operation kinds), and the
-            # listing is NOT refreshed: nothing changed on the server.
-            if self._op_tasks.pop(task_id, None) is None:
-                return   # another pane's operation
-            if kind in (KIND_COPY, KIND_MOVE):
-                # v1.7rc2: a remote copy/move — the machine payload becomes a translated
-                # sentence (a partial tree, a refused rename, a tree over its bound) and
-                # the batch counts ONE failure (the v1.1.3 rule: the rest goes on).
-                self.message.emit(self._remote_error_text(message))
-                self._answer_batch_task(task_id, "failed")
-            else:
-                self.message.emit(self._op_error_text(message))
-        elif kind in ("upload", "download") and self.source == SOURCE_LOCAL \
-                and task_id in self._own_transfers:
-            # v1.7.4rc2: the LOCAL engine's transfers ride the PANE's own signal — there is no
-            # session page listening to it — so a refused local copy is said here, and only for
-            # a task THIS pane queued (a remote upload keeps the window's status line).
-            self.message.emit(self._op_error_text(message))
-        elif kind == KIND_NORMALIZE:
-            # v1.6.3: the address bar asked for a path the server cannot resolve — the bar
-            # keeps the typed text (nothing navigated) and the reason is a sentence.
-            typed = self._normalize_tasks.pop(task_id, None)
-            if typed is None:
-                return   # another pane's normalize
-            self.message.emit(_t("sftp.path_error", path=typed, error=message)
-                              if self.source == SOURCE_REMOTE
-                              else _t("sftp.path_error", path=typed,
-                                      error=local_error_text(message)))
-        elif kind == "list":
-            # v1.3.3.2: the pre-flight listing of a drop on a row failed (the
-            # directory vanished / no permission) — the batch is dropped, the pane
-            # reports the reason instead of uploading into nowhere.
-            failed_dir = self._pending_lists.pop(task_id, None)
-            # v1.7.3 (task 2): the REMEMBERED directory may be the one that is gone — a restored
-            # path is a hint, so the pane says so and opens the shipped starting directory.
-            if failed_dir and failed_dir == self._restore_dir:
-                self._restore_dir = ""
-                self._restored = True
-                self.message.emit(_t("sftp.dir_missing", path=failed_dir,
-                                     fallback=self.paths.root()))
-                self._relist(self.paths.root())
-                self._on_task_finished(task_id)
-                return
-            pending = self._pending_batches.pop(task_id, None)
-            if pending is not None:
-                self.message.emit(self._op_error_text(message))
-            if self._pending_drops.pop(task_id, None) is not None:
-                self.message.emit(self._op_error_text(message))
-        self._on_task_finished(task_id)
-
-    def _op_error_text(self, message: str) -> str:
-        """The sentence of a failed operation, in the source's own vocabulary (v1.7.4rc1).
-
-        A LOCAL refusal is a machine payload with the OS's own text inside it, and the one place
-        that knows how to spell it is `local_error_text()`; a remote task_error is already the
-        server's sentence and goes through the shipped generic key unchanged. A REFUSED NAME
-        (v1.7.5.1, N40) is named in the user's language by the ONE `name_refusal_text()`, and a
-        DIRECTORY download that stopped in the middle (a `PARTIAL` payload) keeps its counters —
-        a refusal inside that payload is rendered by the same helper.
-        """
-        refusal = name_refusal_text(message)
-        if refusal:
-            return refusal
-        data = parse_task_payload(message)
-        if data and str(data.get("code") or "") == PARTIAL_CODE:
-            path = str(data.get("path") or "")
-            failed = str(data.get("error") or "")
-            return _t("sftp.cmd.partial", name=self.paths.basename(path) or path,
-                      copied=int(data.get("copied") or 0),
-                      error=name_refusal_text(failed) or failed)
-        if self.source == SOURCE_LOCAL:
-            return local_error_text(message)
-        return _t("sftp.op.error", error=message)
-
-    def _read_error_text(self, code: str, path: str = "") -> str:
-        """READ_ERROR_* → the translated hint.
-
-        Any OTHER message is a real failure reported by the worker (a path or
-        permission error, str(exception)) — it goes through the same translated
-        line with the file name, so the reader always gets a readable sentence.
-
-        v1.7.5: a `too_large` verdict names the pane's OWN ceiling — the read is truncated at it,
-        so this answer can only come from a read that could not be truncated.
-        """
-        if code == READ_ERROR_BINARY:
-            return _t("sftp.viewer.binary")
-        if code == READ_ERROR_TOO_LARGE:
-            return _t("sftp.viewer.too_large", limit=format_size(self.viewer_cap()))
-        return _t("sftp.viewer.read_failed",
-                  name=posixpath.basename(path) if path else "?",
-                  error=code or "unknown error")
-
-    def _show_viewer(self, path: str, size: int, text: str, encoding: str = "utf-8"):
-        """Fill the panel with the file and show it (an unshown panel gets sizes).
-
-        v1.4.7: the language is decided from the path AND the content
-        (`syntax.detect_syntax` — the honesty rule: a `.json`/`.xml` hint is
-        accepted only after a real parse) and the pane's ONE highlighter colours
-        the blocks around the viewport. The header carries the heuristic note
-        for the modes no parser verified (YAML), exactly like the encoding note.
-
-        v1.7rc3: the panel may have been MOVED to the other pane before this call
-        (`present_viewer_in()`), so the share is computed for the splitter that really carries it
-        and the READING pane keeps the keyboard (its listing stays under the cursor while the
-        preview appears beside it — the mc behaviour).
-
-        v1.7.5: the header's SIZE becomes the truncation notice when the read stopped at the
-        ceiling — the listing knows the real size, so the panel can say how much of how many it
-        shows (`sftp.viewer.truncated`) instead of presenting a part as the whole.
-        """
-        language = syntax.detect_syntax(path, text)
-        size_text = format_size(size)
-        total = self._known_size(path)
-        if int(total or 0) > int(size or 0):
-            size_text = _t("sftp.viewer.truncated", shown=format_size(size),
-                           total=format_size(total))
-        head = _t("sftp.viewer.header", path=path, size=size_text)
-        if encoding != "utf-8":
-            head = f"{head} · {_t('sftp.viewer.encoding_note', encoding=encoding)}"
-        if syntax.is_heuristic(language):
-            head = f"{head} · {_t('sftp.viewer.syntax_heuristic', language=language)}"
-        self.viewer_label.setText(head)
-        self.viewer_label.setToolTip(path)
-        self._viewer_encoding = encoding
-        self._viewer_language = language
-        highlighter = self._ensure_highlighter()
-        if highlighter is not None:
-            highlighter.set_language(language)
-            # BEFORE setPlainText: Qt reformats the WHOLE changed range, and with
-            # an EMPTY window that pass applies no format at all — which is what
-            # keeps the previous file from bleeding into this one.
-            highlighter.reset_for_document()
-        self._highlight_range = None
-        self.viewer_text.setPlainText(text)   # the cursor lands at the start by itself
-        self._viewer_open = True
-        # The panel is where the FILE is: with two panes it takes the OTHER pane's slot (mc/far),
-        # with one it stays inside this one (the shipped look). The move happens HERE — with the
-        # content already in the widget — so a read the worker refused leaves every pane alone.
-        self._container.present_viewer(self)
-        self.viewer.show()
-        self._layout_viewer_share()
-        self._highlight_visible(force=True)
-
-    # ── v1.7rc3: the preview moved to the other pane (the mc F3 of the two-pane view) ──
-
-    def _viewer_splitter(self):
-        """The splitter that really carries the viewer (its HOME pane's by default)."""
-        parent = self.viewer.parent()
-        return parent if parent is not None else self.splitter
-
-    def _layout_viewer_share(self):
-        """Give the panel its declared share of the splitter that REALLY carries it. Never raises.
-
-        Qt gotcha #13: a splitter member's share is set via `setSizes()` only. The splitter can hold
-        a THIRD member — a pane carrying a borrowed panel keeps its OWN one in the layout (hidden,
-        so it lands nowhere) while the borrowed one takes the slot it left — which is why the share
-        is computed over the members BY NAME: the listing takes `VIEWER_TREE_SHARE`, the viewer that
-        is really on screen takes the rest and a panel that stepped aside answers 0. A share handed
-        out by POSITION would give the column to the hidden member and leave the borrowed panel zero
-        pixels wide: the borrowing pane changed its look and showed nothing at all.
-        """
-        splitter = self._viewer_splitter()
-        try:
-            count = splitter.count()
-            index = splitter.indexOf(self.viewer)
-        except RuntimeError:
-            return   # Qt teardown — the splitter or the viewer is already gone
-        if count <= 0 or index < 0:
-            return
-        total = max(splitter.width(), self.VIEWER_MIN_TOTAL_PX)
-        left = int(total * self.VIEWER_TREE_SHARE)
-        try:
-            # v1.7: a pane CARRYING a borrowed panel is a PANEL — its own listing left the layout
-            # (`present_viewer_in()` hides it), so the panel takes the WHOLE pane.
-            listing = splitter.widget(0)
-            if listing is not None and listing.isHidden():
-                left = 0
-        except RuntimeError:
-            pass   # Qt teardown — the splitter is already gone
-        sizes = [0] * count
-        sizes[0] = left                                   # the listing is the first member
-        sizes[index] = max(total - left, 0)               # the panel is the one that is showing
-        splitter.setSizes(sizes)
-
-    def viewer_host(self):
-        """The pane whose splitter currently carries the viewer (None — no preview is open).
-
-        ONE answer for the whole container: the pane that BORROWED the viewer registers itself in
-        `_viewer_host`, so "close the preview and restore the listing" has a single subject and
-        the pane that opened it never has to guess. The state is the DECLARED `_viewer_open` flag,
-        never `QWidget.isVisible()` — a pane that is not on screen yet (a never-shown dock tab, the
-        offscreen test platform) reports its widgets as invisible while its preview is really open.
-        """
-        if not getattr(self, "_viewer_open", False):
-            return None
-        if self._viewer_host is not None:
-            return self._viewer_host
-        return self._viewer_home or self
-
-    def _restore_listing(self):
-        """Put the tree and the pane's own rows back after a borrowed viewer leaves it.
-
-        Called with `_viewer_host` ALREADY cleared (the owner has taken its panel home), so the
-        only question is whether this pane was CARRYING it — a pane that never did must keep its
-        own panel's look untouched. Never raises.
-        """
-        try:
-            if not getattr(self, "_viewer_borrowed", False):
-                return
-            self._viewer_borrowed = False
-            self.path_label.show()
-            self.tree.show()                  # v1.7: the listing comes back with the rows
-            self.splitter.setCollapsible(0, False)   # the tree is never draggable shut again
-            self.set_pane_keys_enabled(True)
-            self._sync_secondary_ui()
-        except (RuntimeError, AttributeError):
-            pass  # Qt teardown / a pane built before the rows exist
-
-    def present_viewer_in(self, host, source=None) -> bool:
-        """Move THIS pane's viewer into `host`'s splitter; True — it really moved.
-
-        The two-pane view shows a preview WHERE THE OTHER PANE IS (mc and far do the same): the
-        listing that opened it keeps the cursor and the keyboard, and the panel takes the other
-        pane's place for as long as it is open. The viewer is ONE widget owned by the pane it was
-        built in, so the move is a re-parent (`QSplitter.insertWidget()`) instead of a second
-        `QPlainTextEdit` per pane — the highlighter, the content and the × belong to the same
-        object, and closing the preview puts it back where it came from.
-
-        **The host is a PANEL for as long as it carries the preview**: its address bar and its key
-        row were already gone, and since v1.7 its LISTING leaves the layout too (`tree.hide()`), so
-        the panel gets the whole pane instead of sharing it with a listing nobody is looking at.
-        That is also why the pane's own pane-scoped keys are disarmed here: a key that acts on a
-        listing off the screen would act on rows nobody can see.
-
-        Refused (False) for the pane itself and for a foreign pane: the container asks
-        `preview_allowed()` BEFORE the read (the ONE-preview rule) and `present_viewer()` decides
-        whether the move is still wanted when the answer is there, this method only performs it.
-        """
-        if host is None or host is self or host is not self._container.other_pane(self):
-            return False
-        try:
-            # The host's OWN panel steps aside — it stays in the splitter, hidden (a hidden member
-            # takes no room) — and the borrowed one is inserted in the very slot it left, so the
-            # panel is the pane's RIGHT column and not a third member squeezed to nothing.
-            index = host.splitter.indexOf(host.viewer)
-            if index < 0:
-                index = host.splitter.count()
-            else:
-                host.viewer.hide()
-            host.splitter.insertWidget(index, self.viewer)
-        except RuntimeError:
-            return False
-        self._viewer_host = host
-        self._viewer_from = source if source is not None else self
-        # The host is a PREVIEW now: its address bar belongs to a listing nobody can see and the
-        # key row of a pane that carries a panel is hidden (see `_sync_secondary_ui`). Since v1.7
-        # its LISTING leaves the layout as well — the panel takes the WHOLE pane (the mc/far quick
-        # view), and the tree's own keys (`Tab` into it, `F3`-`F8` on a row) are disarmed with it.
-        host._viewer_borrowed = True
-        try:
-            host.path_label.hide()
-            host.tree.hide()
-            host.splitter.setCollapsible(0, True)   # a HIDDEN listing may really collapse to 0
-            host.set_pane_keys_enabled(False)
-            host._sync_secondary_ui()
-        except (RuntimeError, AttributeError):
-            pass  # Qt teardown / a pane built before the rows exist
-        return True
-
-    def restore_viewer(self) -> bool:
-        """Move the viewer back to its HOME pane; True — it really moved. Never raises.
-
-        The home splitter shows the panel again (hidden) and the borrowing pane gets its listing
-        rows back; a pane that is being TORN DOWN never takes the viewer with it (the container
-        calls this before it destroys the pane).
-        """
-        host = self._viewer_host
-        if host is None:
-            return False
-        self._viewer_host = None
-        self._viewer_from = None
-        try:
-            self.viewer.hide()
-        except RuntimeError:
-            pass  # Qt teardown — the panel is already gone
-        home = self._viewer_home
-        if home is not None and home is not host:
-            try:
-                home.splitter.addWidget(self.viewer)
-            except RuntimeError:
-                pass  # Qt teardown — the home pane is already gone
-        try:
-            # `_restore_listing()` clears the borrowing flag itself and puts the host's own rows
-            # (its address bar, its buttons or its hints) back.
-            host._restore_listing()
-        except (RuntimeError, AttributeError):
-            pass
-        try:
-            if home is not None:
-                home._sync_secondary_ui()
-        except (RuntimeError, AttributeError):
-            pass  # the home pane is gone / has no rows yet
-        return True
-
-    # ── v1.4.7 (ROADMAP task 3/4): the lazy syntax highlighting ─────────────
-
-    def _ensure_highlighter(self):
-        """The pane's ONE highlighter (built on the first preview, reused after).
-
-        A viewer must keep working when the highlighter cannot be built (an
-        exotic Qt build): the preview then stays monochrome, which is exactly
-        the v1.3.1 behaviour.
-        """
-        if self._highlighter is None:
-            try:
-                self._highlighter = syntax.create_highlighter(
-                    self.viewer_text.document())
-            except Exception:   # noqa: BLE001 — highlighting is never critical
-                self._highlighter = None
-        return self._highlighter
-
-    # ── v1.7.3 (task 4): the reader's word wrap ─────────────────────────────
-
-    def _build_viewer_menu(self):
-        """The reader's menu: Qt's OWN standard one PLUS the ONE app row (`Word wrap`).
-
-        `createStandardContextMenu()` carries Copy / Select All translated by Qt itself (no i18n
-        key of ours), so the app row is APPENDED after a separator — the same seam shape as
-        `_build_context_menu()`: the tests trigger the QAction directly and never run `exec()`.
-        """
-        menu = self.viewer_text.createStandardContextMenu()
-        menu.addSeparator()
-        act = QAction(_t("sftp.viewer.word_wrap"), menu)
-        act.setCheckable(True)
-        act.setChecked(bool(self._viewer_wrap))
-        act.toggled.connect(self._on_wrap_toggled)
-        menu.addAction(act)
-        self._wrap_action = act
-        return menu
-
-    def _on_viewer_menu(self, pos):
-        """Show the reader's menu at the click (the event is the only caller of the seam)."""
-        try:
-            menu = self._build_viewer_menu()
-            menu.exec(self.viewer_text.viewport().mapToGlobal(pos))
-            menu.deleteLater()
-        except RuntimeError:
-            return   # Qt teardown — the panel is already gone
-
-    def _on_wrap_toggled(self, on: bool):
-        """The row was toggled: the CONTAINER owns the ONE global setting (v1.7.3)."""
-        apply_all = getattr(self._container, "apply_viewer_wrap", None)
-        if callable(apply_all):
-            try:
-                apply_all(bool(on))
-                return
-            except RuntimeError:
-                return   # Qt teardown — nothing left to re-text
-        self.set_viewer_wrap(on)
-
-    def _apply_viewer_wrap(self):
-        """Write the mode into the widget and re-run the lazy pass (the wrap changes the window).
-
-        Never raises: a viewer without the enum (an exotic Qt build) keeps the shipped no-wrap look.
-        """
-        mode = (QPlainTextEdit.LineWrapMode.WidgetWidth if self._viewer_wrap
-                else QPlainTextEdit.LineWrapMode.NoWrap)
-        try:
-            self.viewer_text.setLineWrapMode(mode)
-        except (RuntimeError, AttributeError):
-            return
-        self._highlight_range = None
-        self._highlight_visible(force=True)
-
-    def set_viewer_wrap(self, on, persist: bool = True) -> bool:
-        """Set the reader's word wrap for THIS pane (the container walks the rest)."""
-        self._viewer_wrap = bool(on)
-        self._apply_viewer_wrap()
-        act = getattr(self, "_wrap_action", None)
-        if act is not None:
-            try:
-                act.setChecked(self._viewer_wrap)
-            except RuntimeError:
-                pass   # Qt teardown — the menu is already gone
-        if persist:
-            return save_viewer_wrap(self._viewer_wrap)
-        return True
-
-    @property
-    def viewer_wrap(self) -> bool:
-        """Is the reader wrapping long lines (the topical seam)?"""
-        return bool(self._viewer_wrap)
-
-    def _lazy_margin(self) -> int:
-        """The blocks the lazy window keeps around the viewport.
-
-        Under wrapping ONE block covers SEVERAL visual rows, so the block margin is widened: the
-        same visual distance stays formatted around the viewport (the measured seam of the mode).
-        """
-        if self._viewer_wrap:
-            return self.VIEWER_LAZY_MARGIN * self.WRAP_MARGIN_FACTOR
-        return self.VIEWER_LAZY_MARGIN
-
-    def _viewer_block_range(self):
-        """The block numbers on the screen → `(first, last)`, or None.
-
-        Measured from the LAYOUT (`blockBoundingGeometry` + `contentOffset`), so
-        it answers correctly for a hidden panel too (it degrades to block 0).
-        """
-        edit = self.viewer_text
-        try:
-            block = edit.firstVisibleBlock()
-            if not block.isValid():
-                return None
-            height = edit.viewport().height()
-            offset = edit.contentOffset()
-            first = last = block.blockNumber()
-            while block.isValid():
-                if edit.blockBoundingGeometry(block).translated(offset).top() > height:
-                    break
-                last = block.blockNumber()
-                block = block.next()
-            return first, last
-        except RuntimeError:
-            return None   # the C++ object was already destroyed (a close race)
-
-    def _highlight_visible(self, force: bool = False) -> int:
-        """Format the blocks around the viewport (v1.4.7 task 4 — the lazy half).
-
-        A 1 MB file is ~20 000 blocks and `setPlainText()` marks every one of
-        them dirty, so the EXPENSIVE half (turning spans into text formats) is
-        applied only to the visible window ± `VIEWER_LAZY_MARGIN`; the block
-        STATE is still computed for every line, because the state of a line
-        depends on the line before it. A repeated call whose window is already
-        done costs one comparison.
-
-        Returns the number of blocks really rehighlighted.
-        """
-        highlighter = self._highlighter
-        if highlighter is None:
-            return 0
-        window = self._viewer_block_range()
-        if window is None:
-            return 0
-        margin = self._lazy_margin()
-        first = max(0, window[0] - margin)
-        last = window[1] + margin
-        if not force and (first, last) == self._highlight_range:
-            return 0
-        self._highlight_range = (first, last)
-        highlighter.set_window(first, last)
-        return highlighter.highlight_window(force=force)
-
-    def _on_viewer_update_request(self, _rect, dy):
-        """`QPlainTextEdit.updateRequest`: a scroll (`dy != 0`) or a resize.
-
-        A hidden panel is skipped: the content of a closed viewer is gone, and
-        `clear()` fires the signal while it empties the document — formatting a
-        block nobody can see would only leave a mark behind.
-        """
-        if self.viewer.isHidden():
-            return
-        self._highlight_visible()
-
-    @property
-    def viewer_highlighter(self):
-        """The pane's highlighter (None until the first preview — the test seam)."""
-        return self._highlighter
-
-    @property
-    def viewer_language(self) -> str:
-        """The language the shown content was detected as (v1.4.7)."""
-        return self._viewer_language
-
-    @property
-    def viewer_encoding(self) -> str:
-        """The encoding of the shown content ("utf-8" | "latin-1")."""
-        return self._viewer_encoding
-
-    def close_viewer(self):
-        """v1.3.1: hide the panel and drop its content.
-
-        Idempotent and never raises: it is called by the header's ×, by the
-        container's `set_worker(None)` (the worker died) and by the single page
-        teardown (page.shutdown()) — the preview closes together with the session.
-
-        v1.7rc3: a BORROWED panel goes back to the pane it belongs to first (the other pane gets
-        its listing and its address bar back), so closing the preview always restores the two-pane
-        look the user had before it.
-        """
-        self._read_tasks.clear()
-        self._last_read = None
-        # v1.4.7: the panel is empty → the formatting pass has nothing to cover.
-        self._highlight_range = None
-        self._viewer_open = False
-        if self._highlighter is not None:
-            self._highlighter.reset_for_document()
-        self.restore_viewer()
-        try:
-            self.viewer.hide()
-            self.viewer_text.clear()
-            self.viewer_label.clear()
-            self.viewer_label.setToolTip("")
-        except RuntimeError:
-            pass  # the C++ object was already destroyed (a close race) — nothing to hide
-        # v1.7rc3: this pane may have been the CARRYING one while the panel belonged to its
-        # sibling — its own path row and key hints come back with the panel's closing.
-        if getattr(self, "_viewer_borrowed", False):
-            self._viewer_borrowed = False
-            self._viewer_host = None
-            try:
-                self.path_label.show()
-            except RuntimeError:
-                pass
-            self._sync_secondary_ui()
-
-    # ── Operations (buttons) ─────────────────────────────────────────────
-
-    def _on_upload(self):
-        if self._refuse_without_provider():
-            return
-        files, _ = QFileDialog.getOpenFileNames(
-            self, _t("sftp.upload_dialog_title"))
-        if not files:
-            return   # the dialog was cancelled
-        self._queue_uploads(files, self._current_dir,
-                            self._names_in_current_dir())
-
-    def _on_download(self):
-        if self._refuse_without_provider():
-            return
-        items = [i for i in self.tree.selectedItems()
-                 if not i.data(0, self.ISDIR_ROLE)]
-        if not items:
-            self.message.emit(_t("sftp.no_selection"))
-            return
-        local_dir = QFileDialog.getExistingDirectory(
-            self, _t("sftp.download_dir_title"))
-        if not local_dir:  # dialog cancelled — quietly do nothing
-            return
-        self._queue_downloads(items, local_dir)
-
-    def _refuse_without_provider(self) -> bool:
-        """No bound provider → the shipped "waiting" sentence, and True (the caller returns).
-
-        A LOCAL pane always has its provider, so this is the REMOTE pane's waiting state
-        (`SFTP_PANES.md` §1, unchanged); `_waiting` is the declared flag the path bar follows.
-        """
-        if self._waiting or self.provider is None:
-            self.message.emit(_t("sftp.waiting_connection"))
-            return True
-        return False
-
-    def _on_cancel(self):
-        # v1.7.3: a running `Send to…` is cancelled with the queue it uses — the relay drops its
-        # spool on the way out (a cancel must never leave a plaintext copy behind).
-        cancel_sends = getattr(self._container, "cancel_sends", None)
-        if callable(cancel_sends):
-            try:
-                cancel_sends()
-            except RuntimeError:
-                pass   # Qt teardown — the container is already gone
-        provider = self.provider
-        if provider is not None:
-            try:
-                provider.cancel()
-            except (RuntimeError, AttributeError):
-                pass   # Qt teardown — the provider is already gone
-
-    # ── v1.3.3.2: the batch + the overwrite conflict (ROADMAP task 2) ────
-
-    def _names_in_current_dir(self) -> set:
-        """The names the CURRENT listing shows.
-
-        The conflict check must never be a guess, and the tree is exactly what the
-        server last answered for the shown directory (a row of another directory
-        cannot be in it).
-        """
-        names = set()
-        try:
-            for i in range(self.tree.topLevelItemCount()):
-                item = self.tree.topLevelItem(i)
-                if item is self._up_item:
-                    continue
-                names.add(item.text(0))
-        except RuntimeError:
-            pass  # the C++ object was already destroyed (a close race)
-        return names
-
-    def _ask_conflict(self, name: str, target: str, remaining: int, facts: str = ""):
-        """The overwrite question — a method so a test can replace the whole policy."""
-        return ask_conflict(self, name, target, remaining, facts)
-
-    def _conflict_decision(self, name: str, target: str, remaining: int):
-        """The decision of ONE conflict → `(action, apply_all)`.
-
-        action ∈ `"overwrite" | "skip" | "rename"`; a cancelled dialog — and any
-        broken answer of a replaced seam — is a SKIP: the destination is left alone
-        and the batch goes on. `apply_all` asks to reuse the decision for the REST
-        of this batch (never for "rename": a batch rename needs a name per file).
-        """
-        try:
-            action, apply_all = self._ask_conflict(name, target, remaining)
-        except Exception:   # noqa: BLE001 — a dialog must never break a transfer
-            return "skip", False
-        if action not in ("overwrite", "skip", "rename"):
-            return "skip", False
-        if action == "rename":
-            return action, False
-        return action, bool(apply_all)
-
-    def _prompt_name(self, title: str, current: str = "") -> str:
-        """The name input of New folder / Rename (QInputDialog — a module attribute:
-        `STAB.QInputDialog = <fake>` is the test seam).
-
-        Returns the validated name; "" — cancelled or invalid (empty, ".", "..",
-        a path separator): the caller quietly does nothing. The worker never sees a
-        name it would have to sanitize.
-
-        The separator rule is the REMOTE one (a POSIX server accepts `:` and a trailing dot); a
-        LOCAL pane asks the platform's OWN rule instead (v1.7.5.1, N40), so a name typed here can
-        no longer open an alternate data stream or lose its last character.
-        """
-        try:
-            text, ok = QInputDialog.getText(self, title, _t("sftp.op.name_prompt"),
-                                            text=current)
-        except Exception:   # noqa: BLE001 — a dialog must never break the pane
-            return ""
-        if not ok:
-            return ""
-        name = (text or "").strip()
-        if self.source == SOURCE_LOCAL:
-            if local_name_problem(name):
-                self.message.emit(_t("sftp.op.invalid_name"))
-                return ""
-            return name
-        if not name or name in (".", "..") or "/" in name or "\\" in name:
-            self.message.emit(_t("sftp.op.invalid_name"))
-            return ""
-        return name
-
-    def _queue_uploads(self, files: list, target_dir: str, known: set):
-        """Queue a batch of local files into target_dir, resolving the conflicts.
-
-        `known` — the names already present in target_dir (from a LISTING of that
-        directory: the current listing for the Upload button and for a drop on the
-        body, the pre-flight listing for a drop on a directory row). "Apply to all"
-        of the dialog is remembered for the REST of this batch only — the question is
-        asked ONCE per batch, whichever pane started it.
-
-        v1.7.4rc2: the PROVIDER is the pane's own, so the same body runs for a local
-        pane as well (LOCAL_PANE.md §7): an Explorer drop on the OS disk is a LOCAL
-        copy of every file into the directory on the screen, and a drop on a remote
-        pane is the shipped upload.
-        """
-        provider = self.provider
-        if provider is None:
-            self.message.emit(_t("sftp.waiting_connection"))
-            return
-        apply_all = ""
-        total = len(files)
-        for index, local_path in enumerate(files):
-            name = os.path.basename(local_path)
-            if name in known:
-                if apply_all:
-                    action = apply_all
-                else:
-                    action, to_all = self._conflict_decision(
-                        name, target_dir, total - index - 1)
-                    if to_all:
-                        apply_all = action
-                if action == "skip":
-                    continue
-                if action == "rename":
-                    new_name = self._prompt_name(_t("sftp.op.rename"), name)
-                    if not new_name:
-                        continue   # cancelled → this file is skipped
-                    name = new_name
-            self._remember_transfer(provider.queue_upload(local_path, target_dir,
-                                                          remote_name=name))
-
-    def _queue_downloads(self, items: list, local_dir: str):
-        """Queue a batch of local files into local_dir, resolving the conflicts.
-
-        The local existence check is a plain `os.path.exists` — no listing and no
-        network, so it can never be stale.
-
-        v1.7.4rc2: the provider is the pane's own here too, so a LOCAL pane's
-        "Download" is a copy into the chosen directory through the local engine
-        (LOCAL_PANE.md §5) — the signature of the provider method is the shipped one.
-        """
-        provider = self.provider
-        if provider is None:
-            self.message.emit(_t("sftp.waiting_connection"))
-            return
-        apply_all = ""
-        total = len(items)
-        for index, item in enumerate(items):
-            remote_path = item.data(0, self.PATH_ROLE)
-            name = self.paths.basename(remote_path)
-            # v1.7.5.1 (N40): a server-offered NAME that is PATH SYNTAX on this platform is refused
-            # BEFORE the conflict question and before a task is queued — the worker checks the same
-            # rule at `open()` (the authoritative gate), but a 500-file batch must not pay 500 round
-            # trips to learn what one PURE predicate knew. One sentence, and the batch goes on.
-            if self.source == SOURCE_REMOTE:
-                problem = local_name_problem(name)
-                if problem:
-                    self.message.emit(_t("sftp.name_refused", name=name))
-                    continue
-            if os.path.exists(os.path.join(local_dir, name)):
-                if apply_all:
-                    action = apply_all
-                else:
-                    action, to_all = self._conflict_decision(
-                        name, local_dir, total - index - 1)
-                    if to_all:
-                        apply_all = action
-                if action == "skip":
-                    continue
-                if action == "rename":
-                    new_name = self._prompt_name(_t("sftp.op.rename"), name)
-                    if not new_name:
-                        continue
-                    name = new_name
-            self._remember_transfer(provider.queue_download(remote_path, local_dir,
-                                                            item.data(0, self.SIZE_ROLE),
-                                                            local_name=name))
-
-    def _remember_transfer(self, task_id):
-        """v1.7rc1: remember a transfer THIS pane queued.
-
-        The "Cancel" button is per pane while the QUEUE is one: only the pane that
-        started the transfer lights its button up, so a pane never offers to cancel a
-        batch the user began in the other one (the click still cancels the SHARED queue —
-        that is what "Cancel" means).
-        """
-        if task_id is not None:
-            self._own_transfers.add(task_id)
-
-    # ── v1.7rc2: the remote copy / move of a batch (ROADMAP v1.7rc2) ─────
-
-    def _rows_for_batch(self) -> list:
-        """The rows a copy/move batch acts on (v1.7rc2).
-
-        The SELECTION is the batch — the classic commander behaviour, and the reason the
-        overwrite question can be answered "apply to all" ONCE for the whole run. An empty
-        selection falls back to the CURRENT row (one click selects a row anyway); the ".."
-        row and any row without a path are never part of a batch.
-        """
-        rows = []
-        try:
-            for index in range(self.tree.topLevelItemCount()):
-                item = self.tree.topLevelItem(index)
-                if item is self._up_item or not item.data(0, self.PATH_ROLE):
-                    continue
-                if item.isSelected():
-                    rows.append(item)
-        except RuntimeError:
-            return []   # Qt teardown — the tree is already gone
-        if not rows:
-            current = self._current_row()
-            if current is not None:
-                rows = [current]
-        return rows
-
-    def _remote_batch(self, kind: str, target_pane):
-        """Queue ONE copy/move batch of the selection into the OTHER pane's directory.
-
-        The destination directory IS the other pane's listing, so the conflict check needs
-        no listing of its own (the shipped `_names_in_current_dir()` rule: what the source
-        last answered for that directory). A DIRECTORY row is part of the batch — a copy and
-        a move carry a tree recursively — and a row whose destination would be ITSELF is
-        skipped, because copying or moving a file onto itself is not an operation. The
-        overwrite/skip/rename question is asked through the SHIPPED machinery and its "apply
-        to all" answer holds for the rest of this batch only.
-
-        v1.7.3: the body moved into `_queue_transfer_batch()` — the pane-to-pane drop needs
-        exactly the same batch over a SOURCE LIST that is not the selection.
-
-        v1.7.4rc2: that body is the DISPATCH over the PAIR of providers (LOCAL_PANE.md §5) —
-        the ONE question, the shipped counters and the ONE closing report are the same for
-        all four cases, and only the provider that runs a transfer changes.
-        """
-        rows = self._rows_for_batch()
-        if not rows:
-            self.message.emit(_t("sftp.cmd.no_selection"))
-            return
-        items = [(row.data(0, self.PATH_ROLE), row.text(0),
-                  int(row.data(0, self.SIZE_ROLE) or 0)) for row in rows]
-        self._queue_transfer_batch(items, kind, target_pane.current_dir,
-                                   target_pane._names_in_current_dir(), target_pane)
-
-    def _pane_source(self, pane) -> str:
-        """The source a pane reads — asked of the PANE, never assumed (v1.7.4rc2)."""
-        return SOURCE_LOCAL if getattr(pane, "source", SOURCE_REMOTE) == SOURCE_LOCAL \
-            else SOURCE_REMOTE
-
-    def _batch_provider(self, target_pane, src: str = ""):
-        """The provider that RUNS a batch from `src` into `target_pane` (v1.7.4rc2).
-
-        A REMOTE destination is always the SESSION's transport: the container's shipped worker
-        carries the source pane's own copy AND the bytes of a LOCAL source out (`queue_upload`) —
-        the local provider has no network, no credential and no channel. A LOCAL destination with
-        a local source is that pane's own engine; with a remote source the download half still
-        rides the session's worker (LOCAL_PANE.md §5).
-        """
-        src = str(src or self.source)
-        dst = self._pane_source(target_pane)
-        if dst == SOURCE_LOCAL and src == SOURCE_LOCAL:
-            return getattr(target_pane, "provider", None) or self.provider
-        return self.worker
-
-    def _queue_transfer_batch(self, items: list, kind: str, target_dir: str, known: set,
-                              target_pane=None, source: str = ""):
-        """ONE copy/move batch of `(source, row_name, size)` triples into `target_dir`.
-
-        `known` is the destination's listing as it is on the screen (never a guess), the ".."
-        row and a pathless row are never part of a batch, a row that already IS the destination
-        is skipped, and the ONE closing report counts copied / skipped / failed.
-
-        v1.7.4rc2: a task id belongs to the PROVIDER that queued it, so the destination (its pane
-        and its directory) is remembered per task in `_op_targets` and the answer re-lists the
-        pane that really changed through ITS OWN dialect — a remote answer never re-lists a local
-        pane and the other way round. `source` names where the ITEMS came from when the DESTINATION
-        pane queues them (a pane-to-pane drop): the dialect of a row's path is the dialect of the
-        pane that produced it, never the one that received it.
-        """
-        target_pane = target_pane if target_pane is not None else self
-        src = SOURCE_LOCAL if str(source or self.source) == SOURCE_LOCAL else SOURCE_REMOTE
-        dst = self._pane_source(target_pane)
-        if kind == KIND_MOVE and src != dst:
-            # LOCAL_PANE.md §5 declares an upload / a download for a transfer that CROSSES the two
-            # sources and a move only INSIDE one of them: a silent copy where the user asked for a
-            # move is worse than ONE sentence, and F5 is right there for the copy.
-            self.message.emit(_t("sftp.local.move_cross_source"))
-            return
-        provider = self._batch_provider(target_pane, src)
-        if provider is None:
-            self.message.emit(_t("sftp.waiting_connection"))
-            return
-        # The answers of a batch arrive at the pane BOUND to the provider that runs it (§1), so a
-        # cross-source upload is COUNTED by the remote pane while the conflict question and the
-        # report stay where the user acted: a local pane never hears the session's transport.
-        owner = self
-        if provider is not self.provider:
-            owner = self._container.pane_for_provider(provider) or self
-        total = len(items)
-        skipped = 0
-        queued = []
-        apply_all = ""
-        src_paths = dialect_for(src)
-        dest_paths = target_pane.paths
-        for index, (source_path, row_name, size) in enumerate(items):
-            if not source_path:
-                skipped += 1
-                continue
-            name = src_paths.basename(source_path) or str(row_name or "")
-            if dest_paths.same(dest_paths.join(target_dir, name), source_path):
-                skipped += 1   # the row already IS the destination — never an operation
-                continue
-            if name in known:
-                if apply_all:
-                    action = apply_all
-                else:
-                    action, to_all = self._conflict_decision(
-                        name, target_dir, total - index - 1)
-                    if to_all:
-                        apply_all = action
-                if action == "skip":
-                    skipped += 1
-                    continue
-                if action == "rename":
-                    new_name = self._prompt_name(_t("sftp.op.rename"), name)
-                    if not new_name:
-                        skipped += 1
-                        continue
-                    name = new_name
-            queued.append((source_path, name, int(size or 0)))
-        batch_id = owner._open_batch(kind, len(queued), skipped)
-        for source_path, name, size in queued:
-            task_id = self._queue_batch_item(provider, src, dst, kind, source_path, target_dir,
-                                             name, size)
-            if task_id is None:
-                owner._count_batch(batch_id, "failed")   # the provider is gone — still an answer
-                continue
-            owner._op_batches[task_id] = batch_id
-            owner._op_targets[task_id] = (target_pane, target_dir)
-            owner._queue_op(task_id, kind)
-            if kind == KIND_COPY or src != dst:
-                # the progress bar + the Cancel button: a copy always reports, and a cross-source
-                # transfer is an upload / a download whatever the batch calls it (v1.7.4rc2).
-                self._remember_transfer(task_id)
-        if not queued:
-            owner._finish_batch(batch_id)   # everything was skipped — the report says so
-            return
-        self.message.emit(_t("sftp.cmd.batch_started", count=len(queued), dir=target_dir))
-
-    def _queue_batch_item(self, provider, src: str, dst: str, kind: str, source: str,
-                          target_dir: str, name: str, size: int):
-        """Queue ONE item of a batch on the provider that owns the SOURCE (LOCAL_PANE.md §5).
-
-        Three cases use three SHIPPED methods and no new transport: local→remote is the session
-        worker's `queue_upload`, remote→local its `queue_download` (atomic, `<name>.part`), and a
-        pair of one source is the shipped copy / move of that provider — the remote `queue_copy` /
-        `queue_move` or the local engine of `modules/local_fs_worker.py`.
-        """
-        if dst == SOURCE_REMOTE and src == SOURCE_LOCAL:
-            return provider.queue_upload(source, target_dir, remote_name=name)
-        if dst == SOURCE_LOCAL and src == SOURCE_REMOTE:
-            return provider.queue_download(source, target_dir, size, local_name=name)
-        if kind == KIND_COPY:
-            return provider.queue_copy(source, target_dir, name)
-        return provider.queue_move(source, target_dir, name)
-
-    def _open_batch(self, kind: str, total: int, skipped: int) -> int:
-        """Open a batch record and return its id (the counters of ONE report, v1.7rc2)."""
-        self._batch_seq += 1
-        self._batches[self._batch_seq] = {"op": kind, "total": int(total), "done": 0,
-                                          "failed": 0, "skipped": int(skipped), "answers": 0}
-        return self._batch_seq
-
-    def _count_batch(self, batch_id, key: str):
-        """Count ONE answer of a batch; the last answer emits the ONE report (v1.7rc2).
-
-        Every queued item produces exactly one answer (done / failed / cancelled — a
-        cancelled item counts as failed, it was not transferred), so the report cannot be
-        emitted early or stay silent.
-        """
-        record = self._batches.get(batch_id)
-        if record is None:
-            return
-        record[key] = int(record.get(key, 0)) + 1
-        record["answers"] = int(record.get("answers", 0)) + 1
-        if record["answers"] >= record["total"]:
-            self._finish_batch(batch_id)
-
-    def _finish_batch(self, batch_id):
-        """Emit the ONE closing report of a batch and forget it (v1.7rc2)."""
-        record = self._batches.pop(batch_id, None)
-        if record is None:
-            return
-        key = "sftp.cmd.copy_report" if record.get("op") == KIND_COPY else "sftp.cmd.move_report"
-        self.message.emit(_t(key, done=record.get("done", 0), skipped=record.get("skipped", 0),
-                             failed=record.get("failed", 0)))
-
-    def _answer_batch_task(self, task_id, outcome: str):
-        """Count the answer of ONE queued copy/move task into its batch (v1.7rc2)."""
-        batch_id = self._op_batches.pop(task_id, None)
-        if batch_id is None:
-            return   # not a batch task of this pane (another pane's, or already counted)
-        self._count_batch(batch_id, outcome)
-
-    def _remote_error_text(self, message: str) -> str:
-        """The task_error of a copy/move → a translated sentence (v1.7rc2).
-
-        The worker reports a MACHINE payload for the three cases it knows (`parse_task_payload`):
-        a PARTIALLY transferred tree (with its counters), a REFUSED cross-directory rename (the
-        sentence names the fallback: copy + delete) and a tree over its declared bound.
-
-        v1.7.4rc2: a copy or a move of the OS DISK travels the same way from the local engine, so
-        its own codes are rendered through the ONE local table before the generic sentence.
-        """
-        data = parse_task_payload(message)
-        code = data.get("code") if data else None
-        if code == PARTIAL_CODE:
-            copied = data.get("copied", 0)
-            path = str(data.get("path") or "")
-            failed = str(data.get("error") or "")
-            return _t("sftp.cmd.partial", name=self.paths.basename(path) or path,
-                      copied=copied, error=name_refusal_text(failed) or failed)
-        if code == MOVE_ERROR_REFUSED:
-            return _t("sftp.cmd.move_refused", error=str(data.get("error") or ""))
-        if code == TREE_ERROR_TOO_BIG:
-            return _t("sftp.cmd.tree_too_big",
-                      limit=int(data.get("limit") or MAX_TREE_ENTRIES))
-        if code in local_fs.LOCAL_ERROR_KEYS:
-            return local_error_text(message)
-        refusal = name_refusal_text(message)
-        if refusal:
-            return refusal
-        return _t("sftp.op.error", error=message)
-
-    # ── v1.3.3.2: the file operations (ROADMAP task 1) ───────────────────
-
-    def _on_context_menu(self, pos):
-        """The tree's context menu (the seam is `_build_context_menu(item)`)."""
-        try:
-            item = self.tree.itemAt(pos)
-        except RuntimeError:
-            return   # the C++ object is already deleted (a close race)
-        self.activate()   # the row menu belongs to the pane it was opened in
-        menu = self._build_context_menu(item)
-        if menu is not None:
-            menu.exec(self.tree.viewport().mapToGlobal(pos))
-
-    def _build_context_menu(self, item=None):
-        """New folder / Rename / Delete / Copy remote path (a test seam: the tests
-        trigger the QActions directly — `menu.exec()` never runs offscreen).
-
-        Rename/Delete/Copy are enabled only for a REAL row of the current listing
-        (never for the ".." row, never for empty space) — a disabled item is the
-        hint, the actions themselves stay defensive.
-        """
-        menu = QMenu(self)
-        act_new = menu.addAction(_t("sftp.op.new_folder"))
-        act_rename = menu.addAction(_t("sftp.op.rename"))
-        act_delete = menu.addAction(_t("sftp.op.delete"))
-        act_copy = menu.addAction(_t("sftp.op.copy_path"))
-        # v1.7.3 (task 1): `Send to ▸ <session>` — the rows of the sessions open RIGHT NOW.
-        sub = self._build_send_menu(item)
-        if sub is not None:
-            menu.addMenu(sub)
-        menu.addSeparator()
-        act_refresh = menu.addAction(_t("sftp.refresh"))
-
-        real = (item is not None and item is not self._up_item
-                and bool(item.data(0, self.PATH_ROLE)))
-        for act in (act_rename, act_delete, act_copy):
-            act.setEnabled(bool(real))
-
-        act_new.triggered.connect(lambda: self._op_new_folder())
-        act_refresh.triggered.connect(lambda: self._relist(self._current_dir))
-        if real:
-            act_rename.triggered.connect(lambda: self._op_rename(item))
-            act_delete.triggered.connect(lambda: self._op_delete(item))
-            act_copy.triggered.connect(lambda: self._op_copy_path(item))
-        return menu
-
-    # ── v1.7.3 (task 1): `Send to ▸ <session>` — the cross-session relay ──
-
-    def _build_send_menu(self, item):
-        """The `Send to ▸ <session>` submenu of one row (None — an empty space, no row at all).
-
-        The sessions come from the CONTAINER's provider, so this module never learns where a window
-        keeps its registry. A row that is not a FILE answers ONE sentence (a directory crosses
-        through the two panes, the relay carries files) and a session list that is empty says so
-        instead of offering a dead menu — both are DISABLED rows, which is the shipped hint rule.
-        """
-        if item is None or item is self._up_item or not item.data(0, self.PATH_ROLE):
-            return None
-        menu = QMenu(_t("sftp.send.menu"), self)
-        if item.data(0, self.ISDIR_ROLE):
-            menu.addAction(_t("sftp.send.no_file")).setEnabled(False)
-            return menu
-        targets = self._container.send_targets() if self._container is not None else []
-        if not targets:
-            menu.addAction(_t("sftp.send.no_targets")).setEnabled(False)
-            return menu
-        for target in targets:
-            label = target.label or target.host or "?"
-            act = menu.addAction(f"{label} ({target.directory or '/'})")
-            act.triggered.connect(lambda _checked=False, t=target, i=item: self._op_send_to(i, t))
-        return menu
-
-    def _op_send_to(self, item, target):
-        """Send ONE file row to another session (the size gate, then the container's relay).
-
-        A LOCAL row is refused with ONE sentence: the relay carries a row of a SERVER (its legs
-        are the session's shipped download/upload pair), while a file of the OS disk crosses
-        through the two panes with F5 (LOCAL_PANE.md §5) — two doors, each saying which one is
-        which instead of quietly doing the wrong thing.
-        """
-        if self.worker is None:
-            self.message.emit(_t("sftp.waiting_connection"))
-            return
-        if self.source == SOURCE_LOCAL:
-            self.message.emit(_t("sftp.local.transfer_unavailable"))
-            return
-        path = item.data(0, self.PATH_ROLE) if item is not None else ""
-        if not path or (item is not None and item.data(0, self.ISDIR_ROLE)):
-            self.message.emit(_t("sftp.send.no_file"))
-            return
-        size = int(item.data(0, self.SIZE_ROLE) or 0)
-        # The declared ceiling is checked BEFORE anything is transferred (the ask's own number).
-        if not send.size_allowed(size):
-            self.message.emit(_t("sftp.send.too_big", name=self.paths.basename(path),
-                                 size=format_size(size), limit=format_size(send.MAX_SEND_BYTES)))
-            return
-        entry = {"path": path, "name": self.paths.basename(path), "size": size,
-                 "mtime": int(item.data(0, self.MTIME_ROLE) or 0)}
-        if self._container is None:
-            return
-        self._container.start_send(self, target, entry)
+    # ── the file operations the row context menu fires (ROADMAP task 1) ───────────────
 
     def _op_new_folder(self):
         """New folder in the CURRENT directory (mkdir through THIS pane's provider queue)."""
-        if self._refuse_without_provider():
+        if self._refuse_elevated_write() or self._refuse_without_provider():
             return
         name = self._prompt_name(_t("sftp.op.new_folder"))
         if not name:
@@ -3804,7 +1688,7 @@ class _SftpPane(QWidget):
 
     def _op_rename(self, item):
         """Rename a row inside its own directory (only the NAME changes)."""
-        if self._refuse_without_provider():
+        if self._refuse_elevated_write() or self._refuse_without_provider():
             return
         path = item.data(0, self.PATH_ROLE)
         if not path:
@@ -3821,8 +1705,9 @@ class _SftpPane(QWidget):
         A directory is removed with rmdir: a NON-EMPTY one reports the provider's error
         (a recursive delete is not in this version). v1.7.4rc1: the confirmation of a LOCAL
         row SAYS that the delete is permanent — there is no recycle bin (LOCAL_PANE.md §4).
+        v1.8: an ELEVATED pane refuses the delete before the question (ELEVATED_PANE.md §5).
         """
-        if self._refuse_without_provider():
+        if self._refuse_elevated_write() or self._refuse_without_provider():
             return
         path = item.data(0, self.PATH_ROLE)
         if not path:
@@ -3857,289 +1742,6 @@ class _SftpPane(QWidget):
         or reports a message (task_error)."""
         if task_id is not None:
             self._op_tasks[task_id] = kind
-
-    # ── D&D: files from Explorer (v1.2.8) ────────────────────────────────
-
-    _DRAG_TYPES = (QEvent.Type.DragEnter, QEvent.Type.DragMove, QEvent.Type.Drop)
-
-    def eventFilter(self, obj, event):
-        """Drag events on the pane's children are forwarded to the pane's OWN
-        handlers. Returning True = the event is consumed (QTreeWidget does not
-        process it "its own way").
-
-        v1.3.3.2: the SOURCE widget of the event is remembered for the drop — the
-        directory under the cursor is resolved in the tree's coordinates whatever
-        child (viewport, header, button) received the event.
-
-        v1.7rc1: a keyboard FocusIn anywhere inside the pane makes it the ACTIVE pane of
-        the container (the event is NOT consumed — the widget keeps the focus).
-
-        v1.7rc3: a KEY of the pane's walk (`Tab`/`Shift+Tab`, `Enter`, `Insert`/`Space`,
-        `Backspace`, `Left`) is answered here too, so it fires from the address bar, a button
-        or the hint row and not only from the tree. The completer's popup is the ONE exception:
-        while it is open `Tab`/`Enter` complete the typed path (the shipped behaviour), so the
-        popup's events are left to Qt.
-        """
-        etype = event.type()
-        # `obj is self._container` is "the tab itself" — the shipped production path (with DragOnly
-        # the tree's viewport refuses drops, so Qt hands them to the tab), where the point is in the
-        # TAB's coordinates and is mapped back to the tree. The pane's OWN viewer counts as this pane
-        # even while it is BORROWED by the other one (a re-parented widget is nobody's descendant any
-        # more), so a key typed into the open panel still reaches the walk (`AGENTS.md` §4.24).
-        mine = (obj is self or obj is self._container or self.isAncestorOf(obj)
-                or obj is self.viewer or self.viewer.isAncestorOf(obj))
-        # v1.7.5: the SOURCE header line takes no drop — it is a view of the source, not a target,
-        # so a drag over it is left to Qt (a drop is resolved in the tree's viewport, §3).
-        if etype in self._DRAG_TYPES and obj is getattr(self, "header_label", None):
-            return False
-        if etype in self._DRAG_TYPES and mine:
-            self._drag_source = obj
-            try:
-                if etype == QEvent.Type.DragEnter:
-                    self.dragEnterEvent(event)
-                elif etype == QEvent.Type.DragMove:
-                    self.dragMoveEvent(event)
-                else:  # Drop
-                    self.dropEvent(event)
-            finally:
-                self._drag_source = None
-            return True
-        if etype == QEvent.Type.FocusIn and mine:
-            self.activate()
-        # v1.7rc3: the walk of the two-pane view — the tree has its own `keyPressEvent` hook,
-        # the pane answers for every OTHER widget it owns (Tab must switch the panes from the
-        # address bar or a button as well).
-        if etype == QEvent.Type.KeyPress and mine and obj is not self.tree and not self._popup_open():
-            if self._on_pane_key(event):
-                return True
-        return False
-
-    def _popup_open(self) -> bool:
-        """True while the address bar's completer popup has the keyboard (v1.7rc3)."""
-        try:
-            popup = self.path_completer.popup()
-            return popup is not None and popup.isVisible()
-        except (RuntimeError, AttributeError):
-            return False
-
-    @staticmethod
-    def local_files(mime_data) -> list:
-        """The module function of the same name (the drag payload of a drop)."""
-        return local_files(mime_data)
-
-    def dragEnterEvent(self, event):
-        # v1.7.3: a row of ANOTHER Files pane is a payload of its own (the private mime type) —
-        # `local_files()` cannot see it and the drop below is a copy or a move.
-        if local_files(event.mimeData()) or pane_payload(event.mimeData()):
-            event.acceptProposedAction()
-
-    def dragMoveEvent(self, event):
-        # Same answer as dragEnter — otherwise Qt will reset the action before Drop.
-        if local_files(event.mimeData()) or pane_payload(event.mimeData()):
-            event.acceptProposedAction()
-
-    def dropEvent(self, event):
-        # v1.7.3 (task 3): a row dragged out of a pane and dropped INTO a pane is the v1.7rc2
-        # copy (a MOVE with `Shift`) with a PANE as its destination.
-        payload = pane_payload(event.mimeData())
-        if payload is not None:
-            event.acceptProposedAction()
-            self._on_pane_drop(payload, event)
-            return
-        target = self._drop_target_dir(event)
-        files = local_files(event.mimeData())
-        if files:
-            event.acceptProposedAction()
-        self._on_drop(files, target)
-
-    @staticmethod
-    def _drop_is_move(event) -> bool:
-        """Is this drop a MOVE? `Shift`+drop is one (the classic commander reading)."""
-        try:
-            if event.dropAction() == Qt.DropAction.MoveAction:
-                return True
-        except (AttributeError, RuntimeError):
-            pass   # an exotic event object without the action — the modifier decides
-        try:
-            return bool(event.modifiers() & Qt.KeyboardModifier.ShiftModifier)
-        except (AttributeError, RuntimeError):
-            return False
-
-    def _on_pane_drop(self, payload: dict, event):
-        """A row of a pane dropped into THIS pane: copy, or move with `Shift` (v1.7.3).
-
-        TWO refusals are declared and each answers ONE sentence: the row may come from THIS pane
-        (nothing to copy), and it may belong to ANOTHER session — there is no server-to-server
-        path, so a file crosses between servers through `Send to…`, never through a drag.
-
-        v1.7.4rc2: the payload DECLARES its source dialect, so the row's name is read with the
-        dialect that really produced the path (a local path spells its separators the OS way) and
-        the pre-flight listing of a destination that is not on the screen goes to THIS pane's
-        provider — a local directory is the OS's business, never the session's.
-        """
-        if payload.get("pane") == id(self):
-            self.message.emit(_t("sftp.cmd.drop_same_pane"))
-            return
-        if not self.session_key() or payload.get("session") != self.session_key():
-            self.message.emit(_t("sftp.cmd.drop_other_session"))
-            return
-        source = str(payload.get("path") or "")
-        if not source:
-            self.message.emit(_t("sftp.cmd.no_selection"))
-            return
-        provider = self.provider
-        if provider is None:
-            self.message.emit(_t("sftp.waiting_connection"))
-            return
-        items = [(source, dialect_for(payload.get("source")).basename(source),
-                  int(payload.get("size") or 0))]
-        src = payload.get("source") or SOURCE_REMOTE
-        kind = KIND_MOVE if self._drop_is_move(event) else KIND_COPY
-        target_dir = self._drop_target_dir(event) or self._current_dir
-        if self.paths.same(target_dir, self._current_dir):
-            self._queue_transfer_batch(items, kind, target_dir, self._names_in_current_dir(),
-                                       self, src)
-            return
-        # The destination row is not on the screen: LIST it first (the shipped pre-flight rule) so
-        # the conflict question is the source's own answer.
-        task_id = provider.queue_list(target_dir)
-        if task_id is None:
-            self._queue_transfer_batch(items, kind, target_dir, set(), self, src)
-            return
-        self._pending_drops[task_id] = (items, kind, target_dir, src)
-
-    def _item_under(self, event):
-        """The listing row under a drag event (None — empty space / outside the tree).
-
-        The event may arrive from any child (the pane's eventFilter forwards it): the
-        point is mapped into the viewport's coordinates first, so the row is found
-        regardless of who received the event.
-        """
-        try:
-            pos = event.position().toPoint()
-        except AttributeError:   # an older event object without position()
-            pos = event.pos()
-        source = self._drag_source or self
-        try:
-            if source is not self.tree.viewport():
-                pos = self.tree.viewport().mapFrom(source, pos)
-            return self.tree.itemAt(pos)
-        except (RuntimeError, TypeError):
-            return None   # the C++ object is gone / the source is not an ancestor
-
-    def _drop_target_dir(self, event) -> str:
-        """v1.3.3.2 (ROADMAP task 4): the directory UNDER THE CURSOR.
-
-        A directory row (including "..") is the target; a file row and empty space
-        keep the current directory — the second half of the "drop into a specific
-        row" promise quoted in the goal of the version.
-        """
-        item = self._item_under(event)
-        if item is not None and item.data(0, self.ISDIR_ROLE):
-            return item.data(0, self.PATH_ROLE) or self._current_dir
-        return self._current_dir
-
-    def _on_drop(self, files: list, target_dir: str = ""):
-        """Drop result: upload into the directory under the cursor.
-
-        The conflict check must not be a guess, so a target directory that is NOT on
-        the screen is LISTED first (a "list" task of the same queue) and the batch is
-        queued when the answer arrives — see `_on_list_ready`.
-
-        v1.7.4rc2: the queue is THIS pane's PROVIDER, so a drop of Explorer files on the local
-        pane is a LOCAL copy of every file into the directory on the screen, while a drop on a
-        remote pane stays the shipped upload (LOCAL_PANE.md §7).
-        """
-        target = target_dir or self._current_dir
-        if not files:
-            # No local files in the drag (directories/other data).
-            self.message.emit(_t("sftp.drop_no_files"))
-            return
-        provider = self.provider
-        if provider is None:
-            self.message.emit(_t("sftp.waiting_connection"))
-            return
-        if self.paths.same(target, self._current_dir):
-            # The listing on the screen IS the answer of the source for that
-            # directory — the conflict check needs nothing else.
-            self._queue_uploads(files, target, self._names_in_current_dir())
-        else:
-            task_id = provider.queue_list(target)
-            if task_id is not None:
-                self._pending_batches[task_id] = (target, files)
-                return   # the hint + the uploads follow the listing answer
-            self._queue_uploads(files, target, set())
-        self.message.emit(_t("sftp.drop_queued", count=len(files), dir=target))
-
-    # ── Transfer state (the "Cancel" button) ─────────────────────────────
-
-    def _on_task_started(self, task_id: int, kind: str, _label: str):
-        if kind in ("upload", "download", "copy") and task_id in self._own_transfers:
-            self._transfer_tasks.add(task_id)
-            self.btn_cancel.setEnabled(True)
-
-    def _on_task_done(self, task_id: int, detail: str):
-        """task_done: an OPERATION refreshes the listing (v1.3.3.2) and reports the
-        result; a transfer and a read keep their v1.1.3/v1.3.1 handling.
-
-        v1.7rc2: a remote copy/move reports through its BATCH (one closing report instead
-        of one line per file) and re-lists EVERY pane showing a directory it touched — the
-        destination changed, and a move also emptied the source.
-
-        v1.7.4rc2: the re-list goes to the pane that really CHANGED, through ITS OWN dialect
-        (`_op_targets`, LOCAL_PANE.md §5): `detail` is a local path when the destination is the
-        OS disk, so the shipped `posixpath.dirname()` would send a remote pane to a Windows path.
-        """
-        kind = self._op_tasks.pop(task_id, None)
-        if kind in (KIND_COPY, KIND_MOVE):
-            pane, dest_dir = self._op_targets.get(task_id) or (None, "")
-            pane = pane if pane is not None else self
-            try:
-                changed = pane.paths.dirname(detail) or dest_dir
-            except (RuntimeError, AttributeError):
-                changed = dest_dir
-            self._container.relist_pane(pane, changed)
-            if kind == KIND_MOVE:
-                self._container.relist_pane(self, self._current_dir)
-            self._answer_batch_task(task_id, "done")
-            self._on_task_finished(task_id)
-            return
-        if kind is None and self.source == SOURCE_LOCAL and task_id in self._own_transfers:
-            # v1.7.4rc2: a LOCAL transfer (its kind never enters `_op_tasks` — only an OPERATION does)
-            # changed the directory ON THE SCREEN, and no session page re-lists the OS disk, so the
-            # pane refreshes itself.
-            self._relist(self._current_dir)
-            self._on_task_finished(task_id)
-            return
-        if kind is not None:
-            self.message.emit(_t("sftp.op.done", name=detail))
-            self._relist(self._current_dir)
-        self._on_task_finished(task_id)
-
-    def _on_task_cancelled(self, task_id: int, _kind: str):
-        kind = self._op_tasks.pop(task_id, None)
-        # A cancelled pre-flight listing: its batch will never be queued (the
-        # bookkeeping must not leak into the next transport).
-        self._pending_batches.pop(task_id, None)
-        if kind in (KIND_COPY, KIND_MOVE):
-            # v1.7rc2: the item was not transferred — it counts as a failure of its batch
-            # (the window's status bar has already said "Transfer cancelled").
-            self._answer_batch_task(task_id, "failed")
-        self._on_task_finished(task_id)
-
-    def _on_task_finished(self, task_id: int):
-        # v1.3.1: a read task that ended without an answer (cancelled) leaves no trace.
-        self._read_tasks.pop(task_id, None)
-        # v1.6.3: the same for the address bar's tasks and the completer's listings.
-        self._normalize_tasks.pop(task_id, None)
-        self._completer_lists.pop(task_id, None)
-        # v1.7.4rc2: the destination of a batch task is forgotten with its answer.
-        self._op_targets.pop(task_id, None)
-        self._own_transfers.discard(task_id)
-        if task_id in self._transfer_tasks:
-            self._transfer_tasks.discard(task_id)
-            if not self._transfer_tasks:
-                self.btn_cancel.setEnabled(False)
 
 
 class CommanderCorner(QWidget):
@@ -4266,6 +1868,7 @@ class SftpTab(QWidget):
 
     # Local hints in the window's status bar (waiting for connection, no selection).
     message = Signal(str)
+
     # v1.6.3 (ROADMAP task 5): the user switched the cwd follow. The TAB only reports it —
     # the session (TerminalSessionPage) installs the hook, applies it live and persists the
     # `terminal_follow_cwd` key, because the follow is a state of the SESSION, not of a view.
@@ -4278,6 +1881,9 @@ class SftpTab(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._worker = None
+        #: v1.8: the session's live `paramiko.Transport`, published by the page (`set_transport`)
+        #: because the elevated channel rides it (`ELEVATED_PANE.md` §2).
+        self._transport = None
         self._released = False
         self._panes = []
         self._pane_b = None
@@ -4670,6 +2276,39 @@ class SftpTab(QWidget):
         if len(self._panes) < 2:
             return False
         return pane is not self._panes[0]
+
+    def can_elevate(self, pane) -> bool:
+        """May THIS pane read the server as ANOTHER user? The sibling of `can_use_local()`.
+
+        The SAME two structural conditions, for the same reasons (`ELEVATED_PANE.md` §4): the
+        elevation replaces the provider of a pane BESIDE the session's own tree, so it is offered
+        on the SECOND pane of a two-pane container alone — the first pane, the dock's single-pane
+        view and the Files panel answer False and are refused with ONE sentence.
+        """
+        return self.can_use_local(pane)
+
+    # ── v1.8: the SESSION's transport, published for the elevation (ELEVATED_PANE.md §2) ──
+
+    def set_transport(self, transport):
+        """Publish the live `paramiko.Transport` of this session (the page's ONE call).
+
+        The elevated channel rides the transport the Files tab already uses, so the pane needs the
+        object and may not reach into the session's worker for it. `None` — the transport is gone:
+        every pane drops an elevation that has no channel left, instead of listing through a dead
+        one. Never raises.
+        """
+        self._transport = transport
+        if transport is not None:
+            return
+        for pane in list(self._panes):
+            try:
+                pane.transport_lost()
+            except (RuntimeError, AttributeError):
+                continue   # Qt teardown / a bare stub — nothing to drop
+
+    def transport(self):
+        """The live transport of this session (`None` — never connected / already gone)."""
+        return getattr(self, "_transport", None)
 
     def pane_source(self, pane) -> str:
         """The source a pane reads (`SOURCE_REMOTE` for a pane this container does not hold)."""
@@ -5329,3 +2968,29 @@ class SftpTab(QWidget):
                 setattr(pane, name, value)
                 return
         super().__setattr__(name, value)
+
+
+# The LIVE-NAMESPACE SEAMS, declared once: every name a `sftp_pane_*.py` mixin resolves on THIS
+# module at call time (`host_attr`). The declaration IS the seam — it keeps the name importable, it
+# is the substitution point a suite patches, and it stops a static analyser from reading a live seam
+# as a dead import (`AGENTS.md` §4.1, §4.3), so it comes LAST.
+MODULE_FACADE_SEAMS = (
+    # ── the pure readers the listing and the viewer resolve here (rc5 moved them to their own
+    # ── module and re-exports them from this path, so the seam outlives the wave) ──
+    format_size, format_mtime, preview_block_reason, decode_text, ask_conflict, read_was_truncated,
+    clamp_viewer_max_bytes, save_viewer_wrap,
+    # ── the Qt surfaces the transfer and the drag & drop mixins resolve here: a suite substitutes
+    # ── them on THIS module (`STAB.QFileDialog = <fake>` and its two siblings) ──
+    QFileDialog, QInputDialog, QMenu,
+    # ── the pane's source vocabulary, the batch's dispatcher and the listing's row class ──
+    SOURCE_REMOTE, SOURCE_LOCAL, SOURCE_ELEVATED, PANE_SOURCES, dialect_for, local_error_text,
+    name_refusal_text, local_files, pane_payload, _SftpRowItem, READ_ERROR_TOO_LARGE,
+    # ── v1.8: the ELEVATION seams the `sftp_pane_elevated.py` mixin resolves here (the handshake
+    # ── class, the dialogue, the shipped engine over the elevated client and its orphan registry)
+    ElevatedHandshake, ask_elevation, SftpWorker, register_orphan_sftp_worker,
+    # ── the cluster facts the waves moved OUT of this module and RE-EXPORTS: the shipped surface a
+    # ── caller and the suite read on `modules.sftp_tab` (`PANE_SHORTCUTS`, the cap's range, the
+    # ── measured freeze slope) stays importable HERE ──
+    PANE_SHORTCUTS, PANE_HINTS, HINT_SEPARATOR, VIEWER_MAX_BYTES_STEP, VIEWER_MAX_BYTES_WARN,
+    VIEWER_FREEZE_MS_PER_MB, viewer_freeze_seconds,
+)

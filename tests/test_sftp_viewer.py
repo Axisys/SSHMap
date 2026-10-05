@@ -26,7 +26,8 @@ from modules.sftp_worker import (
     SftpWorker, MAX_READ_BYTES, KIND_READ, TEXT_EXTENSIONS, BINARY_EXTENSIONS,
     READ_ERROR_BINARY, READ_ERROR_TOO_LARGE, classify_extension,
 )
-from modules.sftp_tab import SftpTab, decode_text, format_size, preview_block_reason
+from modules.sftp_tab import (SftpTab, decode_text, format_size, preview_block_reason,
+                              read_was_truncated)
 from ui import theme   # v1.3.1.1: the "no preview" marker colour (no literals in code)
 
 # The fake in-memory FS + the fake SFTPClient (no network) — the shared stubs _fakes.py
@@ -245,6 +246,38 @@ check("decode_text: a decode failure → the Latin-1 fallback + the encoding",
       decode_text("caf\u00e9\n".encode("latin-1")) == ("caf\u00e9\n", "latin-1"))
 check("decode_text: Latin-1 never raises on arbitrary bytes",
       decode_text(b"\xff\xfe\x80")[1] == "latin-1" and len(decode_text(b"\xff\xfe\x80")[0]) == 3)
+
+# N46: a read CUT at the ceiling must not be decoded as another encoding. The probe: the largest
+# prefix of a Cyrillic file whose UTF-8 decode fails — the byte-exact cut the workers make.
+_CYR = ("\u0421\u0435\u0440\u0432\u0435\u0440: \u043f\u0440\u043e\u0434\u0430\u043a\u0448\u043d\n" * 4)
+_CYR_BUF = _CYR.encode("utf-8")
+_CYR_CUT = 0
+for _n in range(len(_CYR_BUF), 0, -1):
+    try:
+        _CYR_BUF[:_n].decode("utf-8-sig")
+    except UnicodeDecodeError:
+        _CYR_CUT = _n
+        break
+_CYR_HEAD = _CYR_BUF[:_CYR_CUT]
+_CYR_INTACT = _CYR[:len(_CYR_HEAD.decode("utf-8", errors="ignore"))]
+check("decode_text: a buffer cut MID-character answers latin-1 without the flag (the N46 defect)",
+      _CYR_CUT and _CYR_HEAD[-1] >= 0xC0 and decode_text(_CYR_HEAD)[1] == "latin-1")
+check("decode_text: ...and `truncated=True` holds the incomplete tail back and stays UTF-8",
+      decode_text(_CYR_HEAD, truncated=True) == (_CYR_INTACT, "utf-8"),
+      decode_text(_CYR_HEAD, truncated=True)[1])
+_CJK_BUF = "\u65e5\u672c\u8a9e\u306e\u30c6\u30ad\u30b9\u30c8".encode("utf-8")
+check("decode_text: a 3-byte character cut the same way is handled by the same rule",
+      decode_text(_CJK_BUF[:-1], truncated=True) == (
+          _CJK_BUF[:-1].decode("utf-8", errors="ignore"), "utf-8"))
+check("decode_text: a COMPLETE Latin-1 file keeps its last character (the §G counter-case)",
+      decode_text(b"caf\xe9") == ("caf\xe9", "latin-1")
+      and decode_text(b"caf\xe9", truncated=True)[0] == "caf")
+check("decode_text: a genuinely invalid byte still raises and still falls back",
+      decode_text(_CYR_HEAD + b"\xff\xfe", truncated=True)[1] == "latin-1"
+      and decode_text(b"\xff\xfe", truncated=True)[1] == "latin-1")
+check("read_was_truncated: the listing's size wins, the ceiling is the fallback",
+      read_was_truncated(5, 1024, 9) is True and read_was_truncated(9, 1024, 9) is False
+      and read_was_truncated(1024, 1024, 0) is True and read_was_truncated(10, 1024, 0) is False)
 check("the limit constant is 1 MB", MAX_READ_BYTES == 1024 * 1024)
 check("format_size(MAX_READ_BYTES) == '1.0 MB'", format_size(MAX_READ_BYTES) == "1.0 MB")
 

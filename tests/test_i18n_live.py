@@ -843,8 +843,8 @@ check("the pin counts the keys of the SHIPPED release (v1.5.2 added THIRTEEN —
       "Files page of the settings hub with its ceiling row and its warning, and the "
       "truncation notice of the reader — 915 + 4 = 919; v1.7.5.1 adds SIX: the three external-terminal "
       "refusals, the unpinned host-key warning, the send-queue notice and the refused download name — "
-      "919 + 6 = 925)",
-      EXPECTED_I18N_KEYS == 863 + 4 + 3 + 4 + 4 + 19 + 17 + 1 + 4 + 6, str(EXPECTED_I18N_KEYS))
+      "919 + 6 = 925, and v1.8 adds TWENTY: the elevated pane)",
+      EXPECTED_I18N_KEYS == 863 + 4 + 3 + 4 + 4 + 19 + 17 + 1 + 4 + 6 + 20, str(EXPECTED_I18N_KEYS))
 check_release_state(ROOT)
 for _code in i18n_lang_codes(ROOT):
     check(f"i18n/{_code}.json carries the v1.5 node.status.emulated marker",

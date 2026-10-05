@@ -161,7 +161,29 @@ class SshmapHistoryScreen(pyte.HistoryScreen):
         # HistoryScreen builds self.history there and calls reset(), which never reads these.
         self.scroll_pin = False
         self._pin_anchor = None
+        # N45: the terminal's OWN replies (a DSR/DA query answered by the emulator) are COLLECTED
+        # here instead of being dropped by pyte's no-op default; `TerminalScreen.take_pending_input()`
+        # drains them and the session page puts them on the channel of THIS session.
+        self.pending_input = []
         super().__init__(columns, lines, history=history, ratio=ratio)
+
+    # ── N45: the reply half of the terminal protocol ─────────────────────────────
+
+    def write_process_input(self, data):
+        """pyte's ONE sink for a terminal-generated reply — collected, never dropped (N45).
+
+        `Screen.write_process_input()` is documented "By default is a noop" and its body IS that
+        docstring, so a `CSI 5n` / `CSI 6n` (DSR) or a `CSI c` (DA) query was answered by the
+        emulator into nothing. The reply is a short ASCII string; it is COLLECTED here and sent by
+        the session's own page — never through the input point, which would broadcast it.
+        """
+        try:
+            text = data.decode("ascii", "ignore") if isinstance(data, (bytes, bytearray)) \
+                else str(data)
+        except Exception:  # noqa: BLE001 — a reply is an optimisation for the program, never fatal
+            return
+        if text:
+            self.pending_input.append(text)
 
     # ── v1.6.4 (ROADMAP task 5): the pinned scrollback ───────────────────────────
 
@@ -373,6 +395,24 @@ class TerminalScreen:
         with self._lock:
             self.columns, self.lines = columns, lines
             self.screen.resize(lines, columns)
+
+    def take_pending_input(self) -> bytes:
+        """The terminal's OWN replies since the last call, as bytes (b"" — nothing answered, N45).
+
+        The drain half of the reply pair: `feed()` lets the emulator answer a DSR/DA query and
+        `SshmapHistoryScreen.write_process_input()` collects it, so the session page can put it on
+        the channel of THIS session. Under the lock, so a second feed can never lose a reply.
+        """
+        with self._lock:
+            pending = getattr(self.screen, "pending_input", None)
+            if not pending:
+                return b""
+            text = "".join(pending)
+            del pending[:]
+        try:
+            return text.encode("ascii", "ignore")
+        except Exception:  # noqa: BLE001 — a reply that cannot be encoded is simply not sent
+            return b""
 
     def title(self) -> str:
         """The window title the REMOTE program set (`OSC 0` / `OSC 2`), read under the lock.

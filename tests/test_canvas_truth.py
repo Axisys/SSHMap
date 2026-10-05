@@ -494,6 +494,9 @@ check("§5 the zsh branch uses precmd_functions+= under an eval + a $ZSH_VERSION
 check("§5 the hook is IDEMPOTENT (a duplicate would report twice per prompt)",
       b"*_sshmap_cwd*" in hook)
 check("§5 the hook is ONE command line", hook.endswith(b"\n") and hook.count(b"\n") == 1)
+check("§5 N58 the hook LEADS with a space (the only history suppression a typed line has)",
+      TP.CWD_HOOK_COMMAND.startswith(" ")
+      and hook.startswith(b" _sshmap_cwd"), repr(hook[:20]))
 check("§5 a second injection is refused (one hook per session)",
       page._inject_cwd_hook() is False)
 hub5.reset()

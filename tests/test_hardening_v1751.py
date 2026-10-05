@@ -519,21 +519,35 @@ check("N40 the new sentence exists in all four languages",
           for code in ("en", "ru", "zh", "de")))
 
 # ════════════════════════════════════════════════════════════
-# 6. N50 (minimum) — the terminal's key branch passes the password
+# 6. N50 (minimum) — the terminal's key branch passes the password; (1.8rc6) the ONE builder
 # ════════════════════════════════════════════════════════════
 print("== 6. N50: the terminal's key branch ==")
 
-_ssh_src = open(os.path.join(ROOT, "modules", "ssh_terminal.py"), encoding="utf-8").read()
-_block = _ssh_src[_ssh_src.index("if self.key_path:"):]
-_block = _block[:_block.index("elif self.password:")]
-check("N50 the KEY branch of the terminal passes `password=self.password or None`",
-      "password=self.password or None" in _block, _block.strip()[:200])
-check("N50 ...and keeps the shipped look_for_keys/allow_agent pair",
-      "look_for_keys=False" in _block and "allow_agent=True" in _block)
-check("N50 the four connect sites now agree on the KEY branch argument",
-      sum("password=" in open(os.path.join(ROOT, p), encoding="utf-8").read()
+import modules.ssh_connect as SCON
+
+_kw_key = SCON.build_connect_kwargs("h", "u", 22, password="pw", key_path="/k/id")
+_kw_key_pure = SCON.build_connect_kwargs("h", "u", 22, key_path="/k/id")
+_kw_pw = SCON.build_connect_kwargs("h", "u", 22, password="pw")
+_kw_agent = SCON.build_connect_kwargs("h", "u", 22)
+check("N50 the KEY branch passes `password=self.password or None` and the shipped key pair",
+      _kw_key.get("password") == "pw" and _kw_key.get("key_filename") == "/k/id"
+      and _kw_key.get("look_for_keys") is False and _kw_key.get("allow_agent") is True,
+      str(_kw_key))
+check("N50 ...a key with NO password passes an explicit None (paramiko skips it)",
+      _kw_key_pure.get("password") is None
+      and _kw_key_pure.get("key_filename") == "/k/id", str(_kw_key_pure))
+check("N50/pw the password branch polls neither the local keys nor the agent",
+      _kw_pw.get("password") == "pw" and _kw_pw.get("look_for_keys") is False
+      and _kw_pw.get("allow_agent") is False, str(_kw_pw))
+check("N50/agent the shipped fallback is the key/agent pair",
+      _kw_agent.get("look_for_keys") is True and _kw_agent.get("allow_agent") is True
+      and "key_filename" not in _kw_agent, str(_kw_agent))
+check("N50 the four connect sites now share the ONE builder (no copy left)",
+      all(open(os.path.join(ROOT, p), encoding="utf-8").read().count("connect_client(") == 1
           for p in ("modules/ssh_terminal.py", "modules/ssh_worker.py",
-                    "modules/plugin_runner.py", "services/system_info_collector.py")) >= 3)
+                    "modules/plugin_runner.py", "services/system_info_collector.py"))
+      and "client.connect(" not in open(os.path.join(ROOT, "modules", "ssh_terminal.py"),
+                                        encoding="utf-8").read())
 
 # ════════════════════════════════════════════════════════════
 # 7. N48 — the known_hosts store: ONE owner, merge-on-write, atomic, visible
@@ -641,7 +655,8 @@ try:
     check("N48 ...while a READABLE store still saves through that same door",
           HKP.KnownHostsStore(path=os.path.join(WORK, "n48_readable")).save() is True)
     check("N48 the terminal and the worker report the unpinned state separately",
-          "ssh.host_key_unpinned" in _ssh_src
+          "ssh.host_key_unpinned" in open(os.path.join(ROOT, "modules", "ssh_terminal.py"),
+                                          encoding="utf-8").read()
           and "ssh.host_key_unpinned" in open(os.path.join(ROOT, "modules", "ssh_worker.py"),
                                               encoding="utf-8").read())
     check("N48 the warning sentence exists in all four languages",

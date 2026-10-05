@@ -808,14 +808,19 @@ class SshMixin:
             d.cpu = f"{info['cpu_cores']} core"
         if info.get("ram_gb"):
             d.ram = info["ram_gb"]
-        # The DEVICE choice speaks for `disk` when the node made one: the capacity `lsblk -d`
-        # answered for the named device, or NOTHING when the listing does not hold it — a
-        # vanished device is REPORTED below and the card never shows another disk's number. A
-        # collection silent about a device leaves the figure alone, exactly like the mount pair.
+        # The DEVICE choice speaks for `disk` when the node made one: the capacity `lsblk -d` answered
+        # for the named device, or NOTHING when the listing does not hold it (a vanished device is
+        # REPORTED below, so the card never shows another disk's number). A collection silent about a
+        # device leaves the figure alone, exactly like the mount pair; v1.8rc6 (N34) reads the `disk_gb`
+        # KEY as the answer — an explicit "" CLEARS a figure collected earlier instead of re-dating it.
         if "disk_device_note" in info:
             d.disk = str(info.get("disk_gb") or "")
-        elif info.get("disk_gb"):
-            d.disk = info["disk_gb"]
+            # v1.8rc6 (N35): the WHY travels with the clearing — beside the figure it explains,
+            # so the card can say it long after the 8-second status line is gone. "" (a device
+            # that WAS found) clears the note of an earlier refusal.
+            d.disk_device_note = str(info.get("disk_device_note") or "")
+        elif "disk_gb" in info:
+            d.disk = str(info.get("disk_gb") or "")
         if "disk_devices" in info:
             d.disk_devices = [str(entry) for entry in (info.get("disk_devices") or [])]
         # v1.6.6 (ROADMAP task 5): the DATA-mount family, written as ONE unit by this same
@@ -827,6 +832,9 @@ class SshMixin:
             d.disk_path = str(info.get("disk_path") or "")
             d.disk_free = str(info.get("disk_free") or "")
             d.disk_size = str(info.get("disk_size") or "")
+            # v1.8rc6 (N35): the note is written with the answers it explains — a refusal leaves
+            # the pair EMPTY and the note, an answer leaves the figures and NO note.
+            d.disk_note = str(info.get("disk_note") or "")
         # v1.5.3 (ROADMAP task 1): the date goes WITH the data — a fresh measurement is what
         # the "collected N ago" line and the stale mark describe. It is an ordinary field of
         # the model (optional in JSON, 0.0 = not dated) and it NEVER changes a value.
@@ -863,25 +871,22 @@ class SshMixin:
                 return
             try:
                 from services.system_info_collector import (
-                    disk_refusal_kind, resolve_disk_mount,
-                    DISK_REFUSAL_NETWORK, DISK_REFUSAL_DEVICE, DISK_REFUSAL_NONE)
+                    disk_refusal_kind, disk_refusal_text, resolve_disk_mount,
+                    DISK_REFUSAL_DEVICE, DISK_REFUSAL_NONE)
             except ImportError:  # flat layout
                 from system_info_collector import (
-                    disk_refusal_kind, resolve_disk_mount,
-                    DISK_REFUSAL_NETWORK, DISK_REFUSAL_DEVICE, DISK_REFUSAL_NONE)
+                    disk_refusal_kind, disk_refusal_text, resolve_disk_mount,
+                    DISK_REFUSAL_DEVICE, DISK_REFUSAL_NONE)
             kind = disk_refusal_kind(info.get("disk_note"))
             if kind != DISK_REFUSAL_NONE:
                 mount = resolve_disk_mount(getattr(data, "disk_mount", ""))
-                if kind == DISK_REFUSAL_NETWORK:
-                    text = self.t("status.disk_mount_network", alias=data.alias, mount=mount,
-                                  type=str(info.get("disk_note") or ""))
-                else:
-                    text = self.t("status.disk_mount_missing", alias=data.alias, mount=mount)
-                self.statusBar().showMessage(text, 8000)
+                self.statusBar().showMessage(
+                    disk_refusal_text(self.t, info.get("disk_note"), data.alias, mount=mount), 8000)
             if disk_refusal_kind(info.get("disk_device_note")) == DISK_REFUSAL_DEVICE:
                 self.statusBar().showMessage(
-                    self.t("status.disk_device_missing", alias=data.alias,
-                           device=str(getattr(data, "disk_device", "") or "").strip()), 8000)
+                    disk_refusal_text(self.t, info.get("disk_device_note"), data.alias,
+                                      device=str(getattr(data, "disk_device", "") or "").strip()),
+                    8000)
         except (RuntimeError, AttributeError, ImportError):
             pass  # Qt teardown / a stripped window — the values are already written
 

@@ -12,7 +12,7 @@ import os
 import time
 
 from _common import (bootstrap, check, finish, check_i18n_parity, check_i18n_format,
-                     check_release_state, load_i18n_langs, EXPECTED_I18N_KEYS)
+                     check_release_state, load_i18n_langs, EXPECTED_I18N_KEYS, window_func_body)
 
 ROOT, WORK = bootstrap()  # BEFORE the app module imports (HOME isolation, offscreen, faulthandler)
 
@@ -595,9 +595,7 @@ check("§4 ...and the status it labels is untouched", _probe_node.status == "onl
 check("§4 the tick starts NO probe round by itself (it is a repaint, not a check)",
       _stub.started == 0, str(_stub.started))
 check("§4 the tick is a repaint by construction (no round call in its code path)",
-      "start_round" not in
-      open(os.path.join(ROOT, "ui", "main_window.py"), encoding="utf-8").read()
-      .split("def _refresh_status_freshness")[1].split("def ")[0])
+      "start_round" not in window_func_body("_refresh_status_freshness", ROOT))
 _stub.checked_at = time.time()
 win._freshness_tick()
 check("§4 a new result takes the mark back (the tick is honest both ways)",

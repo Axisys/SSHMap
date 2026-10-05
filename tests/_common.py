@@ -234,13 +234,201 @@ def clear_cfg(*extra_paths: str) -> None:
             pass
 
 
+# The MainWindow FAMILY: the facade module plus every `ui/main_window_*.py` mixin. A cluster of the
+# window moves into a mixin without changing a line of a method's body, so an audit that pins a method
+# reads it WHEREVER the family defines it — a pin that names `ui/main_window.py` stops protecting the
+# day the method moves (`AGENTS.md` §9, `ROADMAP.md`'s 1.8rc wave).
+WINDOW_FAMILY_GLOB = os.path.join("ui", "main_window*.py")
+
+
+def window_family_files(root):
+    """Every file of the MainWindow family, as paths relative to `root` (sorted, one glob)."""
+    import glob
+    return sorted(os.path.relpath(p, root).replace("\\", "/")
+                  for p in glob.glob(os.path.join(root, WINDOW_FAMILY_GLOB)))
+
+
+def window_family_sources(root):
+    """{relative path: source} of the MainWindow family — the facade and every mixin."""
+    out = {}
+    for rel in window_family_files(root):
+        with open(os.path.join(root, rel), encoding="utf-8") as fh:
+            out[rel] = fh.read()
+    return out
+
+
+def window_func_body(func, root=None, docstring=False):
+    """The source of ONE method of the MainWindow family, its docstring STRIPPED by default.
+
+    A source audit has to look at the CODE, not at the prose (a docstring that NAMES a call while
+    explaining why the method must not make it would fail its own check), and the method may live in any
+    file of the family. Raises KeyError when no file of the family defines `func`.
+    """
+    import ast
+    root = root or os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    for rel, source in window_family_sources(root).items():
+        tree = ast.parse(source)
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == func:
+                body = list(node.body)
+                if not docstring and body and isinstance(body[0], ast.Expr) \
+                        and isinstance(body[0].value, ast.Constant) \
+                        and isinstance(body[0].value.value, str):
+                    body = body[1:]  # drop the docstring
+                return ast.unparse(ast.Module(body=body or [ast.Pass()], type_ignores=[]))
+    raise KeyError(f"{func} is not defined anywhere in the MainWindow family "
+                   f"({', '.join(window_family_files(root))})")
+
+
+def window_func_owner(func, root=None):
+    """The family file that defines `func` ('' — none). The owner question a split audit asks."""
+    import ast
+    root = root or os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    for rel, source in window_family_sources(root).items():
+        for node in ast.parse(source).body:
+            if isinstance(node, ast.ClassDef):
+                for sub in node.body:
+                    if isinstance(sub, (ast.FunctionDef, ast.AsyncFunctionDef)) and sub.name == func:
+                        return rel
+    return ""
+
+
+# The `TerminalWidget` FAMILY: `modules/terminal_widget.py` plus every `terminal_widget_*.py` mixin.
+# The same rule as the MainWindow and `_SftpPane` families: a canvas cluster moves into a mixin without
+# changing a line of a method's body, so a pin reads it WHEREVER the family defines it.
+CANVAS_FAMILY_GLOB = os.path.join("modules", "terminal_widget*.py")
+CANVAS_FACADE = "modules/terminal_widget.py"
+
+
+def canvas_family_files(root):
+    """Every file of the canvas family, as paths relative to `root` (sorted, one glob)."""
+    import glob
+    found = sorted(os.path.relpath(p, root).replace("\\", "/")
+                   for p in glob.glob(os.path.join(root, CANVAS_FAMILY_GLOB)))
+    return [rel for rel in found if rel == CANVAS_FACADE] + \
+           [rel for rel in found if rel != CANVAS_FACADE]
+
+
+def canvas_family_sources(root):
+    """{relative path: source} of the canvas family — the facade and every mixin."""
+    out = {}
+    for rel in canvas_family_files(root):
+        with open(os.path.join(root, rel), encoding="utf-8") as fh:
+            out[rel] = fh.read()
+    return out
+
+
+def canvas_family_text(root):
+    """The family's sources as ONE text — a substring pin that follows the code (never a file name)."""
+    return "\n".join(canvas_family_sources(root).values())
+
+
+def canvas_func_body(func, root=None, docstring=False):
+    """The source of ONE method of the canvas family, its docstring STRIPPED by default.
+
+    The `window_func_body()` rule applied to the canvas wave: the audit looks at the CODE and the
+    method may live in any file of the family. Raises KeyError when no file defines `func`.
+    """
+    import ast
+    root = root or os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    for rel, source in canvas_family_sources(root).items():
+        for node in ast.walk(ast.parse(source)):
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == func:
+                body = list(node.body)
+                if not docstring and body and isinstance(body[0], ast.Expr) \
+                        and isinstance(body[0].value, ast.Constant) \
+                        and isinstance(body[0].value.value, str):
+                    body = body[1:]  # drop the docstring
+                return ast.unparse(ast.Module(body=body or [ast.Pass()], type_ignores=[]))
+    raise KeyError(f"{func} is not defined anywhere in the canvas family "
+                   f"({', '.join(canvas_family_files(root))})")
+
+
+def canvas_func_owner(func, root=None):
+    """The family file that defines `func` ('' — none). The owner question the canvas wave asks."""
+    import ast
+    root = root or os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    for rel, source in canvas_family_sources(root).items():
+        for node in ast.parse(source).body:
+            if isinstance(node, ast.ClassDef):
+                for sub in node.body:
+                    if isinstance(sub, (ast.FunctionDef, ast.AsyncFunctionDef)) and sub.name == func:
+                        return rel
+    return ""
+
+
+# The `_SftpPane` FAMILY: the `modules/sftp_tab.py` facade plus every `sftp_pane_*.py` pane mixin.
+# Same rule as the MainWindow family above (`ROADMAP.md`'s `1.8rc4` wave): a pane cluster moves into
+# a mixin without changing a line of a method's body, so a pin must read it WHEREVER the family
+# defines it — a pin that names `modules/sftp_tab.py` stops protecting the day the method moves.
+PANE_FAMILY_GLOB = os.path.join("modules", "sftp_pane*.py")
+PANE_FACADE = "modules/sftp_tab.py"
+
+
+def pane_family_files(root):
+    """Every file of the pane family, as paths relative to `root` (sorted, one glob + the facade)."""
+    import glob
+    found = sorted(os.path.relpath(p, root).replace("\\", "/")
+                   for p in glob.glob(os.path.join(root, PANE_FAMILY_GLOB)))
+    return [PANE_FACADE] + [rel for rel in found if rel != PANE_FACADE]
+
+
+def pane_family_sources(root):
+    """{relative path: source} of the pane family — the facade and every pane mixin."""
+    out = {}
+    for rel in pane_family_files(root):
+        with open(os.path.join(root, rel), encoding="utf-8") as fh:
+            out[rel] = fh.read()
+    return out
+
+
+def pane_family_text(root):
+    """The family's sources as ONE text — a substring pin that follows the code (never a file name)."""
+    return "\n".join(pane_family_sources(root).values())
+
+
+def pane_func_body(func, root=None, docstring=False):
+    """The source of ONE method of the `_SftpPane` family, its docstring STRIPPED by default.
+
+    The `window_func_body()` rule applied to the pane wave: the audit looks at the CODE (a docstring
+    that NAMES a call while explaining why it must not be made would fail its own check) and the
+    method may live in any file of the family. Raises KeyError when no file defines `func`.
+    """
+    import ast
+    root = root or os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    for rel, source in pane_family_sources(root).items():
+        for node in ast.walk(ast.parse(source)):
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == func:
+                body = list(node.body)
+                if not docstring and body and isinstance(body[0], ast.Expr) \
+                        and isinstance(body[0].value, ast.Constant) \
+                        and isinstance(body[0].value.value, str):
+                    body = body[1:]  # drop the docstring
+                return ast.unparse(ast.Module(body=body or [ast.Pass()], type_ignores=[]))
+    raise KeyError(f"{func} is not defined anywhere in the pane family "
+                   f"({', '.join(pane_family_files(root))})")
+
+
+def pane_func_owner(func, root=None):
+    """The family file that defines `func` ('' — none). The owner question the pane wave asks."""
+    import ast
+    root = root or os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    for rel, source in pane_family_sources(root).items():
+        for node in ast.parse(source).body:
+            if isinstance(node, ast.ClassDef):
+                for sub in node.body:
+                    if isinstance(sub, (ast.FunctionDef, ast.AsyncFunctionDef)) and sub.name == func:
+                        return rel
+    return ""
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # The release pins: at every release update ONLY HERE (earlier: the "N keys" number
 # in 12 i18n files + the APP_VERSION/requirements pins in 7 release-state sections).
 # The misses of the keys themselves against the code are caught by check_i18n_keys.py.
 # ─────────────────────────────────────────────────────────────────────────────
-EXPECTED_APP_VERSION = "1.7.5.1"  # the current release (a sentinel: it catches "a bump to the wrong version")
-EXPECTED_I18N_KEYS = 925        # the parity of the TRANSLATION keys of every language file vs en (the
+EXPECTED_APP_VERSION = "1.8"     # the current release (a sentinel: it catches "a bump to the wrong version")
+EXPECTED_I18N_KEYS = 945        # the parity of the TRANSLATION keys of every language file vs en (the
                                 # "name"/"partial" meta keys are excluded) — ONE number per release; the
                                 # per-release counts live in the changelog family, never here
 VERSION_FORMAT_RE = re.compile(r"^\d+(\.\d+){1,3}([Rr][Cc]\d+)?$")  # "1.1.3", "1.0RC4", "0.9.9.7", "1.2.10rc1" (v1.2.10: + lowercase rc)

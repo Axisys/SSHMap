@@ -8,7 +8,7 @@ Checked here: the facade references (`win.tree` / `win.tag_filter` / `win.search
 the window methods `refresh_sidebar` / `_sync_selection_state` / `_on_tree_item_clicked`); the hygiene (the tree, the markers and the rows are built by the panel, not in the window module); the panel at the unit level (`translate_fn=None` → the English fallback literals and a no-op `retranslate`; a missing action callback → `ValueError`; `fill_context_menu` producing its items and separators); and THE REGRESSION of the v0.9.2 bug — on a language switch the sidebar rows (the buttons, the header, the placeholder, "All tags") are not lost and do not stay in the old language, with the tag filter choice surviving the `retranslate`."""
 import sys
 
-from _common import bootstrap, check, finish
+from _common import bootstrap, check, finish, window_family_sources
 
 ROOT, WORK = bootstrap()  # BEFORE the app module imports
 
@@ -62,15 +62,15 @@ for _m in ("refresh_sidebar", "_sync_selection_state", "_on_tree_item_clicked",
           callable(getattr(MW.MainWindow, _m, None)), _m)
 
 # The panel button signals are connected to the window slots. A SignalInstance in PySide6 has no
-# .receivers() (and QObject.receivers('name') returns 0 for new-style signals), hence
-# the connection is checked at the source level — the same pattern as the hygiene checks below:
-# the facade references win.btn_* — the panel's widgets (checked above), the click emits exactly these
-# signals, and connect() in main_window.py closes the chain.
-_mw_src_signals = open(sys.modules[MW.__name__].__file__, encoding="utf-8").read()
+# .receivers() (and QObject.receivers('name') returns 0 for new-style signals), hence the connection is
+# checked at the source level — the panel's widgets are the facade references win.btn_* (checked above)
+# and connect() closes the chain WHEREVER the window's file family defines the wiring
+# (`tests/_common.window_family_sources`), so the pin survives the cluster moving into a mixin.
+_family_signals = "\n".join(window_family_sources(ROOT).values())
 for _sig in ("add_server_clicked", "add_connection_clicked", "connect_ssh_clicked",
              "show_properties_clicked", "delete_selected_clicked"):
-    check(f"main_window.py wires sidebar.{_sig} to a window slot",
-          f"self.sidebar.{_sig}.connect(" in _mw_src_signals)
+    check(f"the window family wires sidebar.{_sig} to a window slot",
+          f"self.sidebar.{_sig}.connect(" in _family_signals)
 
 # Hygiene: the cluster code in main_window.py is gone (the tree/markers/rows — in the panel)
 _mw_src = open(sys.modules[MW.__name__].__file__, encoding="utf-8").read()

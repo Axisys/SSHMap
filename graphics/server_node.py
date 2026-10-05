@@ -17,6 +17,11 @@ try:  # v1.2.5: central theme (palette/radii/fonts — ui/theme.py)
 except ImportError:
     from ui import theme
 
+try:  # v1.8rc6 (N35): the ONE sentence of a refused disk request, composed where it is owned
+    from ..services.system_info_collector import disk_refusal_text, resolve_disk_mount
+except ImportError:
+    from services.system_info_collector import disk_refusal_text, resolve_disk_mount
+
 try:  # v1.5rc2 (ROADMAP task 2): the DECLARED status shapes — the mark beside the colour
     from ..ui import status_shape
 except ImportError:
@@ -1079,13 +1084,39 @@ class ServerNode(QGraphicsItemGroup):
             return ""
         return _t("node.disk_mount", mount=path, free=free, size=size)
 
+    def _disk_note_text(self) -> str:
+        """The durable WHY of a refused disk request (v1.8rc6, N35) — a tooltip line, or `""`.
+
+        The note is stored BESIDE the answers it explains (`disk_note` for the data mount the
+        user asked for, `disk_device_note` for the chosen device) and rendered by the ONE
+        composer the collection's own status line uses, so the card goes on saying what
+        happened after the 8-second message is gone — and stops the moment a later collection
+        answers and clears the note. Purely presentational: no value is derived here.
+        """
+        alias = str(getattr(self.data, "alias", "") or "")
+        notes = []
+        mount_note = str(getattr(self.data, "disk_note", "") or "")
+        if mount_note:
+            text = disk_refusal_text(_t, mount_note, alias,
+                                     mount=resolve_disk_mount(getattr(self.data, "disk_mount", "")))
+            if text:
+                notes.append(text)
+        device_note = str(getattr(self.data, "disk_device_note", "") or "")
+        if device_note:
+            text = disk_refusal_text(_t, device_note, alias,
+                                     device=str(getattr(self.data, "disk_device", "") or "").strip())
+            if text:
+                notes.append(text)
+        return "\n".join(notes)
+
     def _apply_info_tooltip(self):
         """Compose the plaque tooltip: the full text (when it was elided) + the age line.
 
         The plaque's tooltip is the one place that already answers "what is written here"
         (the elided full line), so the age joins it instead of opening a second home, and the
-        discovered DEVICE list joins it too (v1.7.1.2) rather than growing a card line; a
-        non-elided, undated plaque with no device list keeps its empty tooltip.
+        discovered DEVICE list joins it too (v1.7.1.2) rather than growing a card line; the
+        durable refusal NOTE joins it for the same reason (v1.8rc6). A non-elided, undated
+        plaque with no device list and no refusal keeps its empty tooltip.
         """
         lines = []
         if self._info_tip_full:
@@ -1096,6 +1127,9 @@ class ServerNode(QGraphicsItemGroup):
         devices = self._disk_devices_text()
         if devices:
             lines.append(devices)
+        note = self._disk_note_text()
+        if note:
+            lines.append(note)
         try:
             self._info.setToolTip("\n".join(lines))
         except RuntimeError:

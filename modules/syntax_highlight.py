@@ -67,6 +67,17 @@ STATE_YAML_BLOCK_BASE = 100     # + the indent of the `|`/`>` line
 
 MAX_TOKENS_PER_BLOCK = 2000
 
+#: The VERIFICATION budget of `detect_syntax()`: the JSON/XML verdict is a real parse of the WHOLE
+#: string, so above this many characters the hint is accepted UNVERIFIED instead — the caller shows
+#: it through the heuristic channel (`is_heuristic` / `sftp.viewer.syntax_heuristic`) rather than
+#: freezing the GUI on a parse whose answer nobody waits for (N57).
+SYNTAX_VERIFY_MAX_CHARS = 4 * 1024 * 1024
+
+
+def within_verify_budget(text) -> bool:
+    """PURE: may `detect_syntax()` really PARSE this payload (its own declared budget)?"""
+    return len(text) <= SYNTAX_VERIFY_MAX_CHARS if isinstance(text, str) else True
+
 
 def syntax_field(role: str) -> str:
     """The `ui.theme.Theme` field that carries the colour of `role` (v1.4.7)."""
@@ -77,7 +88,7 @@ def syntax_field(role: str) -> str:
 # Detection — a pure function (no Qt, no state, never raises)
 # ══════════════════════════════════════════════════════════════════════════════
 
-def detect_syntax(path, text) -> str:
+def detect_syntax(path, text, verify: bool = True) -> str:
     """`"json" | "xml" | "yaml" | "numbers"` for a viewer payload (v1.4.7).
 
     The rule of the release, in order:
@@ -94,13 +105,17 @@ def detect_syntax(path, text) -> str:
          YAML parser, so the mode is a heuristic and the caller says so
          (`HEURISTIC_LANGUAGES`).
 
+    `verify=False` is the OVER-BUDGET call (`within_verify_budget()` said no): the hint is then
+    accepted WITHOUT the parse and the verdict is UNVERIFIED — the caller owes the heuristic note.
+    A caller that keeps `verify=True` is asking for the honesty rule in full.
+
     Pure: no Qt, no I/O, no global state; a broken `path`/`text` answers
     `"numbers"` rather than raising.
     """
     extension = _extension(path)
-    if extension in JSON_EXTENSIONS and _parses_json(text):
+    if extension in JSON_EXTENSIONS and ((not verify) or _parses_json(text)):
         return LANG_JSON
-    if extension in XML_EXTENSIONS and _parses_xml(text):
+    if extension in XML_EXTENSIONS and ((not verify) or _parses_xml(text)):
         return LANG_XML
     if extension in YAML_EXTENSIONS:
         return LANG_YAML

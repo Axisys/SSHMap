@@ -212,11 +212,16 @@ def _norm(path):
 
 
 class FakeSftpAttr:
-    """The same surface as the paramiko SFTPAttributes (filename/st_mode/size/mtime)."""
+    """The same surface as the paramiko SFTPAttributes (filename/st_mode/size/mtime).
 
-    def __init__(self, filename, is_dir, size, mtime):
+    v1.8rc5 (N49): `mode` is the PER-FILE permission the fake FS carries; without one the
+    attribute answers the constant it always did (0o40755 for a directory, 0o100644 for a file),
+    so every older scenario stays byte-identical.
+    """
+
+    def __init__(self, filename, is_dir, size, mtime, mode=None):
         self.filename = filename
-        self.st_mode = 0o40755 if is_dir else 0o100644
+        self.st_mode = int(mode) if mode is not None else (0o40755 if is_dir else 0o100644)
         self.st_size = size
         self.st_mtime = mtime
 
@@ -233,6 +238,8 @@ class FakeSftpFS:
     `<target>.part`, so a per-FILE denial would no longer model "no write permission").
     remove_dir() — simulates removing the directory ON THE SERVER between the listing and
     the drop (a real-world race: the directory lives in the tree but vanishes on the server).
+    modes (v1.8rc5, N49) — the per-file/directory permission the listing, `stat` and `chmod`
+    read and write; a path with no entry answers the historical constant.
     """
 
     def __init__(self, deny_write=frozenset(), deny_dirs=frozenset(),
@@ -240,23 +247,29 @@ class FakeSftpFS:
         self.dirs = {"/"}
         self.files = {}
         self.mtimes = {}
+        self.modes = {}
         self.deny_write = set(deny_write)
         self.deny_dirs = set(deny_dirs)
         self.deny_write_prefixes = tuple(deny_write_prefixes)
 
-    def add_dir(self, path):
-        self.dirs.add(_norm(path))
+    def add_dir(self, path, mode=0o40755):
+        path = _norm(path)
+        self.dirs.add(path)
+        self.modes[path] = int(mode)
 
     def remove_dir(self, path):
-        self.dirs.discard(_norm(path))
+        path = _norm(path)
+        self.dirs.discard(path)
+        self.modes.pop(path, None)
 
-    def add_file(self, path, data, mtime=1700000000):
+    def add_file(self, path, data, mtime=1700000000, mode=0o100644):
         path = _norm(path)
         parent = posixpath.dirname(path)
         if parent not in self.dirs:
             raise ValueError(f"no parent directory {parent}")
         self.files[path] = bytes(data)
         self.mtimes[path] = mtime
+        self.modes[path] = int(mode)
 
     def exists(self, path):
         """A file OR a directory at this path (v1.3.3.2: the rename/mkdir checks)."""
@@ -277,6 +290,10 @@ class FakeSftpFile:
         self._path = _norm(path)
         self._pos = 0
         self._delay = chunk_delay
+        # v1.8rc5 (N52): the two DEPTH knobs of paramiko's SFTPFile, recorded so a scenario can
+        # assert the worker asked for them (the throughput itself is not a hermetic measurement).
+        self.pipelined = False
+        self.prefetched = None
         if "w" in mode or "a" in mode:
             # The paramiko semantics: open("wb") does NOT create the parent directories.
             parent = posixpath.dirname(self._path)
@@ -292,6 +309,10 @@ class FakeSftpFile:
                 fs.files[self._path] = bytearray()
             else:
                 self._pos = len(fs.files[self._path])   # "a" seeks to the end
+            # v1.8rc5 (N49): a NEW file is created with the SERVER's own default (0666 & ~umask on
+            # OpenSSH, i.e. 0644 under the common umask 022), which is what the client's empty
+            # SFTPAttributes asks for. A TRUNCATE keeps the mode the file already had.
+            fs.modes.setdefault(self._path, 0o644)
         else:
             if self._path not in fs.files:
                 raise IOError("No such file")
@@ -313,6 +334,16 @@ class FakeSftpFile:
 
     def close(self):
         pass
+
+    # ── v1.8rc5 (N52): the two DEPTH knobs the worker asks for ──────────────
+
+    def set_pipelined(self, pipelined):
+        """The write-pipelining knob — paramiko keeps the write requests in flight."""
+        self.pipelined = bool(pipelined)
+
+    def prefetch(self, size=None):
+        """The read-ahead knob — paramiko buffers `size` bytes on a background thread."""
+        self.prefetched = size
 
 
 class FakeSftpClient:
@@ -348,6 +379,9 @@ class FakeSftpClient:
         # two paths live on different filesystems) — the honest-failure scenario of the
         # cross-directory move. A rename INSIDE one directory is unaffected.
         self.cross_device = False
+        # v1.8rc5 (N49): the metadata carry is BEST EFFORT — a server that refuses a
+        # `chmod`/`utime` must still complete the transfer (ONE log line, no failed task).
+        self.deny_metadata = False
 
     def _pause(self):
         if self._chunk_delay:
@@ -363,12 +397,14 @@ class FakeSftpClient:
         for d in sorted(self._fs.dirs):
             if d != "/" and posixpath.dirname(d) == path:
                 out.append(FakeSftpAttr(posixpath.basename(d), True, 0,
-                                        self._fs.mtimes.get(d, 0)))
+                                        self._fs.mtimes.get(d, 0),
+                                        mode=self._fs.modes.get(d)))
         for f in sorted(self._fs.files):
             if posixpath.dirname(f) == path:
                 out.append(FakeSftpAttr(posixpath.basename(f), False,
                                         len(self._fs.files[f]),
-                                        self._fs.mtimes.get(f, 0)))
+                                        self._fs.mtimes.get(f, 0),
+                                        mode=self._fs.modes.get(f)))
         return out
 
     def open(self, path, mode="r"):
@@ -411,10 +447,34 @@ class FakeSftpClient:
         if path in self._fs.files:
             del self._fs.files[path]
             self._fs.mtimes.pop(path, None)
+            self._fs.modes.pop(path, None)
             return
         if path in self._fs.dirs:
             raise IOError("Failure")   # a directory needs rmdir (paramiko's remove)
         raise IOError("No such file")
+
+    # ── v1.8rc5 (N49): the metadata surface of the client ────────────────
+
+    def chmod(self, path, mode):
+        """The permission of ONE remote path — the call the metadata carry makes (`_carry_*`)."""
+        self._pause()
+        path = _norm(path)
+        if path not in self._fs.files and path not in self._fs.dirs:
+            raise IOError("No such file")
+        if self.deny_metadata:
+            raise PermissionError("Operation unsupported")
+        self._fs.modes[path] = int(mode)
+
+    def utime(self, path, times):
+        """The timestamps of ONE remote path (an (atime, mtime) pair, as paramiko takes it)."""
+        self._pause()
+        path = _norm(path)
+        if path not in self._fs.files and path not in self._fs.dirs:
+            raise IOError("No such file")
+        if self.deny_metadata:
+            raise PermissionError("Operation unsupported")
+        stamp = times[1] if isinstance(times, (tuple, list)) and len(times) > 1 else times
+        self._fs.mtimes[path] = int(stamp)
 
     def rename(self, oldpath, newpath):
         """The SFTP v3 rename — like OpenSSH's sftp-server it refuses an existing target."""
@@ -450,6 +510,8 @@ class FakeSftpClient:
             fs.files[new] = fs.files.pop(old)
             if old in fs.mtimes:
                 fs.mtimes[new] = fs.mtimes.pop(old)
+            if old in fs.modes:
+                fs.modes[new] = fs.modes.pop(old)
             return
         if old in fs.dirs:
             for d in sorted(p for p in list(fs.dirs)
@@ -498,6 +560,8 @@ class FakeSftpClient:
         fs.files[dst] = bytearray(fs.files[src])
         if src in fs.mtimes:
             fs.mtimes[dst] = fs.mtimes[src]
+        if src in fs.modes:
+            fs.modes[dst] = fs.modes[src]
 
     def stat(self, path):
         """v1.6.3: the address bar's resolution check — a directory, a file, or nothing.
@@ -508,10 +572,12 @@ class FakeSftpClient:
         self._pause()
         path = _norm(path)
         if path in self._fs.dirs:
-            return FakeSftpAttr(posixpath.basename(path) or "/", True, 0, 0)
+            return FakeSftpAttr(posixpath.basename(path) or "/", True, 0, 0,
+                                mode=self._fs.modes.get(path))
         if path in self._fs.files:
             return FakeSftpAttr(posixpath.basename(path), False,
-                                len(self._fs.files[path]), self._fs.mtimes.get(path, 0))
+                                len(self._fs.files[path]), self._fs.mtimes.get(path, 0),
+                                mode=self._fs.modes.get(path))
         raise IOError("No such file")
 
     def normalize(self, path):

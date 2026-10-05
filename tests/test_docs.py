@@ -259,6 +259,69 @@ for _name in REFERENCE_DOCS + ("ROADMAP.md",):
     check(f"§2 {_name}: every test-file figure is the live one ({_N_TEST_FILES}) or a chain successor",
           not _stale_tests, f"quoted={_quoted_tests} stale={_stale_tests}")
 
+# The SIZE figures of the PLAN (AUDIT N62): `ROADMAP.md` sizes its waves with quoted measurements and
+# nothing read them back (the file the `1.8` line is about was quoted at 3 454 lines while it held 5 284).
+# Rule 7 applied to a FILE size: every `**N lines / K KB**`, `**N / K KB**` and `(N lines)` of the plan is
+# read against the file it NAMES — the nearest backticked `.py` path before it. A CLASS figure
+# (`MainWindow` at 169 methods, `_SftpPane` alone) is deliberately NOT read: it has no resolvable owner.
+_SIZE_FIGURE = re.compile(r"\*\*(\d[\d\u2009\u00a0 ]*)\s*(?:lines\s*)?/\s*([\d.]+)\s*KB\*\*")
+_SIZE_PAREN = re.compile(r"\((\d[\d\u2009\u00a0 ]*)\s+lines\)")
+_SIZE_TOTAL = re.compile(r"\*\*(\d[\d\u2009\u00a0 ]*)\*\*\s+lines of\s+Python")
+_PATH_BEFORE = re.compile(r"`([A-Za-z_][\w./-]*\.py)`")
+
+
+def _size_int(text):
+    """The digits of a figure written with thin or normal spaces as thousands separators ("5 462")."""
+    return int(re.sub(r"\D", "", text))
+
+
+def _measured_size(rel):
+    """(lines, KB) of a repository-relative `.py` file — None when this tree does not hold it."""
+    path = os.path.join(ROOT, rel.replace("/", os.sep))
+    if not os.path.isfile(path):
+        return None
+    with open(path, encoding="utf-8") as fh:
+        text = fh.read()
+    return len(text.splitlines()), round(os.path.getsize(path) / 1024, 1)
+
+
+_roadmap_text = _read(_ROADMAP)
+_size_problems = []
+_size_read = 0
+for _m in _SIZE_FIGURE.finditer(_roadmap_text):
+    _paths = _PATH_BEFORE.findall(_roadmap_text[:_m.start()])
+    _real = _measured_size(_paths[-1]) if _paths else None
+    if _real is None:
+        continue  # a figure about a file this tree does not hold (a planned module)
+    _size_read += 1
+    _quoted = (_size_int(_m.group(1)), float(_m.group(2)))
+    if _quoted != _real:
+        _size_problems.append(f"`{_paths[-1]}`: plan {_quoted[0]} lines / {_quoted[1]} KB, "
+                              f"measured {_real[0]} / {_real[1]}")
+for _m in _SIZE_PAREN.finditer(_roadmap_text):
+    _paths = _PATH_BEFORE.findall(_roadmap_text[:_m.start()])
+    _real = _measured_size(_paths[-1]) if _paths else None
+    if _real is None:
+        continue
+    _size_read += 1
+    if _size_int(_m.group(1)) != _real[0]:
+        _size_problems.append(f"`{_paths[-1]}`: plan {_size_int(_m.group(1))} lines, measured {_real[0]}")
+check("§2 ROADMAP.md sizes its files with REAL figures (a guard over nothing is useless)",
+      _size_read >= 5, f"figures read={_size_read}")
+check("§2 every file size quoted by the plan is the measurement today (AUDIT N62)",
+      not _size_problems, _size_problems)
+_size_total = 0
+for _base, _dirs, _files in os.walk(ROOT):
+    _dirs[:] = [d for d in _dirs if d not in {"__pycache__", ".git", "tests", "third_party",
+                                             "_tmp_testdata", "test-results", "docs", "examples"}]
+    for _fname in _files:
+        if _fname.endswith(".py"):
+            with open(os.path.join(_base, _fname), encoding="utf-8", errors="replace") as _fh:
+                _size_total += len(_fh.read().splitlines())
+_quoted_total = [_size_int(m.group(1)) for m in _SIZE_TOTAL.finditer(_roadmap_text)]
+check(f"§2 the plan's application total is the measurement ({_size_total} lines of *.py outside "
+      f"tests/ and third_party/)", _quoted_total == [_size_total], f"quoted={_quoted_total}")
+
 
 # ════════════════════════════════════════════════════════════════════════════
 print("== §3 DOCUMENTATION.md is self-consistent ==")

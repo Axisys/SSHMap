@@ -13,7 +13,7 @@ import re
 import sys
 
 from _common import (bootstrap, check, finish, load_i18n_langs, check_i18n_parity,
-                     check_release_state, read_cfg, write_cfg, clear_cfg)
+                     check_release_state, read_cfg, write_cfg, clear_cfg, window_family_files)
 
 ROOT, WORK = bootstrap()  # BEFORE the app module imports (the HOME isolation inside)
 
@@ -238,10 +238,12 @@ check("window: undo/redo — the single Edit-menu target follows the map",
       and action_sequences(mw, "edit.redo") == ["Ctrl+Shift+Z", "Ctrl+Y"])
 
 # The literal sequences must be gone from the UI modules (the registry is the only source).
+# The window's files are the whole MainWindow FAMILY (`_common.window_family_files`): a cluster
+# that moves into a `ui/main_window_*.py` mixin joins the audit by construction.
 src_literals = []
-for name in ("main_window.py", "main_window_ssh.py", "map_search_bar.py", "settings_dialog.py",
-             "about_dialog.py"):
-    with open(os.path.join(ROOT, "ui", name), encoding="utf-8") as f:
+for name in list(window_family_files(ROOT)) + ["ui/map_search_bar.py", "ui/settings_dialog.py",
+                                               "ui/about_dialog.py"]:
+    with open(os.path.join(ROOT, *name.split("/")), encoding="utf-8") as f:
         src = f.read()
     for m in re.finditer(r'setShortcut(?:s)?\(\s*(\[[^\]]*\]|"[^"]*"|\'[^\']*\')', src):
         src_literals.append((name, m.group(0)))

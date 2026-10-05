@@ -14,7 +14,8 @@ import sys
 
 from _common import (bootstrap, check, finish, wait_until, wait_for, clear_cfg, read_cfg,
                      load_i18n_langs, check_i18n_parity, check_i18n_format, check_release_state,
-                     EXPECTED_APP_VERSION, EXPECTED_I18N_KEYS)
+                     pane_family_files, pane_family_text, pane_func_body, pane_func_owner,
+                     EXPECTED_APP_VERSION, EXPECTED_I18N_KEYS, releases_at_least)
 
 ROOT, WORK = bootstrap()  # BEFORE the app module imports (the HOME isolation)
 
@@ -37,7 +38,10 @@ from ui import theme_qss
 from _fakes import EventLog, FakeSftpClient, FakeSftpFS, wire_worker
 
 LANGS = load_i18n_langs(ROOT)
-PANE_SRC = open(os.path.join(ROOT, "modules", "sftp_tab.py"), encoding="utf-8").read()
+# The pane FAMILY (the `sftp_tab.py` facade + its `sftp_pane_*.py` mixins): a text pin has to read
+# the code WHEREVER the pane wave put it, or it stops protecting the day the cluster moves (1.8rc4).
+PANE_SRC = pane_family_text(ROOT)
+PANE_FILES = pane_family_files(ROOT)
 
 TREE = os.path.join(WORK, "followup_tree")
 
@@ -417,6 +421,43 @@ check("§2 the pane hands its OWN ceiling to the read task (one number, one home
 _w4.queue_read = _orig_read
 _p4.close_viewer()
 
+# N46 (the READ PATH): a read the ceiling CUT must decode as the SOURCE's encoding, never as the
+# consequence of the cut — the header then carries the truncation notice and NO encoding note.
+_CYR_TEXT = ("\u0421\u0435\u0440\u0432\u0435\u0440: \u043f\u0440\u043e\u0434\u0430\u043a\u0448\u043d\n" * 8)
+_CYR_FILE = _CYR_TEXT.encode("utf-8")
+_fs_view.add_file("/var/cyr.txt", _CYR_FILE, mtime=1_700_000_000)
+_p4._relist("/var")
+wait_rows(_p4, "cyr.txt")
+_CYR_CUT = 0
+for _n in range(len(_CYR_FILE), 0, -1):
+    try:
+        _CYR_FILE[:_n].decode("utf-8-sig")
+    except UnicodeDecodeError:
+        _CYR_CUT = _n
+        break
+_CYR_HEAD = _CYR_FILE[:_CYR_CUT]
+_CYR_INTACT = _CYR_TEXT[:len(_CYR_HEAD.decode("utf-8", errors="ignore"))]
+_CYR_TID = 987_654
+_p4._read_tasks[_CYR_TID] = "/var/cyr.txt"
+_p4._last_read = _CYR_TID
+_p4._on_read_ready(_CYR_TID, "/var/cyr.txt", _CYR_HEAD)
+check("§2 N46 the probe really cuts a multi-byte character (the case the fix exists for)",
+      _CYR_CUT and _CYR_HEAD[-1] >= 0xC0 and _CYR_INTACT, f"cut={_CYR_CUT}")
+check("§2 N46 a read the ceiling CUT shows the REAL text of the prefix, not Latin-1 mojibake",
+      _p4.viewer_text.toPlainText() == _CYR_INTACT and _p4.viewer_encoding == "utf-8",
+      f"{_p4.viewer_encoding} / {len(_p4.viewer_text.toPlainText())}")
+check("§2 N46 ...the header carries the TRUNCATION notice and NOT the encoding note",
+      i18n.t("sftp.viewer.truncated", shown=format_size(_CYR_CUT),
+             total=format_size(len(_CYR_FILE))) in _p4.viewer_label.text()
+      and i18n.t("sftp.viewer.encoding_note", encoding="latin-1")
+      not in _p4.viewer_label.text(),
+      _p4.viewer_label.text())
+check("§2 N46 ...while a COMPLETE Latin-1 file keeps the shipped answer (the counter-case)",
+      STAB.decode_text(b"caf\xe9") == ("caf\xe9", "latin-1")
+      and STAB.read_was_truncated(len(_CYR_HEAD), _p4.viewer_cap(),
+                                  len(_CYR_FILE)) is True)
+_p4.close_viewer()
+
 # The settings hub's "Files" page is the UI of the key.
 from ui.settings_dialog import SettingsDialog   # noqa: E402 — the hub is the setting's UI
 
@@ -441,7 +482,43 @@ _warn_quiet = _dlg.viewer_max_warning.isHidden()
 _dlg.viewer_max_spin.setValue(9)
 check("§2 the warning appears exactly above the declared threshold",
       _warn_quiet is True and _dlg.viewer_max_warning.isHidden() is False)
+
+# N57: the ceiling's GUI cost is a MEASURED number, and the warning is a VIEW of it.
+check("§2 N57 `viewer_freeze_seconds()` is pure, monotone in the cap and never raises",
+      STAB.viewer_freeze_seconds(1024 * 1024) == STAB.VIEWER_FREEZE_MS_PER_MB / 1000.0
+      and STAB.viewer_freeze_seconds(32 * 1024 * 1024)
+      > STAB.viewer_freeze_seconds(3 * 1024 * 1024) > 0.0
+      and STAB.viewer_freeze_seconds(None) == 0.0
+      and STAB.viewer_freeze_seconds("nonsense") == 0.0)
+check("§2 N57 ...and the slope is the release's own measurement (32 MB ≈ 5.1 s, not 'a second')",
+      4.5 <= STAB.viewer_freeze_seconds(32 * 1024 * 1024) <= 6.0,
+      f"{STAB.viewer_freeze_seconds(32 * 1024 * 1024):.1f} s")
+_dlg.viewer_max_spin.setValue(9)
+check("§2 N57 the warning row PRINTS that number for the cap the user is choosing",
+      _dlg.viewer_max_warning.text() == i18n.t(
+          "settings.files.max_bytes_warning",
+          seconds=f"{STAB.viewer_freeze_seconds(9 * STAB.VIEWER_MAX_BYTES_STEP):.1f}"),
+      _dlg.viewer_max_warning.text())
+check("§2 N57 ...and the SAME sentence is rebuilt on a language switch (no frozen literal)",
+      all("{seconds}" in data["settings.files.max_bytes_warning"] for data in LANGS.values()))
 _dlg.reject()
+
+# N57: the parser's own contract — the verification has a DECLARED budget, above which the reader
+# accepts the extension hint UNVERIFIED instead of freezing the GUI on a 250 MiB parse.
+import modules.syntax_highlight as SH   # noqa: E402 — the verdict the reader asks for
+
+check("§2 N57 `detect_syntax` is only asked to PARSE within its declared budget",
+      SH.within_verify_budget("x" * 10) is True
+      and SH.within_verify_budget("x" * (SH.SYNTAX_VERIFY_MAX_CHARS + 1)) is False
+      and SH.detect_syntax("/etc/big.json", "x" * (SH.SYNTAX_VERIFY_MAX_CHARS + 1))
+      == SH.LANG_NUMBERS
+      and SH.detect_syntax("/etc/big.json", "x" * (SH.SYNTAX_VERIFY_MAX_CHARS + 1),
+                           verify=False) == SH.LANG_JSON)
+check("§2 N57 ...and the shipped verdict inside the budget is untouched (the honesty rule)",
+      SH.detect_syntax("/etc/app.json", '{"a": 1}') == SH.LANG_JSON
+      and SH.detect_syntax("/etc/app.json", '{"a": ') == SH.LANG_NUMBERS
+      and SH.detect_syntax("/etc/svc.xml", "<a><b/></a>") == SH.LANG_XML
+      and SH.detect_syntax("/etc/k8s.yaml", "a: 1") == SH.LANG_YAML)
 
 check("§2 VERSION_FORMAT stays `0.9` (a ceiling is a value, not a schema)",
       __import__("version").VERSION_FORMAT == "0.9"
@@ -521,7 +598,7 @@ check("the follow-up's four keys exist in EVERY language",
       all(all(str(data.get(k) or "").strip() for data in LANGS.values())
           for k in ("settings.tab.files", "settings.files.max_bytes",
                     "settings.files.max_bytes_warning", "sftp.viewer.truncated")))
-check("the i18n pin counts the slot's four keys",
-      EXPECTED_I18N_KEYS == 915 + 4 + 6 and EXPECTED_APP_VERSION == "1.7.5.1",
+check("the i18n pin counts the slot's four keys (and the v1.8 elevated pane's 20)",
+      EXPECTED_I18N_KEYS == 915 + 4 + 6 + 20 and releases_at_least(EXPECTED_APP_VERSION, "1.7.5"),
       f"{EXPECTED_I18N_KEYS} / {EXPECTED_APP_VERSION}")
 finish()

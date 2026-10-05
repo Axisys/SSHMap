@@ -33,10 +33,17 @@ except ImportError:
 log = get_logger(__name__)
 
 
-# Transfer chunk size: 32 KB = paramiko's SFTP_MAX_REQUEST_SIZE — the same size
-# as the stock sftp.get/put (equivalent throughput, but full control over
-# cancellation and progress between operations).
+# Transfer chunk size: 32 KB = paramiko's MAX_REQUEST_SIZE — the largest SINGLE request the client
+# will put on the wire (`SFTPFile` clamps every read and write to it), so a bigger value buys nothing.
+# The throughput knob is the DEPTH of the requests, never this number: `PREFETCH_MAX_BYTES` below.
 CHUNK_SIZE = 32 * 1024
+
+#: The largest file a READ is prefetched for (N52). `prefetch()` buffers the file IN MEMORY on a
+#: background thread, so only a file at or under this ceiling pays it — a bigger one keeps the shipped
+#: one-request-at-a-time loop. A WRITE is always pipelined instead (`set_pipelined(True)`): paramiko
+#: then holds up to 100 requests in flight and drains them at the first non-write operation (the
+#: `close()` before the commit). Both widen the granularity of a cancel and of the progress line.
+PREFETCH_MAX_BYTES = 32 * 1024 * 1024
 
 KIND_LIST = "list"
 KIND_UPLOAD = "upload"
@@ -889,6 +896,138 @@ class SftpWorker(QThread):
                 break
             self._emit(self.task_cancelled, skipped.id, skipped.kind)
 
+    # ── N52: the DEPTH of a transfer — a prefetched read, a pipelined write ──────────────
+
+    @staticmethod
+    def _prefetch_read(fh, size) -> bool:
+        """Ask the client for a prefetched READ of `size` bytes (N52); False — the shipped loop.
+
+        Only a file at or under `PREFETCH_MAX_BYTES` is prefetched: paramiko buffers the whole file
+        IN MEMORY on a background thread. A client without the method (a stub) and a server that
+        refuses it both answer False, and the caller then reads chunk by chunk exactly as before.
+        """
+        reader = getattr(fh, "prefetch", None)
+        try:
+            size = int(size or 0)
+        except (TypeError, ValueError):
+            return False
+        if not callable(reader) or size <= 0 or size > PREFETCH_MAX_BYTES:
+            return False
+        try:
+            reader(size)
+            return True
+        except Exception:   # noqa: BLE001 — the depth is an optimisation, never a contract
+            return False
+
+    @staticmethod
+    def _pipeline_write(fh) -> bool:
+        """Ask the client to pipeline the WRITES of this handle (N52); False — one request at a time.
+
+        paramiko keeps up to 100 write requests in flight and drains them at the first non-write
+        operation — the shipped `close()` before the commit — so a write error can surface THERE
+        instead of at `write()`. The task still reports ONE `task_error`; only its position moves.
+        """
+        pipelined = getattr(fh, "set_pipelined", None)
+        if not callable(pipelined):
+            return False
+        try:
+            pipelined(True)
+            return True
+        except Exception:   # noqa: BLE001 — the depth is an optimisation, never a contract
+            return False
+
+    # ── N49: an OVERWRITE carries the destination's own metadata across ──────────────────
+
+    @staticmethod
+    def _quiet_metadata(what: str, path: str, fn, *args) -> bool:
+        """ONE best-effort metadata call on a provisional path (N49) — a refusal is a log line.
+
+        The transfer's contract is "the bytes landed": a server that refuses a `chmod`/`utime`, a
+        non-POSIX filesystem and a Windows local volume (which models only the read-only bit) must
+        never turn a successful copy into a failed task.
+        """
+        if not callable(fn):
+            return False
+        try:
+            fn(*args)
+            return True
+        except Exception as e:   # noqa: BLE001 — best effort, and the reason is recorded
+            try:
+                log.info("SFTP metadata: %s of %s is not applied (%s) — the bytes landed",
+                         what, path, e)
+            except Exception:   # noqa: BLE001 — the record is a side channel
+                pass
+            return False
+
+    def _carry_remote_metadata(self, temp: str, info) -> int:
+        """Give the PROVISIONAL remote file the destination's mode/mtime (N49). Returns how many.
+
+        The mode goes on BEFORE the commit renames the file, so the destination is never momentarily
+        world-readable — the whole point of the fix. A destination that did not exist carries nothing:
+        a NEW file keeps the server's own default, as it should. The OWNER is deliberately not
+        attempted — a non-root `chown` is a guaranteed failed round trip, so the owner becomes the
+        uploading account, which is DOCUMENTED rather than silently tried.
+        """
+        if info is None:
+            return 0
+        done = 0
+        mode = getattr(info, "st_mode", None)
+        try:
+            mode = stat.S_IMODE(int(mode)) if mode is not None else 0
+        except (TypeError, ValueError):
+            mode = 0
+        if mode:
+            done += self._quiet_metadata("chmod", temp,
+                                        getattr(self._sftp, "chmod", None), temp, mode)
+        mtime = getattr(info, "st_mtime", None)
+        try:
+            mtime = int(mtime or 0)
+        except (TypeError, ValueError):
+            mtime = 0
+        if mtime:
+            done += self._quiet_metadata("utime", temp,
+                                         getattr(self._sftp, "utime", None), temp, (mtime, mtime))
+        return done
+
+    @staticmethod
+    def _carry_local_metadata(temp: str, info, mode: bool = True) -> int:
+        """Give the LOCAL provisional file the remote entry's mode/mtime (N49). Returns how many.
+
+        Called BEFORE `os.replace()`, so the published file is never momentarily more permissive than
+        its source. `mode=False` keeps the CALLER's own permission: a spool under the shared OS temp
+        is created with a tight mode on purpose, and `os.replace()` publishes the temporary file's own
+        inode, so overwriting it with the source's mode would publish a world-readable spool.
+        """
+        if info is None:
+            return 0
+        done = 0
+        if mode:
+            st_mode = getattr(info, "st_mode", None)
+            try:
+                st_mode = stat.S_IMODE(int(st_mode)) if st_mode is not None else 0
+            except (TypeError, ValueError):
+                st_mode = 0
+            if st_mode:
+                try:
+                    os.chmod(temp, st_mode)
+                    done += 1
+                except OSError as e:
+                    log.info("SFTP metadata: chmod of %s is not applied (%s) — the bytes landed",
+                             temp, e)
+        mtime = getattr(info, "st_mtime", None)
+        try:
+            mtime = int(mtime or 0)
+        except (TypeError, ValueError):
+            mtime = 0
+        if mtime:
+            try:
+                os.utime(temp, (mtime, mtime))
+                done += 1
+            except OSError as e:
+                log.info("SFTP metadata: utime of %s is not applied (%s) — the bytes landed",
+                         temp, e)
+        return done
+
     def _do_list(self, task: _SftpTask):
         entries = []
         for attr in self._sftp.listdir_attr(task.remote_path):
@@ -899,6 +1038,9 @@ class SftpWorker(QThread):
             entries.append({
                 "name": attr.filename,
                 "is_dir": is_dir,
+                # The mode is ADDITIVE (N49): a pane can show that a file is 0600 and the download
+                # half can restore it; a server that reports no mode answers 0.
+                "mode": int(getattr(attr, "st_mode", 0) or 0),
                 "size": int(getattr(attr, "st_size", 0) or 0),
                 "mtime": int(getattr(attr, "st_mtime", 0) or 0),
             })
@@ -944,9 +1086,15 @@ class SftpWorker(QThread):
         it keeps the provisional file (`_UploadCommitError.temp_kept`).
         """
         temp = provisional_name(target, task.id)
+        # N49: an OVERWRITE must not reset the destination's metadata, so it is read BEFORE a byte is
+        # written and re-applied to the provisional file (a destination that is not there is a new
+        # file — it keeps the server's own default).
+        carry = self._stat_entry(target, quiet=True)
         # open() of a nonexistent directory / no permission → task_error (nothing
         # was created, nothing has to be cleaned up).
         remote_fh = self._sftp.open(temp, "wb")
+        self._carry_remote_metadata(temp, carry)
+        self._pipeline_write(remote_fh)   # N52: the depth of the write requests
         committed = False
         keep_temp = False
         try:
@@ -1125,6 +1273,11 @@ class SftpWorker(QThread):
         if problem:
             raise _SftpNameRefused(name, problem)
         remote_fh = self._sftp.open(remote_path, "rb")  # no file → error
+        # N49: the SOURCE entry's own mode/mtime travel to the local copy (a listing that reports no
+        # mode carries nothing). N52: a read is prefetched up to the ceiling this read may consume.
+        carry = self._stat_entry(remote_path, quiet=True)
+        known_size = int(getattr(carry, "st_size", 0) or 0) if carry is not None else 0
+        self._prefetch_read(remote_fh, known_size or total)
         temp = provisional_name(local_path, task.id)
         committed = False
         try:
@@ -1140,6 +1293,7 @@ class SftpWorker(QThread):
                     self._emit(self.progress, task.id, done_base + done, total)
                 local.flush()
                 os.fsync(local.fileno())   # the data on the disk BEFORE the replace
+            self._carry_local_metadata(temp, carry, mode=not task.part_mode)
             os.replace(temp, local_path)   # same directory → atomic
             committed = True
             return done
@@ -1373,6 +1527,9 @@ class SftpWorker(QThread):
         size = int(size or 0)
         total = int(total or 0) or size
         temp = provisional_name(target, task.id)
+        # N49: the DESTINATION's own metadata is read before a byte moves, so a copy over an existing
+        # file publishes it with the same mode (a new destination keeps the server's default).
+        carry = self._stat_entry(target, quiet=True)
         remote_fh = None
         committed = False
         keep_temp = False
@@ -1381,6 +1538,7 @@ class SftpWorker(QThread):
             self._check_cancel()
             if self._try_copy_data(source, temp):
                 written = size
+                self._carry_remote_metadata(temp, carry)
                 self._emit(self.progress, task.id, done_base + written, total)
             else:
                 # A refused fast path may have left a stub behind — the stream starts from
@@ -1388,8 +1546,11 @@ class SftpWorker(QThread):
                 # `<target>.part` would not be truncatable at all).
                 self._remote_remove_quiet(temp)
                 src_fh = self._sftp.open(source, "rb")
+                self._prefetch_read(src_fh, size)   # N52: the depth of the read requests
                 try:
                     remote_fh = self._sftp.open(temp, "wb")
+                    self._carry_remote_metadata(temp, carry)
+                    self._pipeline_write(remote_fh)   # N52: the depth of the write requests
                     while True:
                         self._check_cancel()
                         chunk = src_fh.read(CHUNK_SIZE)
@@ -1642,6 +1803,7 @@ class SftpWorker(QThread):
         if classify_extension(remote_path) == "binary":
             raise _SftpReadBinary()
         remote_fh = self._sftp.open(remote_path, "rb")  # no file → error
+        self._prefetch_read(remote_fh, limit)   # N52: at most the ceiling this read may consume
         try:
             chunks = []
             done = 0

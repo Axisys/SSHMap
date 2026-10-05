@@ -32,8 +32,8 @@ log = get_logger(__name__)
 # ── Collection batch: one exec_command, output marked with markers ──────────
 # The DISK section reads the ROOT and the node's DATA MOUNT in ONE `df` (both paths as arguments, the
 # 5 columns of `--output`), the DISKS section lists the physical devices (`lsblk -d`, no user input)
-# and the DISKMOUNT section answers "does that path exist": a nonexistent path makes `df` print
-# NOTHING. `__DISK_MOUNT__` becomes ONE single-quoted word — user input never reaches the shell bare.
+# and the DISKMOUNT section answers "does that path exist". `__DISK_MOUNT__` is ONE single-quoted word
+# (user input never reaches the shell bare) and the section's SECOND command is the POSIX ROOT fallback.
 DISK_MOUNT_TOKEN = "__DISK_MOUNT__"
 INFO_BATCH = r"""
 echo ---OS---
@@ -47,6 +47,7 @@ free -b 2>/dev/null | awk '/Mem:/{print $2}'
 grep MemTotal /proc/meminfo 2>/dev/null
 echo ---DISK---
 df -B1 --output=source,fstype,size,avail,target / __DISK_MOUNT__ 2>/dev/null
+df -k / 2>/dev/null | awk 'END{if (NF>=5) printf "%.0f\n", $(NF-4)*1024}'
 echo ---DISKS---
 lsblk -d -n -b -o NAME,SIZE,TYPE 2>/dev/null
 echo ---DISKMOUNT---
@@ -197,12 +198,13 @@ def parse_ram_bytes(text: str):
 
 
 def parse_disk_bytes(text: str) -> int | None:
-    """Root volume size from the legacy `df -B1 --output=size /` (the first numeric line).
+    """The ROOT size in bytes from a bare-number line of the DISK section (PURE).
 
-    v1.6.6: the batch reads the two-row report instead (`parse_disk_report()`), and this
-    number-only form stays as the DECLARED fallback for a `df` that does not accept
-    `--output=source,fstype,size,avail,target` (BusyBox) — a host that cannot name its
-    filesystems still gets its root figure.
+    The section carries TWO readers: `parse_disk_report()` reads the 5-column table of
+    `df --output=…` (the mounted pair), and this one reads the size-only line the batch's
+    `df -k / | awk` fallback writes — the GNU-only `--output` list is refused by a BusyBox
+    `df`, which prints NOTHING for it, so the fallback is what answers the root figure there.
+    The first numeric line wins; a section marker ends the scan.
     """
     for line in text.splitlines():
         s = line.strip()
@@ -338,6 +340,26 @@ def disk_refusal_kind(note) -> str:
     return DISK_REFUSAL_NETWORK if is_network_fs(text) else DISK_REFUSAL_NONE
 
 
+def disk_refusal_text(t, note, alias: str, mount: str = "", device: str = "") -> str:
+    """The ONE sentence of a refused disk request (PURE over `t`; `""` — the note is no refusal).
+
+    The three shipped `status.disk_*` keys carry it, and BOTH surfaces read them HERE: the status
+    bar of the collection that met the refusal, and the card's own tooltip, which keeps saying it
+    for as long as the note is stored beside the answers it explains (v1.8rc6, N35). The composer
+    itself stays i18n-agnostic — the translator is an ARGUMENT (the `ui/unmanaged.py` shape), so a
+    caller without one renders the key and never a hardcoded English sentence.
+    """
+    kind = disk_refusal_kind(note)
+    if kind == DISK_REFUSAL_NETWORK:
+        return t("status.disk_mount_network", alias=alias, mount=mount,
+                 type=str("" if note is None else note))
+    if kind == DISK_REFUSAL_MISSING:
+        return t("status.disk_mount_missing", alias=alias, mount=mount)
+    if kind == DISK_REFUSAL_DEVICE:
+        return t("status.disk_device_missing", alias=alias, device=device)
+    return ""
+
+
 # ── The DEVICE choice beside the root (`lsblk -d -n -b -o NAME,SIZE,TYPE`) ──
 
 def parse_lsblk_report(text: str) -> list:
@@ -469,10 +491,12 @@ def parse_info_output(output: str, disk_device: str = "") -> Dict[str, object]:
     if ram_gb:
         result["ram_gb"] = ram_gb
 
-    disk = parse_disk_bytes("\n".join(sections.get(_SECTION_DISK, [])))
-    disk_gb = bytes_to_gb(disk) if disk else ""
-    if disk_gb:
-        result["disk_gb"] = disk_gb
+    if _SECTION_DISK in sections:
+        # The section RAN, so it ANSWERS the root — with a figure or with an explicit "". The
+        # difference matters to the ONE write path: a stale figure must never be re-dated by a
+        # collection that measured nothing (the `df` family is where it is easiest to see).
+        disk = parse_disk_bytes("\n".join(sections[_SECTION_DISK]))
+        result["disk_gb"] = bytes_to_gb(disk) if disk else ""
 
     # The TWO-mount read. The ROOT keeps the figure it ships (`disk_gb`, whose number the inventory's
     # sort key parses) and the DATA-mount pair is the answer the release is about. The family is emitted
@@ -541,10 +565,12 @@ class SystemInfoCollector(QThread):
         try:
             import paramiko
             from services.credential_manager import get_credential_manager
+            # v1.8rc6 (N50): the ONE connect builder (`AGENTS.md` §4.4) — the branch table, the
+            # known-hosts policy and the single `connect()` are shared with the three other sites.
             try:
-                from modules.host_key_policy import SshKnownHostsPolicy
-            except ImportError:
-                from modules.host_key_policy import SshKnownHostsPolicy
+                from modules.ssh_connect import connect_client
+            except ImportError:  # flat layout
+                from ssh_connect import connect_client
 
             final_password = self.password
             if not final_password:
@@ -554,29 +580,13 @@ class SystemInfoCollector(QThread):
                 except Exception:
                     final_password = ""
 
+            # The client is built BEFORE the try so the `finally: client.close()` has one.
             client = paramiko.SSHClient()
-            policy = SshKnownHostsPolicy(
-                hostname=self.data.host, port=self.data.ssh_port or 22)
-            policy.apply_to_client(client)
             try:
-                connect_kwargs = dict(
-                    hostname=self.data.host,
-                    username=self.data.user,
-                    port=self.data.ssh_port or 22,
-                    timeout=_TIMEOUT_S,
-                    banner_timeout=_TIMEOUT_S,
-                )
-                if self.data.key_path:
-                    connect_kwargs.update(key_filename=self.data.key_path,
-                                          look_for_keys=False, allow_agent=True)
-                    if final_password:
-                        connect_kwargs["password"] = final_password
-                elif final_password:
-                    connect_kwargs.update(password=final_password,
-                                          look_for_keys=False, allow_agent=False)
-                else:
-                    connect_kwargs.update(look_for_keys=True, allow_agent=True)
-                client.connect(**connect_kwargs)
+                client, _policy = connect_client(
+                    self.data.host, self.data.user, self.data.ssh_port or 22,
+                    password=final_password, key_path=self.data.key_path, client=client,
+                    timeout=_TIMEOUT_S, banner_timeout=_TIMEOUT_S)
 
                 # v1.6.6 (ROADMAP task 4): the batch carries THIS node's requested data mount
                 # (`build_info_batch` quotes it into the `df` argument and the existence test).

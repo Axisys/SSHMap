@@ -15,10 +15,10 @@ import socket
 import threading
 import time
 
-from _common import (bootstrap, check, finish, check_i18n_parity, check_i18n_format,
-                     check_release_state, load_i18n_langs, read_cfg, write_cfg,
-                     clear_cfg, wait_for, EXPECTED_APP_VERSION, EXPECTED_I18N_KEYS,
-                     releases_at_least)
+from _common import (VERSION_FORMAT_RE, bootstrap, check, finish, check_i18n_parity, check_i18n_format,
+                     check_release_state, load_i18n_langs, read_cfg, write_cfg, window_func_body,
+                     window_family_sources, clear_cfg, wait_for, EXPECTED_APP_VERSION,
+                     EXPECTED_I18N_KEYS, releases_at_least)
 
 ROOT, WORK = bootstrap()  # BEFORE the app module imports (HOME isolation, offscreen)
 
@@ -200,7 +200,7 @@ check("§2 the UNDO OFFER's sentence reaches the ring too (it never travels thro
       "Server deleted: web-01" in messages() and win.statusBar().is_offer_visible(),
       str(messages()))
 check("§2 the tap is ONE connection per surface (the window owns it, not the panel)",
-      "_record_activity_message" in _src("ui", "main_window.py")
+      "_record_activity_message" in window_family_sources(ROOT)["ui/main_window_activity.py"]
       and "offer_shown" in _src("ui", "status_bar.py")
       and "offer_shown = Signal(str)" in _src("ui", "status_bar.py"))
 check("§2 the panel is not the owner of the taps (it renders, the window wires)",
@@ -423,11 +423,10 @@ check("§4 the window builds the panel (the surface is not lazily forgotten)",
       panel is not None and panel.parent() is win)
 check("§4 it is a NON-MODAL window — never a fifth floating panel (the placement decision)",
       panel.isModal() is False and isinstance(panel, QDialog) and panel.parent() is win)
-_resolver = _src("ui", "main_window.py")
-_open = _resolver.index("def _overlay_panel_rects")
+_resolver = window_func_body("_overlay_panel_rects", ROOT)
 check("§4 ...so it never joins the floating-panel priority resolver (only the VIEW children)",
-      'for name in ("empty_state", "map_search", "minimap", "legend", "bookmark_panel",'
-      in _resolver[_open:_open + 900] and panel.parent() is not win.view)
+      "for name in ('empty_state', 'map_search', 'minimap', 'legend', 'bookmark_panel',"
+      in _resolver and panel.parent() is not win.view)
 check("§4 it owns retranslate() (the v1.3.3.1 container invariant)",
       callable(getattr(panel, "retranslate", None)))
 check("§4 the activity switch JOINS the toolbar's view cluster (v1.6, ROADMAP task 7: the "
@@ -585,9 +584,9 @@ print("== §5 the release state and the 'no new contract' audit ==")
 
 check_release_state(ROOT)
 check("§5 EXPECTED_APP_VERSION is the shipped release (v1.5.2 was the second patch on 1.5;"
-      " the pin quotes the CURRENT one — the 1.7 line, its feature follow-up included)",
+      " the pin quotes the CURRENT one — this file's own line or a later one)",
       releases_at_least(EXPECTED_APP_VERSION, "1.7")
-      and re.fullmatch(r"1\.7(?:\.\d+){0,2}(?:rc\d+)?", EXPECTED_APP_VERSION) is not None)
+      and VERSION_FORMAT_RE.fullmatch(EXPECTED_APP_VERSION) is not None)
 check("§5 the i18n pin counts the shipped release (v1.5.2's 661 + v1.5.3's twenty"
       " + v1.5.4's eleven + v1.5.5's fourteen + v1.5.6's two + v1.5.7's twenty-nine"
       " + v1.6's forty-one + v1.6.2's four + v1.6.3's four + v1.6.4's three"

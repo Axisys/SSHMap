@@ -905,8 +905,8 @@ check("the version pin is the release this file describes",
       releases_at_least(EXPECTED_APP_VERSION, "1.7.4"), EXPECTED_APP_VERSION)
 check("the i18n pin counts the SHIPPED release (897 + the 17 of v1.7.4rc1 + the 1 of v1.7.4rc2"
       " + the 4 of v1.7.5: the Files settings page with its ceiling row and warning, and the"
-      " truncation notice + the 6 of v1.7.5.1)",
-      EXPECTED_I18N_KEYS == 897 + 17 + 1 + 4 + 6, str(EXPECTED_I18N_KEYS))
+      " truncation notice + the 6 of v1.7.5.1 + the 20 of v1.8: the elevated pane)",
+      EXPECTED_I18N_KEYS == 897 + 17 + 1 + 4 + 6 + 20, str(EXPECTED_I18N_KEYS))
 check("VERSION_FORMAT did NOT move (a path is never written into a project)",
       __import__("version").VERSION_FORMAT == "0.9")
 check("no new dependency was added for the local pane (the four pinned ones)",

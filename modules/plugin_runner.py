@@ -112,24 +112,17 @@ def run_command_over_ssh(node: PluginNode, command: str, timeout: float = COMMAN
     key_path = str(credentials.get("key_path") or "")
     client = None
     try:
-        import paramiko
-        from modules.host_key_policy import SshKnownHostsPolicy
+        # v1.8rc6 (N50): the ONE connect builder (`AGENTS.md` §4.4) — the branch table, the
+        # known-hosts policy and the single `connect()` are shared with the three other sites.
+        try:
+            from modules.ssh_connect import connect_client
+        except ImportError:  # flat layout
+            from ssh_connect import connect_client
 
-        client = paramiko.SSHClient()
-        policy = SshKnownHostsPolicy(hostname=node.host, port=node.port)
-        policy.apply_to_client(client)
-
-        kwargs = dict(hostname=node.host, username=node.user, port=node.port,
-                      timeout=timeout, banner_timeout=timeout, auth_timeout=timeout)
-        if key_path:
-            kwargs.update(key_filename=key_path, look_for_keys=False, allow_agent=True)
-            if password:
-                kwargs["password"] = password
-        elif password:
-            kwargs.update(password=password, look_for_keys=False, allow_agent=False)
-        else:
-            kwargs.update(look_for_keys=True, allow_agent=True)
-        client.connect(**kwargs)
+        client, _policy = connect_client(node.host, node.user, node.port,
+                                         password=password, key_path=key_path,
+                                         timeout=timeout, banner_timeout=timeout,
+                                         auth_timeout=timeout)
 
         stdin, stdout, stderr = client.exec_command(command, timeout=timeout)
         try:

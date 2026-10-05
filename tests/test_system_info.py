@@ -76,6 +76,27 @@ check("bytes_to_gb zero/negative → ''", bytes_to_gb(0) == "" and bytes_to_gb(-
 for _m in ("---OS---", "---CPU---", "---RAM---", "---DISK---", "---END---"):
     check(f"INFO_BATCH contains {_m}", _m in INFO_BATCH)
 
+# ── N34 — the DISK section's ROOT fallback ───────────────────────────────────────────────
+# `--output=…` is GNU-only: a BusyBox `df` refuses it and prints NOTHING, so without a second
+# command the root figure (and the data-mount family with it) leaves the card and the old
+# number is re-dated. The fallback must print a BARE NUMBER — what `parse_disk_bytes()` reads.
+_disk_lines = INFO_BATCH.splitlines()
+_i = _disk_lines.index("echo ---DISK---")
+_disk_cmds = _disk_lines[_i + 1:_disk_lines.index("echo ---DISKS---")]
+check("N34 the DISK section holds a second command whose output is a bare number",
+      any(c.strip().startswith("df ") and "--output" not in c for c in _disk_cmds),
+      str(_disk_cmds))
+check("N34 ...and it is the POSIX `df -k` form (a BusyBox df refuses the GNU `-B1`/`--output`)",
+      any("df -k" in c for c in _disk_cmds), str(_disk_cmds))
+_busybox = "---DISK---\n10522669875\n---DISKMOUNT---\npresent\n---END---"
+check("N34 a BusyBox host still gets its root figure",
+      parse_disk_bytes("10522669875") == 10522669875
+      and parse_info_output(_busybox)["disk_gb"] == "9.8 gb",
+      str(parse_info_output(_busybox)))
+check("N34 a section that measured NOTHING answers an explicit '' (never a stale figure)",
+      parse_info_output("---DISK---\n---DISKMOUNT---\npresent\n---END---")["disk_gb"] == ""
+      and "disk_gb" not in parse_info_output("---OS---\nLinux\n---END---"))
+
 # The model: the new fields + backward-compat of the old JSON
 from models.server import ServerData, server_data_from_dict, server_data_to_dict
 _sd = server_data_from_dict({"id": "t1", "alias": "A", "host": "h", "user": "u"})

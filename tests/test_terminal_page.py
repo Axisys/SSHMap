@@ -9,6 +9,7 @@ Run: python tests/test_terminal_page.py   (from the project root) or python test
 import json
 import os
 import sys
+import threading
 
 from _common import (bootstrap, check, finish, wait_until, load_i18n_langs, check_i18n_parity,
                      check_release_state, cfg_path, write_cfg, clear_cfg)
@@ -262,12 +263,54 @@ check("c: the worker is stopped within the shutdown budget (wait_ms=2500)",
       not worker_c.isRunning(), f"running={worker_c.isRunning()}")
 check("c: the idle worker did not go into the orphan-worker registry",
       worker_c not in SWORK._orphan_workers, f"registry={len(SWORK._orphan_workers)}")
-# The worker's signals are disconnected: a late emit — a no-op
+# The worker's signals are disconnected: a late SAME-THREAD emit — a no-op (it proves the
+# disconnect only: the delivered-callable case is the one below, from the worker's own thread)
 worker_c.task_started.emit(99, "list", "/late")
 app.processEvents()
-check("c: task_started after shutdown does not change the page state (the slots are detached)",
+check("c: a same-thread task_started after shutdown does not change the page state",
       pc._sftp_tasks == {} and pc._sftp_busy == 0,
       f"tasks={pc._sftp_tasks} busy={pc._sftp_busy}")
+
+# ── c2) N56 — the IN-FLIGHT bookkeeping: shutdown() clears what it can never hear about ────
+fs_c2 = _FakeSftpFS()
+fs_c2.add_file("/a.txt", b"hello")
+pc2 = make_page("td-c2")
+pc2.terminal_thread.client = _FakeSshClient(_FakeSftpClient(fs_c2))
+check("c2: the worker is up", pc2._ensure_sftp() is True and pc2._sftp_worker.isRunning())
+pc2._on_sftp_task_started(7, "upload", "/a.txt")       # a transfer IS in flight at teardown
+check("c2: the in-flight transfer is recorded before the teardown",
+      pc2._sftp_tasks == {7: ("upload", "/a.txt")} and pc2._sftp_busy == 1,
+      f"tasks={pc2._sftp_tasks} busy={pc2._sftp_busy}")
+pc2.shutdown()
+check("c2: N56 shutdown() leaves NO in-flight bookkeeping behind (the slots are gone with it)",
+      pc2._sftp_tasks == {} and pc2._transfer_meters == {} and pc2._sftp_busy == 0,
+      f"tasks={pc2._sftp_tasks} meters={pc2._transfer_meters} busy={pc2._sftp_busy}")
+
+# The POSTED case the guard is for: the emission is queued by the worker's OWN thread and
+# delivered only after the teardown disconnected the slot — a posted emission survives a
+# disconnect() (§4.3), which is what `_shut_down` is read for.
+fs_c3 = _FakeSftpFS()
+pc3 = make_page("td-c3")
+pc3.terminal_thread.client = _FakeSshClient(_FakeSftpClient(fs_c3))
+check("c3: the worker is up", pc3._ensure_sftp() is True and pc3._sftp_worker.isRunning())
+_worker_c3 = pc3._sftp_worker
+_emitted = threading.Event()
+
+
+def _emit_late():
+    _worker_c3.task_started.emit(8, "upload", "/late")
+    _emitted.set()
+
+
+threading.Thread(target=_emit_late, daemon=True).start()
+check("c3: the late emission left the worker's thread", _emitted.wait(2.0) is True)
+check("c3: nothing was delivered yet (the event is still QUEUED — no loop pumped)",
+      pc3._sftp_tasks == {}, f"tasks={pc3._sftp_tasks}")
+pc3.shutdown()                    # the teardown disconnects the slot the event was posted for
+app.processEvents()               # …and now the queued emission is delivered
+check("c3: N56 a POSTED late emission adds nothing (the _shut_down guard)",
+      pc3._sftp_tasks == {} and pc3._sftp_busy == 0,
+      f"tasks={pc3._sftp_tasks} busy={pc3._sftp_busy}")
 
 # ── d) the error path: error_signal → critical + the status + close_terminal ─────────
 crit_calls = []
@@ -627,7 +670,80 @@ check("a claim armed on an already-dead canvas is safe end to end (armed, then s
 
 
 # ════════════════════════════════════════════════════════════
-# 7. i18n parity + release state
+# 7. N45 — the terminal ANSWERS a DSR/DA query on ITS OWN channel
+# ════════════════════════════════════════════════════════════
+print("== N45: the terminal's own replies ==")
+
+_p45 = make_page("reply")
+_ch45 = _p45.terminal_thread.channel
+check("N45: the screen collects what the emulator answers (pyte's default sank it)",
+      hasattr(_p45.tscreen, "take_pending_input")
+      and _p45.tscreen.take_pending_input() == b"")
+_p45.tscreen.feed(b"abc\x1b[6n")          # DSR — report the cursor position
+_reply45 = _p45.tscreen.take_pending_input()
+check("N45: a DSR 6 answers the 1-based cursor position (the fork's own arithmetic)",
+      _reply45 == b"\x1b[1;4R", repr(_reply45))
+check("N45: the drain is ONCE (a second call answers nothing)", _p45.tscreen.take_pending_input() == b"")
+_p45.tscreen.feed(b"\x1b[5n")             # DSR — terminal status
+check("N45: a DSR 5 answers \\x1b[0n", _p45.tscreen.take_pending_input() == b"\x1b[0n")
+_p45.tscreen.feed(b"\x1b[c")              # DA — device attributes
+check("N45: a DA answers the fork's VT102 report",
+      _p45.tscreen.take_pending_input() == b"\x1b[?6c")
+
+# …and the PAGE puts the reply on the channel of THIS session, after the chunk that produced it.
+_hub_seen = []
+_canvas_sends = []
+_orig_hub = _p45.widget._multi_hub
+_orig_send = _p45.widget._send
+
+
+class _SpyHub:
+    active = True
+
+    def broadcast(self, data, source_widget=None):
+        _hub_seen.append(data)
+        return 0
+
+
+_p45.widget._multi_hub = _SpyHub()
+_p45.widget._send = lambda data: _canvas_sends.append(data)
+_ch45.sent.clear()
+_p45._on_output(b"\x1b[6n")
+_p45.widget._multi_hub = _orig_hub
+_p45.widget._send = _orig_send
+check("N45: the page sent the reply to the session's OWN channel",
+      _ch45.sent == [b"\x1b[1;4R"], repr(_ch45.sent))
+check("N45: the reply never travels through the canvas's ONE input point (`_send`)",
+      _canvas_sends == [], repr(_canvas_sends))
+check("N45: ...and the multi-input broadcast NEVER carries a terminal reply",
+      _hub_seen == [], repr(_hub_seen))
+
+# A CLOSED channel is a quiet no-op (the bytes are dropped, nothing raises).
+_p45.tscreen.feed(b"\x1b[6n")
+_ch45.closed = True
+check("N45: a closed channel answers False and sends nothing",
+      _p45._send_terminal_reply(_p45.tscreen.take_pending_input()) is False
+      and _ch45.sent == [b"\x1b[1;4R"], repr(_ch45.sent))
+_ch45.closed = False
+
+# The contract of the bypass: the CODE (docstring aside) touches the thread and the channel only,
+# and never the command-history recorder or the canvas.
+import ast as _ast  # noqa: E402
+
+_tp_src = open(os.path.join(ROOT, "modules", "terminal_page.py"), encoding="utf-8").read()
+_fn45 = [n for n in _ast.walk(_ast.parse(_tp_src))
+         if isinstance(n, _ast.FunctionDef) and n.name == "_send_terminal_reply"][0]
+_code45 = _ast.unparse(_ast.Module(body=_fn45.body[1:], type_ignores=[]))
+check("N45: the reply is never recorded as a sent command and never touches the canvas "
+      "(the FOURTH bypass of the ONE input point)",
+      "record_sent_command" not in _code45 and "widget" not in _code45
+      and "send_data" in _code45 and "channel" in _code45, _code45[:160])
+
+_p45.shutdown()
+
+
+# ════════════════════════════════════════════════════════════
+# 8. i18n parity + release state
 # ════════════════════════════════════════════════════════════
 print("== i18n parity + release state ==")
 

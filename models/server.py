@@ -61,6 +61,13 @@ class ServerData:
     disk_path: str = ""
     disk_free: str = ""
     disk_size: str = ""
+    # The NOTE of a refused request — the durable half of a sentence that otherwise lives only in
+    # an 8-second status line: the machine note the collector wrote (`missing`, the network
+    # filesystem's name, `device-missing`) for the DATA MOUNT and, one field down, for the chosen
+    # DEVICE. Measured like the answers above (nothing was refused ⇒ no key) and rendered through
+    # the ONE composer, `system_info_collector.disk_refusal_text()`.
+    disk_note: str = ""
+    disk_device_note: str = ""
     # The DEVICE the card is about — the second REQUEST/ANSWER pair, one level DOWN. `disk_device`
     # is the REQUEST (a device name, "" = no choice, so the root's own figure answers as it always
     # did) and `disk_devices` is the LIST the last collection read ("sda 9.7 gb") — offered by the
@@ -239,7 +246,8 @@ def server_data_from_dict(raw: dict) -> ServerData:
     # list or any other foreign value all degrade to "" ("never measured"), so a hand-edited
     # project file can never put a non-string into a field the card and the dialog render.
     # v1.7.1.2: the device REQUEST joins them, and the discovered LIST is sanitized like `tags`.
-    for _field in ('disk_mount', 'disk_path', 'disk_free', 'disk_size', 'disk_device'):
+    for _field in ('disk_mount', 'disk_path', 'disk_free', 'disk_size', 'disk_device',
+                   'disk_note', 'disk_device_note'):
         data[_field] = optional_text(data.get(_field))
     data['disk_devices'] = sanitize_device_list(data.get('disk_devices'))
     try:
@@ -283,12 +291,12 @@ def server_data_to_dict(data: ServerData) -> dict:
     # release and an undated card stays unmarked on the next load.
     if not info_collected_epoch(serialized.get('info_collected_at')):
         serialized.pop('info_collected_at', None)
-    # v1.6.6 (ROADMAP task 5): the REQUEST is written like the collected fields it sits beside
-    # (an empty `disk_mount` is the meaningful "use the declared default"), while the three
-    # ANSWERS are MEASUREMENTS — nothing was measured ⇒ the key is ABSENT, so an ordinary map
-    # keeps the file it had and a project written before the release is never "measured" by a
-    # later save. v1.7.1.2: the device REQUEST follows `disk_mount`, the LIST the answers.
-    for _field in ('disk_path', 'disk_free', 'disk_size'):
+    # v1.6.6 (ROADMAP task 5): the REQUEST is written like the collected fields it sits beside (an
+    # empty `disk_mount` means "use the declared default"), while the three ANSWERS are MEASUREMENTS —
+    # nothing was measured ⇒ the key is ABSENT, so an ordinary map keeps the file it had and a project
+    # written before the release is never "measured" by a later save. v1.7.1.2: the device REQUEST
+    # follows `disk_mount`, the LIST the answers; v1.8rc6 (N35) adds the two refusal NOTES with them.
+    for _field in ('disk_path', 'disk_free', 'disk_size', 'disk_note', 'disk_device_note'):
         if not optional_text(serialized.get(_field)):
             serialized.pop(_field, None)
     if not sanitize_device_list(serialized.get('disk_devices')):

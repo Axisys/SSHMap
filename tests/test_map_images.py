@@ -12,10 +12,10 @@ import os
 import re
 import struct
 
-from _common import (bootstrap, check, finish, check_i18n_parity, check_i18n_format,
-                     check_release_state, load_i18n_langs,
-                     EXPECTED_APP_VERSION, EXPECTED_I18N_KEYS,
-                     releases_at_least)
+from _common import (VERSION_FORMAT_RE, bootstrap, check, finish, check_i18n_parity,
+                     check_i18n_format, check_release_state, load_i18n_langs,
+                     EXPECTED_APP_VERSION, EXPECTED_I18N_KEYS, releases_at_least,
+                     window_func_body)
 
 ROOT, WORK = bootstrap()  # BEFORE the app module imports (HOME isolation, offscreen)
 
@@ -46,30 +46,21 @@ def _src(*parts) -> str:
     return _SRC[key]
 
 
-def _func_body(*parts, func) -> str:
-    """The source of ONE function with its docstring STRIPPED (the audit seam).
+def _func_body(func) -> str:
+    """The source of ONE method of the MainWindow FAMILY, its docstring STRIPPED (the audit seam).
 
     A source audit has to look at the CODE, not at the prose: a docstring that names the
     palette dialog while explaining why the copy must NOT call it would otherwise fail its
-    own check. `ast.parse` + `ast.unparse` (3.9+) yields the statements alone, so the check
-    is about what really runs.
+    own check. The method is read WHEREVER the family defines it (`_common.window_func_body`)
+    — the 1.8rc split moves a method into a `ui/main_window_*.py` mixin and its body does not
+    change, so a pin that named the facade file has to move with it.
     """
-    import ast
-
-    tree = ast.parse(_src(*parts))
-    for node in ast.walk(tree):
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == func:
-            body = list(node.body)
-            if body and isinstance(body[0], ast.Expr) and isinstance(body[0].value, ast.Constant) \
-                    and isinstance(body[0].value.value, str):
-                body = body[1:]  # drop the docstring
-            return ast.unparse(ast.Module(body=body or [ast.Pass()], type_ignores=[]))
-    raise AssertionError(f"{func} is not defined in {parts}")
+    return window_func_body(func, ROOT)
 
 
 def _copy_body() -> str:
     """The stripped body of `MainWindow._copy_map_image` — the v1.5.1 pinned decision."""
-    return _func_body("ui", "main_window.py", func="_copy_map_image")
+    return _func_body("_copy_map_image")
 
 
 def png_size(path):
@@ -255,7 +246,7 @@ check("§2 the source audit: the copy path never asks the palette question (the 
       and "PALETTE_THEME" in _copy_body(),
       _copy_body().replace("\n", " ")[:120])
 check("§2 ...while the PNG export DOES ask it (the two paths really differ)",
-      "self._ask_export_palette(" in _func_body("ui", "main_window.py", func="_export_map_image"))
+      "self._ask_export_palette(" in _func_body("_export_map_image"))
 
 _win_empty = make_main()
 _win_empty.scene.clear_all()
@@ -363,9 +354,9 @@ print("== §4 the release state and the 'no new contract' audit ==")
 
 check_release_state(ROOT)
 check("§4 EXPECTED_APP_VERSION is the shipped release (v1.5.1 was the first patch on 1.5;"
-      " the pin quotes the CURRENT one — the 1.7 line, its feature follow-up included)",
+      " the pin quotes this file's own release or a later line)",
       releases_at_least(EXPECTED_APP_VERSION, "1.7")
-      and re.fullmatch(r"1\.7(?:\.\d+){0,2}(?:rc\d+)?", EXPECTED_APP_VERSION) is not None)
+      and VERSION_FORMAT_RE.fullmatch(EXPECTED_APP_VERSION) is not None)
 check("§4 the i18n pin moved by exactly FOUR keys in v1.5.1 (two labels + two reports), by "
       "v1.5.2's thirteen, by v1.5.3's twenty, by v1.5.4's eleven, by v1.5.5's fourteen"
       " and by v1.5.6's two, v1.5.7's twenty-nine, v1.6.2's four, v1.6.3's four and "

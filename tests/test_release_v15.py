@@ -11,8 +11,8 @@ import dataclasses
 import os
 import re
 
-from _common import (bootstrap, check, finish, check_i18n_parity, check_i18n_format,
-                     check_release_state, load_i18n_langs,
+from _common import (VERSION_FORMAT_RE, bootstrap, check, finish, check_i18n_parity, check_i18n_format,
+                     check_release_state, load_i18n_langs, window_family_sources, window_func_body,
                      EXPECTED_APP_VERSION, EXPECTED_I18N_KEYS,
                      releases_at_least)
 
@@ -134,17 +134,21 @@ print("== §2 the floating-panel SNAP (one resolver, two panels) ==")
 check("§2 the threshold is DECLARED once and is twice the 12 px default margin",
       MW.MainWindow.SNAP_PX == 24
       and MW.MainWindow.SNAP_PX == 2 * MW.MainWindow.LEGEND_MARGIN)
+_family_src = window_family_sources(ROOT)
 check("§2 ONE resolver serves every panel (no second copy of the geometry)",
-      _src("ui", "main_window.py").count("def _snap_panel") == 1
-      and _src("ui", "main_window.py").count("self._snap_panel(") == 3)
+      sum(src.count("def _snap_panel") for src in _family_src.values()) == 1
+      and sum(src.count("self._snap_panel(") for src in _family_src.values()) == 3)
 check("§2 the anchored edges are the documented ones (the legend LEFT|BOTTOM, the minimap "
       "RIGHT|TOP, the bookmarks panel LEFT|TOP)",
-      '_snap_panel(getattr(self, "legend", None), pos, "lb")' in _src("ui", "main_window.py")
-      and '_snap_panel(getattr(self, "minimap", None), pos, "rt")' in _src("ui", "main_window.py")
-      and '_snap_panel(getattr(self, "bookmark_panel", None), pos, "lt")'
-      in _src("ui", "main_window.py"))
+      "_snap_panel(getattr(self, 'legend', None), pos, 'lb')"
+      in window_func_body("_on_legend_moved", ROOT)
+      and "_snap_panel(getattr(self, 'minimap', None), pos, 'rt')"
+      in window_func_body("_on_minimap_moved", ROOT)
+      and "_snap_panel(getattr(self, 'bookmark_panel', None), pos, 'lt')"
+      in window_func_body("_on_bookmarks_moved", ROOT))
 check("§2 the saved position is cleared with the NULL sentinel (a merge write cannot delete)",
-      '{"x": None, "y": None}' in _src("ui", "main_window.py")
+      all("{'x': None, 'y': None}" in window_func_body(mover, ROOT)
+          for mover in ("_on_legend_moved", "_on_minimap_moved", "_on_bookmarks_moved"))
       and MW.MainWindow._saved_position({"x": None, "y": None}) is None
       and MW.MainWindow._saved_position(["a", "b"]) is None)
 check("§2 it costs NO new menu entry, action or hotkey (the rejected \"Reset positions\"; "
@@ -278,9 +282,9 @@ print("== §4 the release state & the \"no new contract\" audit ==")
 
 check_release_state(ROOT)
 check("§4 the pin quotes the SHIPPED version (v1.7 opened the 1.7 line with Files Commander;"
-      " v1.7.1 is its feature follow-up)",
+      " this file reads the pin of its own release or of a later line)",
       releases_at_least(EXPECTED_APP_VERSION, "1.7")
-      and re.fullmatch(r"1\.7(?:\.\d+){0,2}(?:rc\d+)?", EXPECTED_APP_VERSION) is not None)
+      and VERSION_FORMAT_RE.fullmatch(EXPECTED_APP_VERSION) is not None)
 check("§4 the i18n pin moved on by the closing release's ONE key, v1.5.1's four, v1.5.2's "
       "thirteen (the activity panel's chrome), v1.5.3's twenty (the freshness family), "
       "v1.5.4's eleven (the aggregate, the lens and the filter plaque), v1.5.5's fourteen "

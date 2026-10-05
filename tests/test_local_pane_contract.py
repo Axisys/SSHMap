@@ -13,6 +13,7 @@ import sys
 
 from _common import (bootstrap, check, finish, wait_until, wait_for, clear_cfg, write_cfg,
                      load_i18n_langs, check_i18n_parity, check_i18n_format, check_release_state,
+                     pane_family_files, pane_family_text, pane_func_body, pane_func_owner,
                      releases_at_least, EXPECTED_APP_VERSION, EXPECTED_I18N_KEYS)
 
 ROOT, WORK = bootstrap()  # BEFORE the app module imports (the HOME isolation)
@@ -36,7 +37,8 @@ from _fakes import EventLog, FakeSftpClient, FakeSftpFS, wire_worker
 
 TREE = os.path.join(WORK, "contract_tree")
 
-PANE_SRC = open(os.path.join(ROOT, "modules", "sftp_tab.py"), encoding="utf-8").read()
+PANE_SRC = pane_family_text(ROOT)
+PANE_FILES = pane_family_files(ROOT)
 ENGINE_SRC = open(os.path.join(ROOT, "modules", "local_fs_worker.py"), encoding="utf-8").read()
 CONTRACT = open(os.path.join(ROOT, "LOCAL_PANE.md"), encoding="utf-8").read()
 PANES_CONTRACT = open(os.path.join(ROOT, "SFTP_PANES.md"), encoding="utf-8").read()
@@ -645,8 +647,9 @@ check_i18n_format(LANGS)
 check_release_state(ROOT)
 check("§9 the version pin is the release this audit ships with",
       releases_at_least(EXPECTED_APP_VERSION, "1.7.4"), EXPECTED_APP_VERSION)
-check("§9 the i18n pin counts the shipped keys (the local pane's 18 + the v1.7.5 slot's 4 + the v1.7.5.1 slot's 6)",
-      EXPECTED_I18N_KEYS == 897 + 17 + 1 + 4 + 6, str(EXPECTED_I18N_KEYS))
+check("§9 the i18n pin counts the shipped keys (the local pane's 18 + the v1.7.5 slot's 4 + "
+      "the v1.7.5.1 slot's 6 + the v1.8 elevated pane's 20)",
+      EXPECTED_I18N_KEYS == 897 + 17 + 1 + 4 + 6 + 20, str(EXPECTED_I18N_KEYS))
 check("§9 VERSION_FORMAT did NOT move (a path is never written into a project)",
       __import__("version").VERSION_FORMAT == "0.9")
 check("§9 no new dependency was added for the local pane (the four pinned ones)",

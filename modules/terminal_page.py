@@ -12,9 +12,7 @@ signals are unbound and `stop()` + `wait(1500)` runs — a thread that outlives 
 `_orphan_threads` (a live QThread without a QObject parent must not be left to GC). A `RuntimeError` on
 a C++ object never blocks the close. The host learns everything through `status_message` / `progress_*`, and every status write goes through ONE method (`_set_status_text`, `session_status` + the bridge), so the HOST is the single status surface and a split pane's state is its second text. Seams: the thread class and `QMessageBox` are fetched from `ssh_terminal` at call time."""
 
-import re
 import time
-import urllib.parse
 
 from PySide6.QtCore import Qt, QEvent, QRectF, QTimer, Signal
 from PySide6.QtGui import QBrush, QColor, QIcon, QPainter, QPixmap
@@ -59,6 +57,21 @@ except ImportError:
         from ui import theme_qss
     except ImportError:  # flat layout: the ui/ directory itself is on sys.path
         theme_qss = None
+
+# The page's CLUSTERS (the facade over the mixins): the Files-widget handover and the two bridges —
+# the SFTP task family and the OSC 7 follow. A mixin resolves a facade global at call time
+# (`host_attr`, `MODULE_FACADE_SEAMS` below) and never imports this module. The OSC 7 constants and
+# its two PURE readers come back with the mixin (the shipped `TP.parse_osc7` / `TP.CWD_HOOK_COMMAND`).
+try:
+    from .terminal_files_panel import TerminalFilesPanelMixin
+    from .terminal_page_cwd import (CWD_HOOK_COMMAND, FOLLOW_CWD_CONFIG_KEY, TerminalPageCwdMixin,
+                                    osc7_report_end, parse_osc7)
+    from .terminal_page_sftp import TerminalPageSftpMixin
+except ImportError:  # flat launch from the project root
+    from terminal_files_panel import TerminalFilesPanelMixin
+    from terminal_page_cwd import (CWD_HOOK_COMMAND, FOLLOW_CWD_CONFIG_KEY, TerminalPageCwdMixin,
+                                   osc7_report_end, parse_osc7)
+    from terminal_page_sftp import TerminalPageSftpMixin
 
 
 def _st_module():
@@ -225,94 +238,6 @@ def refresh_session_activity(container) -> int:
     return done
 
 
-# ── the Files tab follows the shell (OSC 7; `AGENTS.md` §4.3, `DOCUMENTATION.md` §64) ──
-# A shell REPORTS its working directory with the OSC 7 escape (`ESC ] 7 ; file://host/path`,
-# BEL- or ST-terminated). The application has ONE session kind (SSH), so there is no environment
-# to preset at spawn: the session injects a ONE-TIME hook INVISIBLY (its echo held back),
-# APPENDED to the user's `PROMPT_COMMAND` and, under zsh, through `precmd_functions+=`.
-FOLLOW_CWD_CONFIG_KEY = "terminal_follow_cwd"
-CWD_HOOK_COMMAND = (
-    "_sshmap_cwd() { printf '\\033]7;file://%s%s\\033\\\\'"
-    " \"${HOSTNAME:-localhost}\" \"$PWD\"; }; "
-    "if [ -n \"${ZSH_VERSION:-}\" ]; then "
-    "case \"${precmd_functions[*]:-}\" in *_sshmap_cwd*) ;; "
-    "*) eval 'precmd_functions+=(_sshmap_cwd)';; esac; "
-    "else case \"${PROMPT_COMMAND:-}\" in *_sshmap_cwd*) ;; "
-    "*) PROMPT_COMMAND=\"_sshmap_cwd${PROMPT_COMMAND:+;$PROMPT_COMMAND}\";; esac; fi"
-)
-#: How long after `connected_signal` the hook goes out: the remote shell needs a moment to
-#: reach its first prompt (the same reason the quick-launch command is deferred), and PTY
-#: input is buffered by the kernel, so the hook is never lost.
-CWD_HOOK_DELAY_MS = 400
-#: The first report is what releases the hold-back; a shell that never answers costs the held
-#: bytes back after this deadline (nothing is lost, the echo is simply shown).
-CWD_HOLD_DEADLINE_MS = 4000
-#: The hold-back buffer cap: a shell that floods (a `yes`-like startup script) must never
-#: grow the queue without a bound — past this the held bytes are shown.
-CWD_HOLD_MAX_BYTES = 256 * 1024
-#: The bytes kept between two chunks so an OSC 7 split across a chunk boundary is still seen.
-OSC7_CARRY_BYTES = 512
-#: `ESC ] 7 ; <host><path>` terminated by BEL or ST (the two endings xterm accepts).
-_OSC7_RE = re.compile(rb"\x1b\]7;([^\x07\x1b]*)(?:\x07|\x1b\\)")
-
-
-def parse_osc7(data) -> str:
-    """The directory of the LAST OSC 7 report in `data` ("" — none). PURE, no Qt.
-
-    The payload is `file://<host><path>`: the `file://` scheme is required (anything else
-    is a foreign report and means "no follow"), the host is everything up to the NEXT `/`
-    and is deliberately ignored (the LISTING is the tab's own business), and the path is
-    percent-DECODED (a directory with a space arrives as `%20`). A host-only payload, a
-    report without the scheme and a path that is not absolute all answer "" — the shell on
-    the other side is not ours to trust, so every degradation is "no follow", never an
-    exception.
-    """
-    try:
-        raw = bytes(data or b"")
-    except Exception:  # noqa: BLE001 — a caller that hands over a str/None
-        return ""
-    last = None
-    for last in _OSC7_RE.finditer(raw):
-        pass
-    if last is None:
-        return ""
-    payload = last.group(1)
-    if not payload.startswith(b"file://"):
-        return ""
-    rest = payload[len(b"file://"):]     # <host><path> — the host may be empty
-    cut = rest.find(b"/")
-    if cut < 0:
-        return ""
-    try:
-        path = urllib.parse.unquote(rest[cut:].decode("utf-8", "replace"))
-    except Exception:  # noqa: BLE001 — a malformed escape never breaks the session
-        return ""
-    if not path.startswith("/") or "\x00" in path:
-        return ""
-    return path
-
-
-def osc7_report_end(data, after: int = 0) -> int:
-    """The offset just PAST the first OSC 7 report that ends after `after` (-1 — none). PURE.
-
-    `parse_osc7()` answers WHAT the last report says; this answers WHERE the first report that
-    really arrived in this chunk ends — the boundary the echo hold-back needs: everything before
-    it is the answer's own head (the tty's echo of the injected hook) and is DROPPED with the
-    held bytes, while the tail (the new prompt, which bash prints AFTER `PROMPT_COMMAND` ran) is
-    rendered as usual. `after` is the carry length: a report that ends inside the carry was
-    already seen in an earlier chunk, so it is not an answer to a hook injected since.
-    """
-    try:
-        raw = bytes(data or b"")
-        start = max(0, int(after))
-    except Exception:  # noqa: BLE001 — a caller that hands over a str/None
-        return -1
-    for match in _OSC7_RE.finditer(raw):
-        if match.end() > start:
-            return match.end()
-    return -1
-
-
 def format_duration(seconds) -> str:
     """A duration in seconds → "M:SS" / "H:MM:SS" ("" — no usable value).
 
@@ -377,7 +302,8 @@ class TransferMeter:
         self._samples = []
 
 
-class TerminalSessionPage(QWidget):
+class TerminalSessionPage(TerminalFilesPanelMixin, TerminalPageSftpMixin, TerminalPageCwdMixin,
+                          QWidget):
     """v1.2: an SSH session as a reusable widget.
 
     Composition: terminal_thread (SSHTerminalThread) + tscreen (TerminalScreen) +
@@ -417,18 +343,6 @@ class TerminalSessionPage(QWidget):
     # invoke_shell (login scripts/motd; PTY input is buffered, the command is
     # not lost).
     INITIAL_COMMAND_DELAY_MS = 500
-
-    # The SFTP task kinds that feed the progress bridge (the busy counter, the QProgressBar and the
-    # status-bar text): `read` is the viewer's read, whose OUTCOME the SFTP tab renders itself.
-    # The file operations (mkdir/rename/delete) are outside this set on purpose — no bytes, no bar —
-    # and a remote→remote COPY joins it (bytes, a total from stat, the rate/ETA meter) while a MOVE
-    # is a rename (nothing to measure) — `_SFTP_PROGRESS_KINDS`, `DOCUMENTATION.md` §14.
-    _SFTP_PROGRESS_KINDS = ("upload", "download", "read", "copy")
-
-    # v1.7rc2: the i18n key that NAMES a transfer in flight — one mapping for the start
-    # line and for the indeterminate-progress line, so a new kind cannot half-land.
-    _SFTP_KIND_KEYS = {"upload": "sftp.uploading", "download": "sftp.downloading",
-                       "read": "sftp.viewer.reading", "copy": "sftp.copying"}
 
     # ── Host bridge (window/dock): the page does not know where messages go ─
     status_message = Signal(str, int)   # (text, timeout_ms); 0 — sticky (no timeout)
@@ -1104,6 +1018,12 @@ class TerminalSessionPage(QWidget):
             _dissig(sftp_worker.task_error, self._on_sftp_task_error)
             _dissig(sftp_worker.task_cancelled, self._on_sftp_task_cancelled)
             _dissig(sftp_worker.finished, self._on_sftp_worker_finished)
+            # v1.8rc6 (N56): the transfer bookkeeping dies WITH the transport. The six slots above
+            # are gone, so a transfer that is IN FLIGHT here can never deliver its done/error/
+            # cancelled — the entries would outlive the worker that owned them. Cleared, not left.
+            self._sftp_tasks.clear()
+            self._transfer_meters.clear()
+            self._sftp_busy = 0
             sftp_worker.shutdown(wait_ms=2500)
             if sftp_worker.isRunning():
                 register_orphan_sftp_worker(sftp_worker)
@@ -1294,6 +1214,9 @@ class TerminalSessionPage(QWidget):
             self.widget.write_transcript(data)
         except Exception:  # noqa: BLE001 — the tee never breaks the session
             pass
+        # N45: the terminal's OWN answers (a DSR/DA query the emulator replied to) go back on the
+        # channel of THIS session, AFTER the chunk that produced them.
+        self._send_terminal_reply(self.tscreen.take_pending_input())
         # N7: a history position change ⇔ an auto-return to live (`feed()` — the only path
         # that changes the position without a manual scroll), so a selection on the "old"
         # screen is reset before copying. Under `terminal_scroll = "pin"` the viewport does NOT
@@ -1325,183 +1248,29 @@ class TerminalSessionPage(QWidget):
         except RuntimeError:
             pass  # the C++ object was already destroyed (a WA_DeleteOnClose close race)
 
-    # ── v1.6.3 (ROADMAP task 5): the cwd follow (OSC 7) ─────────────────────
+    def _send_terminal_reply(self, data: bytes) -> bool:
+        """Put the terminal's OWN answer on the channel of THIS session (N45). Never raises.
 
-    def follow_cwd(self) -> bool:
-        """Is this session following the shell's directory? (the checkbox's state)"""
-        return bool(self._follow_cwd)
-
-    def set_follow_cwd(self, enabled, persist: bool = False) -> bool:
-        """Turn the follow on/off for THIS session (the checkbox / the config key).
-
-        `persist=True` writes the ONE `terminal_follow_cwd` key through the ordinary
-        merge-write (the settings-hub rule: an owner-written UI-state key). Turning it ON
-        mid-session injects the hook if it never went out — a session that starts following
-        late is not forced to reconnect. Never raises: a read-only HOME keeps the choice
-        for the session.
+        The FOURTH bypass of the ONE input point (`AGENTS.md` §4.3): a reply to a DSR/DA query is
+        the TERMINAL's, not the user's. It must not travel through `TerminalWidget._send()` — the
+        multi-input hub would copy a cursor-position answer into every live session — and it must
+        not be recorded in the command history (`record_sent_command` is the macro path). A closed
+        channel and a dead thread answer False quietly; the reply is a few bytes.
         """
-        self._follow_cwd = bool(enabled)
-        tab = getattr(self, "sftp_tab", None)
-        if tab is not None:
-            tab.set_follow_cwd(self._follow_cwd)   # the checkbox is a VIEW of this state
-        if not self._follow_cwd:
-            # v1.6.4 fix: a follow turned OFF while its hook's echo is still held gives the held
-            # bytes back at once — the output must never stay invisible because a switch moved.
-            self._release_cwd_hold()
-        if self._follow_cwd and not self._cwd_hook_sent:
-            self._inject_cwd_hook()
-        if persist:
-            self._save_follow_cwd()
-        return self._follow_cwd
-
-    def _save_follow_cwd(self) -> bool:
-        """Persist `terminal_follow_cwd` (the merge-write every config key uses). Never raises."""
-        try:
-            from i18n import save_config
-        except Exception:  # noqa: BLE001 — a build without i18n keeps the session state
+        if not data:
+            return False
+        thread = self.terminal_thread
+        if thread is None:
+            return False
+        channel = getattr(thread, "channel", None)
+        if channel is not None and getattr(channel, "closed", False):
             return False
         try:
-            return bool(save_config({FOLLOW_CWD_CONFIG_KEY: bool(self._follow_cwd)}))
-        except Exception:  # noqa: BLE001 — a read-only HOME is not worth an error dialog
+            thread.send_data(data)
+            return True
+        except Exception:  # noqa: BLE001 — a teardown race must not break the output path
             return False
 
-    def _on_follow_cwd_toggled(self, checked: bool):
-        """The tab's checkbox changed → apply it to the session and persist it."""
-        self.set_follow_cwd(checked, persist=True)
-
-    def _on_connected_for_follow(self):
-        """connected_signal: arm the ONE-TIME hook (deferred — the shell needs a prompt)."""
-        if not self._follow_cwd:
-            return
-        QTimer.singleShot(CWD_HOOK_DELAY_MS, self._inject_cwd_hook)
-
-    def _inject_cwd_hook(self) -> bool:
-        """Send the OSC 7 hook ONCE, invisibly, over THIS session's channel.
-
-        Directly through `terminal_thread.send_data()` — never the multi-input broadcast:
-        one path typed into eight sessions would install eight hooks in eight shells.
-        Returns True when the bytes went out. A dead channel, a follow that was turned off
-        in the meantime and a repeated call are all ordinary False answers.
-        """
-        if self._cwd_hook_sent or not self._follow_cwd:
-            return False
-        thread = getattr(self, "terminal_thread", None)
-        if thread is None or self._pty_channel() is None:
-            return False   # not connected (yet) — the connected_signal path comes back
-        self._cwd_hook_sent = True
-        self._cwd_hold = bytearray()
-        self._cwd_hold_deadline = time.monotonic() + CWD_HOLD_DEADLINE_MS / 1000.0
-        try:
-            thread.send_data((CWD_HOOK_COMMAND + "\n").encode("utf-8"))
-        except Exception:  # noqa: BLE001 — a dead channel mid-teardown: no follow, no error
-            self._cwd_hold = None
-            return False
-        QTimer.singleShot(CWD_HOLD_DEADLINE_MS, self._on_cwd_hold_timeout)
-        return True
-
-    def _scan_osc7(self, data) -> int:
-        """Find an OSC 7 report in the RAW bytes, move the listing and answer WHERE it ends.
-
-        The carry keeps the last `OSC7_CARRY_BYTES` bytes of the previous chunk, so a
-        report split across two reads is still parsed. The FIRST report that really arrived in
-        this chunk also releases the echo hold-back — DROPPING what is held (that is the hook's
-        own echo); every later report only moves the listing, and a directory that did not
-        change is a no-op.
-
-        The return value is the offset in `data` just past that answering report (-1 — there was
-        none), which is what `_hold_cwd_echo()` needs: the released hold must NOT let the echo
-        through when the shell answered within the very same chunk. A report that lives entirely
-        in the carry was already seen in an earlier chunk and is therefore not an answer —
-        otherwise a shell that emits OSC 7 on its own would release the hold before the hook's
-        echo has even been buffered. Never raises.
-        """
-        if not self._follow_cwd:
-            return -1
-        try:
-            raw = bytes(data or b"")
-        except Exception:  # noqa: BLE001 — a caller that hands over something odd
-            return -1
-        carry = self._cwd_carry
-        chunk = carry + raw
-        path = parse_osc7(chunk)
-        self._cwd_carry = chunk[-OSC7_CARRY_BYTES:]
-        if not path:
-            return -1
-        end = osc7_report_end(chunk, after=len(carry))
-        if path != self._last_cwd:
-            self._last_cwd = path
-            self._apply_cwd(path)
-        if end < 0:
-            return -1          # a STALE report (seen before this chunk) — it answers nothing
-        return max(0, end - len(carry))
-
-    def _apply_cwd(self, path: str):
-        """Move the Files tab to the directory the shell reported (the follow itself).
-
-        Only a page with the SFTP tab and a LIVE worker can follow; a foreign path (the
-        tab's own guard) and an unreachable server degrade to "no follow" — the report is a
-        hint, never a command.
-        """
-        tab = getattr(self, "sftp_tab", None)
-        if tab is None or getattr(tab, "worker", None) is None:
-            return
-        try:
-            tab.follow_directory(path)
-        except RuntimeError:
-            pass  # Qt teardown — the tab is already destroyed
-
-    def _hold_cwd_echo(self, data: bytes, cut: int = 0) -> bytes:
-        """The hold-back of the hook's echo: the bytes to RENDER (b"" — nothing yet).
-
-        While the hold is armed the output is buffered; the deadline (and the size cap)
-        gives it BACK — a shell that never sends an OSC 7 costs nothing but a short pause,
-        and its echo appears then. The first report DROPS the held bytes (that is exactly
-        the hook's echo, which must never reach the canvas).
-
-        `cut` is `_scan_osc7()`'s answer: the offset in `data` just past the report that
-        released the hold. When it is set, the answer arrived WITHIN this chunk (the usual
-        case — bash echoes the line and prints the next prompt in one read), so this chunk's
-        head belongs to the echo and goes with the buffer: only `data[cut:]` — the new prompt,
-        which bash writes AFTER `PROMPT_COMMAND` reported — is rendered.
-        """
-        buf = self._cwd_hold
-        if buf is None:
-            return data
-        if cut > 0:
-            self._cwd_hold = None
-            return bytes(data[max(0, int(cut)):])
-        if time.monotonic() >= self._cwd_hold_deadline:
-            self._cwd_hold = None
-            return bytes(buf) + bytes(data or b"")
-        buf += bytes(data or b"")
-        if len(buf) > CWD_HOLD_MAX_BYTES:
-            self._cwd_hold = None
-            return bytes(buf)   # a flooding shell is shown, never buffered forever
-        return b""
-
-    def _on_cwd_hold_timeout(self):
-        """The deadline expired: give the held bytes BACK through the ordinary output path."""
-        self._release_cwd_hold()
-
-    def _release_cwd_hold(self) -> bytes:
-        """Hand the held bytes back through the ordinary output path (idempotent). Never raises.
-
-        The ONE release of a hold that was NOT answered by a report — the deadline of
-        `_on_cwd_hold_timeout` and a follow that is turned OFF while the hold is armed both come
-        here, so a hold can never outlive the reason it was taken for (the output must not stay
-        invisible because a checkbox changed).
-        """
-        buf = self._cwd_hold
-        if buf is None:
-            return b""
-        self._cwd_hold = None
-        if not buf:
-            return b""
-        try:
-            self._on_output(bytes(buf))
-        except Exception:  # noqa: BLE001 — a teardown race: the bytes are dropped, not raised
-            return b""
-        return bytes(buf)
 
     # ── v1.0RC3: resize PTY — a grid guard + debounce (ROADMAP task 6) ──────
 
@@ -1670,308 +1439,15 @@ class TerminalSessionPage(QWidget):
                 pass
         QTimer.singleShot(self.INITIAL_COMMAND_DELAY_MS, _do)
 
-    # ── v1.1.3: the SFTP tab (ROADMAP tasks 2-4) ────────────────────────────
 
-    def _ensure_sftp(self) -> bool:
-        """Open an SFTP channel over a live transport and start the worker.
+# The LIVE-NAMESPACE SEAMS, declared once (`AGENTS.md` §4.1, §4.3): every name a `terminal_page_*`
+# mixin resolves on THIS module at call time (`host_attr`). The declaration IS the seam — the name
+# stays importable and it is the substitution point a suite patches (`TP.format_size = <fake>`), so a
+# name read only by a mixin is not a dead import.
+MODULE_FACADE_SEAMS = (
+    get_translator, SftpWorker, OP_KINDS, format_size, sftp_name_refusal_text,
+    TransferMeter, format_duration,
+    # the OSC 7 cluster the suite reads on THIS module (`TP.parse_osc7`, `TP.CWD_HOOK_COMMAND`)
+    parse_osc7, osc7_report_end, CWD_HOOK_COMMAND, FOLLOW_CWD_CONFIG_KEY,
+)
 
-        It reuses `terminal_thread.client.open_sftp()` — without a second
-        authentication and a second known_hosts pass (ROADMAP task 3):
-        the policy was already applied to the client at connect; open_sftp just
-        opens a new channel on the same Transport. A lazy call: the first switch
-        to the "Files" tab / connected_signal, if the user is already there.
-        The session is not connected yet → False (the tab waits). The server's
-        SFTP subsystem is unavailable → an error in the status (the
-        status_message bridge), the worker is not created (a retry — on the next
-        switch to the tab). v1.3.3.5: a page built WITHOUT the SFTP tab
-        (`with_sftp=False`) never opens a channel — no Files tab exists to ask for it.
-        """
-        t = get_translator()
-        if getattr(self, "sftp_tab", None) is None:
-            return False   # v1.3.3.5: a split pane is a command line — no SFTP channel
-        worker = getattr(self, "_sftp_worker", None)
-        if worker is not None and not worker.isFinished():
-            return True
-        thread = getattr(self, "terminal_thread", None)
-        client = getattr(thread, "client", None) if thread is not None else None
-        transport = None
-        if client is not None:
-            try:
-                transport = client.get_transport()
-            except Exception:
-                transport = None
-        if transport is None or not transport.is_active():
-            return False
-        try:
-            sftp = client.open_sftp()
-        except Exception as e:  # noqa: BLE001 — the SFTP subsystem may be disabled
-            msg = t("sftp.open_failed", error=str(e))
-            self.status_message.emit(
-                msg if not msg.startswith("[") else f"Failed to open SFTP channel: {e}",
-                8000)
-            return False
-        # WITHOUT a QObject parent: the window has WA_DeleteOnClose, and a hanging
-        # transfer may outlive it — the orphan worker registry (the N4 v1.1.2RC1
-        # pattern) keeps the thread alive until finished(); all slots are
-        # disconnected in shutdown().
-        new_worker = SftpWorker(sftp)
-        self._sftp_worker = new_worker
-        new_worker.task_started.connect(self._on_sftp_task_started)
-        new_worker.progress.connect(self._on_sftp_progress)
-        new_worker.task_done.connect(self._on_sftp_task_done)
-        new_worker.task_error.connect(self._on_sftp_task_error)
-        new_worker.task_cancelled.connect(self._on_sftp_task_cancelled)
-        new_worker.finished.connect(self._on_sftp_worker_finished)
-        new_worker.start()
-        self.sftp_tab.set_worker(new_worker)
-        return True
-
-    def _on_tab_changed(self, index: int):
-        """A switch to the "Files" tab — a lazy SFTP start (idempotent).
-
-        v1.3.3.5: on a page without the SFTP tab `self.sftp_tab` is None and no widget
-        can be it, so the guard is a no-op by itself (kept for symmetry).
-        """
-        if self.sftp_tab is not None and self.tabs.widget(index) is self.sftp_tab:
-            self._ensure_sftp()
-
-    def _on_sftp_tab_message(self, msg: str):
-        """A tab message (a file selection and the like) → the status_message bridge (5 s)."""
-        self.status_message.emit(msg, 5000)
-
-    def show_files_tab(self) -> bool:
-        """v1.7rc1 (ROADMAP v1.7rc1, task 3): bring the "Files" tab to the front.
-
-        The door the Files Commander control opens: turning the two-pane view ON while the
-        session shows the CANVAS would build panes nobody can see, so the container asks the
-        page for the tab — and the ordinary `_on_tab_changed` path opens the SFTP channel
-        lazily on the way. False when this page has no Files tab at all (a split pane is
-        built `with_sftp=False`), which is exactly the "the action is disabled there" rule.
-        v1.7.1: False too while the window shows the Files tree in its right-hand PANEL — the
-        page has no Files tab then (`detach_files_tab()`) and nothing to bring to the front.
-        """
-        if self.sftp_tab is None or getattr(self, "_files_panel_on", False):
-            return False
-        try:
-            self.tabs.setCurrentWidget(self.sftp_tab)
-        except RuntimeError:
-            return False  # Qt teardown — the C++ object is already gone
-        return True
-
-    # ── the Files tree as a panel of the WINDOW ────
-    # The window may show this session's Files widget in a right-hand panel of its own
-    # (`modules/ssh_terminal.py`): the widget is RE-PARENTED from the session's tab strip into the
-    # window's `QStackedWidget`, one page per session. The PAGE keeps its owner (`page.sftp_tab` never
-    # changes) — only the TAB is taken away, so every page-level read and the teardown keep working (§4.3).
-
-    def detach_files_tab(self):
-        """Hand the Files widget over to a host panel: remove the TAB, return the WIDGET.
-
-        None when this page has no Files tab (a split pane) or the panel is already off the
-        strip. The widget keeps its parent until the caller re-parents it into the stack —
-        `QTabWidget.removeWidget()` drops the TAB, never the object.
-        """
-        tab = getattr(self, "sftp_tab", None)
-        if tab is None:
-            return None
-        try:
-            index = self.tabs.indexOf(tab)
-            if index < 0:
-                return None
-            self.tabs.removeTab(index)
-        except RuntimeError:
-            return None  # Qt teardown — the strip is already gone
-        return tab
-
-    def attach_files_tab(self) -> bool:
-        """Take the Files widget back from a host panel: re-insert the TAB it lost.
-
-        The position is the SHIPPED one (`Terminal | Files | History`, index 1), so the
-        panel being switched off restores the exact strip the session had before it — the
-        page's own tab order is not the host's business. Idempotent and teardown-safe.
-        """
-        tab = getattr(self, "sftp_tab", None)
-        if tab is None:
-            return False
-        try:
-            if self.tabs.indexOf(tab) >= 0:
-                return True
-            self.tabs.insertTab(1, tab, get_translator()("sftp.tab_files"))
-        except RuntimeError:
-            return False  # Qt teardown — the strip is already gone
-        return True
-
-    def set_files_panel(self, on: bool) -> bool:
-        """The window shows (on) or hides this session's Files tree in its right panel.
-
-        The ONE consequence the PAGE owns: the SFTP channel must be open even though the
-        user never switched to a Files tab — a switch to the tab was the lazy-open trigger
-        (`_on_tab_changed`) and the panel mode has no such tab, so the panel would otherwise
-        sit in `sftp.waiting_connection` for the whole session. The channel is therefore
-        opened HERE when the transport is already alive, and `_on_connected_for_sftp()` opens
-        it for a session that is still connecting. Never raises.
-        """
-        on = bool(on)
-        self._files_panel_on = on
-        if not on:
-            return self._files_panel_on
-        try:
-            self._ensure_sftp()
-        except RuntimeError:
-            pass  # Qt teardown — the session is already going away
-        return self._files_panel_on
-
-    @property
-    def files_panel_on(self) -> bool:
-        """Is this session's Files tree shown in a host panel (and therefore not in a tab)?"""
-        return bool(getattr(self, "_files_panel_on", False))
-
-    def _on_connected_for_sftp(self):
-        """connected_signal: open the channel the session is really going to need.
-
-        Two triggers ask for it — the user was already sitting on "Files", or v1.7.1 shows
-        the tree in the window's right-hand PANEL (where there is no Files tab to switch to).
-        """
-        try:
-            if self._files_panel_on or self.tabs.currentWidget() is self.sftp_tab:
-                self._ensure_sftp()
-        except RuntimeError:
-            pass  # the C++ object was already destroyed (a close race)
-
-    def _transfer_kind_text(self, kind: str, label: str) -> str:
-        """The status line naming a transfer in flight (v1.7rc2: ONE mapping for the
-        start line and the indeterminate-progress line — `sftp.uploading` /
-        `sftp.downloading` / `sftp.viewer.reading` / `sftp.copying`)."""
-        key = self._SFTP_KIND_KEYS.get(kind, "sftp.downloading")
-        return get_translator()(key, name=label)
-
-    def _on_sftp_task_started(self, task_id: int, kind: str, label: str):
-        t = get_translator()
-        self._sftp_tasks[task_id] = (kind, label)
-        if kind in self._SFTP_PROGRESS_KINDS:
-            self._sftp_busy += 1
-            self.progress_busy.emit()   # v1.1.x: setRange(0,0)+setValue(0)+show()
-            self.status_message.emit(self._transfer_kind_text(kind, label), 0)
-        elif kind in OP_KINDS:
-            pass   # v1.3.3.2: a file operation — the SFTP tab reports it itself
-        else:  # list — without a progress bar
-            self.status_message.emit(t("sftp.listing", path=label), 0)
-
-    def _on_sftp_progress(self, task_id: int, done: int, total: int):
-        t = get_translator()
-        entry = self._sftp_tasks.get(task_id)
-        if entry is None or entry[0] not in self._SFTP_PROGRESS_KINDS:
-            return
-        kind, label = entry
-        if total > 0:
-            self.progress_update.emit(done, total)   # v1.1.x: setRange(0,total)+setValue
-            text = t("sftp.progress", name=label, pct=int(done * 100 // total),
-                     done=format_size(done), total=format_size(total))
-            # v1.3.3.4 (ROADMAP task 6): the measured throughput and the ETA, appended
-            # to the same line (an empty string while the meter has nothing honest to show).
-            detail = self._transfer_detail(task_id, done, total)
-            if detail:
-                text = f"{text} · {detail}"
-        else:  # total unknown — name only (an indeterminate bar)
-            self.progress_update.emit(done, 0)
-            text = self._transfer_kind_text(kind, label)
-        self.status_message.emit(text, 0)
-
-    def _transfer_detail(self, task_id: int, done: int, total: int) -> str:
-        """v1.3.3.4 (ROADMAP task 6): "1.2 MB/s · ETA 0:42" — or "" while unmeasurable.
-
-        The meter is created on the first sample of the task and dropped with it
-        (SUCCESS, error and cancel all call _drop_transfer_meter). Never raises: a
-        broken measurement costs the suffix, not the progress line.
-        """
-        try:
-            meter = self._transfer_meters.get(task_id)
-            if meter is None:
-                meter = TransferMeter()
-                self._transfer_meters[task_id] = meter
-            sample = meter.update(done, total)
-            if sample is None:
-                return ""
-            rate, eta = sample
-            if rate is None or rate <= 0:
-                return ""
-            t = get_translator()
-            parts = [t("sftp.rate", rate=format_size(int(rate)))]
-            eta_text = format_duration(eta) if eta is not None else ""
-            if eta_text:
-                parts.append(t("sftp.eta", time=eta_text))
-            return " · ".join(parts)
-        except Exception:  # noqa: BLE001 — a cosmetic suffix must never break the transfer UI
-            return ""
-
-    def _drop_transfer_meter(self, task_id: int):
-        """Forget the rate meter of a finished/failed/cancelled task."""
-        try:
-            self._transfer_meters.pop(task_id, None)
-        except Exception:  # noqa: BLE001 — teardown race
-            pass
-
-    def _on_sftp_task_done(self, task_id: int, detail: str):
-        t = get_translator()
-        self._drop_transfer_meter(task_id)   # v1.3.3.4 (task 6): the meter dies with the task
-        entry = self._sftp_tasks.pop(task_id, None)
-        if entry is not None and entry[0] in self._SFTP_PROGRESS_KINDS:
-            self._sftp_busy = max(0, self._sftp_busy - 1)
-            if self._sftp_busy == 0:
-                self.progress_hidden.emit()
-            # v1.3.1: a read is reported by the SFTP tab itself (the preview panel),
-            # not by a "transfer complete" line in the status bar.
-            if entry[0] != "read":
-                self.status_message.emit(t("sftp.transfer_done", name=entry[1]), 5000)
-
-    def _on_sftp_task_error(self, task_id: int, kind: str, message: str):
-        t = get_translator()
-        self._drop_transfer_meter(task_id)   # v1.3.3.4 (task 6): the meter dies with the task
-        entry = self._sftp_tasks.pop(task_id, None)
-        if entry is not None and entry[0] in self._SFTP_PROGRESS_KINDS:
-            self._sftp_busy = max(0, self._sftp_busy - 1)
-            if self._sftp_busy == 0:
-                self.progress_hidden.emit()
-        if kind == "read":
-            # v1.3.1: the message of a read error is a MACHINE code — the SFTP tab
-            # translates it (its message signal → the bridge); showing it here as
-            # well would duplicate the hint with an untranslated code.
-            return
-        if kind in OP_KINDS:
-            # v1.3.3.2: a file operation — the SFTP tab wraps the server's error in
-            # its own translated line (the same no-duplication rule as for "read").
-            return
-        refusal = sftp_name_refusal_text(message)
-        if refusal:
-            # v1.7.5.1 (N40): a server name this platform cannot turn into a path — the ONE
-            # renderer of that payload, so the sentence is the user's language, not JSON.
-            self.status_message.emit(refusal, 8000)
-            return
-        prefix = t("terminal.error_prefix")
-        self.status_message.emit(f"{prefix} {message}", 8000)
-
-    def _on_sftp_task_cancelled(self, task_id: int, kind: str):
-        t = get_translator()
-        self._drop_transfer_meter(task_id)   # v1.3.3.4 (task 6): the meter dies with the task
-        entry = self._sftp_tasks.pop(task_id, None)
-        if entry is not None and entry[0] in self._SFTP_PROGRESS_KINDS:
-            self._sftp_busy = max(0, self._sftp_busy - 1)
-            if self._sftp_busy == 0:
-                self.progress_hidden.emit()
-        self.status_message.emit(t("sftp.transfer_cancelled"), 5000)
-
-    def _on_sftp_worker_finished(self):
-        """The worker stopped on its own (the transport died — the session
-        closed/crashed): a state reset; the tab returns to "waiting", a restart —
-        on the next switch to it, if a live connection appears. v1.3.3.5: a page
-        without the SFTP tab has no worker to reset — the guard keeps it symmetrical."""
-        try:
-            self._sftp_worker = None
-            self._sftp_tasks.clear()
-            self._transfer_meters.clear()   # v1.3.3.4 (task 6): no live task — no meter
-            self._sftp_busy = 0
-            self.progress_hidden.emit()
-            if getattr(self, "sftp_tab", None) is not None:
-                self.sftp_tab.set_worker(None)
-        except RuntimeError:
-            pass  # the C++ object was already destroyed (a close race)

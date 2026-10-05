@@ -37,7 +37,8 @@ from services.status_checker import (  # noqa: E402
     MIN_INTERVAL_SEC, MAX_INTERVAL_SEC)
 from services.system_info_collector import (  # noqa: E402
     build_info_batch, parse_disk_report, parse_disk_presence, resolve_disk_answer,
-    resolve_disk_mount, disk_refusal_kind, is_network_fs, sh_quote, parse_info_output,
+    resolve_disk_mount, disk_refusal_kind, disk_refusal_text, is_network_fs, sh_quote,
+    parse_info_output,
     INFO_BATCH, DISK_MOUNT_DEFAULT, DISK_MOUNT_TOKEN, NETWORK_FS_TYPES,
     DISK_REFUSAL_MISSING, DISK_REFUSAL_NETWORK, DISK_NOTE_MISSING,
     parse_lsblk_report, physical_disks, device_label, device_labels, resolve_disk_device,
@@ -434,6 +435,20 @@ check("§4 ... and an nfs4 mount follows the same declared rule",
 check("§4 disk_refusal_kind() is total and NAMES nothing it does not know",
       disk_refusal_kind("") == "" and disk_refusal_kind(None) == ""
       and disk_refusal_kind("btrfs") == "" and disk_refusal_kind("missing") == "missing")
+# N35 — the ONE composer both surfaces read (the status line and the card's durable tooltip).
+_note_t = lambda k, **kw: LANGS["en"][k].format(**kw)   # noqa: E731 — the shipped en wording
+check("§4 N35 disk_refusal_text() composes the shipped sentence for every refusal kind",
+      disk_refusal_text(_note_t, DISK_NOTE_MISSING, "web-1", mount="/opt")
+      == LANGS["en"]["status.disk_mount_missing"].format(mount="/opt", alias="web-1")
+      and disk_refusal_text(_note_t, "cifs", "web-1", mount="/opt")
+      == LANGS["en"]["status.disk_mount_network"].format(mount="/opt", alias="web-1", type="cifs")
+      and disk_refusal_text(_note_t, DISK_NOTE_DEVICE_MISSING, "web-1", device="sdb")
+      == LANGS["en"]["status.disk_device_missing"].format(device="sdb", alias="web-1"),
+      str(disk_refusal_text(_note_t, "cifs", "web-1", mount="/opt")))
+check("§4 N35 ...and answers '' for a note that is no refusal (a measured mount)",
+      disk_refusal_text(_note_t, "", "web-1", mount="/opt") == ""
+      and disk_refusal_text(_note_t, None, "web-1", mount="/opt") == ""
+      and disk_refusal_text(_note_t, "ext4", "web-1", mount="/opt") == "")
 
 check("§4 the shell's own existence token decides the missing case",
       parse_disk_presence("present") is True and parse_disk_presence("absent") is False)
@@ -525,6 +540,19 @@ check("§5 a measured map writes all four",
           for k in ("disk_mount", "disk_path", "disk_free", "disk_size")))
 check("§5 the schema does NOT move (an optional field with a default is not a change)",
       _version.VERSION_FORMAT == "0.9")
+# N35 — the two refusal NOTES have a HOME in the model.
+check("§5 N35 the two note fields exist with the declared default",
+      ServerData(id="x", alias="a", host="h", user="u").disk_note == ""
+      and ServerData(id="x", alias="a", host="h", user="u").disk_device_note == "")
+_note_meas = server_data_from_dict({"id": "nm", "alias": "a", "host": "h", "user": "u",
+                                    "disk_note": " cifs ", "disk_device_note": 22})
+check("§5 N35 a note round-trips and a foreign value degrades to ''",
+      _note_meas.disk_note == "cifs" and _note_meas.disk_device_note == ""
+      and server_data_from_dict(server_data_to_dict(_note_meas)).disk_note == "cifs")
+check("§5 N35 a card with NO refusal writes no note key (nothing is claimed)",
+      "disk_note" not in server_data_to_dict(_meas)
+      and "disk_device_note" not in server_data_to_dict(_meas)
+      and server_data_to_dict(_note_meas)["disk_note"] == "cifs")
 
 _rec2 = RoundRecorder()
 win2 = make_main(checker=_rec2)
@@ -556,6 +584,17 @@ check("§5 a collection silent about a data mount leaves the pair ALONE",
       str((_node.data.disk_path, _node.data.disk_free)))
 check("§5 a node that vanished during the collection writes nothing (and dates nothing)",
       win2._apply_info_result("nope", {"disk_path": "/opt", "disk_free": "1 gb"}) is False)
+check("§5 N34 a `disk_gb` KEY answers the root — an explicit '' CLEARS a figure collected earlier",
+      win2._apply_info_result("n1", {"disk_gb": "9.8 gb"}) is True
+      and _node.data.disk == "9.8 gb"
+      and win2._apply_info_result("n1", {"disk_gb": ""}) is True
+      and _node.data.disk == "",
+      str(_node.data.disk))
+check("§5 N34 ...while a collection with NO `disk_gb` key at all leaves the figure where it is",
+      win2._apply_info_result("n1", {"disk_gb": "9.8 gb"}) is True
+      and win2._apply_info_result("n1", {"os_name": "Debian GNU/Linux 12"}) is True
+      and _node.data.disk == "9.8 gb",
+      str(_node.data.disk))
 check("§5 the missing-path refusal has its own sentence",
       win2._apply_info_result("n1", {"disk_path": "", "disk_free": "", "disk_size": "",
                                      "disk_note": DISK_NOTE_MISSING}) is True
@@ -686,6 +725,32 @@ check("§7 ... and the data mount is deliberately NOT a column",
       "disk_mount" not in [f for f, _k in SB.LIST_COLUMNS]
       and "disk_free" not in [f for f, _k in SB.LIST_COLUMNS],
       str([f for f, _k in SB.LIST_COLUMNS]))
+
+# ── N35 — the refusal is DURABLE: the card says WHY long after the status line is gone ────────
+_refused = ServerNode(ServerData(id="c-ref", alias="web-1", host="10.0.0.3", user="u",
+                                 os_name="Ubuntu 24.04 LTS", disk_mount="/opt",
+                                 disk_note=DISK_NOTE_MISSING))
+_refused.update_appearance()
+check("§7 N35 a refused data mount leaves a durable WHY on the card's tooltip",
+      LANGS["en"]["status.disk_mount_missing"].format(mount="/opt", alias="web-1")
+      in _refused._info.toolTip()
+      and "DISK /opt" not in _refused._info.toPlainText(),
+      _refused._info.toolTip().replace("\n", " | "))
+_refused_dev = ServerNode(ServerData(id="c-ref2", alias="web-1", host="10.0.0.4", user="u",
+                                     disk_device="sdb",
+                                     disk_device_note=DISK_NOTE_DEVICE_MISSING))
+_refused_dev.update_appearance()
+check("§7 N35 ...the same channel carries a vanished DEVICE",
+      LANGS["en"]["status.disk_device_missing"].format(device="sdb", alias="web-1")
+      in _refused_dev._info.toolTip(),
+      _refused_dev._info.toolTip().replace("\n", " | "))
+check("§7 N35 ...and an ANSWERED card carries no note at all",
+      "not found" not in _with._info.toolTip(), _with._info.toolTip().replace("\n", " | "))
+_refused.data.disk_note = ""
+_refused.update_appearance()
+check("§7 N35 a later collection that ANSWERS clears the note with the data",
+      LANGS["en"]["status.disk_mount_missing"].format(mount="/opt", alias="web-1")
+      not in _refused._info.toolTip(), _refused._info.toolTip().replace("\n", " | "))
 
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -968,8 +1033,8 @@ check("§9 the i18n pin counts the SHIPPED release (811 + 17 of v1.6.7 + 13 of v
       " the two-sided conflict facts, the remembered-folder sentence, the two drop refusals and Word wrap"
       " + the 17 of v1.7.4rc1: the local source switch of a pane, its two refusals, the permanent-"
       " delete warning and the local file-surface sentences, and v1.7.4rc2 adds 1: the refusal of"
-      " a move that would cross the two sources)",
-      EXPECTED_I18N_KEYS == 811 + 17 + 13 + 5 + 8 + 9 + 4 + 3 + 4 + 4 + 19 + 17 + 1 + 4 + 6, str(EXPECTED_I18N_KEYS))
+      " a move that would cross the two sources and v1.8 adds TWENTY: the elevated pane)",
+      EXPECTED_I18N_KEYS == 811 + 17 + 13 + 5 + 8 + 9 + 4 + 3 + 4 + 4 + 19 + 17 + 1 + 4 + 6 + 20, str(EXPECTED_I18N_KEYS))
 check_i18n_parity(LANGS)
 check_i18n_format(LANGS)
 check("§9 the ELEVEN new keys are present and non-empty in every language",

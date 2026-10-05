@@ -13,7 +13,8 @@ import re
 import sys
 
 from _common import (bootstrap, check, finish, load_i18n_langs, check_i18n_parity,
-                     check_i18n_format, check_release_state, read_cfg, write_cfg, clear_cfg)
+                     check_i18n_format, check_release_state, read_cfg, write_cfg, clear_cfg,
+                     window_family_files)
 
 ROOT, WORK = bootstrap()
 
@@ -704,24 +705,27 @@ from storage.export_drawio import NODE_FILL, NODE_STROKE, NOTE_FILL  # noqa: E40
 check("§8 export_drawio: the export colours are unchanged (the draw.io format)",
       (NODE_FILL, NODE_STROKE, NOTE_FILL) == ("#0f172a", "#38bdf8", "#facc15"))
 
-# The AST audit (the v1.2.5 rule): a raw palette literal must not come back.
+# The AST audit (the v1.2.5 rule): a raw palette literal must not come back. The window's files are
+# the whole MainWindow FAMILY — every `ui/main_window_*.py` mixin is scanned by construction, so a
+# cluster that moves out of the facade keeps its audit (`_common.window_family_files`).
 SCAN_FILES = [
     "main.py",
     "graphics/background_image.py", "graphics/connection_arrow.py",
     "graphics/map_scene.py", "graphics/map_view.py", "graphics/node_group.py",
     "graphics/server_node.py", "graphics/sticky_note.py",
-    "ui/command_palette.py", "ui/icons.py", "ui/main_window.py",
+    "ui/command_palette.py", "ui/icons.py",
     "ui/map_search_bar.py", "ui/mixin_support.py", "ui/settings_dialog.py",
     "ui/sidebar.py",
     "dialogs/add_server_dialog.py", "dialogs/backups_dialog.py",
     "dialogs/connection_dialog.py", "dialogs/profile_manager_dialog.py",
     "dialogs/quick_launch_dialog.py", "dialogs/ssh_connect_dialog.py",
     "modules/multi_input.py", "modules/sftp_tab.py", "modules/terminal_dock.py",
-    "modules/terminal_page.py",
+    "modules/terminal_page.py", "modules/terminal_page_cwd.py", "modules/terminal_page_sftp.py",
+    "modules/terminal_files_panel.py", "modules/terminal_config.py", "modules/ssh_connect.py",
     # v1.4.7: the viewer's grammar layer — it has no literal either (a role's colour
     # comes from `syntax_field()`), and the audit keeps it that way
     "modules/syntax_highlight.py",
-]
+] + window_family_files(ROOT)
 FORBIDDEN = {getattr(theme.DARK, f.name).lower() for f in dataclasses.fields(theme.Theme)
              if isinstance(getattr(theme.DARK, f.name), str)
              and re.match(r"^#[0-9a-f]{6}$", getattr(theme.DARK, f.name))}

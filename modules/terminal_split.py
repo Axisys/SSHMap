@@ -30,49 +30,21 @@ CONTAINER_DOCK = "dock"
 # ── the split state and its geometry ─────────────────────────────────────────
 # The ratio is a FRACTION of the height, so a window resize keeps the proportion; the pixel floor is
 # derived from the canvas metrics (`SPLIT_MIN_ROWS` rows + the pane's own chrome), never a magic
-# number. The two keys are ONE split state for the application — the dock and a window share them.
-SPLIT_CONFIG_BOOL = "ui_terminal_split"          # bool — a pane was open at the last close
-SPLIT_CONFIG_RATIO = "ui_terminal_split_ratio"   # float — the pane's share of the height
-SPLIT_RATIO_DEFAULT = 0.25                       # a quarter of the height
-SPLIT_RATIO_MIN = 0.10
-SPLIT_RATIO_MAX = 0.75
+# number. The two config KEYS and their reader are the terminal family's config surface, declared
+# once in `modules/terminal_config.py` and re-exported HERE (the shipped `SP.<name>` surface).
+try:
+    from .terminal_config import (SPLIT_CONFIG_BOOL, SPLIT_CONFIG_RATIO, SPLIT_RATIO_DEFAULT,
+                                  SPLIT_RATIO_MAX, SPLIT_RATIO_MIN, load_split_settings)
+except ImportError:  # flat launch from the project root
+    from terminal_config import (SPLIT_CONFIG_BOOL, SPLIT_CONFIG_RATIO, SPLIT_RATIO_DEFAULT,
+                                 SPLIT_RATIO_MAX, SPLIT_RATIO_MIN, load_split_settings)
+
 SPLIT_MIN_ROWS = 4                               # the floor: 4 rows of the canvas
 
-
-def load_split_settings():
-    """The split state/ratio from `~/.sshmap/config.json` — the `terminal_*` validation rule.
-
-    Source — `i18n.load_config()` (never raises, `{}` on error); both keys are optional and the
-    defaults equal the single-pane behaviour. Returns `{"split": bool, "ratio": float}`, the ratio
-    clamped to `SPLIT_RATIO_MIN..SPLIT_RATIO_MAX`. A foreign type (a string `"true"`, a bool where a
-    float is expected, a non-finite number) → the default: a broken config must never open a second
-    session or squeeze the panes into unusability. Never raises.
-    """
-    defaults = {"split": False, "ratio": SPLIT_RATIO_DEFAULT}
-    try:
-        from i18n import load_config
-    except Exception:  # noqa: BLE001 — a build without i18n keeps the defaults
-        return dict(defaults)
-    try:
-        cfg = load_config()
-    except Exception:  # noqa: BLE001 — a broken config store must not break the window
-        return dict(defaults)
-    if not isinstance(cfg, dict):
-        return dict(defaults)
-
-    v = cfg.get(SPLIT_CONFIG_BOOL)
-    if isinstance(v, bool):
-        defaults["split"] = v           # only a real JSON bool counts
-
-    v = cfg.get(SPLIT_CONFIG_RATIO)
-    if isinstance(v, (int, float)) and not isinstance(v, bool):
-        try:
-            ratio = float(v)
-        except (TypeError, ValueError):
-            ratio = SPLIT_RATIO_DEFAULT
-        if ratio == ratio and ratio not in (float("inf"), float("-inf")):  # not NaN/inf
-            defaults["ratio"] = max(SPLIT_RATIO_MIN, min(SPLIT_RATIO_MAX, ratio))
-    return defaults
+#: The split surface this module RE-EXPORTS (`ST.<name>` / `SP.<name>` in the shipped suite): the
+#: declaration IS the seam, so a name read only by a caller is not a dead import (`AGENTS.md` §4.3).
+MODULE_FACADE_SEAMS = (SPLIT_CONFIG_BOOL, SPLIT_CONFIG_RATIO, SPLIT_RATIO_DEFAULT,
+                       SPLIT_RATIO_MIN, SPLIT_RATIO_MAX, load_split_settings)
 
 
 def find_host_hook(widget, name):

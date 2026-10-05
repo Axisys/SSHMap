@@ -11,9 +11,10 @@ import inspect
 import re
 import sys
 
-from _common import (bootstrap, check, finish, load_i18n_langs, check_i18n_parity,
-                     check_i18n_format, check_release_state, read_cfg, merge_cfg, clear_cfg,
-                     write_cfg, EXPECTED_APP_VERSION, EXPECTED_I18N_KEYS, releases_at_least)
+from _common import (VERSION_FORMAT_RE, bootstrap, check, finish, load_i18n_langs,
+                     check_i18n_parity, check_i18n_format, check_release_state, read_cfg,
+                     merge_cfg, clear_cfg, write_cfg, EXPECTED_APP_VERSION, EXPECTED_I18N_KEYS,
+                     releases_at_least)
 
 ROOT, WORK = bootstrap()  # BEFORE the app module imports (the HOME isolation and faulthandler)
 
@@ -642,7 +643,8 @@ check(f"the {len(_NEW_KEYS)} keys of the Files surface are present and non-empty
 check("the panel's own header REUSES the tab's title (no second spelling of \"Files\")",
       "terminal.files_panel_title" not in LANGS["en"]
       and 't("sftp.tab_files")' in open(
-          __import__("os").path.join(ROOT, "modules", "ssh_terminal.py"), encoding="utf-8").read())
+          __import__("os").path.join(ROOT, "modules", "terminal_files_panel.py"),
+          encoding="utf-8").read())
 
 # the live chrome: ONE window with the mode on, re-texted in two languages
 _win_i18n = hold(ST.SSHTerminalWindow(ServerData(id="fp-i18n", alias="i18n", host="10.70.5.1",
@@ -698,9 +700,9 @@ app.processEvents()
 close_window(_win_i18n)
 
 check_release_state(ROOT)
-check("§11 EXPECTED_APP_VERSION is the release this file describes (the 1.7.1 patch)",
+check("§11 EXPECTED_APP_VERSION is the release this file describes (the 1.7.1 patch, or later)",
       releases_at_least(EXPECTED_APP_VERSION, "1.7.1")
-      and re.fullmatch(r"1\.7(?:\.\d+){0,2}(?:rc\d+)?", EXPECTED_APP_VERSION) is not None,
+      and VERSION_FORMAT_RE.fullmatch(EXPECTED_APP_VERSION) is not None,
       EXPECTED_APP_VERSION)
 check("§11 the pin counts the shipped release (863 + the 4 keys of the Files panel"
       " + the 3 of the Files display mode + the 4 of the v1.7.1.2 device choice"
@@ -710,8 +712,8 @@ check("§11 the pin counts the shipped release (863 + the 4 keys of the Files pa
       " of a pane, its two refusals, the permanent-delete warning and the local file-surface sentences"
       " + the 1 of v1.7.4rc2: the refusal of a move that would cross the two sources"
       " + the 4 of v1.7.5: the Files settings page, its ceiling row and warning, and the"
-      " truncation notice)",
-      EXPECTED_I18N_KEYS == 863 + 4 + 3 + 4 + 4 + 19 + 17 + 1 + 4 + 6, str(EXPECTED_I18N_KEYS))
+      " truncation notice + the 20 of v1.8: the elevated pane)",
+      EXPECTED_I18N_KEYS == 863 + 4 + 3 + 4 + 4 + 19 + 17 + 1 + 4 + 6 + 20, str(EXPECTED_I18N_KEYS))
 check("§11 VERSION_FORMAT stays `0.9` (the mode lives in config.json, not in the project file)",
       __import__("version").VERSION_FORMAT == "0.9")
 check("§11 no new dependency was added for the panel (the four pinned ones)",

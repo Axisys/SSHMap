@@ -13,6 +13,8 @@ from _common import bootstrap, check, finish
 
 ROOT, WORK = bootstrap()  # BEFORE the app module imports (the HOME isolation and faulthandler inside)
 
+import os  # noqa: E402 — the source pins of §7 read the shipped modules
+
 from PySide6.QtCore import Qt, QEvent, QPointF
 from PySide6.QtGui import QKeyEvent, QMouseEvent
 from PySide6.QtWidgets import QApplication, QHBoxLayout, QPushButton, QWidget
@@ -418,5 +420,47 @@ finally:
             app.processEvents()
         except Exception:
             pass
+
+# ════════════════════════════════════════════════════════════
+# 7. N45 — the ONE input point keeps its bypasses (a terminal REPLY is not typed input)
+# ════════════════════════════════════════════════════════════
+print("== N45: the input point and its bypasses ==")
+
+_src45 = open(os.path.join(ROOT, "modules", "terminal_widget_input.py"),
+              encoding="utf-8").read()
+_mouse45 = open(os.path.join(ROOT, "modules", "terminal_widget_mouse.py"),
+                encoding="utf-8").read()
+
+
+def _code_of(source, func):
+    """The CODE of one function of a shipped module (its docstring stripped — a docstring may NAME
+    the call it forbids, so a source check has to read the body)."""
+    import ast as _ast
+    node = [n for n in _ast.walk(_ast.parse(source))
+            if isinstance(n, _ast.FunctionDef) and n.name == func][0]
+    body = list(node.body)
+    if body and isinstance(body[0], _ast.Expr) and isinstance(body[0].value, _ast.Constant) \
+            and isinstance(body[0].value.value, str):
+        body = body[1:]
+    return _ast.unparse(_ast.Module(body=body, type_ignores=[]))
+
+
+check("N45: ONE input point — the keyboard table reaches the thread only through `_send`",
+      "send_data" not in _code_of(_src45, "keyPressEvent")
+      and "send_data" in _code_of(_src45, "_send")
+      and "def _send" in _src45,
+      "the keyboard table may not call send_data directly")
+check("N45: ...and the THREE declared bypasses are the mouse reports, `send_macro` and the "
+      "excluded session (a terminal reply is the FOURTH, and it lives in the PAGE)",
+      "_send(" not in _code_of(_src45, "send_macro")
+      and "send_data" in _code_of(_src45, "send_macro")
+      and "_send(" not in _code_of(_mouse45, "_send_mouse")
+      and "send_data" in _code_of(_mouse45, "_send_mouse")
+      and "def multi_excluded" in _src45,
+      "the bypasses moved or a new one appeared")
+check("N45: the canvas has no reply path at all (the screen collects, the PAGE sends)",
+      "pending_input" not in _src45
+      and "write_process_input" not in _src45
+      and "take_pending_input" not in _src45)
 
 finish()

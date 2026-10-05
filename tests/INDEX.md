@@ -119,6 +119,8 @@ of the file itself.
 | `test_docs.py` | — | The documentation-consistency guards (the changelog family, ROADMAP, the counters, INDEX freshness, the code-comment budget). |
 | `test_drawio_export.py` | — | Map export to drawio (.drawio) v0.9.5 (a former smoke test). |
 | `test_duplicate_multiselect.py` | — | Regression v0.9.3: node duplication + multi-select + group drag. |
+| `test_elevated_pane.py` | — | The ELEVATED Files pane (v1.8): the sudo command table and its allowlist, the handshake over a |
+| `test_elevated_pane_contract.py` | — | The clause audit of `ELEVATED_PANE.md` (v1.8) against the SHIPPED code — one section per clause |
 | `test_encoding.py` | — | v1.5rc2 — the ENCODING gate: "no meaning in a colour alone" + the print-friendly export. |
 | `test_export_background.py` | — | Regression v0.9.1: map export to image + background image. |
 | `test_export_fidelity.py` | — | v1.3.3.7 — Export fidelity: the drawio vertex keeps the map's data, SVG joins the formats. |
@@ -143,12 +145,13 @@ of the file itself.
 | `test_list_mode.py` | — | v1.4.6 — List mode: collapsing the map = server parameters (ROADMAP v1.4.6). |
 | `test_local_pane.py` | — | The LOCAL pane (v1.7.4rc2): the provider seam, the two path dialects, the OS listing of the |
 | `test_local_pane_contract.py` | — | v1.7.4 — the LOCAL pane, the closing release: the CLAUSE AUDIT of the frozen contract |
-| `test_main_window_split.py` | — | v1.1.4: main_window.py hygiene — split into mixins (ROADMAP v1.1.4 acceptance). |
+| `test_main_window_split.py` | — | v1.1.4: main_window.py hygiene — split into mixins (ROADMAP v1.1.4; the v1.8rc1/rc2/rc3 waves add nineteen). |
 | `test_map_bigpicture.py` | — | v1.4.2 — The big-picture map level: the minimap, the cached card drop-shadow, the group fold. |
 | `test_map_images.py` | — | v1.5.1 — map images: "Copy Map as Image" and the fixed-frame documentation poster. |
 | `test_map_scale.py` | — | v1.6 — the map at scale: bulk editing, density, arrangement and the connections out. |
 | `test_map_search.py` | — | Regression v0.9.8 — map search (Ctrl+F). |
 | `test_menu_actions_regression.py` | — | REGRESSION: the real click path on checkable menu items (`QAction.trigger()`). |
+| `test_module_split.py` | — | `1.8rc3` — waves 1–3 of the MainWindow split: the mixins, the facade and the structural pins. |
 | `test_motion.py` | — | v1.4.4 — Motion: the standards, the camera flights, the node scale-in, the hover focus/dim. |
 | `test_multi_input.py` | — | Multi-input: broadcasting the active session's keystrokes to the other sessions. |
 | `test_multi_input_e2e.py` | — | v1.2.4 — Multi-input: E2E on REAL SSH channels (paramiko), no fake threads. |
@@ -181,12 +184,14 @@ of the file itself.
 | `test_sftp_commander_keys.py` | — | The Files Commander, step 3: the mc/far walk, the hint row and the preview of the other pane. |
 | `test_sftp_dnd.py` | — | Drag & drop of files from the desktop into the SFTP tab. |
 | `test_sftp_ops.py` | — | SFTP as a file manager: the operations and an atomic (loss-free) transfer. |
+| `test_sftp_pane_split.py` | — | The two waves of the `sftp_tab.py` split: `_SftpPane` is a FACADE over six pane mixins. |
 | `test_sftp_syntax.py` | — | v1.4.7 — Syntax highlighting in the SFTP viewer (numbers, JSON/XML/YAML, ROADMAP v1.4.7). |
 | `test_sftp_tab.py` | — | v1.1.3 — SFTP tab in the terminal window (ROADMAP v1.1.3, tasks 1–5). |
 | `test_sftp_viewer.py` | — | v1.3.1 — File viewer in the SFTP tab (text ≤ 1 MB over SFTP, ROADMAP v1.3.1). |
 | `test_sidebar_context_menu.py` | — | Regression v0.9.6 — the context menu in the sidebar (the server list). |
 | `test_sidebar_panel.py` | — | `ui/sidebar.py`: `SidebarPanel` — a facade of `MainWindow` plus `retranslate` (v0.9.9.4). |
 | `test_ssh_config_import.py` | — | v1.4.1 — Import from ~/.ssh/config (ROADMAP v1.4.1, tasks 1–6). |
+| `test_ssh_connect.py` | — | `modules/ssh_connect.py` — the ONE connect builder (`N50`'s consolidation, `AGENTS.md` §4.4). |
 | `test_ssh_dialogs.py` | — | SSH dialogs: assembly, keyring save v0.9.5.6, the "Connect" button (former smoke_test §6a+§7). |
 | `test_ssh_terminal.py` | — | Regression tests v0.8.1 — four fixes. |
 | `test_ssh_undo_lifecycle.py` | — | v1.1.2RC1 — the SSH path: undo, paramiko defaults, thread lifecycle (release theme). |
@@ -210,6 +215,7 @@ of the file itself.
 | `test_terminal_split.py` | — | v1.3.3.5 — Terminal split: a second pane under the sessions (ROADMAP v1.3.3.5). |
 | `test_terminal_tabs.py` | — | v1.2.1 — Multiple SSH sessions as tabs in one terminal window (ROADMAP v1.2.1). |
 | `test_terminal_truth.py` | — | v1.6.2 — the terminal that stops lying: a dead session, the DEC graphics, the column, the cursor. |
+| `test_terminal_widget_split.py` | — | `1.8rc5` — the `terminal_widget.py` split: `TerminalWidget` becomes a facade over five canvas mixins. |
 | `test_theme.py` | — | v1.1.5 → v1.4.3 — the central theme `ui/theme.py`: the `Theme` object, LIGHT, the accent hue. |
 | `test_theme_contrast.py` | — | v1.5rc1 — the CONTRAST GATE: the LIGHT palette, the two accent roles and the numbers that pin them. |
 | `test_ui_density.py` | — | v1.4.5 — UI density & first run (ROADMAP v1.4.5): the compact sidebar grid, the first-run |

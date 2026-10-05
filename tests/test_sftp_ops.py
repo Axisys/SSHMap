@@ -64,6 +64,11 @@ def local_parts(directory):
     return [f for f in os.listdir(directory) if f.endswith(PART_SUFFIX)]
 
 
+def stat_mode(path):
+    """The permission bits of a local file (the `& 0o777` every mode assertion needs)."""
+    return os.stat(path).st_mode & 0o777
+
+
 def mime_with(*paths):
     m = QMimeData()
     m.setUrls([QUrl.fromLocalFile(p) for p in paths])
@@ -860,6 +865,184 @@ check("no row → no mime", tab13.tree.drag_mime(None) is None)
 worker13.shutdown(wait_ms=2000)
 
 STAB.QMessageBox, STAB.QInputDialog, STAB.QFileDialog = _SAVED
+
+
+# ════════════════════════════════════════════════════════════
+# 9b. N49 — an overwrite carries the destination's METADATA across
+# ════════════════════════════════════════════════════════════
+print("== 9b. N49: the metadata an overwrite used to reset ==")
+
+from modules.sftp_worker import PREFETCH_MAX_BYTES  # noqa: E402
+
+
+class _RenameSpy(FakeSftpClient):
+    """The fake client + the MODE the provisional file carried AT the rename (N49's ordering)."""
+
+    def __init__(self, fs):
+        super().__init__(fs)
+        self.rename_modes = []
+
+    def posix_rename(self, oldpath, newpath):
+        self.rename_modes.append(self._fs.modes.get(oldpath))
+        super().posix_rename(oldpath, newpath)
+
+
+class _HandleSpy(FakeSftpClient):
+    """The fake client that keeps the OPEN HANDLES — the two N52 knobs live on them."""
+
+    def __init__(self, fs):
+        super().__init__(fs)
+        self.handles = []
+
+    def open(self, path, mode="r"):
+        handle = super().open(path, mode)
+        self.handles.append((path, mode, handle))
+        return handle
+
+    def opened(self, marker):
+        return [h for _p, mode, h in self.handles if marker in mode]
+
+
+fs49 = FakeSftpFS()
+fs49.add_dir("/srv")
+fs49.add_file("/srv/secret.conf", b"OLD", mode=0o600, mtime=1000000000)
+client49 = _RenameSpy(fs49)
+worker49 = SftpWorker(client49)
+log49 = EventLog()
+wire_worker(worker49, log49)
+worker49.start()
+
+_over = make_local_text("overwrite.conf", b"NEW CONTENT")
+tid49 = worker49.queue_upload(_over, "/srv", remote_name="secret.conf")
+wait_until(lambda: log49.of_kind("done", tid49), timeout_ms=5000)
+
+check("N49: an overwrite of a 0600 destination leaves it 0600",
+      (fs49.modes.get("/srv/secret.conf") or 0) & 0o777 == 0o600,
+      oct(fs49.modes.get("/srv/secret.conf") or 0))
+check("N49: the bytes really landed (the mode fix changed nothing else)",
+      fs49.files.get("/srv/secret.conf") == b"NEW CONTENT")
+check("N49: the PROVISIONAL file already carried the mode at the rename (never a world-readable "
+      "window)",
+      client49.rename_modes and client49.rename_modes[0] is not None
+      and client49.rename_modes[0] & 0o777 == 0o600,
+      str([oct(m) if m is not None else None for m in client49.rename_modes]))
+check("N49: ...and the destination's MTIME travelled with it",
+      int(fs49.mtimes.get("/srv/secret.conf") or 0) == 1000000000,
+      str(fs49.mtimes.get("/srv/secret.conf")))
+
+# A BRAND-NEW name has nothing to carry: the server's own default must stay.
+tid49b = worker49.queue_upload(_over, "/srv", remote_name="fresh.conf")
+wait_until(lambda: log49.of_kind("done", tid49b), timeout_ms=5000)
+check("N49: a NEW file keeps the server's default (nothing to preserve)",
+      (fs49.modes.get("/srv/fresh.conf") or 0) & 0o777 == 0o644,
+      oct(fs49.modes.get("/srv/fresh.conf") or 0))
+worker49.shutdown(wait_ms=2000)
+
+# A server that REFUSES the metadata must still complete the transfer (V5: best effort).
+fs49c = FakeSftpFS()
+fs49c.add_dir("/srv")
+fs49c.add_file("/srv/stubborn.conf", b"OLD", mode=0o600)
+client49c = FakeSftpClient(fs49c)
+client49c.deny_metadata = True
+worker49c = SftpWorker(client49c)
+log49c = EventLog()
+wire_worker(worker49c, log49c)
+worker49c.start()
+tid49c = worker49c.queue_upload(_over, "/srv", remote_name="stubborn.conf")
+wait_until(lambda: log49c.of_kind("done", tid49c), timeout_ms=5000)
+check("N49: a refused chmod does NOT fail the transfer (the bytes are the contract)",
+      bool(log49c.of_kind("done", tid49c)) and fs49c.files.get("/srv/stubborn.conf") == b"NEW CONTENT"
+      and not log49c.of_kind("error", tid49c),
+      f"done={bool(log49c.of_kind('done', tid49c))} err={log49c.of_kind('error', tid49c)}")
+check("N49: ...and the refused mode is the server's default, never a broken file",
+      (fs49c.modes.get("/srv/stubborn.conf") or 0) & 0o777 == 0o644)
+worker49c.shutdown(wait_ms=2000)
+
+# The DOWNLOAD half: the remote entry's mtime (and, on POSIX, its mode) reach the local copy.
+dl_dir49 = os.path.join(WORK, "n49_dl")
+os.makedirs(dl_dir49, exist_ok=True)
+fs49d = FakeSftpFS()
+fs49d.add_dir("/etc")
+fs49d.add_file("/etc/shadow.conf", b"a" * 50, mode=0o600, mtime=1234567890)
+client49d = FakeSftpClient(fs49d)
+worker49d = SftpWorker(client49d)
+log49d = EventLog()
+wire_worker(worker49d, log49d)
+worker49d.start()
+tid49d = worker49d.queue_download("/etc/shadow.conf", dl_dir49)
+wait_until(lambda: log49d.of_kind("done", tid49d), timeout_ms=5000)
+_dl_path = os.path.join(dl_dir49, "shadow.conf")
+check("N49: the download really landed", os.path.isfile(_dl_path)
+      and open(_dl_path, "rb").read() == b"a" * 50)
+check("N49: the downloaded file carries the remote entry's MTIME",
+      int(os.path.getmtime(_dl_path)) == 1234567890, str(os.path.getmtime(_dl_path)))
+if os.name != "nt":   # NTFS models only the read-only bit — the mode is a POSIX-server fact
+    check("N49: ...and its MODE (the 0600 remote file is 0600 locally too)",
+          stat_mode(_dl_path) == 0o600, oct(stat_mode(_dl_path)))
+else:
+    check("N49: ...and the mode half is asserted as the portable read-only bit on this platform",
+          True)
+check("N49: a download of a file the listing does not know still works (the stat is quiet)",
+      not [f for f in os.listdir(dl_dir49) if f.endswith(".part")])
+worker49d.shutdown(wait_ms=2000)
+
+
+# ════════════════════════════════════════════════════════════
+# 9c. N52 — the DEPTH of a transfer (prefetch on a read, pipelining on a write)
+# ════════════════════════════════════════════════════════════
+print("== 9c. N52: the depth knobs of a transfer ==")
+
+
+class _KnobRecorder:
+    """A fake handle recording the two depth knobs paramiko exposes on an SFTPFile."""
+
+    def __init__(self):
+        self.pipelined = False
+        self.prefetched = None
+
+    def set_pipelined(self, on):
+        self.pipelined = bool(on)
+
+    def prefetch(self, size=None):
+        self.prefetched = size
+
+
+_rec = _KnobRecorder()
+check("N52: a WRITE is pipelined (the shipped one-request-at-a-time loop is what cost the depth)",
+      SftpWorker._pipeline_write(_rec) is True and _rec.pipelined is True)
+check("N52: a READ is prefetched up to the declared ceiling",
+      SftpWorker._prefetch_read(_rec, 4096) is True and _rec.prefetched == 4096)
+check("N52: ...and a file OVER the ceiling keeps the shipped loop (prefetch buffers it in MEMORY)",
+      SftpWorker._prefetch_read(_rec, PREFETCH_MAX_BYTES + 1) is False and _rec.prefetched == 4096)
+check("N52: a client without the knobs and a zero-size read are quiet no-ops",
+      SftpWorker._prefetch_read(object(), 10) is False
+      and SftpWorker._pipeline_write(object()) is False
+      and SftpWorker._prefetch_read(_rec, 0) is False)
+
+# The knobs really reach the handles of a live transfer.
+fs52 = FakeSftpFS()
+fs52.add_dir("/srv")
+fs52.add_file("/srv/read.txt", b"x" * 4096)
+client52 = _HandleSpy(fs52)
+worker52 = SftpWorker(client52)
+log52 = EventLog()
+wire_worker(worker52, log52)
+worker52.start()
+_up52 = make_local_text("n52_up.txt", b"y" * 2048)
+tid52u = worker52.queue_upload(_up52, "/srv", remote_name="written.txt")
+wait_until(lambda: log52.of_kind("done", tid52u), timeout_ms=5000)
+check("N52: the upload asked for a pipelined handle",
+      any(h.pipelined for h in client52.opened("w")), str(client52.opened("w")))
+check("N52: the upload still produced the exact bytes",
+      fs52.files.get("/srv/written.txt") == b"y" * 2048)
+tid52d = worker52.queue_download("/srv/read.txt", WORK)
+wait_until(lambda: log52.of_kind("done", tid52d), timeout_ms=5000)
+check("N52: the download asked for a prefetched handle (the size it may consume)",
+      any(h.prefetched == 4096 for h in client52.opened("r")),
+      str([h.prefetched for h in client52.opened("r")]))
+check("N52: ...and the downloaded bytes are identical to the source",
+      open(os.path.join(WORK, "read.txt"), "rb").read() == b"x" * 4096)
+worker52.shutdown(wait_ms=2000)
 
 
 # ════════════════════════════════════════════════════════════

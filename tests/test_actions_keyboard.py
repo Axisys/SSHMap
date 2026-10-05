@@ -14,7 +14,8 @@ import sys
 import inspect  # v1.3.3.3: the audit reads the live signature / the worker source
 
 from _common import (bootstrap, check, finish, check_i18n_parity, check_i18n_format,
-                     check_release_state, read_cfg, write_cfg, clear_cfg)
+                     check_release_state, read_cfg, write_cfg, clear_cfg, window_family_files,
+                     window_family_sources)
 
 ROOT, WORK = bootstrap()  # BEFORE the app module imports (the HOME isolation inside)
 
@@ -160,8 +161,9 @@ check("registry: no duplicate default sequence among the non-empty ones",
 # the authoritative "no global action lives outside the registry".
 _add_params = list(inspect.signature(MW.MainWindow._add_menu_action).parameters)[2:]  # self, menu
 _i18n_pos, _id_pos = _add_params.index("key"), _add_params.index("action_id")
-with open(os.path.join(ROOT, "ui", "main_window.py"), encoding="utf-8") as f:
-    _src = f.read()
+# The menubar's call sites are read WHEREVER the window's file family defines them — the cluster moved
+# into `ui/main_window_menubar.py` (v1.8rc3), so a pin naming the facade would stop protecting it.
+_src = "\n".join(window_family_sources(ROOT).values())
 _calls = [m.group(0) for m in re.finditer(r"_add_menu_action\([^()]*\)", _src)]
 check("source audit: the menubar is built through _add_menu_action",
       len(_calls) >= 25, f"{len(_calls)} call sites")
@@ -251,11 +253,13 @@ check("window: no sequence is installed twice (the 'Ambiguous shortcut overload'
       not _dups, str(_dups))
 
 # The source audit for leftover literal sequences (the v1.3.2 rule, extended to the new
-# module) — the registry stays the single source of truth.
+# module) — the registry stays the single source of truth. The window's files are the whole
+# MainWindow FAMILY: a cluster that moves into a `ui/main_window_*.py` mixin joins the audit
+# by construction (`_common.window_family_files`), which is what the 1.8rc split needs.
 _src_literals = []
-for _name in ("main_window.py", "main_window_ssh.py", "map_search_bar.py",
-              "settings_dialog.py", "about_dialog.py"):
-    with open(os.path.join(ROOT, "ui", _name), encoding="utf-8") as f:
+for _name in list(window_family_files(ROOT)) + ["ui/map_search_bar.py", "ui/settings_dialog.py",
+                                                "ui/about_dialog.py"]:
+    with open(os.path.join(ROOT, *_name.split("/")), encoding="utf-8") as f:
         _mod = f.read()
     for _m in re.finditer(r'setShortcut(?:s)?\(\s*(\[[^\]]*\]|"[^"]*"|\'[^\']*\')', _mod):
         _src_literals.append((_name, _m.group(0)))

@@ -1071,9 +1071,10 @@ class SettingsDialog(QDialog):
         form.addRow(self._lbl_viewer_max, row)
 
         # The warning is a VIEW of the value (never a second number): it appears exactly above the
-        # declared threshold and is deliberately NOT part of the search index (a hidden hint is not
-        # a row, and the search hides rows).
-        self.viewer_max_warning = QLabel(_t("settings.files.max_bytes_warning"))
+        # declared threshold, carries the MEASURED price of the cap the user is choosing
+        # (`viewer_freeze_seconds()`) and is deliberately NOT part of the search index (a hidden
+        # hint is not a row, and the search hides rows).
+        self.viewer_max_warning = QLabel("")
         self.viewer_max_warning.setWordWrap(True)
         form.addRow(self.viewer_max_warning)
 
@@ -1093,7 +1094,12 @@ class SettingsDialog(QDialog):
             pass
 
     def _sync_viewer_max_widgets(self, mib: int):
-        """Make BOTH controls show `mib` and show/hide the warning (the ONE writer of the row)."""
+        """Make BOTH controls show `mib` and show/re-text the warning (the ONE writer of the row).
+
+        The warning's sentence is BUILT here from the module's own slope (N57): "a preview this
+        large costs about N seconds" is a fact of the number the row shows, so a stale adjective
+        cannot survive a slider drag.
+        """
         mib = int(mib)
         self._viewer_max_mib = mib
         for widget, setter in ((getattr(self, "viewer_max_slider", None), "setValue"),
@@ -1110,11 +1116,28 @@ class SettingsDialog(QDialog):
             except (RuntimeError, AttributeError, TypeError):
                 continue   # Qt teardown / a dialog built without the row
         warning = getattr(self, "viewer_max_warning", None)
-        if warning is not None:
-            try:
-                warning.setVisible(mib > int(getattr(self, "_viewer_max_warn_mib", 3)))
-            except RuntimeError:
-                pass  # Qt teardown — the label is already gone
+        if warning is None:
+            return
+        show = mib > int(getattr(self, "_viewer_max_warn_mib", 3))
+        try:
+            if show:
+                warning.setText(_t("settings.files.max_bytes_warning",
+                                   seconds=self._viewer_freeze_text(mib)))
+            warning.setVisible(show)
+        except RuntimeError:
+            pass  # Qt teardown — the label is already gone
+
+    def _viewer_freeze_text(self, mib: int) -> str:
+        """The MEASURED price of the shown cap, as the sentence spells it ("" — the slope is gone)."""
+        sftp = _viewer_max_module()
+        freeze = getattr(sftp, "viewer_freeze_seconds", None) if sftp is not None else None
+        if not callable(freeze):
+            return ""
+        try:
+            seconds = float(freeze(int(mib) * int(getattr(self, "_viewer_max_step", 1024 * 1024))))
+        except (TypeError, ValueError):
+            return ""
+        return f"{seconds:.1f}"
 
     def viewer_max_bytes(self) -> int:
         """The collected CEILING in BYTES (the value box speaks MiB — the row's own unit)."""
@@ -2057,10 +2080,12 @@ class SettingsDialog(QDialog):
         self.tabs.setTabText(6, _t("settings.tab.map"))
         self.tabs.setTabText(7, _t("settings.tab.hotkeys"))   # v1.3.2
         self.tabs.setTabText(8, _t("settings.tab.language"))
-        # v1.7.5: the "Files" tab's own row + its warning.
+        # v1.7.5: the "Files" tab's own row + its warning (the number is the row's own, N57).
         try:
             self._lbl_viewer_max.setText(_t("settings.files.max_bytes"))
-            self.viewer_max_warning.setText(_t("settings.files.max_bytes_warning"))
+            self.viewer_max_warning.setText(
+                _t("settings.files.max_bytes_warning",
+                   seconds=self._viewer_freeze_text(int(getattr(self, "_viewer_max_mib", 1)))))
         except (AttributeError, RuntimeError):
             pass  # Qt teardown / a build without the Files surface
 
