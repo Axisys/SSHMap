@@ -2,15 +2,15 @@
 """The COMMAND history — the terminal's third tab, one history per server (`DOCUMENTATION.md` §49, `AGENTS.md` §4.3).
 The PURE parser `parse_history_text(text)` returns the entries plus a report: bash (one command per
 line, the `HISTTIMEFORMAT` markers `#<epoch>` belonging to the commands that FOLLOW them), zsh
-extended (`: <epoch>:<duration>;<command>`), empty lines dropped. An entry's identity is the command
-text after `strip()` ONLY — no case folding, no collapsing of inner whitespace (`grep  a` is not
-`grep a`); a duplicate keeps the LATEST timestamp and counts repeats. `CommandHistoryStore` owns
-`~/.sshmap/history/<key>.json`, ONE file per `ServerData.id` (a renamed alias keeps its history):
-a write RE-READS AND MERGES (two sessions of one node share the file) and a corrupt file is a log
-line + an empty history (a read never writes). `CommandHistoryPanel` is the tab: the filter, the
-three-column tree, the counts line and the right-click menu (import a local file or the server's
-`~/.bash_history`, copy, send, merge duplicates, clear); only what the APPLICATION sent is recorded
-(the ONE `send_macro()` path), and the file may carry secrets — never logged, never exported."""
+extended (`: <epoch>:<duration>;<command>`), empty lines dropped; an entry's identity is the command
+text after `strip()` ONLY (no case folding, no collapsing of inner whitespace) and a duplicate keeps
+the LATEST timestamp and counts repeats. `CommandHistoryStore` owns `~/.sshmap/history/<key>.json`,
+ONE file per `ServerData.id` (a renamed alias keeps its history): a write RE-READS AND MERGES (two
+sessions of one node share the file) and a corrupt file is a log line + an empty history (a read
+never writes). `CommandHistoryPanel` is the tab: the filter, the three-column tree, the counts line
+and the right-click menu (import a local file or the server's `~/.bash_history`, copy, send, hand
+ONE row to the command library of the container, merge duplicates, clear); only what the APPLICATION
+sent is recorded (the ONE `send_macro()` path), and the file may carry secrets — never exported."""
 
 import hashlib
 import json
@@ -478,6 +478,27 @@ def sorted_entries(entries, column: int = 1, descending: bool = True) -> list:
     return sorted(entries, key=key, reverse=bool(descending))
 
 
+# ── the container's ONE command library (the parent-chain seam) ─────────────
+
+def container_library(widget):
+    """The command library of `widget`'s container — the parent-chain seam (None — nobody answers).
+
+    The library panel is ONE PER CONTAINER while this tab is per SESSION, so the History door resolves
+    "the library of my container" the way a container resolves its own hooks (`find_host_hook` — the
+    `AGENTS.md` §4.1 rule: `modules/*` never imports `ui.main_window`). The container answers through
+    its `command_library()` hook. Never raises.
+    """
+    try:
+        from .terminal_split import find_host_hook
+    except ImportError:  # flat launch from the project root
+        from terminal_split import find_host_hook
+    try:
+        hook = find_host_hook(widget, "command_library")
+        return hook() if callable(hook) else None
+    except Exception:   # noqa: BLE001 — a broken host must not break the tab
+        return None
+
+
 # ── the store (pure Python, no Qt) ──────────────────────────────────────────
 
 def default_history_dir() -> str:
@@ -665,7 +686,8 @@ class CommandHistoryPanel(QWidget):
 
     Test seams (the command_library conventions): an explicit `store=`, `_build_context_menu(item)`
     (the tests trigger the QActions without `menu.exec()`) and the module attribute `QMessageBox`
-    (monkeypatch `CH.QMessageBox`), plus `QFileDialog` for the file import.
+    (monkeypatch `CH.QMessageBox`), plus `QFileDialog` for the file import. The row → library door
+    (`send_to_library()`) resolves the library panel on the parent chain (`library_panel()`).
     """
 
     status_message = Signal(str, int)   # (text, timeout_ms); 0 — sticky
@@ -1023,6 +1045,41 @@ class CommandHistoryPanel(QWidget):
         self.status_message.emit(get_translator()("terminal.history.copied"), 3000)
         return True
 
+    # ── the door into the command library (ROADMAP v1.8.2) ──────────────────
+
+    def library_panel(self):
+        """The ONE command library of this tab's container (None — no container answers)."""
+        return container_library(self)
+
+    def send_to_library(self, entry) -> bool:
+        """Hand ONE row to the command library of this container — the door of ROADMAP v1.8.2.
+
+        **ONE row** — never the whole list and never a batch: the menu item is built for the row the
+        user right-clicked, and this method takes exactly that entry. A row that carries a secret is
+        REFUSED with one sentence and stores nothing: the mark the ONE recording path wrote
+        (`SECRET_FIELD`) OR the PURE `looks_like_secret()` — the second test covers a row that arrived
+        through an IMPORTED file, which is deliberately never scanned.
+
+        The row is handed to the library's OWN panel (`add_from_history()`), which opens the shipped
+        form pre-filled and performs the write: `commands.json` is rewritten WHOLE, so a second writer
+        beside that panel would be the `N51` race.
+        """
+        t = get_translator()
+        if not entry:
+            return False
+        cmd = str(entry.get("cmd", ""))
+        if entry.get(SECRET_FIELD) or looks_like_secret(cmd):
+            self.status_message.emit(t("terminal.history.secret_refused"), 8000)
+            return False
+        add = getattr(self.library_panel(), "add_from_history", None)
+        if not callable(add):
+            self.status_message.emit(t("terminal.history.no_library"), 6000)
+            return False
+        try:
+            return bool(add(cmd))
+        except Exception:   # noqa: BLE001 — a container teardown race
+            return False
+
     # ── the import ──────────────────────────────────────────────────────────
 
     def import_text(self, text, source: str = ""):
@@ -1258,6 +1315,7 @@ class CommandHistoryPanel(QWidget):
         menu.addSeparator()
         act_copy = menu.addAction(t("terminal.history.copy"))
         act_send = menu.addAction(t("terminal.history.send"))
+        act_library = menu.addAction(t("terminal.history.send_to_commands"))
         # The label reuses the macro panel's `terminal.cmdlib.delete` — one word, one key.
         act_delete = menu.addAction(t("terminal.cmdlib.delete"))
         menu.addSeparator()
@@ -1267,6 +1325,7 @@ class CommandHistoryPanel(QWidget):
         has_entry = entry is not None
         act_copy.setEnabled(has_entry)
         act_send.setEnabled(has_entry and self._session is not None)
+        act_library.setEnabled(has_entry)
         act_delete.setEnabled(has_entry)
         act_dedup.setEnabled(bool(self._entries))
         act_clear.setEnabled(bool(self._entries))
@@ -1276,6 +1335,7 @@ class CommandHistoryPanel(QWidget):
         if has_entry:
             act_copy.triggered.connect(lambda: self.copy_entry(entry))
             act_send.triggered.connect(lambda: self.send_entry(entry))
+            act_library.triggered.connect(lambda: self.send_to_library(entry))
             act_delete.triggered.connect(lambda: self.delete_entry(entry))
         act_dedup.triggered.connect(self.remove_duplicates)
         act_clear.triggered.connect(self.clear_history)

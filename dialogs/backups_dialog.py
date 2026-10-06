@@ -45,13 +45,17 @@ class BackupsDialog(QDialog):
     """Backup list (newest first) + a "Restore" button for the selected row.
 
     Double-clicking a row — same as the button. Close without a selection — reject().
+    The caller owns the decision: `MainWindow` restores a project file, the command-library panel
+    (v1.8.2) its own `commands.json` — this dialog only reports WHICH row was asked for.
     """
 
     restore_requested = Signal(str, str)  # (source path, label for status/log)
 
-    def __init__(self, items: list, parent=None):
+    def __init__(self, items: list, parent=None, title: str = None):
         super().__init__(parent)
-        self.setWindowTitle(t("dialog.backups"))
+        # `title` is additive: the project ring keeps its own caption, while a second ring (the
+        # command library of v1.8.2) names what it is about to restore.
+        self.setWindowTitle(title or t("dialog.backups"))
         self.resize(580, 340)
 
         layout = QVBoxLayout(self)

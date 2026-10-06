@@ -332,16 +332,17 @@ print("== §6 the context menu and the maintenance actions ==")
 
 _menu = panel._build_context_menu(panel.tree.topLevelItem(0))
 _texts = [a.text() for a in _menu.actions() if not a.isSeparator()]
-check("the menu carries the seven items, in order, all translated; a row enables Copy/Delete",
+check("the menu carries the eight items, in order, all translated; a row enables Copy/Send/Library/Delete",
       _texts == [i18n.t("terminal.history.import_file"),
                  i18n.t("terminal.history.import_server"),
                  i18n.t("terminal.history.copy"),
                  i18n.t("terminal.history.send"),
+                 i18n.t("terminal.history.send_to_commands"),
                  i18n.t("terminal.cmdlib.delete"),
                  i18n.t("terminal.history.dedup"),
                  i18n.t("terminal.history.clear")]
-      and [a.isEnabled() for a in _menu.actions() if not a.isSeparator()][2:5]
-      == [True, False, True],
+      and [a.isEnabled() for a in _menu.actions() if not a.isSeparator()][2:7]
+      == [True, False, True, True, True],
       str(_texts))
 
 # The GESTURE, not only the menu: the POLICY is what makes Qt emit `customContextMenuRequested`
@@ -374,6 +375,7 @@ check("on an EMPTY history the imports stay reachable, the rest is disabled and 
       and _enabled[i18n.t("terminal.history.import_server")] is True
       and _enabled[i18n.t("terminal.history.copy")] is False
       and _enabled[i18n.t("terminal.history.send")] is False
+      and _enabled[i18n.t("terminal.history.send_to_commands")] is False
       and _enabled[i18n.t("terminal.cmdlib.delete")] is False
       and _enabled[i18n.t("terminal.history.dedup")] is False
       and _enabled[i18n.t("terminal.history.clear")] is False
@@ -584,15 +586,15 @@ check("the pin counts the shipped keys (+29 of v1.5.7: the tab, the panel chrome
       " +4 of the v1.7.1 Files panel = 867, +3 of the v1.7.1.1 Files display mode = 870,"
       " +4 of the v1.7.1.2 device choice = 874, +4 of v1.7.2 = 878, +19 of v1.7.3 = 897,"
       " +17 of v1.7.4rc1 = 914, +1 of v1.7.4rc2 = 915, v1.8 adds TWENTY: the elevated pane, v1.8.1"
-      " its 41 and v1.8.1.1 ONE: the send identity sentence)",
-      EXPECTED_I18N_KEYS == 863 + 4 + 3 + 4 + 4 + 19 + 17 + 1 + 4 + 6 + 20 + 41 + 1, str(EXPECTED_I18N_KEYS))
+      " its 41 and v1.8.1.1 ONE: the send identity sentence) and v1.8.2 adds SIXTEEN: the library file — the History door, the backup ring and the import/export pair",
+      EXPECTED_I18N_KEYS == 863 + 4 + 3 + 4 + 4 + 19 + 17 + 1 + 4 + 6 + 20 + 41 + 1 + 16, str(EXPECTED_I18N_KEYS))
 check_release_state(ROOT)
 
 _langs = load_i18n_langs(ROOT)
 check("every discovered language carries the whole v1.5.7 command-history key family "
-      "(+ the v1.6.4 marked-secret tooltip)",
+      "(+ the v1.6.4 marked-secret tooltip, + the v1.8.2 door's three sentences)",
       all(len([k for k in translation_keys(_langs[c]) if k.startswith("terminal.history.")])
-          == 29 and "terminal.tab_history" in translation_keys(_langs[c])
+          == 32 and "terminal.tab_history" in translation_keys(_langs[c])
           and str(_langs[c].get("terminal.tab_history", "")).strip()
           for c in i18n_lang_codes(ROOT)),
       str({c: len([k for k in translation_keys(_langs[c])

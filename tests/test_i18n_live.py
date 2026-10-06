@@ -844,9 +844,12 @@ check("the pin counts the keys of the SHIPPED release (v1.5.2 added THIRTEEN —
       "truncation notice of the reader — 915 + 4 = 919; v1.7.5.1 adds SIX: the three external-terminal "
       "refusals, the unpinned host-key warning, the send-queue notice and the refused download name — "
       "919 + 6 = 925, and v1.8 adds TWENTY: the elevated pane, v1.8.1 its 41 (the trust surface) and "
-      "v1.8.1.1 adds ONE: the identity sentence of a send)"
-      " — 925 + 20 + 41 + 1 = 987)",
-      EXPECTED_I18N_KEYS == 863 + 4 + 3 + 4 + 4 + 19 + 17 + 1 + 4 + 6 + 20 + 41 + 1, str(EXPECTED_I18N_KEYS))
+      "v1.8.1.1 adds ONE: the identity sentence of a send) and v1.8.2 adds SIXTEEN: the library file "
+      "menu of the macro panel with the ring's restore, the import/export pair and their reports, the "
+      "door's three sentences on the History row and the confirmation of an import"
+      " — 925 + 20 + 41 + 1 + 16 = 1003)",
+      EXPECTED_I18N_KEYS == 863 + 4 + 3 + 4 + 4 + 19 + 17 + 1 + 4 + 6 + 20 + 41 + 1 + 16,
+      str(EXPECTED_I18N_KEYS))
 check_release_state(ROOT)
 for _code in i18n_lang_codes(ROOT):
     check(f"i18n/{_code}.json carries the v1.5 node.status.emulated marker",

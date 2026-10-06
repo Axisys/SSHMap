@@ -427,8 +427,8 @@ def pane_func_owner(func, root=None):
 # in 12 i18n files + the APP_VERSION/requirements pins in 7 release-state sections).
 # The misses of the keys themselves against the code are caught by check_i18n_keys.py.
 # ─────────────────────────────────────────────────────────────────────────────
-EXPECTED_APP_VERSION = "1.8.1.1"   # the current release (a sentinel: it catches "a bump to the wrong version")
-EXPECTED_I18N_KEYS = 987        # the parity of the TRANSLATION keys of every language file vs en (the
+EXPECTED_APP_VERSION = "1.8.2"   # the current release (a sentinel: it catches "a bump to the wrong version")
+EXPECTED_I18N_KEYS = 1003       # the parity of the TRANSLATION keys of every language file vs en (the
                                 # "name"/"partial" meta keys are excluded) — ONE number per release; the
                                 # per-release counts live in the changelog family, never here
 VERSION_FORMAT_RE = re.compile(r"^\d+(\.\d+){1,3}([Rr][Cc]\d+)?$")  # "1.1.3", "1.0RC4", "0.9.9.7", "1.2.10rc1" (v1.2.10: + lowercase rc)
@@ -440,8 +440,9 @@ VERSION_FORMAT_RE = re.compile(r"^\d+(\.\d+){1,3}([Rr][Cc]\d+)?$")  # "1.1.3", "
 TEST_FILE_COUNTER_RE = re.compile(r"(\d+)\s+(?:test[ _-]?files?|test_\*\.py)")
 # The key-count figures a version section quotes: "parity: 458", "parity **458 → 459**",
 # "parity baseline (v1.3.3.1): 460". A "~" marks a deliberately approximate figure and
-# is skipped (the guard compares EXACT numbers).
-I18N_PARITY_FIGURE_RE = re.compile(r"parity[^\n]{0,32}?(?<!~)(\d{3})")
+# is skipped (the guard compares EXACT numbers). FOUR digits are accepted: the pin
+# crossed 1000 with v1.8.2, and a three-only pattern silently read "100" out of "1003".
+I18N_PARITY_FIGURE_RE = re.compile(r"parity[^\n]{0,32}?(?<!~)(\d{3,4})")
 
 # v1.3.3: the meta keys of a language file — file metadata, not UI strings.
 # A language file: {"name": "Русский", "partial": true, "menu.file": "Файл", …}. "name" is the language

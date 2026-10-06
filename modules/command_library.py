@@ -1,26 +1,28 @@
 # -*- coding: utf-8 -*-
 """"Terminal macros" — the command/script library of the terminal panel (DOCUMENTATION.md §14e).
-
 `CommandLibraryStore` owns `~/.sshmap/commands.json` — pure Python, no Qt: an atomic write of the WHOLE
-document (tmp + fsync + `os.replace`) and deliberately NO merge, because the file belongs to this module
-alone. The first run seeds five examples (`seeded: true`); a corrupt file or a foreign type is a log line
-plus an EMPTY library — never a raise, never a re-seed of an existing file (user data is not overwritten).
-`CommandLibraryPanel` is the panel left of the session tabs in BOTH containers
-(`SSHTerminalWindow` and `TerminalDockContent`): the search, the "category → command" tree, the
-Add/Edit/Delete buttons, the collapse into a thin strip whose state is the ONE key `ui_cmdlib_collapsed`
-(a merge write, `collect()` untouched), and a double click / Enter that sends the macro to the ACTIVE
-session (`page.widget.send_macro` → `terminal_thread.send_data()`, never the multi-input broadcast — an
-addressed action, the pinned decision). `CommandLibraryDialog` is the add/edit dialog. Test seams: the store takes an explicit `path=`, the panel a `store=`; `QMessageBox` / `QMenu` are module attributes read at call time; `_build_context_menu(item)` lets a test trigger the QActions without `menu.exec()`. Import discipline: the window module is NOT imported (a cycle), the collapse strip is duplicated locally with the theme's colours, and `session_tabs` / `send_macro` are duck-typed."""
+document and deliberately NO merge, because the file belongs to this module alone; the first run seeds
+five examples (`seeded: true`) and a corrupt file or a foreign type is a log line plus an EMPTY library.
+The library FILE is first-class (ROADMAP v1.8.2): every write rotates the backup ring, a slot is
+restored through the shipped backup dialog, the import/export pair carries the WHOLE library and
+`add_from_history()` is where the History tab's door lands. `CommandLibraryPanel` is the panel left of
+the session tabs in BOTH containers: the search, the "category → command" tree, the Add/Edit/Delete
+buttons, the collapse into a thin strip whose state is the ONE key `ui_cmdlib_collapsed`, and a double
+click / Enter that sends a macro to the ACTIVE session (`page.widget.send_macro` →
+`terminal_thread.send_data()`, never the multi-input broadcast). `CommandLibraryDialog` is the add/edit
+dialog; test seams: an explicit `path=` / `store=`, the module attributes `QMessageBox` / `QMenu` / `BackupsDialog`, read at call time."""
 
+import hashlib
 import json
 import os
+import shutil
 import uuid
 
 from PySide6.QtCore import QEvent, Qt, Signal
 from PySide6.QtGui import QColor, QIcon, QPainter, QPainterPath, QPen, QPixmap
 from PySide6.QtWidgets import (
-    QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFormLayout,
-    QHBoxLayout, QLabel, QLineEdit, QMenu, QMessageBox, QPlainTextEdit,
+    QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFileDialog,
+    QFormLayout, QHBoxLayout, QLabel, QLineEdit, QMenu, QMessageBox, QPlainTextEdit,
     QPushButton, QSplitter, QToolButton, QTreeWidget, QTreeWidgetItem, QVBoxLayout,
     QWidget,
 )
@@ -34,6 +36,14 @@ try:  # the ONE atomic-write mechanism (`AGENTS.md` §4.4, `DOCUMENTATION.md` §
     from ..storage import atomic as _atomic
 except ImportError:  # flat launch from the project root
     from storage import atomic as _atomic
+
+try:  # the SHIPPED backup-list dialog (data in, one restore request out — the project ring's own)
+    from ..dialogs.backups_dialog import BackupsDialog
+except ImportError:  # flat launch from the project root
+    try:
+        from dialogs.backups_dialog import BackupsDialog
+    except ImportError:  # a build without the dialogs package: the restore reports its refusal
+        BackupsDialog = None
 
 
 # ── i18n / config (cached helpers per the ssh_terminal.py pattern) ──────────
@@ -176,12 +186,7 @@ class CommandLibraryStore:
             if lg is not None:
                 lg.warning(f"command library: unexpected document type in {self.path} — starting empty")
             return []
-        out = []
-        for e in data["commands"]:
-            norm = self._normalize(e)
-            if norm is not None:
-                out.append(norm)
-        return out
+        return entries_from_document(data)
 
     @staticmethod
     def _normalize(e):
@@ -209,6 +214,198 @@ class CommandLibraryStore:
         """An atomic write of the WHOLE document. False on an I/O error (the file is untouched)."""
         doc = {"seeded": True, "commands": [dict(c) for c in commands]}
         return _atomic_write_json(self.path, doc)
+
+
+def entries_from_document(data) -> list:
+    """The entries of a DECODED library document — the ONE normalization of a document. PURE.
+
+    `CommandLibraryStore.load()`, the import reader and the ring's own row builder all go through
+    it, so a foreign file can never reach the library through a second, laxer path: a non-dict
+    root, a missing / non-list `commands` and an unusable record answer the records that really
+    are entries, in document order ([] for a document that carries none).
+    """
+    if not isinstance(data, dict) or not isinstance(data.get("commands"), list):
+        return []
+    out = []
+    for e in data["commands"]:
+        norm = CommandLibraryStore._normalize(e)
+        if norm is not None:
+            out.append(norm)
+    return out
+
+
+# ── the library FILE: the backup ring and the import/export pair (ROADMAP v1.8.2) ────────────
+# `~/.sshmap/commands.json` is a user file like the project file, so it gets the project file's ring
+# (`storage/autosave.py` is the pattern: slot 1 is the version the last write replaced, every older
+# slot moves +1, the overflow is deleted) plus the import/export pair the language files have. The
+# mechanism is `DOCUMENTATION.md` §14e; the ring's arithmetic is the project's own, deliberately.
+
+#: The ring's folder, beside the project's own (`~/.sshmap/backups/`).
+COMMANDS_BACKUP_DIR = os.path.join(os.path.expanduser("~"), ".sshmap", "command_backups")
+
+#: The DECLARED bound of the ring. Not a config key: the project's `backup_count` sizes the PROJECT
+#: ring, and this file must not silently borrow a number that describes another file.
+COMMANDS_BACKUP_COUNT = 10
+COMMANDS_BACKUPS_MIN = 1
+COMMANDS_BACKUPS_MAX = 100
+
+#: The longest NAME the History door pre-fills out of a row (the first line of its command).
+SUGGESTED_NAME_MAX = 60
+
+#: The machine reasons of `read_library_file()` / `export_library_file()` — data, never a UI string
+#: (the language pair's shape: the caller renders them in its own language).
+LIB_ERR_UNREADABLE = "unreadable"
+LIB_ERR_JSON = "not_json"
+LIB_ERR_OBJECT = "not_object"
+LIB_ERR_EMPTY = "no_commands"
+LIB_ERR_WRITE = "write_failed"
+
+
+def library_key(path) -> str:
+    """Stable key of a library file: `sha1[:16]` of the normalized absolute path (the project ring)."""
+    norm = os.path.normcase(os.path.abspath(str(path)))
+    return hashlib.sha1(norm.encode("utf-8")).hexdigest()[:16]
+
+
+def library_backup_path(path, slot) -> str:
+    """The path of ONE ring slot of a library file; slot 1 is the newest."""
+    return os.path.join(COMMANDS_BACKUP_DIR, f"{library_key(path)}_{int(slot):03d}.json")
+
+
+def _atomic_copy(src: str, dst: str) -> None:
+    """An atomic file copy through the ONE mechanism; a failed copy leaves no `*.tmp` behind."""
+    _atomic.publish_atomic(dst, lambda temp: shutil.copy2(src, temp))
+
+
+def rotate_library_backups(path, count: int = COMMANDS_BACKUP_COUNT) -> list:
+    """Shift the ring and put the CURRENT file into slot 1 — taken BEFORE a library write.
+
+    The project ring's arithmetic (`storage/autosave.rotate_backups`): the slots receive the version
+    the write is about to replace, and the leftovers beyond `count` are deleted. A missing file (the
+    very first write) rotates nothing. Never raises: the ring is a safety net, so a read-only HOME
+    must not stop the library from being saved.
+    """
+    try:
+        if not os.path.isfile(path):
+            return []
+        count = _backup_count(count)
+        for slot in range(count, 1, -1):
+            src = library_backup_path(path, slot - 1)
+            if os.path.isfile(src):
+                _atomic_copy(src, library_backup_path(path, slot))
+        for slot in range(count + 1, COMMANDS_BACKUPS_MAX + 1):
+            extra = library_backup_path(path, slot)
+            if os.path.isfile(extra):
+                try:
+                    os.remove(extra)
+                except OSError:
+                    pass
+        _atomic_copy(path, library_backup_path(path, 1))
+        return list_library_backups(path, count)
+    except (OSError, TypeError, ValueError):
+        return []
+
+
+def _backup_count(count) -> int:
+    """A usable ring size: the declared default for a foreign value, clamped to the bounds."""
+    try:
+        value = int(count)
+    except (TypeError, ValueError):
+        value = COMMANDS_BACKUP_COUNT
+    return max(COMMANDS_BACKUPS_MIN, min(value, COMMANDS_BACKUPS_MAX))
+
+
+def list_library_backups(path, count: int = COMMANDS_BACKUP_COUNT) -> list:
+    """The ring slots that exist, newest first: `[{path, slot, mtime, size}, …]`."""
+    items = []
+    for slot in range(1, _backup_count(count) + 1):
+        slot_path = library_backup_path(path, slot)
+        if not os.path.isfile(slot_path):
+            continue
+        try:
+            st = os.stat(slot_path)
+        except OSError:
+            continue
+        items.append({"path": slot_path, "slot": slot, "mtime": st.st_mtime, "size": st.st_size})
+    return items
+
+
+def restore_library_backup(source_path, path) -> None:
+    """Copy one ring slot over the library file ATOMICALLY; RAISES (the caller owns the sentence)."""
+    if not os.path.isfile(source_path):
+        raise FileNotFoundError(f"Command library backup not found: {source_path}")
+    _atomic_copy(source_path, path)
+
+
+def suggested_name(command) -> str:
+    """The NAME the History door pre-fills — the FIRST line of the command, capped. PURE.
+
+    A history row is a command, not a name: its first line is what a user recognizes in the tree,
+    and the cap keeps a 4 KB one-liner out of the name field. A non-string / an empty text answers "".
+    """
+    if not isinstance(command, str):
+        return ""
+    for line in command.splitlines():
+        if line.strip():
+            return line.strip()[:SUGGESTED_NAME_MAX].strip()
+    return ""
+
+
+def read_library_file(source_path) -> dict:
+    """Validate ONE library file → `{"ok", "error", "path", "count", "entries"}`. Never raises.
+
+    The language pair's shape (`i18n.import_language_file`): validate FIRST, hand the caller the data
+    after — a file that fails any check never reaches the library. The accepted document is the
+    store's OWN (`{"seeded": true, "commands": […]}`), so an exported library imports back unchanged,
+    and a document without ONE usable command is refused rather than applied as an empty library.
+    """
+    result = {"ok": False, "error": LIB_ERR_UNREADABLE, "path": "", "count": 0, "entries": []}
+    try:
+        source = os.path.abspath(os.path.expanduser(str(source_path or "")))
+    except (TypeError, ValueError):
+        return result
+    if not source or not os.path.isfile(source):
+        return result
+    try:
+        with open(source, "r", encoding="utf-8-sig") as f:
+            data = json.load(f)
+    except ValueError:   # json.JSONDecodeError / UnicodeDecodeError are ValueErrors
+        result["error"] = LIB_ERR_JSON
+        return result
+    except OSError:
+        return result
+    if not isinstance(data, dict):
+        result["error"] = LIB_ERR_OBJECT
+        return result
+    entries = entries_from_document(data)
+    if not entries:
+        result["error"] = LIB_ERR_EMPTY
+        return result
+    result.update({"ok": True, "error": "", "path": source,
+                   "count": len(entries), "entries": entries})
+    return result
+
+
+def export_library_file(destination_path, entries) -> dict:
+    """Write the WHOLE library to `destination_path` ATOMICALLY → `{"ok", "error", "path", "count"}`.
+
+    The store's own document is written, so an exported file imports back unchanged AND could be
+    dropped in as `commands.json` itself. A library carries no passwords by construction (§4.4), so
+    nothing is stripped here. Never raises.
+    """
+    result = {"ok": False, "error": LIB_ERR_WRITE, "path": "", "count": 0}
+    try:
+        destination = os.path.abspath(os.path.expanduser(str(destination_path or "")))
+    except (TypeError, ValueError):
+        return result
+    if not destination:
+        return result
+    doc = {"seeded": True, "commands": [dict(c) for c in (entries or [])]}
+    if not _atomic_write_json(destination, doc):
+        return result
+    result.update({"ok": True, "error": "", "path": destination,
+                   "count": len(doc["commands"])})
+    return result
 
 
 # ── collapsing: a local copy of v1.2.4.1 (no ui.main_window import) ──────────────
@@ -383,7 +580,9 @@ class _CommandTree(QTreeWidget):
 class CommandLibraryDialog(QDialog):
     """v1.3: the library command dialog (name / category / command / enabled).
 
-    entry=None — the add mode, otherwise — the edit mode (the fields are pre-filled).
+    The MODE is the ID: an `entry` that carries one is the stored record being edited (the title
+    says so), while an `entry` WITHOUT one is a NEW record whose fields are PRE-FILLED — the form the
+    History tab's door opens (`add_from_history()`), and `entry=None` is the empty add form.
     The category — an editable QComboBox with the existing categories
     (new ones are typed freely). OK is blocked until the name AND the command are non-empty
     (a double guard: the disabled button + the check in _on_accept). The command is NOT
@@ -393,7 +592,8 @@ class CommandLibraryDialog(QDialog):
     def __init__(self, entry: dict = None, categories: list = None, parent=None):
         super().__init__(parent)
         t = get_translator()
-        self.setWindowTitle(t("terminal.cmdlib.edit") if entry else t("terminal.cmdlib.add"))
+        editing = bool(entry) and bool(entry.get("id"))
+        self.setWindowTitle(t("terminal.cmdlib.edit") if editing else t("terminal.cmdlib.add"))
         form = QFormLayout(self)
 
         self.name_edit = QLineEdit()
@@ -536,6 +736,23 @@ class CommandLibraryPanel(QWidget):
         self._collapse_btn.setToolTip(t("terminal.cmdlib.collapse_tooltip"))
         self._collapse_btn.clicked.connect(lambda: self.set_collapsed(True))
         head.addWidget(title, 1)
+        # v1.8.2: the library FILE — the ring's restore and the import/export pair. ONE QToolButton
+        # with a QMenu whose actions are built ONCE here and re-texted by retranslate(); the menu and
+        # the actions stay on the panel, because a dying Python QAction wrapper destroys its QMenu
+        # (Qt gotcha #9). The button's own label is a glyph — nothing to translate.
+        self._file_btn = QToolButton()
+        self._file_btn.setText("…")
+        self._file_btn.setToolTip(t("terminal.cmdlib.file_menu_tooltip"))
+        self._file_btn.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        self._file_menu = QMenu(self._file_btn)
+        self.act_restore_backup = self._file_menu.addAction(t("terminal.cmdlib.restore_backup"))
+        self.act_import_library = self._file_menu.addAction(t("terminal.cmdlib.import"))
+        self.act_export_library = self._file_menu.addAction(t("terminal.cmdlib.export"))
+        self.act_restore_backup.triggered.connect(self.restore_backup)
+        self.act_import_library.triggered.connect(self.import_library)
+        self.act_export_library.triggered.connect(self.export_library)
+        self._file_btn.setMenu(self._file_menu)
+        head.addWidget(self._file_btn)
         head.addWidget(self._collapse_btn)
         bl.addLayout(head)
 
@@ -626,6 +843,10 @@ class CommandLibraryPanel(QWidget):
             self.add_btn.setText(t("terminal.cmdlib.add"))
             self.edit_btn.setText(t("terminal.cmdlib.edit"))
             self.del_btn.setText(t("terminal.cmdlib.delete"))
+            self._file_btn.setToolTip(t("terminal.cmdlib.file_menu_tooltip"))
+            self.act_restore_backup.setText(t("terminal.cmdlib.restore_backup"))
+            self.act_import_library.setText(t("terminal.cmdlib.import"))
+            self.act_export_library.setText(t("terminal.cmdlib.export"))
         except RuntimeError:
             return  # the C++ object is already deleted (a close race)
         # The collapse state also owns the two tooltips (set_collapsed re-applies the
@@ -831,9 +1052,14 @@ class CommandLibraryPanel(QWidget):
     def _existing_categories(self) -> list:
         return sorted({e["category"] for e in self._entries if e["category"]})
 
-    def _commit(self):
-        """Save the state to the disk; on failure — re-read the file (the disk stays
-        the source of truth, the local changes are discarded) + a status message."""
+    def _commit(self) -> bool:
+        """Rotate the ring, then save; False — re-read the file (the disk stays the source of truth).
+
+        The ORDER is the project's (`MainWindow._do_save()`): the version the write is about to
+        replace goes into slot 1 BEFORE the write, so every library change — an edit, a delete or
+        the import of a whole file — is one restore away.
+        """
+        rotate_library_backups(self._store.path)
         if not self._store.save(self._entries):
             t = get_translator()
             try:
@@ -841,7 +1067,10 @@ class CommandLibraryPanel(QWidget):
                     t("msg.save_failed", error="commands.json"), 8000)
             except RuntimeError:
                 pass  # the C++ object is already deleted (a close race)
+            self.reload()
+            return False
         self.reload()
+        return True
 
     def _on_add(self):
         dlg = CommandLibraryDialog(None, categories=self._existing_categories(),
@@ -919,6 +1148,152 @@ class CommandLibraryPanel(QWidget):
         e = self._current_entry()
         if e is not None:
             self._delete_entry(e)
+
+    # ── the library FILE: the door's landing, the ring and the import/export pair (v1.8.2) ──
+
+    def add_from_history(self, command: str, name: str = "") -> bool:
+        """The History tab's door lands HERE: the SHIPPED add form, PRE-FILLED, written by this panel.
+
+        The write stays here — the store rewrites the whole document, so a second writer beside the
+        panel IS the `N51` race. The door hands in an ID-LESS entry, which `CommandLibraryDialog`
+        reads as "a NEW record, pre-filled" (the command and a name — a history row carries no name,
+        so `suggested_name()` takes the first line of the command); the CATEGORY stays a choice the
+        shipped form makes.
+        """
+        t = get_translator()
+        if not isinstance(command, str) or not command.strip():
+            return False
+        dlg = CommandLibraryDialog(
+            {"name": (name or "").strip() or suggested_name(command),
+             "command": command, "category": "", "enabled": True},
+            categories=self._existing_categories(), parent=self.window() or self)
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return False
+        d = dlg.result_entry()
+        self._entries.append({
+            "id": uuid.uuid4().hex[:12], "name": d["name"],
+            "command": d["command"], "category": d["category"],
+            "enabled": d["enabled"],
+        })
+        ok = self._commit()
+        if ok:
+            try:
+                self.status_message.emit(t("terminal.cmdlib.saved", name=d["name"]), 4000)
+            except RuntimeError:
+                pass  # the C++ object is already deleted (a close race)
+        return ok
+
+    def backup_items(self) -> list:
+        """The rows of the restore dialog: the ring slots that really PARSE, newest first.
+
+        A corrupt slot is not a rescue (the project's `_unreadable_sources()` rule), so it is not
+        offered; the label is the shipped `backups.backup` one the project's own dialog uses.
+        """
+        t = get_translator()
+        items = []
+        for slot in list_library_backups(self._store.path):
+            if not read_library_file(slot["path"])["ok"]:
+                continue
+            items.append({"label": t("backups.backup", n=slot["slot"]),
+                          "path": slot["path"], "mtime": slot["mtime"],
+                          "size": slot["size"]})
+        return items
+
+    def restore_backup(self) -> bool:
+        """Offer the ring and copy the chosen slot over the library — the ONE explicit ask.
+
+        Nothing is rewritten while the ring is only LOOKED at, and the state being replaced goes into
+        slot 1 first, so a restore is itself reversible. The dialog and its "Restore" button ARE the
+        confirmation (the row names the slot).
+        """
+        t = get_translator()
+        items = self.backup_items()
+        if not items:
+            self.status_message.emit(t("terminal.cmdlib.backup_empty"), 6000)
+            return False
+        if BackupsDialog is None:
+            return False
+        chosen = {}
+        dlg = BackupsDialog(items, parent=self.window() or self,
+                            title=t("terminal.cmdlib.restore_backup"))
+
+        def _take(source, label):
+            chosen["path"], chosen["label"] = str(source), str(label)
+            dlg.accept()   # the click IS the decision — the dialog closes on it
+
+        dlg.restore_requested.connect(_take)
+        dlg.exec()
+        if not chosen:
+            return False
+        rotate_library_backups(self._store.path)
+        try:
+            restore_library_backup(chosen["path"], self._store.path)
+        except OSError as e:
+            self.status_message.emit(
+                t("terminal.cmdlib.restore_failed", error=str(e)), 8000)
+            return False
+        self.reload()
+        self.status_message.emit(
+            t("terminal.cmdlib.restored", source=chosen["label"]), 5000)
+        return True
+
+    def import_library(self, path: str = None) -> bool:
+        """Replace THIS library with a foreign file — AFTER the user confirmed the replacement.
+
+        An export is a copy of the WHOLE library, so the pair round-trips; a merge-by-name is a
+        decision of its own and is deliberately NOT taken here. The write goes through `_commit()`,
+        so the library being replaced is rotated into the ring first.
+        """
+        t = get_translator()
+        if not path:
+            try:
+                path, _selected = QFileDialog.getOpenFileName(
+                    self.window() or self, t("terminal.cmdlib.import"), "",
+                    "JSON (*.json);;All files (*)")
+            except Exception:   # noqa: BLE001 — a Qt teardown race
+                return False
+        if not path:
+            return False
+        result = read_library_file(path)
+        if not result["ok"]:
+            self.status_message.emit(
+                t("terminal.cmdlib.import_failed", error=result["error"]), 8000)
+            return False
+        box = QMessageBox   # the monkeypatch CL.QMessageBox works in the tests
+        reply = box.question(
+            self.window() or self, t("terminal.cmdlib.import"),
+            t("terminal.cmdlib.import_confirm", count=result["count"]),
+            box.Yes | box.No, box.No)
+        if reply != box.Yes:
+            return False
+        self._entries = [dict(e) for e in result["entries"]]
+        if not self._commit():
+            return False
+        self.status_message.emit(t("terminal.cmdlib.imported", count=result["count"]), 6000)
+        return True
+
+    def export_library(self, path: str = None) -> bool:
+        """Write the WHOLE library to a file the user picks (one atomic copy, no secrets in it)."""
+        t = get_translator()
+        if not path:
+            try:
+                path, _selected = QFileDialog.getSaveFileName(
+                    self.window() or self, t("terminal.cmdlib.export"), "commands.json",
+                    "JSON (*.json);;All files (*)")
+            except Exception:   # noqa: BLE001 — a Qt teardown race
+                return False
+        if not path:
+            return False
+        path = str(path)
+        if not path.lower().endswith(".json"):
+            path += ".json"
+        result = export_library_file(path, self._entries)
+        if not result["ok"]:
+            self.status_message.emit(
+                t("terminal.cmdlib.export_failed", error=result["error"]), 8000)
+            return False
+        self.status_message.emit(t("terminal.cmdlib.exported", path=result["path"]), 6000)
+        return True
 
     # ── the context menu (test seam: QActions without exec()) ───────────────
 

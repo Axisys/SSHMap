@@ -354,6 +354,15 @@ class TerminalDockContent(QWidget):
         except RuntimeError:
             return None
 
+    def command_library(self):
+        """The container's ONE command library panel — the hook the History tab resolves.
+
+        The macro panel is one per CONTAINER while the History tab is per SESSION, so the tab walks
+        its parent chain (`modules/command_history.container_library`) and asks this hook — the
+        mirror of the shipped `active_session` seam, where the library asks the container.
+        """
+        return getattr(self, "cmdlib_panel", None)
+
     def focused_split_pane(self):
         """The split pane while the keyboard focus is INSIDE it (None otherwise). Never raises."""
         pane = self.split.pane
