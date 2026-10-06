@@ -20,6 +20,11 @@ try:  # the ONE entry sanitizer of the project — never a second copy of it
 except ImportError:  # flat layout: the project root is on sys.path
     from models.server import sanitize_quick_launch
 
+try:  # the ONE atomic-write mechanism (`AGENTS.md` §4.4, `DOCUMENTATION.md` §71)
+    from ..storage import atomic as _atomic
+except ImportError:  # flat layout: the project root is on sys.path
+    from storage import atomic as _atomic
+
 
 #: The entry type the panel OFFERS. The file may carry others (a `command` entry is kept
 #: and written back, never listed) — the sanitizer's shape is reused, the scope is narrower.
@@ -49,28 +54,13 @@ def default_store_path() -> str:
     return os.path.join(os.path.expanduser("~"), ".sshmap", "bookmarks.json")
 
 
-def _atomic_write_json(path: str, doc) -> bool:
-    """An atomic write of the WHOLE document (tmp + flush + fsync + os.replace).
+def _atomic_write_json(path: str, doc, reader=None) -> bool:
+    """An atomic MERGE-write through `storage/atomic.py` — the ONE mechanism.
 
-    The `i18n.save_config` technique (which is what makes a half-written file impossible);
+    `reader` answers the document already on disk (this store's own lenient reader), and the read,
+    the merge and the publish are ONE critical section, so two writers keep both sets of keys.
     False on OSError, and a failed write leaves no `*.tmp` behind (v1.6.1 rule)."""
-    directory = os.path.dirname(path)
-    tmp = path + ".tmp"
-    try:
-        if directory:
-            os.makedirs(directory, exist_ok=True)
-        with open(tmp, "w", encoding="utf-8") as f:
-            json.dump(doc, f, ensure_ascii=False, indent=2)
-            f.flush()
-            os.fsync(f.fileno())
-        os.replace(tmp, path)   # an atomic rename (one file system)
-        return True
-    except OSError:
-        try:
-            os.remove(tmp)
-        except OSError:
-            pass
-        return False
+    return _atomic.write_json_atomic(path, doc, merge=True, reader=reader)
 
 
 def filter_entries(entries, text: str) -> list:
@@ -172,9 +162,7 @@ class BookmarkStore:
         key a plugin or a hand-edit put beside the list survives. The list is sanitized on
         the way out (the file never carries a record the reader would drop)."""
         clean = [dict(e) for e in sanitize_quick_launch(list(entries or []))]
-        doc = self._read_document() or {}
-        doc[DOC_KEY] = clean
-        return _atomic_write_json(self.path, doc)
+        return _atomic_write_json(self.path, {DOC_KEY: clean}, reader=self._read_document)
 
     def save_urls(self, url_entries_) -> bool:
         """Write the URL list the panel owns, leaving every FOREIGN entry where it is.

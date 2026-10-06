@@ -125,7 +125,8 @@ class SshMixin:
                 targets.append(endpoint_from_tab(
                     tab, key=key, label=getattr(data, "alias", "") or "",
                     host=getattr(data, "host", "") or "",
-                    port=getattr(data, "ssh_port", 22), worker=worker))
+                    port=getattr(data, "ssh_port", 22),
+                    user=getattr(data, "user", "") or "", worker=worker))
             except Exception:  # noqa: BLE001 — one dead session never hides the rest
                 continue
         return targets

@@ -17,6 +17,11 @@ import os
 import shutil
 from typing import Dict, List, Optional
 
+try:  # the ONE atomic-write mechanism (`AGENTS.md` §4.4, `DOCUMENTATION.md` §71)
+    from . import atomic
+except ImportError:  # flat launch from the project root
+    from storage import atomic
+
 # ── Paths and defaults ────────────────────────────────────────────────────────────
 
 _CONFIG_DIR = os.path.join(os.path.expanduser("~"), ".sshmap")
@@ -121,29 +126,13 @@ def _bool_setting(value, default: bool = True) -> bool:
 # ── Atomic write (save_project / save_config pattern) ────────────────────
 
 def atomic_write_json(path: str, data: dict) -> None:
-    """Atomic JSON write: tmp + fsync + os.replace.
+    """Atomic JSON write through the ONE mechanism (`storage/atomic.py`, `DOCUMENTATION.md` §71).
 
-    A crash/power loss mid-write corrupts neither the autosave nor a backup —
-    replace either happens in full or not at all (v0.9.3 fix for save_project).
-    A FAILED write removes the provisional file, so a rejected path leaves no
-    `*.tmp` behind (the error still propagates to the caller).
+    A crash/power loss mid-write corrupts neither the autosave nor a backup — replace either
+    happens in full or not at all. A FAILED write removes the provisional file, so a rejected
+    path leaves no `*.tmp` behind (the error still propagates to the caller).
     """
-    directory = os.path.dirname(path)
-    if directory:
-        os.makedirs(directory, exist_ok=True)
-    tmp_path = path + ".tmp"
-    try:
-        with open(tmp_path, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
-            f.flush()
-            os.fsync(f.fileno())
-        os.replace(tmp_path, path)
-    except OSError:
-        try:
-            os.remove(tmp_path)
-        except OSError:
-            pass
-        raise
+    atomic.publish_atomic(path, lambda temp: atomic.dump_json(temp, data))
 
 
 def read_json(path: str) -> Optional[dict]:
@@ -157,26 +146,13 @@ def read_json(path: str) -> Optional[dict]:
 
 
 def _atomic_copy(src: str, dst: str) -> None:
-    """Atomic file copy: copy2 to tmp + os.replace.
+    """Atomic file copy through the ONE mechanism (`storage/atomic.py`).
 
     copy2 preserves mtime — for backups this is "when the version was made"
     (the "Modified" column in the backups dialog). A FAILED copy removes the
-    provisional file (the `atomic_write_json` guard), so no `*.tmp` survives
-    a rejected destination.
+    provisional file, so no `*.tmp` survives a rejected destination.
     """
-    directory = os.path.dirname(dst)
-    if directory:
-        os.makedirs(directory, exist_ok=True)
-    tmp_path = dst + ".tmp"
-    try:
-        shutil.copy2(src, tmp_path)
-        os.replace(tmp_path, dst)
-    except OSError:
-        try:
-            os.remove(tmp_path)
-        except OSError:
-            pass
-        raise
+    atomic.publish_atomic(dst, lambda temp: shutil.copy2(src, temp))
 
 
 # ── Autosave (ROADMAP v0.9.7 #1, #3) ───────────────────────────────────

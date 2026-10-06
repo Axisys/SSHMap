@@ -364,6 +364,7 @@
   "sftp.send.target_line": "Ziel: {alias} ({host}) — Ordner: {dir}",
   "sftp.send.folder_prompt": "Zielordner:",
   "sftp.send.same_host_note": "Derselbe Host: die Datei wird auf dem Server kopiert, ohne Download",
+  "sftp.send.same_host_user_note": "Auf dem Server läuft die Kopie als „{user}“",
   "sftp.send.relay_note": "Anderer Host: die Datei wird über diesen Computer weitergeleitet",
   "sftp.send.too_big": "'{name}' ist {size} groß — ein Senden zwischen Sitzungen ist auf {limit} begrenzt",
   "sftp.send.no_file": "Ein Ordner lässt sich nicht zwischen Sitzungen senden — kopieren Sie ihn zwischen den beiden Bereichen",

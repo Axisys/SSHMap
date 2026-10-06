@@ -1,5 +1,4 @@
 import json
-import os
 from typing import Dict, TYPE_CHECKING
 
 try:
@@ -11,6 +10,11 @@ try:
     from ..models.server import server_data_to_dict
 except ImportError:
     from models.server import server_data_to_dict
+
+try:  # the ONE atomic-write mechanism (`AGENTS.md` §4.4, `DOCUMENTATION.md` §71)
+    from . import atomic
+except ImportError:  # flat launch from the project root
+    from storage import atomic
 
 if TYPE_CHECKING:  # AUDIT v0.7.2 (low #16): annotation without a runtime circular import
     try:
@@ -124,25 +128,11 @@ def serialize_scene(
 def write_project_json(path: str, data: dict) -> None:
     """v0.9.7: atomic write of an already-serialized project (dict → file).
 
-    Atomicity — the same as save_project had before v0.9.7 (tmp + fsync +
-    os.replace, v0.9.3 fix): a crash mid-write doesn't corrupt the map file.
-    A FAILED write removes the provisional file — the guard the rest of the
-    writer family already carries, so no `<project>.json.tmp` is left next to
-    the project (the error itself still propagates to the caller).
+    The publish goes through the ONE mechanism (`storage/atomic.py`, `DOCUMENTATION.md` §71): a
+    crash mid-write never corrupts the map file. A FAILED write removes the provisional file, so
+    nothing is left next to the project (the error itself still propagates to the caller).
     """
-    tmp_path = path + '.tmp'
-    try:
-        with open(tmp_path, 'w', encoding='utf-8') as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
-            f.flush()
-            os.fsync(f.fileno())
-        os.replace(tmp_path, path)
-    except OSError:
-        try:
-            os.remove(tmp_path)
-        except OSError:
-            pass
-        raise
+    atomic.publish_atomic(path, lambda temp: atomic.dump_json(temp, data))
 
 
 def save_project(

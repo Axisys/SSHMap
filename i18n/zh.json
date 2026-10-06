@@ -364,6 +364,7 @@
   "sftp.send.target_line": "目标：{alias}（{host}）— 文件夹：{dir}",
   "sftp.send.folder_prompt": "目标文件夹：",
   "sftp.send.same_host_note": "同一主机：文件在服务器上直接复制，无需下载",
+  "sftp.send.same_host_user_note": "在服务器上以 {user} 身份执行复制",
   "sftp.send.relay_note": "不同主机：文件经这台计算机中转",
   "sftp.send.too_big": "“{name}”为 {size} — 会话之间发送的上限是 {limit}",
   "sftp.send.no_file": "文件夹无法在会话之间发送 — 请在两个窗格之间复制",

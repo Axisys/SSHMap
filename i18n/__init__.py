@@ -15,6 +15,10 @@ import json
 import os
 from typing import Optional, Dict
 
+# The ONE atomic-write mechanism of the application (`AGENTS.md` §4.4): `save_config()` and the
+# language import/export pair write through it, so "atomic" is a mechanism here, not a habit.
+from storage import atomic as _atomic
+
 
 # ── Configuration ──────────────────────────────────────────────
 
@@ -289,32 +293,16 @@ def load_config() -> dict:
 
 def save_config(partial_update: dict) -> bool:
     """Atomically save partial config update to ~/.sshmap/config.json.
-    
-    Preserves existing keys — only overwrites the ones in partial_update.
-    Returns False on any I/O error.
+
+    Preserves existing keys — only overwrites the ones in partial_update. The WHOLE
+    read-merge-write runs inside the lock of `storage/atomic.py` (`DOCUMENTATION.md` §71), so two
+    writers cannot publish each other's stale snapshot, and the publish uses a unique provisional
+    name + `fsync` + `os.replace`. Returns False on any I/O error.
     """
     if not _ensure_config_dir():
         return False
-    
-    # Read existing, merge, write back
-    current = load_config()
-    current.update(partial_update)
-    
-    try:
-        tmp_file = _CONFIG_FILE + ".tmp"
-        with open(tmp_file, "w", encoding="utf-8") as f:
-            json.dump(current, f, ensure_ascii=False, indent=2)
-            f.flush()
-            os.fsync(f.fileno())
-        # Atomic rename (works on same filesystem)
-        os.replace(tmp_file, _CONFIG_FILE)
-        return True
-    except OSError:
-        try:
-            os.remove(tmp_file)
-        except OSError:
-            pass
-        return False
+    return _atomic.write_json_atomic(_CONFIG_FILE, dict(partial_update or {}), merge=True,
+                                     reader=load_config)
 
 
 # ── Available languages ───────────────────────────────────────
@@ -413,21 +401,8 @@ def get_current_language() -> str:
 # turns them into the i18n messages of `language.*`.
 
 def _atomic_write_json(path: str, data) -> bool:
-    """Write JSON atomically (tmp + os.replace) — the storage/autosave pattern. Never raises."""
-    tmp = path + ".tmp"
-    try:
-        with open(tmp, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
-            f.flush()
-            os.fsync(f.fileno())
-        os.replace(tmp, path)
-        return True
-    except (OSError, TypeError, ValueError):
-        try:
-            os.remove(tmp)
-        except OSError:
-            pass
-        return False
+    """Write JSON atomically through `storage/atomic.py` (the ONE mechanism). Never raises."""
+    return _atomic.write_json_atomic(path, data)
 
 
 def import_language_file(source_path) -> dict:

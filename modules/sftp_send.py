@@ -1,15 +1,17 @@
 # -*- coding: utf-8 -*-
 """The cross-session relay behind `Send to ▸ <session>` (v1.7.3) — the orchestrator and its dialog.
 
-ONE conversation over the SHIPPED worker kinds: the SAME `(host, ssh_port)` is a server-side
-`queue_copy()` on the source worker, a DIFFERENT host is a RELAY through this machine — a download
+ONE conversation over the SHIPPED worker kinds: the SAME `(host, ssh_port, user)` is a server-side
+`queue_copy()` on the source worker, a DIFFERENT end is a RELAY through this machine — a download
 into ONE spool file under the OS temp and an upload out of it, each leg atomic and cancellable.
-`SendFileDialog` names the file, its folder and the target session; the conflict question gains BOTH
-sides' size and date. There is deliberately no server-to-server path. Rules — `AGENTS.md`
+`SendFileDialog` names the file, its folder, the target session and the identity the server-side
+path runs as; the conflict question gains BOTH sides' size and date. There is deliberately no
+server-to-server path. Rules — `AGENTS.md`
 §4.3/§4.24; mechanism — `DOCUMENTATION.md` §66; the spool sentence — `README.md`, Security.
 """
 import os
 import posixpath
+import stat
 import tempfile
 import time
 
@@ -32,10 +34,16 @@ except ImportError:  # flat launch from the project root
 #: size BEFORE leg 1 (a config key can wait; `terminal_max_open` is the precedent).
 MAX_SEND_BYTES = 100 * 1024 * 1024
 
-#: The spool: ONE file under the OS temp, the tightest mode the platform offers, recognized by its
-#: prefix so a crash can be swept at the next startup (a plaintext copy must not outlive the app).
+#: The spool: ONE file under the OS temp, the tightest mode the platform offers, created under a
+#: name nobody else could have claimed (`mkstemp`) and recognized by its prefix, so the startup
+#: sweep can take the leftovers of a CRASHED run (a plaintext copy must not outlive the app).
 SPOOL_PREFIX = "sshmap-send-"
 SPOOL_FILE_MODE = 0o600
+
+#: The age a spool may reach before the startup sweep takes it. An AGE rule is the portable one:
+#: `os.kill(pid, 0)` is not portable on Windows and a pid is recycled, while a LIVE sibling
+#: instance keeps its spools young — a relay in flight is never cut in half by another instance.
+SPOOL_MAX_AGE_SEC = 6 * 60 * 60
 
 #: The TWO declared paths of a send — reported in the result and asserted by the topical file.
 SEND_STRATEGY_SERVER = "server_side"
@@ -51,17 +59,22 @@ DIALOG_ACCEPTED = QDialog.DialogCode.Accepted
 
 
 def same_host(source, target) -> bool:
-    """Do the two endpoints name the SAME SSH end? (the server-side `queue_copy()` path).
+    """Do the two endpoints name the SAME SSH end AND the same identity? (the server-side path).
 
     Two `SFTPClient`s cannot talk to each other, so a DIFFERENT host is always a relay through this
     machine — while the same host reached through two sessions can copy SERVER-SIDE. The comparison
-    is `(host, ssh_port)`, and an unknown host is never "the same".
+    is `(host, ssh_port, user)`: the server-side copy executes on the SOURCE session's client, i.e.
+    as the source session's user, so two sessions of one host with DIFFERENT users must take the
+    relay (which obeys the target's own rights). An unknown host or user is never "the same".
     """
     if source is None or target is None:
         return False
     host = str(getattr(source, "host", "") or "").strip().lower()
     other = str(getattr(target, "host", "") or "").strip().lower()
-    return bool(host) and host == other and _port(source) == _port(target)
+    if not host or host != other or _port(source) != _port(target):
+        return False
+    user = str(getattr(source, "user", "") or "").strip()
+    return bool(user) and user == str(getattr(target, "user", "") or "").strip()
 
 
 def _port(endpoint) -> int:
@@ -84,18 +97,20 @@ class SendEndpoint:
     """ONE side of a send: the session's identity, transport, directory and visible listing.
 
     A plain object (no Qt): the provider that builds it lives in `ui/main_window_ssh.py`, the
-    comparison it feeds is `same_host()`, and a test hands in whatever it likes.
+    comparison it feeds is `same_host()`, and a test hands in whatever it likes. `user` is part of
+    the identity the comparison reads — the server-side copy runs as the SOURCE session's user.
     """
 
-    __slots__ = ("key", "label", "host", "port", "worker", "directory", "folders", "facts",
+    __slots__ = ("key", "label", "host", "port", "user", "worker", "directory", "folders", "facts",
                  "refresh")
 
-    def __init__(self, key="", label="", host="", port=None, worker=None, directory="/",
+    def __init__(self, key="", label="", host="", port=None, user="", worker=None, directory="/",
                  folders=(), facts=None, refresh=None):
         self.key = str(key or "")
         self.label = str(label or "")
         self.host = str(host or "")
         self.port = port
+        self.user = str(user or "")
         self.worker = worker
         self.directory = str(directory or "/")
         self.folders = tuple(folders or ())
@@ -137,11 +152,11 @@ def pane_listing_facts(pane) -> tuple:
     return facts, folders
 
 
-def endpoint_from_tab(tab, key="", label="", host="", port=None, worker=None) -> SendEndpoint:
+def endpoint_from_tab(tab, key="", label="", host="", port=None, user="", worker=None) -> SendEndpoint:
     """The endpoint of a LIVE Files container: its ACTIVE pane's directory, folders and rows."""
     pane = getattr(tab, "active_pane", None)
     facts, folders = (pane_listing_facts(pane) if pane is not None else ({}, []))
-    return SendEndpoint(key=key, label=label, host=host, port=port, worker=worker,
+    return SendEndpoint(key=key, label=label, host=host, port=port, user=user, worker=worker,
                         directory=str(getattr(pane, "current_dir", "/") or "/"),
                         folders=folders, facts=facts,
                         refresh=getattr(tab, "relist_dir", None))
@@ -167,28 +182,78 @@ def spool_dir() -> str:
     return tempfile.gettempdir()
 
 
+def _spool_base(name: str) -> str:
+    """The file name of ONE send, platform-safe and recognizable (`payload.bin`)."""
+    return posixpath.basename(str(name or "").replace("\\", "/")) or "file"
+
+
 def spool_path(name: str = "", token=None) -> str:
-    """The spool file name of ONE send: unique per process, recognizable, platform-safe."""
-    base = posixpath.basename(str(name or "").replace("\\", "/")) or "file"
+    """The LOGICAL spool name of ONE send (the shipped spelling; `create_spool()` claims a real one)."""
     stamp = int(token) if token is not None else int(time.time() * 1000)
-    return os.path.join(spool_dir(), f"{SPOOL_PREFIX}{os.getpid()}-{stamp}-{base}")
+    return os.path.join(spool_dir(), f"{SPOOL_PREFIX}{os.getpid()}-{stamp}-{_spool_base(name)}")
+
+
+def create_spool(name: str = "", token=None) -> str:
+    """Claim a UNIQUE spool file with `mkstemp`; answers "" when the folder refused it.
+
+    The name nobody else could have claimed is what closes the planted-name case, and `mkstemp`
+    creates the file 0600 in one exclusive step. The prefix keeps it sweepable and the basename
+    keeps it recognizable; the fd is closed at once, because the download leg re-opens the path.
+    """
+    stamp = int(token) if token is not None else int(time.time() * 1000)
+    try:
+        handle, path = tempfile.mkstemp(prefix=f"{SPOOL_PREFIX}{os.getpid()}-{stamp}-",
+                                        suffix=f"-{_spool_base(name)}", dir=spool_dir())
+    except OSError:
+        return ""
+    os.close(handle)
+    try:
+        os.chmod(path, SPOOL_FILE_MODE)   # the tightest mode the platform offers
+    except OSError:
+        pass
+    return path
+
+
+def _is_our_empty_twin(path: str) -> bool:
+    """Is this path the UNTOUCHED provisional file of an earlier attempt of OURS? (never a plant).
+
+    An EXISTING name is verified, never assumed: a symlink (a plain link is not a regular file),
+    a hard link to somebody's file (`st_nlink`), a file with content, a foreign owner and a stale
+    file are all refusals.
+    """
+    try:
+        info = os.lstat(path)
+    except OSError:
+        return False
+    if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1 or info.st_size != 0:
+        return False
+    getuid = getattr(os, "getuid", None)
+    if getuid is not None:
+        try:
+            if info.st_uid != getuid():
+                return False
+        except OSError:
+            return False
+    return (time.time() - info.st_mtime) <= SPOOL_MAX_AGE_SEC
 
 
 def prepare_spool(path: str) -> bool:
-    """Claim the spool's name BEFORE the first leg; False — this send cannot start.
+    """Claim the spool's provisional twin BEFORE the first leg; False — this send cannot start.
 
     The probe is what the relay's "spool" refusal is made of (the folder takes a file and the name
-    is free), and the provisional file it creates is the spool's twin, removed with it by
-    `drop_spool()`. The MODE of the committed spool comes from the WRITER: the download leg creates
-    its own provisional file with `SPOOL_FILE_MODE` (`queue_download(part_mode=…)`), because
-    `os.replace()` publishes that file's inode and the destination's mode does not survive it.
+    is ours). The twin is created EXCLUSIVELY and an existing one is VERIFIED (`_is_our_empty_twin`)
+    instead of accepted: a name somebody planted answers False. The MODE of the committed spool
+    comes from the WRITER — the download leg creates its own provisional file with `SPOOL_FILE_MODE`
+    (`queue_download(part_mode=…)`), because `os.replace()` publishes that file's inode and the
+    destination's mode does not survive it.
     """
     if not path:
         return False
+    twin = path + PART_SUFFIX
     try:
-        fd = os.open(path + PART_SUFFIX, os.O_CREAT | os.O_EXCL | os.O_WRONLY, SPOOL_FILE_MODE)
+        fd = os.open(twin, os.O_CREAT | os.O_EXCL | os.O_WRONLY, SPOOL_FILE_MODE)
     except FileExistsError:
-        return True   # prepared by an earlier attempt of the same send
+        return _is_our_empty_twin(twin)
     except OSError:
         return False
     os.close(fd)
@@ -214,18 +279,29 @@ def drop_spool(path: str) -> int:
     return removed
 
 
-def sweep_spools(directory: str = "") -> int:
-    """Delete the stale spools of a crashed run (the startup sweep). Never raises."""
+def sweep_spools(directory: str = "", max_age_sec=SPOOL_MAX_AGE_SEC) -> int:
+    """Delete the spools of a CRASHED run — only the ones past the declared age. Never raises.
+
+    The age rule is the owner rule: a live sibling instance keeps its spools (they are young, and
+    its relay may be mid-flight), while a crashed run's leftovers go at the next startup.
+    """
     folder = directory or spool_dir()
     removed = 0
     try:
         names = os.listdir(folder)
     except OSError:
         return 0
+    now = time.time()
     for name in names:
         if not name.startswith(SPOOL_PREFIX):
             continue
-        removed += drop_spool(os.path.join(folder, name))
+        candidate = os.path.join(folder, name)
+        try:
+            if (now - os.lstat(candidate).st_mtime) <= float(max_age_sec):
+                continue   # young enough to belong to a live instance (or to this one)
+        except (OSError, TypeError, ValueError):
+            continue
+        removed += drop_spool(candidate)
     return removed
 
 
@@ -320,11 +396,12 @@ class SendRelay(QObject):
                                   SEND_LEG_COPY)
         # TWO legs through this machine: the spool is the only path between the two transports.
         self._strategy = SEND_STRATEGY_RELAY
-        self._spool = spool_path(self._name)
-        if not prepare_spool(self._spool):
-            self._spool = ""
+        spool = create_spool(self._name)
+        if not spool or not prepare_spool(spool):
+            drop_spool(spool)   # a refused send leaves nothing of ours in the temp folder
             self._finish(False, error="spool")
             return False
+        self._spool = spool
         self._bind(worker)
         self._bind(self.target.worker)
         task = worker.queue_download(source_path, os.path.dirname(self._spool),
@@ -456,7 +533,7 @@ class SendFileDialog(QDialog):
     """
 
     def __init__(self, parent=None, entry=None, target=None, folders=(), default_dir="/",
-                 same_host=True):
+                 same_host=True, user=""):
         super().__init__(parent)
         self._entry = dict(entry or {})
         name = str(self._entry.get("name") or "?")
@@ -485,6 +562,12 @@ class SendFileDialog(QDialog):
         note = QLabel(_t("sftp.send.same_host_note") if same_host else _t("sftp.send.relay_note"))
         note.setWordWrap(True)
         layout.addWidget(note)
+        # The server-side copy runs as the SOURCE session's user — the ONE sentence that names it.
+        self.user_note = None
+        if same_host:
+            self.user_note = QLabel(_t("sftp.send.same_host_user_note", user=str(user or "?")))
+            self.user_note.setWordWrap(True)
+            layout.addWidget(self.user_note)
         self.buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel, self)
         self.buttons.accepted.connect(self.accept)
@@ -619,7 +702,8 @@ class SendCoordinator(QObject):
         """Ask the ONE question of the send: WHERE the file lands (and say what it is)."""
         dialog = SendFileDialog(self._parent, self.entry, self.target, folders=self._folders,
                                 default_dir=self._default,
-                                same_host=same_host(self.source, self.target))
+                                same_host=same_host(self.source, self.target),
+                                user=str(getattr(self.source, "user", "") or ""))
         self._dialog = dialog
         accepted = False
         try:

@@ -472,7 +472,7 @@ class TerminalSessionPage(TerminalFilesPanelMixin, TerminalPageSftpMixin, Termin
         if self.sftp_tab is not None:
             # v1.7.3 (ROADMAP v1.7.3, task 1/2): the container is TOLD who this session is — the
             # `history_key()` of the server (the per-server directory memory is filed under it) and
-            # the `(host, ssh_port)` pair that decides the same-host (server-side) send path.
+            # the `(host, ssh_port, user)` triple that decides the server-side send path.
             self.sftp_tab.set_session_info(key=history_key(getattr(server_data, "id", "")),
                                            label=getattr(server_data, "alias", "") or "",
                                            host=getattr(server_data, "host", "") or "",

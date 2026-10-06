@@ -1,11 +1,13 @@
 # -*- coding: utf-8 -*-
 """The documentation-consistency guards (the changelog family, ROADMAP, the counters, INDEX freshness, the code-comment budget).
 
-§1 the section ownership of the changelog family and `ROADMAP.md`; §2 the counters the reference
+§1 the section ownership of the changelog family and `ROADMAP.md` (the migration pin of the
+family's pairing rule included); §2 the counters the reference
 docs quote are the code's counters (the i18n key pin, the action registry in every spelling and
 its empty-default count); §3 `DOCUMENTATION.md` is self-consistent (every `§N` resolves, a dotted
 `§N.M` names `AGENTS.md`, the contents list is complete, the gotcha numbering is shared with §7);
-§4 `tests/INDEX.md` freshness, §5 the documentation rules over the two reference docs, §6 the CODE
+§4 `tests/INDEX.md` freshness, §5 the documentation rules over the two reference docs (and the
+repository's own closed world: an ignored `*.md` is untracked), §6 the CODE
 ratchet and §7 the byte budget of `AGENTS.md` (the harness TRUNCATES it) are the rest — a missing
 documentation set is a SKIP, never a defect (they are gitignored, so a fresh clone stays runnable).
 Run: python tests/test_docs.py   (from the project root) or python tests/run_all.py"""
@@ -13,6 +15,7 @@ import collections
 import glob
 import os
 import re
+import subprocess
 import sys
 
 from _common import bootstrap, check, finish, EXPECTED_APP_VERSION, EXPECTED_I18N_KEYS
@@ -171,6 +174,22 @@ _still_to_move = sorted({_line_digits(p) for p in _HISTORY if _line_digits(p)} -
 if _still_to_move:
     print(f"  note  lines whose details are still to be created: {_still_to_move} "
           f"(the migration of the reference docs is staged)")
+
+# The MISSING direction of the pairing rule (AUDIT R8): the check above catches a details file whose
+# history is absent, while a line that arrives WITHOUT its details passed in silence — which is
+# exactly the half of the rollover nobody looks at for a year. The lines the details family never
+# reached are a PINNED debt: the set is the measured one and it may only SHRINK, so a new line
+# (whose digits are not in it) MUST bring its pair, and a migrated line must lower the pin.
+_DETAILS_MIGRATION_LINES = {"0997", "114", "1214", "1338", "147"}
+check("§1 the lines whose details are still to be created are the PINNED migration set (R8)",
+      _still_to_move == sorted(_DETAILS_MIGRATION_LINES),
+      f"unpaired={_still_to_move} pinned={sorted(_DETAILS_MIGRATION_LINES)} — a NEW line must bring "
+      f"CHANGELOG_DETAILS_V<digits>.md in the same rollover; a migrated line must LOWER the pin")
+check("§1 every pinned migration line really has its history file (the pin names no phantom)",
+      all(os.path.exists(os.path.join(ROOT, f"CHANGELOG_HISTORY_V{d}.md"))
+          for d in _DETAILS_MIGRATION_LINES),
+      [d for d in sorted(_DETAILS_MIGRATION_LINES)
+       if not os.path.exists(os.path.join(ROOT, f"CHANGELOG_HISTORY_V{d}.md"))])
 check("§1 a release section of the DETAILS family is not duplicated across two files "
       "(the details of a closed line leave the live file)",
       all(len(files) == 1 for files in _by_version_details.values()),
@@ -534,6 +553,44 @@ check("§5 no block is copied between the details family and the reference docs 
       "(a moved paragraph is DELETED from its old home)",
       not any(_shared_details.values()),
       {_n: v[:1] for _n, v in _shared_details.items() if v})
+
+
+# ── the repository's own closed world (AUDIT N60) ────────────────────────────
+# `.gitignore` is the project's ANSWER to §13's question "is this internal document public?" — it
+# names every internal `*.md`. A file that is ignored AND tracked makes that answer WRONG for every
+# other name in the list, so the two states must agree: a `*.md` the ignore list names is untracked.
+# Git is asked ONCE and its absence (or a tree that is not a repository) is a clean skip.
+_GITIGNORE = os.path.join(ROOT, ".gitignore")
+_GITIGNORED_MD = re.compile(r"^\s*([A-Za-z0-9_.*/-]+\.md)\s*$", re.M)
+
+
+def _git(args):
+    """(exit code, stdout) of one git call; (None, "") when git is missing or unusable."""
+    try:
+        done = subprocess.run(["git"] + list(args), cwd=ROOT, capture_output=True, text=True,
+                              timeout=60)
+    except (OSError, subprocess.SubprocessError):
+        return None, ""
+    if done.returncode != 0:
+        return None, done.stdout or ""
+    return done.returncode, done.stdout or ""
+
+
+if os.path.exists(_GITIGNORE):
+    _ignored_md = sorted(set(_GITIGNORED_MD.findall(_read(_GITIGNORE))))
+    _code, _tracked_out = _git(["ls-files"])
+    if _code is None:
+        print("  note  git is unavailable (or this tree is not a repository) — "
+              "the tracked/ignored cross-check is skipped")
+    else:
+        _tracked = {line.strip().replace("\\", "/") for line in _tracked_out.splitlines()
+                    if line.strip()}
+        _published = sorted(name for name in _ignored_md if name in _tracked)
+        check("§5 every *.md named by .gitignore is UNTRACKED (an internal document stays internal)",
+              not _published,
+              f"ignored yet TRACKED (untrack with: git rm --cached <path>): {_published}")
+        check("§5 the closed world really has names to check (a guard over nothing is useless)",
+              len(_ignored_md) >= 5, f"patterns={_ignored_md}")
 
 
 # ════════════════════════════════════════════════════════════════════════════

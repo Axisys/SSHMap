@@ -10,6 +10,11 @@ import os
 from dataclasses import dataclass, asdict
 from typing import Optional, List
 
+try:  # the ONE atomic-write mechanism (`AGENTS.md` §4.4, `DOCUMENTATION.md` §71)
+    from ..storage import atomic as _atomic
+except ImportError:  # flat launch from the project root
+    from storage import atomic as _atomic
+
 
 @dataclass
 class Profile:
@@ -90,14 +95,9 @@ def save_profiles(profiles: List[Profile]) -> None:
         d = asdict(p)
         d.pop("password", None)  # the password lives only in the keyring, not in the JSON
         data.append(d)
-    # atomic write (tmp + fsync + os.replace) — like in storage/project.py;
-    # a crash mid-way through a direct open/write corrupted the entire profiles file.
-    tmp_path = _profiles_path() + ".tmp"
-    with open(tmp_path, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
-        f.flush()
-        os.fsync(f.fileno())
-    os.replace(tmp_path, _profiles_path())
+    # atomic write through the ONE mechanism (`storage/atomic.py`) — a crash mid-way through a
+    # direct open/write corrupted the entire profiles file; the failure still RAISES to the caller.
+    _atomic.publish_atomic(_profiles_path(), lambda temp: _atomic.dump_json(temp, data))
 
 
 def add_profile(name: str, user: str, password: str = "") -> Profile:

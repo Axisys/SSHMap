@@ -422,8 +422,9 @@ print("== §5 the release state ==")
 check_i18n_parity(LANGS)
 check_i18n_format(LANGS)
 check_release_state(ROOT)
-check("§5 the wave adds NO i18n key and NO schema move (a pure structure release; the release's own feature adds the elevated pane's TWENTY)",
-      EXPECTED_I18N_KEYS == 919 + 6 + 20 + 41 and VERSION_FORMAT == "0.9",
+check("§5 the wave adds NO i18n key and NO schema move (a pure structure release; the release's own "
+      "feature adds the elevated pane's TWENTY, v1.8.1 its 41 and v1.8.1.1 ONE)",
+      EXPECTED_I18N_KEYS == 919 + 6 + 20 + 41 + 1 and VERSION_FORMAT == "0.9",
       f"{EXPECTED_I18N_KEYS} / {VERSION_FORMAT}")
 check("§5 the pin names this release", releases_at_least(EXPECTED_APP_VERSION, "1.8"),
       EXPECTED_APP_VERSION)

@@ -32,6 +32,11 @@ try:
 except ImportError:  # flat launch from the project root
     import interactive_ask as _ask
 
+try:  # the ONE atomic-write mechanism of the application (`DOCUMENTATION.md` §71)
+    from ..storage import atomic as _atomic
+except ImportError:  # flat launch from the project root
+    from storage import atomic as _atomic
+
 #: The budget of ONE host-key question, in seconds (the ask primitive's own bound is the default).
 HOST_KEY_ASK_TIMEOUT_S = 300.0
 
@@ -160,14 +165,12 @@ class KnownHostsStore:
     """The ONE owner of `~/.sshmap/known_hosts`.
 
     Read-modify-write, never write-a-snapshot: `pin()` re-reads the file under the lock, merges the
-    entry and publishes it with `<path>.tmp` + `fsync` + `os.replace`, so a long-lived session can no
-    longer wipe a key pinned meanwhile and a crash can no longer leave a half file. A file that fails
-    to LOAD is never overwritten (it may be repairable) and puts the store into the DECLARED
-    "unpinned" state, which the caller reports to the user.
+    entry and publishes it through `storage/atomic.py` (a unique prefixed provisional file + `fsync`
+    + `os.replace`), so a long-lived session can no longer wipe a key pinned meanwhile and a crash
+    can no longer leave a half file. A file that fails to LOAD is never overwritten (it may be
+    repairable) and puts the store into the DECLARED "unpinned" state, which the caller reports.
 
-    Cross-process writers are deliberately OUT of scope and declared: the lock is a `threading.Lock`
-    (this application instance), and the atomic replace is what keeps a second instance from seeing a
-    truncated file.
+    The cross-process answer is NOT restated here: it is the ONE declaration of `storage/atomic.py`.
     """
 
     def __init__(self, path=None):
@@ -309,31 +312,19 @@ class KnownHostsStore:
         return False
 
     def _write(self, store) -> bool:
-        """Atomic publish: the SAME directory, `<path>.tmp`, fsync, then `os.replace`."""
+        """Atomic publish through the ONE write mechanism of the application (`storage/atomic.py`).
+
+        `store.save()` writes onto a UNIQUE provisional file, which is fsynced and replaced onto
+        the published path; nothing ever truncates the file a reader may be opening.
+        """
         path = self.path
-        temp = path + ".tmp"
-        directory = os.path.dirname(path)
-        if directory:
-            os.makedirs(directory, exist_ok=True)
         try:
-            # `HostKeys.save()` truncates and writes line by line — onto the TEMP name, which is
-            # exactly the shape that is safe for; nothing ever truncates the published file.
-            store.save(temp)
-            handle = os.open(temp, os.O_RDWR)
-            try:
-                os.fsync(handle)   # the bytes on the disk BEFORE the replace
-            finally:
-                os.close(handle)
-            os.replace(temp, path)
+            _atomic.publish_atomic(path, lambda temp: store.save(temp))
             return True
         except Exception as e:  # noqa: BLE001
             log = _log()
             if log:
                 log.error("Failed to publish known_hosts (%s): %s", path, e)
-            try:
-                os.remove(temp)
-            except OSError:
-                pass
             return False
 
 

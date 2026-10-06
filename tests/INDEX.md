@@ -133,6 +133,7 @@ of the file itself.
 | `test_freshness.py` | — | v1.5.3 — freshness everywhere: the collected facts get an age, and a red card answers "why". |
 | `test_groups.py` | — | Node groups on the map v0.8.1 (the "v0.8.1 groups" part of the old smoke test). |
 | `test_hardening_v1751.py` | — | The v1.7.5.1 hardening patch: the nine LOCAL security defects of the shipped ledger. |
+| `test_hardening_v1811.py` | — | The hardening patch of the 1.8.1 line (v1.8.1.1): the ONE atomic writer, the send identity, the spool and the two document guards. |
 | `test_hotkeys_config.py` | — | v1.3.2 — Configurable hotkeys (QKeySequenceEdit, action registry): the release's test. |
 | `test_hotkeys_palette.py` | — | Hotkeys and command palette v0.9.2 (a former smoke-test part). |
 | `test_i18n_languages.py` | — | v1.3.3 — Languages without writing code ("name" in JSON + parity policy + documentation): the release's themed test. |

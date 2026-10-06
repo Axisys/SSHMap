@@ -10,6 +10,7 @@ reader's word wrap; §5 the provider of the window and the release state. Contra
 Run: python tests/test_files_surface.py   (from the project root) or python tests/run_all.py"""
 import os
 import sys
+import time
 
 from _common import (bootstrap, check, finish, wait_until, clear_cfg, write_cfg, load_i18n_langs,
                      check_i18n_parity, check_i18n_format, check_release_state, read_cfg,
@@ -161,6 +162,15 @@ def spool_files():
     return sorted(n for n in names if n.startswith(SEND.SPOOL_PREFIX))
 
 
+def age_file(path, seconds):
+    """Push a file's mtime `seconds` into the past (the sweep's rule is an AGE, not a name)."""
+    old = time.time() - float(seconds)
+    try:
+        os.utime(path, (old, old))
+    except OSError:
+        pass
+
+
 def drop_event(mime, pos=QPoint(500, 500), action=Qt.DropAction.CopyAction,
                modifiers=Qt.KeyboardModifier.NoModifier):
     return QDropEvent(pos, action, mime, Qt.MouseButton.LeftButton, modifiers)
@@ -257,9 +267,15 @@ DATA = b"payload-" * 4096   # 32 KB — one whole chunk
 check("the ceiling of ONE send is the declared constant (100 MB)",
       SEND.MAX_SEND_BYTES == 100 * 1024 * 1024 and SEND.size_allowed(SEND.MAX_SEND_BYTES)
       and not SEND.size_allowed(SEND.MAX_SEND_BYTES + 1))
-check("only a real (host, ssh_port) pair is 'the same host' (an unknown host is a relay)",
-      SEND.same_host(SEND.SendEndpoint(host="h", port=22), SEND.SendEndpoint(host="H", port=22))
-      and not SEND.same_host(SEND.SendEndpoint(host="h"), SEND.SendEndpoint(host="h", port=2222))
+check("only a real (host, ssh_port, user) triple is 'the same host' (an unknown host or user is a relay)",
+      SEND.same_host(SEND.SendEndpoint(host="h", port=22, user="root"),
+                     SEND.SendEndpoint(host="H", port=22, user="root"))
+      and not SEND.same_host(SEND.SendEndpoint(host="h", user="root"),
+                             SEND.SendEndpoint(host="h", port=2222, user="root"))
+      and not SEND.same_host(SEND.SendEndpoint(host="h", port=22, user="root"),
+                             SEND.SendEndpoint(host="h", port=22, user="alice"))
+      and not SEND.same_host(SEND.SendEndpoint(host="h", port=22),
+                             SEND.SendEndpoint(host="h", port=22))
       and not SEND.same_host(SEND.SendEndpoint(), SEND.SendEndpoint()))
 
 SEND.sweep_spools()
@@ -308,8 +324,10 @@ fs_same.add_dir("/a")
 fs_same.add_dir("/b")
 fs_same.add_file("/a/same.bin", DATA)
 same_worker, same_log, _c3 = one_worker(fs_same)
-same_src = SEND.SendEndpoint(key="s1", host="10.10.0.7", port=22, worker=same_worker, directory="/a")
-same_dst = SEND.SendEndpoint(key="s2", host="10.10.0.7", port=22, worker=same_worker, directory="/b")
+same_src = SEND.SendEndpoint(key="s1", host="10.10.0.7", port=22, user="root",
+                             worker=same_worker, directory="/a")
+same_dst = SEND.SendEndpoint(key="s2", host="10.10.0.7", port=22, user="root",
+                             worker=same_worker, directory="/b")
 relay_same = SEND.SendRelay(same_src, same_dst, dict(entry, path="/a/same.bin", name="same.bin"))
 same_results = []
 relay_same.finished.connect(same_results.append)
@@ -371,11 +389,25 @@ check("a Cancel ends the send without a target file",
 check("...and DELETES the spool (the acceptance sentence of the release)",
       spool_files() == [], str(spool_files()))
 
-check("the sweep removes the stale spools of a crashed run (the startup door)",
-      SEND.prepare_spool(SEND.spool_path("stale-a", token=1))
-      and SEND.prepare_spool(SEND.spool_path("stale-b", token=2))
-      and len(spool_files()) == 2 and SEND.sweep_spools() == 2 and spool_files() == [],
-      str(spool_files()))
+_stale_a = SEND.spool_path("stale-a", token=1)
+_stale_b = SEND.spool_path("stale-b", token=2)
+_live = SEND.create_spool("live-sibling")
+_prepared = (SEND.prepare_spool(_stale_a) and SEND.prepare_spool(_stale_b)
+             and bool(_live) and SEND.prepare_spool(_live))
+age_file(_stale_a + PART_SUFFIX, SEND.SPOOL_MAX_AGE_SEC + 60)
+age_file(_stale_b + PART_SUFFIX, SEND.SPOOL_MAX_AGE_SEC + 60)
+_removed = SEND.sweep_spools()
+check("the sweep takes the CRASHED run's spools by AGE and leaves a LIVE instance's own alone",
+      _prepared and _removed >= 2
+      and not os.path.exists(_stale_a + PART_SUFFIX) and not os.path.exists(_stale_b + PART_SUFFIX)
+      and os.path.exists(_live) and os.path.exists(_live + PART_SUFFIX),
+      f"prepared={_prepared} removed={_removed} left={spool_files()}")
+SEND.drop_spool(_live)
+_young_path = SEND.spool_path("young", token=3)
+check("a YOUNG spool survives the startup sweep (a live sibling is never cut in half)",
+      SEND.prepare_spool(_young_path) and SEND.sweep_spools() == 0
+      and os.path.exists(_young_path + PART_SUFFIX), str(spool_files()))
+SEND.drop_spool(_young_path)
 
 # the coordinator: the folder question, the conflict facts, the cancelled dialog
 class _FakeSendDialog:
@@ -385,12 +417,13 @@ class _FakeSendDialog:
     SEEN = []
 
     def __init__(self, parent=None, entry=None, target=None, folders=(), default_dir="/",
-                 same_host=True):
+                 same_host=True, user=""):
         self.entry = dict(entry or {})
         self.target = target
         self.folders = list(folders)
         self.default_dir = default_dir
         self.same = same_host
+        self.user = user
         self._choice = self.SCRIPT.pop(0) if self.SCRIPT else None
         _FakeSendDialog.SEEN.append(self)
 
@@ -412,7 +445,8 @@ fs_c2.add_dir("/in")          # the source's folder EXISTS on the target (the do
 fs_c2.add_dir("/out")
 c1_worker, c1_log, _c8 = one_worker(fs_c1)
 c2_worker, c2_log, _c9 = one_worker(fs_c2)
-co_source = SEND.SendEndpoint(key="cs", label="alpha", host="ha", worker=c1_worker, directory="/in")
+co_source = SEND.SendEndpoint(key="cs", label="alpha", host="ha", user="root",
+                              worker=c1_worker, directory="/in")
 co_target = SEND.SendEndpoint(key="ct", label="beta", host="hb", worker=c2_worker, directory="/out",
                               folders=["/out"], facts={"old.txt": (False, 10, 1700000000)})
 asked = []
@@ -429,6 +463,9 @@ check("the dialog is opened with the TARGET's folders and the source folder as t
       and _FakeSendDialog.SEEN[-1].default_dir == "/in"
       and _FakeSendDialog.SEEN[-1].same is False,
       str(_FakeSendDialog.SEEN[-1].default_dir if _FakeSendDialog.SEEN else None))
+check("the dialog is TOLD the identity the server-side path would run as (the source's user)",
+      bool(_FakeSendDialog.SEEN) and _FakeSendDialog.SEEN[-1].user == co_source.user,
+      str(_FakeSendDialog.SEEN[-1].user if _FakeSendDialog.SEEN else None))
 check("the chosen folder takes the RELAY and the file is there",
       bool(coord_results) and coord_results[0]["ok"] and fs_c2.files.get("/in/one.txt") == b"one")
 check("no conflict is asked on a name the target does not have", asked == [], str(asked))

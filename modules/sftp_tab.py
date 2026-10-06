@@ -2079,7 +2079,7 @@ class SftpTab(QWidget):
         """The endpoint of THIS session: its identity, its worker and the pane's directory."""
         return send.SendEndpoint(key=self.session_key(), label=self._session_label,
                                  host=self._session_host, port=self._session_port,
-                                 worker=self._worker,
+                                 user=self._session_user, worker=self._worker,
                                  directory=(pane.current_dir if pane is not None else "/"))
 
     @staticmethod

@@ -30,6 +30,11 @@ try:  # v1.2.5: the central theme (the terminal_page/terminal_dock pattern)
 except ImportError:
     from ui import theme
 
+try:  # the ONE atomic-write mechanism (`AGENTS.md` §4.4, `DOCUMENTATION.md` §71)
+    from ..storage import atomic as _atomic
+except ImportError:  # flat launch from the project root
+    from storage import atomic as _atomic
+
 
 # ── i18n / config (cached helpers per the ssh_terminal.py pattern) ──────────
 
@@ -86,27 +91,11 @@ def _default_store_path() -> str:
 
 
 def _atomic_write_json(path: str, doc) -> bool:
-    """An atomic write of the WHOLE document (tmp + flush + fsync + os.replace).
+    """An atomic write of the WHOLE document through `storage/atomic.py` — the ONE mechanism.
 
-    The i18n.save_config() pattern, but WITHOUT merge: commands.json belongs entirely
-    to this module — merging foreign keys is neither needed nor safe here. False on OSError."""
-    d = os.path.dirname(path)
-    tmp = path + ".tmp"
-    try:
-        if d:
-            os.makedirs(d, exist_ok=True)
-        with open(tmp, "w", encoding="utf-8") as f:
-            json.dump(doc, f, ensure_ascii=False, indent=2)
-            f.flush()
-            os.fsync(f.fileno())
-        os.replace(tmp, path)   # an atomic rename (one file system)
-        return True
-    except OSError:
-        try:
-            os.remove(tmp)
-        except OSError:
-            pass
-        return False
+    Deliberately NO merge: commands.json belongs entirely to this module — merging foreign keys is
+    neither needed nor safe here. False on OSError; a failed write leaves no `*.tmp` behind."""
+    return _atomic.write_json_atomic(path, doc)
 
 
 def _seed_entries() -> list:

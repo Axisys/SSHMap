@@ -437,8 +437,8 @@ check_i18n_parity(LANGS)
 check_i18n_format(LANGS)
 check_release_state(ROOT)
 check("§7 the waves add NO i18n key and NO schema move (the release's OWN feature adds its 20, "
-      "`ELEVATED_PANE.md`)",
-      EXPECTED_I18N_KEYS == 925 + 20 + 41 and VERSION_FORMAT == "0.9",
+      "`ELEVATED_PANE.md`; v1.8.1 adds its 41 and v1.8.1.1 ONE)",
+      EXPECTED_I18N_KEYS == 925 + 20 + 41 + 1 and VERSION_FORMAT == "0.9",
       f"{EXPECTED_I18N_KEYS} / {VERSION_FORMAT}")
 check("§7 the pin names this release", releases_at_least(EXPECTED_APP_VERSION, "1.8"),
       EXPECTED_APP_VERSION)

@@ -30,6 +30,11 @@ try:  # the central theme (the terminal_page / command_library pattern)
 except ImportError:
     from ui import theme
 
+try:  # the ONE atomic-write mechanism (`AGENTS.md` §4.4, `DOCUMENTATION.md` §71)
+    from ..storage import atomic as _atomic
+except ImportError:  # flat launch from the project root
+    from storage import atomic as _atomic
+
 
 # ── i18n (the cached-translator pattern of modules/ssh_terminal.py) ─────────
 
@@ -498,28 +503,12 @@ def history_path_for(server_id, directory: str = None) -> str:
 
 
 def _atomic_write_json(path: str, doc) -> bool:
-    """The whole-document atomic write (tmp + flush + fsync + os.replace); False on OSError.
+    """The whole-document atomic write through `storage/atomic.py` — the ONE mechanism.
 
-    The `command_library._atomic_write_json` / `storage.autosave.atomic_write_json` pattern —
-    local, because `modules/*` owns its content file and answers a bool instead of raising.
+    `modules/*` owns its content file and answers a bool instead of raising; a failed write leaves
+    no `*.tmp` behind.
     """
-    d = os.path.dirname(path)
-    tmp = path + ".tmp"
-    try:
-        if d:
-            os.makedirs(d, exist_ok=True)
-        with open(tmp, "w", encoding="utf-8") as f:
-            json.dump(doc, f, ensure_ascii=False, indent=2)
-            f.flush()
-            os.fsync(f.fileno())
-        os.replace(tmp, path)   # an atomic rename (one file system)
-        return True
-    except OSError:
-        try:
-            os.remove(tmp)
-        except OSError:
-            pass
-        return False
+    return _atomic.write_json_atomic(path, doc)
 
 
 class CommandHistoryStore:
@@ -600,15 +589,17 @@ class CommandHistoryStore:
         """Re-read the file, fold `entries` into it, write the result; return the new list.
 
         The ONLY write path: the file is the truth and the caller's memory is a proposal, so a
-        second session of the same node can write at any moment without losing commands.
+        second session of the same node can write at any moment without losing commands. The whole
+        read-fold-write runs under `atomic_lock()`, so two writers cannot drop each other's entries.
         """
-        merged = merge_entries(self._read_entries(), entries)
-        if not self._write(merged):
-            lg = _log()
-            if lg is not None:
-                lg.warning(f"command history: write failed for {self.path}")
-            return self._read_entries()
-        return merged
+        with _atomic.atomic_lock(self.path):
+            merged = merge_entries(self._read_entries(), entries)
+            if not self._write(merged):
+                lg = _log()
+                if lg is not None:
+                    lg.warning(f"command history: write failed for {self.path}")
+                return self._read_entries()
+            return merged
 
     def record(self, cmd, timestamp=None) -> list:
         """Record ONE command the application sent (an explicit timestamp — a test seam).
