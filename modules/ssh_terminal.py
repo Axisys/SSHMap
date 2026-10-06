@@ -241,9 +241,11 @@ class SSHTerminalThread(QThread):
         # known-hosts policy and the single `connect()` moved to `modules/ssh_connect.py`; this
         # thread keeps the session it opens and the sentences it reports.
         try:
-            from .ssh_connect import CONNECT_TIMEOUT_S, connect_client
+            from .ssh_connect import (CONNECT_TIMEOUT_S, ConnectionCancelled, HostKeyRejected,
+                                      connect_client)
         except ImportError:  # flat layout
-            from ssh_connect import CONNECT_TIMEOUT_S, connect_client
+            from ssh_connect import (CONNECT_TIMEOUT_S, ConnectionCancelled, HostKeyRejected,
+                                     connect_client)
 
         try:
             self.status_signal.emit(t("terminal.connecting", user=self.user, host=self.host, port=self.port))
@@ -339,6 +341,11 @@ class SSHTerminalThread(QThread):
                 msg = t("ssh.auth_failed")
                 self.error_signal.emit(msg if not msg.startswith("[") else "Authentication failed")
         except paramiko.SSHException as e:
+            # v1.8.1 (N63): the user's own refusal keeps its FINISHED sentence — a host key that was
+            # rejected and a prompt nobody answered are not "SSH error: …".
+            if self.running and isinstance(e, (HostKeyRejected, ConnectionCancelled)):
+                self.error_signal.emit(str(e))
+                return
             if self.running:
                 msg = t("ssh.ssh_error", message=str(e))
                 self.error_signal.emit(msg if not msg.startswith("[") else f"SSH error: {e}")

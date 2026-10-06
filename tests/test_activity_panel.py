@@ -618,9 +618,9 @@ check("§5 the ONE new action is registered with an EMPTY default (assignable, n
       and HR.action_family("view.toggle_activity") == "view")
 check("§5 the registry grew 51 -> 52 in v1.5.2 (and 52 -> 54 with the v1.5.3 pair,"
       " 54 -> 56 with the v1.5.5 inventory pair, -> 59 with the v1.6 trio, -> 60 with v1.6.7,"
-      " -> 61 with v1.6.8) and the empty-default "
+      " -> 61 with v1.6.8, -> 62 with v1.8.1) and the empty-default "
       "set 28 -> 29 (-> 31, -> 33, -> 36, -> 37, -> 38)",
-      len(HR.HOTKEY_ACTIONS) == 61 and len(HR.empty_default_action_ids()) == 38,
+      len(HR.HOTKEY_ACTIONS) == 62 and len(HR.empty_default_action_ids()) == 39,
       f"{len(HR.HOTKEY_ACTIONS)} / {len(HR.empty_default_action_ids())}")
 
 _win = make_main()

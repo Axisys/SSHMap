@@ -289,12 +289,18 @@ def build_ssh_args(host: str, user: str, port: int = 22,
     known_hosts — the system one (~/.ssh/known_hosts), NOT ~/.sshmap. A `--` closes the option list
     BEFORE the address (v1.7.5.1): without it an empty user turns a `-o…` host into an ssh OPTION
     (`ssh -oProxyCommand=calc`) — verified against the shipped OpenSSH, which accepts `--`.
+    `key_path` goes through the ONE local-path resolver (v1.8.1), so `~/keys/id` reaches `ssh -i`
+    expanded; an absolute path is passed byte for byte.
     """
     args = ["ssh"]
     if port and int(port) != 22:
         args += ["-p", str(int(port))]
     if key_path:
-        args += ["-i", key_path]
+        try:
+            from .local_paths import resolve_local_path
+        except ImportError:
+            from local_paths import resolve_local_path
+        args += ["-i", resolve_local_path(key_path)]
     if jump:
         args += ["-J", jump]
     args += ["-o", "ConnectTimeout=10"]

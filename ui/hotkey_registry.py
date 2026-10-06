@@ -147,6 +147,9 @@ HOTKEY_ACTIONS: Dict[str, dict] = {
     "view.set_background":  {"label": "view.set_background",  "default": ""},
     "view.remove_background": {"label": "view.remove_background", "default": ""},
     "profile.manage":       {"label": "profile.manage",       "default": ""},
+    # Profile → Known hosts (v1.8.1): the manager of the trust store. An EMPTY default, like the
+    # profile manager beside it — assignable, no key taken from anyone.
+    "hostkey.manage":       {"label": "hostkey.manage",       "default": ""},
     "help.open_logs":       {"label": "help.open_logs",       "default": ""},
     "help.about":           {"label": "about.open",           "default": ""},
     # The two Help entries. "Keyboard shortcuts" — the registry-derived cheat-sheet that Help → About

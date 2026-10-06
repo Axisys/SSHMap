@@ -159,12 +159,13 @@ class ProjectIOMixin:
             self._update_counts_label()   # the counters tell the truth of the MAP
         return painted
 
-    def _import_project_raw(self, raw: dict):
+    def _import_project_raw(self, raw: dict, base_dir=None):
         """Import an already-loaded JSON project into the scene.
 
         Extracted from _open_project() for tests and backward-compat: v0.6
         files have no "type" field on connections — the default type (SSH)
-        is substituted.
+        is substituted. `base_dir` (v1.8.1) is the folder of the project FILE: a relative path in
+        the `"background"` entry is resolved against it.
         """
         self.scene.clear_all()
 
@@ -288,7 +289,8 @@ class ProjectIOMixin:
             from background_image import BackgroundImage as _BgCls
         bg_raw = raw.get('background')
         if isinstance(bg_raw, dict):
-            bg = _BgCls.try_from_dict(bg_raw)
+            # v1.8.1: a RELATIVE image path in the entry is read next to the project file.
+            bg = _BgCls.try_from_dict(bg_raw, base_dir=base_dir)
             if bg is not None:
                 self.scene.addItem(bg)
                 self.scene._background = bg
@@ -494,7 +496,7 @@ class ProjectIOMixin:
         try:
             server_count = len(raw.get('servers', []))
 
-            self._import_project_raw(raw)
+            self._import_project_raw(raw, base_dir=os.path.dirname(os.path.abspath(path)) or None)
 
             # UI polish: restore the saved view state (zoom + center).
             # _do_save() writes these fields to the JSON; the old code ignored
@@ -522,7 +524,8 @@ class ProjectIOMixin:
 
             # Load passwords from keyring if available
             try:
-                from services.credential_manager import get_credential_manager as _get_cm
+                from services.credential_manager import (get_credential_manager as _get_cm,
+                                                         node_scope)
                 cm = _get_cm()
                 for node in list(self.scene.nodes()):
                     # v1.6.5 (ROADMAP task 1): an UNMANAGED card has no credentials — the
@@ -531,7 +534,8 @@ class ProjectIOMixin:
                     if _is_unmanaged(node.data):
                         continue
                     sid = getattr(node.data, 'id', '')
-                    cached_pw = cm.load_password(sid)
+                    # v1.8.1 (N47): a credential is read only for the endpoint it was SAVED for.
+                    cached_pw = cm.load_password(sid, scope=node_scope(node.data))
                     if cached_pw:
                         node.data.password = cached_pw
             except Exception as e:
@@ -771,7 +775,8 @@ class ProjectIOMixin:
             # The result is checked: if the keyring is unavailable the
             # password is NOT reset — otherwise it would silently vanish
             # (former AUDIT.md, medium #12 — see CHANGELOG.md).
-            from services.credential_manager import get_credential_manager as _get_cm
+            from services.credential_manager import (get_credential_manager as _get_cm,
+                                                     node_scope)
             cm = _get_cm()
             unsaved_aliases = []
             for node in list(self.scene.nodes()):
@@ -783,7 +788,9 @@ class ProjectIOMixin:
                 # (a hand-edited file, an older build, a programmatic path) still does not
                 # leave the process.
                 if pw and not _is_unmanaged(node.data):  # only save non-empty passwords to keyring
-                    saved_to_store = cm.is_available and bool(cm.save_password(sid, pw))
+                    # v1.8.1 (N47): the entry records the endpoint it was saved FOR.
+                    saved_to_store = cm.is_available and bool(
+                        cm.save_password(sid, pw, scope=node_scope(node.data)))
                     if saved_to_store:
                         node.data.password = ""  # clear in memory — the password is in the store
                     else:
@@ -840,11 +847,12 @@ class ProjectIOMixin:
         except Exception as e:
             # Restore passwords from keyring on failure so they're not lost
             try:
-                from services.credential_manager import get_credential_manager as _get_cm2
+                from services.credential_manager import (get_credential_manager as _get_cm2,
+                                                         node_scope)
                 cm = _get_cm2()
                 for node in list(self.scene.nodes()):
                     sid = getattr(node.data, 'id', '')
-                    cached_pw = cm.load_password(sid)
+                    cached_pw = cm.load_password(sid, scope=node_scope(node.data))
                     if cached_pw:
                         node.data.password = cached_pw
             except Exception:

@@ -61,6 +61,7 @@ class SSHConnectDialog(QDialog):
         self._profiles: List[Dict[str, str]] = []
 
         self._build_ui()
+        self._refresh_credential_hint()
 
     def _ensure_profiles_loaded(self):
         """Load profiles into cache once (without passwords)."""
@@ -156,6 +157,16 @@ class SSHConnectDialog(QDialog):
         form_layout.addRow(self.t("ssh.password_label"), self.password_edit)
         form_layout.addRow(self.t("ssh.port_label"), self.port_edit)
 
+        # v1.8.1 (N47): the password lives in the keyring UNDER THE ENDPOINT it was saved for, so a
+        # credential saved for another host is deliberately not offered here — and the reason is said
+        # out loud instead of leaving an empty field unexplained.
+        self.scope_hint = QLabel("")
+        self.scope_hint.setWordWrap(True)
+        self.scope_hint.setStyleSheet(f"color: {theme.SELECTION_AMBER};")
+        form_layout.addRow("", self.scope_hint)
+        self.user_edit.textChanged.connect(self._refresh_credential_hint)
+        self.port_edit.valueChanged.connect(self._refresh_credential_hint)
+
         # UI polish: emojis removed from the i18n values (server.key, ssh.connect, ssh.test);
         # don't add them in the code — there was a duplication bug ("🔑 🔑 SSH key").
         key_btn = QPushButton(self.t("server.key"))
@@ -233,6 +244,29 @@ class SSHConnectDialog(QDialog):
         self.status_label = QLabel("")
         self.status_label.setStyleSheet(f"color: {theme.TEXT_MUTED};")
         layout.addWidget(self.status_label)
+
+    def _refresh_credential_hint(self, *_args):
+        """Say WHY the stored password is not offered: it belongs to another endpoint (v1.8.1, N47)."""
+        try:
+            self.scope_hint.setText(self._credential_hint_text())
+        except RuntimeError:
+            pass  # the C++ widgets are gone (a late signal) — the hint is cosmetic
+
+    def _credential_hint_text(self) -> str:
+        """The sentence for a credential stored for ANOTHER endpoint — "" when there is none."""
+        try:
+            from ..services.credential_manager import endpoint_scope, get_credential_manager
+        except ImportError:
+            from services.credential_manager import endpoint_scope, get_credential_manager
+        try:
+            saved = get_credential_manager().stored_scope(self.server_data.id)
+        except Exception:  # noqa: BLE001 — no keyring: nothing is stored, nothing to explain
+            return ""
+        wanted = endpoint_scope(self.user_edit.text().strip(),
+                                self.server_data.host.strip(), self.port_edit.value())
+        if saved and wanted and saved != wanted:
+            return self.t("ssh.credential_scope_mismatch", saved=saved, current=wanted)
+        return ""
 
     def _on_profile_changed(self, index: int):
         """When profile selected → auto-fill user + password from keyring."""

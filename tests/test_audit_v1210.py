@@ -139,7 +139,7 @@ try:
 
     # The password from the keyring (a fake credential manager) + key_path.
     class _FakeCM:
-        def load_password(self, server_id):
+        def load_password(self, server_id, scope=None):
             return "ring-pw"
 
     _orig_gcm = CM.get_credential_manager

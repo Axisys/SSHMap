@@ -382,9 +382,10 @@ check("§4 the two new actions are registered with an EMPTY default (assignable,
       and HR.default_sequence("file.docs_frame") == ""
       and {"file.copy_map", "file.docs_frame"} <= set(HR.empty_default_action_ids()))
 check("§4 the registry grew 49 -> 51 in v1.5.1 (+v1.5.2's View item -> 52, +the v1.5.3 pair -> 54,"
-      " +the v1.5.5 inventory pair -> 56, the v1.6 trio -> 59, v1.6.7 -> 60 and v1.6.8 -> 61)"
+      " +the v1.5.5 inventory pair -> 56, the v1.6 trio -> 59, v1.6.7 -> 60, v1.6.8 -> 61 "
+      "and v1.8.1 -> 62)"
       " and the empty-default set 26 -> 28 (-> 29, -> 31, -> 33, -> 36, -> 37, -> 38)",
-      len(HR.HOTKEY_ACTIONS) == 61 and len(HR.empty_default_action_ids()) == 38,
+      len(HR.HOTKEY_ACTIONS) == 62 and len(HR.empty_default_action_ids()) == 39,
       f"{len(HR.HOTKEY_ACTIONS)} / {len(HR.empty_default_action_ids())}")
 check("§4 every registry action is still bound to a real object in a live window",
       all(len(targets) > 0 for targets in make_main()._hotkey_targets.values()))

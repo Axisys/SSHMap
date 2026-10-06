@@ -385,10 +385,10 @@ class _FakeCM:
     def __init__(self):
         self.store = {}
 
-    def load_password(self, sid):
+    def load_password(self, sid, scope=None):
         return self.store.get(sid)
 
-    def save_password(self, sid, pw):
+    def save_password(self, sid, pw, scope=""):
         self.store[sid] = pw
         return True
 

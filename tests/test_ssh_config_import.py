@@ -495,11 +495,12 @@ check("§8 the registry grew 43 → 44 (v1.4.2 added view.toggle_minimap → 45;
       "v1.5rc4 added view.focus_map → 49; v1.5.1 → 51; v1.5.2 added view.toggle_activity → 52; "
       "v1.5.3 added node.collect_info + node.diagnose → 54; "
       "v1.5.5 added file.copy_list + file.export_list → 56, v1.6 the bulk edit / arrangement / "
-      "connection report trio → 59 → 60 and v1.6.8 the attention report → 61)",
-      len(HR.HOTKEY_ACTIONS) == 61, str(len(HR.HOTKEY_ACTIONS)))
+      "connection report trio → 59 → 60, v1.6.8 the attention report → 61 and "
+      "v1.8.1 the known-hosts manager → 62)",
+      len(HR.HOTKEY_ACTIONS) == 62, str(len(HR.HOTKEY_ACTIONS)))
 check("§8 …and the empty defaults 21 → 22 (v1.4.2: 23; v1.4.5: 24; v1.5rc3: 25; v1.5rc4: 26; "
-      "v1.5.1: 28; v1.5.2: 29; v1.5.3: 31; v1.5.5: 33; v1.6: 36; v1.6.7: 37; v1.6.8: 38)",
-      len(HR.empty_default_action_ids()) == 38, str(len(HR.empty_default_action_ids())))
+      "v1.5.1: 28; v1.5.2: 29; v1.5.3: 31; v1.5.5: 33; v1.6: 36; v1.6.7: 37; v1.6.8: 38; v1.8.1: 39)",
+      len(HR.empty_default_action_ids()) == 39, str(len(HR.empty_default_action_ids())))
 
 
 def menu_action(win, action_id):

@@ -46,6 +46,20 @@ def main():
         app = QApplication(sys.argv)
         app.setStyle('Fusion')
 
+        # v1.8.1 (ROADMAP v1.8.1): the interactive TRUST SURFACE. A host key is verified and a private
+        # key is unlocked on the CONNECT thread, so those questions are answered from a window here
+        # (`ui/trust_surface.py` + `modules/interactive_ask.py`). Without this install the shipped TOFU
+        # fallback applies — which is exactly what a headless run and the suite rely on.
+        try:
+            from ui.trust_surface import install as _install_trust_surface
+        except ImportError:
+            from .ui.trust_surface import install as _install_trust_surface
+        try:
+            _install_trust_surface()
+        except Exception as e:
+            if log is not None:
+                log.warning(f"The interactive trust surface did not install: {e}")
+
         # The base palette AND the application QSS are built from the ACTIVE theme, and the ACTIVE
         # theme is the SAVED one, applied BEFORE the window exists, so nothing is ever constructed
         # with the wrong palette; an `auto` mode is resolved here too (the platform's colour scheme

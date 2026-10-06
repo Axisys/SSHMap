@@ -128,7 +128,7 @@ class _FakeChecker:
 print("== 1. the registry is complete ==")
 
 ids = HR.action_ids()
-check("registry: 61 actions — the v1.3.2 set + Save As + the zoom family + the empty defaults "
+check("registry: 62 actions — the v1.3.2 set + Save As + the zoom family + the empty defaults "
       "(v1.3.3.7: +file.export_svg; v1.4rc1: +plugins.reload; v1.4rc3: +plugins.run_on_nodes; "
       "v1.4.1: +file.import_ssh_config; v1.4.2: +view.toggle_minimap; "
       "v1.4.5: +view.toggle_legend; v1.5rc3: +help.cheatsheet (F1) and +help.example; "
@@ -138,8 +138,8 @@ check("registry: 61 actions — the v1.3.2 set + Save As + the zoom family + the
       "v1.5.5: +file.copy_list and +file.export_list — the inventory report pair, both EMPTY defaults; "
       "v1.6: +edit.selected, +edit.arrange_group and +file.export_connections — the bulk edit / "
       "arrangement / connection report trio, all EMPTY defaults; "
-      "v1.6.8: +file.export_problems — the attention report, an EMPTY default as well)",
-      len(ids) == 61 and len(set(ids)) == 61, str(len(ids)))
+      "v1.6.8: +file.export_problems — the attention report, an EMPTY default as well; v1.8.1: +hostkey.manage — the known-hosts manager, an EMPTY default too)",
+      len(ids) == 62 and len(set(ids)) == 62, str(len(ids)))
 check("registry: the 4 new SEQUENCED actions carry exactly the promised defaults",
       {a: HR.default_sequence(a) for a in NEW_DEFAULT_ACTIONS} == NEW_DEFAULT_ACTIONS,
       str({a: HR.default_sequence(a) for a in NEW_DEFAULT_ACTIONS}))

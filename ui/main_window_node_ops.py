@@ -474,11 +474,12 @@ class NodeOpsMixin:
         # v1.6.5 (ROADMAP task 1): unless the card is UNMANAGED — the keyring is never
         # written for such a card, and its copy is one of those cards too.
         try:
-            from services.credential_manager import get_credential_manager
+            from services.credential_manager import get_credential_manager, node_scope
             cm = get_credential_manager()
-            pw = None if _is_unmanaged(data) else cm.load_password(node.data.id)
+            scope = node_scope(data)
+            pw = None if _is_unmanaged(data) else cm.load_password(node.data.id, scope=scope)
             if pw:
-                cm.save_password(new_id, pw)
+                cm.save_password(new_id, pw, scope=scope)
         except Exception:  # noqa: BLE001 — the keyring is unavailable: the copy has no password
             pass
         from modules.undo_commands import CmdAddRemoveNode

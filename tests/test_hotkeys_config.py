@@ -100,6 +100,8 @@ EMPTY_DEFAULT_IDS = {
     # v1.6.8: the attention report — "Export Problems…" (Export menu), the closing
     # release's ONE new action, an EMPTY default like every other export.
     "file.export_problems",
+    # v1.8.1: the known-hosts manager — the Profile-menu surface over the trust store.
+    "hostkey.manage",
 }
 def new_window():
     """A MainWindow with the autosave timer stopped (no event loop in the tests)."""
@@ -138,17 +140,17 @@ ALL_IDS = sorted(set(EXPECTED_DEFAULTS) | EMPTY_DEFAULT_IDS)
 print("== 1. the action registry ==")
 
 ids = HR.action_ids()
-check("registry: the grown action set (23 sequenced + 38 empty-default; v1.5rc3 adds F1, "
+check("registry: the grown action set (23 sequenced + 39 empty-default; v1.5rc3 adds F1, "
       "v1.5rc4 adds view.focus_map, v1.5.1 the two map-image actions, v1.5.3 the "
       "freshness pair, v1.5.5 the inventory pair, v1.6 the bulk edit / arrangement / "
-      "connection report trio, v1.6.8 the attention report)",
-      set(ids) == set(ALL_IDS) and len(ids) == 61,
+      "connection report trio, v1.6.8 the attention report, v1.8.1 the trust store)",
+      set(ids) == set(ALL_IDS) and len(ids) == 62,
       str(sorted(set(ids) ^ set(ALL_IDS))))
 check("registry: the sequenced defaults are the v1.3.1.1 set + the v1.3.3.3 additions "
       "+ help.cheatsheet (F1, v1.5rc3)",
       {a: HR.default_sequence(a) for a in ids if HR.default_sequence(a)} == EXPECTED_DEFAULTS,
       str({a: HR.default_sequence(a) for a in ids if HR.default_sequence(a)}))
-check("registry: exactly the 38 remaining global actions carry an EMPTY default",
+check("registry: exactly the 39 remaining global actions carry an EMPTY default",
       {a for a in ids if not HR.default_sequence(a)} == EMPTY_DEFAULT_IDS
       and set(HR.empty_default_action_ids()) == EMPTY_DEFAULT_IDS,
       str(sorted(EMPTY_DEFAULT_IDS ^ {a for a in ids if not HR.default_sequence(a)})))
@@ -184,7 +186,7 @@ check("normalize: a broken value is None (a non-string or an unparsable sequence
 
 clear_cfg()
 mw = new_window()
-check("window: all 60 registry actions are bound to real targets",
+check("window: all 61 registry actions are bound to real targets",
       set(mw._hotkey_targets) == set(ids) and all(mw._hotkey_targets.values()),
       str(sorted(set(ids) ^ set(mw._hotkey_targets))))
 
@@ -284,7 +286,7 @@ check("load: an empty-default action keeps a sequence the user assigned to it",
       and effective["file.export_png"] == "", str(effective))
 
 clear_cfg()
-check("save: save_hotkeys() writes the 61 registry ids and returns True",
+check("save: save_hotkeys() writes the 62 registry ids and returns True",
       HR.save_hotkeys({"file.save": "Ctrl+Alt+S"}) and
       set(read_cfg({})["hotkeys"]) == set(ALL_IDS))
 check("save: normalized values (a broken mapping value is stored as the default)",
@@ -387,8 +389,8 @@ dlg._refresh_hotkey_conflicts()
 check("dialog: two disabled (empty) hotkeys are not a conflict",
       HR.find_conflicts(dlg.hotkey_sequences()) == set()
       and dlg.hotkey_sequences()["file.open"] == "" == dlg.hotkey_sequences()["edit.properties"])
-check("dialog: the 38 empty-default rows are not a conflict among themselves",
-      len([a for a in EMPTY_DEFAULT_IDS if dlg.hotkey_sequences()[a] == ""]) == 38
+check("dialog: the 39 empty-default rows are not a conflict among themselves",
+      len([a for a in EMPTY_DEFAULT_IDS if dlg.hotkey_sequences()[a] == ""]) == 39
       and HR.find_conflicts(dlg.hotkey_sequences()) == set())
 
 # A prefill from the config (a saved value shows up in the table)

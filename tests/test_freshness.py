@@ -726,8 +726,8 @@ check("§4 the placeholders of the new keys match en in every language",
           for k in NEW_KEYS for c in LANGS))
 check("§4 the registry grew 52 -> 54 (the assignable set 29 -> 31: no key out of the box; the "
       "v1.5.5 inventory pair takes it to 56 / 33; the v1.6 trio to 59 / 36, v1.6.7 to 60 / 37"
-      " and v1.6.8 to 61 / 38)",
-      len(HR.HOTKEY_ACTIONS) == 61 and len(HR.empty_default_action_ids()) == 38
+      " and v1.6.8 to 61 / 38, v1.8.1 to 62 / 39)",
+      len(HR.HOTKEY_ACTIONS) == 62 and len(HR.empty_default_action_ids()) == 39
       and {"node.collect_info", "node.diagnose"} <= set(HR.empty_default_action_ids()),
       f"{len(HR.HOTKEY_ACTIONS)} / {len(HR.empty_default_action_ids())}")
 check("§4 task 1's OPEN question is decided: the schema does NOT change",

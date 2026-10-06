@@ -58,7 +58,7 @@ Desktop application (Python + PySide6): an interactive map of your IT infrastruc
 ### Look, motion & keyboard
 - Dark, light and Auto (system) themes, an accent colour picked as a hue, a "Reduce motion" switch; the light palette is measured against each surface it is drawn on and gated by contrast tests. Meaning never lives in a colour alone: every connection type has its own line style, every status its own shape (dot / ring / triangle), and the legend samples both.
 - Motion can be interrupted - camera flights, a scale-in on add, hover focus on a connection; the wheel or a drag always wins.
-- Command palette on Ctrl+K, a searchable settings hub (8 tabs), all 61 global actions assignable in the Hotkeys tab; `?` or F1 opens the shortcut list. The map works from the keyboard alone (Tab / arrows / Enter).
+- Command palette on Ctrl+K, a searchable settings hub (8 tabs), all 62 global actions assignable in the Hotkeys tab; `?` or F1 opens the shortcut list. The map works from the keyboard alone (Tab / arrows / Enter).
 
 ### Projects & data
 - One JSON project file (`.json` / `.sshmap`); a recent-files list, a project dropped onto the window, autosave with a ring of backups - an unreadable file offers its newest autosave or backup instead of dead ends.
@@ -124,12 +124,15 @@ keychain on macOS; plaintext fallbacks are rejected. Without a secure backend th
 survive a restart. The external terminal is an OS `ssh` process: the password is entered there, never passed in argv.
 
 **Limitations:**
-- TOFU on first connect: a host key missing from `~/.sshmap/known_hosts` is accepted automatically (the fingerprint is logged). Protection kicks in when a recorded key changes - verify a critical host's first-connect fingerprint over a trusted channel. That file is written atomically and re-read before every addition, so two connections never overwrite each other's keys; if it cannot be read, the session says so and runs **unpinned** instead of pretending the key was saved.
+- A host key is never trusted in silence: a key missing from `~/.sshmap/known_hosts` opens a window with its algorithm and SHA256 fingerprint, and only an explicit accept pins it - verify a critical host's fingerprint over a trusted channel, since a first contact has nothing to compare against. A key that CHANGED shows both fingerprints and offers to replace the stored one, which is also the recovery path after a server is rebuilt. Profile -> Known hosts lists what is recorded, deletes one fingerprint (the next connection asks again) or replaces it with the key the server presents now, read without authenticating. That file is written atomically and re-read before every addition, so two connections never overwrite each other's keys; if it cannot be read, the session says so and runs **unpinned** instead of pretending the key was saved.
+- A host that asks for a SECOND FACTOR after accepting your key is answered in a window of this application, and an encrypted private key asks for its passphrase the same way - only when the file really needs one. Closing that window cancels the connection with a sentence instead of hanging on a prompt written to a console nobody is watching. Neither the code nor the passphrase is stored anywhere: not a config key, not a project field, not a log line.
+- A stored password belongs to the endpoint it was saved for (`user@host:port`): change a card's host, user or port and the saved password is not offered to the new address - the connect dialog says so and asks for it again. Entries saved before this rule are adopted once, for the address the card names at that moment. A profile password is deliberately not bound this way: a profile is a reusable credential you attach to a node.
+- `~` and relative paths work wherever a local path is typed or stored - a private key file, the map background image; an absolute path is used exactly as written.
 - The external terminal hands `ssh` a command line, so a host, a user or a jump host is accepted only when it is a plain name (`letters, digits, . - _ : [ ]`); anything a shell or a terminal parser could read as its own syntax is refused with a sentence, and the built-in terminal has no such limit. A key path is never restricted - a path with `&` is legal and works.
 - A quick-launch link and a bookmark open `http://` and `https://` only. The OS opener accepts any registered protocol handler and, on Windows, `webbrowser.open()` *is* `os.startfile()`, so a value from a foreign project could otherwise run a local file or a URI handler; the entry itself is kept, only the open is refused.
 - A remote name is checked before it becomes a local path: a download whose server-side name is invalid on this system (a path separator, a reserved device name such as `NUL`, a trailing dot or space) is refused with a sentence instead of writing outside the chosen folder or into a device. On Linux the same names are legal and are accepted.
 - Undo/redo covers the map (nodes, connections, notes, groups, imports, bulk edits, background image, group arrangements) but not node statuses.
-- A host key change and an unreadable project are reported, never repaired silently; recovery means an autosave or backup slot.
+- An unreadable project is reported, never repaired silently; recovery means an autosave or backup slot.
 - Plugins run inside the application's process: a plugin with a broken C extension can take it down - install plugins you trust.
 - The command history is a plain-text file per server under `~/.sshmap/history/`: what the app sent or you imported, so it can carry secrets (a token or password passed as an argument). Passwords typed into a shell are not recorded; a secret-shaped command is marked with a padlock but still kept. The file never enters a project, an export or the log.
 - The bookmarks list is plain JSON in `~/.sshmap/bookmarks.json`, outside every project and never exported - a link may carry a token in its query string, so treat it like the history: it holds what you put there, and opening an entry hands the address to your browser.
@@ -198,7 +201,7 @@ PySide6 / Qt 6 gotchas worth knowing before writing UI code:
 | `dialogs/` | Add/edit dialogs, connect, profiles, backups, imports, export options |
 | `ui/` | Main window and mixins, sidebar, theme, palette, panels, settings, hotkeys, icons |
 | `i18n/` | `en` (reference), `ru`, `zh`, `de` - one JSON file per language |
-| `tests/` | 129 test files, the parallel runner and the harness - map in `tests/INDEX.md` |
+| `tests/` | 130 test files, the parallel runner and the harness - map in `tests/INDEX.md` |
 | `examples/plugins/` | Two working example plugins, not installed and never auto-discovered |
 | `third_party/pyte/`, `third_party/pyte-patches/` | The managed pyte 0.8.2 fork: sdist plus explicit patches, provenance in the patches' `MANIFEST.md` |
 | `docs/` | The map image above, rendered from the example map |

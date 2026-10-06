@@ -307,10 +307,10 @@ check("the tab order: General / Appearance / Terminal / Files / Status Checks / 
 import ui.hotkey_registry as _HR
 
 _expected_rows = len(_HR.action_ids())
-check("'Hotkeys': one ACTION row per registry action (61 in v1.6.8: +the attention report "
+check("'Hotkeys': one ACTION row per registry action (62 in v1.8.1: +the known-hosts manager "
       "over the 60 of v1.6.7), grouped by family",
       len(dlg.hotkey_edits) == _expected_rows
-      and _expected_rows == 61
+      and _expected_rows == 62
       and dlg.hotkeys_table.rowCount() == _expected_rows + len(dlg.hotkey_family_rows())
       and [dlg._hotkey_rows[r][1] for r in dlg.hotkey_action_rows()]
       == [aid for fam in _HR.family_order() for aid in _HR.actions_by_family()[fam]],

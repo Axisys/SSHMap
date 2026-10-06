@@ -218,6 +218,7 @@ of the file itself.
 | `test_terminal_widget_split.py` | — | `1.8rc5` — the `terminal_widget.py` split: `TerminalWidget` becomes a facade over five canvas mixins. |
 | `test_theme.py` | — | v1.1.5 → v1.4.3 — the central theme `ui/theme.py`: the `Theme` object, LIGHT, the accent hue. |
 | `test_theme_contrast.py` | — | v1.5rc1 — the CONTRAST GATE: the LIGHT palette, the two accent roles and the numbers that pin them. |
+| `test_trust_surface.py` | — | v1.8.1 — the trust and keys surface: the first connection ASKS, the store is manageable, a credential |
 | `test_ui_density.py` | — | v1.4.5 — UI density & first run (ROADMAP v1.4.5): the compact sidebar grid, the first-run |
 | `test_ui_polish.py` | — | UI polish: nodes, grid, fit/zoom, status bar, icons, arrow hit zones (a former smoke-test part). |
 | `test_ui_requests.py` | — | v1.5.6 — the customer requests: the Export menu, a third first-run button, environment |

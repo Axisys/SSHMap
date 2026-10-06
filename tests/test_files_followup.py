@@ -599,6 +599,6 @@ check("the follow-up's four keys exist in EVERY language",
           for k in ("settings.tab.files", "settings.files.max_bytes",
                     "settings.files.max_bytes_warning", "sftp.viewer.truncated")))
 check("the i18n pin counts the slot's four keys (and the v1.8 elevated pane's 20)",
-      EXPECTED_I18N_KEYS == 915 + 4 + 6 + 20 and releases_at_least(EXPECTED_APP_VERSION, "1.7.5"),
+      EXPECTED_I18N_KEYS == 915 + 4 + 6 + 20 + 41 and releases_at_least(EXPECTED_APP_VERSION, "1.7.5"),
       f"{EXPECTED_I18N_KEYS} / {EXPECTED_APP_VERSION}")
 finish()

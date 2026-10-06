@@ -363,7 +363,7 @@ check("§4 the counts header is the LIVE table, not the registry",
       dlg._lbl_hotkeys_counts.text()
       == i18n.t("settings.hotkeys.counts", with_key=_with,
                 assignable=len(_counts) - _with)
-      and _with == 23 and len(_counts) - _with == 38,
+      and _with == 23 and len(_counts) - _with == 39,
       f"{_with} with a key, {len(_counts) - _with} assignable")
 
 check("§4 the assignment hint is shown next to the older 'clear to disable' one",
@@ -690,9 +690,9 @@ check("§8 the family map of the registry is complete (every action has a home)"
 
 check("§8 the registry grew by the panel/map toggles, the v1.5.3 freshness pair "
       "and the v1.5.5 inventory pair",
-      len(HR.action_ids()) == 61
+      len(HR.action_ids()) == 62
       and HR.default_sequence("view.focus_map") == ""
-      and len(HR.empty_default_action_ids()) == 38)
+      and len(HR.empty_default_action_ids()) == 39)
 
 _hub = SettingsDialog(None)
 check("§8 the hub's collect() carries 25 config.json keys (this section adds none)",

@@ -1532,8 +1532,24 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, StatusMixin, PluginMixi
         dlg = ProfileManagerDialog(self)
         if dlg.exec() == QDialog.Accepted:
             self.statusBar().showMessage(self.t("status.profile_updated"))
+        if self.log:
+            self.log.info("Profile manager closed (saved)")
+
+    def _open_known_hosts_manager(self):
+        """v1.8.1: Profile → Known hosts — what `~/.sshmap/known_hosts` records, and its two edits.
+
+        The store is the ONE owner of the file, so the dialog only asks it; the window stays the
+        assembly and the dialog is self-contained. Never raises: a UI error must not break the window.
+        """
+        try:
+            from .trust_surface import open_known_hosts_manager
+        except ImportError:  # flat launch from the project root
+            from ui.trust_surface import open_known_hosts_manager
+        try:
+            open_known_hosts_manager(self)
+        except Exception as e:  # noqa: BLE001 — a UI error must not break the window
             if self.log:
-                self.log.info("Profile manager closed (saved)")
+                self.log.warning(f"Known-hosts manager failed: {e}")
 
     def _open_log_file(self):
         """Open the log file in default text editor."""

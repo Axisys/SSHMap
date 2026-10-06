@@ -265,7 +265,8 @@ try:
     res_a = cm_a.delete_password("rc2del")
     check("without PasswordDeleteError → the generic handler, returns False",
           res_a is False, repr(res_a))
-    check("the backend is called (the exception from delete_password)", cm_a._keyring_backend.calls == 1)
+    check("the backend is called for the secret AND its endpoint scope (v1.8.1, N47)",
+          cm_a._keyring_backend.calls == 2, str(cm_a._keyring_backend.calls))
 finally:
     _restore_keyring_errors(saved_a)
 

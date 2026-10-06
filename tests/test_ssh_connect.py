@@ -117,8 +117,12 @@ try:
           _policy.hostname == "web-1" and _policy.port == 2222
           and _policy.applied_to == [_client] and _client.policy is _policy)
     check("§2 the ONE connect() carries the builder's own kwargs",
-          _client.connect_kwargs == SCON.build_connect_kwargs("web-1", "root", 2222, password="pw"),
+          {k: v for k, v in _client.connect_kwargs.items() if k != "transport_factory"}
+          == SCON.build_connect_kwargs("web-1", "root", 2222, password="pw"),
           str(_client.connect_kwargs))
+    check("§2 ...plus the ANSWERING transport the builder owns (the v1.8.1 handler contract)",
+          callable(_client.connect_kwargs.get("transport_factory")),
+          str(_client.connect_kwargs.get("transport_factory")))
     check("§2 the host is a KEYWORD argument (hostname=), never a positional one",
           _client._args == () and _client.connect_kwargs.get("hostname") == "web-1",
           str(_client._args))

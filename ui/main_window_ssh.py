@@ -1097,8 +1097,8 @@ class SshMixin:
         data = node.data
         pwd = ""
         try:
-            from services.credential_manager import get_credential_manager
-            pwd = get_credential_manager().load_password(data.id) or ""
+            from services.credential_manager import get_credential_manager, node_scope
+            pwd = get_credential_manager().load_password(data.id, scope=node_scope(data)) or ""
         except Exception:  # noqa: BLE001 — the keyring is unavailable: the dialog path
             pwd = ""
         if pwd or (data.key_path or "").strip():

@@ -49,7 +49,12 @@ class BackgroundImage(QGraphicsObject):
     def __init__(self, path: str, x: float = 0.0, y: float = 0.0,
                  width: float = None, height: float = None):
         super().__init__()
-        self._path = str(path or "")
+        # v1.8.1: the ONE local-path resolver — `~` and a relative path work here like everywhere.
+        try:
+            from ..modules.local_paths import resolve_local_path
+        except ImportError:
+            from modules.local_paths import resolve_local_path
+        self._path = resolve_local_path(path)
         self._pixmap = QPixmap(self._path)
 
         if self._pixmap.isNull():
@@ -241,15 +246,20 @@ class BackgroundImage(QGraphicsObject):
         }
 
     @classmethod
-    def try_from_dict(cls, raw: dict) -> "Optional[BackgroundImage]":
+    def try_from_dict(cls, raw: dict, base_dir=None) -> "Optional[BackgroundImage]":
         """Create the background from a JSON entry, or None (no file / corrupt entry).
 
         A missing image is NOT a project load error: the warning is logged by the
-        caller, and the map opens without the background.
+        caller, and the map opens without the background. `base_dir` is the folder of the project
+        file, so a RELATIVE path in the entry is read next to the project (v1.8.1).
         """
         if not isinstance(raw, dict):
             return None
-        path = str(raw.get("path") or "")
+        try:
+            from ..modules.local_paths import resolve_local_path
+        except ImportError:
+            from modules.local_paths import resolve_local_path
+        path = resolve_local_path(raw.get("path") or "", base_dir=base_dir)
         if not path or not os.path.isfile(path):
             return None
         try:

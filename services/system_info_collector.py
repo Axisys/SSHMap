@@ -564,7 +564,7 @@ class SystemInfoCollector(QThread):
         sid = self.data.id
         try:
             import paramiko
-            from services.credential_manager import get_credential_manager
+            from services.credential_manager import get_credential_manager, node_scope
             # v1.8rc6 (N50): the ONE connect builder (`AGENTS.md` §4.4) — the branch table, the
             # known-hosts policy and the single `connect()` are shared with the three other sites.
             try:
@@ -576,7 +576,7 @@ class SystemInfoCollector(QThread):
             if not final_password:
                 try:
                     cm = get_credential_manager()
-                    final_password = cm.load_password(sid) or ""
+                    final_password = cm.load_password(sid, scope=node_scope(self.data)) or ""
                 except Exception:
                     final_password = ""
 

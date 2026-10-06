@@ -547,7 +547,7 @@ check("§6 no new dependency (the four pinned ones and nothing else)",
 check("§6 VERSION_FORMAT did not move (the project schema is unchanged)",
       __import__("version").VERSION_FORMAT == "0.9")
 check("§6 the registry grew by the closing release's ONE export (the menu is a CONTAINER)",
-      len(action_ids()) == 61 and len(_EXPORT_IDS) == 10)
+      len(action_ids()) == 62 and len(_EXPORT_IDS) == 10)
 
 _questions.restore()
 PIO.QFileDialog.getSaveFileName = _orig_save_dialog

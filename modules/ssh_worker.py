@@ -61,6 +61,7 @@ class SSHWorker(QThread):
     def __init__(self, host: str, user: str, port: int, server_id: str = "",
                  password: str = "", key_path: str = "",
                  test_only: bool = False, load_from_store: bool = True,
+                 passphrase: str = "", verification_code: str = "",
                  parent=None):
         super().__init__(parent)
         # v1.6.4 (ROADMAP task 1): the MANAGED worker names itself. Qt's abort —
@@ -76,6 +77,9 @@ class SSHWorker(QThread):
         self.key_path = key_path
         self.test_only = test_only
         self.load_from_store = load_from_store
+        # v1.8.1 (N63): a secret the caller already collected — never logged, never serialized.
+        self.passphrase = passphrase
+        self.verification_code = verification_code
 
         # Register in the active worker registry (patch v0.6.x): the guard for
         # node removal. Auto-cleanup — on the thread's finished().
@@ -114,21 +118,25 @@ class SSHWorker(QThread):
     def _run_ssh_connect(self):
         import paramiko
         t = _get_translator()
-        from services.credential_manager import get_credential_manager
+        from services.credential_manager import endpoint_scope, get_credential_manager
 
         # v1.8rc6 (N50): the ONE connect builder (`AGENTS.md` §4.4) — the branch table, the
         # known-hosts policy and the single `connect()` live in `modules/ssh_connect.py`; this
         # site keeps only the credential resolution and the error reporting below.
         try:
-            from .ssh_connect import CONNECT_TIMEOUT_S, connect_client
+            from .ssh_connect import (CONNECT_TIMEOUT_S, ConnectionCancelled, HostKeyRejected,
+                                      connect_client)
         except ImportError:  # flat layout
-            from ssh_connect import CONNECT_TIMEOUT_S, connect_client
+            from ssh_connect import (CONNECT_TIMEOUT_S, ConnectionCancelled, HostKeyRejected,
+                                     connect_client)
 
         # Resolve password: explicit arg > credential manager > key-based fallback
         final_password = self.password or ""
         if not final_password and self.server_id and self.load_from_store:
             cm = get_credential_manager()
-            cached_pw = cm.load_password(self.server_id)
+            # v1.8.1 (N47): the credential is read only for the endpoint it was SAVED for.
+            cached_pw = cm.load_password(
+                self.server_id, scope=endpoint_scope(self.user, self.host, self.port))
             if cached_pw:
                 final_password = cached_pw
 
@@ -142,7 +150,9 @@ class SSHWorker(QThread):
             # no agent is polled before the attempt.
             client, policy = connect_client(self.host, self.user, self.port,
                                             password=final_password, key_path=self.key_path,
-                                            client=client, timeout=CONNECT_TIMEOUT_S)
+                                            client=client, timeout=CONNECT_TIMEOUT_S,
+                                            passphrase=self.passphrase,
+                                            verification_code=self.verification_code)
 
             msg = t("ssh.connected_ok", host=self.host)
             # AUDIT v0.7.2 (high #4): first connection — warn about the accepted key
@@ -168,6 +178,11 @@ class SSHWorker(QThread):
             msg = t("ssh.auth_failed")
             self.error.emit(msg if not msg.startswith("[") else "Authentication failed")
         except paramiko.SSHException as e:
+            # v1.8.1 (N63): the user's own refusal carries a FINISHED sentence — never re-wrapped
+            # into the generic "SSH error:" line, which would bury the reason in a prefix.
+            if isinstance(e, (HostKeyRejected, ConnectionCancelled)):
+                self.error.emit(str(e))
+                return
             msg = t("ssh.ssh_error", message=str(e))
             self.error.emit(msg if not msg.startswith("[") else f"SSH error: {e}")
         except OSError as e:

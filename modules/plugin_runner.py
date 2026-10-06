@@ -84,8 +84,9 @@ def default_credentials(node: PluginNode, node_facts: Optional[Dict[str, dict]] 
     """
     password = ""
     try:
-        from services.credential_manager import get_credential_manager
-        password = get_credential_manager().load_password(node.id) or ""
+        from services.credential_manager import get_credential_manager, endpoint_scope
+        password = get_credential_manager().load_password(
+            node.id, scope=endpoint_scope(getattr(node, "user", ""), node.host, node.port)) or ""
     except Exception:  # noqa: BLE001 — no keyring → the app still works (key/agent auth)
         password = ""
     facts = (node_facts or {}).get(node.id) or {}

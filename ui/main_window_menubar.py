@@ -204,6 +204,10 @@ class MenubarMixin:
         self._register_i18n(profile_menu, "menu.profile")
         self._add_menu_action(profile_menu, "profile.manage", self._open_profile_manager,
                               "profile.manage")
+        # v1.8.1 (ROADMAP v1.8.1): the known-hosts surface — the readable view of what the TOFU
+        # policy recorded, with "delete this fingerprint" and "replace it with the server's".
+        self._add_menu_action(profile_menu, "hostkey.manage", self._open_known_hosts_manager,
+                              "hostkey.manage")
 
         # View menu
         view_menu = menubar.addMenu(self.t("menu.view") if self._i18n_available else "View")

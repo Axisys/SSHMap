@@ -294,9 +294,12 @@ class CmdAddRemoveNode(_MapCommand):
         # and redo must RESTORE the record the undo deleted; for a fresh addition there is no
         # record yet — `load_password` returns None, the stash is empty, restore is a no-op.
         self._stashed_password: Optional[str] = None
+        self._stashed_scope = ""
         try:
-            from services.credential_manager import get_credential_manager
-            self._stashed_password = get_credential_manager().load_password(data.id)
+            from services.credential_manager import get_credential_manager, node_scope
+            self._stashed_scope = node_scope(data)
+            self._stashed_password = get_credential_manager().load_password(
+                data.id, scope=self._stashed_scope)
         except Exception:
             self._stashed_password = None
 
@@ -311,7 +314,8 @@ class CmdAddRemoveNode(_MapCommand):
         if self._stashed_password:
             try:
                 from services.credential_manager import get_credential_manager
-                get_credential_manager().save_password(self._data.id, self._stashed_password)
+                get_credential_manager().save_password(self._data.id, self._stashed_password,
+                                                       scope=self._stashed_scope)
             except Exception:
                 pass
 
@@ -370,10 +374,11 @@ class CmdAddRemoveNodeBatch(_MapCommand):
         self._stashed_passwords: List[Tuple[str, Optional[str]]] = []
         if mode == "remove":
             try:
-                from services.credential_manager import get_credential_manager
+                from services.credential_manager import get_credential_manager, node_scope
                 cm = get_credential_manager()
                 for d in self._data_list:
-                    self._stashed_passwords.append((d.id, cm.load_password(d.id)))
+                    self._stashed_passwords.append(
+                        (d.id, cm.load_password(d.id, scope=node_scope(d)), node_scope(d)))
             except Exception:
                 pass
 
@@ -390,9 +395,9 @@ class CmdAddRemoveNodeBatch(_MapCommand):
         try:
             from services.credential_manager import get_credential_manager
             cm = get_credential_manager()
-            for sid, pwd in self._stashed_passwords:
+            for sid, pwd, scope in self._stashed_passwords:
                 if pwd:
-                    cm.save_password(sid, pwd)
+                    cm.save_password(sid, pwd, scope=scope)
         except Exception:
             pass
 

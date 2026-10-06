@@ -44,11 +44,11 @@ BLOCK_BUDGET_LINES = 5     # a comment block in the body: the invariant + the po
 
 # ── The pins (the debt measured when the ratchet was introduced; LOWER them, never raise) ─────
 NARRATIVE_PIN = 0          # HISTORY_MARKERS matches in the code text — the goal state, reached by §7 step 5
-HEADER_LINES_PIN = 2439    # module docstring lines, all files — RAISED for v1.7.3 … v1.8, always with
+HEADER_LINES_PIN = 2501    # module docstring lines, all files — RAISED for v1.7.3 … v1.8.1, always with
                            # the reason in the changelog family: a NEW module or topical file needs a
-                           # header (`local_fs_worker`, the 38 files of the 1.8rc1–rc6 waves and the 1.8
-                           # FEATURE's five: the elevated provider, its pane mixin, its dialogue and
-                           # the two topical gates).
+                           # header (`local_fs_worker`, the 38 files of the 1.8rc1–rc6 waves, the 1.8
+                           # FEATURE's five, and the v1.8.1 trust surface's five: `local_paths`,
+                           # `interactive_ask`, the two dialogs and the topical gate).
 MAX_HEADER_PIN = 12        # the longest module docstring — the budget itself
 HEADER_FILES_PIN = 0       # module docstrings longer than HEADER_BUDGET_LINES — the goal state
 BLOCK_LINES_PIN = 0        # lines inside comment blocks longer than BLOCK_BUDGET_LINES — the goal state
