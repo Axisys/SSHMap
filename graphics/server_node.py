@@ -18,9 +18,11 @@ except ImportError:
     from ui import theme
 
 try:  # v1.8rc6 (N35): the ONE sentence of a refused disk request, composed where it is owned
-    from ..services.system_info_collector import disk_refusal_text, resolve_disk_mount
+    from ..services.system_info_collector import (disk_refusal_text, inode_alert,
+                                                  inode_percent, resolve_disk_mount)
 except ImportError:
-    from services.system_info_collector import disk_refusal_text, resolve_disk_mount
+    from services.system_info_collector import (disk_refusal_text, inode_alert,
+                                                inode_percent, resolve_disk_mount)
 
 try:  # v1.5rc2 (ROADMAP task 2): the DECLARED status shapes — the mark beside the colour
     from ..ui import status_shape
@@ -1076,13 +1078,33 @@ class ServerNode(QGraphicsItemGroup):
         EMPTY and the card therefore claims nothing, which is the whole point of keeping the
         REQUEST (`disk_mount`) and the ANSWER (`disk_path`) apart. Purely presentational: no
         value is derived and no measurement is invented here.
+
+        v1.8.4: an inode table at or above `INODE_ALERT_PERCENT` joins the SAME line (the
+        second sentence of `node.disk_mount_inodes`), because 40 % free space beside 100 %
+        used inodes is the lie the card must not keep telling. Below the line the percentage
+        stays in the tooltip alone, so an ordinary card renders byte for byte as before.
         """
         path = str(getattr(self.data, "disk_path", "") or "")
         free = str(getattr(self.data, "disk_free", "") or "")
         size = str(getattr(self.data, "disk_size", "") or "")
         if not (path and free and size):
             return ""
+        inodes = str(getattr(self.data, "disk_inodes", "") or "")
+        if inode_alert(inodes):
+            return _t("node.disk_mount_inodes", mount=path, free=free, size=size,
+                      pct=str(inode_percent(inodes)))
         return _t("node.disk_mount", mount=path, free=free, size=size)
+
+    def _disk_inodes_text(self) -> str:
+        """The measured inode use as ONE tooltip line (v1.8.4) — `""` when nothing was measured.
+
+        The fact is always readable (a hover answers "how full is the table"), while the CARD
+        names it only past the alert line — the device list's channel, one line above the note.
+        """
+        percent = inode_percent(getattr(self.data, "disk_inodes", ""))
+        if percent is None:
+            return ""
+        return _t("node.disk_inodes", pct=str(percent))
 
     def _disk_note_text(self) -> str:
         """The durable WHY of a refused disk request (v1.8rc6, N35) — a tooltip line, or `""`.
@@ -1127,6 +1149,9 @@ class ServerNode(QGraphicsItemGroup):
         devices = self._disk_devices_text()
         if devices:
             lines.append(devices)
+        inodes = self._disk_inodes_text()
+        if inodes:
+            lines.append(inodes)
         note = self._disk_note_text()
         if note:
             lines.append(note)

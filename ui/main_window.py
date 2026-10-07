@@ -1333,8 +1333,96 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, StatusMixin, PluginMixi
         except (AttributeError, RuntimeError):
             return None
 
+    # ── v1.8.4 (ROADMAP task 2): the DEPENDENCY focus — the reverse traversal ──────
+    # The second channel of the dim state below: the ROOT is ONE node id and the closure of the
+    # arrows that point AT it (`MapScene.dependency_closure()`) is recomputed on every dim pass
+    # from the LIVE scene, so a deleted node or a loaded project drops the highlight by itself.
+
+    def _dependency_root(self) -> str:
+        """The node id the dependency highlight was asked about (`""` — none)."""
+        return str(getattr(self, "_dependency_focus", "") or "")
+
+    def _dependency_ids(self) -> set:
+        """The node ids the dependency highlight covers — the live closure, `set()` if none.
+
+        An empty set means "the channel is OFF": either nothing was asked or the root left the
+        map (a delete, a project load) — and a highlight with nothing to show must never dim
+        the whole map.
+        """
+        root = self._dependency_root()
+        if not root:
+            return set()
+        try:
+            if self.scene.get_node(root) is None:
+                return set()
+            return set(self.scene.dependency_closure(root))
+        except (AttributeError, RuntimeError):
+            return set()
+
+    def _dependency_focus_text(self, node_id) -> str:
+        """The status-bar ANSWER of the gesture — how many cards depend on this one.
+
+        A card with no arrow into it is an answer too ("nothing depends on it"), so the line
+        says which of the two happened; the translator is an ARGUMENT-safe read of the shipped
+        keys (`status.map_dependents` / `status.map_dependents_none`).
+        """
+        try:
+            node = self.scene.get_node(node_id)
+            alias = str(getattr(getattr(node, "data", None), "alias", "") or "") or str(node_id)
+        except (AttributeError, RuntimeError):
+            alias = str(node_id)
+        try:
+            members = self._dependency_ids()
+            count = max(len(members) - 1, 0)
+        except (AttributeError, RuntimeError):
+            count = 0
+        if count <= 0:
+            return (self.t("status.map_dependents_none", alias=alias) if self._i18n_available
+                    else f"Nothing depends on «{alias}»")
+        return (self.t("status.map_dependents", count=count, alias=alias)
+                if self._i18n_available
+                else f"{count} cards depend on «{alias}»")
+
+    def _toggle_dependency_focus(self, node_id) -> bool:
+        """Ctrl+click on a card: set the dependency highlight on it, or drop the same one.
+
+        Answers True while a highlight is ON after the call. Never touches the scene: a
+        highlight is a VIEW state (AGENTS.md §4.2), and the selection Qt performs on the same
+        Ctrl+click is left exactly as it was.
+        """
+        wanted = str("" if node_id is None else node_id)
+        if not wanted:
+            return False
+        if wanted == self._dependency_root():
+            return self._set_dependency_focus("")
+        if not self._set_dependency_focus(wanted):
+            return False
+        self.statusBar().showMessage(self._dependency_focus_text(wanted))
+        return True
+
+    def _set_dependency_focus(self, node_id) -> bool:
+        """The ONE writer of the dependency root: store it, re-dim, report whether it is ON."""
+        wanted = str("" if node_id is None else node_id)
+        if wanted and wanted != self._dependency_root():
+            try:
+                if self.scene.get_node(wanted) is None:
+                    return False
+            except (AttributeError, RuntimeError):
+                return False
+        self._dependency_focus = wanted
+        self._apply_map_dimming()
+        return bool(self._dependency_ids())
+
+    def _clear_dependency_focus(self) -> bool:
+        """Drop the dependency highlight (a plain click, Esc, a loaded project). True if it was on."""
+        if not self._dependency_root():
+            return False
+        self._dependency_focus = ""
+        self._apply_map_dimming()
+        return True
+
     def _apply_map_dimming(self):
-        """v0.9.4/v0.9.8/v1.4.4/v1.5.4: dimming + highlighting of the active filters on the map.
+        """v0.9.4/v0.9.8/v1.4.4/v1.5.4/v1.8.4: dimming + highlighting of the active filters on the map.
 
         A node "glows" only if it passes ALL active filters (the same semantics as in
         the sidebar — refresh_sidebar applies the query and the tag at once):
@@ -1347,7 +1435,9 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, StatusMixin, PluginMixi
         - the v1.4.4 arrow hover focus (ROADMAP task 4): hovering a connection highlights
           its TWO ends and dims everything else. It is merged HERE on purpose — this method
           is the single owner of the dim state, so the hover, the tag filter, the search and
-          the lens cannot stack into a "stuck" opacity (the ROADMAP's "one owner" rule).
+          the lens cannot stack into a "stuck" opacity (the ROADMAP's "one owner" rule);
+        - the v1.8.4 DEPENDENCY focus (ROADMAP task 2): the same merge for the reverse
+          traversal — the closure of a Ctrl+clicked card is read back and the rest recedes.
         The arrows are not touched: connections between dimmed nodes are read from context.
         The floating filter plaque (v1.5.4, task 3) is re-synced from the SAME place: this
         is the one call every filter change already passes through.
@@ -1361,6 +1451,7 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, StatusMixin, PluginMixi
             for end in (getattr(focus, "source", None), getattr(focus, "target", None)):
                 if end is not None:
                     focus_ids.add(id(end))
+        dependents = self._dependency_ids()
         try:
             nodes = list(self.scene.nodes())
         except (AttributeError, RuntimeError):
@@ -1382,6 +1473,14 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, StatusMixin, PluginMixi
                 getattr(node, "status", ""), bool(getattr(node, "is_stale", False)))
             dimmed = not (tag_ok and match_ok and problem_ok)
             matched = bool(query) and match_ok
+            if dependents:
+                # The dependency focus wins over the three filters (it is the question the
+                # user just asked) and the accent frame marks the closure; it in turn yields
+                # to the TRANSIENT arrow hover below.
+                if str(getattr(node.data, "id", "")) in dependents:
+                    dimmed, matched = False, True
+                else:
+                    dimmed, matched = True, False
             if focus is not None:
                 # The hover focus wins: the two ends are read, the rest recedes — and the
                 # accent frame belongs to the hovered ends alone while the hover lasts

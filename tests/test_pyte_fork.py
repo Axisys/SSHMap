@@ -1,12 +1,12 @@
 # -*- coding: utf-8 -*-
-"""v1.3rc1 — Terminal: the managed pyte fork (vendored 0.8.2 + patch manifest).
-v1.5.7.1 — the dependency audit's five patches (0005–0009) join the manifest and its smoke.
+"""v1.3rc1 — Terminal: the managed pyte fork (vendored 0.8.2 + patch manifest); v1.5.7.1 — the
+dependency audit's five patches (0005–0009); v1.9 — the OSC 8 hyperlink and the erased background.
 
 The PROVENANCE checks of `third_party/pyte/` (the fork policy is `AGENTS.md` §4.7, the deep dive is
 `PYTE82_AUDIT.md`): the sha256 of every file against the two tables of `MANIFEST.md` (pristine = the
-upstream PyPI sdist 0.8.2, post-patch = after 0001–0010), so "patched it and forgot what changed" is
+upstream PyPI sdist 0.8.2, post-patch = after 0001–0012), so "patched it and forgot what changed" is
 caught; the manifest itself (the `NNNN-slug.patch` convention, the provenance headers, the mandatory
-LGPL-3.0 attribution, UTF-8 so a cp1251-piped `git diff` cannot produce mojibake); and the behavioral smoke of the fork, headless: a private SGR does not crash, a private CSI with a non-mode final byte is ignored while the public DECSTBM keeps working and the chunk tail survives, the LNM default, the alt-screen round trip character by character, a grapheme cluster landing whole, no final of the CSI table raising on a malformed sequence, an unknown erase mode as a no-op, DECOM without a region, a resize keeping the cursor inside the screen, and the G0/G1 graphics designation reaching the grid."""
+LGPL-3.0 attribution, UTF-8 so a cp1251-piped `git diff` cannot produce mojibake); and the behavioral smoke of the fork, headless: a private SGR does not crash, a private CSI with a non-mode final byte is ignored while the public DECSTBM keeps working and the chunk tail survives, the LNM default, the alt-screen round trip character by character, a grapheme cluster landing whole, no final of the CSI table raising on a malformed sequence, an unknown erase mode as a no-op, DECOM without a region, a resize keeping the cursor inside the screen, the G0/G1 graphics designation reaching the grid, an OSC 8 link riding the cell (and surviving SGR 0), and a background erase painting the whole row."""
 import hashlib
 import os
 import re
@@ -34,6 +34,8 @@ EXPECTED_PATCHES = (
     "0008-decom-guard.patch",
     "0009-resize-cursor-clamp.patch",
     "0010-honour-charset-designation.patch",
+    "0011-osc8-hyperlinks.patch",
+    "0012-erase-background.patch",
 )
 SDIST_SHA256 = "5af970e843fa96a97149d64e170c984721f20e52227a2f57f0a54207f08f083f"  # PyPI pyte-0.8.2.tar.gz
 
@@ -105,8 +107,8 @@ for name in actual_files:
         break
 check("the sha256 of every third_party/pyte/ file == the post-patch table", hash_ok, detail)
 
-# The unpatched files are identical in both tables; patches 0001–0010 touch TWO files:
-# screens.py (0001–0005, 0007–0009) and streams.py (0006, 0010).
+# The unpatched files are identical in both tables; patches 0001–0012 touch TWO files:
+# screens.py (0001–0005, 0007–0009, 0011, 0012) and streams.py (0006, 0010, 0011).
 untouched = [n for n in actual_files if pristine_tbl.get(n) == postpatch_tbl.get(n)]
 changed = [n for n in actual_files if pristine_tbl.get(n) != postpatch_tbl.get(n)]
 check("the unpatched files: the same hash in both tables (9 of 11)",
@@ -126,7 +128,7 @@ print("== patch manifest ==")
 
 actual_patches = sorted(
     n for n in os.listdir(PATCHDIR) if n.endswith(".patch"))
-check("patches 0001–0010 are in place, no extras", actual_patches == list(EXPECTED_PATCHES),
+check("patches 0001–0012 are in place, no extras", actual_patches == list(EXPECTED_PATCHES),
       str(actual_patches))
 check("the names follow the NNNN-slug.patch convention",
       all(re.fullmatch(r"\d{4}-[a-z0-9][a-z0-9-]*\.patch", n) for n in actual_patches),
@@ -147,6 +149,8 @@ PATCH_PROVENANCE = (
     (EXPECTED_PATCHES[7], "pyte/screens.py", ("BUG-D",)),
     (EXPECTED_PATCHES[8], "pyte/screens.py", ("BUG-E",)),
     (EXPECTED_PATCHES[9], "pyte/streams.py", ("use_utf8", "ACS")),
+    (EXPECTED_PATCHES[10], "pyte/screens.py", ("OSC 8", "hyperlink")),
+    (EXPECTED_PATCHES[11], "pyte/screens.py", ("BCE", "StaticDefaultDict")),
 )
 check("every patch is covered by the provenance table (a new patch cannot skip it)",
       [n for n, _, _ in PATCH_PROVENANCE] == list(EXPECTED_PATCHES),
@@ -387,6 +391,83 @@ pyte.ByteStream(_acs_frame).feed(b"\x1b(0lqqqk\x1b(B\r\nx   x")
 check("charset: a whole ACS frame arrives as box drawing (the mc panel separator)",
       lines(_acs_frame)[:2] == ["\u250c\u2500\u2500\u2500\u2510", "x   x"],
       repr(lines(_acs_frame)[:2]))
+
+# 3.11 OSC 8 hyperlinks (patch 0011): the link a program sends rides the CELL. pyte dispatched OSC
+#      0/1/2 only and DROPPED the rest, so a linked word arrived with nothing to click.
+_osc = pyte.HistoryScreen(20, 3)
+_osc_stream = pyte.ByteStream(_osc)
+_osc_stream.feed(b"\x1b]8;;https://example.com\x07LINK\x1b]8;;\x07 plain")
+check("OSC 8: the four cells of the link carry the URI",
+      [_osc.buffer[0][x].hyperlink for x in range(4)] == ["https://example.com"] * 4,
+      str([_osc.buffer[0][x].hyperlink for x in range(4)]))
+check("OSC 8: an empty URI closes the link (the cells after it are free)",
+      all(_osc.buffer[0][x].hyperlink == "" for x in range(4, 9)),
+      str([_osc.buffer[0][x].hyperlink for x in range(4, 7)]))
+_osc_id = pyte.HistoryScreen(20, 3)
+pyte.ByteStream(_osc_id).feed(b"\x1b]8;id=42;http://a.example\x1b\\X")
+check("OSC 8: the `id=` params half is accepted and ignored, the URI lands (the ST terminator too)",
+      _osc_id.buffer[0][0].hyperlink == "http://a.example", _osc_id.buffer[0][0].hyperlink)
+_osc_sgr = pyte.HistoryScreen(20, 3)
+pyte.ByteStream(_osc_sgr).feed(b"\x1b]8;;http://x\x07a\x1b[0mb\x1b[1;31mc\x1b]8;;\x07d")
+check("OSC 8: SGR 0 is ORTHOGONAL — the link survives the reset and the attributes really reset",
+      _osc_sgr.buffer[0][1].hyperlink == "http://x"
+      and _osc_sgr.buffer[0][1].fg == "default" and _osc_sgr.buffer[0][1].bold is False,
+      str(_osc_sgr.buffer[0][1]))
+check("OSC 8: a later SGR keeps the link and applies its attribute, and the close frees the next cell",
+      _osc_sgr.buffer[0][2].hyperlink == "http://x" and _osc_sgr.buffer[0][2].bold is True
+      and _osc_sgr.buffer[0][3].hyperlink == "",
+      str([_osc_sgr.buffer[0][x] for x in (2, 3)]))
+_osc_reset = pyte.HistoryScreen(20, 3)
+pyte.ByteStream(_osc_reset).feed(b"\x1b]8;;http://y\x07Z")
+_osc_reset.reset()
+check("OSC 8: `Screen.reset()` drops the link (the attributes are rebuilt from scratch)",
+      _osc_reset.buffer[0][0].hyperlink == "", repr(_osc_reset.buffer[0][0].hyperlink))
+check("OSC 8: the field is ADDITIVE — a Char built the old way still answers \"\"",
+      pyte.screens.Char("x").hyperlink == "" and pyte.screens.Char("x", "red").hyperlink == "",
+      str(pyte.screens.Char("x")))
+
+# 3.12 The erased background (patch 0012): BCE paints the WHOLE width. `for x in line` walked the
+#      SPARSE buffer dict — iterating it yields the KEYS — so a background erase painted only the
+#      cells that already existed (measured: 0 of 30 on a blank row, 11 of 30 on a written one).
+
+
+def _painted(scr, row=0):
+    """How many cells of a row carry a NON-default background (the BCE measurement)."""
+    return sum(1 for x in range(scr.columns) if scr.buffer[row][x].bg not in ("default", ""))
+
+
+_bce = pyte.HistoryScreen(30, 3)
+pyte.ByteStream(_bce).feed(b"\x1b[44m\x1b[2J")
+check("erase: `ESC[44m ESC[2J` on a BLANK row paints every cell (BCE — 0 of 30 before the patch)",
+      _painted(_bce) == 30 and _bce.buffer[0][0].bg == "blue" and _bce.buffer[0][0].data == " ",
+      f"{_painted(_bce)}/30 bg={_bce.buffer[0][0].bg!r} data={_bce.buffer[0][0].data!r}")
+_bce_written = pyte.HistoryScreen(30, 3)
+pyte.ByteStream(_bce_written).feed(b"\x1b[44mhello world\x1b[2J")
+check("erase: over a WRITTEN row the whole width is one background (no holes left)",
+      _painted(_bce_written) == 30 and _bce_written.display[0].strip() == "",
+      f"{_painted(_bce_written)}/30")
+_bce_plain = pyte.HistoryScreen(30, 3)
+pyte.ByteStream(_bce_plain).feed(b"hello\x1b[2J")
+check("erase: the plain `ESC[2J` still CLEARS and invents no background",
+      _painted(_bce_plain) == 0 and _bce_plain.display[0].strip() == "",
+      repr(_bce_plain.buffer[0][0].bg))
+_bce_el = pyte.HistoryScreen(30, 3)
+pyte.ByteStream(_bce_el).feed(b"\x1b[44mabcdef\x1b[1;3H\x1b[K")
+check("erase: EL paints its range with the current background as before",
+      _painted(_bce_el) == 30 and _bce_el.buffer[0][0].bg == "blue", str(_painted(_bce_el)))
+_bce_link = pyte.HistoryScreen(30, 3)
+pyte.ByteStream(_bce_link).feed(b"\x1b]8;;http://x\x07abc\x1b[2J")
+check("erase: an ERASED cell is not a LINK (patches 0011 and 0012 together)",
+      all(_bce_link.buffer[0][x].hyperlink == "" for x in range(30)),
+      repr(_bce_link.buffer[0][0].hyperlink))
+_bce_keep = pyte.HistoryScreen(30, 3)
+pyte.ByteStream(_bce_keep).feed(b"\x1b]8;;http://x\x07abc\x1b[K")
+check("erase: EL drops the link on what it erased and keeps it on what it did not touch",
+      all(_bce_keep.buffer[0][x].hyperlink == "" for x in range(3, 30))
+      and all(_bce_keep.buffer[0][x].hyperlink == "http://x" for x in range(3)),
+      str([_bce_keep.buffer[0][x].hyperlink for x in (0, 3)]))
+check("erase: the audit's item (c) is deliberately NOT taken — `CSI 3 J` still clears the visible grid",
+      lines(_bce_link)[0] == "" and all(_bce_link.buffer[0][x].data == " " for x in range(30)))
 
 
 # ════════════════════════════════════════════════════════════

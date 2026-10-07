@@ -258,6 +258,63 @@ def arrange_positions(items, mode: str, per_line: int = 0,
     return positions
 
 
+def arrange_unit_positions(items, mode: str, per_line: int = 0,
+                           gap: float = ARRANGE_GAP, origin=None) -> list:
+    """The target positions of an arrangement of UNITS — PURE (v1.8.4).
+
+    ``items`` is an iterable of ``(key, x, y, width, height, unit)``: the first five are the
+    cell of `arrange_positions()`, ``unit`` names the unit the item belongs to (``""`` — the
+    item rides alone). A unit is laid out as ONE cell — its own bounding box — and every item
+    of that unit is then shifted by that one delta, so the relative placement INSIDE a unit
+    survives the gesture byte for byte (the map's TOP level: a group and its members ride
+    together while the groups and the loose cards line up).
+
+    The result is ``[(key, x, y)]`` in the SAME order (the reading order the caller handed
+    over), and the anchor is the top-left of the units' own bounding box unless ``origin``
+    is given — the `arrange_positions()` contract, which this function delegates the unit
+    geometry to.
+    """
+    cells = []
+    for item in items or ():
+        try:
+            key, x, y, width, height, unit = (item[0], float(item[1]), float(item[2]),
+                                              float(item[3]), float(item[4]), item[5])
+        except (TypeError, ValueError, IndexError):
+            continue  # a broken entry is skipped, the rest of the map still arranges
+        cells.append((key, float(x), float(y), max(width, 1.0), max(height, 1.0),
+                      str(unit or "")))
+    if not cells:
+        return []
+
+    # The units, in the order they are first seen (the caller's reading order).
+    order = []
+    boxes = {}
+    for key, x, y, width, height, unit in cells:
+        uid = unit or ("\0%s" % (key,))   # a lone item is its own unit, keyed by its own key
+        if uid not in boxes:
+            order.append(uid)
+            boxes[uid] = [x, y, x + width, y + height]
+        else:
+            box = boxes[uid]
+            box[0] = min(box[0], x)
+            box[1] = min(box[1], y)
+            box[2] = max(box[2], x + width)
+            box[3] = max(box[3], y + height)
+
+    unit_cells = [(uid, boxes[uid][0], boxes[uid][1],
+                   boxes[uid][2] - boxes[uid][0], boxes[uid][3] - boxes[uid][1])
+                  for uid in order]
+    delta = {}
+    for uid, new_x, new_y in arrange_positions(unit_cells, mode, per_line, gap, origin):
+        delta[uid] = (float(new_x) - boxes[uid][0], float(new_y) - boxes[uid][1])
+
+    out = []
+    for key, x, y, _width, _height, unit in cells:
+        dx, dy = delta.get(unit or ("\0%s" % (key,)), (0.0, 0.0))
+        out.append((key, x + dx, y + dy))
+    return out
+
+
 class NodeGroup(QGraphicsObject):
     """A cluster/folder on the map: a frame + a title, drag/resize, server membership.
 

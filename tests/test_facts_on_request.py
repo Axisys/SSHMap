@@ -364,12 +364,12 @@ check("§4 the path is QUOTED into the command, never interpolated bare",
       sh_quote("/o'pt"))
 
 _batch = build_info_batch("")
-check("§4 the batch carries the requested mount TWICE (the df argument and the test)",
-      _batch.count("'/opt'") == 2 and DISK_MOUNT_TOKEN not in _batch,
+check("§4 the batch carries the requested mount THREE times (the df argument, the test and df -i)",
+      _batch.count("'/opt'") == 3 and DISK_MOUNT_TOKEN not in _batch,
       str(_batch.count("'/opt'")))
 _batch2 = build_info_batch("/data/opt'x")
 check("§4 ... quoted as ONE shell word even when the path holds a quote",
-      _batch2.count("'/data/opt'\\''x'") == 2 and "'/opt'" not in _batch2)
+      _batch2.count("'/data/opt'\\''x'") == 3 and "'/opt'" not in _batch2)
 check("§4 the module constant stays a usable template (the markers are pinned)",
       all(m in INFO_BATCH for m in ("---OS---", "---CPU---", "---RAM---", "---DISK---",
                                     "---END---", DISK_MOUNT_TOKEN)))
@@ -493,7 +493,7 @@ _collector = SIC.SystemInfoCollector(ServerData(id="c1", alias="a", host="h", us
                                                disk_mount="/data"))
 check("§4 the collector builds its batch from the NODE's own request",
       "'/data'" in build_info_batch(getattr(_collector.data, "disk_mount", ""))
-      and build_info_batch("").count("'/opt'") == 2)
+      and build_info_batch("").count("'/opt'") == 3)
 check("§4 the collector names the refusal in its own report (the activity history's half)",
       callable(getattr(_collector, "_log_disk_note", None))
       and _collector._log_disk_note({"disk_note": "cifs"}) is None
@@ -787,8 +787,8 @@ def device_output(rows, present="present", lsblk=None):
 check("§8 the batch asks for the devices in their OWN section (no user input in that command)",
       "---DISKS---" in INFO_BATCH and "lsblk -d -n -b -o NAME,SIZE,TYPE" in INFO_BATCH
       and DISK_MOUNT_TOKEN not in INFO_BATCH.split("---DISKS---")[1].split("---DISKMOUNT---")[0])
-check("§8 ... and it still carries the requested mount twice (the shipped half is untouched)",
-      build_info_batch("").count("'/opt'") == 2 and build_info_batch("").count("---DISKS---") == 1)
+check("§8 ... and it still carries the requested mount (three reads, the shipped two plus df -i)",
+      build_info_batch("").count("'/opt'") == 3 and build_info_batch("").count("---DISKS---") == 1)
 
 _dev_rows = parse_lsblk_report("\n".join(_LSBLK_ROWS))
 check("§8 the parser splits the listing into rows (name, size, type) with the size as an int",
@@ -1034,8 +1034,8 @@ check("§9 the i18n pin counts the SHIPPED release (811 + 17 of v1.6.7 + 13 of v
       " + the 17 of v1.7.4rc1: the local source switch of a pane, its two refusals, the permanent-"
       " delete warning and the local file-surface sentences, and v1.7.4rc2 adds 1: the refusal of"
       " a move that would cross the two sources, and v1.8 adds TWENTY: the elevated pane and the"
-      " 41 of v1.8.1: the trust surface; v1.8.1.1 adds ONE: the send identity sentence) and v1.8.2 adds SIXTEEN: the library file — the History door, the backup ring and the import/export pair — and v1.8.3 adds TWENTY-THREE: the Plugins window (its chrome, its three columns and its export)",
-      EXPECTED_I18N_KEYS == 811 + 17 + 13 + 5 + 8 + 9 + 4 + 3 + 4 + 4 + 19 + 17 + 1 + 4 + 6 + 20 + 41 + 1 + 16 + 23, str(EXPECTED_I18N_KEYS))
+      " 41 of v1.8.1: the trust surface; v1.8.1.1 adds ONE: the send identity sentence) and v1.8.2 adds SIXTEEN: the library file — the History door, the backup ring and the import/export pair — and v1.8.3 adds TWENTY-THREE: the Plugins window (its chrome, its three columns and its export) and v1.8.4 adds TEN: the whole-map layout, the reverse traversal and the inode fact",
+      EXPECTED_I18N_KEYS == 811 + 17 + 13 + 5 + 8 + 9 + 4 + 3 + 4 + 4 + 19 + 17 + 1 + 4 + 6 + 20 + 41 + 1 + 16 + 23 + 10, str(EXPECTED_I18N_KEYS))
 check_i18n_parity(LANGS)
 check_i18n_format(LANGS)
 check("§9 the ELEVEN new keys are present and non-empty in every language",

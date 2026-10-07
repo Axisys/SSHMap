@@ -530,6 +530,37 @@ class MapView(QGraphicsView):
         # v1.4.4 (ROADMAP task 1): any press is manual control — a flying camera is
         # stopped before the gesture starts (pan, node drag, rubber band, connect drag).
         self.stop_camera_flight()
+        # v1.8.4 (ROADMAP task 2): Ctrl+LMB on a card asks "what breaks if I stop this one" —
+        # the dependency highlight. The window owns the state (it is the ONE owner of the dim);
+        # the press is NOT consumed, so Ctrl+click keeps its shipped multi-selection, and a
+        # Ctrl+click that lands on empty space drops the highlight (the question was left).
+        if (event.button() == Qt.LeftButton
+                and bool(event.modifiers() & Qt.ControlModifier)
+                and self._connect_source is None):
+            win_dep = self.window()
+            toggle = getattr(win_dep, "_toggle_dependency_focus", None)
+            if callable(toggle):
+                try:
+                    node_dep = self._find_node_at(
+                        self.mapToScene(event.position().toPoint()))
+                    if node_dep is not None:
+                        toggle(node_dep.data.id)
+                    else:
+                        clear = getattr(win_dep, "_clear_dependency_focus", None)
+                        if callable(clear):
+                            clear()
+                except (AttributeError, RuntimeError):
+                    pass
+        elif event.button() == Qt.LeftButton:
+            # A PLAIN left press moves the question elsewhere: the dependency highlight of the
+            # card clicked before is dropped (the hover focus and the filters are untouched).
+            clear = getattr(self.window(), "_clear_dependency_focus", None)
+            if callable(clear):
+                try:
+                    if self._find_node_at(self.mapToScene(event.position().toPoint())) is not None:
+                        clear()
+                except (AttributeError, RuntimeError):
+                    pass
         # Shift+LMB on a node → create a connection by dragging (v0.7).
         # Don't pass the event on: the node doesn't move and panning doesn't start.
         if (event.button() == Qt.LeftButton
@@ -1006,6 +1037,12 @@ class MapView(QGraphicsView):
             if self.clear_keyboard_selection():
                 event.accept()
                 return True
+            # v1.8.4 (ROADMAP task 2): nothing was selected — Esc drops the dependency
+            # highlight instead (the second view state the key can undo).
+            clear = getattr(self.window(), "_clear_dependency_focus", None)
+            if callable(clear) and clear():
+                event.accept()
+                return True
             return False
         return False
 
@@ -1426,6 +1463,18 @@ class MapView(QGraphicsView):
                     if callable(fn):
                         fn()
                 act_copy_map.triggered.connect(_copy_map)
+
+            # ── v1.8.4 (ROADMAP task 1): "Arrange Map…" — the whole map in one gesture ──
+            # The empty-space branch is the natural door (the map IS empty space), and the
+            # window owns the mode question, the pure geometry and the ONE undo step.
+            if hasattr(win, "_ask_arrange_map"):
+                act_arrange_map = menu.addAction(_t("ctx.arrange_map"))
+                def _arrange_map(checked=False):  # checked — a bool from QAction.triggered
+                    w = self.window()
+                    fn = getattr(w, "_ask_arrange_map", None)
+                    if callable(fn):
+                        fn()
+                act_arrange_map.triggered.connect(_arrange_map)
 
             # ── v0.8.1: group context menu (click on its background/title) ──
             grp = None

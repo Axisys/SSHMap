@@ -372,12 +372,32 @@ class TerminalInputMixin:
         try:
             payload = host_attr(self, "strip_paste_markers")(
                 text.replace("\r\n", "\n").replace("\r", "\n"))
+            # v1.9: the production-tag guard — a MULTI-LINE block asks the page before it reaches the
+            # shell (the page owns the node's tags and the words; the canvas owns the gesture).
+            lines = payload.count("\n") + 1
+            if lines > 1 and not self._guard_allows(lines):
+                return
             data = payload.encode("utf-8")
             if self._paste_mode_enabled():
                 data = b"\x1b[200~" + data + b"\x1b[201~"
             self._send(data)
         except Exception:
             pass
+
+    def _guard_allows(self, lines: int) -> bool:
+        """The page's production-tag guard for a MULTI-LINE paste (v1.9); no hook — allowed.
+
+        The hook is installed by `TerminalSessionPage` (the `command_sent_hook` split: the canvas owns
+        the gesture, the page owns the node, the policy and the words). A hook that raises REFUSES the
+        block — a guard that cannot answer must never wave a block of text into a guarded session.
+        """
+        hook = getattr(self, "guard_hook", None)
+        if not callable(hook):
+            return True
+        try:
+            return bool(hook(int(lines)))
+        except Exception:  # noqa: BLE001 — a broken guard refuses, never passes
+            return False
 
     def _paste_mode_enabled(self) -> bool:
         """Has the remote application asked for the bracketed-paste wrapper? (v1.7.5.1, N44)

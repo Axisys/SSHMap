@@ -836,6 +836,12 @@ class SshMixin:
             # v1.8rc6 (N35): the note is written with the answers it explains — a refusal leaves
             # the pair EMPTY and the note, an answer leaves the figures and NO note.
             d.disk_note = str(info.get("disk_note") or "")
+        # v1.8.4 (ROADMAP task 3): the INODE fact is written where it was MEASURED — beside the
+        # mount pair it belongs to. The key is present only while the batch carried the section,
+        # so a legacy batch (and a fixture that predates the read) leaves the stored figure alone
+        # instead of clearing a fact it never asked about.
+        if "disk_inodes" in info:
+            d.disk_inodes = str(info.get("disk_inodes") or "")
         # v1.5.3 (ROADMAP task 1): the date goes WITH the data — a fresh measurement is what
         # the "collected N ago" line and the stale mark describe. It is an ordinary field of
         # the model (optional in JSON, 0.0 = not dated) and it NEVER changes a value.
@@ -1173,7 +1179,51 @@ class SshMixin:
         if hub is None:
             return  # a window without a hub (a test fake) — nothing to do
         target = (not hub.active) if checked is None else bool(checked)
+        if target and not self._confirm_guard_broadcast():
+            self._reset_multi_action()
+            return
         hub.set_active(target)
+
+    def _reset_multi_action(self):
+        """v1.9: put the multi-input QAction back when the production guard REFUSED the mode.
+
+        The user clicked a checkable item, so the checkmark is already on while the hub stayed off —
+        the same `RuntimeError` guard the other QAction writes carry.
+        """
+        act = getattr(self, "act_multi_input", None)
+        if act is None:
+            return
+        try:
+            act.setChecked(False)
+        except RuntimeError:
+            pass  # C++ object already removed (close race) — nothing to reset
+
+    def _confirm_guard_broadcast(self) -> bool:
+        """v1.9: the production-tag guard, asked ONCE before multi-input turns on.
+
+        The broadcast reaches EVERY open session, so the question is asked about the whole REGISTRY at
+        once — every session whose node carries one of the `guard_tags` of `~/.sshmap/config.json` is
+        named in the ONE dialog (`modules/production_guard.py` holds the policy and the dialog). No
+        policy, no guarded session, no module — True: a guard that is not configured changes nothing,
+        which is the declared default.
+        """
+        try:
+            from modules.production_guard import VERB_BROADCAST, confirm, guard_tag
+        except ImportError:  # a flat launch that cannot see the package
+            return True
+        guarded = []
+        for page in list(getattr(self, "_terminal_windows", [])):
+            data = getattr(page, "server_data", None)
+            tag = guard_tag(getattr(data, "tags", None) or ())
+            if not tag:
+                continue
+            name = (getattr(data, "alias", "") or getattr(data, "host", "")
+                    or getattr(data, "id", "") or "?")
+            guarded.append((str(name), str(tag)))
+        if not guarded:
+            return True
+        names = ", ".join(f"{name} ({tag})" for name, tag in guarded)
+        return confirm(VERB_BROADCAST, guarded[0][1], names=names, parent=self)
 
     def _sync_multi_shortcut(self):
         """v1.2.3 -> v1.3.2 (ROADMAP task 4): the multi-input sequence on the QAction.

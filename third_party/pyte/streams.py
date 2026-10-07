@@ -394,6 +394,11 @@ class Stream:
                     listener.set_icon_name(param)
                 if code in "02":
                     listener.set_title(param)
+                # sshmap fork (patch 0011): OSC 8 carries a hyperlink for the cells written
+                # afterwards (`ESC ] 8 ; params ; URI ST`, an empty URI closes it) — the one
+                # OSC a terminal that shows a clickable link needs.
+                if code == "8":
+                    listener.set_hyperlink(param)
             elif char not in NUL_OR_DEL:
                 draw(char)
 

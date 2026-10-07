@@ -1,4 +1,4 @@
-# MANIFEST — the managed pyte fork (pyte 0.8.2 + patches 0001–0010, sshmap v1.6.2)
+# MANIFEST — the managed pyte fork (pyte 0.8.2 + patches 0001–0012, sshmap v1.9)
 
 > The single source of truth of the fork: `third_party/pyte/` = pristine upstream pyte 0.8.2 +
 > an explicit set of patches from this directory. In-place edits that get "forgotten what was changed" —
@@ -6,7 +6,9 @@
 > (`tests/test_pyte_fork.py`). Converted: v1.3rc1 (2026-09-10), per PYTE82_AUDIT.md
 > ("Appendix: the "managed fork" variant" + the "Decision" section). The patch set grew in v1.5.7
 > (0004), v1.5.7.1 (0005–0009 — the dependency audit of the raise-review section of
-> PYTE82_AUDIT.md) and v1.6.2 (0010 — the G0/G1 charset designation the VT100 special graphics needs).
+> PYTE82_AUDIT.md), v1.6.2 (0010 — the G0/G1 charset designation the VT100 special graphics needs)
+> and v1.9 (0011 — OSC 8 hyperlinks, the terminal-link feature; 0012 — the erased background, the
+> audit's cosmetic (b)).
 
 ## Base
 
@@ -31,6 +33,8 @@
 | 0008 | 0008-decom-guard.patch | the pyte-audit report BUG-D (reported, fixed in neither tree): VPA and the DSR report added `self.margins.top` behind a bare `assert`, so `ESC[?6h ESC[5d` / `ESC[?6h ESC[6n` raised `AssertionError` out of `feed()` when DECOM was set with no scrolling region — the guard mirrors `cursor_position()` | keep until upstream merges the report's fix |
 | 0009 | 0009-resize-cursor-clamp.patch | the pyte-audit report BUG-E (reported and fixed nowhere): `resize()` left the cursor outside the new geometry, so the next `draw()` wrote an off-screen cell that `display()` never shows. Deviation from the report's diff: the clamps run AFTER `set_margins()`, so they bound to the full new screen | keep until upstream merges the report's fix |
 | 0010 | 0010-honour-charset-designation.patch | sshmap (v1.6.2; the colleagues' `mc` report): the G0/G1 designation of `ESC ( x` / `ESC ) x` was skipped in UTF-8 mode (`if self.use_utf8: continue` — twice in `pyte/streams.py`), so the VT100 special graphics, which is how an ACS frame is drawn, arrived as its literal letters (`ESC ( 0` + `q` stayed `q` in the grid). The tables (`pyte/charsets.py`: `MAPS["0"] = VT100_MAP`) and the translation in `Screen.draw()` were already there — only the designation never arrived | keep until upstream makes the designation independent of `use_utf8` (the same "input is Unicode-only" assumption stands in 0.8.3.dev) |
+| 0011 | 0011-osc8-hyperlinks.patch | sshmap (v1.9, ROADMAP task 1): `OSC 8` hyperlinks. Upstream dispatches OSC `0`/`1`/`2` only and DROPS the rest, so a link a program sends was consumed and lost. `Char` gains the LAST field `hyperlink: str = ""`, `Screen.set_hyperlink()` parses `params;URI` (the `id=` params half is accepted and ignored) and re-applies the link on BOTH attribute-reset paths of `select_graphic_rendition` (SGR 0 is orthogonal to a link, as in xterm), and the OSC branch of `pyte/streams.py` dispatches `code == "8"`. The link travels WITH the cell through `draw()`, the erase paths and the scroll, because it lives in the attributes rather than in a map beside the grid | keep until upstream implements OSC 8 (`0.8.3.dev` has no hyperlink support at all — its OSC branch is behaviourally unchanged); the field is additive, so a rebase can keep the canvas side and drop the patch |
+| 0012 | 0012-erase-background.patch | sshmap (v1.9, ROADMAP task 2) — item (b) of the dependency audit's three pyte cosmetics (PYTE82_AUDIT.md, the raise-review of 2026-09-26): `erase_in_display` ended its loop with `for x in line:` over a SPARSE `StaticDefaultDict`, whose iteration yields the KEYS, so only the cells that already had an entry were written — measured, `ESC[44m ESC[2J` on a blank 30-cell row painted 0 of 30 cells (against 6 of 30 for `ESC[K`) and 11 of 30 on a written one. The fix writes the WHOLE width through ONE private helper (`Screen._erase_attrs()` — the current attributes, the character blanked and the OSC 8 link dropped), used by `erase_characters` / `erase_in_line` / `erase_in_display`; measured cost of a full-screen clear: 0.016 → 0.229 ms at 200×50, 0.010 → 0.061 ms at 80×24 | keep — 0.8.3.dev carries the same sparse loop, so there is no release to wait for; the audit's item (c) (`CSI 3 J` clearing the visible screen, an underline carrying into the erased cells) is deliberately NOT part of this patch |
 
 **Applying the patches on Windows — the EOL trap (measured 2026-09-26).** `git apply` honours
 `core.autocrlf`: with the Git-for-Windows default (`true`, set in the SYSTEM gitconfig) it rewrites the
@@ -56,11 +60,12 @@ sha256 `e63eab3f25f5cc45bb4532c571435fa9f2a97866e0c9b802c2ac7a40959a73fc`) is ru
 A patch that changed nothing is therefore always checked with
 `git status --porcelain third_party/pyte` (a patch that was skipped leaves the tree clean).
 
-Rebasing onto a future upstream release: `git apply` (or `git am`) the ten patches onto the new
+Rebasing onto a future upstream release: `git apply` (or `git am`) the twelve patches onto the new
 base, drop the ones absorbed upstream, recompute the tables below. Verified 2026-09-26: the nine
 patches apply IN ORDER to the pristine base with `git -c core.autocrlf=false apply` without offsets,
 and the result is byte-for-byte the post-patch table (0010 verified the same way 2026-10-03, on the
-base of the nine).
+base of the nine; 0011 and 0012 verified the same way 2026-10-07, on the base of the ten — each
+applied to a copy of that base reproduced the post-patch table byte-for-byte).
 
 ## sha256 — pristine base (upstream pyte 0.8.2, before the patches)
 
@@ -91,11 +96,11 @@ base of the nine).
 | graphics.py | 6a38c4f4cdcbc8178097ec90ce1d7bce6b3b356d9f2e27d4b7e2d26d35fa898a |
 | modes.py | ffc0ad1a8264ac7e500349d5f3a8084cc634b72cc782b8664d0841d5d24e2650 |
 | py.typed | e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855 |
-| screens.py | 2cd00c8865722b2a2af18d25d96caa536c8b4900295854b88857e7c5048023a8 |
-| streams.py | e63eab3f25f5cc45bb4532c571435fa9f2a97866e0c9b802c2ac7a40959a73fc |
+| screens.py | 1344f495bf61fd36b728181eb4a56de186084a2575958c311c2000e2d0302faf |
+| streams.py | 6b9d10873ce9688911edac88311636bbd6ab25382328985a43b43ccdde724881 |
 
 The files untouched by the patches have the same hash in both tables; the files changed by
-patches 0001–0010 are `screens.py` (0001–0005, 0007–0009) and `streams.py` (0006, 0010).
+patches 0001–0012 are `screens.py` (0001–0005, 0007–0009, 0011, 0012) and `streams.py` (0006, 0010, 0011).
 
 ## Verified facts about the upstream internals (moved here from PYTE82_AUDIT.md §5/§7 and the terminal_screen.py docstring)
 
@@ -106,11 +111,23 @@ Knowledge about someone else's code lives here, not in our docstrings; the histo
 - 256-colors and truecolor are stored as hex strings WITHOUT '#' ('ff0000', '0a141e') — the isdigit() branch in resolve_color() never fires, a hex passthrough is needed;
 - pyte's own typo in 0.8.2: `BG_AIXTERM[105] = 'bfightmagenta'` (SGR 4;105) — fixed in master ('brightmagenta'), not fixed in 0.8.2;
 - the charset machinery: `Screen` keeps `g0_charset` / `g1_charset` / `charset` (0 = G0, 1 = G1) and `draw()` applies the SELECTED map with `data.translate(...)`; `define_charset()` accepts only the codes of `cs.MAPS` (`"B0UK"` — so `ESC ( 0` is the VT100 special graphics, `ESC ( B` is the identity `LAT1_MAP`) and `Stream._parser_fsm()` skipped the whole designation AND the SI/SO shift in UTF-8 mode before patch 0010. The designation is per `Screen` and is NOT part of `save_cursor`/`restore_cursor` or of the alternate-screen give-back (xterm resets it there; pyte never did — a divergence patch 0010 declares and keeps);
+- the OSC branch of `Stream._parser_fsm()` reads ONE character as the code, then everything up to
+  `ST`/`BEL` as the payload, drops the payload's FIRST character (the `;` after the code) and dispatches
+  `0`/`1` → `set_icon_name` and `2` → `set_title` — and **nothing else**: `OSC 8`, `OSC 4`, `OSC 52`
+  and the palette codes are consumed and dropped in silence (patch 0011 adds `8`; a handler therefore
+  receives `params;URI`, and an EMPTY params half makes the whole tail the URI, which is the OSC 8
+  reading);
+- a buffer LINE is a `StaticDefaultDict` of `Char`, so iterating it yields the KEYS (`x` indices), never
+  the cells — the same trap `TerminalScreen._row_text()` documents, and the defect patch 0012 fixes; a
+  cell that was never written reads as `default_char` and is NOT stored, which is why an erase has to
+  spell out `range(self.columns)` instead of walking the line;
 - private modes are stored in `screen.mode` with a <<5 shift (`set_mode(private=True)`: `mode << 5`) — DECCKM is 32, not 1; mouse tracking: 1000/1002/1003/1006 → 32000/32064/32128/32192 (DECSET 1006 ALONE does NOT enable tracking — it only changes the reporting encoding);
 - 0.8.2 has NO alternate screen: modes 47/1047/1048/1049 were inert bits (patch 0003 adds the handlers; there are no constants in pyte.modes — the class attribute `Screen.ALTSCREEN_MODES` is declared);
 - HistoryScreen auto-return to live: `before_event()` spins `next_page()` in a loop for every event except prev_page/next_page (measurement D1 v1.2.12: 68–73 ms/chunk with deep history → batching D2 in modules/terminal_screen.py, v1.2.14);
 - `HistoryScreen.__getattribute__` wraps set_mode/reset_mode/index/reverse_index (all of them are in `Stream.events`) and calls `self.before_event(event)` by name → subclass overrides are picked up automatically; `before_event` is not in `_wrapped` (no recursion);
-- `Char` has an `italics` field; a wide glyph = 2 cells, the second one — a stub with `data==""` (draw() uses wcwidth(3)); `display()` skips the stubs;
+- `Char` has an `italics` field and, after patch 0011, a LAST `hyperlink: str = ""` field (the OSC 8
+  link of the cell, `""` for none; a wide glyph = 2 cells, the second one — a stub with `data==""`
+  — carries the same link and `display()` skips it);
 - after patch 0005 (upstream's own emoji change) `Char.data` may hold MORE than one code point — a **grapheme cluster** — so `len(data) == 1` is no longer an invariant: the width of a cell is `wcswidth(data)`, and the canvas reads the SAME table (`modules/terminal_widget.char_width()`), which is what keeps the runs and the grid in step;
 - the private-CSI dispatch (`pyte/streams.py`): `csi_dispatch[char](*params, private=True)` for EVERY
   `?`-prefixed CSI — the handlers that must act on the flag declare `**kwargs` (set_mode/reset_mode);

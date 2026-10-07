@@ -148,6 +148,7 @@ of the file itself.
 | `test_local_pane.py` | — | The LOCAL pane (v1.7.4rc2): the provider seam, the two path dialects, the OS listing of the |
 | `test_local_pane_contract.py` | — | v1.7.4 — the LOCAL pane, the closing release: the CLAUSE AUDIT of the frozen contract |
 | `test_main_window_split.py` | — | v1.1.4: main_window.py hygiene — split into mixins (ROADMAP v1.1.4; the v1.8rc1/rc2/rc3 waves add nineteen). |
+| `test_map_answers.py` | — | v1.8.4 — the map arranges itself and answers: the whole-map layout, the reverse traversal, the inode fact. |
 | `test_map_bigpicture.py` | — | v1.4.2 — The big-picture map level: the minimap, the cached card drop-shadow, the group fold. |
 | `test_map_images.py` | — | v1.5.1 — map images: "Copy Map as Image" and the fixed-frame documentation poster. |
 | `test_map_scale.py` | — | v1.6 — the map at scale: bulk editing, density, arrangement and the connections out. |
@@ -170,7 +171,7 @@ of the file itself.
 | `test_project_lifecycle.py` | — | v1.3.3.6 (ROADMAP "Projects: open, recover, remember"): the life cycle of a project file. |
 | `test_pyproject.py` | — | v0.9.9.6 — pyproject.toml: installable identity for 1.0 (ROADMAP). |
 | `test_pyte_compat.py` | — | v1.2.11 — Terminal: pyte 0.8.2 compatibility (private SGR + LNM). |
-| `test_pyte_fork.py` | — | v1.3rc1 — Terminal: the managed pyte fork (vendored 0.8.2 + patch manifest). |
+| `test_pyte_fork.py` | — | v1.3rc1 — Terminal: the managed pyte fork (vendored 0.8.2 + patch manifest); v1.5.7.1 — the |
 | `test_pyte_hardening.py` | — | v1.5.7.1 — Terminal: the pyte fork takes the five defects of the dependency audit. |
 | `test_quick_launch.py` | — | v1.0RC4 — Quick launch (server links and commands): the release's themed test. |
 | `test_rc2_map_import_sidebar.py` | — | v1.1.2RC2 — Map, import, sidebar (release theme). |

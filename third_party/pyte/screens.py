@@ -96,6 +96,11 @@ class Char(NamedTuple):
     strikethrough: bool = False
     reverse: bool = False
     blink: bool = False
+    # sshmap fork (patch 0011): the OSC 8 hyperlink of this cell ("" = none). A LAST field with a
+    # default, so every existing `Char(...)` and `_replace(...)` call stays valid; the link is part
+    # of the attributes, exactly like a colour, so it travels with the character through `draw()`,
+    # the erase paths and the scroll instead of living in a map beside the grid.
+    hyperlink: str = ""
 
 
 class Cursor:
@@ -668,6 +673,19 @@ class Screen:
         """
         self.icon_name = param
 
+    def set_hyperlink(self, param: str) -> None:
+        """Set (or clear) the OSC 8 hyperlink of the CURRENT cell attributes.
+
+        sshmap fork (patch 0011). ``param`` is the payload the OSC branch hands over:
+        ``"params;URI"``, where the ``params`` half is the ``id=``-style key list — ACCEPTED
+        and IGNORED here, because an id only groups the cells of one link while the URI is
+        what a canvas opens. An EMPTY URI closes the link, as OSC 8 specifies. Like SGR the
+        link is a property of the current attributes, so it is inherited by every character
+        written afterwards; `Screen.reset()` rebuilds the attributes and therefore drops it.
+        """
+        _params, _sep, uri = param.partition(";")
+        self.cursor.attrs = self.cursor.attrs._replace(hyperlink=uri)
+
     def carriage_return(self) -> None:
         """Move the cursor to the beginning of the current line."""
         self.cursor.x = 0
@@ -840,6 +858,16 @@ class Screen:
             else:
                 line.pop(x, None)
 
+    def _erase_attrs(self) -> Char:
+        """The attributes an ERASED cell takes — sshmap fork (patch 0012).
+
+        xterm's BCE: an erase paints the CURRENT background, so the cell keeps the SGR state
+        (background, and the foreground the writer set) while its character becomes a blank.
+        The OSC 8 hyperlink is the one attribute that does NOT survive (patch 0011): a cleared
+        cell is not part of a link any more.
+        """
+        return self.cursor.attrs._replace(data=" ", hyperlink="")
+
     def erase_characters(self, count: Optional[int] = None) -> None:
         """Erase the indicated # of characters, starting with the
         character at cursor position. Character attributes are set
@@ -860,7 +888,7 @@ class Screen:
         line = self.buffer[self.cursor.y]
         for x in range(self.cursor.x,
                        min(self.cursor.x + count, self.columns)):
-            line[x] = self.cursor.attrs
+            line[x] = self._erase_attrs()
 
     def erase_in_line(self, how: int = 0, private: bool = False) -> None:
         """Erase a line in a specific way.
@@ -893,8 +921,9 @@ class Screen:
 
         self.dirty.add(self.cursor.y)
         line = self.buffer[self.cursor.y]
+        attrs = self._erase_attrs()   # sshmap fork (patch 0012): the background, no hyperlink
         for x in interval:
-            line[x] = self.cursor.attrs
+            line[x] = attrs
 
     def erase_in_display(self, how: int= 0, *args: Any, **kwargs: Any) -> None:
         """Erases display in a specific way.
@@ -931,10 +960,17 @@ class Screen:
             return
 
         self.dirty.update(interval)
+        # sshmap fork (patch 0012): the WHOLE width is written, not the keys of the sparse
+        # buffer dict. `for x in line` visited only the cells that already existed, so a
+        # background erase (`ESC[44m ESC[2J`) painted NOTHING on a blank screen — measured 0
+        # of 30 cells, against 6 of 30 for EL — and left holes in a written one: xterm's BCE
+        # is what a TUI that clears with a colour (`less -R`, htop, a full-screen editor's
+        # exit) depends on, and the sparse walk also made the cost depend on the CONTENT.
+        attrs = self._erase_attrs()
         for y in interval:
             line = self.buffer[y]
-            for x in line:
-                line[x] = self.cursor.attrs
+            for x in range(self.columns):
+                line[x] = attrs
 
         if how == 0 or how == 1:
             self.erase_in_line(how)
@@ -1118,7 +1154,11 @@ class Screen:
 
         # Fast path for resetting all attributes.
         if not attrs or attrs == (0, ):
-            self.cursor.attrs = self.default_char
+            # sshmap fork (patch 0011): SGR 0 resets the SGR attributes and NOT the OSC 8
+            # hyperlink — the two are orthogonal (xterm closes a link on `ESC ] 8 ; ; ST` and
+            # on nothing else), so a `printf '\e[0m'` in the middle of a link keeps the link.
+            self.cursor.attrs = self.default_char._replace(
+                hyperlink=self.cursor.attrs.hyperlink)
             return
 
         attrs_list = list(reversed(attrs))
@@ -1126,8 +1166,9 @@ class Screen:
         while attrs_list:
             attr = attrs_list.pop()
             if attr == 0:
-                # Reset all attributes.
+                # Reset all attributes (the OSC 8 link survives — see the fast path above).
                 replace.update(self.default_char._asdict())
+                replace["hyperlink"] = self.cursor.attrs.hyperlink
             elif attr in g.FG_ANSI:
                 replace["fg"] = g.FG_ANSI[attr]
             elif attr in g.BG:

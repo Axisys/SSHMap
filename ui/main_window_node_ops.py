@@ -10,7 +10,7 @@ splittable), the ping/DNS/import thread references (`self._ping_thread`, `self._
 `_diagnose_node()` and the report slots, whose registry is `self._diagnose_threads` keyed by server id
 (the same node twice is refused while a different node is fine). The report RUNS in
 `services/diagnostics.ReachabilityThread`, never on the GUI thread. `_is_scene_point` moved here with the cluster and `main_window.py` imports it back (`_add_group_at`)."""
-from PySide6.QtCore import QPointF
+from PySide6.QtCore import QPointF, QRectF
 from PySide6.QtWidgets import QDialog, QMessageBox, QApplication
 
 try:
@@ -46,6 +46,24 @@ except ImportError:
     except ImportError:
         _NodeGroup = None
         arrange_positions = None
+
+try:  # v1.8.4 (ROADMAP task 1): the PURE geometry of the map's TOP level (units ride together)
+    from ..graphics.node_group import arrange_unit_positions
+except ImportError:
+    try:
+        from graphics.node_group import arrange_unit_positions
+    except ImportError:  # a stripped build — the whole-map arrangement reports itself unavailable
+        arrange_unit_positions = None
+
+try:  # v1.8.4: the scope of the ONE arrangement dialog (a group's members / the whole map)
+    from ..dialogs.arrange_group_dialog import SCOPE_GROUP as _SCOPE_GROUP
+    from ..dialogs.arrange_group_dialog import SCOPE_MAP as _SCOPE_MAP
+except ImportError:
+    try:
+        from dialogs.arrange_group_dialog import SCOPE_GROUP as _SCOPE_GROUP
+        from dialogs.arrange_group_dialog import SCOPE_MAP as _SCOPE_MAP
+    except ImportError:
+        _SCOPE_GROUP, _SCOPE_MAP = "group", "map"
 
 
 def _is_scene_point(value) -> bool:
@@ -968,6 +986,147 @@ class NodeOpsMixin:
                 else "Select a group on the map first")
             return False
         return self._ask_arrange_group(group)
+
+    # ── v1.8.4 (ROADMAP task 1): the WHOLE-map auto-layout ───────────────────────
+
+    def _arrange_map_units(self):
+        """The map's TOP level as the pure layout's cells: `(key, x, y, w, h, unit)` + the items.
+
+        A unit is a GROUP — its frame AND its members, so the group is laid out as ONE cell —
+        or a single card no group holds. The frame is part of its unit's box on purpose: a unit
+        box narrower than the frame would let the NEXT unit be placed inside the group. Answers
+        `(items, by_key, unit_of)`; `by_key` maps a cell key back to the scene item a move is
+        applied to (`ServerNode` / `NodeGroup`) and `unit_of` the cell key back to its unit.
+        """
+        items, by_key, unit_of = [], {}, {}
+        try:
+            groups = [g for g in self.scene.groups() if g.scene() is not None]
+            nodes = [n for n in self.scene.nodes() if n.scene() is not None]
+        except (AttributeError, RuntimeError):
+            return [], {}, {}
+        # Membership is the scene's own (the geometric invariant): a node is a member of the
+        # TOPMOST group whose frame holds its card centre.
+        members = {}   # node id -> unit key
+        for group in groups:
+            try:
+                unit = "group:%s" % (group.group_id,)
+                for member in group.get_members():
+                    if getattr(member, "data", None) is not None:
+                        members[member.data.id] = unit
+            except (AttributeError, RuntimeError):
+                continue
+        for group in groups:
+            try:
+                rect = QRectF(group.mapRectToScene(QRectF(group.boundingRect())))
+            except (AttributeError, RuntimeError):
+                continue
+            unit = "group:%s" % (group.group_id,)
+            key = "group:" + str(group.group_id)
+            items.append((key, rect.x(), rect.y(), rect.width(), rect.height(), unit))
+            by_key[key] = group
+            unit_of[key] = unit
+        for node in nodes:
+            try:
+                rect = node.card_rect()
+                x, y = node.pos().x(), node.pos().y()
+            except (AttributeError, RuntimeError):
+                continue
+            unit = members.get(node.data.id, "")
+            key = "node:" + str(node.data.id)
+            items.append((key, x, y, rect.width(), rect.height(), unit))
+            by_key[key] = node
+            unit_of[key] = unit
+        # The reading order (top-to-bottom, left-to-right): an arrangement must not depend
+        # on the scene's insertion order, and re-arranging the same map with the same mode
+        # then answers the SAME layout (the id breaks a tie deterministically).
+        items.sort(key=lambda item: (round(item[2], 3), round(item[1], 3), item[0]))
+        return items, by_key, unit_of
+
+    def _arrange_map(self, mode: str = "", per_line: int = 0) -> bool:
+        """Line the WHOLE map up in ONE undo step — the top level, a group riding together.
+
+        The layout is the pure `graphics.node_group.arrange_unit_positions()`; this method
+        only reads the live geometry, pushes ONE `CmdArrangeMap` and reports. The declared
+        boundaries: the arrangement MOVES cards and frames and never resizes a group, the
+        geometric membership of `MapScene.resync_group_members()` keeps deciding who is
+        inside, and free-standing notes and the background image are not moved.
+
+        ONE move per UNIT is what the command holds: a group is moved by its FRAME, and the
+        frame's own `setPos` carries the members (the shipped `NodeGroup.itemChange` — "its
+        members ride together"), so listing the members beside it would shift them TWICE — the
+        second shift coming from the frame's follow, which reads their position as it is at
+        that moment.
+        """
+        if arrange_unit_positions is None:
+            return False
+        items, by_key, unit_of = self._arrange_map_units()
+        # The UNITS are what lines up: one group (frame + members) or one free card. A map
+        # with a single unit has nothing to arrange whatever its card count — the refusal is
+        # the honest one, and a group of five cards is exactly that case.
+        units = {str(item[5] or item[0]) for item in items}
+        if len(units) < 2:
+            self.statusBar().showMessage(
+                self.t("status.map_arrange_none") if self._i18n_available
+                else "Nothing to arrange — the map needs at least two groups or free cards")
+            return False
+        targets = arrange_unit_positions(items, mode, per_line)
+        if not targets:
+            return False
+
+        moves = []
+        for key, x, y in targets:
+            item = by_key.get(str(key))
+            if item is None:
+                continue
+            is_group = _NodeGroup is not None and isinstance(item, _NodeGroup)
+            if str(unit_of.get(str(key)) or "") and not is_group:
+                continue  # a MEMBER: the frame of its unit carries it (never moved twice)
+            try:
+                old = QPointF(item.pos())
+            except (AttributeError, RuntimeError):
+                continue
+            new = QPointF(float(x), float(y))
+            if (new - old).manhattanLength() > 0.5:
+                moves.append((item, old, new))
+        if not moves:
+            return False
+
+        count = len([key for key, _x, _y in targets if str(key).startswith("node:")
+                     and str(key) in by_key])
+        count = max(count, len(moves))   # a map of groups alone still reports what it moved
+        from modules.undo_commands import CmdArrangeMap
+        self._push_command(CmdArrangeMap(self, moves))
+        self.statusBar().showMessage(
+            self.t("status.map_arranged", count=count) if self._i18n_available
+            else f"Arranged {count} cards on the map")
+        self._mark_dirty()  # ← unsaved changes
+        return True
+
+    def _ask_arrange_map(self) -> bool:
+        """The map's "Arrange Map…" entry point (the empty-space context menu): ask, then apply.
+
+        The ONE entry point of the gesture: it opens the SHARED arrangement dialog in its MAP
+        scope (the same three modes, the same rows count) and hands the answer to
+        `_arrange_map()`. A cancelled dialog changes nothing.
+        """
+        count = len(self._arrange_map_units()[1])
+        dlg_cls = host_attr(self, "ArrangeGroupDialog")
+        if dlg_cls is None or arrange_unit_positions is None:
+            return False
+        dlg = None
+        try:
+            dlg = dlg_cls(count, self, _SCOPE_MAP)
+            if dlg.exec() != QDialog.Accepted:
+                return False
+            mode, per_line = dlg.mode(), dlg.per_line()
+        except Exception as e:  # noqa: BLE001 — a broken dialog must not crash the window
+            if self.log:
+                self.log.warning(f"Arrange map dialog failed: {e}")
+            return False
+        finally:
+            if dlg is not None:
+                getattr(dlg, "deleteLater", lambda: None)()
+        return self._arrange_map(mode, per_line)
 
     def _copy_text_to_clipboard(self, text, message_key: str = "status.copied_to_clipboard",
                                 **kw) -> bool:

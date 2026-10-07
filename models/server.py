@@ -61,6 +61,12 @@ class ServerData:
     disk_path: str = ""
     disk_free: str = ""
     disk_size: str = ""
+    # v1.8.4 (ROADMAP task 3): the INODE fact of that same filesystem — the machine's own
+    # `IUse%` token (`"100%"`), an OPTIONAL measured string like the two figures above. A
+    # filesystem can sit at 40 % free SPACE and 100 % used INODES, so this is the second
+    # answer the mount line would otherwise hide. Additive: a foreign value loads as "" and
+    # the key is ABSENT from the JSON while nothing was measured (`VERSION_FORMAT` stays).
+    disk_inodes: str = ""
     # The NOTE of a refused request — the durable half of a sentence that otherwise lives only in
     # an 8-second status line: the machine note the collector wrote (`missing`, the network
     # filesystem's name, `device-missing`) for the DATA MOUNT and, one field down, for the chosen
@@ -246,8 +252,8 @@ def server_data_from_dict(raw: dict) -> ServerData:
     # list or any other foreign value all degrade to "" ("never measured"), so a hand-edited
     # project file can never put a non-string into a field the card and the dialog render.
     # v1.7.1.2: the device REQUEST joins them, and the discovered LIST is sanitized like `tags`.
-    for _field in ('disk_mount', 'disk_path', 'disk_free', 'disk_size', 'disk_device',
-                   'disk_note', 'disk_device_note'):
+    for _field in ('disk_mount', 'disk_path', 'disk_free', 'disk_size', 'disk_inodes',
+                   'disk_device', 'disk_note', 'disk_device_note'):
         data[_field] = optional_text(data.get(_field))
     data['disk_devices'] = sanitize_device_list(data.get('disk_devices'))
     try:
@@ -296,7 +302,8 @@ def server_data_to_dict(data: ServerData) -> dict:
     # nothing was measured ⇒ the key is ABSENT, so an ordinary map keeps the file it had and a project
     # written before the release is never "measured" by a later save. v1.7.1.2: the device REQUEST
     # follows `disk_mount`, the LIST the answers; v1.8rc6 (N35) adds the two refusal NOTES with them.
-    for _field in ('disk_path', 'disk_free', 'disk_size', 'disk_note', 'disk_device_note'):
+    for _field in ('disk_path', 'disk_free', 'disk_size', 'disk_inodes',
+                   'disk_note', 'disk_device_note'):
         if not optional_text(serialized.get(_field)):
             serialized.pop(_field, None)
     if not sanitize_device_list(serialized.get('disk_devices')):

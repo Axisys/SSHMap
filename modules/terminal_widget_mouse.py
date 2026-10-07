@@ -2,9 +2,10 @@
 
 `TerminalMouseMixin` owns every mouse surface of the canvas: the ONE xterm encoder (`_send_mouse`) behind
 the ONE predicate (`_mouse_reports_to_pty`) with `Shift` as the local override, the wheel (the `Ctrl`
-font zoom first, then the mouse report, then the scrollback), the local press/drag/release gestures and
-the right-click context menu. Every report goes to the session's channel DIRECTLY — never through
-`_send()`: the coordinates are session-local.
+font zoom first, then the mouse report, then the scrollback), the local press/drag/release gestures, the
+right-click context menu and the `OSC 8` link (the hover, the hit test and the ONE opener door —
+`Ctrl`+click while the application tracks the mouse, a plain click while it does not). Every report goes
+to the session's channel DIRECTLY — never through `_send()`: the coordinates are session-local.
 
 Contract — `AGENTS.md` §4.3; mechanism — `DOCUMENTATION.md` §14a, §64.
 """
@@ -212,8 +213,102 @@ class TerminalMouseMixin:
             return True
         return mode == 1002 and bool(event.buttons())
 
+    # ── v1.9: the `OSC 8` link — the hit test, the hover and the ONE opener ────
+
+    def link_uri_at(self, pos) -> str:
+        """The `OSC 8` URI under a widget point; `""` for no link, no grid or a stale view.
+
+        The cell comes from `_cell_at()` (the ONE cell mapping) and the URI from the LIVE snapshot —
+        the same rows `_paint` reads — so an erase or a rewrite is honoured on the next event.
+        Never raises: a half-torn-down screen answers "no link" instead of taking a paint down.
+        """
+        try:
+            row, col = self._cell_at(pos)
+            rows, _cx, _cy, _hidden = self.tscreen.snapshot()
+            if not 0 <= row < len(rows):
+                return ""
+            span = host_attr(self, "link_span")(rows[row], col)
+            return span[2] if span else ""
+        except Exception:  # noqa: BLE001 — a dying screen is "no link", never a crash
+            return ""
+
+    def open_link(self, uri) -> bool:
+        """Open an `OSC 8` target through the ONE allowlist; True when the OS was really asked.
+
+        `models.server.is_launchable_url()` is the SHIPPED predicate (`http`/`https` — the quick-launch
+        row and the bookmarks ask the same one, `AGENTS.md` §4.4), so a `file:` link a REMOTE program
+        sent is REFUSED here rather than translated: that path belongs to the server, and opening it as
+        this computer's path is the confusion the allowlist exists to prevent. A refusal is silent —
+        a link is not a command and there is no status line to spend on it.
+        """
+        text = str(uri or "").strip()
+        if not text:
+            return False
+        try:
+            if not host_attr(self, "is_launchable_url")(text):
+                return False
+            return bool(host_attr(self, "QDesktopServices").openUrl(host_attr(self, "QUrl")(text)))
+        except Exception:  # noqa: BLE001 — an opener failure is a refused link
+            return False
+
+    def _open_link_at(self, event) -> bool:
+        """A click that belongs to a link; True when the event is CONSUMED (v1.9).
+
+        The gesture: `Ctrl`+click whenever the application is tracking the mouse (the modifier that
+        says "this click is LOCAL" for a link — `Shift` stays the shipped selection override) and a
+        PLAIN click while it is not. A cell without a link — and a click that the tracking application
+        owns — fall through to the ordinary press path, so the selection and the xterm report are
+        untouched.
+        """
+        ctrl = bool(event.modifiers() & Qt.KeyboardModifier.ControlModifier)
+        tracking, _sgr = self.tscreen.mouse_tracking_mode()
+        if tracking and not ctrl:
+            return False
+        uri = self.link_uri_at(event.position().toPoint())
+        if not uri:
+            return False
+        self.open_link(uri)
+        return True
+
+    def _refresh_hover(self, pos):
+        """The link hover under the pointer (v1.9) — a CELL and the pointing hand, never the URI."""
+        try:
+            row, col = self._cell_at(pos)
+        except Exception:  # noqa: BLE001 — a dying screen has no hover
+            row, col = None, None
+        cell = (row, col) if self.link_uri_at(pos) else None
+        if cell == self._hover_cell:
+            return
+        self._hover_cell = cell
+        self._set_link_cursor(cell is not None)
+        self.update()
+
+    def _set_link_cursor(self, on: bool):
+        """The pointing hand while a link is under the pointer, the default otherwise. Never raises."""
+        try:
+            if on:
+                self.setCursor(Qt.CursorShape.PointingHandCursor)
+            else:
+                self.unsetCursor()
+        except Exception:  # noqa: BLE001 — a widget mid-teardown
+            pass
+
+    def leaveEvent(self, event):
+        """The pointer left the canvas — the link hover goes with it (v1.9)."""
+        if self._hover_cell is not None:
+            self._hover_cell = None
+            self._set_link_cursor(False)
+            self.update()
+        super().leaveEvent(event)
+
     # ── mouse: LMB press → drag → release (v1.0RC2; v1.2.7 — double/triple-click) ─
     def mousePressEvent(self, event):
+        # v1.9: the `OSC 8` link comes FIRST — a cell that carries one CONSUMES the press (so a link
+        # is never also a selection start and never an xterm report), and every other cell is
+        # untouched by this branch.
+        if event.button() == Qt.MouseButton.LeftButton and self._open_link_at(event):
+            event.accept()
+            return
         # v1.6.3 (ROADMAP task 2): the application asked for the mouse → the press is
         # REPORTED and no local selection starts. Shift (the local override) sends it to
         # the branch below instead.
@@ -255,6 +350,9 @@ class TerminalMouseMixin:
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event):
+        # v1.9: the link hover follows the pointer — a LOCAL, non-consuming effect, so it is
+        # refreshed before the routing below (a tracking TUI still gets its motion report).
+        self._refresh_hover(event.position().toPoint())
         # v1.6.3 (ROADMAP task 2): a MOTION reaches the application under 1002 (while a
         # button is held) or 1003 (any motion) — the report is the held button + 32, and
         # "no button" is 3. Under 1000 a motion is not part of the protocol and falls

@@ -46,6 +46,43 @@ if TYPE_CHECKING:  # the string annotations of the two render helpers below
     from PySide6.QtGui import QPixmap
 
 
+def dependency_ids(pairs, start) -> List[str]:
+    """Who depends on ``start`` — the TRANSITIVE closure read off the arrows (PURE, v1.8.4).
+
+    ``pairs`` is an iterable of ``(source_id, target_id)`` (a third entry — the arrow is
+    BIDIRECTIONAL — makes the edge readable both ways). The answer is the node's own id plus
+    every node that reaches it: the walk follows the arrows BACKWARDS (from a target to its
+    sources), which is the "what breaks if I stop this one" question — a node whose arrow
+    points AT this one is a node that leans on it, directly or through a chain.
+
+    The ids come back sorted, so the closure is a set-like fact two runs cannot disagree on;
+    a cycle terminates (a node is visited once) and a start the edges do not mention answers
+    its own id alone.
+    """
+    wanted = str("" if start is None else start)
+    if not wanted:
+        return []
+    incoming: Dict[str, set] = {}
+    for edge in pairs or ():
+        try:
+            source, target = str(edge[0]), str(edge[1])
+        except (TypeError, ValueError, IndexError):
+            continue
+        both_ways = bool(edge[2]) if len(edge) > 2 else False
+        incoming.setdefault(target, set()).add(source)
+        if both_ways:
+            incoming.setdefault(source, set()).add(target)
+    seen = {wanted}
+    queue = [wanted]
+    while queue:
+        current = queue.pop()
+        for source in sorted(incoming.get(current, ())):
+            if source not in seen:
+                seen.add(source)
+                queue.append(source)
+    return sorted(seen)
+
+
 class MapScene(QGraphicsScene):
     """The main map scene."""
 
@@ -178,6 +215,30 @@ class MapScene(QGraphicsScene):
 
     def arrow_count(self) -> int:
         return len(self._arrows)
+
+    def connection_pairs(self) -> List[tuple]:
+        """The live connections as ``(source_id, target_id, bidirectional)`` triples (v1.8.4).
+
+        The GRAPH the reverse traversal walks. Read from the arrows themselves, so a removed
+        arrow is gone from the answer at once — the ids are the ones the project stores, and a
+        dead C++ item (Qt teardown) is skipped rather than raising.
+        """
+        pairs = []
+        for arrow in list(self._arrows):
+            try:
+                source = getattr(arrow, "source", None)
+                target = getattr(arrow, "target", None)
+                if source is None or target is None:
+                    continue
+                pairs.append((str(source.data.id), str(target.data.id),
+                              bool(getattr(arrow, "bidirectional", False))))
+            except (AttributeError, RuntimeError):
+                continue
+        return pairs
+
+    def dependency_closure(self, node_id) -> List[str]:
+        """`dependency_ids()` over THIS scene's live connections (v1.8.4)."""
+        return dependency_ids(self.connection_pairs(), node_id)
 
     def groups(self) -> List[NodeGroup]:
         """All groups (v0.8.1; a list copy)."""

@@ -52,6 +52,8 @@ echo ---DISKS---
 lsblk -d -n -b -o NAME,SIZE,TYPE 2>/dev/null
 echo ---DISKMOUNT---
 [ -e __DISK_MOUNT__ ] && echo present || echo absent
+echo ---INODES---
+df -i -P / __DISK_MOUNT__ 2>/dev/null
 echo ---END---
 """
 
@@ -62,6 +64,7 @@ _SECTION_RAM = "---RAM---"
 _SECTION_DISK = "---DISK---"
 _SECTION_DISKS = "---DISKS---"
 _SECTION_DISKMOUNT = "---DISKMOUNT---"
+_SECTION_INODES = "---INODES---"
 _SECTION_END = "---END---"
 
 #: The mount point measured when the node asks for none (v1.6.6). DECLARED here, named by the
@@ -85,6 +88,12 @@ DISK_NOTE_DEVICE_MISSING = "device-missing"   # the note the collector writes fo
 #: it, while `loop`, `rom`, `dm-*` and `md*` carry their own — so the filter is a declaration about
 #: the DEVICE, never about the shape of its name.
 DISK_TYPE_PHYSICAL = "disk"
+
+#: v1.8.4: the inode use at which the card stops saying only "N gb free" — a filesystem can sit at
+#: 40 % free SPACE and 100 % used INODES, so the percentage is a fact the card carries and this is
+#: the DECLARED line above which the mount's own info line names it (below it the figure lives in
+#: the tooltip, so an ordinary card's line stays byte for byte what it was).
+INODE_ALERT_PERCENT = 90
 
 
 def sh_quote(text: str) -> str:
@@ -453,6 +462,106 @@ def resolve_disk_device(devices, requested) -> dict:
     return {"name": name, "size": "", "note": DISK_NOTE_DEVICE_MISSING}
 
 
+# ── v1.8.4 (ROADMAP task 3): the INODE fact beside the space figure ──────────────
+# Its own section: the six inode columns of `df -i -P` would parse as a `df --output` space row.
+# The answer describes the SAME filesystem the mount answer names — 40 % free SPACE beside 100 %
+# used INODES is the second lie a card can tell.
+
+def inode_token(value) -> str:
+    """A `df -i` "IUse%" cell → the stored token `"100%"` (PURE); `""` — nothing measured.
+
+    `df` prints `-` for a filesystem that has no inode table at all (some pseudo-filesystems),
+    and a legacy `df` may print nothing — both answer `""`, which is "not measured" and never
+    `"0%"`. A percentage outside 0..100 is refused for the same reason: it cannot be a
+    measurement of a table that is at most full.
+    """
+    text = str("" if value is None else value).strip().rstrip("%").strip()
+    if not text.isdigit():
+        return ""
+    number = int(text)
+    return f"{number}%" if 0 <= number <= 100 else ""
+
+
+def inode_percent(value):
+    """The INTEGER percentage of a stored inode token (`"100%"` → 100, PURE); None — not measured."""
+    token = inode_token(value)
+    return int(token[:-1]) if token else None
+
+
+def inode_alert(value, threshold: int = INODE_ALERT_PERCENT) -> bool:
+    """Is this inode figure at or above the DECLARED alert line? (PURE)
+
+    The ONE predicate behind the card's own line: an exhausted inode table is invisible in the
+    free-SPACE figure the card already paints, so the percentage has to be able to speak. An
+    unmeasured value (`""`, junk) is never an alert — a missing measurement is not a problem.
+    """
+    percent = inode_percent(value)
+    return percent is not None and percent >= int(threshold)
+
+
+def parse_inode_report(text: str) -> list:
+    """The rows of ONE `df -i -P` run (PURE, v1.8.4).
+
+    Returns `[(source, itotal, iused, ifree, ipcent, target), …]` with the three inode counts as
+    ints and the percentage as the machine's own token (`"4%"`). The header line (`Filesystem
+    Inodes IUsed IFree IUse% Mounted on`), a section marker and every unparsable line are
+    DROPPED, so a `df` that is absent or refuses the flag yields `[]` — a degradation, never an
+    error. `df -i` prints `-` in every column of a filesystem that has no inode table at all
+    (some pseudo-filesystems): that row is dropped too, because "-" is not a measurement. The
+    target is the rest of the line, so a mount point with a space survives.
+    """
+    rows = []
+    for line in text.splitlines():
+        s = _clean_text(line)
+        if not s or s.startswith("---"):
+            continue
+        parts = s.split(None, 5)
+        if len(parts) < 6:
+            continue
+        source, itotal, iused, ifree, ipcent, target = parts
+        if not (itotal.isdigit() and iused.isdigit() and ifree.isdigit()):
+            continue  # the header, or the `-` of a filesystem without an inode table
+        token = inode_token(ipcent)
+        if not token:
+            continue
+        rows.append((source, int(itotal), int(iused), int(ifree), token, target))
+    return rows
+
+
+def resolve_inode_answer(rows, mount: str = "") -> str:
+    """The inode token of the filesystem an ACCEPTED data mount lives on (PURE, v1.8.4).
+
+    ``mount`` is the mount point the space read really reported (`disk_path`): the row whose
+    target IS that path wins. The ROOT row is the fallback — the batch always asks for `/`, so
+    it is the one path that is always there — and the single non-root row is the last resort.
+    The requested path therefore always answers for the filesystem it is really on.
+
+    An EMPTY ``mount`` answers `""`: the space read refused the request (a path that is not
+    there, a network share), so there is no answer for an inode figure to sit beside, and a
+    collection that refused the mount CLEARS the stored one instead of leaving a stale number.
+    """
+    wanted = str("" if mount is None else mount).strip()
+    if not wanted:
+        return ""
+    exact = extra = root = ""
+    for row in rows or ():
+        try:
+            _source, _itotal, _iused, _ifree, token, target = row
+        except (TypeError, ValueError):
+            continue
+        token = inode_token(token)
+        if not token:
+            continue
+        target = str(target).strip()
+        if target == wanted:
+            exact = exact or token
+        elif target == "/":
+            root = root or token
+        else:
+            extra = extra or token
+    return exact or root or extra
+
+
 def parse_info_output(output: str, disk_device: str = "") -> Dict[str, object]:
     """Parse the whole batch output by markers → a dict of finished values.
 
@@ -466,7 +575,7 @@ def parse_info_output(output: str, disk_device: str = "") -> Dict[str, object]:
         line = line.rstrip("\r")
         s = line.strip()
         if s in (_SECTION_OS, _SECTION_CPU, _SECTION_RAM, _SECTION_DISK, _SECTION_DISKS,
-                 _SECTION_DISKMOUNT):
+                 _SECTION_DISKMOUNT, _SECTION_INODES):
             current = s
             sections[current] = []
         elif s == _SECTION_END:
@@ -517,6 +626,12 @@ def parse_info_output(output: str, disk_device: str = "") -> Dict[str, object]:
         result["disk_free"] = answer["free"]
         result["disk_size"] = answer["size"]
         result["disk_note"] = answer["note"]
+        # v1.8.4 (ROADMAP task 3): the INODE fact of the filesystem that answer just named. It
+        # belongs to the ANSWER (an accepted mount), so a refused one clears it with the pair; a
+        # batch WITHOUT the section (a legacy one) says NOTHING and leaves the stored figure alone.
+        if _SECTION_INODES in sections:
+            result["disk_inodes"] = resolve_inode_answer(
+                parse_inode_report("\n".join(sections[_SECTION_INODES])), answer["path"])
 
     # The DEVICE choice. The section is present in every batch this code builds, so a collection
     # that carries it ANSWERS the request — with a capacity or with a REPORTED miss — while an

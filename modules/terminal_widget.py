@@ -6,7 +6,8 @@ never left to the font's own widths and `font_grid_problems()` is the gate over 
 cursor GEOMETRY is the PURE `cursor_shape_rect()` over the DECLARED `CURSOR_STYLES`
 (`resolve_cursor_style()` reads the config); `FORMAT_CACHE_LIMIT` caps the format cache. The canvas is a
 FACADE over its clusters — the key map and the ONE input point (`terminal_widget_input.py`), the mouse
-family (`..._mouse.py`), the find bar (`..._find.py`), the transcript (`..._transcript.py`) and the local
+family (`..._mouse.py` — the xterm reports, the local gestures and the `OSC 8` link), the find bar
+(`..._find.py`), the transcript (`..._transcript.py`) and the local
 selection (`..._selection.py`) — each resolving a facade global through `MODULE_FACADE_SEAMS` below.
 `feed()` runs under the screen's lock, painting on the GUI thread; mechanism — `DOCUMENTATION.md` §14a,
 §64."""
@@ -144,11 +145,18 @@ def strip_paste_markers(text) -> str:
     return out
 
 
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import Qt, QTimer, QUrl
 from PySide6.QtGui import (
-    QBrush, QColor, QFont, QFontDatabase, QFontMetricsF, QPainter, QPen,
+    QBrush, QColor, QDesktopServices, QFont, QFontDatabase, QFontMetricsF, QPainter, QPen,
 )
 from PySide6.QtWidgets import QFileDialog, QMenu, QSizePolicy, QWidget
+
+# v1.9: the OSC 8 link opener asks the SHIPPED allowlist (`AGENTS.md` §4.4) — the same predicate the
+# quick-launch row and the bookmarks ask — so the canvas adds no second scheme rule of its own.
+try:
+    from ..models.server import is_launchable_url
+except ImportError:  # a flat launch from the project root
+    from models.server import is_launchable_url
 
 # The canvas FACADE over its clusters: the key map and the ONE input point, the mouse family, the find
 # bar, the transcript and the local selection. The module-level helpers a mixin resolves at call time
@@ -315,6 +323,30 @@ def run_glyphs(row, start, text):
     if consumed < total:
         glyphs.append(text[consumed:])   # a row out of step — never lose the ink
     return glyphs
+
+
+def link_span(row, col):
+    """The contiguous cells of `row` around `col` that share its `OSC 8` hyperlink (v1.9).
+
+    PURE, the `split_row_runs()` family: a link is a RUN, so the underline and the click ask THIS
+    function and never a cell twice — `row` is one line of a `snapshot()`, and `(start, end, uri)`
+    is the maximal span of equal, non-empty URIs around `col`. `None` for a cell without a link (or a
+    `col` outside the row): the canvas then draws nothing and the press falls through to the ordinary
+    mouse path. Nothing is stored: the URI is read from the GRID on every call, so an erase or an
+    overwrite between two events takes the decoration with it.
+    """
+    if row is None or not 0 <= col < len(row):
+        return None
+    uri = getattr(row[col], "hyperlink", "")
+    if not uri:
+        return None
+    start = col
+    while start > 0 and getattr(row[start - 1], "hyperlink", "") == uri:
+        start -= 1
+    end = col
+    while end + 1 < len(row) and getattr(row[end + 1], "hyperlink", "") == uri:
+        end += 1
+    return start, end, uri
 
 
 def split_row_runs(row):
@@ -504,6 +536,10 @@ class TerminalWidget(TerminalInputMixin, TerminalMouseMixin, TerminalFindMixin,
     # amber/blue pair the map uses for "this one" vs "also matches").
     FIND_MATCH_COLOR = (56, 189, 248, 60)     # theme.ACCENT @ ~24%
     FIND_CURRENT_COLOR = (245, 158, 11, 130)  # theme.SELECTION_AMBER @ ~51%
+    # v1.9: the `OSC 8` hyperlink underline — the SAME accent ink as the find overlay, opaque enough
+    # to read as a link under any cell background (the SELECTION_COLOR precedent: a canvas overlay
+    # constant, never a theme field — the terminal palette is this widget's own).
+    LINK_COLOR = (56, 189, 248, 190)          # theme.ACCENT @ ~75%
     TRANSCRIPT_SUGGESTED_SUFFIX = ".log"      # the default name of a transcript
 
     def __init__(self, tscreen, terminal_thread=None, parent=None,
@@ -541,10 +577,17 @@ class TerminalWidget(TerminalInputMixin, TerminalMouseMixin, TerminalFindMixin,
         # and the metrics; the config key and the words belong to the page (the
         # `command_sent_hook` split: the canvas stays free of stores and of i18n).
         self.font_zoom_hook = None
+        # v1.9: the PRODUCTION-TAG guard of a multi-line paste — the owning page installs it (it knows
+        # the node's tags and the words); None — no policy installed, the paste goes ahead.
+        self.guard_hook = None
 
         self._bg_color = QColor(self._palette["default_bg"])
         self._cursor_color = QColor(self.CURSOR_COLOR)
         self._selection_color = QColor(*self.SELECTION_COLOR)
+        # v1.9: the link UNDERLINE ink and the CELL the pointer hovers — a cell, never the URI, so a
+        # program that erases or rewrites the link between two paints takes the decoration with it.
+        self._link_color = QColor(*self.LINK_COLOR)
+        self._hover_cell = None
 
         # v1.0RC2: the mouse selection — the anchor (press) and the active end (move/release),
         # the coordinates are ALWAYS (row, col); None — no selection.
@@ -851,6 +894,20 @@ class TerminalWidget(TerminalInputMixin, TerminalMouseMixin, TerminalFindMixin,
                                      brush_current if is_current else brush_other)
             stats["find_matches"] = sum(len(v) for v in find_rows.values())
 
+        # v1.9: the `OSC 8` link under the pointer — the whole RUN the hovered cell belongs to,
+        # underlined AFTER the text so the glyphs stay readable. Only the CELL is stored, so a link
+        # the program overwrote between two paints simply stops being underlined.
+        if self._hover_cell is not None:
+            hy, hx = self._hover_cell
+            span = link_span(rows[hy], hx) if 0 <= hy < len(rows) else None
+            if span is not None:
+                start, end, _uri = span
+                thickness = max(1, self._cell_h // 12)
+                painter.fillRect(start * self._cell_w,
+                                 hy * self._cell_h + self._cell_h - thickness,
+                                 (end - start + 1) * self._cell_w, thickness,
+                                 QBrush(self._link_color))
+
         # The cursor (`DOCUMENTATION.md` §64): the SHAPE is declared — the block fills the cell and swaps
         # the glyph, while the bar and the underline paint a thin line and leave the text alone. It is NOT
         # drawn when `screen.cursor.hidden` (`ESC[?25l/h` — vim hides it) or in the "invisible" phase of
@@ -1078,9 +1135,10 @@ class TerminalWidget(TerminalInputMixin, TerminalMouseMixin, TerminalFindMixin,
 # name read only by a mixin is not a dead import. The PURE helpers the mixins need are the module's own
 # functions (`selection_cells`, `word_units`, `build_macro_payload`, `strip_paste_markers`, …).
 MODULE_FACADE_SEAMS = (
-    QFileDialog, QMenu,
+    QFileDialog, QMenu, QUrl, QDesktopServices,
     _get_multi_hub, _get_app_log, get_translator,
     selection_cells, word_units, build_macro_payload, strip_paste_markers,
+    link_span, is_launchable_url,
 )
 
 

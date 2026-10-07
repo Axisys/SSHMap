@@ -45,6 +45,12 @@ except ImportError:
     from modules.command_history import (CommandHistoryPanel, CommandHistoryStore,
                                          history_key)
 
+try:  # v1.9: the production-tag guard of a multi-line paste (the page owns the node's tags)
+    from .production_guard import VERB_PASTE, confirm as guard_confirm, guard_tag, node_tags
+except ImportError:
+    from production_guard import (VERB_PASTE, confirm as guard_confirm, guard_tag,
+                                  node_tags)
+
 try:  # v1.2.5: the central theme (status labels — ui/theme.py)
     from ..ui import theme
 except ImportError:
@@ -447,6 +453,8 @@ class TerminalSessionPage(TerminalFilesPanelMixin, TerminalPageSftpMixin, Termin
         # v1.3.3.4 (ROADMAP task 3): the transcript's suggested file name carries the
         # host — the page owns the server data, the canvas owns the menu that asks.
         self.widget.set_transcript_host(getattr(server_data, "host", "") or "")
+        # v1.9: the production-tag guard of a multi-line paste — the page owns the node's tags.
+        self.widget.guard_hook = self._guard_paste
         # v1.0 final: applying the config (an unknown palette → set_palette() False
         # → "default" stays; corrupt values were dropped in load_terminal_settings).
         if term_cfg["palette"] is not None:
@@ -1360,6 +1368,19 @@ class TerminalSessionPage(TerminalFilesPanelMixin, TerminalPageSftpMixin, Termin
 
     def _set_status(self, text: str):
         self._set_status_text(text)
+
+    def _guard_paste(self, lines: int) -> bool:
+        """v1.9: the production-tag guard for a MULTI-LINE paste into THIS session.
+
+        The page is the ONE owner of the session's own tags (`server_data.tags`), so the canvas asks it
+        through `widget.guard_hook`; the policy is PURE (`modules/production_guard.py`) and the dialog is
+        that module's ONE `confirm()`. No guard tag on this node — the paste goes ahead untouched.
+        """
+        tag = guard_tag(node_tags(self.server_data))
+        if not tag:
+            return True
+        alias = getattr(self.server_data, "alias", "") or getattr(self.server_data, "host", "")
+        return guard_confirm(VERB_PASTE, tag, alias=alias, lines=lines, parent=self)
 
     def _set_status_text(self, text: str):
         """The SINGLE status write of the page (v1.3.3.5, completed in the v1.4.7 follow-up).

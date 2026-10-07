@@ -1,0 +1,93 @@
+Subject: [sshmap fork 0012] the erased background — BCE paints the WHOLE width (the sparse walk)
+
+Provenance: sshmap (v1.9, ROADMAP task 2) — item (b) of the three pyte cosmetics the dependency audit
+            left in the backlog (PYTE82_AUDIT.md, the raise-review of 2026-09-26, "the cheapest and
+            the most visible"). Reproduced on the vendored fork first: `erase_in_display` ends its
+            loop with `for x in line:` and `line` is a SPARSE `StaticDefaultDict` whose iteration
+            yields the KEYS — so only the cells that ALREADY have an entry are written. Measured
+            through a bare screen, `ESC[44m ESC[2J` on a blank 30-cell row painted **0 of 30** cells
+            (against 6 of 30 for `ESC[K`, which already iterates a `range`), and on a WRITTEN row it
+            painted 11 of 30 and left the unwritten cells at the default background: xterm's BCE
+            (background colour erase) is what a TUI that clears with a colour — `less -R`, htop, a
+            full-screen editor's exit — depends on, and the sparse walk also made the cost of an
+            erase depend on the CONTENT of the screen.
+            The fix is the one the audit named: an erase writes over the WHOLE width, and the
+            attributes it writes are the CURRENT ones (the background survives) minus the character
+            and minus the OSC 8 hyperlink of patch 0011 — a cleared cell is a blank, not a link.
+            ONE private helper (`Screen._erase_attrs()`) is the single spelling of that cell, used
+            by `erase_characters`, `erase_in_line` and `erase_in_display` so the three cannot drift.
+            Cost, measured on the dev box (200x50, one `ESC[2J` per feed): **0.016 ms -> 0.229 ms**;
+            an 80x24 screen goes **0.010 ms -> 0.061 ms**. Declared: a full-screen clear now writes
+            every cell (~10 000 entries at 200x50), which is ~0.5 % of the ~42 ms a full htop chunk
+            costs to feed, and the alternative — keeping the sparse walk and painting the DEFAULT
+            background only where a cell already exists — is exactly the stale picture this fixes.
+            Not taken (the audit's item (c), each its own semantics move): `CSI 3 J` still clears
+            the VISIBLE screen as well (xterm clears the saved lines only) and an underline still
+            carries into the erased cells (the canvas paints a line across the blank area).
+Base:       pyte 0.8.2 (PyPI sdist, sha256 in MANIFEST.md), pyte/screens.py (after patches
+            0001-0011; patch 0011 was the last one to touch this file).
+Policy:     keep — upstream 0.8.3.dev carries the same sparse loop, so this is a fork fix with no
+            release to wait for; the helper is additive and a future rebase can re-apply it alone.
+Applied:    2026-10-07, sshmap v1.9.
+
+diff --git a/pyte/screens.py b/pyte/screens.py
+index b3a1e37..0a9da70 100644
+--- a/pyte/screens.py
++++ b/pyte/screens.py
+@@ -858,6 +858,16 @@
+             else:
+                 line.pop(x, None)
+ 
++    def _erase_attrs(self) -> Char:
++        """The attributes an ERASED cell takes — sshmap fork (patch 0012).
++
++        xterm's BCE: an erase paints the CURRENT background, so the cell keeps the SGR state
++        (background, and the foreground the writer set) while its character becomes a blank.
++        The OSC 8 hyperlink is the one attribute that does NOT survive (patch 0011): a cleared
++        cell is not part of a link any more.
++        """
++        return self.cursor.attrs._replace(data=" ", hyperlink="")
++
+     def erase_characters(self, count: Optional[int] = None) -> None:
+         """Erase the indicated # of characters, starting with the
+         character at cursor position. Character attributes are set
+@@ -878,7 +888,7 @@
+         line = self.buffer[self.cursor.y]
+         for x in range(self.cursor.x,
+                        min(self.cursor.x + count, self.columns)):
+-            line[x] = self.cursor.attrs
++            line[x] = self._erase_attrs()
+ 
+     def erase_in_line(self, how: int = 0, private: bool = False) -> None:
+         """Erase a line in a specific way.
+@@ -911,8 +921,9 @@
+ 
+         self.dirty.add(self.cursor.y)
+         line = self.buffer[self.cursor.y]
++        attrs = self._erase_attrs()   # sshmap fork (patch 0012): the background, no hyperlink
+         for x in interval:
+-            line[x] = self.cursor.attrs
++            line[x] = attrs
+ 
+     def erase_in_display(self, how: int= 0, *args: Any, **kwargs: Any) -> None:
+         """Erases display in a specific way.
+@@ -949,10 +960,17 @@
+             return
+ 
+         self.dirty.update(interval)
++        # sshmap fork (patch 0012): the WHOLE width is written, not the keys of the sparse
++        # buffer dict. `for x in line` visited only the cells that already existed, so a
++        # background erase (`ESC[44m ESC[2J`) painted NOTHING on a blank screen — measured 0
++        # of 30 cells, against 6 of 30 for EL — and left holes in a written one: xterm's BCE
++        # is what a TUI that clears with a colour (`less -R`, htop, a full-screen editor's
++        # exit) depends on, and the sparse walk also made the cost depend on the CONTENT.
++        attrs = self._erase_attrs()
+         for y in interval:
+             line = self.buffer[y]
+-            for x in line:
+-                line[x] = self.cursor.attrs
++            for x in range(self.columns):
++                line[x] = attrs
+ 
+         if how == 0 or how == 1:
+             self.erase_in_line(how)

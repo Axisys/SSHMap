@@ -690,7 +690,7 @@ check("§5 ...and they are the keys the CODE really asks for (the window's own v
 check("§5 the export sentence carries its {file} placeholder in every language",
       all("{file}" in _LANGS[c]["plugins.window.status.exported"] for c in _LANGS))
 check("§5 the release moved and the SCHEMA did not (VERSION_FORMAT stays 0.9)",
-      __import__("version").APP_VERSION == "1.8.3"
+      __import__("_common").releases_at_least(__import__("version").APP_VERSION, "1.8.3")
       and __import__("version").VERSION_FORMAT == "0.9"
       and all(f"{d}>=" in _src("requirements.txt")
               for d in ("PySide6", "paramiko", "keyring", "wcwidth")))

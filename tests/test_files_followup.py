@@ -599,7 +599,7 @@ check("the follow-up's four keys exist in EVERY language",
           for k in ("settings.tab.files", "settings.files.max_bytes",
                     "settings.files.max_bytes_warning", "sftp.viewer.truncated")))
 check("the i18n pin counts the slot's four keys (the v1.8 elevated pane's 20, the v1.8.1 trust "
-      "surface's 41 and the ONE of v1.8.1.1) and v1.8.2 adds SIXTEEN: the library file — the History door, the backup ring and the import/export pair — and v1.8.3 adds TWENTY-THREE: the Plugins window (its chrome, its three columns and its export)",
-      EXPECTED_I18N_KEYS == 915 + 4 + 6 + 20 + 41 + 1 + 16 + 23 and releases_at_least(EXPECTED_APP_VERSION, "1.7.5"),
+      "surface's 41 and the ONE of v1.8.1.1) and v1.8.2 adds SIXTEEN: the library file — the History door, the backup ring and the import/export pair — and v1.8.3 adds TWENTY-THREE: the Plugins window (its chrome, its three columns and its export) and v1.8.4 adds TEN: the whole-map layout, the reverse traversal and the inode fact",
+      EXPECTED_I18N_KEYS == 915 + 4 + 6 + 20 + 41 + 1 + 16 + 23 + 10 and releases_at_least(EXPECTED_APP_VERSION, "1.7.5"),
       f"{EXPECTED_I18N_KEYS} / {EXPECTED_APP_VERSION}")
 finish()

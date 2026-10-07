@@ -1,0 +1,106 @@
+Subject: [sshmap fork 0011] OSC 8 hyperlinks — the link a program sends rides the CELL
+
+Provenance: sshmap (v1.9, ROADMAP task 1) — the terminal-link ask. The vendored 0.8.2 dispatches OSC
+            `0`/`1`/`2` only (the `if code in "01"` / `in "02"` pair of `pyte/streams.py`), so an
+            `ESC ] 8 ; params ; URI ST` was consumed and DROPPED: measured through
+            `TerminalScreen.feed` + `snapshot()`, the cell of a linked word had no hyperlink to
+            answer with, and the canvas had nothing to make clickable.
+            Why the CELL and not a map beside the grid: every write path already builds its cell
+            from `self.cursor.attrs` (`draw()`'s `_replace(data=char)`), so a link held in the
+            attributes is inherited by the characters written after it and travels WITH the cell
+            through `draw()`, `erase_characters`, `erase_in_line`/`erase_in_display`, the insert
+            family and the scroll. A parallel `{(row, col): uri}` map would be a second truth that
+            pyte's own erase and scroll would not maintain, and the fork's policy is that the
+            emulator is the ONE owner of the emulation (AGENTS.md §4.7).
+            Two rules this patch DECLARES: (1) the `params` half (`id=…`) is ACCEPTED and IGNORED
+            — an id only groups the cells of one link, while the URI is what a canvas opens; an
+            EMPTY params half therefore makes the whole tail the URI, which is the OSC 8 reading.
+            (2) SGR 0 is ORTHOGONAL to OSC 8: `select_graphic_rendition` rebuilds the attributes
+            from `default_char` on BOTH of its paths, so both paths re-apply the current
+            hyperlink; a link is closed by `ESC ] 8 ; ; ST` and by `Screen.reset()` (which
+            rebuilds the attributes) and by nothing else.
+Base:       pyte 0.8.2 (PyPI sdist, sha256 in MANIFEST.md), pyte/screens.py and pyte/streams.py
+            (after patches 0001-0010; 0001-0005 and 0007-0009 touched screens.py, 0006 and 0010
+            touched streams.py).
+Policy:     keep until upstream implements OSC 8 — `0.8.3.dev` has no hyperlink support at all
+            (its OSC branch is behaviourally unchanged), so this is a fork feature rather than a
+            fix waiting for a release; the `Char` field is additive, so a future rebase can keep
+            the canvas side and drop the patch at any time.
+Applied:    2026-10-07, sshmap v1.9.
+
+diff --git a/pyte/screens.py b/pyte/screens.py
+index ff27e8a..b3a1e37 100644
+--- a/pyte/screens.py
++++ b/pyte/screens.py
+@@ -96,6 +96,11 @@
+     strikethrough: bool = False
+     reverse: bool = False
+     blink: bool = False
++    # sshmap fork (patch 0011): the OSC 8 hyperlink of this cell ("" = none). A LAST field with a
++    # default, so every existing `Char(...)` and `_replace(...)` call stays valid; the link is part
++    # of the attributes, exactly like a colour, so it travels with the character through `draw()`,
++    # the erase paths and the scroll instead of living in a map beside the grid.
++    hyperlink: str = ""
+ 
+ 
+ class Cursor:
+@@ -668,6 +673,19 @@
+         """
+         self.icon_name = param
+ 
++    def set_hyperlink(self, param: str) -> None:
++        """Set (or clear) the OSC 8 hyperlink of the CURRENT cell attributes.
++
++        sshmap fork (patch 0011). ``param`` is the payload the OSC branch hands over:
++        ``"params;URI"``, where the ``params`` half is the ``id=``-style key list — ACCEPTED
++        and IGNORED here, because an id only groups the cells of one link while the URI is
++        what a canvas opens. An EMPTY URI closes the link, as OSC 8 specifies. Like SGR the
++        link is a property of the current attributes, so it is inherited by every character
++        written afterwards; `Screen.reset()` rebuilds the attributes and therefore drops it.
++        """
++        _params, _sep, uri = param.partition(";")
++        self.cursor.attrs = self.cursor.attrs._replace(hyperlink=uri)
++
+     def carriage_return(self) -> None:
+         """Move the cursor to the beginning of the current line."""
+         self.cursor.x = 0
+@@ -1118,7 +1136,11 @@
+ 
+         # Fast path for resetting all attributes.
+         if not attrs or attrs == (0, ):
+-            self.cursor.attrs = self.default_char
++            # sshmap fork (patch 0011): SGR 0 resets the SGR attributes and NOT the OSC 8
++            # hyperlink — the two are orthogonal (xterm closes a link on `ESC ] 8 ; ; ST` and
++            # on nothing else), so a `printf '\e[0m'` in the middle of a link keeps the link.
++            self.cursor.attrs = self.default_char._replace(
++                hyperlink=self.cursor.attrs.hyperlink)
+             return
+ 
+         attrs_list = list(reversed(attrs))
+@@ -1126,8 +1148,9 @@
+         while attrs_list:
+             attr = attrs_list.pop()
+             if attr == 0:
+-                # Reset all attributes.
++                # Reset all attributes (the OSC 8 link survives — see the fast path above).
+                 replace.update(self.default_char._asdict())
++                replace["hyperlink"] = self.cursor.attrs.hyperlink
+             elif attr in g.FG_ANSI:
+                 replace["fg"] = g.FG_ANSI[attr]
+             elif attr in g.BG:
+diff --git a/pyte/streams.py b/pyte/streams.py
+index ea24b66..d482baf 100644
+--- a/pyte/streams.py
++++ b/pyte/streams.py
+@@ -394,6 +394,11 @@
+                     listener.set_icon_name(param)
+                 if code in "02":
+                     listener.set_title(param)
++                # sshmap fork (patch 0011): OSC 8 carries a hyperlink for the cells written
++                # afterwards (`ESC ] 8 ; params ; URI ST`, an empty URI closes it) — the one
++                # OSC a terminal that shows a clickable link needs.
++                if code == "8":
++                    listener.set_hyperlink(param)
+             elif char not in NUL_OR_DEL:
+                 draw(char)
+ 

@@ -299,6 +299,10 @@ class LayoutMixin:
         # It is UI state (memory only, never a config key) and it never changes the
         # counters: a lens is a view, not a fact.
         self._problems_only = False
+        # v1.8.4 (ROADMAP task 2): the DEPENDENCY focus of the map — the node id a Ctrl+click
+        # asked about ("" = no highlight), memory only, read back by `_apply_map_dimming()`
+        # through `_dependency_ids()`. UI state like the lens above, never a config key.
+        self._dependency_focus = ""
         self.problems_chip = chip_cls(self)
         self.problems_chip.clicked.connect(self._on_problems_chip_clicked)
         self.problems_chip.refresh_theme()

@@ -932,3 +932,38 @@ class CmdArrangeGroup(CmdMoveNodes):
         super().__init__(win, moves)
         self.setText(f"Arrange {len(self._moves)} members")
         self._group = group
+
+
+# ── v1.8.4 (ROADMAP task 1): CmdArrangeMap — the whole map in one gesture ────────
+
+class CmdArrangeMap(CmdMoveNodes):
+    """The auto-arrangement of the WHOLE map (v1.8.4, ROADMAP task 1).
+
+    The `CmdMoveNodes` body with the text that names THIS gesture: absolute positions, ONE
+    stack entry, so Ctrl+Z returns every card byte for byte. The units are the map's TOP
+    level: a free card is set directly, while a GROUP is moved through its own `_apply_move()`
+    — the ONE mechanism that carries its members (`CmdMoveGroup` calls the same one), because
+    the frame's `setPos()` does not move them.
+
+    NOT destructive: an arrangement loses nothing, so `offers_undo()` stays False.
+    """
+
+    def __init__(self, win, moves):
+        super().__init__(win, moves)
+        self.setText(f"Arrange {len(self._moves)} cards")
+
+    def _apply(self, use_old: bool):
+        """Apply every move — a group frame through `_apply_move()` (the members ride with it)."""
+        for item, old, new in self._moves:
+            target = old if use_old else new
+            try:
+                if item.scene() is None:
+                    continue
+                mover = getattr(item, "_apply_move", None)
+                if callable(mover):
+                    mover(QPointF(target.x() - item.pos().x(),
+                                  target.y() - item.pos().y()))
+                else:
+                    item.setPos(target)
+            except (RuntimeError, AttributeError):
+                pass  # Qt teardown — the item was destroyed, nothing to apply
