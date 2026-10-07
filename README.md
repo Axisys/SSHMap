@@ -70,6 +70,7 @@ Desktop application (Python + PySide6): an interactive map of your IT infrastruc
 ### Languages & plugins
 - English (default), Russian, Chinese and German - plus any language as one JSON file dropped into `~/.sshmap/languages/`; a file there shadows the built-in of the same code, and the Language tab imports and exports files without touching the installed package.
 - Plugins from an entry point (`sshmap.plugins/v1`) or one file in `~/.sshmap/plugins/`: run a command on selected servers, contribute a status to a card, add palette commands and node-menu rows. A broken plugin is reported instead of freezing the window.
+- The Plugins window (Plugins menu) puts the plugins with their switch on the left, the servers to run on in the middle and what each run reported on the right - with a text export of the visible lines. The history lives until the application exits.
 
 ---
 
@@ -202,7 +203,7 @@ PySide6 / Qt 6 gotchas worth knowing before writing UI code:
 | `dialogs/` | Add/edit dialogs, connect, profiles, backups, imports, export options |
 | `ui/` | Main window and mixins, sidebar, theme, palette, panels, settings, hotkeys, icons |
 | `i18n/` | `en` (reference), `ru`, `zh`, `de` - one JSON file per language |
-| `tests/` | 132 test files, the parallel runner and the harness - map in `tests/INDEX.md` |
+| `tests/` | 133 test files, the parallel runner and the harness - map in `tests/INDEX.md` |
 | `examples/plugins/` | Two working example plugins, not installed and never auto-discovered |
 | `third_party/pyte/`, `third_party/pyte-patches/` | The managed pyte 0.8.2 fork: sdist plus explicit patches, provenance in the patches' `MANIFEST.md` |
 | `docs/` | The map image above, rendered from the example map |

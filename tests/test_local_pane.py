@@ -906,8 +906,10 @@ check("the version pin is the release this file describes",
 check("the i18n pin counts the SHIPPED release (897 + the 17 of v1.7.4rc1 + the 1 of v1.7.4rc2"
       " + the 4 of v1.7.5: the Files settings page with its ceiling row and warning, and the"
       " truncation notice + the 6 of v1.7.5.1 + the 20 of v1.8: the elevated pane + the 41 of"
-      " v1.8.1: the trust surface, and v1.8.1.1 adds ONE: the send identity sentence) and v1.8.2 adds SIXTEEN: the library file — the History door, the backup ring and the import/export pair",
-      EXPECTED_I18N_KEYS == 897 + 17 + 1 + 4 + 6 + 20 + 41 + 1 + 16, str(EXPECTED_I18N_KEYS))
+      " v1.8.1: the trust surface, and v1.8.1.1 adds ONE: the send identity sentence) and v1.8.2 adds SIXTEEN: the library file — the History door, the backup ring and the import/export pair"
+      " — and v1.8.3 adds TWENTY-THREE: the Plugins window (its chrome, its three columns and its"
+      " export)",
+      EXPECTED_I18N_KEYS == 897 + 17 + 1 + 4 + 6 + 20 + 41 + 1 + 16 + 23, str(EXPECTED_I18N_KEYS))
 check("VERSION_FORMAT did NOT move (a path is never written into a project)",
       __import__("version").VERSION_FORMAT == "0.9")
 check("no new dependency was added for the local pane (the four pinned ones)",

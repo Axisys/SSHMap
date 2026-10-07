@@ -437,8 +437,10 @@ check_i18n_parity(LANGS)
 check_i18n_format(LANGS)
 check_release_state(ROOT)
 check("§7 the waves add NO i18n key and NO schema move (the release's OWN feature adds its 20, "
-      "`ELEVATED_PANE.md`; v1.8.1 adds its 41 and v1.8.1.1 ONE) and v1.8.2 adds SIXTEEN: the library file — the History door, the backup ring and the import/export pair",
-      EXPECTED_I18N_KEYS == 925 + 20 + 41 + 1 + 16 and VERSION_FORMAT == "0.9",
+      "`ELEVATED_PANE.md`; v1.8.1 adds its 41 and v1.8.1.1 ONE) and v1.8.2 adds SIXTEEN: the library file — the History door, the backup ring and the import/export pair"
+      " — and v1.8.3 adds TWENTY-THREE: the Plugins window (its chrome, its three columns and its"
+      " export)",
+      EXPECTED_I18N_KEYS == 925 + 20 + 41 + 1 + 16 + 23 and VERSION_FORMAT == "0.9",
       f"{EXPECTED_I18N_KEYS} / {VERSION_FORMAT}")
 check("§7 the pin names this release", releases_at_least(EXPECTED_APP_VERSION, "1.8"),
       EXPECTED_APP_VERSION)

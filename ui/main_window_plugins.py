@@ -1,14 +1,15 @@
 """`PluginMixin` — the window half of the plugin API v1: the registry surfaces and the enable switch (AGENTS.md §4.1, §4.10).
 
-Methods only: `MainWindow` stays the facade and the public API is unchanged; the mixin does NOT import
-the window module (a cycle) — it duck-types the instance. The manager (`modules/plugin_manager.py`) reports
-FACTS (records and events) and this cluster turns them into a menu and into status-bar lines; the frozen
-contract is `PLUGINS.md`, and the manager itself stays HEADLESS.
+Methods only: `MainWindow` stays the facade and the public API is unchanged; the mixin does NOT import the
+window module (a cycle) — it duck-types the instance. The manager (`modules/plugin_manager.py`) reports FACTS
+(records and events) this cluster turns into a menu and into status-bar lines; `PLUGINS.md` is the contract.
 
 Owned here: the discovery entry point (`start_plugin_discovery()`, called once from `main.py`), the
 per-plugin rows of the "Plugins" menu (`_populate_plugin_items()` — the DYNAMIC rows only), the
 plugin-visible node registry, the context-menu hook (`_extend_node_context_menu()`, the ONE entry point of
-BOTH surfaces) and the run/status/error reporting. Mechanism — `DOCUMENTATION.md` §33."""
+BOTH surfaces), the run/status/error reporting and the `Plugins window` (`ui/plugins_panel.py`) with its
+`ui_plugins_panel` visibility and TWO taps: the drained events (ONE consumer) and `command_result`.
+Mechanism — `DOCUMENTATION.md` §33."""
 from PySide6.QtCore import QTimer
 from PySide6.QtGui import QAction
 
@@ -172,6 +173,14 @@ class PluginMixin:
                                        plugin_manager.HOOK_RUN_ON_NODES)))
             except RuntimeError:
                 pass  # Qt teardown
+        # The window lists the SAME registry: a node added, removed or renamed by a project load
+        # reaches its server column here (the ONE place the registry is re-fed).
+        panel = getattr(self, "plugins_panel", None)
+        if panel is not None:
+            try:
+                panel.refresh_servers()
+            except Exception:  # noqa: BLE001 — a diagnostic column must not break a project load
+                pass
 
     def _plugin_records_with_hook(self, hook_name: str) -> list:
         """The loaded plugins that declare a hook ([] — no plugin, no hook)."""
@@ -289,14 +298,200 @@ class PluginMixin:
             return
         self._report_plugin_events()
 
-    def _report_plugin_events(self):
-        """Turn the manager's events into status-bar lines (ROADMAP rc1: loaded/error/disabled).
+    # ── the Plugins window (v1.8.3, ROADMAP task 1) ───────────────────────────
+    # The panel is a SESSION surface: it is built once, it lives until the process exits and it owns
+    # the bounded event ring, so closing the window never loses the history. This mixin is the ONE
+    # place that touches it — the construction, the visibility key and the two taps of the ring.
 
-        One line per event, in order (a QStatusBar keeps the last one); when the round
-        carried an ERROR it is re-shown at the end, so a broken plugin stays the visible
-        message instead of being overwritten by the round report. The "loaded" line is
-        shown only for a RELOAD round — at startup the menu already says what is on and
-        a status line per plugin would outlive its own usefulness. Never raises.
+    @staticmethod
+    def _read_plugins_window_visible() -> bool:
+        """`ui_plugins_panel` from config.json → the saved visibility (default OFF).
+
+        Off by default: the window is a diagnostic surface, and a first run must not open a
+        second window. A broken value costs the default — never the surface.
+        """
+        try:
+            from i18n import load_config
+            cfg = load_config()
+        except Exception:  # noqa: BLE001 — without a config the default (hidden) stands
+            return False
+        raw = cfg.get("ui_plugins_panel")
+        return bool(raw) if isinstance(raw, bool) else False
+
+    def _save_plugins_window_config(self, data: dict) -> None:
+        """Merge-write the window's own UI state (the `ui_activity_panel` pattern)."""
+        try:
+            from i18n import save_config
+            save_config(dict(data))
+        except Exception:  # noqa: BLE001 — a cosmetic state must not break the toggle
+            pass
+
+    def _setup_plugins_panel(self):
+        """Create the Plugins window and install its TWO taps (v1.8.3, ROADMAP tasks 1–3).
+
+        (a) the drained discovery events — `_report_plugin_events()` is their ONE consumer and
+        copies every event into the panel's ring; (b) the per-node answers — `command_result` is
+        the manager's own fact about what a plugin RAN, so tapping it requires no API change at
+        all (`PLUGINS.md` stays frozen). Never raises: a plugin window must not break the startup.
+        """
+        try:
+            from ui.plugins_panel import PluginsPanel
+        except ImportError:  # flat layout: the ui/ directory itself is on sys.path
+            try:
+                from plugins_panel import PluginsPanel
+            except ImportError:  # a stripped build — no window, the app works as before
+                return
+        try:
+            panel = PluginsPanel(manager=self._plugin_manager, parent=self)
+            panel.on_hidden = self._on_plugins_window_hidden
+            panel.on_status = self._show_plugin_status
+            panel.tooltip_for = self._plugin_tooltip
+            self.plugins_panel = panel
+        except Exception as e:  # noqa: BLE001 — a diagnostic surface must not break startup
+            if self.log:
+                self.log.warning(f"Plugins window unavailable: {e}")
+            return
+        if bool(getattr(self, "_plugins_window_enabled", False)):
+            try:
+                panel.set_visible(True)
+            except RuntimeError:
+                pass  # Qt teardown — the panel is already destroyed
+        try:
+            # The registry is the MODEL of the window: every round, every switch and (below) every
+            # project change reaches it, so the menu and the window can never disagree.
+            self._plugin_manager.plugins_changed.connect(self._refresh_plugins_window)
+            self._plugin_manager.command_result.connect(self._on_plugin_command_result)
+            self._plugin_manager.command_finished.connect(self._on_plugin_command_finished)
+            # The plugin's OWN words: `ctx.log()` is its report and `ctx.status()` the sentence it
+            # asked the interface to show — a window that ran a plugin must show both, or a run
+            # reads as a bare `exit 0`.
+            self._plugin_manager.plugin_message.connect(self._on_plugin_message)
+        except (RuntimeError, AttributeError, TypeError):
+            pass  # an older manager without those signals is still a working registry
+
+    def _refresh_plugins_window_nodes(self):
+        """The window is a LIVE surface: while it is OPEN its server column follows the map.
+
+        The plugin-visible registry is otherwise re-fed when the "Plugins" menu opens (and at
+        discovery), so a project edit with the window on screen would leave the column stale. The
+        ONE sidebar refresh asks here, and the walk of the map is paid for only while it is really
+        shown. Never raises.
+        """
+        panel = getattr(self, "plugins_panel", None)
+        if panel is None:
+            return
+        try:
+            if not panel.is_shown():
+                return
+        except RuntimeError:
+            return  # Qt teardown — the panel is already destroyed
+        self._sync_plugin_nodes()
+
+    def _refresh_plugins_window(self):
+        """Follow the manager's registry change into the window (the ONE consumer's branch)."""
+        panel = getattr(self, "plugins_panel", None)
+        if panel is None:
+            return
+        try:
+            panel.refresh()
+        except Exception:  # noqa: BLE001 — a diagnostic surface must not break a switch
+            pass
+
+    def _show_plugin_status(self, text, timeout_ms: int = 8000):
+        """Put a sentence of the Plugins window on the status bar (the panel owns no widget)."""
+        try:
+            self.statusBar().showMessage(str(text), max(0, int(timeout_ms)))
+        except (RuntimeError, TypeError, ValueError):
+            pass  # Qt teardown / a broken timeout — a status line is cosmetic
+
+    def _on_plugin_command_result(self, plugin_id: str, node_id: str, payload: dict):
+        """The RESULT tap: ONE per-node `PluginRunResult` → ONE row of the session ring.
+
+        The core owns `PluginCommandRunner` and the manager re-emits every answer on
+        `command_result`, so this branch is what makes a plugin's run visible in the window —
+        the row says what the plugin RAN (node, exit code, the captured text), never what it
+        concluded. Never raises.
+        """
+        panel = getattr(self, "plugins_panel", None)
+        if panel is None:
+            return
+        try:
+            panel.record_run_result(plugin_id, payload)
+        except Exception:  # noqa: BLE001 — a diagnostic row must never break a run
+            pass
+
+    def _on_plugin_command_finished(self, plugin_id: str, payloads: list):
+        """The end of one plugin's run → ONE summary row (the count of the nodes it walked)."""
+        panel = getattr(self, "plugins_panel", None)
+        if panel is None:
+            return
+        try:
+            panel.record_run_finished(plugin_id, len(payloads or []))
+        except Exception:  # noqa: BLE001
+            pass
+
+    def _on_plugin_message(self, plugin_id: str, message: str):
+        """`ctx.log()` → ONE row of the session ring (the plugin's OWN words, verbatim).
+
+        The line is the plugin author's text (never an i18n key), so the window copies it as it
+        came; the durable record of the same fact stays the prefixed line in `sshmap.log`.
+        """
+        panel = getattr(self, "plugins_panel", None)
+        if panel is None:
+            return
+        try:
+            panel.record_plugin_message(plugin_id, message)
+        except Exception:  # noqa: BLE001 — a plugin's line must never break a run
+            pass
+
+    def _toggle_plugins_window(self, checked: bool):
+        """Show/hide the Plugins window + persist `ui_plugins_panel`.
+
+        The panel instance lives for the whole session (the ring survives closing it), so the
+        toggle only shows/hides — `ui/plugins_panel.py` explains why.
+        """
+        panel = getattr(self, "plugins_panel", None)
+        if panel is None:
+            return
+        visible = bool(checked)
+        try:
+            panel.set_visible(visible)
+        except RuntimeError:
+            return  # Qt teardown — the panel is already destroyed
+        self._plugins_window_enabled = visible
+        self._save_plugins_window_config({"ui_plugins_panel": visible})
+
+    def _on_plugins_window_hidden(self):
+        """The user closed the window (its X): the item that OWNS the state must follow.
+
+        The close is mirrored into the checkable Plugins-menu item with BLOCKED signals (no
+        `toggled` loop back into `set_visible`) and persisted, so the next start opens the window
+        only if it was left open.
+        """
+        self._plugins_window_enabled = False
+        self._save_plugins_window_config({"ui_plugins_panel": False})
+        action = getattr(self, "act_plugins_window", None)
+        if action is None:
+            return
+        try:
+            if action.isChecked():
+                action.blockSignals(True)
+                try:
+                    action.setChecked(False)
+                finally:
+                    action.blockSignals(False)
+        except RuntimeError:
+            pass  # Qt teardown — the action is already destroyed
+
+    def _report_plugin_events(self):
+        """Turn the manager's events into the session ring AND into status-bar lines.
+
+        The drain is DESTRUCTIVE and this method is its ONE consumer: every event is COPIED into the
+        Plugins window's ring first (the row reads the same in any language — an event line is a
+        logging line), and the status line is written only while that window is CLOSED, so a fact has
+        ONE home at any moment. When the round carried an ERROR it is re-shown at the end, so a broken
+        plugin stays the visible message instead of being overwritten by the round report. The "loaded"
+        line is shown only for a RELOAD round. Never raises.
         """
         try:
             events = self._plugin_manager.drain_events()
@@ -304,6 +499,17 @@ class PluginMixin:
             return
         if not events:
             return
+        panel = getattr(self, "plugins_panel", None)
+        if panel is not None:
+            try:
+                panel.record_events(events)
+            except Exception:  # noqa: BLE001 — the ring is a consumer, not a gate
+                pass
+            try:
+                if panel.is_shown():
+                    return  # the window shows them: no double display on the status bar
+            except RuntimeError:
+                pass  # Qt teardown — fall through to the ordinary status lines
         lines = []                # [(text, timeout_ms)]
         first_error = None
         reloading = any(ev.get("kind") == plugin_manager.EVENT_RELOADED for ev in events)
@@ -364,11 +570,21 @@ class PluginMixin:
         the GUI thread). The guard is the v1.2.2 pattern of the dock's status line: every
         message takes a fresh token and the pending auto-clear of an older one is
         invalidated, so a slow asynchronous result can never blank a newer message.
+
+        The Plugins window keeps the SAME sentence as a row (v1.8.3): the bar is the "now" and it
+        forgets, while a plugin's own report is exactly what a user looks for later — and this is
+        the plugin's REQUEST, so it reaches both (only the core's own drained reports change home).
         """
         try:
             message = str(text)
             if not message:
                 return
+            panel = getattr(self, "plugins_panel", None)
+            if panel is not None:
+                try:
+                    panel.record_plugin_status(plugin_id, message)
+                except Exception:  # noqa: BLE001 — a history row must not break a status line
+                    pass
             token = next(self._plugin_status_tokens)
             self._plugin_status_token = token
             self.statusBar().showMessage(message, max(0, int(timeout_ms)))

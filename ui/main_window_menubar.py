@@ -10,7 +10,7 @@ window, `_rebuild_qaction_guard()` (gotcha #9) and the two halves of the languag
 belong to their own clusters. Mechanism — `DOCUMENTATION.md` §15, §31."""
 
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QKeySequence
+from PySide6.QtGui import QAction, QKeySequence
 from PySide6.QtWidgets import QMenu
 
 try:  # v1.8rc3: the common seam for monkeypatching the facade module's globals (see mixin_support)
@@ -399,6 +399,20 @@ class MenubarMixin:
         # destroy either of them (the language menu rebuilds its own children —
         # here the permanent pieces must survive `_populate_plugin_items`).
         self._plugin_sep = self._plugin_menu.insertSeparator(self.act_plugins_reload)
+        # v1.8.3 (ROADMAP task 1): the Plugins WINDOW — the door to the window, in the permanent
+        # group (below the separator) and the checkable OWNER of its `ui_plugins_panel` visibility
+        # (the `view.toggle_activity` rule: the item owns the state, the panel follows it). Built
+        # manually with an explicit toggled(bool): an auto-connected QMenu slot fires WITHOUT
+        # arguments in PySide6 6.11 and cannot be disconnected again (gotcha #10).
+        self.act_plugins_window = QAction(
+            self.t("plugins.window.open") if self._i18n_available else "Plugins window…",
+            self._plugin_menu)
+        self.act_plugins_window.setCheckable(True)
+        self.act_plugins_window.setChecked(bool(getattr(self, "_plugins_window_enabled", False)))
+        self.act_plugins_window.toggled.connect(self._toggle_plugins_window)
+        self._register_i18n(self.act_plugins_window, "plugins.window.open")
+        host_attr(self, "set_action_icon")(self.act_plugins_window, "plugin")
+        self._plugin_menu.insertAction(self.act_plugins_reload, self.act_plugins_window)
         self._populate_plugin_items()
         self._plugin_menu.aboutToShow.connect(self._populate_plugin_items)
 

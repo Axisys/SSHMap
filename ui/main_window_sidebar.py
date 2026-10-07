@@ -113,6 +113,7 @@ class SidebarMixin:
         self._apply_map_dimming()  # v0.9.8: dimming = the tag filter AND the map search
         self._sync_selection_state()
         self._update_counts_label()  # UI polish: the status-bar counters track the composition
+        self._refresh_plugins_window_nodes()  # the OPEN Plugins window follows the map (v1.8.3)
 
     # ── the filters of the sidebar ──
 

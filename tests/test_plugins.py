@@ -497,9 +497,12 @@ check("the startup round reports the load ERROR in the status bar (the one-time 
       win.statusBar().currentMessage() == _error_text, win.statusBar().currentMessage())
 check("…while a successfully loaded plugin stays quiet at startup (the menu already lists it)",
       t("plugins.status.loaded", name="uiplugin") not in win.statusBar().currentMessage())
-_rows = {a.text(): a for a in win._plugin_menu.actions() if a.isCheckable()}
-check("every discovered plugin got a checkable row (loaded + the broken one)",
-      set(_rows) == {"uiplugin", "uibroken"}, str(sorted(_rows)))
+_rows = {a.text(): a for a in win._plugin_menu.actions()
+         if a.isCheckable() and a is not win.act_plugins_window}
+check("every discovered plugin got a checkable row (loaded + the broken one) — the window's own "
+      "door is a checkable item of the same menu and is NOT a plugin row",
+      set(_rows) == {"uiplugin", "uibroken"} and win.act_plugins_window.isCheckable()
+      and win.act_plugins_window in win._plugin_menu.actions(), str(sorted(_rows)))
 check("the loaded plugin's row is checked and enabled",
       _rows["uiplugin"].isChecked() and _rows["uiplugin"].isEnabled())
 check("the FAILED plugin's row is present but disabled and unchecked (the reason in the tooltip)",

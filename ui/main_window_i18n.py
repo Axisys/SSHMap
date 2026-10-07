@@ -163,6 +163,15 @@ class I18nMixin:
                 _activity.retranslate()
             except RuntimeError:
                 pass  # Qt teardown — the panel is already destroyed
+        # v1.8.3 (ROADMAP task 1): the Plugins window — the CHROME only (its title, the column
+        # captions, the three buttons and the headers). The event LINES are logging lines and stay
+        # English: one key per event kind would be an i18n cost with no reader (§4.10).
+        _plugins_window = getattr(self, "plugins_panel", None)
+        if _plugins_window is not None:
+            try:
+                _plugins_window.retranslate()
+            except RuntimeError:
+                pass  # Qt teardown — the window is already destroyed
         # v1.4.5 (ROADMAP task 2): the first-run hint (its button text + the paint).
         _empty = getattr(self, "empty_state", None)
         if _empty is not None:

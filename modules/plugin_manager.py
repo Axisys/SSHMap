@@ -373,6 +373,9 @@ class PluginManager(QObject):
     plugins_changed = Signal()
     # v1.4rc2: the services of `PluginContext`, as facts the window turns into widgets.
     status_requested = Signal(str, str, int)      # (plugin_id, text, timeout_ms)
+    # v1.8.3: `ctx.log()` — the plugin's OWN line, for the Plugins window's event ring (the
+    # prefixed line of the application log stays the durable record of the same fact).
+    plugin_message = Signal(str, str)             # (plugin_id, message)
     hook_failed = Signal(str, str, str)           # (plugin_id, hook, detail)
     hook_timeout = Signal(str, str, int)          # (plugin_id, hook, budget_ms)
     command_result = Signal(str, str, dict)       # (plugin_id, node_id, result)
@@ -544,8 +547,18 @@ class PluginManager(QObject):
     # ── v1.4rc2: the PluginContext services (the adapter of modules/plugin_context.py) ──
 
     def plugin_log(self, plugin_id: str, message) -> None:
-        """`ctx.log()` — one line into the application log, prefixed with the plugin id."""
+        """`ctx.log()` — one line into the application log, prefixed with the plugin id.
+
+        The SAME line is also reported as a SIGNAL (`plugin_message`): a plugin's own words are
+        what a user reads in the Plugins window (`ui/plugins_panel.py`), and the log line stays
+        the durable record. Emitting from any thread is safe — Qt delivers it to the thread the
+        manager lives in — so a `ctx.log()` inside a `run_command` callback costs nothing.
+        """
         _log_line("info", f"[plugin {plugin_id}] {message}")
+        try:
+            self.plugin_message.emit(str(plugin_id or ""), str(message))
+        except RuntimeError:
+            pass  # Qt teardown — no receiver left
 
     def plugin_status(self, plugin_id: str, text, timeout_ms: int = 5000) -> bool:
         """`ctx.status()` — a status-bar line (a signal: the window owns the widget).
@@ -615,20 +628,21 @@ class PluginManager(QObject):
             asked += 1
         return asked
 
-    def plugin_run_on_nodes(self, nodes=None) -> int:
+    def plugin_run_on_nodes(self, nodes=None, plugin_ids=None) -> int:
         """Run "put this on the selected servers" — `run_on_nodes` on every loaded plugin.
 
         The window's entry point behind the "Run on selected servers" action: the nodes
-        are the user's selection (or the whole registry when nothing is selected) and the
-        manager starts ONE managed worker per plugin that declares the hook (rc2
-        machinery — `ctx.run_command` inside the hook gets its own managed worker, and
+        are the user's selection (or the whole registry when nothing is selected), the
+        optional `plugin_ids` narrows the run to named plugins (the Plugins window's row
+        action) and the manager starts ONE managed worker per plugin that declares the hook
+        (rc2 machinery — `ctx.run_command` inside the hook gets its own managed worker, and
         `shutdown()` waits for all of them). Returns the number of plugins started.
 
         An action the user triggered must never fail silently: with no plugin
         implementing the hook an ERROR line is logged (the status bar has nothing to
         report — the window disables the menu item in that case). Never raises.
         """
-        started = int(self.run_on_nodes(nodes))
+        started = int(self.run_on_nodes(nodes, plugin_ids=plugin_ids))
         if started == 0:
             _log_line("warning", "run_on_nodes: no loaded plugin implements the hook — "
                                  "nothing was run")
@@ -859,19 +873,30 @@ class PluginManager(QObject):
             return None
         return box.get("value")
 
-    def run_on_nodes(self, nodes=None) -> int:
+    def run_on_nodes(self, nodes=None, plugin_ids=None) -> int:
         """Start the `run_on_nodes` hook of EVERY loaded plugin (a managed worker each).
 
-        `nodes` defaults to the registry `set_nodes()` filled. Returns the number of
-        plugins the call was started for (0 — no plugin implements the hook). The hooks
-        run on managed QThreads; the work they start (`ctx.run_command`) has its own
-        managed workers, and `shutdown()` waits for all of them with the wait budget.
+        `nodes` defaults to the registry `set_nodes()` filled. `plugin_ids` is the ADDITIVE
+        run selection: `None` keeps the shipped "every capable plugin" semantics, a list runs
+        exactly those ids (a persisted enable switch is CONFIG and is never reused as the
+        selection of one run). Returns the number of plugins the call was started for (0 — no
+        plugin implements the hook, or no named one does). The hooks run on managed QThreads;
+        the work they start (`ctx.run_command`) has its own managed workers, and `shutdown()`
+        waits for all of them with the wait budget.
         """
         records = node_records(nodes) if nodes is not None else self.node_records()
         if not records:
             return 0
+        wanted = None
+        if plugin_ids is not None:
+            try:
+                wanted = {str(plugin_id) for plugin_id in plugin_ids}
+            except TypeError:      # a value that is not iterable: "no id selected"
+                wanted = set()
         started = 0
         for rec in self._loaded_with_hook(HOOK_RUN_ON_NODES):
+            if wanted is not None and rec.plugin_id not in wanted:
+                continue
             worker = _HookWorker(rec, HOOK_RUN_ON_NODES,
                                  (records, self._context_for(rec)), parent=self)
             worker.hook_error.connect(self._on_hook_error)

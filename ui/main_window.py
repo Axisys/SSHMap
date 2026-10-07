@@ -467,6 +467,13 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, StatusMixin, PluginMixi
         self._activity_enabled = MainWindow._read_activity_visible()
         self.activity_panel = None
 
+        # ── the Plugins window ────────────
+        # The saved visibility is read BEFORE `_setup_menubar` builds its checkable Plugins-menu item
+        # (the `ui_activity_panel` rule) and the panel itself is built right AFTER the menubar. The
+        # SESSION RING it owns lives as long as the process, so closing the window loses no history.
+        self._plugins_window_enabled = MainWindow._read_plugins_window_visible()
+        self.plugins_panel = None
+
         # ── the bookmarks panel ────────────
         # The saved visibility is read BEFORE `_setup_menubar` builds the checkable View item (the
         # `ui_activity_panel` rule: the menu item is the OWNER of the state, the panel follows it). The
@@ -514,6 +521,10 @@ class MainWindow(ProjectIOMixin, NodeOpsMixin, SshMixin, StatusMixin, PluginMixi
         # menubar (the View item owns its visibility) and BEFORE the first
         # `_apply_ui_translations()` below, so the startup messages are already history.
         self._setup_activity_panel()
+        # v1.8.3 (ROADMAP task 1): the Plugins window + the two taps of its session ring — the
+        # drained discovery events and the per-node answers of a plugin's run. AFTER the menubar
+        # (the Plugins-menu item owns its visibility) and BEFORE `_apply_ui_translations()` below.
+        self._setup_plugins_panel()
         # v1.3.2 (task 3): the hotkeys — applied at startup, AFTER the whole UI
         # (menus/toolbar/palette) exists; the same method runs after the dialog's OK.
         self._apply_hotkeys()

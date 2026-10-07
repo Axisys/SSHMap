@@ -847,8 +847,11 @@ check("the pin counts the keys of the SHIPPED release (v1.5.2 added THIRTEEN —
       "v1.8.1.1 adds ONE: the identity sentence of a send) and v1.8.2 adds SIXTEEN: the library file "
       "menu of the macro panel with the ring's restore, the import/export pair and their reports, the "
       "door's three sentences on the History row and the confirmation of an import"
-      " — 925 + 20 + 41 + 1 + 16 = 1003)",
-      EXPECTED_I18N_KEYS == 863 + 4 + 3 + 4 + 4 + 19 + 17 + 1 + 4 + 6 + 20 + 41 + 1 + 16,
+      " — 925 + 20 + 41 + 1 + 16 = 1003, and v1.8.3 adds TWENTY-THREE: the Plugins window — its "
+      "title and the three column captions, its three buttons, the door of the Plugins menu, the "
+      "checked-servers hint, the two empty sentences and the twelve column headers of its tables"
+      " — 1003 + 23 = 1026)",
+      EXPECTED_I18N_KEYS == 863 + 4 + 3 + 4 + 4 + 19 + 17 + 1 + 4 + 6 + 20 + 41 + 1 + 16 + 23,
       str(EXPECTED_I18N_KEYS))
 check_release_state(ROOT)
 for _code in i18n_lang_codes(ROOT):
