@@ -162,7 +162,8 @@ of the file itself.
 | `test_note_attach.py` | — | v1.2.4: attaching notes to servers + a special line (the v1.2.4 release theme). |
 | `test_notes.py` | — | Sticky notes: drag / resize / edit / delete plus the JSON round trip (a former smoke-test part). |
 | `test_pdf_export.py` | — | v0.9.9.7 — Map PDF export (ROADMAP v0.9.9.7); the page geometry is pinned in §6 of this file. |
-| `test_plugin_examples.py` | — | v1.4 — the two example plugins (`examples/plugins/hello.py`, `disk_monitor.py`). |
+| `test_plugin_examples.py` | — | v1.4 — the example plugins (`hello.py`, `disk_monitor.py`, `open_ports.py`, `app_versions.py`). |
+| `test_plugin_examples_monitors.py` | — | v1.9.2 — the two PROVEN examples (`examples/plugins/open_ports.py`, `app_versions.py`). |
 | `test_plugin_runtime.py` | — | v1.4rc2 — Plugin foundation, part 2: `PluginContext` and Main Thread isolation |
 | `test_plugin_ui.py` | — | v1.4rc3 — Plugin foundation, part 3: the UI hooks and dogfooding (ROADMAP tasks 7–9). |
 | `test_plugins.py` | — | v1.4rc1 — Plugin foundation, part 1: discovery and manager (ROADMAP v1.4rc1). |

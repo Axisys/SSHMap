@@ -20,7 +20,7 @@
 > hook of API v1 is now called by the core.**
 >
 > **v1.4 (SHIPPED — the base release of the line).** The API v1 contract is complete and
-> exercised from the OUTSIDE: the repository ships two WORKING example plugins in
+> exercised from the OUTSIDE: the repository ships WORKING example plugins in
 > `examples/plugins/` (`hello.py` — the minimal two-hook plugin; `disk_monitor.py` — the
 > Disk Space Monitor: `run_on_nodes` collects `df -hP` into the plugin's own atomic cache
 > and `status_probe` warns from it). They are examples, not shipped plugins: not installed,
@@ -351,17 +351,21 @@ points on the next start — no registration file, no cooperation from the appli
 
 ### 10.4 Working code in the repository
 
-`examples/plugins/` holds two examples that really load (copy them into
-`~/.sshmap/plugins/`, then `Plugins → Reload`):
+`examples/plugins/` holds examples that really load (copy them into
+`~/.sshmap/plugins/`, then `Plugins → Reload`); the folder's own README carries the table and
+the "Using them" walk:
 
 | File | What it shows |
 |---|---|
-| `hello.py` | The minimal plugin: one palette command returned as a plain `(text, callback)` pair, one row in the node context menu. No import of the core — the shape a plugin of ten lines has. |
+| `hello.py` | The minimal plugin, doing the smallest useful thing twice: a palette row that copies the plugins folder path (a palette callback DOES get the context) and a node-menu row that copies an `ssh` command line (a menu hook gets NO context, so the plugin uses the clipboard itself). |
 | `disk_monitor.py` | The first useful one, and the shape most real plugins take: `run_on_nodes` COLLECTS (`ctx.run_command` → `df -hP` → the plugin's own atomic cache) and `status_probe` REPORTS from that cache — no SSH inside a probe. |
+| `open_ports.py` | The same collector/reporter shape over `ss -tulpn`: the listening sockets normalised in pure Python and a watchlisted port the network can REACH reported as `warn`. |
+| `app_versions.py` | ONE generated POSIX-sh probe per node that only COLLECTS evidence, a pure-Python report over it and a baseline data file the user owns; its `ctx.run_command` budget is derived from the live catalog. |
 
-`examples/README.md` explains how to use and edit them; `tests/test_plugin_examples.py`
-loads both through the real discovery, drives their hooks and pins the "a plugin never
-imports the core" rule with a source scan.
+`examples/README.md` explains how to use and edit them; `tests/test_plugin_examples.py` and
+`tests/test_plugin_examples_monitors.py` load them through the real discovery, drive their
+hooks and pin the "a plugin never imports the core" rule (`example_plugin_problems()`,
+`tests/_common.py`).
 
 ### 10.5 Where to read more
 

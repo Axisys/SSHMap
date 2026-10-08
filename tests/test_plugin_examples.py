@@ -1,12 +1,13 @@
 # -*- coding: utf-8 -*-
-"""v1.4 — the two example plugins (`examples/plugins/hello.py`, `disk_monitor.py`).
+"""v1.4 — the example plugins (`hello.py`, `disk_monitor.py`, `open_ports.py`, `app_versions.py`).
 
-The acceptance of the plugin-foundation tasks: BOTH example files are loaded through the REAL discovery
-path of `PluginManager` (copied into the isolated `~/.sshmap/plugins/`, then `discover()`), never a
-syntax check, and their hooks are driven.
-§1 the examples as plugins (the manifests, the recorded hooks, the "a plugin never imports the core"
-source scan, the packaging guard — NOT auto-discovered, NOT installable); §2 `hello` (the palette command
-and the node context-menu row with narrowed records); §3 `disk_monitor`'s `df -hP` parser over fixtures (the header, the worst-of-several rule, a mount point with a SPACE, the pseudo-fs filter, a truncated line, an empty answer, a locale decimal, the 0–100 clamp); §4 its atomic cache, the merge and the cap; §5 the threshold (89 → no opinion, 90 → `warn`); §6 `run_on_nodes` on a fake context (no socket); §7 the reporter end to end; §8 the examples add NO i18n key and the index is regenerated."""
+EVERY example file loads through the REAL discovery path of `PluginManager` (copied into the isolated
+`~/.sshmap/plugins/`, then `discover()`), never a syntax check, and its hooks are driven; the two newer
+files are driven in DEPTH by `tests/test_plugin_examples_monitors.py`. §1 the four examples as plugins
+(the manifests, the hooks, the shared "a plugin never imports the core" predicate of `_common.py`);
+§2 `hello` (Copy SSH command + Copy the plugins folder path); §3–§5 `disk_monitor`'s `df -hP` parser,
+its atomic cache and the 90% threshold; §6 the collector on a fake context; §7 the reporter end to end;
+§8 the release state (the examples add NO i18n key)."""
 import json
 import os
 import re
@@ -19,7 +20,7 @@ from _common import (bootstrap, check, finish, check_i18n_parity, check_i18n_for
                      check_release_state, load_i18n_langs, translation_keys,
                      EXPECTED_APP_VERSION, EXPECTED_I18N_KEYS, clear_cfg,
                      wait_for as _wait_for,
-                     releases_at_least)
+                     releases_at_least, example_plugin_problems)
 
 ROOT, WORK = bootstrap()  # BEFORE the app module imports (the HOME isolation inside)
 
@@ -37,15 +38,16 @@ EXAMPLES_DIR = os.path.join(ROOT, "examples")
 PLUGINS_SRC = os.path.join(EXAMPLES_DIR, "plugins")
 HELLO_SRC = os.path.join(PLUGINS_SRC, "hello.py")
 DISK_SRC = os.path.join(PLUGINS_SRC, "disk_monitor.py")
+PORTS_SRC = os.path.join(PLUGINS_SRC, "open_ports.py")
+VERSIONS_SRC = os.path.join(PLUGINS_SRC, "app_versions.py")
 PLUGIN_DIR = PM.user_plugin_dir()
 CONFIG_FILE = os.path.join(os.path.expanduser("~"), ".sshmap", "config.json")
 
-# The rule of the folder (examples/README.md): an example plugin never imports the core —
-# a user of an INSTALLED app has no repository checkout on sys.path.
-CORE_IMPORT_RE = re.compile(
-    r"^\s*(?:from|import)\s+"
-    r"(modules|i18n|ui|graphics|models|services|storage|dialogs|third_party|version)\b",
-    re.MULTILINE)
+# The FOUR examples every section below installs (the rule of the folder is read from a file).
+EXAMPLE_FILES = ((HELLO_SRC, "hello", (PM.HOOK_REGISTER_COMMANDS, PM.HOOK_NODE_CONTEXT_MENU)),
+                 (DISK_SRC, "disk_monitor", (PM.HOOK_STATUS_PROBE, PM.HOOK_RUN_ON_NODES)),
+                 (PORTS_SRC, "open_ports", (PM.HOOK_STATUS_PROBE, PM.HOOK_RUN_ON_NODES)),
+                 (VERSIONS_SRC, "app_versions", (PM.HOOK_REGISTER_COMMANDS, PM.HOOK_RUN_ON_NODES)))
 
 
 # ── helpers ──────────────────────────────────────────────────────────────────
@@ -65,10 +67,12 @@ def clean_plugins():
                 pass
     for key in [k for k in sys.modules if k.startswith(PM.LOCAL_MODULE_PREFIX)]:
         sys.modules.pop(key, None)
+
+
 def install_examples():
-    """Copy BOTH examples into the sandbox plugin folder — what a user does by hand."""
+    """Copy the FOUR examples into the sandbox plugin folder — what a user does by hand."""
     os.makedirs(PLUGIN_DIR, exist_ok=True)
-    for src in (HELLO_SRC, DISK_SRC):
+    for src, _stem, _hooks in EXAMPLE_FILES:
         shutil.copyfile(src, os.path.join(PLUGIN_DIR, os.path.basename(src)))
 
 
@@ -177,16 +181,6 @@ def remove_cache():
         pass
 
 
-def no_core_imports(source):
-    """The rule of examples/README.md, read over the CODE (the prose may name the modules)."""
-    return (CORE_IMPORT_RE.findall(source) == []
-            and "import sys" not in source
-            and "import importlib" not in source
-            and "from importlib" not in source
-            and "import paramiko" not in source
-            and "import socket" not in source)
-
-
 clear_cfg()
 clean_plugins()
 
@@ -194,8 +188,9 @@ clean_plugins()
 print("== §1 the examples as plugins: the REAL discovery path ==")
 # ════════════════════════════════════════════════════════════════════════════
 
-check("both examples exist as plain files in examples/plugins/",
-      os.path.isfile(HELLO_SRC) and os.path.isfile(DISK_SRC))
+check("the FOUR examples exist as plain files in examples/plugins/",
+      all(os.path.isfile(src) for src, _stem, _hooks in EXAMPLE_FILES),
+      [os.path.basename(src) for src, _s, _h in EXAMPLE_FILES if not os.path.isfile(src)])
 check("examples/README.md explains what the folder is (and that it is not installed)",
       os.path.isfile(os.path.join(EXAMPLES_DIR, "README.md")))
 
@@ -203,8 +198,7 @@ check("examples/README.md explains what the folder is (and that it is not instal
 # empty user folder finds nothing even though the files sit in the checkout.
 _empty = new_manager()
 check("the examples are NOT auto-discovered from the repository (an empty folder = no plugin)",
-      _empty.records() == [] and _empty.get("hello") is None
-      and _empty.get("disk_monitor") is None,
+      _empty.records() == [] and all(_empty.get(stem) is None for _s, stem, _h in EXAMPLE_FILES),
       str([r.plugin_id for r in _empty.records()]))
 check("the folder source is the user folder, not the checkout's examples/",
       PM.user_plugin_dir() != PLUGINS_SRC
@@ -212,72 +206,99 @@ check("the folder source is the user folder, not the checkout's examples/",
 
 install_examples()
 _manager = new_manager()
+_records = {stem: _manager.get(stem) for _s, stem, _h in EXAMPLE_FILES}
 hello = _manager.get("hello")
 disk = _manager.get("disk_monitor")
 check("a copied example is discovered by the real manager (no packaging, no install)",
-      hello is not None and disk is not None and hello.ok is True and disk.ok is True,
+      all(rec is not None and rec.ok is True for rec in _records.values()),
       str([(r.plugin_id, r.state) for r in _manager.records()]))
-check("the records carry the manifests of the files (id, version, api_version, description)",
-      hello.version == "1.0" and hello.api_version == PM.API_VERSION
-      and "minimal" in hello.description
-      and disk.version == "1.0" and "disk usage" in disk.description,
-      f"{hello.version}/{hello.api_version} | {disk.version}")
-check("both declare their hooks and both are really IMPORTED from the folder",
-      hello.hooks == (PM.HOOK_REGISTER_COMMANDS, PM.HOOK_NODE_CONTEXT_MENU)
-      and disk.hooks == (PM.HOOK_STATUS_PROBE, PM.HOOK_RUN_ON_NODES),
-      f"{hello.hooks} | {disk.hooks}")
-check("both are source=folder with the file as the origin",
-      hello.source == PM.SOURCE_FOLDER and disk.source == PM.SOURCE_FOLDER
-      and hello.origin.endswith("hello.py") and disk.origin.endswith("disk_monitor.py"))
+check("every manifest carries id, version, api_version and a description",
+      all(rec.version == "1.0" and rec.api_version == PM.API_VERSION and rec.description
+          for rec in _records.values())
+      and "minimal" in hello.description and "disk usage" in disk.description,
+      {stem: (rec.version, rec.api_version) for stem, rec in _records.items()})
+check("every example declares its hooks and is really IMPORTED from the folder",
+      all(_records[stem].hooks == hooks for _s, stem, hooks in EXAMPLE_FILES),
+      {stem: rec.hooks for stem, rec in _records.items()})
+check("every example is source=folder with its own file as the origin",
+      all(rec.source == PM.SOURCE_FOLDER and rec.origin.endswith(f"{stem}.py")
+          for stem, rec in _records.items()),
+      {stem: rec.origin for stem, rec in _records.items()})
 check("the imported modules are the files themselves (the discovery exec'd them)",
-      local("hello") is not None and local("disk_monitor") is not None
-      and local("hello").MANIFEST["name"] == "hello")
+      all(local(stem) is not None and local(stem).MANIFEST["name"] == stem
+          for _s, stem, _h in EXAMPLE_FILES),
+      [stem for _s, stem, _h in EXAMPLE_FILES if local(stem) is None])
 
-for _path, _name in ((HELLO_SRC, "hello.py"), (DISK_SRC, "disk_monitor.py")):
+for _path, _stem, _hooks in EXAMPLE_FILES:
+    _name = os.path.basename(_path)
     _src = read(_path)
-    check(f"{_name}: NO import of the core (the rule of examples/README.md)",
-          CORE_IMPORT_RE.findall(_src) == [], str(CORE_IMPORT_RE.findall(_src)))
-    check(f"{_name}: no sys.path / importlib trick either (an installed app has no checkout)",
-          no_core_imports(_src))
+    # The predicate lives in `tests/_common.py` ONCE: the monitors' own topical file reads it too.
+    check(f"{_name}: NO import of the core, no path trick, no SSH library (the folder's rule)",
+          example_plugin_problems(_name, _src) == [], example_plugin_problems(_name, _src))
     check(f"{_name}: every hook it claims is a callable in the file",
-          all(callable(getattr(local(os.path.splitext(_name)[0]), h, None))
-              for h in _manager.get(os.path.splitext(_name)[0]).hooks))
+          all(callable(getattr(local(_stem), h, None)) for h in _hooks))
 _manager.shutdown(500)
 
 # ════════════════════════════════════════════════════════════════════════════
-print("== §2 `hello` — the minimal plugin: a palette command + a context-menu row ==")
+print("== §2 `hello` — the minimal plugin: a useful palette command + a context-menu row ==")
 # ════════════════════════════════════════════════════════════════════════════
 
 hello = _manager.get("hello")
 _commands = [cmd for pid, cmd in _manager.plugin_commands() if pid == "hello"]
 check("its `register_commands` reaches the palette as ONE command (the lenient pair shape)",
-      len(_commands) == 1 and _commands[0].text == "Say hello",
+      len(_commands) == 1 and _commands[0].text == "Copy the plugins folder path",
       str([c.text for c in _commands]))
 check("the record carries a callback the core can run (the pair's second element)",
       callable(_commands[0].callback))
 
 _seen_status = []
+_seen_logs = []
 _manager.status_requested.connect(lambda pid, text, ms: _seen_status.append((pid, text)))
+_manager.plugin_message.connect(lambda pid, text: _seen_logs.append((pid, text)))
 _ctx = _manager._context_for(hello)
+local("hello").COPIED.clear()
+local("hello").PALETTE_RUNS.clear()
 _manager.call_hook_wrapped("hello", PM.HOOK_REGISTER_COMMANDS, _commands[0].callback, _ctx)
-check("running it goes through the wrapper with the plugin's OWN context",
+_plugins_dir = os.path.join(os.path.expanduser("~"), ".sshmap", "plugins")
+check("the palette callback receives the plugin's OWN context and computes its own data",
+      local("hello").COPIED == [_plugins_dir]
+      and QApplication.clipboard().text() == _plugins_dir,
+      f"{local('hello').COPIED} / {QApplication.clipboard().text()!r}")
+check("running it goes through the wrapper with the plugin's OWN context (ctx.plugin_id)",
       local("hello").PALETTE_RUNS == ["hello"], str(local("hello").PALETTE_RUNS))
-check("the command reports through `ctx.status` (a signal — the window owns the status bar)",
-      _seen_status == [("hello", "Hello from the example plugin")], str(_seen_status))
+check("it reports the copied line through `ctx.status` (a signal — the window owns the status bar)",
+      _seen_status == [("hello", f"hello: copied {_plugins_dir}")], str(_seen_status))
+check("it logs through `ctx.log` as well (the Plugins window shows the plugin's own words)",
+      _seen_logs and _seen_logs[-1][0] == "hello" and "copied" in _seen_logs[-1][1],
+      str(_seen_logs))
 
 _menu = QMenu()
-_asked = _manager.plugin_node_context_menu(_menu, node("n1", "web-1"))
+_asked = _manager.plugin_node_context_menu(_menu, node("n1", "web-1", "10.0.0.1"))
 check("its `extend_node_context_menu` appends its row to a node menu",
-      "Hello on this server" in menu_texts(_menu) and _asked >= 1, str(menu_texts(_menu)))
-_action = next(a for a in _menu.actions() if a.text() == "Hello on this server")
-_action.trigger()
+      "Copy SSH command" in menu_texts(_menu) and _asked >= 1, str(menu_texts(_menu)))
+local("hello").COPIED.clear()
+next(a for a in _menu.actions() if a.text() == "Copy SSH command").trigger()
 check("the row's action receives the node RECORDS the core narrowed (never the scene objects)",
-      local("hello").GREETED == [["web-1"]], str(local("hello").GREETED))
+      QApplication.clipboard().text() == "ssh -p 22 root@10.0.0.1",
+      repr(QApplication.clipboard().text()))
+check("the ssh line is BUILT from the record (`ssh -p <port> <user>@<host>`, a pure function)",
+      local("hello").ssh_command(PM.PluginNode(id="n9", host="10.0.0.9", port=22, user=""))
+      == "ssh -p 22 10.0.0.9"
+      and local("hello").ssh_command(PM.PluginNode(id="n8", host="10.0.0.8", port=2222,
+                                                   user="admin"))
+      == "ssh -p 2222 admin@10.0.0.8",
+      local("hello").ssh_command(PM.PluginNode(id="n8", host="10.0.0.8", port=2222,
+                                               user="admin")))
 _menu2 = QMenu()
-_manager.plugin_node_context_menu(_menu2, node("n2", "", "10.0.0.9"))
-next(a for a in _menu2.actions() if a.text() == "Hello on this server").trigger()
-check("an alias-less node is shown by its id (`n.alias or n.id`)",
-      local("hello").GREETED[-1] == ["n2"], str(local("hello").GREETED[-1]))
+_manager.plugin_node_context_menu(_menu2, [node("n2", "db", "10.0.0.2"),
+                                           node("n3", "db2", "10.0.0.3")])
+next(a for a in _menu2.actions() if a.text() == "Copy SSH command").trigger()
+check("a multi-node click copies ONE line per record (the whole selection in one clipboard)",
+      QApplication.clipboard().text() == "ssh -p 22 root@10.0.0.2\nssh -p 22 root@10.0.0.3",
+      repr(QApplication.clipboard().text()))
+check("this hook gets NO ctx — the clipboard call is the plugin's own Qt use (the lesson)",
+      "def extend_node_context_menu(menu, nodes):" in read(HELLO_SRC)
+      and "ctx" not in read(HELLO_SRC).split("def extend_node_context_menu")[1].split("\ndef ")[0])
 
 # ════════════════════════════════════════════════════════════════════════════
 print("== §3 `disk_monitor` — the `df -hP` parser (fixtures, no socket) ==")
@@ -286,7 +307,7 @@ print("== §3 `disk_monitor` — the `df -hP` parser (fixtures, no socket) ==")
 disk_mod = local("disk_monitor")
 check("the parser is a pure function of the answer (one place, no IO, no SSH library)",
       callable(disk_mod.parse_df) and callable(disk_mod.parse_percent)
-      and no_core_imports(read(DISK_SRC)))
+      and example_plugin_problems("disk_monitor.py", read(DISK_SRC)) == [])
 
 check("a normal `df -hP` table → the worst real filesystem (percent, mount)",
       disk_mod.parse_df(DF_TABLE) == (92, "/var"), str(disk_mod.parse_df(DF_TABLE)))
@@ -415,7 +436,7 @@ check("an unknown node is no opinion (a node that left the map)",
       and disk_mod.status_probe(PM.PluginNode(id="")) is None)
 check("the reporter reads the cache and touches NOTHING else (a probe runs per node per round)",
       "run_command" not in read(DISK_SRC).split("def status_probe")[1].split("\ndef ")[0]
-      and no_core_imports(read(DISK_SRC)))
+      and example_plugin_problems("disk_monitor.py", read(DISK_SRC)) == [])
 check("`fresh_record` honours an explicit clock (the staleness rule is testable)",
       disk_mod.fresh_record("high", now=time.time() + disk_mod.STALE_SECONDS + 10) is None
       and disk_mod.fresh_record("high") is not None)
@@ -533,8 +554,8 @@ try:
           and _from_worker == ["srv-3", "done"], str(_from_worker))
 
     _started = _manager.plugin_run_on_nodes(None)
-    check("`run_on_nodes` starts the example plugin on the registry's nodes",
-          _started == 1, str(_started))
+    check("`run_on_nodes` starts EVERY capable example on the registry's nodes (one per plugin)",
+          _started == 3, str(_started))
     check("the round really finished — the cache has the answer and nothing is left running",
           wait_until(lambda: "srv-1" in local("disk_monitor").load_cache()) is not False
           and wait_until(lambda: _manager.active_workers() == []
@@ -577,27 +598,37 @@ _win.scene.add_server(ServerData(id="w-1", alias="web-1", host="10.0.0.20",
 _win.refresh_sidebar()
 _win.start_plugin_discovery()
 app.processEvents()
-check("the window discovers the example plugin on startup",
-      _win._plugin_manager.get("disk_monitor") is not None
-      and _win._plugin_manager.get("disk_monitor").ok)
+check("the window discovers the example plugins on startup",
+      all(_win._plugin_manager.get(stem) is not None and _win._plugin_manager.get(stem).ok
+          for _s, stem, _h in EXAMPLE_FILES),
+      str([(r.plugin_id, r.state) for r in _win._plugin_manager.records()]))
 _win._command_palette._collect_commands()
 check("`hello` really feeds the Ctrl+K palette of the WINDOW (the author's text verbatim)",
-      "Say hello" in [c[0] for c in _win._command_palette._commands]
+      "Copy the plugins folder path" in [c[0] for c in _win._command_palette._commands]
       and [c[1] for c in _win._command_palette._commands
-           if c[0] == "Say hello"] == ["plugin"],
+           if c[0] == "Copy the plugins folder path"] == ["plugin"],
       str([c[0] for c in _win._command_palette._commands][-5:]))
+check("the palette also carries the two plugins that only collect (their own Ctrl+K rows)",
+      "Versions: re-check every known server" in [c[0] for c in _win._command_palette._commands],
+      str([c[0] for c in _win._command_palette._commands][-8:]))
 check("its `run_on_nodes` enables the menu item (an empty cache does not change that)",
       _win.act_plugins_run.isEnabled() is True)
 PR.run_command_over_ssh = lambda node, command, timeout, credentials: PR.PluginRunResult(
     node=node, exit_code=0, output=DF_TABLE)
+# The menu door starts EVERY capable example (three of the four now), so the status bar is a race
+# between their own lines: the SIGNAL is collected and the bar is checked to be one of them.
+_seen_lines = []
+_win._plugin_manager.status_requested.connect(lambda pid, text, ms: _seen_lines.append(str(text)))
 try:
     _win.act_plugins_run.trigger()
-    check("the round reports through the plugin's own status line",
-          wait_until(lambda: _win.statusBar().currentMessage().startswith("disk: ")) is not False,
-          _win.statusBar().currentMessage())
-    check("the status line is the collector's summary (1 node, 1 over the threshold)",
-          _win.statusBar().currentMessage() == "disk: 1 node(s), 1 over the threshold",
-          _win.statusBar().currentMessage())
+    check("the menu round reports through the plugins' OWN status lines",
+          wait_until(lambda: any(line.startswith("disk: ") for line in _seen_lines)) is not False,
+          str(_seen_lines))
+    check("the Disk Space Monitor's summary is the shipped one (1 node, 1 over the threshold)",
+          "disk: 1 node(s), 1 over the threshold" in _seen_lines, str(_seen_lines))
+    check("the status bar shows one of those lines (the window owns the widget)",
+          _win.statusBar().currentMessage() in _seen_lines,
+          f"{_win.statusBar().currentMessage()!r} / {_seen_lines}")
 finally:
     PR.run_command_over_ssh = _ORIG_TRANSPORT
 _node = _win.scene.get_node("w-1")
@@ -615,7 +646,7 @@ print("== §8 the release state: the examples add NO i18n key ==")
 
 _langs = load_i18n_langs(ROOT)
 check("the examples contribute no translation key (a plugin's text is the AUTHOR's)",
-      not any("Say hello" == value or "Hello on this server" == value
+      not any("Copy SSH command" == value or "Copy the plugins folder path" == value
               for data in _langs.values() for value in data.values()))
 check("the parity pin is the shipped one (the examples contribute nothing — the releases "
       "move the pin, not this file; v1.6 left it at 778, v1.7rc1's five and v1.7rc2's eight moved it again)",
@@ -624,14 +655,17 @@ check("the parity pin is the shipped one (the examples contribute nothing — th
       str({c: len(translation_keys(d)) for c, d in _langs.items()}))
 check_i18n_parity(_langs)
 check_i18n_format(_langs)
-check("the plugin strings of both examples stay outside the parity policy",
-      "disk: " not in json.dumps(_langs["en"]) and "threshold 90" not in json.dumps(_langs["en"]))
+check("the plugin strings of the examples stay outside the parity policy",
+      all(fragment not in json.dumps(_langs["en"]) for fragment in
+          ("disk: ", "threshold 90", "ports: ", "versions: ", "ssh -p ")))
 check("the release is the version this file ships with (the pin quotes the shipped one)",
       releases_at_least(EXPECTED_APP_VERSION, "1.7"), EXPECTED_APP_VERSION)
 check_release_state(ROOT)
-check("the example file for these tasks is described in examples/README.md",
-      "disk_monitor" in read(os.path.join(EXAMPLES_DIR, "README.md"))
-      and "hello" in read(os.path.join(EXAMPLES_DIR, "README.md")))
+check("every example file is described in examples/README.md",
+      all(stem in read(os.path.join(EXAMPLES_DIR, "README.md"))
+          for _s, stem, _h in EXAMPLE_FILES),
+      [stem for _s, stem, _h in EXAMPLE_FILES
+       if stem not in read(os.path.join(EXAMPLES_DIR, "README.md"))])
 check("the suite map lists this topical file (tests/INDEX.md regenerated)",
       "test_plugin_examples.py" in read(os.path.join(ROOT, "tests", "INDEX.md")))
 

@@ -1,6 +1,6 @@
 # `examples/` — working example plugins
 
-Two plugins that really load, next to the contract (`PLUGINS.md`) and the walkthrough it
+Four plugins that really load, next to the contract (`PLUGINS.md`) and the walkthrough it
 carries in §10. They are **examples, not shipped plugins**:
 
 * they are NOT part of the installed package (`pyproject.toml` lists the packages
@@ -11,8 +11,10 @@ carries in §10. They are **examples, not shipped plugins**:
 
 | File | What it shows |
 |---|---|
-| `plugins/hello.py` | The minimal plugin: one command in the Ctrl+K palette (returned as a plain `(text, callback)` pair) and one row in the right-click menu of a server, on the map and in the list alike. |
-| `plugins/disk_monitor.py` | The first useful one — the Disk Space Monitor: `run_on_nodes` collects `df -hP` over SSH into the plugin's own atomic cache, `status_probe` turns a filesystem over 90% into a `warn` on the card and a line in its tooltip. No SSH inside a probe. |
+| `plugins/hello.py` | The minimal plugin, doing the smallest USEFUL thing twice: a Ctrl+K row that copies the plugins folder path (a palette callback **does** receive the context) and a server right-click row that copies an `ssh` command line (a menu hook receives **no** context, so the plugin uses the clipboard itself). |
+| `plugins/disk_monitor.py` | The Disk Space Monitor: `run_on_nodes` collects `df -hP` over SSH into the plugin's own atomic cache, `status_probe` turns a filesystem over 90% into a `warn` on the card and a line in its tooltip. No SSH inside a probe. |
+| `plugins/open_ports.py` | The Open Ports Monitor: one `ss -tulpn` per node, the listening sockets normalised (a dual-stack pair collapses to the most EXPOSED binding), the list appended to the tooltip and a watchlisted port that the net can REACH turned into a `warn`. |
+| `plugins/app_versions.py` | The App Version Check: ONE generated POSIX-sh probe per node that only COLLECTS evidence, a pure-Python report over it (nginx, Grafana, Loki, Alloy, Prometheus, Tempo, Telegraf, Promtail) and the expected versions in `~/.sshmap/plugins/app_versions.baseline.json`, a data file you own. |
 
 ## Using them
 
@@ -21,27 +23,47 @@ carries in §10. They are **examples, not shipped plugins**:
 mkdir -p ~/.sshmap/plugins                 # Windows: %USERPROFILE%\.sshmap\plugins
 cp examples/plugins/hello.py          ~/.sshmap/plugins/
 cp examples/plugins/disk_monitor.py   ~/.sshmap/plugins/
+cp examples/plugins/open_ports.py     ~/.sshmap/plugins/
+cp examples/plugins/app_versions.py   ~/.sshmap/plugins/
 
-# 2. in the application: Plugins → Reload — both rows appear, both are ON
+# 2. in the application: Plugins → Reload — four rows appear, all of them ON
 #    (the switch lives in the "plugins" key of ~/.sshmap/config.json)
 ```
 
-* **`hello`**: press `Ctrl+K` and run *Say hello*, or right-click a server → *Hello on this server*.
+* **`hello`**: press `Ctrl+K` and run *Copy the plugins folder path* (the line lands on the
+  clipboard and in the status bar), or right-click a server → *Copy SSH command* — one `ssh -p …`
+  line per selected server, ready to paste into a terminal.
 * **`disk_monitor`**: select the servers you care about and use **Plugins → Run on selected
   servers**; the status bar reports `disk: N node(s), M over the threshold`, and from the
   next status round a full filesystem shows as `warn` with `/var 92% (threshold 90)` in
   the card's tooltip. Its cache is `~/.sshmap/plugins/disk_monitor.state.json` — delete it
   freely, the next run rebuilds it.
+* **`open_ports`**: the same door collects `ss -tulpn` and reports `ports: N node(s), M with a
+  watchlisted port exposed`; an `online` card gains the reachable port list
+  (`3 open: 22/tcp, 80/tcp, 443/tcp (+2 on loopback)`) and a database the network can reach turns it
+  `warn` (`exposed 3306/tcp (mysqld) - 3 open`). **The Plugins window carries the DATA too** — one line
+  per node with the whole cached list, each row marked (`6379/tcp redis-server (exposed)`,
+  `3306/tcp (loopback)`), so **Plugins → Export** writes a per-node port report to a text file. Cache:
+  `open_ports.state.json`. A host whose `ss` is missing is a log line, never an empty
+  "nothing is listening" answer.
+* **`app_versions`**: run it the same way (or `Ctrl+K` → *Versions: re-check every known
+  server*, which re-probes the fleet of the last collection); every app is reported as
+  `web-1: nginx [ok] 1.30.2 (/usr/sbin/nginx)`, and **Plugins → Export** writes the lines to a
+  text file. `Ctrl+K` → *Versions: write the baseline file* seeds
+  `app_versions.baseline.json` from the last collection — edit the `expected` versions there
+  (and `nodes` for a single server) by hand; an existing file is never overwritten.
 
 ## Editing them
 
 `Plugins → Reload` re-reads the folder: a changed file is picked up without a restart.
 
-**The one rule both files follow: an example plugin never imports the core** (`modules.*`,
-`i18n.*`, `ui.*`). The application finds plugins without any cooperation from them, and a
-user of an installed app has no repository checkout on `sys.path` — an example that
-imported `modules.plugin_manager` would work here and break for that user.
-`tests/test_plugin_examples.py` enforces this with a source scan.
+**The one rule all four files follow: an example plugin never imports the core** (`modules.*`,
+`i18n.*`, `ui.*`), uses no `sys.path` trick and opens no SSH connection of its own (the
+standard library is the author's business). The application finds plugins without any
+cooperation from them, and a user of an installed app has no repository checkout on
+`sys.path` — an example that imported `modules.plugin_manager` would work here and break for
+that user. The predicate lives ONCE, in `tests/_common.py` (`example_plugin_problems()`), and
+both topical files read it.
 
 Deeper: the contract and the per-hook reference — `PLUGINS.md`; the implementation —
 `DOCUMENTATION.md` §33.

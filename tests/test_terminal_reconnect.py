@@ -13,7 +13,7 @@ import sys
 
 from _common import (bootstrap, check, finish, wait_for, load_i18n_langs, check_i18n_parity,
                      check_i18n_format, check_release_state, translation_keys, EXPECTED_I18N_KEYS,
-                     EXPECTED_APP_VERSION)
+                     EXPECTED_APP_VERSION, releases_at_least)
 
 ROOT, WORK = bootstrap()  # BEFORE the app module imports (the HOME isolation and faulthandler)
 
@@ -539,7 +539,8 @@ check_i18n_parity(LANGS)
 check_i18n_format(LANGS)
 check("§6 the pin counts the shipped keys (the v1.9 line's 1040 + ELEVEN of this release)",
       EXPECTED_I18N_KEYS == 1040 + 11, f"{EXPECTED_I18N_KEYS}")
-check("§6 the pin names this release", EXPECTED_APP_VERSION == "1.9.1", EXPECTED_APP_VERSION)
+check("§6 the pin names this release or a LATER one (the file describes v1.9.1)",
+      releases_at_least("1.9.1"), EXPECTED_APP_VERSION)
 _NEW_KEYS = ("terminal.reconnect", "terminal.reconnect_tooltip", "terminal.reconnecting",
              "terminal.reconnect_marker", "terminal.reconnect_live",
              "terminal.reconnect_no_credential", "terminal.attach_tmux",

@@ -30,10 +30,10 @@ CHAPTER_ORDER = (12, 8, 3, 10, 9, 13, 7, 4, 1, 2, 5, 6, 11)
 # (name, the marker the section starts at, the pin) — the pins are byte offsets into AGENTS.md and
 # they only ever DECREASE. The name is what the check reports; the marker is a literal of the file.
 SECTION_PINS = (
-    ("AGENTS.md: THE DOCUMENTATION RULES", "> **THE DOCUMENTATION RULES", 2394),
-    ("AGENTS.md §8 Testing conventions", "## 8. Testing conventions", 12161),
-    ("AGENTS.md §9 Release conventions", "## 9. Release conventions", 16470),
-    ("AGENTS.md §12 Agent checklist", "## 12. Agent checklist", 7820),
+    ("AGENTS.md: THE DOCUMENTATION RULES", "> **THE DOCUMENTATION RULES", 2392),
+    ("AGENTS.md §8 Testing conventions", "## 8. Testing conventions", 12159),
+    ("AGENTS.md §9 Release conventions", "## 9. Release conventions", 16468),
+    ("AGENTS.md §12 Agent checklist", "## 12. Agent checklist", 7818),
 )
 
 DOC = "AGENTS.md"

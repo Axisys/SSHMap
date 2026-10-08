@@ -422,12 +422,43 @@ def pane_func_owner(func, root=None):
     return ""
 
 
+# The example plugins' ONE rule (`examples/README.md`, `AGENTS.md` §4.10): a plugin never imports
+# the core. The core FINDS a plugin (entry points + `~/.sshmap/plugins/`), so an installed
+# application has no checkout on `sys.path` — a `modules.*` import would work in this repository
+# and break for that user. Shared: both topical files of the folder read this predicate.
+CORE_IMPORT_RE = re.compile(
+    r"^\s*(?:from|import)\s+"
+    r"(modules|i18n|ui|graphics|models|services|storage|dialogs|third_party|version)\b",
+    re.MULTILINE)
+
+
+def core_imports(source):
+    """The core modules an example plugin imports — `[]` is the rule of the folder."""
+    return CORE_IMPORT_RE.findall(source)
+
+
+def example_plugin_problems(name, source):
+    """The isolation defects of ONE example plugin file — `[]` is clean.
+
+    Read over the CODE (a docstring may NAME a module while explaining why it is not imported):
+    a core import, a `sys` / `importlib` path trick (there is no checkout to reach into) and an
+    SSH library of its own (`paramiko` is the core's, never a plugin's). The standard library is
+    the author's business — `json`, `os`, `ssl` and `socket` are not defects.
+    """
+    problems = [f"{name}: imports the core ({module})" for module in core_imports(source)]
+    for needle, why in (("import sys", "a sys.path trick"), ("importlib", "an import cache"),
+                        ("paramiko", "its own SSH library")):
+        if needle in source:
+            problems.append(f"{name}: {why} ({needle})")
+    return problems
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # The release pins: at every release update ONLY HERE (earlier: the "N keys" number
 # in 12 i18n files + the APP_VERSION/requirements pins in 7 release-state sections).
 # The misses of the keys themselves against the code are caught by check_i18n_keys.py.
 # ─────────────────────────────────────────────────────────────────────────────
-EXPECTED_APP_VERSION = "1.9.1"   # the current release (a sentinel: it catches "a bump to the wrong version")
+EXPECTED_APP_VERSION = "1.9.2"   # the current release (a sentinel: it catches "a bump to the wrong version")
 EXPECTED_I18N_KEYS = 1051       # the parity of the TRANSLATION keys of every language file vs en (the
                                 # "name"/"partial" meta keys are excluded) — ONE number per release; the
                                 # per-release counts live in the changelog family, never here
