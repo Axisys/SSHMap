@@ -458,8 +458,8 @@ def example_plugin_problems(name, source):
 # in 12 i18n files + the APP_VERSION/requirements pins in 7 release-state sections).
 # The misses of the keys themselves against the code are caught by check_i18n_keys.py.
 # ─────────────────────────────────────────────────────────────────────────────
-EXPECTED_APP_VERSION = "1.9.2"   # the current release (a sentinel: it catches "a bump to the wrong version")
-EXPECTED_I18N_KEYS = 1051       # the parity of the TRANSLATION keys of every language file vs en (the
+EXPECTED_APP_VERSION = "1.9.3"   # the current release (a sentinel: it catches "a bump to the wrong version")
+EXPECTED_I18N_KEYS = 1064       # the parity of the TRANSLATION keys of every language file vs en (the
                                 # "name"/"partial" meta keys are excluded) — ONE number per release; the
                                 # per-release counts live in the changelog family, never here
 VERSION_FORMAT_RE = re.compile(r"^\d+(\.\d+){1,3}([Rr][Cc]\d+)?$")  # "1.1.3", "1.0RC4", "0.9.9.7", "1.2.10rc1" (v1.2.10: + lowercase rc)

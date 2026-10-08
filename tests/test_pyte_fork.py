@@ -1,12 +1,13 @@
 # -*- coding: utf-8 -*-
 """v1.3rc1 — Terminal: the managed pyte fork (vendored 0.8.2 + patch manifest); v1.5.7.1 — the
-dependency audit's five patches (0005–0009); v1.9 — the OSC 8 hyperlink and the erased background.
+dependency audit's five patches (0005–0009); v1.9 — the OSC 8 hyperlink and the erased background;
+v1.9.3 — the erase family's second half (`CSI 3 J`, the erased cell's decorations).
 
 The PROVENANCE checks of `third_party/pyte/` (the fork policy is `AGENTS.md` §4.7, the deep dive is
 `PYTE82_AUDIT.md`): the sha256 of every file against the two tables of `MANIFEST.md` (pristine = the
-upstream PyPI sdist 0.8.2, post-patch = after 0001–0012), so "patched it and forgot what changed" is
+upstream PyPI sdist 0.8.2, post-patch = after 0001–0013), so "patched it and forgot what changed" is
 caught; the manifest itself (the `NNNN-slug.patch` convention, the provenance headers, the mandatory
-LGPL-3.0 attribution, UTF-8 so a cp1251-piped `git diff` cannot produce mojibake); and the behavioral smoke of the fork, headless: a private SGR does not crash, a private CSI with a non-mode final byte is ignored while the public DECSTBM keeps working and the chunk tail survives, the LNM default, the alt-screen round trip character by character, a grapheme cluster landing whole, no final of the CSI table raising on a malformed sequence, an unknown erase mode as a no-op, DECOM without a region, a resize keeping the cursor inside the screen, the G0/G1 graphics designation reaching the grid, an OSC 8 link riding the cell (and surviving SGR 0), and a background erase painting the whole row."""
+LGPL-3.0 attribution, UTF-8 so a cp1251-piped `git diff` cannot produce mojibake); and the behavioral smoke of the fork, headless: a private SGR does not crash, a private CSI with a non-mode final byte is ignored while the public DECSTBM keeps working and the chunk tail survives, the LNM default, the alt-screen round trip character by character, a grapheme cluster landing whole, no final of the CSI table raising on a malformed sequence, an unknown erase mode as a no-op, DECOM without a region, a resize keeping the cursor inside the screen, the G0/G1 graphics designation reaching the grid, an OSC 8 link riding the cell (and surviving SGR 0), a background erase painting the whole row, and `CSI 3 J` clearing the SAVED lines only while an erased cell keeps the colours and loses every decoration."""
 import hashlib
 import os
 import re
@@ -36,6 +37,7 @@ EXPECTED_PATCHES = (
     "0010-honour-charset-designation.patch",
     "0011-osc8-hyperlinks.patch",
     "0012-erase-background.patch",
+    "0013-erase-family-second-half.patch",
 )
 SDIST_SHA256 = "5af970e843fa96a97149d64e170c984721f20e52227a2f57f0a54207f08f083f"  # PyPI pyte-0.8.2.tar.gz
 
@@ -107,8 +109,8 @@ for name in actual_files:
         break
 check("the sha256 of every third_party/pyte/ file == the post-patch table", hash_ok, detail)
 
-# The unpatched files are identical in both tables; patches 0001–0012 touch TWO files:
-# screens.py (0001–0005, 0007–0009, 0011, 0012) and streams.py (0006, 0010, 0011).
+# The unpatched files are identical in both tables; patches 0001–0013 touch TWO files:
+# screens.py (0001–0005, 0007–0009, 0011–0013) and streams.py (0006, 0010, 0011).
 untouched = [n for n in actual_files if pristine_tbl.get(n) == postpatch_tbl.get(n)]
 changed = [n for n in actual_files if pristine_tbl.get(n) != postpatch_tbl.get(n)]
 check("the unpatched files: the same hash in both tables (9 of 11)",
@@ -128,7 +130,7 @@ print("== patch manifest ==")
 
 actual_patches = sorted(
     n for n in os.listdir(PATCHDIR) if n.endswith(".patch"))
-check("patches 0001–0012 are in place, no extras", actual_patches == list(EXPECTED_PATCHES),
+check("patches 0001–0013 are in place, no extras", actual_patches == list(EXPECTED_PATCHES),
       str(actual_patches))
 check("the names follow the NNNN-slug.patch convention",
       all(re.fullmatch(r"\d{4}-[a-z0-9][a-z0-9-]*\.patch", n) for n in actual_patches),
@@ -151,6 +153,7 @@ PATCH_PROVENANCE = (
     (EXPECTED_PATCHES[9], "pyte/streams.py", ("use_utf8", "ACS")),
     (EXPECTED_PATCHES[10], "pyte/screens.py", ("OSC 8", "hyperlink")),
     (EXPECTED_PATCHES[11], "pyte/screens.py", ("BCE", "StaticDefaultDict")),
+    (EXPECTED_PATCHES[12], "pyte/screens.py", ("CSI 3 J", "underscore")),
 )
 check("every patch is covered by the provenance table (a new patch cannot skip it)",
       [n for n, _, _ in PATCH_PROVENANCE] == list(EXPECTED_PATCHES),
@@ -466,8 +469,80 @@ check("erase: EL drops the link on what it erased and keeps it on what it did no
       all(_bce_keep.buffer[0][x].hyperlink == "" for x in range(3, 30))
       and all(_bce_keep.buffer[0][x].hyperlink == "http://x" for x in range(3)),
       str([_bce_keep.buffer[0][x].hyperlink for x in (0, 3)]))
-check("erase: the audit's item (c) is deliberately NOT taken — `CSI 3 J` still clears the visible grid",
-      lines(_bce_link)[0] == "" and all(_bce_link.buffer[0][x].data == " " for x in range(30)))
+
+# 3.13 The erase family's SECOND half (patch 0013), over BOTH screens: `CSI 3 J` clears the SAVED
+#      lines only — the visible grid survives it on a plain `Screen` (which keeps no saved lines at
+#      all) and on a `HistoryScreen` (whose history reset is the whole effect) — and an erased cell
+#      keeps the COLOURS while every decoration of a glyph that is no longer there is dropped.
+
+
+def _row(scr, row=0):
+    """The text of one row (the display cells, trailing blanks stripped)."""
+    return "".join(scr.buffer[row][x].data for x in range(scr.columns)).rstrip()
+
+
+def _cells(scr, row=0):
+    """The pyte cells of one row (the attributes behind the text)."""
+    return [scr.buffer[row][x] for x in range(scr.columns)]
+
+
+_ed3 = pyte.Screen(30, 3)
+pyte.ByteStream(_ed3).feed(b"one\r\ntwo\r\nthree")
+_ed3_shown = [_row(_ed3, y) for y in range(3)]
+_ed3.dirty.clear()
+pyte.ByteStream(_ed3).feed(b"\x1b[3J")
+check("erase: `CSI 3 J` on a plain Screen is a NO-OP (there are no saved lines to clear)",
+      [_row(_ed3, y) for y in range(3)] == _ed3_shown == ["one", "two", "three"]
+      and not _ed3.dirty,
+      f"{_ed3_shown} -> {[_row(_ed3, y) for y in range(3)]} dirty={sorted(_ed3.dirty)}")
+_ed3_hist = pyte.HistoryScreen(30, 3)
+pyte.ByteStream(_ed3_hist).feed(b"".join(b"line%d\r\n" % _i for _i in range(8)))
+_top_before = len(_ed3_hist.history.top)
+_hist_shown = [_row(_ed3_hist, y) for y in range(3)]
+pyte.ByteStream(_ed3_hist).feed(b"\x1b[3J")
+check("erase: `CSI 3 J` drops the SCROLLBACK and leaves the visible grid alone (the HistoryScreen "
+      "rule)",
+      _top_before > 0 and not _ed3_hist.history.top
+      and [_row(_ed3_hist, y) for y in range(3)] == _hist_shown,
+      f"history.top {_top_before} -> {len(_ed3_hist.history.top)}, "
+      f"shown {_hist_shown} -> {[_row(_ed3_hist, y) for y in range(3)]}")
+_ed3_link = pyte.HistoryScreen(30, 3)
+pyte.ByteStream(_ed3_link).feed(b"\x1b]8;;http://x\x07abc\x1b[3J")
+check("erase: the mode erases nothing, so a CELL's link survives it with the glyph it belongs to",
+      _ed3_link.buffer[0][0].hyperlink == "http://x" and _row(_ed3_link) == "abc",
+      str(_ed3_link.buffer[0][0]))
+
+_decor = pyte.Screen(30, 3)
+pyte.ByteStream(_decor).feed(b"\x1b[1;3;4;9;5;44;31;7mhello world\r\x1b[K")
+_cell = _decor.buffer[0][3]
+check("erase: an erased cell KEEPS the colours — foreground, background and the reverse",
+      _cell.data == " " and _cell.fg == "red" and _cell.bg == "blue" and _cell.reverse is True,
+      str(_cell))
+check("erase: ...and drops EVERY glyph decoration (bold, italics, underscore, strike-through, blink)",
+      not (_cell.bold or _cell.italics or _cell.underscore or _cell.strikethrough or _cell.blink)
+      and not any(c.underscore or c.bold or c.strikethrough for c in _cells(_decor)),
+      str(_cell))
+check("erase: ...so the recorded symptom is gone — no cell of the erased row carries a line under it",
+      sum(1 for c in _cells(_decor) if c.underscore) == 0
+      and sum(1 for c in _cells(_decor) if c.bold) == 0,
+      f"underline={sum(1 for c in _cells(_decor) if c.underscore)} "
+      f"bold={sum(1 for c in _cells(_decor) if c.bold)}")
+check("erase: the whole width is still painted by the colour erase (patch 0012 stands)",
+      sum(1 for c in _cells(_decor) if c.bg == "blue") == 30)
+_decor_dec = pyte.Screen(30, 3)
+pyte.ByteStream(_decor_dec).feed(b"\x1b[4mhello\r\x1b[2J")
+check("erase: a FULL clear takes the decorations with it (the helper's third caller, ED 2)",
+      all(not c.underscore for c in _cells(_decor_dec)) and _row(_decor_dec) == "")
+_decor_rev = pyte.Screen(30, 3)
+pyte.ByteStream(_decor_rev).feed(b"\x1b[?5h\x1b[2J")
+check("erase: the DECSCNM screen-wide reverse survives an erase (it is a colour, not a decoration)",
+      _decor_rev.buffer[0][0].reverse is True, str(_decor_rev.buffer[0][0]))
+_decor_keep = pyte.Screen(30, 3)
+pyte.ByteStream(_decor_keep).feed(b"\x1b[4mabc\x1b[1;1H\x1b[2X")
+check("erase: ECH keeps the same rule (the helper is the ONE spelling of an erased cell)",
+      _row(_decor_keep) == "  c" and not any(c.underscore for c in _cells(_decor_keep)[:2])
+      and _decor_keep.buffer[0][2].underscore is True,
+      f"{_row(_decor_keep)!r} underline={[c.underscore for c in _cells(_decor_keep)[:3]]}")
 
 
 # ════════════════════════════════════════════════════════════

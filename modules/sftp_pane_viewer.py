@@ -3,10 +3,11 @@
 
 `SftpPaneViewerMixin` owns the reader: the panel's share of the `QSplitter`, the read task and its
 answer, the header (size, the truncation notice, the encoding, the heuristic language), the pane's
-ONE `QSyntaxHighlighter` with its lazy window and the word-wrap mode, and the panel's MOVE into the
-other pane (`present_viewer_in()` / `restore_viewer()` — the mc/far preview of `SFTP_PANES.md`
-§3b). The reader's CEILING (`ui_viewer_max_bytes`) is resolved ONCE by the pane and travels in the
-task, so the workers read no config (`AGENTS.md` §4.8, §4.15).
+ONE `QSyntaxHighlighter` with its lazy window, the word-wrap mode and the ENCODING choice
+(`ui_viewer_encoding`), and the panel's MOVE into the other pane (`present_viewer_in()` /
+`restore_viewer()` — the mc/far preview of `SFTP_PANES.md` §3b). The reader's CEILING
+(`ui_viewer_max_bytes`) is resolved ONCE by the pane and travels in the task, so the workers read no
+config (`AGENTS.md` §4.8, §4.15).
 
 Contract — `SFTP_PANES.md` §3b; mechanism — `DOCUMENTATION.md` §38, §64.
 """
@@ -28,6 +29,13 @@ try:  # v1.3.1: the shipped read policy — the FLOOR of the reader's ceiling
     from .sftp_worker import MAX_READ_BYTES
 except ImportError:
     from sftp_worker import MAX_READ_BYTES
+
+try:  # v1.9.3: the DECLARED encoding list, its normaliser and the value of "the shipped rule"
+    from .sftp_pane_helpers import (VIEWER_ENCODING_DEFAULT, VIEWER_ENCODINGS,
+                                    normalize_viewer_encoding)
+except ImportError:
+    from sftp_pane_helpers import (VIEWER_ENCODING_DEFAULT, VIEWER_ENCODINGS,  # type: ignore
+                                   normalize_viewer_encoding)
 
 try:  # AGENTS.md §4.1: the ONE seam for a facade global — a mixin never imports the facade module
     from ..ui.mixin_support import host_attr
@@ -142,8 +150,7 @@ class SftpPaneViewerMixin:
         v1.7.4rc1: the read goes to THIS pane's provider, so a LOCAL file previews through the
         SHIPPED read policy unchanged (LOCAL_PANE.md §3).
         """
-        provider = self.provider
-        if provider is None:
+        if self.provider is None:
             self.message.emit(_t("sftp.waiting_connection"))
             return
         path = item.data(0, self.PATH_ROLE)
@@ -159,15 +166,27 @@ class SftpPaneViewerMixin:
         # is MOVED to the other pane only once the content is there (`_show_viewer()`): a read the
         # worker refuses must not leave the other pane dressed as a panel that shows nothing.
         self._container.close_preview()
-        # v1.7.5: the pane RESOLVES the ceiling and hands it to the task — the worker reads no
-        # config (and truncates at it instead of refusing the file).
-        tid = provider.queue_read(path, int(item.data(0, self.SIZE_ROLE) or 0),
-                                  max_bytes=self.viewer_cap())
+        self._queue_viewer_read(path, item.data(0, self.SIZE_ROLE))
+
+    def _queue_viewer_read(self, path: str, size=0) -> bool:
+        """Ask this pane's provider for `path` at the pane's ceiling (the ONE preview read).
+
+        v1.9.3: the ENCODING choice needs the same read a double click makes — the shown text was
+        decoded with the previous codec, so a change re-reads the file instead of leaving a
+        mis-decoded document on the screen — and ONE place asks `queue_read()`, so the ceiling
+        travels with it exactly once (AGENTS.md §4.15).
+        """
+        provider = self.provider
+        if provider is None:
+            self.message.emit(_t("sftp.waiting_connection"))
+            return False
+        tid = provider.queue_read(path, int(size or 0), max_bytes=self.viewer_cap())
         if tid is None:
-            return  # the worker is finished — there is nobody to read
+            return False   # the worker is finished — there is nobody to read
         self._read_tasks[tid] = path
         self._last_read = tid
         self.viewer_label.setText(_t("sftp.viewer.reading", name=self.paths.basename(path)))
+        return True
 
     def _on_read_ready(self, task_id: int, remote_path: str, data: bytes):
         """The read answer (already on the GUI thread): render it in the panel.
@@ -186,7 +205,8 @@ class SftpPaneViewerMixin:
             self._mark_row(path)
         truncated = host_attr(self, "read_was_truncated")(
             len(data), self.viewer_cap(), self._known_size(path))
-        text, encoding = host_attr(self, "decode_text")(bytes(data), truncated=truncated)
+        text, encoding = host_attr(self, "decode_text")(bytes(data), truncated=truncated,
+                                                        encoding=self.viewer_encoding_choice)
         self._show_viewer(path, len(data), text, encoding)
 
     def _show_viewer(self, path: str, size: int, text: str, encoding: str = "utf-8"):
@@ -218,13 +238,19 @@ class SftpPaneViewerMixin:
             size_text = _t("sftp.viewer.truncated", shown=format_bytes(size),
                            total=format_bytes(total))
         head = _t("sftp.viewer.header", path=path, size=size_text)
-        if encoding != "utf-8":
+        chosen = self.viewer_encoding_choice
+        if chosen != "auto" and encoding != chosen:
+            # v1.9.3: the CHOICE could not read the file — the shipped rule did, and the header says
+            # which is which instead of presenting a fallback as the requested decoding.
+            head = f"{head} · {_t('sftp.viewer.encoding_failed', encoding=chosen, fallback=encoding)}"
+        elif encoding != "utf-8":
             head = f"{head} · {_t('sftp.viewer.encoding_note', encoding=encoding)}"
         if syntax.is_heuristic(language) or not verifiable:
             head = f"{head} · {_t('sftp.viewer.syntax_heuristic', language=language)}"
         self.viewer_label.setText(head)
         self.viewer_label.setToolTip(path)
         self._viewer_encoding = encoding
+        self._viewer_path = path
         self._viewer_language = language
         highlighter = self._ensure_highlighter()
         if highlighter is not None:
@@ -425,11 +451,14 @@ class SftpPaneViewerMixin:
     # ── v1.7.3 (task 4): the reader's word wrap ─────────────────────────────
 
     def _build_viewer_menu(self):
-        """The reader's menu: Qt's OWN standard one PLUS the ONE app row (`Word wrap`).
+        """The reader's menu: Qt's OWN standard one PLUS the TWO app rows (wrap, encoding).
 
         `createStandardContextMenu()` carries Copy / Select All translated by Qt itself (no i18n
-        key of ours), so the app row is APPENDED after a separator — the same seam shape as
+        key of ours), so the app rows are APPENDED after a separator — the same seam shape as
         `_build_context_menu()`: the tests trigger the QAction directly and never run `exec()`.
+        v1.9.3: the encoding row is a SUBMENU of the declared codecs (a codec name is an
+        identifier, so only `auto` carries a translated word) whose checkmark mirrors the ONE
+        global value the container owns.
         """
         menu = self.viewer_text.createStandardContextMenu()
         menu.addSeparator()
@@ -439,7 +468,58 @@ class SftpPaneViewerMixin:
         act.toggled.connect(self._on_wrap_toggled)
         menu.addAction(act)
         self._wrap_action = act
+        submenu = menu.addMenu(_t("sftp.viewer.encoding"))
+        self._encoding_menu = submenu
+        self._encoding_actions = {}
+        for codec in VIEWER_ENCODINGS:
+            item = QAction(_t("sftp.viewer.encoding_auto") if codec == VIEWER_ENCODING_DEFAULT
+                           else codec, submenu)
+            item.setCheckable(True)
+            item.setChecked(codec == self._viewer_encoding_choice)
+            item.triggered.connect(lambda _checked=False, code=codec:
+                                   self._on_encoding_chosen(code))
+            submenu.addAction(item)
+            self._encoding_actions[codec] = item
         return menu
+
+    def _on_encoding_chosen(self, codec):
+        """An encoding row was chosen: the CONTAINER owns the ONE global setting (v1.9.3)."""
+        apply_all = getattr(self._container, "apply_viewer_encoding", None)
+        if callable(apply_all):
+            try:
+                apply_all(codec)
+                return
+            except RuntimeError:
+                return   # Qt teardown — nothing left to re-read
+        self.set_viewer_encoding(codec)
+
+    def set_viewer_encoding(self, codec, persist: bool = True, reread: bool = True) -> str:
+        """Set the reader's encoding CHOICE for THIS pane (the container walks the rest).
+
+        The text on the screen was decoded with the PREVIOUS choice, so a real change re-reads the
+        file the preview holds instead of leaving a mis-decoded document there; a panel with nothing
+        open simply carries the new default into its next read. The value is normalised against the
+        DECLARED list, so a hand-edited config cannot reach the decoder with an unknown codec.
+        Never raises.
+        """
+        resolved = normalize_viewer_encoding(codec)
+        changed = resolved != self._viewer_encoding_choice
+        self._viewer_encoding_choice = resolved
+        for name, act in (getattr(self, "_encoding_actions", None) or {}).items():
+            try:
+                act.setChecked(name == resolved)
+            except RuntimeError:
+                pass   # Qt teardown — the menu is already gone
+        if persist:
+            host_attr(self, "save_viewer_encoding")(resolved)
+        if changed and reread and self._viewer_open and self._viewer_path:
+            self._queue_viewer_read(self._viewer_path, self._known_size(self._viewer_path))
+        return resolved
+
+    @property
+    def viewer_encoding_choice(self) -> str:
+        """The encoding this reader ASKS for (`auto` — the shipped utf-8 → latin-1 rule)."""
+        return str(getattr(self, "_viewer_encoding_choice", "") or VIEWER_ENCODING_DEFAULT)
 
     def _on_viewer_menu(self, pos):
         """Show the reader's menu at the click (the event is the only caller of the seam)."""
@@ -596,6 +676,7 @@ class SftpPaneViewerMixin:
         # v1.4.7: the panel is empty → the formatting pass has nothing to cover.
         self._highlight_range = None
         self._viewer_open = False
+        self._viewer_path = ""   # v1.9.3: no file on the screen → the choice re-reads nothing
         if self._highlighter is not None:
             self._highlighter.reset_for_document()
         self.restore_viewer()

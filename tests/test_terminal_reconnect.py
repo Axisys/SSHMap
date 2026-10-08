@@ -537,8 +537,9 @@ check_release_state(ROOT)
 LANGS = load_i18n_langs(ROOT)
 check_i18n_parity(LANGS)
 check_i18n_format(LANGS)
-check("§6 the pin counts the shipped keys (the v1.9 line's 1040 + ELEVEN of this release)",
-      EXPECTED_I18N_KEYS == 1040 + 11, f"{EXPECTED_I18N_KEYS}")
+check("§6 the pin counts the shipped keys (the v1.9 line's 1040 + ELEVEN of v1.9.1 "
+      "+ THIRTEEN of v1.9.3: the command dialog and the reader's encoding)",
+      EXPECTED_I18N_KEYS == 1040 + 11 + 13, f"{EXPECTED_I18N_KEYS}")
 check("§6 the pin names this release or a LATER one (the file describes v1.9.1)",
       releases_at_least("1.9.1"), EXPECTED_APP_VERSION)
 _NEW_KEYS = ("terminal.reconnect", "terminal.reconnect_tooltip", "terminal.reconnecting",

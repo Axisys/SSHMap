@@ -82,6 +82,11 @@ STATUS_PROBE_BUDGET_MS = 1500         # one plugin's `status_probe` (it runs ins
 STATUS_DETAIL_MAX = 200               # one plugin's node detail (a tooltip line, not a log)
 COMMAND_TIMEOUT_S = 30.0              # the per-node budget of `ctx.run_command`
 
+# The identity a CORE-owned run reports under (v1.9.3): `plugin_run_command()` takes a `plugin_id` for
+# the log prefix and for every event it emits, and the command dialog is not a plugin — this name says
+# so instead of borrowing a real plugin's id (it is never a record of the registry).
+CORE_RUN_ID = "core"
+
 
 def _log():
     """The app logger (lazy — the discovery must work in a bare headless script)."""

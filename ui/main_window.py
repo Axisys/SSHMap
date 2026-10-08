@@ -29,6 +29,9 @@ try:
     # both are used by the mixin through host_attr (the MW.<name> test seam).
     from ..dialogs.bulk_edit_dialog import BulkEditDialog
     from ..dialogs.arrange_group_dialog import ArrangeGroupDialog
+    # v1.9.3 (ROADMAP task 3): the CORE-owned command question — asked by PluginMixin through
+    # host_attr (the MW.ask_plugin_command test seam).
+    from ..dialogs.plugin_command_dialog import ask_plugin_command
 except ImportError:
     from dialogs.add_server_dialog import AddServerDialog
     from dialogs.connection_dialog import ConnectionDialog
@@ -37,6 +40,7 @@ except ImportError:
     from dialogs.export_options_dialog import ExportOptionsDialog
     from dialogs.bulk_edit_dialog import BulkEditDialog
     from dialogs.arrange_group_dialog import ArrangeGroupDialog
+    from dialogs.plugin_command_dialog import ask_plugin_command
 
 try:  # v1.6.5 (ROADMAP tasks 4/5): the ONE gate of an unmanaged card (the menu rows ask it)
     from ..ui import unmanaged as _unmanaged_gate
@@ -228,7 +232,7 @@ except ImportError:  # flat layout without the package (same pattern as the impo
 MODULE_FACADE_SEAMS = (
     # ── the dialogs and containers a suite substitutes on this module ──
     AddServerDialog, ConnectionDialog, SSHConnectDialog, SshConfigImportDialog,
-    BulkEditDialog, ArrangeGroupDialog, ExportOptionsDialog, SSHTerminalWindow,
+    BulkEditDialog, ArrangeGroupDialog, ExportOptionsDialog, SSHTerminalWindow, ask_plugin_command,
     # ── the Qt facades patched on the shared class (a module attribute would not reach them) ──
     QFileDialog, QMenu, QMessageBox,
     # ── the module-level facades the mixins resolve here (a stripped build sets some to None) ──

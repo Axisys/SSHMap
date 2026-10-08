@@ -6,9 +6,11 @@ left, the servers a run would target in the middle and the session's plugin even
 read like the Activity panel's, newest first, with a text export. The ring (`PluginEventRing`) is the ONLY
 owner of those rows (bounded, memory only, never persisted) while the WINDOW owns the taps:
 `PluginMixin._report_plugin_events()` copies the drained events in and `command_result` brings what a
-plugin RAN. The event LINES stay English (they are logging lines) and the chrome is translated by
-`retranslate()`; `plugin_event_line()` / `run_result_line()` / `plugin_events_text()` are PURE and the panel
-never drains the manager. Mechanism — `DOCUMENTATION.md` §33."""
+plugin RAN. The event TREE follows the ring INCREMENTALLY (a drained batch is a new PREFIX of the rows
+on screen — `sync_events()`, never a rebuild), while the event LINES stay English (they are logging
+lines) and only the chrome is translated by `retranslate()`; `plugin_event_line()` / `run_result_line()`
+/ `plugin_events_text()` are PURE and the panel never drains the manager. Mechanism — `DOCUMENTATION.md`
+§33."""
 
 import os
 import time
@@ -288,6 +290,10 @@ class PluginsPanel(QDialog):
         self.tooltip_for = None     # callable(record) -> str — the ONE plugin tooltip of the window
         self._building = False      # the guard: a programmatic rebuild never fires a switch
         self._checked_ids = set()   # the CHECKED servers (the run's target list, a view state)
+        #: The incremental event tree: the TOP row's event and how many rows are on screen. Both
+        #: are cleared by the rebuild path, so a foreign ring can never leave a stale head behind.
+        self._event_head = None
+        self._event_shown = 0
 
         self.setModal(False)
         self.resize(1080, 560)
@@ -490,7 +496,7 @@ class PluginsPanel(QDialog):
         """Rebuild every column from the sources (the test seam and the show path)."""
         self.refresh_plugins()
         self.refresh_servers()
-        self.refresh_events()
+        self.sync_events()
 
     def refresh_plugins(self):
         """Rebuild the plugin rows: the label, the version and the persisted ENABLE switch.
@@ -563,28 +569,74 @@ class PluginsPanel(QDialog):
         self._toggle_empty(self.server_tree, self.server_empty)
         self._sync_run_enabled()
 
+    def _make_event_item(self, event) -> QTreeWidgetItem:
+        """ONE ring row → ONE DETACHED tree item (the four Activity cells + the detail tooltip).
+
+        The event's `seq` rides the row's `UserRole`, so the tree and the ring can be told apart from
+        a rebuild without a second copy of the cells (the plugin and server trees' own convention).
+        """
+        item = QTreeWidgetItem()
+        item.setText(0, event.time_text())
+        item.setText(1, event.level)
+        item.setText(2, event.source)
+        item.setText(3, event.text)
+        for column in range(4):
+            item.setToolTip(column, event.detail or event.text)
+        item.setData(0, Qt.ItemDataRole.UserRole, event.seq)
+        return item
+
     def refresh_events(self):
-        """Rebuild the event rows from the ring, NEWEST first (the window lists a history)."""
+        """Re-sync the WHOLE event tree from the ring — the FORCED rebuild (`clear()`, a test seam)."""
+        self._event_head = None
+        self._event_shown = 0
+        self.sync_events()
+
+    def sync_events(self) -> int:
+        """Bring the tree in step with the ring, touching ONLY the rows that really changed.
+
+        The ring owns the ORDER (`newest_first()`), so a drained batch is a new PREFIX of what is on
+        screen: the fresh rows go in at the TOP and the ones the bound evicted leave the BOTTOM, which
+        is O(added) tree work per drain — the full rebuild is O(rows), and a run over two hundred rows
+        that answers node by node pays it for every answer. An unchanged pair of head-and-count is one
+        comparison and NO widget work at all. A foreign ring (a `clear()` beside an append, a rebuild
+        by something else) falls back to the full rebuild. Returns the number of rows touched.
+        """
         events = self.visible_events()
+        head = events[0] if events else None
+        try:
+            rows = int(self.event_tree.topLevelItemCount())
+        except RuntimeError:
+            return 0                    # Qt teardown — the tree is already destroyed
+        if head is self._event_head and len(events) == self._event_shown == rows:
+            return 0                    # what is on screen IS the ring — the pin of this path
+        added = None
+        if self._event_head is not None:
+            for index, event in enumerate(events):
+                if event is self._event_head:
+                    added = index
+                    break
         try:
             self.event_tree.setUpdatesEnabled(False)
-            self.event_tree.clear()
-            for event in events:
-                item = QTreeWidgetItem(self.event_tree)
-                item.setText(0, event.time_text())
-                item.setText(1, event.level)
-                item.setText(2, event.source)
-                item.setText(3, event.text)
-                for column in range(4):
-                    item.setToolTip(column, event.detail or event.text)
+            if added:
+                for event in reversed(events[:added]):
+                    self.event_tree.insertTopLevelItem(0, self._make_event_item(event))
+            else:
+                self.event_tree.clear()
+                for event in events:
+                    self.event_tree.addTopLevelItem(self._make_event_item(event))
+            while self.event_tree.topLevelItemCount() > len(events):
+                self.event_tree.takeTopLevelItem(self.event_tree.topLevelItemCount() - 1)
         except RuntimeError:
-            return  # Qt teardown
+            return 0                    # Qt teardown — the tree is already destroyed
         finally:
             try:
                 self.event_tree.setUpdatesEnabled(True)
             except RuntimeError:
                 pass
+        self._event_head = head
+        self._event_shown = len(events)
         self._toggle_empty(self.event_tree, self.event_empty)
+        return int(added) if added else len(events)
 
     @staticmethod
     def _toggle_empty(tree, label) -> None:
@@ -674,7 +726,7 @@ class PluginsPanel(QDialog):
             if self.ring.append(kind, level, source, text, detail) is not None:
                 added += 1
         if added:
-            self.refresh_events()
+            self.sync_events()
         return added
 
     def record_run_result(self, plugin_id, payload) -> "PluginEvent":
@@ -687,7 +739,7 @@ class PluginsPanel(QDialog):
         level, source, text, detail = run_result_line(self._plugin_label(plugin_id), payload)
         event = self.ring.append(KIND_RUN_RESULT, level, source, text, detail)
         if event is not None:
-            self.refresh_events()
+            self.sync_events()
         return event
 
     def record_run_finished(self, plugin_id, count) -> "PluginEvent":
@@ -695,7 +747,7 @@ class PluginsPanel(QDialog):
         level, source, text, detail = run_finished_line(self._plugin_label(plugin_id), count)
         event = self.ring.append(KIND_RUN_FINISHED, level, source, text, detail)
         if event is not None:
-            self.refresh_events()
+            self.sync_events()
         return event
 
     def record_plugin_message(self, plugin_id, message) -> "PluginEvent":
@@ -710,7 +762,7 @@ class PluginsPanel(QDialog):
             return None
         event = self.ring.append(KIND_PLUGIN_MESSAGE, "INFO", self._plugin_label(plugin_id), text)
         if event is not None:
-            self.refresh_events()
+            self.sync_events()
         return event
 
     def record_plugin_status(self, plugin_id, text) -> "PluginEvent":
@@ -727,7 +779,7 @@ class PluginsPanel(QDialog):
         event = self.ring.append(KIND_PLUGIN_STATUS, LEVEL_STATUS,
                                  self._plugin_label(plugin_id), line)
         if event is not None:
-            self.refresh_events()
+            self.sync_events()
         return event
 
     def visible_events(self) -> list:
@@ -741,25 +793,34 @@ class PluginsPanel(QDialog):
 
     # ── the run doors ─────────────────────────────────────────────────────────
 
+    def resolve_targets(self):
+        """What a run would touch — `(nodes, refusal_key)`, the ONE reader of the selection rule.
+
+        The CHECKED rows are the target list; a selection that no longer resolves is REFUSED with
+        one sentence instead of widening to the whole project, and only a user who checked NOTHING
+        targets every server (unless the registry itself is empty, where the shipped "no servers"
+        sentence is the honest one). Every door — the global button, the row action and the
+        command dialog of the Plugins menu — asks HERE, so no two of them can disagree.
+        """
+        nodes = self.checked_nodes()
+        registry = self._manager_nodes()
+        if self._checked_ids and not nodes and registry:
+            return [], "plugins.selection_gone"
+        return (nodes or registry), None
+
     def run_plugins(self, plugin_ids=None) -> int:
         """Start a run on the CHECKED servers — the panel's door to `run_on_nodes`.
 
         `plugin_ids=None` keeps the shipped "every capable plugin" semantics of the global button; a
         LIST runs exactly those ids, which is the row action's door (the persisted enable switch is
-        CONFIG and is deliberately never reused as the run selection — §4.10). With NO server checked
-        the whole plugin registry is the target, the scope the menu action documents; a CHECKED server
-        that has left the map is REFUSED with one sentence instead, because widening that selection to
-        every server would run on the ones the user did not pick — unless the registry itself is EMPTY,
-        where the shipped "no servers" sentence is the honest one. Returns the number of plugins started
-        (0 — nothing could run).
+        CONFIG and is deliberately never reused as the run selection — §4.10). The scope and the
+        refusal come from `resolve_targets()`. Returns the number of plugins started (0 — nothing
+        could run).
         """
-        nodes = self.checked_nodes()
-        registry = self._manager_nodes()
-        if self._checked_ids and not nodes and registry:
-            self._notify(_t("plugins.selection_gone"), 8000)
+        nodes, refusal = self.resolve_targets()
+        if refusal:
+            self._notify(_t(refusal), 8000)
             return 0
-        if not nodes:
-            nodes = registry
         started = 0
         try:
             started = int(self._manager.plugin_run_on_nodes(nodes, plugin_ids=plugin_ids))
@@ -768,7 +829,7 @@ class PluginsPanel(QDialog):
         if started:
             level, source, text, detail = run_started_line(started, len(nodes))
             if self.ring.append(KIND_RUN_STARTED, level, source, text, detail) is not None:
-                self.refresh_events()
+                self.sync_events()
             self._notify(_t("plugins.status.run_on_nodes", count=len(nodes)), 8000)
         else:
             self._notify(_t("plugins.run_hint") if nodes else _t("plugins.no_selection"), 8000)

@@ -162,6 +162,7 @@ of the file itself.
 | `test_note_attach.py` | — | v1.2.4: attaching notes to servers + a special line (the v1.2.4 release theme). |
 | `test_notes.py` | — | Sticky notes: drag / resize / edit / delete plus the JSON round trip (a former smoke-test part). |
 | `test_pdf_export.py` | — | v0.9.9.7 — Map PDF export (ROADMAP v0.9.9.7); the page geometry is pinned in §6 of this file. |
+| `test_plugin_command.py` | — | v1.9.3 — the CORE-owned command dialog: the door, its targets and the rows it produces. |
 | `test_plugin_examples.py` | — | v1.4 — the example plugins (`hello.py`, `disk_monitor.py`, `open_ports.py`, `app_versions.py`). |
 | `test_plugin_examples_monitors.py` | — | v1.9.2 — the two PROVEN examples (`examples/plugins/open_ports.py`, `app_versions.py`). |
 | `test_plugin_runtime.py` | — | v1.4rc2 — Plugin foundation, part 2: `PluginContext` and Main Thread isolation |

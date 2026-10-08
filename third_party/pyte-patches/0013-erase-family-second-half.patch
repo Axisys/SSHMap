@@ -1,0 +1,93 @@
+Subject: [sshmap fork 0013] the erase family's SECOND half — `CSI 3 J` keeps the visible grid and an erased cell keeps only the colours
+
+Provenance: sshmap (v1.9.3, ROADMAP task 1) — item (c) of the three pyte cosmetics the dependency audit
+            left in the backlog (PYTE82_AUDIT.md, the raise-review of 2026-09-26, "the two neighbours of
+            that same erase family"): the two hunks patch 0012 deliberately left alone, measured on the
+            vendored fork first. (i) `erase_in_display` answered `how == 3` with the SAME
+            `range(self.lines)` interval as `2`, so `CSI 3 J` also wiped the VISIBLE screen where xterm
+            clears the SAVED lines only — measured: `ESC[3J` on a written 3-line screen blanked every
+            visible row, while the mode's documented meaning is the scrollback. A plain `Screen` keeps no
+            saved lines at all, so the honest reading there is the NO-OP branch `erase_in_line` already
+            takes for a mode it does not implement, and `HistoryScreen._reset_history()` stays the whole
+            effect of the mode where the saved lines exist. (ii) `_erase_attrs()` handed an erased cell
+            `self.cursor.attrs` WHOLE, so `underscore` — and every other glyph decoration — survived an
+            erase; the canvas paints the underline of a run of SPACES too (`QFont.setUnderline` plus
+            `drawText(" ")`), which is the recorded symptom of a line drawn across the blank area.
+            xterm's BCE takes the current BACKGROUND and colours, not the decoration of a glyph that is
+            no longer there.
+            The decision the patch carries: what an erased cell KEEPS is ONE declared set — the COLOURS
+            (fg, bg and the DECSCNM/SGR-7 reverse) — so `_erase_attrs()` is the single place that
+            answers it and the three erase paths (`erase_characters`, `erase_in_line`,
+            `erase_in_display`) cannot drift. Also measured, on the vendored fork: the visible grid of
+            both screens really does survive `ESC[3J` after the patch (0 of 15 cells rewritten on a
+            30x5 written row, against 15 of 15 before it) while the scrollback is still dropped.
+Base:       pyte 0.8.2 (PyPI sdist, sha256 in MANIFEST.md), pyte/screens.py (after patches
+            0001-0012; patch 0012 was the last one to touch this file).
+Policy:     keep — 0.8.3.dev carries BOTH shapes (the `2 or 3` branch and the whole-attrs erase), so
+            there is no release to wait for; each hunk is additive to the helper and to one branch, so
+            a future rebase can re-apply it alone.
+Applied:    2026-10-08, sshmap v1.9.3.
+
+diff --git a/pyte/screens.py b/pyte/screens.py
+index 0a9da70..afe8471 100644
+--- a/pyte/screens.py
++++ b/pyte/screens.py
+@@ -859,14 +859,19 @@ class Screen:
+                 line.pop(x, None)
+ 
+     def _erase_attrs(self) -> Char:
+-        """The attributes an ERASED cell takes — sshmap fork (patch 0012).
+-
+-        xterm's BCE: an erase paints the CURRENT background, so the cell keeps the SGR state
+-        (background, and the foreground the writer set) while its character becomes a blank.
+-        The OSC 8 hyperlink is the one attribute that does NOT survive (patch 0011): a cleared
+-        cell is not part of a link any more.
++        """The attributes an ERASED cell takes — sshmap fork (patches 0012, 0013).
++
++        xterm's BCE: an erase paints the CURRENT background, so the cell keeps the COLOURS
++        (foreground, background and the DECSCNM/SGR-7 reverse) while its character becomes a
++        blank and every GLYPH DECORATION — bold, italics, underscore, strike-through, blink —
++        is dropped, because there is no glyph left to decorate and a decoration would draw a
++        line across the blank area. The OSC 8 hyperlink goes with them (patch 0011): a cleared
++        cell is not part of a link any more. The ONE declared set survives here.
+         """
+-        return self.cursor.attrs._replace(data=" ", hyperlink="")
++        attrs = self.cursor.attrs
++        default = self.default_char
++        return default._replace(data=" ", fg=attrs.fg, bg=attrs.bg,
++                                reverse=bool(attrs.reverse or default.reverse))
+ 
+     def erase_characters(self, count: Optional[int] = None) -> None:
+         """Erase the indicated # of characters, starting with the
+@@ -936,9 +941,13 @@ class Screen:
+               cursor position.
+             * ``1`` -- Erases from beginning of screen to cursor,
+               including cursor position.
+-            * ``2`` and ``3`` -- Erases complete display. All lines
++            * ``2`` -- Erases complete display. All lines
+               are erased and changed to single-width. Cursor does not
+               move.
++            * ``3`` -- Erases the SAVED lines only (sshmap fork, patch
++              0013); the VISIBLE grid is untouched. A plain ``Screen``
++              keeps no saved lines, so the mode is a no-op there and the
++              history reset is its whole effect where they exist.
+         :param bool private: when ``True`` only characters marked as
+                              erasable are affected **not implemented**.
+ 
+@@ -952,11 +961,13 @@ class Screen:
+             interval = range(self.cursor.y + 1, self.lines)
+         elif how == 1:
+             interval = range(self.cursor.y)
+-        elif how == 2 or how == 3:
++        elif how == 2:
+             interval = range(self.lines)
+         else:
+-            # sshmap fork (patch 0007): as in erase_in_line — an unrecognised erase mode is a
+-            # no-op, not an `UnboundLocalError`.
++            # sshmap fork (patches 0007, 0013): an unrecognised erase mode is a no-op — and so is
++            # `3`, which erases the SAVED lines xterm keeps, never the visible grid. `HistoryScreen`
++            # answers that mode with its own history reset (`_reset_history()`), which is the whole
++            # effect it has; returning BEFORE `dirty` is touched is what keeps the visible frame.
+             return
+ 
+         self.dirty.update(interval)

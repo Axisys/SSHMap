@@ -56,12 +56,14 @@ WAVE = {
         "_sort_is_default"]),
     "modules/sftp_pane_viewer.py": ("SftpPaneViewerMixin", PVW.SftpPaneViewerMixin, [
         "viewer_cap", "set_viewer_max_bytes", "_mark_rows", "_known_size", "_open_viewer",
-        "_on_read_ready", "_show_viewer", "_viewer_splitter", "_layout_viewer_share",
-        "viewer_host", "_restore_listing", "present_viewer_in", "restore_viewer",
-        "_ensure_highlighter", "_build_viewer_menu", "_on_viewer_menu", "_on_wrap_toggled",
-        "_apply_viewer_wrap", "set_viewer_wrap", "viewer_wrap", "_lazy_margin",
+        "_queue_viewer_read", "_on_read_ready", "_show_viewer", "_viewer_splitter",
+        "_layout_viewer_share", "viewer_host", "_restore_listing", "present_viewer_in",
+        "restore_viewer", "_ensure_highlighter", "_build_viewer_menu", "_on_viewer_menu",
+        "_on_wrap_toggled", "_apply_viewer_wrap", "set_viewer_wrap", "viewer_wrap", "_lazy_margin",
         "_viewer_block_range", "_highlight_visible", "_on_viewer_update_request",
-        "viewer_highlighter", "viewer_language", "viewer_encoding", "close_viewer"]),
+        "viewer_highlighter", "viewer_language", "viewer_encoding", "close_viewer",
+        # v1.9.3: the reader's encoding CHOICE — its menu row, its setter and its two readers.
+        "_on_encoding_chosen", "set_viewer_encoding", "viewer_encoding_choice"]),
 }
 # The WAVE-2 plan: the transfers with the conflict question and the batch copy/move, the drag & drop
 # with the row context menu, and the pure helpers in their own module.
@@ -171,8 +173,9 @@ check(f"§2 every one of the {sum(len(m) for _r, (_n, _c, m) in {**WAVE, **WAVE2
 check("§2 the AST reader of the family still finds EVERY wave method (its pins travel with the code)",
       all(pane_func_owner(m, ROOT) for _rel, (_n, _c, methods) in {**WAVE, **WAVE2}.items()
           for m in methods))
-check("§2 the method counts are the plan's (23 + 25 + 28 in wave 1, 29 + 15 in wave 2, 25 kept)",
-      [len(m) for _rel, (_n, _c, m) in WAVE.items()] == [23, 25, 28]
+check("§2 the method counts are the plan's (23 + 25 + 28 in wave 1 — v1.9.3 adds the reader's "
+      "encoding four, 29 + 15 in wave 2, 25 kept)",
+      [len(m) for _rel, (_n, _c, m) in WAVE.items()] == [23, 25, 32]
       and [len(m) for _rel, (_n, _c, m) in WAVE2.items()] == [29, 15]
       and len(_class_method_names("modules/sftp_tab.py", "_SftpPane")) == len(FACADE_METHODS),
       str({rel: len(m) for rel, (_n, _c, m) in WAVE2.items()}))
@@ -439,8 +442,8 @@ check_release_state(ROOT)
 check("§7 the waves add NO i18n key and NO schema move (the release's OWN feature adds its 20, "
       "`ELEVATED_PANE.md`; v1.8.1 adds its 41 and v1.8.1.1 ONE) and v1.8.2 adds SIXTEEN: the library file — the History door, the backup ring and the import/export pair"
       " — and v1.8.3 adds TWENTY-THREE: the Plugins window (its chrome, its three columns and its"
-      " export) and v1.8.4 adds TEN: the whole-map layout, the reverse traversal and the inode fact, and v1.9 adds FOUR: the production-tag guard — its title, the broadcast sentence and the paste sentence — and the notice of a checked selection that has left the map, and v1.9.1 adds ELEVEN: the reconnect and its `tmux attach`",
-      EXPECTED_I18N_KEYS == 925 + 20 + 41 + 1 + 16 + 23 + 10 + 4 + 11 and VERSION_FORMAT == "0.9",
+      " export) and v1.8.4 adds TEN: the whole-map layout, the reverse traversal and the inode fact, and v1.9 adds FOUR: the production-tag guard — its title, the broadcast sentence and the paste sentence — and the notice of a checked selection that has left the map, and v1.9.1 adds ELEVEN: the reconnect and its `tmux attach`; v1.9.3 adds THIRTEEN: the command dialog's ten keys and the reader's encoding three",
+      EXPECTED_I18N_KEYS == 925 + 20 + 41 + 1 + 16 + 23 + 10 + 4 + 11 + 13 and VERSION_FORMAT == "0.9",
       f"{EXPECTED_I18N_KEYS} / {VERSION_FORMAT}")
 check("§7 the pin names this release", releases_at_least(EXPECTED_APP_VERSION, "1.8"),
       EXPECTED_APP_VERSION)

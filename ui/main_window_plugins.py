@@ -2,14 +2,14 @@
 
 Methods only: `MainWindow` stays the facade and the public API is unchanged; the mixin does NOT import the
 window module (a cycle) — it duck-types the instance. The manager (`modules/plugin_manager.py`) reports FACTS
-(records and events) this cluster turns into a menu and into status-bar lines; `PLUGINS.md` is the contract.
+(records and events) this cluster renders; `PLUGINS.md` is the contract.
 
 Owned here: the discovery entry point (`start_plugin_discovery()`, called once from `main.py`), the
 per-plugin rows of the "Plugins" menu (`_populate_plugin_items()` — the DYNAMIC rows only), the
 plugin-visible node registry, the context-menu hook (`_extend_node_context_menu()`, the ONE entry point of
-BOTH surfaces), the run/status/error reporting and the `Plugins window` (`ui/plugins_panel.py`) with its
-`ui_plugins_panel` visibility and TWO taps: the drained events (ONE consumer) and `command_result`.
-Mechanism — `DOCUMENTATION.md` §33."""
+BOTH surfaces), the run/status/error reporting, the `Plugins window` (`ui/plugins_panel.py`) with its
+`ui_plugins_panel` visibility, its TWO taps (the drained events, `command_result`) and the CORE-owned
+command dialog. Mechanism — `DOCUMENTATION.md` §33."""
 from PySide6.QtCore import QTimer
 from PySide6.QtGui import QAction
 
@@ -17,6 +17,11 @@ try:  # v1.4rc1 (plugin foundation): discovery + the registry of the plugins
     from ..modules import plugin_manager as plugin_manager
 except ImportError:
     from modules import plugin_manager as plugin_manager
+
+try:  # AGENTS.md §4.1: the ONE seam for a facade global (the dialog and the i18n of the menu row)
+    from .mixin_support import host_attr
+except ImportError:
+    from ui.mixin_support import host_attr
 
 try:  # v0.9.9.4/UI polish: the per-plugin row icon (the same three-step layout as the window's)
     from .icons import set_action_icon
@@ -173,6 +178,15 @@ class PluginMixin:
                                        plugin_manager.HOOK_RUN_ON_NODES)))
             except RuntimeError:
                 pass  # Qt teardown
+        # The CORE-owned command door follows the registry ALONE: its runner is the core's own, so a
+        # project without a single capable plugin still has something to run (an enabled item with no
+        # server could only answer "nothing to run on").
+        command_act = getattr(self, "act_plugins_command", None)
+        if command_act is not None:
+            try:
+                command_act.setEnabled(bool(self._plugin_manager.node_records()))
+            except RuntimeError:
+                pass  # Qt teardown
         # The window lists the SAME registry: a node added, removed or renamed by a project load
         # reaches its server column here (the ONE place the registry is re-fed).
         panel = getattr(self, "plugins_panel", None)
@@ -267,6 +281,69 @@ class PluginMixin:
         except Exception as e:  # noqa: BLE001 — an action must never crash the window
             if self.log:
                 self.log.warning(f"Plugin run_on_nodes failed: {e}")
+
+    def _open_plugin_command_dialog(self) -> bool:
+        """The CORE-owned command door (ROADMAP v1.9.3, task 3): ONE dialog → `plugin_run_command()`.
+
+        The targets come from the Plugins window's `resolve_targets()` — the CHECKED rows, the
+        refusal of a selection that left the map included — so the scope and the wording are the
+        ones the two plugin doors already use; without the window (a stripped build) the whole
+        registry is the target, which is what a run means when there is no selection to make. The
+        answer lands where every run's answer lands — the session ring of that window, which this
+        door REVEALS through the item that owns its visibility (a result nobody can read is not a
+        report) — and its rows report under the manager's `CORE_RUN_ID`, never a plugin's id.
+        Returns True — the command was handed to the runner. Never raises.
+        """
+        panel = getattr(self, "plugins_panel", None)
+        nodes, refusal = [], None
+        try:
+            if panel is not None:
+                nodes, refusal = panel.resolve_targets()
+            else:
+                nodes = list(self._plugin_manager.node_records())
+        except Exception:  # noqa: BLE001 — a broken registry is "nothing to run on"
+            nodes, refusal = [], None
+        if refusal:
+            self._show_plugin_status(self.t(refusal), 8000)
+            return False
+        if not nodes:
+            self._show_plugin_status(self.t("plugins.no_selection"), 8000)
+            return False
+        ask = host_attr(self, "ask_plugin_command")
+        if not callable(ask):
+            return False
+        try:
+            command = ask(nodes, self)
+        except Exception as e:  # noqa: BLE001 — a broken dialog must not crash the window
+            if self.log:
+                self.log.warning(f"Command dialog failed: {e}")
+            return False
+        if not command:
+            return False               # cancelled (an empty command never leaves the dialog)
+        try:
+            started = bool(self._plugin_manager.plugin_run_command(
+                plugin_manager.CORE_RUN_ID, nodes, command))
+        except Exception as e:  # noqa: BLE001 — an action must never crash the window
+            if self.log:
+                self.log.warning(f"Command run failed: {e}")
+            started = False
+        if not started:
+            self._show_plugin_status(self.t("plugins.command.failed"), 8000)
+            return False
+        self._reveal_plugins_window()
+        self._show_plugin_status(self.t("plugins.command.status.started", count=len(nodes)), 8000)
+        return True
+
+    def _reveal_plugins_window(self):
+        """Show the Plugins window through the item that OWNS `ui_plugins_panel`. Never raises."""
+        action = getattr(self, "act_plugins_window", None)
+        if action is None:
+            return
+        try:
+            if not action.isChecked():
+                action.setChecked(True)
+        except RuntimeError:
+            pass  # Qt teardown — the action is already destroyed
 
     def _plugin_tooltip(self, rec) -> str:
         """The tooltip of one plugin row: the version + the description, or the failure.

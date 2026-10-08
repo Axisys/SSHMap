@@ -104,8 +104,11 @@ try:
                                    VIEWER_MAX_BYTES_MAX, VIEWER_MAX_BYTES_MIN,
                                    VIEWER_MAX_BYTES_STEP, VIEWER_MAX_BYTES_WARN,
                                    SftpPaneViewerMixin, viewer_freeze_seconds)
-    from .sftp_pane_helpers import (ask_conflict, decode_text, format_mtime, format_size,
-                                    preview_block_reason)
+    from .sftp_pane_helpers import (VIEWER_ENCODING_CONFIG, VIEWER_ENCODING_DEFAULT,
+                                    VIEWER_ENCODINGS, VIEWER_WRAP_CONFIG, ask_conflict, decode_text,
+                                    format_mtime, format_size, normalize_viewer_encoding,
+                                    preview_block_reason, resolve_viewer_encoding,
+                                    resolve_viewer_wrap, save_viewer_encoding, save_viewer_wrap)
     from .sftp_pane_transfer import SftpPaneTransferMixin
     from .sftp_pane_dnd import SftpPaneDndMixin
     from .sftp_pane_elevated import SftpPaneElevatedMixin
@@ -116,8 +119,11 @@ except ImportError:  # flat launch from the project root
                                   VIEWER_MAX_BYTES_MAX, VIEWER_MAX_BYTES_MIN,
                                   VIEWER_MAX_BYTES_STEP, VIEWER_MAX_BYTES_WARN,
                                   SftpPaneViewerMixin, viewer_freeze_seconds)
-    from sftp_pane_helpers import (ask_conflict, decode_text, format_mtime, format_size,
-                                   preview_block_reason)
+    from sftp_pane_helpers import (VIEWER_ENCODING_CONFIG, VIEWER_ENCODING_DEFAULT,
+                                   VIEWER_ENCODINGS, VIEWER_WRAP_CONFIG, ask_conflict, decode_text,
+                                   format_mtime, format_size, normalize_viewer_encoding,
+                                   preview_block_reason, resolve_viewer_encoding,
+                                   resolve_viewer_wrap, save_viewer_encoding, save_viewer_wrap)
     from sftp_pane_transfer import SftpPaneTransferMixin
     from sftp_pane_dnd import SftpPaneDndMixin
     from sftp_pane_elevated import SftpPaneElevatedMixin
@@ -159,8 +165,9 @@ DIRS_CONFIG = "ui_sftp_dirs"
 MAX_REMEMBERED_DIRS = 32
 
 #: v1.7.3: the reader's WORD WRAP — ONE global boolean (`terminal_wheel`'s validation rule): the
-#: extension is a HINT, the value is a real JSON bool or the default.
-VIEWER_WRAP_CONFIG = "ui_viewer_wrap"
+#: extension is a HINT, the value is a real JSON bool or the default. The pair of readers and the
+#: ENCODING choice beside them live in `modules/sftp_pane_helpers.py` and are re-exported at the end
+#: of this file (`VIEWER_WRAP_CONFIG`, `resolve_viewer_wrap`, `save_viewer_wrap`).
 
 #: v1.7.3: the drag payload of a row that started INSIDE a Files pane. The remote path alone
 #: cannot say WHICH pane (two servers show the same path), so the private type carries the session
@@ -378,37 +385,6 @@ def remembered_dir_for(mapping, key) -> str:
         return str((mapping or {}).get(str(key or "")) or "")
     except Exception:  # noqa: BLE001 — a foreign mapping is simply "no memory"
         return ""
-
-
-def resolve_viewer_wrap(cfg: dict = None) -> bool:
-    """The reader's word wrap as a PURE value (v1.7.3).
-
-    Only a real JSON `true`/`false` counts; anything else — a string `"true"`, a number, a missing
-    key, an unreadable config — answers the DEFAULT (`False`: the shipped no-wrap look).
-    """
-    if not isinstance(cfg, dict):
-        try:
-            from i18n import load_config
-        except Exception:  # noqa: BLE001 — a build without i18n keeps the default
-            return False
-        try:
-            cfg = load_config() or {}
-        except Exception:  # noqa: BLE001 — a broken config store keeps the default
-            cfg = {}
-    value = cfg.get(VIEWER_WRAP_CONFIG) if isinstance(cfg, dict) else None
-    return value if isinstance(value, bool) else False
-
-
-def save_viewer_wrap(on) -> bool:
-    """Write the ONE word-wrap key (merge-write; False — the config could not be written)."""
-    try:
-        from i18n import save_config
-    except Exception:  # noqa: BLE001 — a build without i18n cannot remember it
-        return False
-    try:
-        return bool(save_config({VIEWER_WRAP_CONFIG: bool(on)}))
-    except Exception:  # noqa: BLE001 — a write failure must not break the reader
-        return False
 
 
 def clamp_viewer_max_bytes(value) -> int:
@@ -1013,6 +989,10 @@ class _SftpPane(SftpPaneWalkMixin, SftpPaneListingMixin, SftpPaneViewerMixin,
         # v1.7.3 (ROADMAP v1.7.3, task 4): the reader's word wrap — ONE global setting, read at
         # construction so both panes and every session agree.
         self._viewer_wrap = resolve_viewer_wrap()
+        # v1.9.3: the reader's ENCODING choice — the SAME "one global setting, resolved ONCE" rule
+        # as the wrap above, plus the path the preview holds (the choice re-reads THAT file).
+        self._viewer_encoding_choice = resolve_viewer_encoding()
+        self._viewer_path = ""
         # v1.7.5: the reader's CEILING — the SAME "one global setting, resolved ONCE" rule as the
         # wrap above. The value travels into every read task, so the worker never reads a config.
         self._viewer_cap = resolve_viewer_max_bytes()
@@ -1864,6 +1844,8 @@ class SftpTab(QWidget):
         "_completer_dir", "_op_batches", "_batches", "_batch_seq", "_pending_drops",
         # v1.7.5: the listing's sort (a view state) and the reader's ceiling belong to the PANE.
         "_sort_column", "_sort_desc", "_viewer_cap",
+        # v1.9.3: the reader's ENCODING choice and the path its preview holds (the choice re-reads it).
+        "_viewer_encoding_choice", "_viewer_path",
     })
 
     # Local hints in the window's status bar (waiting for connection, no selection).
@@ -2184,6 +2166,22 @@ class SftpTab(QWidget):
             except RuntimeError:
                 continue   # Qt teardown — the pane is already gone
         return saved
+
+    def apply_viewer_encoding(self, codec) -> str:
+        """Write the ONE encoding key and apply it to EVERY pane of this container (v1.9.3).
+
+        The reader's second global setting, on the word-wrap rule: ONE resolved value for both
+        panes and every session, and a pane whose preview is open RE-READS its file (the shown text
+        was decoded with the previous choice). Returns the NORMALISED value that was applied.
+        """
+        resolved = normalize_viewer_encoding(codec)
+        save_viewer_encoding(resolved)
+        for pane in list(self._panes):
+            try:
+                pane.set_viewer_encoding(resolved, persist=False)
+            except RuntimeError:
+                continue   # Qt teardown — the pane is already gone
+        return resolved
 
     def other_pane(self, pane=None):
         """The pane that is NOT `pane` — the DESTINATION of F5/F6 (v1.7rc2).
@@ -2978,7 +2976,9 @@ MODULE_FACADE_SEAMS = (
     # ── the pure readers the listing and the viewer resolve here (rc5 moved them to their own
     # ── module and re-exports them from this path, so the seam outlives the wave) ──
     format_size, format_mtime, preview_block_reason, decode_text, ask_conflict, read_was_truncated,
-    clamp_viewer_max_bytes, save_viewer_wrap,
+    clamp_viewer_max_bytes, save_viewer_wrap, save_viewer_encoding, normalize_viewer_encoding,
+    VIEWER_WRAP_CONFIG, VIEWER_ENCODING_CONFIG, VIEWER_ENCODING_DEFAULT, VIEWER_ENCODINGS,
+    resolve_viewer_wrap, resolve_viewer_encoding,
     # ── the Qt surfaces the transfer and the drag & drop mixins resolve here: a suite substitutes
     # ── them on THIS module (`STAB.QFileDialog = <fake>` and its two siblings) ──
     QFileDialog, QInputDialog, QMenu,

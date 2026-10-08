@@ -413,6 +413,16 @@ class MenubarMixin:
         self._register_i18n(self.act_plugins_window, "plugins.window.open")
         host_attr(self, "set_action_icon")(self.act_plugins_window, "plugin")
         self._plugin_menu.insertAction(self.act_plugins_reload, self.act_plugins_window)
+        # v1.9.3 (ROADMAP task 3): the CORE-owned command — a command of the USER's own, sent to the
+        # servers the window targets. It needs NO plugin (the runner is the core's own), so the
+        # registry alone enables it, and it is built MANUALLY like the window item above: a new
+        # surface costs no shortcut and no registry row (gotcha #10 — the QAction is built and its
+        # slot connected here, never through the implicit QMenu connection).
+        self.act_plugins_command = QAction(self.t("plugins.command.open"), self._plugin_menu)
+        self.act_plugins_command.triggered.connect(self._open_plugin_command_dialog)
+        self._register_i18n(self.act_plugins_command, "plugins.command.open")
+        host_attr(self, "set_action_icon")(self.act_plugins_command, "plugin")
+        self._plugin_menu.addAction(self.act_plugins_command)
         self._populate_plugin_items()
         self._plugin_menu.aboutToShow.connect(self._populate_plugin_items)
 

@@ -336,6 +336,35 @@ check("§2 ...and the three empty columns each say their own thing",
       and panel.server_empty.text() == _t("plugins.window.empty_servers")
       and panel.event_empty.text() == _t("plugins.window.empty_events"))
 
+# The event tree is updated INCREMENTALLY: a drained batch is a new PREFIX of the rows on screen, so
+# the rows that did not change keep their own widget objects (the full rebuild is O(rows) per drain,
+# and a run that answers node by node pays it for every answer).
+panel.clear()
+panel.record_events([event(kind=PM.EVENT_LOADED, record=win._plugin_manager.get("alpha"))])
+_head_item = panel.event_tree.topLevelItem(0)
+check("§2 an unchanged ring touches NOTHING (sync_events() answers 0 and keeps the row object)",
+      panel.sync_events() == 0 and panel.event_tree.topLevelItem(0) is _head_item,
+      f"rows={panel.row_count()}")
+panel.record_run_result("alpha", {"node_id": "s1", "exit_code": 0})
+check("§2 a drain INSERTS at the top — the rows below keep their own widget object",
+      panel.event_tree.topLevelItem(1) is _head_item and panel.row_count() == 2
+      and panel.event_rows()[0][3] == "alpha @ s1: exit 0",
+      str(panel.event_rows()))
+check("§2 ...and every row names its ring event (the seq rides the row, so the two cannot drift)",
+      [panel.event_tree.topLevelItem(i).data(0, Qt.ItemDataRole.UserRole) for i in range(2)]
+      == [e.seq for e in panel.ring.newest_first()]
+      and panel.event_tree.topLevelItem(0).toolTip(3) == panel.event_rows()[0][3],
+      str([panel.event_tree.topLevelItem(i).data(0, Qt.ItemDataRole.UserRole) for i in range(2)]))
+panel.clear()
+for _i in range(PP.MAX_EVENTS + 3):
+    panel.record_plugin_message("alpha", f"bulk {_i}")
+check("§2 the tree follows the ring's BOUND: the evicted rows leave the BOTTOM, not the whole tree",
+      panel.row_count() == PP.MAX_EVENTS
+      and panel.event_rows()[0][3] == f"bulk {PP.MAX_EVENTS + 2}"
+      and panel.event_rows()[-1][3] == f"bulk {3}",
+      f"rows={panel.row_count()} newest={panel.event_rows()[0][3]!r} "
+      f"oldest={panel.event_rows()[-1][3]!r}")
+
 # The export takes a SNAPSHOT of the same ring.
 panel.clear()
 panel.record_events([event(kind=PM.EVENT_LOADED, record=win._plugin_manager.get("alpha"))])
@@ -668,7 +697,12 @@ check("§4 ...next to the CORE's own row for the same node (what ran + what it s
       any("disk_monitor @ node-1: exit 0" in row[3] for row in panel.event_rows()),
       str(panel.event_rows()))
 check("§4 ...and its summary sentence is a row too (the plugin asked the bar for it)",
-      any("/opt" not in row[3] and "over the threshold" in row[3] for row in panel.event_rows()),
+      # `ctx.status()` is asked from the FINISHED callback — AFTER the per-node lines the wait above
+      # was satisfied by — so the row is waited for instead of assumed to be on screen already.
+      wait_for(lambda: any("over the threshold" in row[3] for row in panel.event_rows()),
+               timeout_ms=5000) is not False
+      and any("/opt" not in row[3] and "over the threshold" in row[3]
+              for row in panel.event_rows()),
       str(panel.event_rows()[:2]))
 
 

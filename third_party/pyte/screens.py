@@ -859,14 +859,19 @@ class Screen:
                 line.pop(x, None)
 
     def _erase_attrs(self) -> Char:
-        """The attributes an ERASED cell takes — sshmap fork (patch 0012).
+        """The attributes an ERASED cell takes — sshmap fork (patches 0012, 0013).
 
-        xterm's BCE: an erase paints the CURRENT background, so the cell keeps the SGR state
-        (background, and the foreground the writer set) while its character becomes a blank.
-        The OSC 8 hyperlink is the one attribute that does NOT survive (patch 0011): a cleared
-        cell is not part of a link any more.
+        xterm's BCE: an erase paints the CURRENT background, so the cell keeps the COLOURS
+        (foreground, background and the DECSCNM/SGR-7 reverse) while its character becomes a
+        blank and every GLYPH DECORATION — bold, italics, underscore, strike-through, blink —
+        is dropped, because there is no glyph left to decorate and a decoration would draw a
+        line across the blank area. The OSC 8 hyperlink goes with them (patch 0011): a cleared
+        cell is not part of a link any more. The ONE declared set survives here.
         """
-        return self.cursor.attrs._replace(data=" ", hyperlink="")
+        attrs = self.cursor.attrs
+        default = self.default_char
+        return default._replace(data=" ", fg=attrs.fg, bg=attrs.bg,
+                                reverse=bool(attrs.reverse or default.reverse))
 
     def erase_characters(self, count: Optional[int] = None) -> None:
         """Erase the indicated # of characters, starting with the
@@ -936,9 +941,13 @@ class Screen:
               cursor position.
             * ``1`` -- Erases from beginning of screen to cursor,
               including cursor position.
-            * ``2`` and ``3`` -- Erases complete display. All lines
+            * ``2`` -- Erases complete display. All lines
               are erased and changed to single-width. Cursor does not
               move.
+            * ``3`` -- Erases the SAVED lines only (sshmap fork, patch
+              0013); the VISIBLE grid is untouched. A plain ``Screen``
+              keeps no saved lines, so the mode is a no-op there and the
+              history reset is its whole effect where they exist.
         :param bool private: when ``True`` only characters marked as
                              erasable are affected **not implemented**.
 
@@ -952,11 +961,13 @@ class Screen:
             interval = range(self.cursor.y + 1, self.lines)
         elif how == 1:
             interval = range(self.cursor.y)
-        elif how == 2 or how == 3:
+        elif how == 2:
             interval = range(self.lines)
         else:
-            # sshmap fork (patch 0007): as in erase_in_line — an unrecognised erase mode is a
-            # no-op, not an `UnboundLocalError`.
+            # sshmap fork (patches 0007, 0013): an unrecognised erase mode is a no-op — and so is
+            # `3`, which erases the SAVED lines xterm keeps, never the visible grid. `HistoryScreen`
+            # answers that mode with its own history reset (`_reset_history()`), which is the whole
+            # effect it has; returning BEFORE `dirty` is touched is what keeps the visible frame.
             return
 
         self.dirty.update(interval)

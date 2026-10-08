@@ -6,13 +6,14 @@ The release theme: the read-only preview inside the existing SFTP tab (stage 3 o
 tests/_fakes.py, extended by a client that journals `open()` calls with the THREAD they ran on.
 §1 the worker's "read" task and its progress order; §2 the refusals (over MAX_READ_BYTES, an unknown
 size, a binary extension, a null byte) and the queue surviving them; §3 `classify_extension` / `decode_text`;
-§4–§5 the tab offscreen, its staleness filter and the markers; §6–§8 the encodings, the teardown, i18n."""
+§4–§5 the tab offscreen, its staleness filter and the markers; §6–§9 the encodings, the teardown, the
+reader's encoding CHOICE and i18n."""
 import os
 import sys
 import threading
 
 from _common import (bootstrap, check, finish, wait_until, load_i18n_langs, check_i18n_parity,
-                     check_release_state)
+                     check_release_state, read_cfg, write_cfg)
 
 ROOT, WORK = bootstrap()  # BEFORE the app module imports
 
@@ -644,21 +645,154 @@ finally:
 
 
 # ════════════════════════════════════════════════════════════
-# 8. i18n + the release state
+# 8. v1.9.3: the reader's encoding CHOICE (`ui_viewer_encoding`)
 # ════════════════════════════════════════════════════════════
-print("== 8. i18n: sftp.viewer.* keys x3, parity 453 ==")
+print("== 8. sftp tab: the reader's encoding choice ==")
+
+# The declared list, its normaliser and the key's two readers — PURE, no widget involved.
+check("§8 the offered codecs are ONE declared tuple and `auto` is its default",
+      STAB.VIEWER_ENCODINGS[0] == STAB.VIEWER_ENCODING_DEFAULT == "auto"
+      and {"utf-8", "cp1251", "latin-1"} <= set(STAB.VIEWER_ENCODINGS)
+      and len(STAB.VIEWER_ENCODINGS) == len(set(STAB.VIEWER_ENCODINGS)),
+      str(STAB.VIEWER_ENCODINGS))
+check("§8 a value outside the list (a hand-edited config, a number, a case variant) is normalised",
+      STAB.normalize_viewer_encoding("CP1251") == "cp1251"
+      and STAB.normalize_viewer_encoding("utf-16") == "auto"
+      and STAB.normalize_viewer_encoding(None) == "auto"
+      and STAB.normalize_viewer_encoding(7) == "auto")
+check("§8 the reader falls back to `auto` for a missing/unusable key",
+      STAB.resolve_viewer_encoding({}) == "auto"
+      and STAB.resolve_viewer_encoding({STAB.VIEWER_ENCODING_CONFIG: "koi8-r"}) == "koi8-r"
+      and STAB.resolve_viewer_encoding({STAB.VIEWER_ENCODING_CONFIG: "no-such-codec"}) == "auto"
+      and STAB.resolve_viewer_encoding({STAB.VIEWER_ENCODING_CONFIG: True}) == "auto")
+write_cfg({})
+check("§8 the writer stores the NORMALISED value and the round trip through config.json is real",
+      STAB.save_viewer_encoding("cp866") and read_cfg().get(STAB.VIEWER_ENCODING_CONFIG) == "cp866"
+      and STAB.resolve_viewer_encoding() == "cp866"
+      and STAB.save_viewer_encoding("nonsense")
+      and read_cfg().get(STAB.VIEWER_ENCODING_CONFIG) == "auto")
+write_cfg({})
+
+# The decode: `auto` is the shipped rule, a NAMED codec is tried FIRST with it as the fallback.
+_CYR = "\u041f\u0440\u0438\u0432\u0435\u0442, \u043c\u0438\u0440\n"       # "Привет, мир"
+_CYR_1251 = _CYR.encode("cp1251")
+check("§8 the chosen codec decodes what the shipped rule cannot",
+      decode_text(_CYR_1251, encoding="cp1251") == (_CYR, "cp1251")
+      and decode_text(_CYR_1251)[1] == "latin-1"
+      and decode_text(_CYR_1251)[0] != _CYR)
+check("§8 a choice the bytes contradict falls back to the shipped rule (never an exception)",
+      decode_text(b"caf\xe9", encoding="latin-1") == ("caf\u00e9", "latin-1")
+      and decode_text(_CYR_1251, encoding="utf-8")[1] == "latin-1"
+      and decode_text(b"\xff\xfe", encoding="utf-8")[1] == "latin-1")
+check("§8 a named MULTI-byte codec holds an incomplete tail back too (the cap's rule is shared)",
+      decode_text(_CYR.encode("utf-8")[:-2], truncated=True, encoding="utf-8")
+      == (_CYR[:-2], "utf-8"),
+      repr(decode_text(_CYR.encode("utf-8")[:-2], truncated=True, encoding="utf-8")))
+check("§8 `auto` keeps the shipped behaviour BYTE FOR BYTE (a complete Latin-1 file keeps its last char)",
+      decode_text(b"caf\xe9", encoding="auto") == ("caf\u00e9", "latin-1")
+      and decode_text(b"caf\xe9", truncated=True)[0] == "caf")
+
+# ── the pane and the container, over the live (fake) transport ──
+_orig_thread_cls8 = ST.SSHTerminalThread
+ST.SSHTerminalThread = _FakeSSHThread
+win8 = None
+try:
+    fs8 = FakeSftpFS()
+    fs8.add_dir("/etc")
+    fs8.add_file("/etc/cyr.txt", _CYR_1251)
+    client8 = RecordingSftpClient(fs8)
+    win8 = ST.SSHTerminalWindow(
+        ServerData(id="viewer-8", alias="viewer8", host="10.99.0.2", user="root"), None,
+        password="pw")
+    win8.terminal_thread.client = _FakeSshClient(client8)
+    win8.tabs.setCurrentIndex(1)
+    wait_until(lambda: win8._sftp_worker is not None and win8.sftp_tab.tree.topLevelItemCount() >= 1,
+               timeout_ms=5000)
+    tab8 = win8.sftp_tab
+    tab8._navigate("/etc")
+    wait_until(lambda: item_by_name(tab8, "cyr.txt") is not None, timeout_ms=5000)
+    tab8._on_item_double_clicked(item_by_name(tab8, "cyr.txt"), 0)
+    wait_until(lambda: not tab8.viewer.isHidden(), timeout_ms=5000)
+    check("§8 under `auto` a CP1251 file arrives as mojibake (the shipped rule cannot know the codec)",
+          tab8.viewer_encoding_choice == "auto" and tab8.viewer_encoding == "latin-1"
+          and tab8.viewer_text.toPlainText() != _CYR,
+          f"{tab8.viewer_encoding_choice}/{tab8.viewer_encoding}")
+
+    _menu8 = tab8._build_viewer_menu()
+    check("§8 the reader's menu carries ONE submenu of the declared codecs",
+          sorted(tab8._encoding_actions) == sorted(STAB.VIEWER_ENCODINGS)
+          and tab8._encoding_menu.title() == i18n.t("sftp.viewer.encoding")
+          and len(tab8._encoding_menu.actions()) == len(STAB.VIEWER_ENCODINGS))
+    check("§8 ...with the CURRENT value checked, `auto` as a translated word and a codec as its OWN name",
+          tab8._encoding_actions["auto"].isChecked()
+          and not tab8._encoding_actions["cp1251"].isChecked()
+          and tab8._encoding_actions["auto"].text() == i18n.t("sftp.viewer.encoding_auto")
+          and tab8._encoding_actions["cp1251"].text() == "cp1251")
+    _menu8.deleteLater()
+
+    check("§8 the CONTAINER owns the value: the choice is persisted under ONE key and walked to the panes",
+          tab8._container.apply_viewer_encoding("cp1251") == "cp1251"
+          and read_cfg().get(STAB.VIEWER_ENCODING_CONFIG) == "cp1251"
+          and tab8.viewer_encoding_choice == "cp1251",
+          str(read_cfg().get(STAB.VIEWER_ENCODING_CONFIG)))
+    check("§8 ...and the open preview is RE-READ, so the text on the screen IS the chosen decoding",
+          wait_until(lambda: tab8.viewer_text.toPlainText() == _CYR, timeout_ms=5000) is not False
+          and tab8.viewer_encoding == "cp1251"
+          and tab8.viewer_label.text().endswith(
+              i18n.t("sftp.viewer.encoding_note", encoding="cp1251")),
+          f"{tab8.viewer_encoding} / {tab8.viewer_label.text()!r}")
+    _menu8b = tab8._build_viewer_menu()
+    check("§8 the submenu of a REBUILD mirrors the pane (a menu never keeps a stale checkmark)",
+          tab8._encoding_actions["cp1251"].isChecked()
+          and not tab8._encoding_actions["auto"].isChecked())
+    _menu8b.deleteLater()
+
+    # A choice the file cannot be read with: the shipped rule still shows it, and the header says so.
+    tab8.set_viewer_encoding("utf-8", persist=False, reread=False)
+    tab8._show_viewer("/etc/cyr.txt", len(_CYR_1251), "mojibake", "latin-1")
+    check("§8 a choice that could NOT read the file is NAMED in the header (never passed off as the result)",
+          i18n.t("sftp.viewer.encoding_failed", encoding="utf-8", fallback="latin-1")
+          in tab8.viewer_label.text()
+          and i18n.t("sftp.viewer.encoding_note", encoding="latin-1")
+          not in tab8.viewer_label.text(),
+          repr(tab8.viewer_label.text()))
+    tab8.set_viewer_encoding("auto", persist=False, reread=False)
+    tab8._show_viewer("/etc/cyr.txt", len(_CYR_1251), "mojibake", "latin-1")
+    check("§8 ...while under `auto` the shipped note stands unchanged",
+          tab8.viewer_label.text().endswith(i18n.t("sftp.viewer.encoding_note", encoding="latin-1")))
+    check("§8 a pane with nothing open simply carries the choice into its next read",
+          tab8.close_viewer() is None and tab8.set_viewer_encoding("cp1251", persist=False) == "cp1251"
+          and len(tab8._read_tasks) == 0)
+
+    win8.page.shutdown()
+finally:
+    if win8 is not None:
+        try:
+            win8.close()
+            app.processEvents()
+        except Exception:  # noqa: BLE001 — the teardown must not mask the checks
+            pass
+    ST.SSHTerminalThread = _orig_thread_cls8
+    write_cfg({})
+
+
+# ════════════════════════════════════════════════════════════
+# 9. i18n + the release state
+# ════════════════════════════════════════════════════════════
+print("== 9. i18n: sftp.viewer.* keys x4 ==")
 
 VIEWER_KEYS = [
     "sftp.viewer.header", "sftp.viewer.close_tooltip", "sftp.viewer.reading",
     "sftp.viewer.binary", "sftp.viewer.too_large", "sftp.viewer.encoding_note",
-    "sftp.viewer.read_failed",
+    "sftp.viewer.read_failed", "sftp.viewer.encoding", "sftp.viewer.encoding_auto",
+    "sftp.viewer.encoding_failed",
 ]
-check("exactly 7 sftp.viewer.* keys are used in the code", len(VIEWER_KEYS) == 7)
+check("exactly 10 sftp.viewer.* keys are used in the code", len(VIEWER_KEYS) == 10)
 
-for code in ("en", "ru", "zh"):
+for code in ("en", "ru", "zh", "de"):
     i18n.set_language(code)
     missing = [k for k in VIEWER_KEYS if i18n.t(k) == k or not i18n.t(k).strip()]
-    check(f"{code}: all the 7 sftp.viewer.* keys are translated (not empty, not the raw ones)",
+    check(f"{code}: all the 10 sftp.viewer.* keys are translated (not empty, not the raw ones)",
           not missing, f"missing={missing}")
 
 i18n.set_language("en")  # the default for cleanliness
