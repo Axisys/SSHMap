@@ -291,16 +291,27 @@ try:
               _closed is False and [e["name"] for e in _panel_store.load()]
               == ["one", "two", "three"], str([e["name"] for e in _panel_store.load()]))
 
-        _StubBackups.pick = CL.list_library_backups(_panel_store.path)[1]["path"]
+        _pick_path = CL.list_library_backups(_panel_store.path)[1]["path"]
+        _pick_wanted = [c["name"] for c in json.load(
+            open(_pick_path, encoding="utf-8"))["commands"]]   # what the row showed at PICK time
+        _before_restore = [e["name"] for e in _panel_store.load()]
+        _StubBackups.pick = _pick_path
         _restored = panel.restore_backup()
-        check("the chosen slot replaces the library (and the dialog named the library's ring)",
-              _restored is True and [e["name"] for e in _panel_store.load()] == ["one", "two"]
+        check("the CHOSEN slot replaces the library — the version the row held WHEN IT WAS PICKED",
+              _restored is True and [e["name"] for e in _panel_store.load()] == _pick_wanted == ["one"]
               and _StubBackups.last["title"] == i18n.t("terminal.cmdlib.restore_backup"),
-              f"{[e['name'] for e in _panel_store.load()]} / {_StubBackups.last.get('title')!r}")
+              f"{[e['name'] for e in _panel_store.load()]} vs picked {_pick_wanted} / "
+              f"{_StubBackups.last.get('title')!r}")
         check("the replaced state went into slot 1 first (a restore is reversible)",
-              json.load(open(CL.list_library_backups(_panel_store.path)[0]["path"],
-                             encoding="utf-8"))["commands"][0]["name"] == "one"
-              and len([e for e in _panel_store.load()]) == 2)
+              [c["name"] for c in json.load(open(CL.list_library_backups(_panel_store.path)[0]["path"],
+                                                 encoding="utf-8"))["commands"]]
+              == _before_restore == ["one", "two", "three"], str(_before_restore))
+        _ring_after = CL.list_library_backups(_panel_store.path)
+        check("…and the picked version still exists in the ring (the rotation SHIFTED it)",
+              len(_ring_after) == 3 and [c["name"] for c in json.load(
+                  open(_ring_after[2]["path"], encoding="utf-8"))["commands"]] == _pick_wanted,
+              str([[c["name"] for c in json.load(open(s["path"], encoding="utf-8"))["commands"]]
+                   for s in _ring_after]))
         check("the restore reports itself",
               _msgs and _msgs[-1][0] == i18n.t(
                   "terminal.cmdlib.restored", source=i18n.t("backups.backup", n=2)),

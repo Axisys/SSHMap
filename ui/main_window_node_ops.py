@@ -859,6 +859,18 @@ class NodeOpsMixin:
             self.log.info("Bulk edit applied", extra={"count": len(edits)})
         return True
 
+    def _arrange_group_members(self, group) -> list:
+        """The group's members that can be LAID OUT — the ONE reading of the refusal's input.
+
+        A member whose record is gone or that has left the scene cannot be moved, so it does not
+        count: a group with fewer than two of them has no honest layout to compute.
+        """
+        try:
+            return [m for m in group.get_members()
+                    if getattr(m, "data", None) is not None and m.scene() is not None]
+        except (AttributeError, RuntimeError):
+            return []
+
     def _arrange_group(self, group, mode: str = "", per_line: int = 0) -> bool:
         """v1.6 (ROADMAP task 6): line a group's members up in ONE undo step.
 
@@ -886,8 +898,7 @@ class NodeOpsMixin:
         if arrange_positions is None or _NodeGroup is None:
             return False
 
-        members = [m for m in group.get_members()
-                   if getattr(m, "data", None) is not None and m.scene() is not None]
+        members = self._arrange_group_members(group)
         if len(members) < 2:
             self.statusBar().showMessage(
                 self.t("status.arrange_none") if self._i18n_available
@@ -949,6 +960,8 @@ class NodeOpsMixin:
         try:
             if bool(group.is_collapsed()):
                 return self._arrange_group(group)   # the refusal path (one status line)
+            if len(self._arrange_group_members(group)) < 2:
+                return self._arrange_group(group)   # the same refusal, BEFORE the question
             count = len(group.get_members())
         except (AttributeError, RuntimeError):
             return False
@@ -1042,6 +1055,21 @@ class NodeOpsMixin:
         items.sort(key=lambda item: (round(item[2], 3), round(item[1], 3), item[0]))
         return items, by_key, unit_of
 
+    def _arrange_map_units_read(self):
+        """`(items, by_key, unit_of, the set of UNIT keys)` — the ONE reading of the map's TOP level.
+
+        The refusal of "nothing to arrange" and the layout itself ask the SAME question, so a map with
+        fewer than two UNITS (one group, or one free card) is refused identically wherever the gesture
+        is entered.
+        """
+        items, by_key, unit_of = self._arrange_map_units()
+        return items, by_key, unit_of, {str(item[5] or item[0]) for item in items}
+
+    def _arrange_map_none_text(self) -> str:
+        """The ONE sentence of the "nothing to arrange" refusal (the door and the applier share it)."""
+        return (self.t("status.map_arrange_none") if self._i18n_available
+                else "Nothing to arrange — the map needs at least two groups or free cards")
+
     def _arrange_map(self, mode: str = "", per_line: int = 0) -> bool:
         """Line the WHOLE map up in ONE undo step — the top level, a group riding together.
 
@@ -1051,23 +1079,20 @@ class NodeOpsMixin:
         geometric membership of `MapScene.resync_group_members()` keeps deciding who is
         inside, and free-standing notes and the background image are not moved.
 
-        ONE move per UNIT is what the command holds: a group is moved by its FRAME, and the
-        frame's own `setPos` carries the members (the shipped `NodeGroup.itemChange` — "its
-        members ride together"), so listing the members beside it would shift them TWICE — the
-        second shift coming from the frame's follow, which reads their position as it is at
-        that moment.
+        ONE move per UNIT is what the command holds: a group is moved by its FRAME, and the frame's
+        `_apply_move()` carries the members (`CmdArrangeMap._apply`) — a bare `setPos()` moves the
+        frame ALONE, because `NodeGroup` does not set `ItemSendsGeometryChanges` and its
+        `itemChange(ItemPositionChange)` branch therefore never runs. A member is never listed beside
+        its frame for that reason: the frame has already moved it.
         """
         if arrange_unit_positions is None:
             return False
-        items, by_key, unit_of = self._arrange_map_units()
+        items, by_key, unit_of, units = self._arrange_map_units_read()
         # The UNITS are what lines up: one group (frame + members) or one free card. A map
         # with a single unit has nothing to arrange whatever its card count — the refusal is
         # the honest one, and a group of five cards is exactly that case.
-        units = {str(item[5] or item[0]) for item in items}
         if len(units) < 2:
-            self.statusBar().showMessage(
-                self.t("status.map_arrange_none") if self._i18n_available
-                else "Nothing to arrange — the map needs at least two groups or free cards")
+            self.statusBar().showMessage(self._arrange_map_none_text())
             return False
         targets = arrange_unit_positions(items, mode, per_line)
         if not targets:
@@ -1105,13 +1130,18 @@ class NodeOpsMixin:
     def _ask_arrange_map(self) -> bool:
         """The map's "Arrange Map…" entry point (the empty-space context menu): ask, then apply.
 
-        The ONE entry point of the gesture: it opens the SHARED arrangement dialog in its MAP
-        scope (the same three modes, the same rows count) and hands the answer to
-        `_arrange_map()`. A cancelled dialog changes nothing.
+        The ONE entry point of the gesture. The REFUSAL comes first, before the dialog is built (the
+        order the group door already keeps, `_ask_arrange_group()`): a map whose top level holds fewer
+        than two UNITS has nothing to lay out, and asking its mode would be a question with no answer.
+        Then the SHARED arrangement dialog opens in its MAP scope (the same three modes, the same rows
+        count) and its answer goes to `_arrange_map()`. A cancelled dialog changes nothing.
         """
         count = len(self._arrange_map_units()[1])
         dlg_cls = host_attr(self, "ArrangeGroupDialog")
         if dlg_cls is None or arrange_unit_positions is None:
+            return False
+        if len(self._arrange_map_units_read()[3]) < 2:
+            self.statusBar().showMessage(self._arrange_map_none_text())
             return False
         dlg = None
         try:

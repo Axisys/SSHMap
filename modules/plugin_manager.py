@@ -638,15 +638,37 @@ class PluginManager(QObject):
         (rc2 machinery — `ctx.run_command` inside the hook gets its own managed worker, and
         `shutdown()` waits for all of them). Returns the number of plugins started.
 
-        An action the user triggered must never fail silently: with no plugin
-        implementing the hook an ERROR line is logged (the status bar has nothing to
-        report — the window disables the menu item in that case). Never raises.
+        An action the user triggered must never fail silently: with nothing started an ERROR
+        line carrying the REAL reason is logged (the status bar has nothing to report — the
+        window disables the menu item in that case). Never raises.
         """
         started = int(self.run_on_nodes(nodes, plugin_ids=plugin_ids))
         if started == 0:
-            _log_line("warning", "run_on_nodes: no loaded plugin implements the hook — "
+            _log_line("warning", f"run_on_nodes: {self._run_on_nodes_reason(nodes, plugin_ids)} — "
                                  "nothing was run")
         return started
+
+    def _run_on_nodes_reason(self, nodes, plugin_ids) -> str:
+        """WHY `run_on_nodes()` started nothing — the ONE reader of the zero branch's sentence.
+
+        It answers 0 for three different reasons, and ONE sentence for all of them sent a reader
+        looking for a missing plugin that was loaded and capable: no node to run on, no loaded plugin
+        declaring the hook, or a `plugin_ids` selection that matched none of the capable ones.
+        """
+        records = node_records(nodes) if nodes is not None else self.node_records()
+        if not records:
+            return "no node to run on"
+        capable = self._loaded_with_hook(HOOK_RUN_ON_NODES)
+        if not capable:
+            return "no loaded plugin implements the hook"
+        if plugin_ids is not None:
+            try:
+                wanted = {str(plugin_id) for plugin_id in plugin_ids}
+            except TypeError:      # a value that is not iterable: "no id selected"
+                wanted = set()
+            if not any(rec.plugin_id in wanted for rec in capable):
+                return "none of the named plugin(s) implements the hook"
+        return "nothing to run"
 
     def _loaded_with_hook(self, hook_name: str) -> List[PluginRecord]:
         """The loaded + enabled records that really declare a hook (stable id order)."""

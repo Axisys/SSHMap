@@ -18,6 +18,7 @@
   "plugins.run_on_nodes": "在选中的服务器上运行",
   "plugins.run_hint": "请先添加服务器，以便在节点上使用插件命令",
   "plugins.no_selection": "没有可运行的目标：没有服务器",
+  "plugins.selection_gone": "已勾选的服务器已不在图上——未运行任何内容",
   "plugins.status.run_on_nodes": "插件命令已在 {count} 台服务器上启动",
   "plugins.window.open": "插件窗口…",
   "plugins.window.title": "插件",

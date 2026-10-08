@@ -168,6 +168,7 @@ of the file itself.
 | `test_plugins.py` | — | v1.4rc1 — Plugin foundation, part 1: discovery and manager (ROADMAP v1.4rc1). |
 | `test_plugins_panel.py` | — | v1.8.3 — the Plugins window: the plugin list, the server list and the session event ring. |
 | `test_problem_first.py` | — | v1.5.4 — trouble first: the map answers "where is the problem". |
+| `test_production_guard.py` | — | v1.9 — the production-tag guard: ONE policy, ONE dialog and the TWO verbs' call sites. |
 | `test_project_lifecycle.py` | — | v1.3.3.6 (ROADMAP "Projects: open, recover, remember"): the life cycle of a project file. |
 | `test_pyproject.py` | — | v0.9.9.6 — pyproject.toml: installable identity for 1.0 (ROADMAP). |
 | `test_pyte_compat.py` | — | v1.2.11 — Terminal: pyte 0.8.2 compatibility (private SGR + LNM). |
@@ -211,6 +212,7 @@ of the file itself.
 | `test_terminal_files_panel.py` | — | The Files tree as a right-hand panel of a standalone terminal window. |
 | `test_terminal_history.py` | — | v1.5.7 — the command history: the terminal's third tab, one history per server. |
 | `test_terminal_input.py` | — | v1.0RC2 — keyboard + selection/copy (ROADMAP v1.0RC2). |
+| `test_terminal_links.py` | — | v1.9 — the `OSC 8` link of the canvas: the pure run hit test, the gesture, the allowlist and the underline. |
 | `test_terminal_mouse.py` | — | v1.2.13 — the mouse wheel in the full-screen TUI (SGR/X10 passthrough) |
 | `test_terminal_output.py` | — | Working with the terminal's output: the find bar, the reset and the transcript. |
 | `test_terminal_page.py` | — | TerminalSessionPage — the session as a reusable widget (window → page). |

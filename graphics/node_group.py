@@ -637,15 +637,16 @@ class NodeGroup(QGraphicsObject):
         self.moved.emit()
 
     def itemChange(self, change, value):
-        """An external (programmatic) setPos — the members follow the group the same way.
+        """The `ItemPositionChange` branch — DECLARED, and unreachable in THIS class.
 
-        An interactive drag goes through _apply_move() with the _applying_move flag — there
-        the member shift is already done manually; without the flag itemChange catches only
-        programmatic moves (tests/scripts), and there is no duplication.
-
-        As with ServerNode, the hook is called BEFORE the position is applied: the frame for
-        the resync is computed from value explicitly (the moving_group override in MapScene).
-        v1.4.2: the same atomicity as in _apply_move (the badge grid is not re-laid mid-move).
+        Qt delivers that notification only to an item that sets `ItemSendsGeometryChanges`, which
+        `NodeGroup` deliberately does not (`ItemIsSelectable` is its whole flag set; `ServerNode` is the
+        one that sets it), so no position change reaches this hook — measured with a spy, which saw
+        flags / z-value / tooltip / scene changes and nothing else. The branch stays as the declared net
+        for a subclass or a script that turns the flag on: it would shift the members by the same delta
+        and hand the resync the target frame through the `moving_group` override, exactly as
+        `_apply_move()` does, while `_applying_move` keeps the two from doubling a shift. Every shipped
+        programmatic group move goes through `_apply_move()` (`CmdMoveGroup`, `CmdArrangeMap`).
         """
         if change == QGraphicsItem.ItemPositionChange and not getattr(self, "_applying_move", False):
             try:

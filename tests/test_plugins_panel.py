@@ -413,6 +413,26 @@ check("§3 ...and the status line counts the servers really handed over",
       win.statusBar().currentMessage() == _t("plugins.status.run_on_nodes", count=1),
       repr(win.statusBar().currentMessage()))
 
+# A CHECKED server that LEFT the map is refused — never silently replaced by the whole registry.
+local("beta").RAN["nodes"].clear()
+win.scene.remove_server("s2")
+win.refresh_sidebar()
+panel.refresh_servers()
+check("§3 a checked server that left the map does NOT widen the run to every server",
+      panel.checked_nodes() == [] and panel._checked_ids == {"s2"}
+      and panel.run_plugins(None) == 0 and local("beta").RAN["nodes"] == [],
+      f"checked={panel.checked_nodes()} ids={panel._checked_ids} "
+      f"ran={local('beta').RAN['nodes']}")
+check("§3 ...and the refusal says so with ONE sentence (the release's fourth key)",
+      win.statusBar().currentMessage() == _t("plugins.selection_gone"),
+      repr(win.statusBar().currentMessage()))
+add_node(win, "s2", "192.0.2.12")    # s2 is back, and the rest of the file keeps its state
+panel.set_checked_nodes(["s2"])
+check("§3 ...while a genuinely EMPTY selection still means the whole registry",
+      panel.set_checked_nodes([]) == 0 and panel._checked_ids == set()
+      and panel.checked_nodes() == [])
+panel.set_checked_nodes(["s2"])
+
 write_plugin("gamma", "gamma", "RAN = {'nodes': []}\n"
                              "def run_on_nodes(nodes, ctx):\n"
                              "    RAN['nodes'].append(sorted(n.id for n in nodes))\n")

@@ -209,6 +209,16 @@ input/output interception; a plugin API for the map scene (drawing, layout); aut
 download or update of plugins; a marketplace; sandboxing. Some of these are on the
 horizon (no version promises them yet); the rest are rejected.
 
+**API v2, when it comes, is a SECOND entry-point group — never an edit of this one.** The
+group name carries the version (`sshmap.plugins/v1`), so v2 arrives as
+`sshmap.plugins/v2` BESIDE it: a plugin declares the group it was written for, the context
+reports the matching `api_version`, and everything this document froze keeps working exactly
+as it does. What v2 will carry is decided by the gaps listed above together with what real
+plugins ask the core for; what it will NOT carry is the other half of that same list — a
+plugin does not draw or lay out the map, does not replace the interface, and the in-process
+limitation of §6 is not lifted by a version number. This document gains its v2 sections only
+once that contract is frozen, in the same shape as this one.
+
 ## 9. Coming with rc3
 
 *(Delivered — see §10: the package template, the "plugin in 20 minutes" walkthrough and

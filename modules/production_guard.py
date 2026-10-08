@@ -6,11 +6,10 @@ BLOCK of text into one, must be confirmed first: the two verbs are the MULTI-INP
 MULTI-LINE paste. The policy is `guard_tags` (+ the optional `guard_verbs`) of `~/.sshmap/config.json` —
 CONFIG and never the project, so `VERSION_FORMAT` does not move and one user's guard is not carried into
 a shared file — and its default is EMPTY: a policy that shipped ON would change the behaviour of every
-existing map whose owner happens to use a tag called `prod`.
-
-`guard_tag()` / `verb_enabled()` / `needs_confirmation()` / `node_tags()` are PURE (the topical test
-drives them without a window); `confirm()` is the ONE dialog and reads the config through
-`i18n.load_config()`. Rule and owner — `AGENTS.md` §4.28, mechanism — `DOCUMENTATION.md` §72.
+existing map whose owner happens to use a tag called `prod`. `guard_tag()` / `verb_enabled()` /
+`needs_confirmation()` / `node_tags()` are PURE (the topical test drives them without a window);
+`confirm()` is the ONE dialog and reads the config through `i18n.load_config()`.
+Rule and owner — `AGENTS.md` §4.28, mechanism — `DOCUMENTATION.md` §72.
 """
 
 try:

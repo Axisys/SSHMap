@@ -850,8 +850,8 @@ check("the pin counts the keys of the SHIPPED release (v1.5.2 added THIRTEEN —
       " — 925 + 20 + 41 + 1 + 16 = 1003, and v1.8.3 adds TWENTY-THREE: the Plugins window — its "
       "title and the three column captions, its three buttons, the door of the Plugins menu, the "
       "checked-servers hint, the two empty sentences and the twelve column headers of its tables"
-      " — 1003 + 23 = 1026, and v1.8.4 adds TEN: the whole-map layout, the reverse traversal and the inode fact",
-      EXPECTED_I18N_KEYS == 863 + 4 + 3 + 4 + 4 + 19 + 17 + 1 + 4 + 6 + 20 + 41 + 1 + 16 + 23 + 10,
+      " — 1003 + 23 = 1026, and v1.8.4 adds TEN: the whole-map layout, the reverse traversal and the inode fact, and v1.9 adds FOUR: the production-tag guard — its title, the broadcast sentence and the paste sentence — and the notice of a checked selection that has left the map",
+      EXPECTED_I18N_KEYS == 863 + 4 + 3 + 4 + 4 + 19 + 17 + 1 + 4 + 6 + 20 + 41 + 1 + 16 + 23 + 10 + 4,
       str(EXPECTED_I18N_KEYS))
 check_release_state(ROOT)
 for _code in i18n_lang_codes(ROOT):

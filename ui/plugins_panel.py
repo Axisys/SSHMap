@@ -635,7 +635,11 @@ class PluginsPanel(QDialog):
             self._checked_ids.discard(node_id)
 
     def checked_nodes(self) -> list:
-        """The node records of the CHECKED rows, in the table's order ([] = the whole registry)."""
+        """The node records of the CHECKED rows, in the table's order.
+
+        `[]` means "nothing checked" OR "every checked row's node has left the map" — `run_plugins()`
+        tells the two apart through `_checked_ids`, which holds what the USER checked.
+        """
         ordered = []
         try:
             for index in range(self.server_tree.topLevelItemCount()):
@@ -742,13 +746,20 @@ class PluginsPanel(QDialog):
 
         `plugin_ids=None` keeps the shipped "every capable plugin" semantics of the global button; a
         LIST runs exactly those ids, which is the row action's door (the persisted enable switch is
-        CONFIG and is deliberately never reused as the run selection — §4.10). With no server checked
-        the whole plugin registry is the target, the scope the menu action documents. Returns the
-        number of plugins started (0 — nothing could run).
+        CONFIG and is deliberately never reused as the run selection — §4.10). With NO server checked
+        the whole plugin registry is the target, the scope the menu action documents; a CHECKED server
+        that has left the map is REFUSED with one sentence instead, because widening that selection to
+        every server would run on the ones the user did not pick — unless the registry itself is EMPTY,
+        where the shipped "no servers" sentence is the honest one. Returns the number of plugins started
+        (0 — nothing could run).
         """
         nodes = self.checked_nodes()
+        registry = self._manager_nodes()
+        if self._checked_ids and not nodes and registry:
+            self._notify(_t("plugins.selection_gone"), 8000)
+            return 0
         if not nodes:
-            nodes = self._manager_nodes()
+            nodes = registry
         started = 0
         try:
             started = int(self._manager.plugin_run_on_nodes(nodes, plugin_ids=plugin_ids))

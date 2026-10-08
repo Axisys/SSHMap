@@ -330,11 +330,39 @@ def list_library_backups(path, count: int = COMMANDS_BACKUP_COUNT) -> list:
     return items
 
 
+def read_library_bytes(source_path) -> bytes:
+    """The RAW bytes of ONE ring slot — read BEFORE the ring rotates (RAISES; the caller owns the sentence).
+
+    A restore publishes what the user SAW in the dialog, so the slot is read as bytes: a document that
+    was re-serialized on the way back is not the file the row named (its formatting, its key order and
+    any record the current normalization would drop belong to the SLOT). The read has to happen before
+    `rotate_library_backups()`: that call shifts `i → i+1` and rewrites slot 1, so the picked path holds
+    its NEIGHBOUR's content afterwards — and a picked OLDEST slot would be overwritten before it was read.
+    """
+    with open(source_path, "rb") as fh:
+        return fh.read()
+
+
+def _write_library_bytes(path, payload: bytes) -> None:
+    """The `write_temp` of a restore: the slot's own bytes, nothing re-serialized."""
+    with open(path, "wb") as fh:
+        fh.write(payload)
+
+
+def restore_library_payload(payload: bytes, path) -> None:
+    """Publish a slot's PAYLOAD over the library file — the ONE writer of a restore (RAISES).
+
+    Through the ONE atomic writer (`AGENTS.md` §4.4), so a reader sees the whole document or the
+    previous one; the caller owns the sentence a failure produces.
+    """
+    _atomic.publish_atomic(path, lambda temp: _write_library_bytes(temp, payload))
+
+
 def restore_library_backup(source_path, path) -> None:
     """Copy one ring slot over the library file ATOMICALLY; RAISES (the caller owns the sentence)."""
     if not os.path.isfile(source_path):
         raise FileNotFoundError(f"Command library backup not found: {source_path}")
-    _atomic_copy(source_path, path)
+    restore_library_payload(read_library_bytes(source_path), path)
 
 
 def suggested_name(command) -> str:
@@ -1202,9 +1230,12 @@ class CommandLibraryPanel(QWidget):
     def restore_backup(self) -> bool:
         """Offer the ring and copy the chosen slot over the library — the ONE explicit ask.
 
-        Nothing is rewritten while the ring is only LOOKED at, and the state being replaced goes into
-        slot 1 first, so a restore is itself reversible. The dialog and its "Restore" button ARE the
-        confirmation (the row names the slot).
+        The ORDER is the whole mechanism: the chosen slot's bytes are read FIRST, then the ring
+        rotates, then those bytes are published. `rotate_library_backups()` shifts `i → i+1` and
+        rewrites slot 1 with the CURRENT file, so a path read AFTER the rotation answers the slot's
+        NEIGHBOUR — and a picked oldest slot is overwritten by the shift before it is read at all,
+        which loses it. The state being replaced then goes into slot 1, so a restore is itself
+        reversible. The dialog and its "Restore" button ARE the confirmation (the row names the slot).
         """
         t = get_translator()
         items = self.backup_items()
@@ -1225,9 +1256,15 @@ class CommandLibraryPanel(QWidget):
         dlg.exec()
         if not chosen:
             return False
+        try:
+            payload = read_library_bytes(chosen["path"])
+        except OSError as e:
+            self.status_message.emit(
+                t("terminal.cmdlib.restore_failed", error=str(e)), 8000)
+            return False
         rotate_library_backups(self._store.path)
         try:
-            restore_library_backup(chosen["path"], self._store.path)
+            restore_library_payload(payload, self._store.path)
         except OSError as e:
             self.status_message.emit(
                 t("terminal.cmdlib.restore_failed", error=str(e)), 8000)

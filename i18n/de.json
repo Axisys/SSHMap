@@ -18,6 +18,7 @@
   "plugins.run_on_nodes": "Auf ausgewählten Servern ausführen",
   "plugins.run_hint": "Server hinzufügen, um Plugin-Befehle auf Knoten zu nutzen",
   "plugins.no_selection": "Nichts auszuführen: keine Server",
+  "plugins.selection_gone": "Die markierten Server sind nicht mehr auf der Karte — es wurde nichts ausgeführt",
   "plugins.status.run_on_nodes": "Plugin-Befehle auf {count} Server(n) gestartet",
   "plugins.window.open": "Plugin-Fenster…",
   "plugins.window.title": "Plugins",

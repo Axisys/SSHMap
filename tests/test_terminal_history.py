@@ -586,8 +586,8 @@ check("the pin counts the shipped keys (+29 of v1.5.7: the tab, the panel chrome
       " +4 of the v1.7.1 Files panel = 867, +3 of the v1.7.1.1 Files display mode = 870,"
       " +4 of the v1.7.1.2 device choice = 874, +4 of v1.7.2 = 878, +19 of v1.7.3 = 897,"
       " +17 of v1.7.4rc1 = 914, +1 of v1.7.4rc2 = 915, v1.8 adds TWENTY: the elevated pane, v1.8.1"
-      " its 41 and v1.8.1.1 ONE: the send identity sentence) and v1.8.2 adds SIXTEEN: the library file — the History door, the backup ring and the import/export pair — and v1.8.3 adds TWENTY-THREE: the Plugins window (its chrome, its three columns and its export) and v1.8.4 adds TEN: the whole-map layout, the reverse traversal and the inode fact",
-      EXPECTED_I18N_KEYS == 863 + 4 + 3 + 4 + 4 + 19 + 17 + 1 + 4 + 6 + 20 + 41 + 1 + 16 + 23 + 10, str(EXPECTED_I18N_KEYS))
+      " its 41 and v1.8.1.1 ONE: the send identity sentence) and v1.8.2 adds SIXTEEN: the library file — the History door, the backup ring and the import/export pair — and v1.8.3 adds TWENTY-THREE: the Plugins window (its chrome, its three columns and its export) and v1.8.4 adds TEN: the whole-map layout, the reverse traversal and the inode fact, and v1.9 adds FOUR: the production-tag guard — its title, the broadcast sentence and the paste sentence — and the notice of a checked selection that has left the map",
+      EXPECTED_I18N_KEYS == 863 + 4 + 3 + 4 + 4 + 19 + 17 + 1 + 4 + 6 + 20 + 41 + 1 + 16 + 23 + 10 + 4, str(EXPECTED_I18N_KEYS))
 check_release_state(ROOT)
 
 _langs = load_i18n_langs(ROOT)
