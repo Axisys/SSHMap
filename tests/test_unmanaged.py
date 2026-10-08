@@ -797,8 +797,8 @@ check("§8 the i18n pin moved by the ELEVEN keys of this release and by the ELEV
       " v1.7.4rc2 adds 1: the refusal of a move that would cross the two sources, and"
       " v1.8.1 adds 41: the host-key question and its manager window, the credential prompt of the"
       " second factor and of a key's passphrase, and the endpoint-scope sentences, and v1.8.1.1 adds"
-      " ONE: the send identity sentence and v1.8.2 adds SIXTEEN: the library file — the History door, the backup ring and the import/export pair — and v1.8.3 adds TWENTY-THREE: the Plugins window (its chrome, its three columns and its export) and v1.8.4 adds TEN: the whole-map layout, the reverse traversal and the inode fact, and v1.9 adds FOUR: the production-tag guard — its title, the broadcast sentence and the paste sentence — and the notice of a checked selection that has left the map",
-      EXPECTED_I18N_KEYS == 811 + 17 + 13 + 5 + 8 + 9 + 4 + 3 + 4 + 4 + 19 + 17 + 1 + 4 + 6 + 20 + 41 + 1 + 16 + 23 + 10 + 4,
+      " ONE: the send identity sentence and v1.8.2 adds SIXTEEN: the library file — the History door, the backup ring and the import/export pair — and v1.8.3 adds TWENTY-THREE: the Plugins window (its chrome, its three columns and its export) and v1.8.4 adds TEN: the whole-map layout, the reverse traversal and the inode fact, and v1.9 adds FOUR: the production-tag guard — its title, the broadcast sentence and the paste sentence — and the notice of a checked selection that has left the map, and v1.9.1 adds ELEVEN: the reconnect and its `tmux attach`",
+      EXPECTED_I18N_KEYS == 811 + 17 + 13 + 5 + 8 + 9 + 4 + 3 + 4 + 4 + 19 + 17 + 1 + 4 + 6 + 20 + 41 + 1 + 16 + 23 + 10 + 4 + 11,
       str(EXPECTED_I18N_KEYS))
 _missing = {code: [k for k in NEW_KEYS if not str(data.get(k) or "").strip()]
             for code, data in LANGS.items()}

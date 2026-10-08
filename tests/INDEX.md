@@ -216,6 +216,7 @@ of the file itself.
 | `test_terminal_mouse.py` | — | v1.2.13 — the mouse wheel in the full-screen TUI (SGR/X10 passthrough) |
 | `test_terminal_output.py` | — | Working with the terminal's output: the find bar, the reset and the transcript. |
 | `test_terminal_page.py` | — | TerminalSessionPage — the session as a reusable widget (window → page). |
+| `test_terminal_reconnect.py` | — | The reconnect of a session and the `tmux attach` that rides it (v1.9.1) — the ONE re-arm path. |
 | `test_terminal_scroll.py` | — | v1.0RC3 — PTY resize + scrollback + dirty rendering (ROADMAP v1.0RC3). |
 | `test_terminal_selection_menu.py` | — | v1.2.7 — Terminal: double/triple-click selection + context menu (ROADMAP v1.2.7). |
 | `test_terminal_split.py` | — | v1.3.3.5 — Terminal split: a second pane under the sessions (ROADMAP v1.3.3.5). |

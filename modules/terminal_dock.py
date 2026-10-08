@@ -14,7 +14,7 @@ import itertools
 from PySide6.QtCore import Qt, QEvent, QTimer, Signal
 from PySide6.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout, QTabWidget, QLabel, QProgressBar,
-    QDockWidget, QSplitter,
+    QDockWidget, QSplitter, QMenu,
 )
 
 try:
@@ -31,11 +31,14 @@ except ImportError:
     from modules.sftp_tab import CommanderCorner
 
 # v1.6.4 (ROADMAP task 4): the ACTIVITY mark of an inactive session — the SAME renderer the
-# terminal window uses (the page module owns it, both containers call it).
+# terminal window uses (the page module owns it, both containers call it). v1.9.1: the session
+# rows (Reconnect / Attach tmux) are shared the same way — ONE state rule, two surfaces.
 try:
-    from .terminal_page import refresh_session_activity, render_session_activity
+    from .terminal_page import (add_session_actions, ask_tmux_name, refresh_session_activity,
+                                render_session_activity)
 except ImportError:
-    from modules.terminal_page import refresh_session_activity, render_session_activity
+    from modules.terminal_page import (add_session_actions, ask_tmux_name,
+                                       refresh_session_activity, render_session_activity)
 
 # v1.7.2 (ROADMAP v1.7.2, task 2): the SPLIT — ONE controller for both containers, and the
 # parent-chain hook lookup that reaches `MainWindow._adopt_split_session` through the dock.
@@ -116,6 +119,11 @@ class TerminalDockContent(QWidget):
         self.session_tabs.setTabsClosable(True)
         self.session_tabs.tabCloseRequested.connect(self._on_tab_close_requested)
         self.session_tabs.currentChanged.connect(self._on_current_tab_changed)
+        # v1.9.1: the dock's tab bar carries the SESSION rows (Reconnect / Attach tmux) for the tab
+        # a user right-clicks — the very pair the dock's own context menu shows for the session in
+        # front (the window's rule, §4.3; the corner keeps its two controls, §4.12).
+        self.session_tabs.tabBar().setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.session_tabs.tabBar().customContextMenuRequested.connect(self._on_tab_context_menu)
 
         # v1.7.2 (task 2): the DOCK's split — the SAME construct as the window's, so the session
         # area is `V[session_tabs | split_host]` here too. The dock has no close of its own, so the
@@ -496,6 +504,107 @@ class TerminalDockContent(QWidget):
             return  # C++ object already deleted (close race)
         if page is not None:
             self.close_page(page)
+
+    # ── v1.9.1 (ROADMAP v1.9.1): the session rows — Reconnect and the `tmux attach` ──
+
+    def _tab_page(self, index):
+        """The session of ONE tab index (None for a stale index) — the tab menu's target."""
+        try:
+            if 0 <= int(index) < self.session_tabs.count():
+                return self.session_tabs.widget(int(index))
+        except (RuntimeError, TypeError):
+            pass  # a destroyed tab strip / an unusable index: no target
+        return None
+
+    def reconnect_session(self, page=None) -> bool:
+        """Re-arm ONE session — the DELEGATE the Reconnect row fires (v1.9.1).
+
+        The dock owns the same two surfaces as the window (`_build_context_menu` for the session in
+        front, `_build_tab_context_menu` for the tab that was right-clicked) and the same rule: the
+        row passes its page, a caller without one gets the ACTIVE session (`active_session()` — the
+        focused pane first). The WORK is `page.reconnect()`; the session object and every
+        registration of the host survive, so a re-arm adds no second session anywhere. Never raises.
+        """
+        page = page if page is not None else self.active_session()
+        hook = getattr(page, "reconnect", None)
+        if not callable(hook):
+            return False
+        try:
+            return bool(hook())
+        except RuntimeError:
+            return False  # Qt teardown — the session is already gone
+
+    def attach_tmux_session(self, page=None) -> bool:
+        """Ask for a tmux session name and hand it to the session (v1.9.1).
+
+        The ONE name field (`ask_tmux_name()`, the `ST.QInputDialog` seam) and the session's own
+        `attach_tmux()` do the work — the container owns the surface, never the command line.
+        Never raises.
+        """
+        page = page if page is not None else self.active_session()
+        hook = getattr(page, "attach_tmux", None)
+        if not callable(hook):
+            return False
+        name = ask_tmux_name(self)
+        if not name:
+            return False
+        try:
+            return bool(hook(name))
+        except RuntimeError:
+            return False  # Qt teardown — the session is already gone
+
+    def _build_tab_context_menu(self, index):
+        """The context menu of ONE session TAB of the dock (v1.9.1) — the test seam.
+
+        Built per right click (the state of the Reconnect row is READ from the session then) and
+        answers None for a stale index. Never raises.
+        """
+        page = self._tab_page(index)
+        if page is None:
+            return None
+        menu = QMenu(self)
+        add_session_actions(menu, page, self.reconnect_session, self.attach_tmux_session)
+        return menu
+
+    def _on_tab_context_menu(self, pos):
+        """RMB on a session tab → its own menu (`CustomContextMenu`). Never raises."""
+        try:
+            bar = self.session_tabs.tabBar()
+            menu = self._build_tab_context_menu(bar.tabAt(pos))
+        except Exception:  # noqa: BLE001 — a menu is chrome and may not break the container
+            return
+        if menu is None:
+            return
+        try:
+            menu.exec(bar.mapToGlobal(pos))
+        except Exception:  # noqa: BLE001 — an exec failure must not break the container
+            pass
+
+    def _build_context_menu(self):
+        """The dock's own context menu — the SPLIT switch and the session rows (v1.9.1).
+
+        The test seam of the container (the `SSHTerminalWindow` pattern): the menu is created by the
+        method and the event only shows it, so an offscreen test triggers the QAction directly and
+        never runs `menu.exec()`. The session rows belong to the session in FRONT (`active_session()`).
+        """
+        menu = QMenu(self)
+        act_split = getattr(self, "act_split", None)
+        if act_split is not None:
+            menu.addAction(act_split)
+        page = self.active_session()
+        if page is not None:
+            menu.addSeparator()
+            add_session_actions(menu, page, self.reconnect_session, self.attach_tmux_session)
+        return menu
+
+    def contextMenuEvent(self, event):
+        """RMB on the dock's own area (the tab bar, the status row, the margins) → its menu. The
+        terminal canvas and the SFTP tree consume the event for their own menus. Never raises."""
+        try:
+            menu = self._build_context_menu()
+            menu.exec(event.globalPos())  # QContextMenuEvent.globalPos() is a QPoint (Qt 6)
+        except Exception:  # noqa: BLE001 — a menu failure must not break the container
+            pass
 
     # ── v1.2.2: "status line" bridge — only the active tab (v1.2.1 pattern) ───
 

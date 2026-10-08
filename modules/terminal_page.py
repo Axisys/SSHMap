@@ -244,6 +244,75 @@ def refresh_session_activity(container) -> int:
     return done
 
 
+# ── v1.9.1 (ROADMAP v1.9.1): the SESSION ROWS a container puts on its surfaces ──
+# A session whose channel died is a page the user would otherwise close and open again;
+# `TerminalSessionPage.reconnect()` is the ONE re-arm path that brings it back. The row that fires
+# it belongs to the SESSION, so its label, tooltip and STATE RULE ("enabled iff the session can be
+# re-armed") are declared ONCE here — the tab-bar CORNER keeps its two controls (AGENTS.md §4.12).
+
+
+def tmux_attach_command(name) -> str:
+    """The `tmux attach` command line of a session name — PURE (v1.9.1).
+
+    `sh_quote()` (`services/system_info_collector.py`) is the SHIPPED quoting rule of this
+    codebase: the name travels as ONE single-quoted word, so a space, a quote or a shell
+    metacharacter can never become a second word of the command. An empty name answers "" —
+    there is nothing to attach to, and the caller refuses it with ONE sentence.
+    """
+    clean = str(name or "").strip()
+    if not clean:
+        return ""
+    try:
+        from services.system_info_collector import sh_quote
+    except ImportError:  # flat launch from the project root
+        from system_info_collector import sh_quote
+    return "tmux attach -t " + sh_quote(clean)
+
+
+def ask_tmux_name(parent=None) -> str:
+    """The session-name field of `Attach tmux session…` — the ONE dialog (v1.9.1).
+
+    `QInputDialog` is read from the `ssh_terminal` module at call time — the same live-namespace
+    seam as `ST.QMessageBox` (`AGENTS.md` §4.1), so a suite substitutes it on that module and no
+    container grows a dialog of its own. A cancelled field answers "" (the caller does nothing).
+    """
+    try:
+        dialog = _st_module().QInputDialog
+        t = get_translator()
+        text, ok = dialog.getText(parent, t("terminal.attach_tmux_title"),
+                                  t("terminal.attach_tmux_prompt"))
+    except Exception:  # noqa: BLE001 — a dialog must never break a container
+        return ""
+    return str(text or "").strip() if ok else ""
+
+
+def add_session_actions(menu, page, on_reconnect, on_tmux) -> tuple:
+    """Append the Reconnect / Attach tmux rows of `page` to `menu` — the ONE builder (v1.9.1).
+
+    Both containers build their menus per right click (the `_build_context_menu` test seam), which
+    is what makes the enabled state a READ of the session at that moment instead of something an
+    action has to keep in step: a LIVE session disables Reconnect, an ended one enables it. The
+    actions belong to the menu (`menu.addAction()`, so Qt keeps them alive) and the handlers
+    receive the page they act on — the tab a user right-clicked is not always the active one.
+    Never raises. Answers `(act_reconnect, act_tmux)`.
+    """
+    t = get_translator()
+    can = getattr(page, "can_reconnect", None)
+    try:
+        reconnectable = bool(callable(can) and can())
+    except Exception:  # noqa: BLE001 — a dying C++ object is simply not reconnectable
+        reconnectable = False
+    act_reconnect = menu.addAction(t("terminal.reconnect"))
+    act_reconnect.setToolTip(t("terminal.reconnect_tooltip"))
+    act_reconnect.setEnabled(reconnectable)
+    act_reconnect.triggered.connect(lambda _checked=False: on_reconnect(page))
+    act_tmux = menu.addAction(t("terminal.attach_tmux"))
+    act_tmux.setToolTip(t("terminal.attach_tmux_tooltip"))
+    act_tmux.setEnabled(page is not None)
+    act_tmux.triggered.connect(lambda _checked=False: on_tmux(page))
+    return act_reconnect, act_tmux
+
+
 def format_duration(seconds) -> str:
     """A duration in seconds → "M:SS" / "H:MM:SS" ("" — no usable value).
 
@@ -364,6 +433,9 @@ class TerminalSessionPage(TerminalFilesPanelMixin, TerminalPageSftpMixin, Termin
         self._host_window = None     # the host window (SSHTerminalWindow); close_terminal() closes it
         self._force_close = False    # v1.1.1: the limit path — a confirmed decision, "ask" does not ask again
         self._shut_down = False      # shutdown() is idempotent (all teardown paths go through one method)
+        # v1.9.1: the session's SECOND state — `closed_signal` has arrived, so `reconnect()` may
+        # run (a live session is never re-armed). The re-arm clears it; `shutdown()` ends the page.
+        self._session_ended = False
         # The SPLIT marker — the page was created as the second pane of a terminal window
         # (`add_session(split=True)`), NOT as a tab. `MainWindow._terminal_windows` keeps it for the green
         # dot and the multi-input provider, while the `terminal_max_open` limit and
@@ -416,17 +488,14 @@ class TerminalSessionPage(TerminalFilesPanelMixin, TerminalPageSftpMixin, Termin
             pwd = password or ""
         else:
             pwd = getattr(server_data, 'password', '') or ""
+        # v1.9.1: the credential the session was OPENED with stays on the page in memory — a re-arm
+        # reuses it when the keyring holds nothing, so no second secret surface is ever opened (§4.4).
+        self._session_password = pwd
 
         # Test seam: the thread class is fetched from the ssh_terminal module at
         # call time (monkeypatching ST.SSHTerminalThread in tests works unchanged).
-        thread_cls = _st_module().SSHTerminalThread
-        self.terminal_thread = thread_cls(
-            host=server_data.host,
-            user=server_data.user,
-            port=server_data.ssh_port or 22,
-            password=pwd,
-            key_path=server_data.key_path,
-        )
+        # The SAME builder creates the thread of a re-arm — one constructor for the two lives.
+        self.terminal_thread = self._build_thread()
 
         # v1.0 final (ROADMAP task 9): terminal_* keys from ~/.sshmap/config.json —
         # all optional, defaults = the current behaviour (the RC4 look). UI — v1.1.
@@ -555,26 +624,14 @@ class TerminalSessionPage(TerminalFilesPanelMixin, TerminalPageSftpMixin, Termin
         self._font_timer.setInterval(FONT_SIZE_SAVE_DEBOUNCE_MS)
         self._font_timer.timeout.connect(self._save_font_size)
 
-        self.terminal_thread.output_signal.connect(self._on_output)
-        self.terminal_thread.error_signal.connect(self._show_error)
-        self.terminal_thread.status_signal.connect(self._set_status)
-        self.terminal_thread.closed_signal.connect(self._on_closed)
-        # v1.1.3: the user may already be sitting on the "Files" tab during the
-        # connection — open SFTP as soon as the client appears in the thread.
-        self.terminal_thread.connected_signal.connect(self._on_connected_for_sftp)
-        # v1.5.7: the PTY receives the grid the layout computed BEFORE the connection —
-        # the one debounced resize that the missing channel refused (see _flush_pty_grid).
-        self.terminal_thread.connected_signal.connect(self._flush_pty_grid)
-
         # Quick Launch — the first command is sent after the connection (`connected_signal`), not before:
         # on a failed authentication the command simply does not go out and the error is shown via the
-        # regular error path. The Connection is kept, because `shutdown()` disconnects ONLY if the
-        # connection was made (PySide6 6.11: disconnecting an unconnected slot raises a RuntimeWarning).
-        self._initial_command = (initial_command or "").strip()
+        # regular error path. `_session_command` is what the session EXISTS for (a quick-launch command
+        # or a `tmux attach`) and is what a re-arm sends again; `_initial_command` is the one-shot send
+        # that is still pending (v1.9.1: the two are the same fact at birth).
+        self._session_command = (initial_command or "").strip()
+        self._initial_command = self._session_command
         self._initial_cmd_conn = None
-        if self._initial_command:
-            self._initial_cmd_conn = self.terminal_thread.connected_signal.connect(
-                self._send_initial_command)
 
         # ── v1.6.3 (ROADMAP task 5): the cwd follow (OSC 7) ─────────────────
         # The state of THIS session: the hook goes out ONCE (nothing in the canvas shows
@@ -589,11 +646,10 @@ class TerminalSessionPage(TerminalFilesPanelMixin, TerminalPageSftpMixin, Termin
         if self.sftp_tab is not None:
             self.sftp_tab.set_follow_cwd(self._follow_cwd)
             self.sftp_tab.follow_cwd_changed.connect(self._on_follow_cwd_toggled)
-        # The follow's connect hook is UNCONDITIONAL (the slot itself checks the flag), so
-        # the teardown disconnects it by the bound method — the same rule as the PTY flush.
-        self.terminal_thread.connected_signal.connect(self._on_connected_for_follow)
 
-        self.terminal_thread.start()
+        # The thread's signals are bound and the session starts — the VERY wiring a re-arm runs
+        # (`_wire_thread()`), so the birth and the second life can never drift apart.
+        self._wire_thread()
         # This call is a NO-OP — the page is still HIDDEN here and Qt delivers no FocusIn to a hidden
         # container, so the keystrokes of a fresh session would go nowhere until the user clicked the
         # canvas. The real claim is the DEFERRED `claim_focus()`, armed by the first `showEvent` and by
@@ -601,6 +657,174 @@ class TerminalSessionPage(TerminalFilesPanelMixin, TerminalPageSftpMixin, Termin
         # screen the choice of the target belongs to the user (`AGENTS.md` §4.3).
         if not self._is_split_pane:
             self.widget.setFocus()
+
+    # ── v1.9.1 (ROADMAP v1.9.1): the ONE re-arm path of a session ───────────
+
+    def _build_thread(self):
+        """The session thread of THIS page — the ONE constructor of `terminal_thread`.
+
+        The birth and every re-arm call it, so the two threads of a page describe the SAME
+        endpoint, the SAME resolved settings and the SAME credential: the class is fetched from
+        the `ssh_terminal` module at call time (the suite's seam) and the password travels only
+        as an argument — never through the model, a file or a log (`AGENTS.md` §4.4).
+        """
+        thread_cls = _st_module().SSHTerminalThread
+        return thread_cls(
+            host=self.server_data.host,
+            user=self.server_data.user,
+            port=self.server_data.ssh_port or 22,
+            password=getattr(self, "_session_password", ""),
+            key_path=self.server_data.key_path,
+        )
+
+    def _wire_thread(self):
+        """Bind the CURRENT thread's signals to this page and START it — ONE wiring path.
+
+        `connected_signal` carries three slots: the lazy SFTP channel, the PTY grid the layout
+        computed while connecting (`_flush_pty_grid`) and the cwd-follow hook (whose slot checks
+        the flag itself, so the binding is unconditional and the teardown drops it by name). The
+        Quick Launch connection exists only while a command is pending, which is why it is kept in
+        `_initial_cmd_conn` — `shutdown()` disconnects it by that handle (PySide6 6.11 raises a
+        RuntimeWarning for an unconnected slot).
+        """
+        thread = self.terminal_thread
+        # The canvas sends through ITS OWN reference (the ONE input point, §4.3), so a re-arm hands
+        # it the NEW thread — without this every keystroke, macro and mouse report of the second
+        # life would still travel to the dead one.
+        try:
+            self.widget.terminal_thread = thread
+        except (RuntimeError, AttributeError):
+            pass  # a test double without a canvas / a dead C++ object
+        thread.output_signal.connect(self._on_output)
+        thread.error_signal.connect(self._show_error)
+        thread.status_signal.connect(self._set_status)
+        thread.closed_signal.connect(self._on_closed)
+        # v1.1.3: the user may already be sitting on the "Files" tab during the connection —
+        # open SFTP as soon as the client appears in the thread.
+        thread.connected_signal.connect(self._on_connected_for_sftp)
+        # v1.5.7: the PTY receives the grid the layout computed BEFORE the connection — the one
+        # debounced resize that the missing channel refused (see _flush_pty_grid).
+        thread.connected_signal.connect(self._flush_pty_grid)
+        thread.connected_signal.connect(self._on_connected_for_follow)
+        self._initial_cmd_conn = None
+        if self._initial_command:
+            self._initial_cmd_conn = thread.connected_signal.connect(self._send_initial_command)
+        thread.start()
+
+    def can_reconnect(self) -> bool:
+        """May this page be re-armed? — the ONE state reader of the Reconnect row (v1.9.1).
+
+        True exactly when `closed_signal` has arrived and the page is still alive: a LIVE session
+        is never re-armed (the row is disabled) and a page whose `shutdown()` ran has no host left
+        to report to. A container reads this at the moment it builds a menu, so the state is never
+        cached in an action. Never raises.
+        """
+        if getattr(self, "_shut_down", False):
+            return False
+        return bool(getattr(self, "_session_ended", False))
+
+    def reconnect(self) -> bool:
+        """Bring THIS session back — the ONE re-arm path (v1.9.1, `AGENTS.md` §4.3).
+
+        The page is REUSED: the screen (so the dead output stays as scrollback), the canvas, the
+        SFTP tab, the registrations of the host and the credential are the session's own — only the
+        THREAD is created again, through the ONE `_build_thread()` + `_wire_thread()` pair. The
+        dead thread leaves through the shipped `stop()` + orphan registry, the marker line is
+        written into the screen BEFORE the new life starts (it is the boundary the user sees), the
+        session's own command (`_session_command`) is re-armed — a `tmux attach` comes back — and
+        the PTY grid is handed over by the shipped `_flush_pty_grid()` on `connected_signal`.
+
+        THREE refusals, each ONE status line and a False: a page already torn down, a session that
+        is still LIVE, and a re-arm with no credential at all (no keyring entry, no credential this
+        session was opened with and no key file — the keyring is READ, never asked (§4.4)).
+        The host-key question is not re-asked for a key the store already pinned: the policy of
+        `modules/ssh_connect.py` accepts a known key silently.
+        """
+        t = get_translator()
+        if getattr(self, "_shut_down", False):
+            return False
+        if not self._session_ended:
+            self._set_status_text(t("terminal.reconnect_live"))
+            return False
+        password = self._resolve_reconnect_password()
+        key_path = (getattr(self.server_data, "key_path", "") or "").strip()
+        if not password and not key_path:
+            self._set_status_text(t("terminal.reconnect_no_credential"))
+            return False
+        old = getattr(self, "terminal_thread", None)
+        if old is not None:
+            try:
+                old.stop()
+                if old.isRunning():
+                    _st_module().register_orphan_thread(old)
+            except RuntimeError:
+                pass  # Qt teardown of a dead thread — the new one is what matters
+        self._session_password = password
+        self._session_ended = False
+        self._initial_command = self._session_command
+        self._write_reconnect_marker(t)
+        self.terminal_thread = self._build_thread()
+        self._wire_thread()
+        self._set_status_text(t("terminal.reconnecting",
+                                alias=getattr(self.server_data, "alias", "")
+                                or getattr(self.server_data, "host", "")))
+        return True
+
+    def _resolve_reconnect_password(self) -> str:
+        """The secret a re-arm starts with — the keyring first, this session's own second.
+
+        The page opens NO second secret surface (`AGENTS.md` §4.4): the STORED credential of this
+        endpoint is re-read through the ONE scope rule, and when the store answers nothing the
+        credential the session was opened with is reused. A key path needs no secret at all, which
+        is why the caller refuses only when all three answers are empty. Never raises — an
+        unavailable keyring is the shipped "no stored credential" path.
+        """
+        data = self.server_data
+        stored = ""
+        try:
+            from services.credential_manager import get_credential_manager, node_scope
+            stored = get_credential_manager().load_password(
+                getattr(data, "id", ""), scope=node_scope(data)) or ""
+        except Exception:  # noqa: BLE001 — the keyring is optional, exactly as in every other read
+            stored = ""
+        return stored or getattr(self, "_session_password", "") or ""
+
+    def _write_reconnect_marker(self, t):
+        """Write the ONE boundary line of a re-arm into the KEPT screen.
+
+        The dead output is this session's scrollback, so the line that says "a new life starts here"
+        is fed into pyte directly — NOT through `_on_output()`: nothing came from the network, the
+        transcript keeps the remote stream alone, and the OSC 7 scan has no report to read. The
+        canvas is repainted so the boundary is on screen before the new prompt arrives. Never raises.
+        """
+        marker = str(t("terminal.reconnect_marker") or "").strip()
+        try:
+            self.tscreen.feed(b"\r\n" + marker.encode("utf-8", "replace") + b"\r\n")
+            self.widget.update()
+        except Exception:  # noqa: BLE001 — a cosmetic line may never block the re-arm
+            pass
+
+    def attach_tmux(self, name) -> bool:
+        """Ask this session for a `tmux attach` — the ONE entry both containers call (v1.9.1).
+
+        The command is built by the PURE `tmux_attach_command()` (the SHIPPED `sh_quote()` is the
+        quoting rule) and becomes the session's OWN command, so a later Reconnect attaches again —
+        that is what "bring this session back" means to a shell that exists for a `tmux attach`.
+        A LIVE session sends it at once through the ONE `send_macro()` (and the command history
+        records it like any other explicit send); an ENDED one rides the re-arm instead. An empty
+        name answers False — there is nothing to attach to.
+        """
+        cmd = tmux_attach_command(name)
+        if not cmd:
+            return False
+        self._session_command = cmd
+        if self._session_ended:
+            self._initial_command = cmd
+            return self.reconnect()
+        sent = self.send_macro(cmd)
+        if sent:
+            self._set_status_text(get_translator()("terminal.attach_tmux_sent", name=str(name).strip()))
+        return sent
 
     # ── v1.3.3.1 (ROADMAP task 1): live i18n — re-text on a language switch ──
 
@@ -1426,6 +1650,9 @@ class TerminalSessionPage(TerminalFilesPanelMixin, TerminalPageSftpMixin, Termin
         self.close_terminal()
 
     def _on_closed(self):
+        # v1.9.1: the ONE fact the Reconnect row reads — the session's channel is gone, so this
+        # page can be brought back (`can_reconnect()`); the marker of a re-arm clears it again.
+        self._session_ended = True
         # v1.4.7 follow-up: one write — `_set_status_text` IS the bridge now (the line
         # and the host's status surface were two writes of the same text before).
         self._set_status_text(get_translator()("terminal.session_closed"))

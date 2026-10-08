@@ -667,8 +667,8 @@ check("§7 the pin counts the SHIPPED release (828 + the 13 keys of v1.6.8"
       " + the 17 of v1.7.4rc1: the local source switch of a pane, its two refusals, the permanent-"
       " delete warning and the local file-surface sentences, and v1.7.4rc2 adds 1: the refusal of a"
       " move that would cross the two sources, and v1.8 adds TWENTY: the elevated pane and the 41 of"
-      " v1.8.1: the trust surface; v1.8.1.1 adds ONE: the send identity sentence) and v1.8.2 adds SIXTEEN: the library file — the History door, the backup ring and the import/export pair — and v1.8.3 adds TWENTY-THREE: the Plugins window (its chrome, its three columns and its export) and v1.8.4 adds TEN: the whole-map layout, the reverse traversal and the inode fact, and v1.9 adds FOUR: the production-tag guard — its title, the broadcast sentence and the paste sentence — and the notice of a checked selection that has left the map",
-      EXPECTED_I18N_KEYS >= 854 and EXPECTED_I18N_KEYS == 828 + 13 + 5 + 8 + 9 + 4 + 3 + 4 + 4 + 19 + 17 + 1 + 4 + 6 + 20 + 41 + 1 + 16 + 23 + 10 + 4,
+      " v1.8.1: the trust surface; v1.8.1.1 adds ONE: the send identity sentence) and v1.8.2 adds SIXTEEN: the library file — the History door, the backup ring and the import/export pair — and v1.8.3 adds TWENTY-THREE: the Plugins window (its chrome, its three columns and its export) and v1.8.4 adds TEN: the whole-map layout, the reverse traversal and the inode fact, and v1.9 adds FOUR: the production-tag guard — its title, the broadcast sentence and the paste sentence — and the notice of a checked selection that has left the map, and v1.9.1 adds ELEVEN: the reconnect and its `tmux attach`",
+      EXPECTED_I18N_KEYS >= 854 and EXPECTED_I18N_KEYS == 828 + 13 + 5 + 8 + 9 + 4 + 3 + 4 + 4 + 19 + 17 + 1 + 4 + 6 + 20 + 41 + 1 + 16 + 23 + 10 + 4 + 11,
       str(EXPECTED_I18N_KEYS))
 check("§7 EXPECTED_APP_VERSION is the release this file describes",
       releases_at_least(EXPECTED_APP_VERSION, "1.7"), EXPECTED_APP_VERSION)
