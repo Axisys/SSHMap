@@ -1,13 +1,14 @@
 # -*- coding: utf-8 -*-
-"""v1.4 — the example plugins (`hello.py`, `disk_monitor.py`, `open_ports.py`, `app_versions.py`).
+"""v1.4 — the example plugins of `examples/plugins/` (the minimal one and the two monitors).
 
 EVERY example file loads through the REAL discovery path of `PluginManager` (copied into the isolated
-`~/.sshmap/plugins/`, then `discover()`), never a syntax check, and its hooks are driven; the two newer
-files are driven in DEPTH by `tests/test_plugin_examples_monitors.py`. §1 the four examples as plugins
+`~/.sshmap/plugins/`, then `discover()`), never a syntax check, and its hooks are driven; the newer
+files are driven in DEPTH by `tests/test_plugin_examples_monitors.py` (the two proven monitors) and by
+`tests/test_plugin_examples_local.py` (the two whose fact is local). §1 the whole folder as plugins
 (the manifests, the hooks, the shared "a plugin never imports the core" predicate of `_common.py`);
 §2 `hello` (Copy SSH command + Copy the plugins folder path); §3–§5 `disk_monitor`'s `df -hP` parser,
-its atomic cache and the 90% threshold; §6 the collector on a fake context; §7 the reporter end to end;
-§8 the release state (the examples add NO i18n key)."""
+its atomic cache and the 90% threshold; §6 the collector on a fake context; §7 the reporter end to
+end; §8 the release state (the examples add NO i18n key)."""
 import json
 import os
 import re
@@ -40,14 +41,23 @@ HELLO_SRC = os.path.join(PLUGINS_SRC, "hello.py")
 DISK_SRC = os.path.join(PLUGINS_SRC, "disk_monitor.py")
 PORTS_SRC = os.path.join(PLUGINS_SRC, "open_ports.py")
 VERSIONS_SRC = os.path.join(PLUGINS_SRC, "app_versions.py")
+SYSTEMD_SRC = os.path.join(PLUGINS_SRC, "systemd_failed.py")
+MAINTENANCE_SRC = os.path.join(PLUGINS_SRC, "maintenance.py")
+CERTIFICATES_SRC = os.path.join(PLUGINS_SRC, "certificates.py")
+WATCH_SRC = os.path.join(PLUGINS_SRC, "watch_command.py")
 PLUGIN_DIR = PM.user_plugin_dir()
 CONFIG_FILE = os.path.join(os.path.expanduser("~"), ".sshmap", "config.json")
 
-# The FOUR examples every section below installs (the rule of the folder is read from a file).
+# The EIGHT examples every section below installs (the rule of the folder is read from a file).
 EXAMPLE_FILES = ((HELLO_SRC, "hello", (PM.HOOK_REGISTER_COMMANDS, PM.HOOK_NODE_CONTEXT_MENU)),
                  (DISK_SRC, "disk_monitor", (PM.HOOK_STATUS_PROBE, PM.HOOK_RUN_ON_NODES)),
                  (PORTS_SRC, "open_ports", (PM.HOOK_STATUS_PROBE, PM.HOOK_RUN_ON_NODES)),
-                 (VERSIONS_SRC, "app_versions", (PM.HOOK_REGISTER_COMMANDS, PM.HOOK_RUN_ON_NODES)))
+                 (VERSIONS_SRC, "app_versions", (PM.HOOK_REGISTER_COMMANDS, PM.HOOK_RUN_ON_NODES)),
+                 (SYSTEMD_SRC, "systemd_failed", (PM.HOOK_STATUS_PROBE, PM.HOOK_RUN_ON_NODES)),
+                 (MAINTENANCE_SRC, "maintenance", (PM.HOOK_STATUS_PROBE, PM.HOOK_RUN_ON_NODES)),
+                 (CERTIFICATES_SRC, "certificates", (PM.HOOK_STATUS_PROBE,)),
+                 (WATCH_SRC, "watch_command", (PM.HOOK_REGISTER_COMMANDS, PM.HOOK_STATUS_PROBE,
+                                               PM.HOOK_RUN_ON_NODES)))
 
 
 # ── helpers ──────────────────────────────────────────────────────────────────
@@ -70,7 +80,7 @@ def clean_plugins():
 
 
 def install_examples():
-    """Copy the FOUR examples into the sandbox plugin folder — what a user does by hand."""
+    """Copy the EIGHT examples into the sandbox plugin folder — what a user does by hand."""
     os.makedirs(PLUGIN_DIR, exist_ok=True)
     for src, _stem, _hooks in EXAMPLE_FILES:
         shutil.copyfile(src, os.path.join(PLUGIN_DIR, os.path.basename(src)))
@@ -85,6 +95,24 @@ def new_manager():
     manager = PM.PluginManager()
     manager.discover()
     return manager
+
+
+def safe_certificates():
+    """Give `certificates` a canned, comfortably valid peer certificate.
+
+    That example's `status_probe` opens a REAL TLS connection by design (the folder's rule allows the
+    standard library), so the suite replaces the module's injectable `CONNECTOR` instead of letting a
+    status round of this file reach the network. A certificate far in the future is "no opinion",
+    which is what the checks of THIS file expect from it — its own lesson is
+    `tests/test_plugin_examples_local.py`.
+    """
+    module = local("certificates")
+    if module is None:
+        return None
+    moment = time.time() + 300 * 86400 + 3600
+    module.CONNECTOR = lambda host, port, timeout=1.0: {
+        "notAfter": time.strftime("%b %d %H:%M:%S %Y GMT", time.gmtime(moment))}
+    return module
 
 
 def wait_until(predicate, timeout_ms=6000):
@@ -188,7 +216,7 @@ clean_plugins()
 print("== §1 the examples as plugins: the REAL discovery path ==")
 # ════════════════════════════════════════════════════════════════════════════
 
-check("the FOUR examples exist as plain files in examples/plugins/",
+check("the EIGHT examples exist as plain files in examples/plugins/",
       all(os.path.isfile(src) for src, _stem, _hooks in EXAMPLE_FILES),
       [os.path.basename(src) for src, _s, _h in EXAMPLE_FILES if not os.path.isfile(src)])
 check("examples/README.md explains what the folder is (and that it is not installed)",
@@ -215,7 +243,9 @@ check("a copied example is discovered by the real manager (no packaging, no inst
 check("every manifest carries id, version, api_version and a description",
       all(rec.version == "1.0" and rec.api_version == PM.API_VERSION and rec.description
           for rec in _records.values())
-      and "minimal" in hello.description and "disk usage" in disk.description,
+      and "minimal" in hello.description and "disk usage" in disk.description
+      and "systemd units" in _records["systemd_failed"].description
+      and "certificate" in _records["certificates"].description,
       {stem: (rec.version, rec.api_version) for stem, rec in _records.items()})
 check("every example declares its hooks and is really IMPORTED from the folder",
       all(_records[stem].hooks == hooks for _s, stem, hooks in EXAMPLE_FILES),
@@ -516,6 +546,7 @@ clean_plugins()
 clear_cfg()
 install_examples()
 _manager = new_manager()
+safe_certificates()
 _manager.set_nodes([ServerData(id="srv-1", alias="web-1", host="10.0.0.10", user="root"),
                     ServerData(id="srv-2", alias="db-1", host="10.0.0.11", user="root")])
 
@@ -555,7 +586,7 @@ try:
 
     _started = _manager.plugin_run_on_nodes(None)
     check("`run_on_nodes` starts EVERY capable example on the registry's nodes (one per plugin)",
-          _started == 3, str(_started))
+          _started == 6, str(_started))
     check("the round really finished — the cache has the answer and nothing is left running",
           wait_until(lambda: "srv-1" in local("disk_monitor").load_cache()) is not False
           and wait_until(lambda: _manager.active_workers() == []
@@ -597,6 +628,7 @@ _win.scene.add_server(ServerData(id="w-1", alias="web-1", host="10.0.0.20",
                                  user="root", x=40.0, y=40.0))
 _win.refresh_sidebar()
 _win.start_plugin_discovery()
+safe_certificates()          # the window re-exec'd the folder: the canned TLS connector is re-armed
 app.processEvents()
 check("the window discovers the example plugins on startup",
       all(_win._plugin_manager.get(stem) is not None and _win._plugin_manager.get(stem).ok
@@ -615,7 +647,7 @@ check("its `run_on_nodes` enables the menu item (an empty cache does not change 
       _win.act_plugins_run.isEnabled() is True)
 PR.run_command_over_ssh = lambda node, command, timeout, credentials: PR.PluginRunResult(
     node=node, exit_code=0, output=DF_TABLE)
-# The menu door starts EVERY capable example (three of the four now), so the status bar is a race
+# The menu door starts EVERY capable example (six of the eight now), so the status bar is a race
 # between their own lines: the SIGNAL is collected and the bar is checked to be one of them.
 _seen_lines = []
 _win._plugin_manager.status_requested.connect(lambda pid, text, ms: _seen_lines.append(str(text)))
@@ -657,7 +689,8 @@ check_i18n_parity(_langs)
 check_i18n_format(_langs)
 check("the plugin strings of the examples stay outside the parity policy",
       all(fragment not in json.dumps(_langs["en"]) for fragment in
-          ("disk: ", "threshold 90", "ports: ", "versions: ", "ssh -p ")))
+          ("disk: ", "threshold 90", "ports: ", "versions: ", "ssh -p ", "systemd: ",
+           "maintenance: ", "reboot required", "watch: ")))
 check("the release is the version this file ships with (the pin quotes the shipped one)",
       releases_at_least(EXPECTED_APP_VERSION, "1.7"), EXPECTED_APP_VERSION)
 check_release_state(ROOT)

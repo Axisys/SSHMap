@@ -351,19 +351,22 @@ points on the next start — no registration file, no cooperation from the appli
 
 ### 10.4 Working code in the repository
 
-`examples/plugins/` holds examples that really load (copy them into
-`~/.sshmap/plugins/`, then `Plugins → Reload`); the folder's own README carries the table and
-the "Using them" walk:
+`examples/plugins/` holds examples that really load (copy one into `~/.sshmap/plugins/`, then
+`Plugins → Reload`). **`examples/README.md` owns the list** — the table of the files and the "Using
+them" walk live there, so a file added to the folder is one edit in one place. What stays HERE is
+the choice of SHAPES an author picks between:
 
-| File | What it shows |
-|---|---|
-| `hello.py` | The minimal plugin, doing the smallest useful thing twice: a palette row that copies the plugins folder path (a palette callback DOES get the context) and a node-menu row that copies an `ssh` command line (a menu hook gets NO context, so the plugin uses the clipboard itself). |
-| `disk_monitor.py` | The first useful one, and the shape most real plugins take: `run_on_nodes` COLLECTS (`ctx.run_command` → `df -hP` → the plugin's own atomic cache) and `status_probe` REPORTS from that cache — no SSH inside a probe. |
-| `open_ports.py` | The same collector/reporter shape over `ss -tulpn`: the listening sockets normalised in pure Python and a watchlisted port the network can REACH reported as `warn`. |
-| `app_versions.py` | ONE generated POSIX-sh probe per node that only COLLECTS evidence, a pure-Python report over it and a baseline data file the user owns; its `ctx.run_command` budget is derived from the live catalog. |
+* **the minimal plugin** — two UI hooks, no SSH, the smallest thing that does something;
+* **the collector + reporter** — `run_on_nodes` runs the command through `ctx.run_command()` and
+  writes the plugin's own atomic cache, while `status_probe` only READS that cache (a probe runs for
+  every node on every status round, so it may not open a connection);
+* **the collector that composes** — the same shape where two facts are ONE question: one generated
+  POSIX-sh probe with a marker protocol, and a detail composed by the plugin;
+* **the plugin that never touches SSH** — the fact comes from its own config and its own socket, so
+  it has an answer about a host whose SSH is down; the connector is injectable for the tests.
 
-`examples/README.md` explains how to use and edit them; `tests/test_plugin_examples.py` and
-`tests/test_plugin_examples_monitors.py` load them through the real discovery, drive their
+`tests/test_plugin_examples.py`, `tests/test_plugin_examples_monitors.py` and the folder's
+`tests/test_plugin_examples_local.py` load the examples through the real discovery, drive their
 hooks and pin the "a plugin never imports the core" rule (`example_plugin_problems()`,
 `tests/_common.py`).
 
