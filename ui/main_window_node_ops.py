@@ -1070,7 +1070,7 @@ class NodeOpsMixin:
         return (self.t("status.map_arrange_none") if self._i18n_available
                 else "Nothing to arrange — the map needs at least two groups or free cards")
 
-    def _arrange_map(self, mode: str = "", per_line: int = 0) -> bool:
+    def _arrange_map(self, mode: str = "", per_line: int = 0, reading=None) -> bool:
         """Line the WHOLE map up in ONE undo step — the top level, a group riding together.
 
         The layout is the pure `graphics.node_group.arrange_unit_positions()`; this method
@@ -1084,10 +1084,16 @@ class NodeOpsMixin:
         frame ALONE, because `NodeGroup` does not set `ItemSendsGeometryChanges` and its
         `itemChange(ItemPositionChange)` branch therefore never runs. A member is never listed beside
         its frame for that reason: the frame has already moved it.
+
+        `reading` is the tuple `_arrange_map_units_read()` answers, handed in by a caller that has
+        already read the map's top level (the dialog's own door): the gesture then walks the scene
+        ONCE. `None` — read it here, which is what every other caller does.
         """
         if arrange_unit_positions is None:
             return False
-        items, by_key, unit_of, units = self._arrange_map_units_read()
+        if reading is None:
+            reading = self._arrange_map_units_read()
+        items, by_key, unit_of, units = reading
         # The UNITS are what lines up: one group (frame + members) or one free card. A map
         # with a single unit has nothing to arrange whatever its card count — the refusal is
         # the honest one, and a group of five cards is exactly that case.
@@ -1135,12 +1141,17 @@ class NodeOpsMixin:
         than two UNITS has nothing to lay out, and asking its mode would be a question with no answer.
         Then the SHARED arrangement dialog opens in its MAP scope (the same three modes, the same rows
         count) and its answer goes to `_arrange_map()`. A cancelled dialog changes nothing.
+
+        ONE reading of the map's top level answers the refusal AND the dialog's row count, and the
+        SAME reading is handed to `_arrange_map()`: the modal dialog blocks the scene, so the map
+        cannot move under it while the answer is pending.
         """
-        count = len(self._arrange_map_units()[1])
+        reading = self._arrange_map_units_read()
+        count = len(reading[0])
         dlg_cls = host_attr(self, "ArrangeGroupDialog")
         if dlg_cls is None or arrange_unit_positions is None:
             return False
-        if len(self._arrange_map_units_read()[3]) < 2:
+        if len(reading[3]) < 2:
             self.statusBar().showMessage(self._arrange_map_none_text())
             return False
         dlg = None
@@ -1156,7 +1167,7 @@ class NodeOpsMixin:
         finally:
             if dlg is not None:
                 getattr(dlg, "deleteLater", lambda: None)()
-        return self._arrange_map(mode, per_line)
+        return self._arrange_map(mode, per_line, reading)
 
     def _copy_text_to_clipboard(self, text, message_key: str = "status.copied_to_clipboard",
                                 **kw) -> bool:

@@ -19,7 +19,7 @@ ROOT, WORK = bootstrap()  # BEFORE the app module imports (HOME isolation + offs
 
 from PySide6.QtCore import QPointF, Qt  # noqa: E402
 from PySide6.QtTest import QTest  # noqa: E402
-from PySide6.QtWidgets import QApplication  # noqa: E402
+from PySide6.QtWidgets import QApplication, QDialog  # noqa: E402
 
 app = QApplication(sys.argv)
 
@@ -279,6 +279,51 @@ finally:
     _win2._ask_arrange_map = _orig_ask2
 check("§2 ...and triggering it calls the window's ONE entry point", _called2 == [1], str(_called2))
 _menu2.deleteLater()
+
+# The door reads the map's top level ONCE and hands that reading to the layout below it.
+_walks = []
+_orig_units = _win2._arrange_map_units
+_expected_rows = len(_orig_units()[1])
+
+
+def _counted_units():
+    _walks.append(1)
+    return _orig_units()
+
+
+class _FakeArrangeDialog:
+    """The dialog seam: it answers the ROWS mode, and records the rows count it was asked for."""
+
+    asked = None
+
+    def __init__(self, count, parent=None, scope=None):
+        _FakeArrangeDialog.asked = (count, scope)
+
+    def exec(self):
+        return QDialog.Accepted
+
+    def mode(self):
+        return ARRANGE_ROWS
+
+    def per_line(self):
+        return 2
+
+    def deleteLater(self):
+        pass
+
+
+_orig_dlg2 = MW.ArrangeGroupDialog
+_win2._arrange_map_units = _counted_units
+MW.ArrangeGroupDialog = _FakeArrangeDialog
+try:
+    _win2._ask_arrange_map()
+finally:
+    MW.ArrangeGroupDialog = _orig_dlg2
+    _win2._arrange_map_units = _orig_units
+check("§2 the arrange DOOR reads the map's top level exactly ONCE (ONE reading, handed down)",
+      len(_walks) == 1, f"{len(_walks)} walks")
+check("§2 ...and the dialog is asked with that reading's own row count",
+      _FakeArrangeDialog.asked == (_expected_rows, SCOPE_MAP), str(_FakeArrangeDialog.asked))
 close_window(_solo)
 close_window(_win2)
 

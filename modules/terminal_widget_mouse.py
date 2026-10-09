@@ -218,16 +218,15 @@ class TerminalMouseMixin:
     def link_uri_at(self, pos) -> str:
         """The `OSC 8` URI under a widget point; `""` for no link, no grid or a stale view.
 
-        The cell comes from `_cell_at()` (the ONE cell mapping) and the URI from the LIVE snapshot —
-        the same rows `_paint` reads — so an erase or a rewrite is honoured on the next event.
-        Never raises: a half-torn-down screen answers "no link" instead of taking a paint down.
+        The cell comes from `_cell_at()` (the ONE cell mapping) and the URI from ONE row of the LIVE
+        grid (`TerminalScreen.row_cells()`, the targeted read beside `snapshot()`) — a pointer
+        crossing the canvas asks about a row, never about the whole screen. The PURE `link_span()` is
+        the run rule the hover, the underline and the click share. Never raises: a half-torn-down
+        screen answers "no link" instead of taking a paint down.
         """
         try:
             row, col = self._cell_at(pos)
-            rows, _cx, _cy, _hidden = self.tscreen.snapshot()
-            if not 0 <= row < len(rows):
-                return ""
-            span = host_attr(self, "link_span")(rows[row], col)
+            span = host_attr(self, "link_span")(self.tscreen.row_cells(row), col)
             return span[2] if span else ""
         except Exception:  # noqa: BLE001 — a dying screen is "no link", never a crash
             return ""

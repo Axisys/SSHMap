@@ -646,6 +646,9 @@ check("§4 closing the window hides it, keeps the ring and unchecks the item",
       str(read_cfg({})))
 check("§4 ...without a second toggle loop (the close mirrors with BLOCKED signals)",
       panel.is_shown() is False and win.act_plugins_window.isChecked() is False)
+check("§4 ...and the toolbar switch follows the close (the blocked mirror is RESYNCED explicitly)",
+      win._view_toolbar_buttons["plugins.window.open"].isChecked() is False,
+      str(win._view_toolbar_buttons["plugins.window.open"].isChecked()))
 _second = make_window()
 check("§4 a NEW window reads the saved state back (the key is the only owner)",
       _second._plugins_window_enabled is False and _second.act_plugins_window.isChecked() is False
@@ -659,11 +662,28 @@ check("§4 re-opening shows the SAME session ring (the history lives until the p
 _second.plugins_panel.close()
 _second._dirty = False
 _second.close()
-check("§4 the new surface costs no shortcut and no toolbar button (a window, not a view toggle)",
+check("§4 the surface costs no registry action and no shortcut (the window is not a hotkey target)",
       "plugins.window.open" not in HR.action_ids()
       and "view.toggle_plugins" not in HR.action_ids()
       and callable(getattr(win, "_toggle_plugins_window", None))
       and callable(getattr(win, "_on_plugins_window_hidden", None)))
+
+_plug_btn = win._view_toolbar_buttons.get("plugins.window.open")
+check("§4 ...but the window has its OWN switch in the toolbar's panel cluster (the seventh mirror)",
+      _plug_btn is not None and _plug_btn is win._plugins_window_toolbar_btn
+      and _plug_btn.isCheckable() and _plug_btn.shortcut().isEmpty()
+      and _plug_btn.text() == i18n.t("plugins.window.open"),
+      str(_plug_btn))
+_before_plug = win.act_plugins_window.isChecked()
+_plug_btn.setChecked(not _before_plug)
+app.processEvents()
+check("§4 ...and the switch DRIVES the item (the button → the Plugins-menu item)",
+      win.act_plugins_window.isChecked() is (not _before_plug),
+      f"{_before_plug} -> {win.act_plugins_window.isChecked()}")
+win.act_plugins_window.setChecked(_before_plug)
+app.processEvents()
+check("§4 ...while the item drives the switch back (blocked signals, no toggle loop)",
+      _plug_btn.isChecked() is _before_plug, str(_plug_btn.isChecked()))
 check("§4 the two new taps are declared on the MANAGER (a fact of the core, not a UI invention)",
       "plugin_message = Signal(str, str)" in _src("modules", "plugin_manager.py")
       and "_on_plugin_message" in _src("ui", "main_window_plugins.py")

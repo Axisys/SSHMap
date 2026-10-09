@@ -62,6 +62,15 @@ except ImportError:
                                 SPLIT_MIN_ROWS, load_split_settings, find_host_hook,
                                 CONTAINER_WINDOW)
 
+# The THREE branches of the ONE connect builder (`AGENTS.md` §4.4): the session page records which
+# one opened it, so a re-arm refuses only a branch whose secret is really GONE (§4.29).
+try:
+    from .ssh_connect import (AUTH_FALLBACK, AUTH_KEY, AUTH_PASSWORD, rearm_credential_missing,
+                              resolve_auth_branch)
+except ImportError:
+    from ssh_connect import (AUTH_FALLBACK, AUTH_KEY, AUTH_PASSWORD, rearm_credential_missing,
+                             resolve_auth_branch)
+
 # v1.6.4 (ROADMAP task 4): the ACTIVITY mark of an inactive session — the rendering is shared
 # by BOTH containers (the window and the dock), which is why it lives in the page's module.
 # v1.9.1: the session rows (Reconnect / Attach tmux) are declared there for the same reason —

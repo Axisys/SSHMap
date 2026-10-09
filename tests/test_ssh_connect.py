@@ -62,6 +62,29 @@ check("§1 the kwargs are a FRESH dict (a caller cannot poison the next one)",
       and _kw_agent == SCON.build_connect_kwargs("h", "u", 22))
 
 
+def _builder_branch(password="", key_path=""):
+    """Which branch the BUILDER really took — read back off its own kwargs, never a second table."""
+    kwargs = SCON.build_connect_kwargs("h", "u", 22, password=password, key_path=key_path)
+    if "key_filename" in kwargs:
+        return SCON.AUTH_KEY
+    return SCON.AUTH_PASSWORD if "password" in kwargs else SCON.AUTH_FALLBACK
+
+
+_BRANCH_CASES = (("", ""), ("pw", ""), ("", "/k/id_ed25519"), ("pw", "/k/id_ed25519"))
+check("§1 `resolve_auth_branch()` mirrors the builder for every password/key pair",
+      all(SCON.resolve_auth_branch(pw, key) == _builder_branch(pw, key) for pw, key in _BRANCH_CASES)
+      and SCON.resolve_auth_branch("", "") == SCON.AUTH_FALLBACK,
+      str([(pw, key, SCON.resolve_auth_branch(pw, key), _builder_branch(pw, key))
+           for pw, key in _BRANCH_CASES]))
+check("§1 a re-arm refuses ONLY the branch whose secret is really gone",
+      SCON.rearm_credential_missing(SCON.AUTH_FALLBACK, password="", key_path="") is False
+      and SCON.rearm_credential_missing(SCON.AUTH_KEY, password="", key_path="/k/id") is False
+      and SCON.rearm_credential_missing(SCON.AUTH_KEY, password="", key_path="") is True
+      and SCON.rearm_credential_missing(SCON.AUTH_PASSWORD, password="pw") is False
+      and SCON.rearm_credential_missing(SCON.AUTH_PASSWORD, password="") is True,
+      "the three branches of the re-arm rule")
+
+
 # ════════════════════════════════════════════════════════════════════════════
 print("== §2 the live half (connect_client) ==")
 # ════════════════════════════════════════════════════════════════════════════

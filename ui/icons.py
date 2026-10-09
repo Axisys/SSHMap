@@ -473,6 +473,26 @@ def _draw_activity(p):
     p.drawPath(letter)
 
 
+def _draw_plugins_letter(p):
+    """The PLUGINS window — the initial "P" inside the panel FRAME (the `_draw_activity` rule).
+
+    The same rounded 14×13 frame the panel family wears, with the INITIAL of the surface as its
+    interior: a stem and a bowl drawn as STROKES, because the set is vector-only and never calls
+    `drawText`. The puzzle glyph of the "Plugins" menu items says what a plugin IS; this drawer says
+    WHICH surface the button mirrors.
+    """
+    frame = QPainterPath()
+    frame.addRoundedRect(QRectF(3.0, 3.5, 14.0, 13.0), 1.8, 1.8)
+    p.drawPath(frame)
+    letter = QPainterPath()
+    letter.moveTo(7.4, 14.0)
+    letter.lineTo(7.4, 6.2)
+    letter.lineTo(9.7, 6.2)
+    letter.arcTo(QRectF(7.4, 6.2, 4.6, 4.4), 90.0, -180.0)
+    letter.lineTo(7.4, 10.6)
+    p.drawPath(letter)
+
+
 def _draw_bookmarks(p):
     """v1.6.7: the BOOKMARKS panel — a bookmark RIBBON (the View item / the toolbar button).
 
@@ -516,6 +536,8 @@ _DRAWERS = {
     # v1.6.7 (ROADMAP task 4): the BOOKMARKS panel — the sixth view toggle of the cluster
     # (the View menu item + the toolbar button), with its own ribbon glyph.
     "bookmarks": _draw_bookmarks,
+    # The PLUGINS window — the seventh mirror of the cluster, with the panel frame and a "P".
+    "plugins_panel": _draw_plugins_letter,
     # v1.3.3.3 (task 2): the zoom pair of the View menu (project-drawn, no image files)
     "zoom_in": _draw_zoom_in,
     "zoom_out": _draw_zoom_out,

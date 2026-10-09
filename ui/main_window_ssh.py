@@ -1208,13 +1208,13 @@ class SshMixin:
         which is the declared default.
         """
         try:
-            from modules.production_guard import VERB_BROADCAST, confirm, guard_tag
+            from modules.production_guard import VERB_BROADCAST, confirm, needs_confirmation
         except ImportError:  # a flat launch that cannot see the package
             return True
         guarded = []
         for page in list(getattr(self, "_terminal_windows", [])):
             data = getattr(page, "server_data", None)
-            tag = guard_tag(getattr(data, "tags", None) or ())
+            tag = needs_confirmation(VERB_BROADCAST, getattr(data, "tags", None) or ())
             if not tag:
                 continue
             name = (getattr(data, "alias", "") or getattr(data, "host", "")

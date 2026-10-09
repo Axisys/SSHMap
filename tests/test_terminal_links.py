@@ -139,6 +139,40 @@ try:
     check("`link_uri_at` answers \"\" outside the link", w.link_uri_at(outside) == "",
           repr(w.link_uri_at(outside)))
 
+    check("`row_cells()` is the ONE-row reader beside `snapshot()` (an unusable index is empty)",
+          len(scr.row_cells(0)) == 40 and scr.row_cells(-1) == [] and scr.row_cells(None) == []
+          and scr.row_cells("x") == [] and len(scr.snapshot()[0][0]) == 40,
+          f"{len(scr.row_cells(0))} cells")
+
+    # The hover asks about ONE ROW: `snapshot()` copies the WHOLE grid under the lock, and a
+    # pointer crossing the canvas would pay that per motion event.
+    _reads = []
+    _orig_snapshot, _orig_row_cells = scr.snapshot, scr.row_cells
+
+    def _counted_snapshot():
+        _reads.append("snapshot")
+        return _orig_snapshot()
+
+    def _counted_row(row):
+        _reads.append(("row", row))
+        return _orig_row_cells(row)
+
+    scr.snapshot, scr.row_cells = _counted_snapshot, _counted_row
+    try:
+        w._hover_cell = None
+        _reads.clear()
+        w._refresh_hover(middle)
+        _on_link = list(_reads)
+        w._hover_cell = None
+        _reads.clear()
+        w._refresh_hover(outside)
+        _off_link = list(_reads)
+    finally:
+        scr.snapshot, scr.row_cells = _orig_snapshot, _orig_row_cells
+    check("the link hover reads ONE ROW of the live grid, never the whole snapshot",
+          _on_link == [("row", 0)] and _off_link == [("row", 0)],
+          f"on={_on_link} off={_off_link}")
+
     ev = press(w, 1.5 * cw, 0.5 * ch)
     check("a PLAIN click opens the link while the application is NOT tracking the mouse",
           len(opener.opened) == 1 and opener.opened[0].text == "https://example.com/docs",

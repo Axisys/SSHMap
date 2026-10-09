@@ -372,23 +372,39 @@ _orphan = _page(password="")
 _orphan.server_data.key_path = ""
 _close(_orphan)
 _fake_cm.secrets = {}
-_before_refusal = len(_FakeThread.created)
-check("§3 an ended session with NO credential and NO key is refused",
-      _orphan.reconnect() is False)
-check("§3 ...with ONE sentence that names the reason",
-      _orphan.session_status == i18n.t("terminal.reconnect_no_credential"),
-      _orphan.session_status)
-check("§3 ...and no thread was created for the refused re-arm",
-      len(_FakeThread.created) == _before_refusal, len(_FakeThread.created))
+check("§3 a page built with NO password and NO key records the key/agent FALLBACK branch",
+      _orphan._session_auth == "fallback", str(_orphan._session_auth))
+_before_fallback = len(_FakeThread.created)
+check("§3 a FALLBACK session re-arms (it never used a secret of ours, so nothing can be gone)",
+      _orphan.reconnect() is True and len(_FakeThread.created) == _before_fallback + 1,
+      f"{_before_fallback} -> {len(_FakeThread.created)}")
+check("§3 ...with the SAME empty arguments its first connect used (no new secret surface)",
+      _orphan.terminal_thread.password == "" and _orphan.terminal_thread.key_path == "",
+      f"{_orphan.terminal_thread.password!r} / {_orphan.terminal_thread.key_path!r}")
 _orphan.shutdown()
 
-_keyed = _page(password="")
-_keyed.server_data.key_path = "C:/keys/id_ed25519"
-_close(_keyed)
-check("§3 a key path needs NO secret: the re-arm goes ahead", _keyed.reconnect() is True)
+_orphan_key = TP.TerminalSessionPage(_data(password="", key_path="C:/keys/id_ed25519"), None)
+_close(_orphan_key)
+check("§3 a key path needs NO secret: the re-arm goes ahead (the recorded KEY branch)",
+      _orphan_key._session_auth == "key" and _orphan_key.reconnect() is True,
+      str(_orphan_key._session_auth))
 check("§3 ...and the new thread carries the same key path",
-      _keyed.terminal_thread.key_path == "C:/keys/id_ed25519")
-_keyed.shutdown()
+      _orphan_key.terminal_thread.key_path == "C:/keys/id_ed25519")
+_orphan_key.shutdown()
+
+_fake_cm.secrets = {}
+_gone = _page(password="FromTheSession")
+_close(_gone)
+_gone._session_password = ""          # the session's own memory is the only copy left — and it is gone
+_before_refusal = len(_FakeThread.created)
+check("§3 a PASSWORD session whose secret is gone IS refused",
+      _gone._session_auth == "password" and _gone.reconnect() is False)
+check("§3 ...with ONE sentence that names the reason",
+      _gone.session_status == i18n.t("terminal.reconnect_no_credential"),
+      _gone.session_status)
+check("§3 ...and no thread was created for the refused re-arm",
+      len(_FakeThread.created) == _before_refusal, len(_FakeThread.created))
+_gone.shutdown()
 
 _fake_cm.secrets = {}
 _own = _page(password="FromTheSession")

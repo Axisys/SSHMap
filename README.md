@@ -74,7 +74,7 @@ Desktop application (Python + PySide6): an interactive map of your IT infrastruc
 ### Languages & plugins
 - English (default), Russian, Chinese and German - plus any language as one JSON file dropped into `~/.sshmap/languages/`; a file there shadows the built-in of the same code, and the Language tab imports and exports without touching the installed package.
 - Plugins from an entry point (`sshmap.plugins/v1`) or one file in `~/.sshmap/plugins/`: run a command on selected servers, contribute a status to a card, add palette commands and node-menu rows. A broken plugin is reported instead of freezing the window. Eight working examples ship in `examples/plugins/` - one lesson each, including a monitor that never touches SSH - with the table and the walkthrough in `examples/README.md`.
-- The Plugins window (Plugins menu) puts the plugins with their switch on the left, the servers to run on in the middle and what each run reported on the right - with a text export of the visible lines. The history lives until the application exits.
+- The Plugins window (the Plugins menu, or the rightmost switch of the toolbar beside the panel toggles) puts the plugins with their switch on the left, the servers to run on in the middle and what each run reported on the right - with a text export of the visible lines. The history lives until the application exits.
 - **A command of your own, without a plugin**: *Plugins → Run a command on servers…* sends one shell command to the servers checked in the Plugins window (or the whole project when none is checked), names how many it reaches, and shows every server's exit code and output in that same window.
 
 ---

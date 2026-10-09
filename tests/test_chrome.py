@@ -183,15 +183,16 @@ check("§2 the toolbar stopped repeating the sidebar and the palette (the de-dup
       not any(text in _texts for text in _dropped),
       f"texts={_texts}")
 
-check("§2 the keep-set: 3 file verbs + Center + Fit, undo/redo and the six view toggles",
-      len(_buttons) == 3 + 2 + 2 + 6
+check("§2 the keep-set: 3 file verbs + Center + Fit, undo/redo and the seven panel mirrors",
+      len(_buttons) == 3 + 2 + 2 + 7
       and all(i18n.t(k) in _texts for k in ("file.new_project", "file.open", "file.save",
                                            "view.center_map", "view.fit_map",
                                            "edit.undo", "edit.redo"))
       and all(text in _texts for text in
               (i18n.t("view.toggle_sidebar"), i18n.t("view.toggle_map"),
                i18n.t("view.toggle_minimap"), i18n.t("view.toggle_legend"),
-               i18n.t("view.toggle_bookmarks"), i18n.t("view.toggle_activity"))),
+               i18n.t("view.toggle_bookmarks"), i18n.t("view.toggle_activity"),
+               i18n.t("plugins.window.open"))),
       f"{len(_buttons)} buttons: {_texts}")
 
 check("§2 the dropped actions are still reachable (the menus and the palette own them)",

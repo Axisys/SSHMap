@@ -179,6 +179,11 @@ def certificate_in(days):
     return {"notAfter": time.strftime("%b %d %H:%M:%S %Y GMT", time.gmtime(moment))}
 
 
+def certificate_ago(seconds):
+    """A peer certificate whose `notAfter` was this many seconds ago (the past-side boundary)."""
+    return {"notAfter": time.strftime("%b %d %H:%M:%S %Y GMT", time.gmtime(time.time() - seconds))}
+
+
 NOT_AFTER = "Sep  1 12:00:00 2026 GMT"
 NOT_AFTER_EPOCH = float(ssl.cert_time_to_seconds(NOT_AFTER))
 
@@ -296,6 +301,25 @@ check("a certificate without a usable date is `None`, never a guess",
       cert_mod.days_left({}) is None and cert_mod.days_left(None) is None
       and cert_mod.days_left({"notAfter": "not a date"}) is None
       and cert_mod.days_left("a string") is None)
+check("the expiry VERDICT is its own pure fact, with the same no-data rule as the days",
+      cert_mod.has_expired({"notAfter": NOT_AFTER}, now=NOT_AFTER_EPOCH - 1) is False
+      and cert_mod.has_expired({"notAfter": NOT_AFTER}, now=NOT_AFTER_EPOCH) is True
+      and cert_mod.has_expired({}) is None and cert_mod.has_expired(None) is None
+      and cert_mod.has_expired({"notAfter": "not a date"}) is None
+      and cert_mod.has_expired("a string") is None,
+      str(cert_mod.has_expired({"notAfter": NOT_AFTER}, now=NOT_AFTER_EPOCH)))
+check("the day count is truncated TOWARD ZERO: minutes past the date are still the SAME day",
+      cert_mod.days_left({"notAfter": NOT_AFTER}, now=NOT_AFTER_EPOCH + 300) == 0
+      and cert_mod.days_left({"notAfter": NOT_AFTER}, now=NOT_AFTER_EPOCH + 12 * 3600) == 0
+      and cert_mod.days_left({"notAfter": NOT_AFTER}, now=NOT_AFTER_EPOCH + 25 * 3600) == -1
+      and cert_mod.days_left({"notAfter": NOT_AFTER}, now=NOT_AFTER_EPOCH - 300) == 0,
+      str([cert_mod.days_left({"notAfter": NOT_AFTER}, now=NOT_AFTER_EPOCH + _s)
+           for _s in (300, 12 * 3600, 25 * 3600, -300)]))
+check("the one day the two `0` cases meet reads its OWN sentence (expired today)",
+      cert_mod.detail_text(0, 443, expired=True) == "certificate expired today (443/tcp)"
+      and cert_mod.detail_text(0, 443, expired=False) == "certificate expires today (443/tcp)"
+      and cert_mod.detail_text(0, 443) == "certificate expires today (443/tcp)",
+      cert_mod.detail_text(0, 443, expired=True))
 check("the detail is the ONE line of the card, in its three shapes",
       cert_mod.detail_text(12, 443) == "certificate expires in 12 day(s) (443/tcp)"
       and cert_mod.detail_text(0, 8443) == "certificate expires today (8443/tcp)"
@@ -329,10 +353,22 @@ cert_mod.CONNECTOR = lambda host, port, timeout=1.0: certificate_in(0)
 check("a certificate that expires TODAY is already a warning (the boundary counts)",
       cert_mod.status_probe(node("srv-1")) == ("warn", "certificate expires today (443/tcp)"),
       str(cert_mod.status_probe(node("srv-1"))))
-cert_mod.CONNECTOR = lambda host, port, timeout=1.0: certificate_in(-3)
+cert_mod.CONNECTOR = lambda host, port, timeout=1.0: certificate_ago(3 * 86400 + 3600)
 check("an ALREADY expired certificate still warns (the handshake succeeded, the date did not)",
       cert_mod.status_probe(node("srv-1"))
       == ("warn", "certificate expired 3 day(s) ago (443/tcp)"),
+      str(cert_mod.status_probe(node("srv-1"))))
+cert_mod.CONNECTOR = lambda host, port, timeout=1.0: certificate_ago(300)
+check("five minutes past the date reads the SAME-DAY sentence, not a whole day ago",
+      cert_mod.status_probe(node("srv-1")) == ("warn", "certificate expired today (443/tcp)"),
+      str(cert_mod.status_probe(node("srv-1"))))
+cert_mod.CONNECTOR = lambda host, port, timeout=1.0: certificate_ago(12 * 3600)
+check("twelve hours past it is still the same day",
+      cert_mod.status_probe(node("srv-1")) == ("warn", "certificate expired today (443/tcp)"),
+      str(cert_mod.status_probe(node("srv-1"))))
+cert_mod.CONNECTOR = lambda host, port, timeout=1.0: certificate_ago(25 * 3600)
+check("twenty-five hours past it is exactly ONE whole day",
+      cert_mod.status_probe(node("srv-1")) == ("warn", "certificate expired 1 day(s) ago (443/tcp)"),
       str(cert_mod.status_probe(node("srv-1"))))
 cert_mod.CONNECTOR = lambda host, port, timeout=1.0: certificate_in(21)
 check("exactly the horizon still warns (the rule is `<=`, the day the user asked about)",

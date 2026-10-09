@@ -543,7 +543,9 @@ class PluginMixin:
 
         The close is mirrored into the checkable Plugins-menu item with BLOCKED signals (no
         `toggled` loop back into `set_visible`) and persisted, so the next start opens the window
-        only if it was left open.
+        only if it was left open. Because the signals are BLOCKED, the toolbar MIRROR never hears
+        about the new state and has to be resynced EXPLICITLY (`_sync_view_toolbar()`), or it keeps
+        showing "open" while the window is gone and a click on it flips the wrong way.
         """
         self._plugins_window_enabled = False
         self._save_plugins_window_config({"ui_plugins_panel": False})
@@ -558,7 +560,8 @@ class PluginMixin:
                 finally:
                     action.blockSignals(False)
         except RuntimeError:
-            pass  # Qt teardown — the action is already destroyed
+            return  # Qt teardown — the action is already destroyed
+        self._sync_view_toolbar("plugins.window.open", False)
 
     def _report_plugin_events(self):
         """Turn the manager's events into the session ring AND into status-bar lines.

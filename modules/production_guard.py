@@ -111,9 +111,9 @@ def confirm(verb, tag, alias="", lines=0, names="", parent=None) -> bool:
     """The ONE dialog of the guard: True when the user confirmed the gesture.
 
     A `QMessageBox` with the two shipped buttons (Yes/No are Qt's own translations) and the module
-    attribute `QMessageBox` as the test seam (`modules/command_library.py`'s pattern). A GUI that
-    cannot show a dialog (no Qt, no parent) answers False — the guard is a REFUSAL by default, never
-    a silent pass.
+    attribute `QMessageBox` as the test seam (`modules/command_library.py`'s pattern). A build that
+    cannot show a dialog at all (no Qt) answers False — the guard is a REFUSAL by default, never a
+    silent pass; a `parent=None` box is legal Qt and therefore still asked.
     """
     if QMessageBox is None:
         return False

@@ -543,9 +543,10 @@ check("§6 audit 5: the arrangement geometry is PURE (no Qt item, no scene) and 
 
 # (6) the toolbar's declaration (v1.6)
 _TB = getattr(MW, "_VIEW_TOOLBAR_ITEMS", ())
-check("§6 audit 6: the view toggles are ONE declaration of six items, wired by ONE pair",
-      len(_TB) == 6 and len(getattr(MW, "_VIEW_TOOLBAR_ACTIONS", {})) == 6
-      and "view.toggle_bookmarks" in [item[0] for item in _TB],
+check("§6 audit 6: the view toggles are ONE declaration of seven mirrors, wired by ONE pair",
+      len(_TB) == 7 and len(getattr(MW, "_VIEW_TOOLBAR_ACTIONS", {})) == 7
+      and "view.toggle_bookmarks" in [item[0] for item in _TB]
+      and "plugins.window.open" in [item[0] for item in _TB],
       f"{len(_TB)} items")
 
 # (7) the glyph grid's gate (v1.6.3)

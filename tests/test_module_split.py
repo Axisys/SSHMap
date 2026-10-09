@@ -256,7 +256,7 @@ check("§2 ...and the facade RE-EXPORTS the eight names the suite reads on `MW`"
       all(n in MW.__dict__ for n in ("_CollapseStrip", "_diamond_icon", "_WIDGET_MAX_WIDTH",
                                      "STATUS_FILTER_ORDER", "_StatusCounter", "_ProblemsChip",
                                      "_VIEW_TOOLBAR_ITEMS", "_VIEW_TOOLBAR_ACTIONS"))
-      and MW._CollapseStrip.STRIP_WIDTH == 18 and len(MW._VIEW_TOOLBAR_ITEMS) == 6,
+      and MW._CollapseStrip.STRIP_WIDTH == 18 and len(MW._VIEW_TOOLBAR_ITEMS) == 7,
       str([n for n in ("_CollapseStrip", "_diamond_icon", "_WIDGET_MAX_WIDTH",
                        "STATUS_FILTER_ORDER", "_StatusCounter", "_ProblemsChip",
                        "_VIEW_TOOLBAR_ITEMS", "_VIEW_TOOLBAR_ACTIONS") if n not in MW.__dict__]))

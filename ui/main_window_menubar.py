@@ -413,6 +413,10 @@ class MenubarMixin:
         self._register_i18n(self.act_plugins_window, "plugins.window.open")
         host_attr(self, "set_action_icon")(self.act_plugins_window, "plugin")
         self._plugin_menu.insertAction(self.act_plugins_reload, self.act_plugins_window)
+        # The Plugins window JOINS the toolbar's panel cluster (`_setup_toolbar` runs before this
+        # method, so the button already exists): the item stays the OWNER of the state and the
+        # button mirrors it, exactly like the six view toggles above.
+        self._wire_view_toolbar_button("plugins.window.open", self.act_plugins_window)
         # v1.9.3 (ROADMAP task 3): the CORE-owned command — a command of the USER's own, sent to the
         # servers the window targets. It needs NO plugin (the runner is the core's own), so the
         # registry alone enables it, and it is built MANUALLY like the window item above: a new

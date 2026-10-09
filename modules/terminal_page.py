@@ -46,9 +46,9 @@ except ImportError:
                                          history_key)
 
 try:  # v1.9: the production-tag guard of a multi-line paste (the page owns the node's tags)
-    from .production_guard import VERB_PASTE, confirm as guard_confirm, guard_tag, node_tags
+    from .production_guard import VERB_PASTE, confirm as guard_confirm, needs_confirmation, node_tags
 except ImportError:
-    from production_guard import (VERB_PASTE, confirm as guard_confirm, guard_tag,
+    from production_guard import (VERB_PASTE, confirm as guard_confirm, needs_confirmation,
                                   node_tags)
 
 try:  # v1.2.5: the central theme (status labels — ui/theme.py)
@@ -491,6 +491,10 @@ class TerminalSessionPage(TerminalFilesPanelMixin, TerminalPageSftpMixin, Termin
         # v1.9.1: the credential the session was OPENED with stays on the page in memory — a re-arm
         # reuses it when the keyring holds nothing, so no second secret surface is ever opened (§4.4).
         self._session_password = pwd
+        # WHICH branch of the ONE connect builder opened this session (`key` | `password` |
+        # `fallback`) — a re-arm refuses only a branch whose secret is really gone (§4.29).
+        self._session_auth = _st_module().resolve_auth_branch(
+            pwd, getattr(server_data, "key_path", "") or "")
 
         # Test seam: the thread class is fetched from the ssh_terminal module at
         # call time (monkeypatching ST.SSHTerminalThread in tests works unchanged).
@@ -735,10 +739,12 @@ class TerminalSessionPage(TerminalFilesPanelMixin, TerminalPageSftpMixin, Termin
         the PTY grid is handed over by the shipped `_flush_pty_grid()` on `connected_signal`.
 
         THREE refusals, each ONE status line and a False: a page already torn down, a session that
-        is still LIVE, and a re-arm with no credential at all (no keyring entry, no credential this
-        session was opened with and no key file — the keyring is READ, never asked (§4.4)).
-        The host-key question is not re-asked for a key the store already pinned: the policy of
-        `modules/ssh_connect.py` accepts a known key silently.
+        is still LIVE, and a branch of the ONE connect builder whose credential is really GONE — the
+        page records the branch it was built with, so a KEY session needs its key file, a PASSWORD
+        session the keyring or its own memory, and a session opened through the ssh-agent or the
+        default keys re-arms with the very arguments of its first connect (`AGENTS.md` §4.29; the
+        keyring is READ, never asked (§4.4)). The host-key question is not re-asked for a key the
+        store already pinned: the policy of `modules/ssh_connect.py` accepts a known key silently.
         """
         t = get_translator()
         if getattr(self, "_shut_down", False):
@@ -748,7 +754,9 @@ class TerminalSessionPage(TerminalFilesPanelMixin, TerminalPageSftpMixin, Termin
             return False
         password = self._resolve_reconnect_password()
         key_path = (getattr(self.server_data, "key_path", "") or "").strip()
-        if not password and not key_path:
+        st = _st_module()
+        branch = getattr(self, "_session_auth", "") or getattr(st, "AUTH_FALLBACK", "")
+        if st.rearm_credential_missing(branch, password=password, key_path=key_path):
             self._set_status_text(t("terminal.reconnect_no_credential"))
             return False
         old = getattr(self, "terminal_thread", None)
@@ -1600,7 +1608,7 @@ class TerminalSessionPage(TerminalFilesPanelMixin, TerminalPageSftpMixin, Termin
         through `widget.guard_hook`; the policy is PURE (`modules/production_guard.py`) and the dialog is
         that module's ONE `confirm()`. No guard tag on this node — the paste goes ahead untouched.
         """
-        tag = guard_tag(node_tags(self.server_data))
+        tag = needs_confirmation(VERB_PASTE, node_tags(self.server_data))
         if not tag:
             return True
         alias = getattr(self.server_data, "alias", "") or getattr(self.server_data, "host", "")

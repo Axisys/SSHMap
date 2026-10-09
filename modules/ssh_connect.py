@@ -96,6 +96,40 @@ def build_connect_kwargs(host, user, port, password="", key_path="", passphrase=
     return kwargs
 
 
+#: The THREE branches of the table above, as NAMES — what a caller records about its own connect.
+AUTH_KEY = "key"
+AUTH_PASSWORD = "password"
+AUTH_FALLBACK = "fallback"
+
+
+def resolve_auth_branch(password="", key_path="") -> str:
+    """Which of the THREE branches `build_connect_kwargs()` takes for this pair (PURE).
+
+    A usable key FILE is `AUTH_KEY` (the password rides beside it only as the LAST method), a
+    password alone is `AUTH_PASSWORD` and neither is the shipped key/agent `AUTH_FALLBACK`, which
+    opens a session with NO secret of ours.
+    """
+    if key_path and resolve_local_path(key_path):
+        return AUTH_KEY
+    return AUTH_PASSWORD if password else AUTH_FALLBACK
+
+
+def rearm_credential_missing(branch, password="", key_path="") -> bool:
+    """Does a re-arm of a session built on `branch` lack the credential that opened it? (PURE)
+
+    Only a branch that really used a secret of OURS can miss it: `AUTH_KEY` holds its credential in
+    the FILE (still present — the keyring is not consulted at all), `AUTH_PASSWORD` is missing once
+    the keyring and the caller's own memory answer nothing, and `AUTH_FALLBACK` authenticated through
+    the ssh-agent or the user's default keys, so it is re-armed with the very arguments of its first
+    connect and never refused.
+    """
+    if branch == AUTH_KEY:
+        return not (key_path or password)
+    if branch == AUTH_PASSWORD:
+        return not password
+    return False
+
+
 def key_needs_passphrase(key_path) -> bool:
     """Is this private key file ENCRYPTED — i.e. does opening it demand a passphrase? Never raises.
 

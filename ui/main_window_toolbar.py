@@ -23,8 +23,8 @@ except ImportError:
 # ── the VIEW toggles of the toolbar ──────────────────────────────────────────
 # (action id, icon name, i18n key, the literal fallback of the key) — ONE group at the right end
 # of the toolbar, in the order the surfaces sit in the window: the sidebar, the map (whose
-# collapsedness is the LIST mode), the minimap, the legend, the activity panel. Every button is a
-# MIRROR of its checkable "View" item: the item owns the hotkey and the state, the button the click.
+# collapsedness is the LIST mode), the minimap, the legend, the activity panel, the Plugins
+# window. A button MIRRORS its checkable item — the item owns the hotkey, the state and the text.
 _VIEW_TOOLBAR_ITEMS = (
     ("view.toggle_sidebar", "sidebar_panel", "view.toggle_sidebar", "Sidebar / Map"),
     ("view.toggle_map", "map_panel", "view.toggle_map", "Map / List"),
@@ -34,6 +34,10 @@ _VIEW_TOOLBAR_ITEMS = (
     # to the legend because both are floating panels over the canvas.
     ("view.toggle_bookmarks", "bookmarks", "view.toggle_bookmarks", "Bookmarks"),
     ("view.toggle_activity", "activity", "view.toggle_activity", "Activity panel"),
+    # The PLUGINS window — the LAST surface of the window and the seventh mirror of the cluster
+    # (the panel frame with a "P"). It adds no registry action: the shipped `plugins.window.open`
+    # item of the Plugins menu stays the owner.
+    ("plugins.window.open", "plugins_panel", "plugins.window.open", "Plugins window…"),
 )
 
 # action id → the MainWindow attribute holding the OWNER QAction (the wiring in
@@ -46,6 +50,7 @@ _VIEW_TOOLBAR_ACTIONS = {
     "view.toggle_legend": "act_show_legend",
     "view.toggle_bookmarks": "act_show_bookmarks",
     "view.toggle_activity": "act_show_activity",
+    "plugins.window.open": "act_plugins_window",
 }
 
 
@@ -166,6 +171,9 @@ class ToolbarMixin:
         # v1.6.7 (ROADMAP task 4): the bookmarks panel's button — the sixth member of the
         # cluster (the attribute survives for the same reason as the five above).
         self._bookmarks_toolbar_btn = self._view_toolbar_buttons["view.toggle_bookmarks"]
+        # The Plugins window's button — the seventh member, wired in `_setup_menubar` to the
+        # shipped checkable `plugins.window.open` item of the Plugins menu (its OWNER).
+        self._plugins_window_toolbar_btn = self._view_toolbar_buttons["plugins.window.open"]
 
         # ── the "»" OVERFLOW menu ───────────────────────────────────────────
         # Not Qt's own toolbar extension: that one is a popup of ICONS with no labels, and this

@@ -115,11 +115,11 @@ def default_connector(host: str, port: int, timeout: float = PROBE_TIMEOUT_S):
 CONNECTOR = default_connector
 
 
-def days_left(certificate, now: Optional[float] = None) -> Optional[int]:
-    """The whole days between now and `notAfter`, or None when the certificate has no usable date.
+def not_after_seconds(certificate) -> Optional[float]:
+    """The `notAfter` of a peer certificate as a POSIX timestamp — None for a foreign value (PURE).
 
-    `ssl.cert_time_to_seconds()` is the standard library's own reader of the ASN.1 timestamp, and
-    the clock is an argument so the rule is testable without waiting for a certificate to age.
+    The ONE reader of the ASN.1 timestamp (`ssl.cert_time_to_seconds()`, the standard library's
+    own), so the days and the verdict below cannot disagree about what the date IS.
     """
     if not isinstance(certificate, dict):
         return None
@@ -127,17 +127,50 @@ def days_left(certificate, now: Optional[float] = None) -> Optional[int]:
     if not not_after:
         return None
     try:
-        expiry = float(ssl.cert_time_to_seconds(not_after))
+        return float(ssl.cert_time_to_seconds(not_after))
     except Exception:                       # noqa: BLE001 — a foreign date is "no data"
         return None
+
+
+def days_left(certificate, now: Optional[float] = None) -> Optional[int]:
+    """The whole days between now and `notAfter`, or None when the certificate has no usable date.
+
+    The count is truncated TOWARD ZERO: a certificate that expired five minutes ago is 0 whole days
+    past its date, never "1 day ago", and `has_expired()` is the verdict that tells the two `0`
+    cases apart. The clock is an argument, so the rule is testable without waiting for a
+    certificate to age.
+    """
+    expiry = not_after_seconds(certificate)
+    if expiry is None:
+        return None
     moment = time.time() if now is None else float(now)
-    return int((expiry - moment) // DAY_SECONDS)
+    return int((expiry - moment) / DAY_SECONDS)
 
 
-def detail_text(days: int, port: int) -> str:
-    """`"certificate expires in 12 days (443/tcp)"` — the ONE line the card carries."""
+def has_expired(certificate, now: Optional[float] = None) -> Optional[bool]:
+    """Is the certificate PAST its `notAfter`? — None when it carries no usable date (PURE).
+
+    The sign `days_left()` cannot carry: a truncated day count is 0 on BOTH sides of the boundary,
+    so the card needs this second fact to say "expires today" or "expired today". The same clock
+    argument and the same "a foreign value is no data" rule.
+    """
+    expiry = not_after_seconds(certificate)
+    if expiry is None:
+        return None
+    return expiry <= (time.time() if now is None else float(now))
+
+
+def detail_text(days: int, port: int, expired: bool = False) -> str:
+    """`"certificate expires in 12 days (443/tcp)"` — the ONE line the card carries.
+
+    `expired` is the verdict of `has_expired()` and it only matters at `days == 0`, the day the two
+    sentences meet: a certificate still valid today expires today, one already past its date does
+    not.
+    """
     if days < 0:
         text = f"certificate expired {abs(int(days))} day(s) ago ({int(port)}/tcp)"
+    elif days == 0 and expired:
+        text = f"certificate expired today ({int(port)}/tcp)"
     elif days == 0:
         text = f"certificate expires today ({int(port)}/tcp)"
     else:
@@ -169,4 +202,4 @@ def status_probe(node):
     remaining = days_left(certificate)
     if remaining is None or remaining > int(settings["horizon_days"]):
         return None
-    return ("warn", detail_text(remaining, port))
+    return ("warn", detail_text(remaining, port, expired=bool(has_expired(certificate))))

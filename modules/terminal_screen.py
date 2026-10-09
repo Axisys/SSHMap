@@ -766,6 +766,23 @@ class TerminalScreen:
             return (2004 << 5) in self.screen.mode
 
     # ── rendering for the GUI thread ───────────────────
+    def row_cells(self, row):
+        """ONE row of the grid, under the same lock as `snapshot()` — the TARGETED read of a viewer.
+
+        `snapshot()` rebuilds EVERY row for the painter; a hover asks about one cell and the run of
+        text around it, so this answers that row alone (an unusable index is an EMPTY list, which the
+        PURE `link_span()` of the canvas already reads as "no link"). Never raises.
+        """
+        try:
+            index = int(row)
+        except (TypeError, ValueError):
+            return []
+        with self._lock:
+            scr = self.screen
+            if not 0 <= index < scr.lines:
+                return []
+            return [scr.buffer[index][x] for x in range(scr.columns)]
+
     def snapshot(self):
         """v1.0RC1: a screen snapshot for the per-cell canvas (TerminalWidget, the GUI thread).
 

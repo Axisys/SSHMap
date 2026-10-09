@@ -195,6 +195,13 @@ try:
           and _asked[0][2] == "web-1 (prod), db-1 (PROD)", str(_asked))
     check("…the unguarded session is NOT named in it", "dev-1" not in str(_asked[0][2]), str(_asked))
 
+    i18n.save_config({"guard_tags": ["prod"], "guard_verbs": ["paste"]})
+    _asked.clear()
+    check('…and `guard_verbs: ["paste"]` SILENCES the broadcast (the narrowed pair is really asked)',
+          SshMixin._confirm_guard_broadcast(_Window([session("web-1", ["prod"])])) is True
+          and _asked == [], str(_asked))
+    i18n.save_config({"guard_tags": ["prod"]})
+
     PG.confirm = lambda verb, tag, **kw: True
     check("…and a confirmed dialog lets the mode through",
           SshMixin._confirm_guard_broadcast(_Window([session("web-1", ["prod"])])) is True)
@@ -240,6 +247,16 @@ try:
           and calls[0][2]["alias"] == "prod-web", str(calls))
     _page_mod.guard_confirm = lambda *a, **kw: True
     check("…and it goes ahead when the user confirms", page.widget._guard_allows(3) is True)
+    _page_mod.guard_confirm = lambda verb, tag, **kw: (calls.append((verb, tag, kw)), True)[1]
+    i18n.save_config({"guard_tags": ["prod"], "guard_verbs": ["broadcast"]})
+    calls.clear()
+    check('…and `guard_verbs: ["broadcast"]` SILENCES the paste (the narrowed pair is really asked)',
+          page.widget._guard_allows(3) is True and calls == [], str(calls))
+    i18n.save_config({"guard_tags": ["prod"], "guard_verbs": ["paste"]})
+    calls.clear()
+    check('…while `guard_verbs: ["paste"]` still asks for the paste (the pair is not dead)',
+          page.widget._guard_allows(3) is True and len(calls) == 1, str(calls))
+    i18n.save_config({"guard_tags": ["prod"]})
     page.shutdown()
 
     page2 = TerminalSessionPage(ServerData(id="g2", alias="dev", host="10.0.0.8", user="root",

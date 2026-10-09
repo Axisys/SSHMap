@@ -497,11 +497,12 @@ check("toolbar: the ACTIVITY panel has a mirror in the view cluster (the fifth m
 check("toolbar: the mirror carries NO sequence of its own (the menu item owns the hotkey)",
       _btn.shortcut().toString() == ""
       and _win7.act_show_activity in _win7._hotkey_targets["view.toggle_activity"])
-check("toolbar: every panel of the cluster is present "
-      "(sidebar / map / minimap / legend / bookmarks / activity)",
+check("toolbar: every surface of the cluster is present "
+      "(sidebar / map / minimap / legend / bookmarks / activity / Plugins window)",
       set(_win7._view_toolbar_buttons) == {"view.toggle_sidebar", "view.toggle_map",
                                            "view.toggle_minimap", "view.toggle_legend",
-                                           "view.toggle_bookmarks", "view.toggle_activity"},
+                                           "view.toggle_bookmarks", "view.toggle_activity",
+                                           "plugins.window.open"},
       str(sorted(_win7._view_toolbar_buttons)))
 
 _before_state = _win7.act_show_activity.isChecked()

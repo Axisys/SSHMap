@@ -461,9 +461,10 @@ _menu = _win.createPopupMenu()
 _rows = [(a.text(), a.isSeparator()) for a in _menu.actions()]
 check("N19: OUR menu lists no blank row (a separator is not a row)",
       [t for t, sep in _rows if not sep and not t.strip()] == [], str(_rows))
-check("N19: ...and it carries the SIX panel switches of the toolbar cluster",
+check("N19: ...and it carries the SEVEN panel switches of the toolbar cluster",
       [a.text() for a in _win._panel_switch_actions()] ==
-      ["Sidebar / Map", "Map / List", "Minimap", "Legend", "Bookmarks", "Activity panel"],
+      ["Sidebar / Map", "Map / List", "Minimap", "Legend", "Bookmarks", "Activity panel",
+       "Plugins window…"],
       str([a.text() for a in _win._panel_switch_actions()]))
 check("N19: the panel rows and the dock row are really IN the menu",
       all(a in _menu.actions() for a in _win._panel_switch_actions()))
