@@ -516,7 +516,7 @@ _mw_src = open(os.path.join(ROOT, "graphics", "map_view.py"), encoding="utf-8").
 check("check now: the map's node context menu carries the entry",
       'ctx.check_status' in _mw_src and "_check_statuses_now" in _mw_src)
 check("check now: the sidebar context menu carries the entry",
-      any(e is not None and e[0] == "check_status" for e in SB.CONTEXT_MENU_ITEMS)
+      "check_status" in SB.CONTEXT_MENU_ACTIONS
       and "check_status" in mw4.sidebar._actions,
       str(SB.CONTEXT_MENU_ITEMS))
 _sb_actions = {k: (lambda node, _k=k: None) for k in
@@ -527,7 +527,20 @@ from PySide6.QtWidgets import QMenu  # noqa: E402
 
 _menu = QMenu()
 _sidebar.fill_context_menu(_menu, _nodes[0])
-_labels = [a.text().replace("&", "") for a in _menu.actions()]
+
+
+def _menu_texts(menu):
+    """Every row of a menu and of its submenus (v1.9.8: the diagnostic verbs are one group)."""
+    out = []
+    for action in menu.actions():
+        out.append(action.text().replace("&", ""))
+        sub = action.menu()
+        if sub is not None:
+            out.extend(_menu_texts(sub))
+    return out
+
+
+_labels = _menu_texts(_menu)
 check("check now: the sidebar menu shows the translated 'Check statuses now' item",
       t("ctx.check_status") in _labels, str(_labels))
 

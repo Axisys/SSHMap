@@ -14,7 +14,7 @@ and the level filter is the PURE `activity_log.matches_level()`. `_ActivityBridg
 
 from PySide6.QtCore import QObject, Qt, QTimer, Signal
 from PySide6.QtWidgets import (
-    QComboBox, QDialog, QHBoxLayout, QHeaderView, QLabel, QPushButton, QTreeWidget,
+    QComboBox, QDialog, QHBoxLayout, QHeaderView, QLabel, QMessageBox, QPushButton, QTreeWidget,
     QTreeWidgetItem, QVBoxLayout,
 )
 
@@ -22,6 +22,10 @@ try:  # the module is the ONE owner of the ring (the panel only renders it)
     from modules import activity_log as AL
 except ImportError:  # flat layout: the project root is on sys.path
     import activity_log as AL  # type: ignore
+
+
+#: The slack a measured column keeps beside its own text (the header's frame and padding).
+STAMP_COLUMN_PADDING = 10
 
 
 def _t(key: str, **kw) -> str:
@@ -77,8 +81,10 @@ class ActivityPanel(QDialog):
     #: without the wait the same rows would be built dozens of times.
     REFRESH_MS = 80
 
-    #: The column widths (px) of the four columns; the message column stretches.
-    COLUMN_WIDTHS = (72, 78, 190)
+    #: The column widths (px) of the four columns; the message column stretches. The first number
+    #: is the FLOOR of the time column — the column itself is measured from the live font, because
+    #: the stamp carries the date now and a wider UI font may need more room than a constant.
+    COLUMN_WIDTHS = (152, 82, 190)
 
     def __init__(self, buffer=None, parent=None):
         super().__init__(parent)
@@ -113,7 +119,11 @@ class ActivityPanel(QDialog):
         self.tree.setObjectName("ActivityTree")
         self.tree.setColumnCount(4)
         self.tree.setRootIsDecorated(False)
-        self.tree.setUniformRowHeights(True)
+        # A long message WRAPS instead of being clipped: the rows are few (the ring's bound) and
+        # the message is the one cell a reader is here for, so the row is allowed to grow. The
+        # full text also rides the tooltip (below) — the two channels of the same decision.
+        self.tree.setUniformRowHeights(False)
+        self.tree.setWordWrap(True)
         self.tree.setAlternatingRowColors(True)
         self.tree.setAllColumnsShowFocus(True)
         self.tree.setSelectionMode(QTreeWidget.SelectionMode.ExtendedSelection)
@@ -122,6 +132,7 @@ class ActivityPanel(QDialog):
         for index, width in enumerate(self.COLUMN_WIDTHS):
             header.setSectionResizeMode(index, QHeaderView.ResizeMode.Interactive)
             self.tree.setColumnWidth(index, width)
+        self.tree.setColumnWidth(0, self.stamp_column_width())
         header.setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
         header.setStretchLastSection(True)
         layout.addWidget(self.tree, 1)
@@ -154,7 +165,16 @@ class ActivityPanel(QDialog):
                                        _t("activity.col.message")])
         except RuntimeError:
             return  # Qt teardown — nothing to re-text
-        self.clear_btn.setToolTip(_t("activity.clear"))
+        self.clear_btn.setToolTip(_t("activity.clear_hint"))
+
+    def stamp_column_width(self) -> int:
+        """The time column: the DECLARED floor or the live font's own measurement, whichever is
+        wider (a stamp carries the date now, and a wider UI font needs more room than a constant)."""
+        try:
+            needed = self.tree.fontMetrics().horizontalAdvance(AL.stamp_text(0.0))
+        except (RuntimeError, AttributeError, TypeError):
+            return int(self.COLUMN_WIDTHS[0])
+        return max(int(self.COLUMN_WIDTHS[0]), int(needed) + STAMP_COLUMN_PADDING)
 
     def current_level(self) -> str:
         """The active level-filter key ("all" … — `activity_log.LEVEL_KEYS`)."""
@@ -213,7 +233,7 @@ class ActivityPanel(QDialog):
             for event in rows:
                 item = QTreeWidgetItem(self.tree)
                 item.setText(0, event.time_text())
-                item.setText(1, event.level)
+                item.setText(1, self._level_text(event))
                 item.setText(2, event.source)
                 item.setText(3, self._message_text(event))
                 for column in range(4):
@@ -240,8 +260,31 @@ class ActivityPanel(QDialog):
             text = f"{text}  ×{event.repeats}"
         return text
 
+    @staticmethod
+    def _level_text(event) -> str:
+        """The level cell — the FILTER's own word for that level (`activity.level.*`).
+
+        The ring's vocabulary (`UI`, `INFO`) is the machine spelling of a family and has no home
+        in a user-facing cell; `activity_log.level_key()` maps the event onto the very key the
+        filter above renders, so a cell and the filter that shows it always agree.
+        """
+        return _t(f"activity.level.{AL.level_key(event)}")
+
     def clear(self):
-        """Clear the HISTORY (the ring itself, not only the view)."""
+        """Clear the HISTORY (the ring itself, not only the view) — after ONE question.
+
+        The ring is a VIEW of the durable log (`~/.sshmap/logs/sshmap.log` keeps every line), so
+        emptying it costs no evidence — but it does cost the reader their place in the history,
+        and that is what the confirmation protects.
+        """
+        try:
+            reply = QMessageBox.question(
+                self, _t("dialog.confirm_clear"), _t("activity.clear_confirm"),
+                QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+        except RuntimeError:
+            return  # Qt teardown — nothing to ask and nothing to clear
+        if reply != QMessageBox.Yes:
+            return
         try:
             self._buffer.clear()
         except Exception:  # noqa: BLE001 — clearing is best effort

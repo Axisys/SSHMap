@@ -24,7 +24,7 @@ import i18n
 import modules.ssh_terminal as ST
 import modules.terminal_split as SP
 import modules.terminal_dock as TD
-from modules.terminal_page import TerminalSessionPage
+from modules.terminal_page import TerminalSessionPage, session_identity, session_tab_tooltip
 from models.server import ServerData
 import ui.main_window as MW
 
@@ -441,22 +441,23 @@ win7 = make_window(mw7, "xi", "10.98.2.1")
 page7 = win7.session_tabs.widget(0)
 check("the tab TEXT is the node alias and the tooltip is the shipped sentence",
       win7.session_tabs.tabText(0) == "xi"
-      and win7.session_tabs.tabToolTip(0) == i18n.t("terminal.tab_close_tooltip"))
+      and win7.session_tabs.tabToolTip(0) == session_tab_tooltip(page7, i18n.t))
 check("no remote title yet", page7.remote_title == "")
 
 page7._on_output(b"hello\r\n")
 app.processEvents()
 check("plain output sets no title (the reader is honest about an empty one)",
       page7.remote_title == "" and win7.session_tabs.tabToolTip(0)
-      == i18n.t("terminal.tab_close_tooltip"))
+      == session_tab_tooltip(page7, i18n.t))
 
 page7._on_output(b"\x1b]2;vim /etc/hosts\x07more\r\n")
 app.processEvents()
 check("an OSC 2 from the remote program is READ (pyte stored it all along)",
       page7.remote_title == "vim /etc/hosts", repr(page7.remote_title))
-check("the remote title lands on the tab TOOLTIP as its second line",
+check("the remote title lands on the tab TOOLTIP as the line under the identity",
       win7.session_tabs.tabToolTip(0).splitlines()
       == [i18n.t("terminal.tab_close_tooltip"),
+          i18n.t("terminal.tab_identity", identity=session_identity(page7)),
           i18n.t("terminal.tab_remote_title", title="vim /etc/hosts")],
       repr(win7.session_tabs.tabToolTip(0)))
 check("the tab TEXT still carries the node alias (the tooltip is the second channel)",
@@ -483,9 +484,9 @@ check("an UNCHANGED title is not a change (the host is told once, the tooltip st
 
 page7.set_activity(True)
 app.processEvents()
-check("the activity mark's sentence keeps its own line above the remote title",
+check("the activity mark's sentence keeps its own line above the identity and the remote title",
       win7.session_tabs.tabToolTip(0).splitlines()[0] == i18n.t("terminal.tab_new_output")
-      and win7.session_tabs.tabToolTip(0).splitlines()[1]
+      and win7.session_tabs.tabToolTip(0).splitlines()[-1]
       == i18n.t("terminal.tab_remote_title", title="same title"))
 page7.set_activity(False)
 app.processEvents()
@@ -493,7 +494,8 @@ app.processEvents()
 win7.add_session(new_node(mw7, "omicron", "10.98.2.2").data, password="pw")
 app.processEvents()
 check("a session that never set a title carries the plain sentence (no empty second line)",
-      win7.session_tabs.tabToolTip(1) == i18n.t("terminal.tab_close_tooltip"))
+      win7.session_tabs.tabToolTip(1)
+      == session_tab_tooltip(win7.session_tabs.widget(1), i18n.t))
 check("the title follows the tab switch (the new session is on screen)",
       win7.windowTitle() == i18n.t("terminal.window_title", alias="omicron", host="10.98.2.2"),
       repr(win7.windowTitle()))

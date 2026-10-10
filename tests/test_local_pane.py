@@ -884,7 +884,8 @@ check_i18n_parity(LANGS)
 check_i18n_format(LANGS)
 NEW_KEYS = [k for k in LANGS["en"] if k.startswith("sftp.local.")]
 check(f"the {len(NEW_KEYS)} keys of the local pane are present and non-empty in EVERY language",
-      len(NEW_KEYS) == 18
+      len([k for k in NEW_KEYS if not k.endswith("_tooltip")]) == 18
+      and len(NEW_KEYS) == 20
       and all(str(data.get(k) or "").strip() for k in NEW_KEYS for data in LANGS.values()),
       f"{len(NEW_KEYS)} keys")
 check("the switch's values are TRANSLATED (never the raw key or the English literal)",
@@ -908,8 +909,8 @@ check("the i18n pin counts the SHIPPED release (897 + the 17 of v1.7.4rc1 + the 
       " truncation notice + the 6 of v1.7.5.1 + the 20 of v1.8: the elevated pane + the 41 of"
       " v1.8.1: the trust surface, and v1.8.1.1 adds ONE: the send identity sentence) and v1.8.2 adds SIXTEEN: the library file — the History door, the backup ring and the import/export pair"
       " — and v1.8.3 adds TWENTY-THREE: the Plugins window (its chrome, its three columns and its"
-      " export) and v1.8.4 adds TEN: the whole-map layout, the reverse traversal and the inode fact, and v1.9 adds FOUR: the production-tag guard — its title, the broadcast sentence and the paste sentence — and the notice of a checked selection that has left the map, and v1.9.1 adds ELEVEN: the reconnect and its `tmux attach`; v1.9.3 adds THIRTEEN: the command dialog's ten keys and the reader's encoding three; v1.9.6 adds THREE: the command guard's two sentences and the refusal line",
-      EXPECTED_I18N_KEYS == 897 + 17 + 1 + 4 + 6 + 20 + 41 + 1 + 16 + 23 + 10 + 4 + 11 + 13 + 3 + 12, str(EXPECTED_I18N_KEYS))
+      " export) and v1.8.4 adds TEN: the whole-map layout, the reverse traversal and the inode fact, and v1.9 adds FOUR: the production-tag guard — its title, the broadcast sentence and the paste sentence — and the notice of a checked selection that has left the map, and v1.9.1 adds ELEVEN: the reconnect and its `tmux attach`; v1.9.3 adds THIRTEEN: the command dialog's ten keys and the reader's encoding three; v1.9.6 adds THREE: the command guard's two sentences and the refusal line; v1.9.8 adds THIRTEEN: the two `Clear` asks with their hints and their title, the `Diagnostics ▸` submenu with its imperative row, the session tab's identity line, the two source-switch tooltips and the three fields of the Settings dialog's font row",
+      EXPECTED_I18N_KEYS == 897 + 17 + 1 + 4 + 6 + 20 + 41 + 1 + 16 + 23 + 10 + 4 + 11 + 13 + 3 + 12 + 13, str(EXPECTED_I18N_KEYS))
 check("VERSION_FORMAT did NOT move (a path is never written into a project)",
       __import__("version").VERSION_FORMAT == "0.9")
 check("no new dependency was added for the local pane (the four pinned ones)",

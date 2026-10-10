@@ -25,16 +25,29 @@ import ui.sidebar as SB
 def _ctx_action_keys():
     """The action keys the panel REQUIRES — from its own composition (v1.3.3.3).
 
-    The sidebar menu is data (``SidebarPanel.CONTEXT_MENU_ITEMS``) and the panel refuses
-    to build without a callback for every entry, so a test double must ask the module
-    instead of carrying a frozen list (which is exactly how v1.3.3.3's "Check statuses
-    now" broke these fakes)."""
-    return [e[0] for e in SB.CONTEXT_MENU_ITEMS if e is not None]
+    The sidebar menu is data (``SidebarPanel.CONTEXT_MENU_ITEMS`` plus the ``Diagnostics ▸``
+    group's rows, together ``CONTEXT_MENU_ACTIONS``) and the panel refuses to build without a
+    callback for every entry, so a test double must ask the module instead of carrying a frozen
+    list (which is exactly how v1.3.3.3's "Check statuses now" broke these fakes)."""
+    return list(SB.CONTEXT_MENU_ACTIONS)
 
 
 def _ctx_i18n_keys():
     """The i18n keys of the same composition, in the same order (the labels are data too)."""
     return [e[1] for e in SB.CONTEXT_MENU_ITEMS if e is not None]
+
+
+def _menu_rows(menu):
+    """Every row of a menu and of its submenus (v1.9.8: the diagnostic verbs are one group)."""
+    out = []
+    for action in menu.actions():
+        if action.isSeparator():
+            continue
+        out.append(action)
+        sub = action.menu()
+        if sub is not None:
+            out.extend(_menu_rows(sub))
+    return out
 
 
 # ══ 1. The MainWindow facade: the panel is built in, the public API is unchanged ═══════
@@ -170,17 +183,25 @@ menu = QMenu()
 panel_ctx.fill_context_menu(menu, fake_node)
 _actions = [a for a in menu.actions() if not a.isSeparator()]
 _seps = sum(1 for a in menu.actions() if a.isSeparator())
-_n_actions = len(_ctx_action_keys())
+_n_actions = len([e for e in SB.CONTEXT_MENU_ITEMS if e is not None])
 _n_seps = sum(1 for e in SB.CONTEXT_MENU_ITEMS if e is None)
-check(f"fill_context_menu: exactly {_n_actions} actions (one per CONTEXT_MENU_ITEMS entry)",
+check(f"fill_context_menu: exactly {_n_actions} top-level actions (one per CONTEXT_MENU_ITEMS "
+      f"entry)",
       len(_actions) == _n_actions, f"got {len(_actions)}")
 check(f"fill_context_menu: grouped by {_n_seps} separators", _seps == _n_seps,
       f"separators={_seps}")
 _expected = [_t(k) for k in _ctx_i18n_keys()]
 check("fill_context_menu: action order + i18n labels per CONTEXT_MENU_ITEMS",
       [a.text() for a in _actions] == _expected, str([a.text() for a in _actions]))
-check("fill_context_menu: the v1.3.3.3 'Check statuses now' entry is present",
-      _t("ctx.check_status") in [a.text() for a in _actions], str([a.text() for a in _actions]))
+check("fill_context_menu: the v1.3.3.3 'Check statuses now' entry is present (the "
+      "`Diagnostics ▸` group)",
+      _t("ctx.check_status") in [a.text() for a in _menu_rows(menu)],
+      str([a.text() for a in _menu_rows(menu)]))
+check("fill_context_menu: the group's four rows are the shared table's own order",
+      [a.text() for a in _menu_rows(menu) if a.text() in
+       [_t(k) for _key, k in SB.server_menu.DIAGNOSTIC_ITEMS]]
+      == [_t(k) for _key, k in SB.server_menu.DIAGNOSTIC_ITEMS],
+      str([a.text() for a in _menu_rows(menu)]))
 _copy_ip_action = next(a for a in _actions if a.text() == _t("ctx.copy_ip"))
 _copy_ip_action.trigger()  # ctx.copy_ip
 check("context menu action triggers its callback with the node", _calls == ["copy_ip"], str(_calls))

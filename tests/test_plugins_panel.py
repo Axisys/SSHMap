@@ -23,6 +23,12 @@ from PySide6.QtWidgets import QApplication, QDialog  # noqa: E402
 
 app = QApplication.instance() or QApplication(sys.argv)
 
+# The window's Clear asks before it empties the ring (the module-attribute stub pattern,
+# `AGENTS.md` §8): a modal question would block offscreen forever, so the whole file answers YES.
+from PySide6.QtWidgets import QMessageBox as _QMB  # noqa: E402
+
+_QMB.question = staticmethod(lambda *a, **k: _QMB.Yes)
+
 import i18n  # noqa: E402
 import modules.plugin_manager as PM  # noqa: E402
 import modules.plugin_runner as PR  # noqa: E402

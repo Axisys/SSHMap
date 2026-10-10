@@ -22,6 +22,26 @@ app = QApplication(sys.argv)
 from i18n import t as it
 from models.server import ServerData
 import ui.main_window as MW
+import ui.server_menu as SM
+
+
+#: Every submenu a walk entered (a collected wrapper destroys the C++ submenu and its rows, gotcha #9).
+_KEPT_MENUS = []
+
+
+def find_action(menu, label):
+    """The QAction of `label` in a menu OR in one of its submenus (v1.9.8: the diagnostic group)."""
+    for action in menu.actions():
+        if action.text() == label:
+            return action
+        sub = action.menu()
+        if sub is not None:
+            _KEPT_MENUS.append(sub)
+            _KEPT_MENUS.append(action)
+            found = find_action(sub, label)
+            if found is not None:
+                return found
+    return None
 
 win = MW.MainWindow()
 win.show(); app.processEvents()
@@ -81,19 +101,22 @@ try:
     # The per-release key additions are the changelog family's; the live total is the parity pin
     # (`EXPECTED_I18N_KEYS` in tests/_common.py) — never enumerated here.
     check_i18n_parity(langs)
-    _sidebar_keys = ["ctx.ssh_connect", "ctx.ssh_external", "ctx.edit_server",
-                     "ctx.copy_ip", "ctx.copy_hostname", "ctx.ping",
-                     "ctx.collect_info",
-                     # v1.3.3.3 (ROADMAP task 5): the on-demand status round
-                     "ctx.check_status",
-                     # v1.5.3 (ROADMAP task 3): "why is it offline?" — the reachability report
-                     "ctx.diagnose",
+    _sidebar_keys = ["ctx.ssh_connect", "ctx.ssh_external",
+                     # v1.6.8 (ROADMAP task 1): "Connect to…" — the row of the drawing gesture,
+                     # in the SSH group (all three answer "connect this server to something").
+                     "ctx.connect_to",
+                     "ctx.copy_ip", "ctx.copy_hostname",
+                     "ctx.edit_server",
+                     # v1.9.8 (task 2): the diagnostic verbs are ONE `Diagnostics ▸` submenu on both
+                     # surfaces — the table (`ui/server_menu.py`) owns their order.
+                     "ctx.diagnostics",
                      "ctx.reveal_on_map", "ctx.delete_server"]
-    # v1.6.8 (ROADMAP task 1): "Connect to…" — the row of the drawing gesture, in the
-    # SSH group (all three answer "connect this server to something").
-    _sidebar_keys.insert(2, "ctx.connect_to")
     check("all sidebar menu keys exist in every language",
           all(k in langs[c] for k in _sidebar_keys for c in ("en", "ru", "zh", "de")))
+    check("... and the diagnostic group's own four rows are the shared declaration's",
+          [k for _key, k in SM.DIAGNOSTIC_ITEMS] == ["ctx.ping", "ctx.check_status",
+                                                     "ctx.diagnose_offline", "ctx.collect_info"],
+          str(SM.DIAGNOSTIC_ITEMS))
 
     # ══ #1. The menu composition and order (ROADMAP v0.9.6, item 1; v1.0RC4: +Quick launch) ══
     print("== menu composition ==")
@@ -104,15 +127,16 @@ try:
         non_sep = [a.text() for a in actions if a.isSeparator() is False]
         n_sep = sum(1 for a in actions if a.isSeparator())
         # v1.0RC4: the first item — the "Quick launch" submenu (sb6a has no items →
-        # in it only "Configure…"), then a separator and the ROADMAP actions
-        # (v1.3.3.3: +"Check statuses now"; v1.5.3: +"Why is it offline?";
-        # v1.6.8: +"Connect to…" → 13 items).
-        expected_order = [it("ctx.quick_launch")] + [it(k) for k in _sidebar_keys]
-        check("menu has the Quick Launch submenu + the 12 ROADMAP actions",
-              len(non_sep) == 13, f"got {len(non_sep)}: {non_sep}")
-        check("action order: quick launch FIRST, then ROADMAP (ssh → … → diagnose → delete)",
+        # in it only "Configure…"), then a separator and the rows of the ONE shared table
+        # (`ui/server_menu.py`: v1.3.3.3 +"Check statuses now"; v1.5.3 +"Why is it offline?";
+        # v1.6.8 +"Connect to…"; v1.9.8: the four diagnostic verbs became the `Diagnostics ▸`
+        # submenu → 10 top-level rows).
+        expected_order = ([it("ctx.quick_launch")] + [it(k) for k in _sidebar_keys])
+        check("menu has the Quick Launch submenu + the 9 shared-table actions",
+              len(non_sep) == 10, f"got {len(non_sep)}: {non_sep}")
+        check("action order: quick launch FIRST, then the SHARED table (connect → … → delete)",
               non_sep == expected_order, f"got={non_sep} want={expected_order}")
-        check("menu grouped by 5 separators (4 ROADMAP + 1 after Quick Launch)",
+        check("menu grouped by 5 separators (4 shared-table sections + 1 after Quick Launch)",
               n_sep == 5, f"separators={n_sep}")
         # The submenu: a node without items — only "Configure…"
         ql_sub = next((a.menu() for a in actions if a.text() == it("ctx.quick_launch")), None)
@@ -121,6 +145,12 @@ try:
             ql_items = [a.text() for a in ql_sub.actions() if not a.isSeparator()]
             check("empty quick launch → submenu holds only 'Configure…'",
                   ql_items == [it("ql.configure")], str(ql_items))
+        # v1.9.8: the SAME four diagnostic rows, inside their own submenu, in the table's order
+        diag_sub = next((a.menu() for a in actions if a.text() == it("ctx.diagnostics")), None)
+        diag_rows = ([a.text() for a in diag_sub.actions() if not a.isSeparator()]
+                     if diag_sub is not None else [])
+        check("the Diagnostics submenu carries the table's four rows in its order",
+              diag_rows == [it(k) for _key, k in SM.DIAGNOSTIC_ITEMS], str(diag_rows))
 
         # ══ #2. The "card" actions are NOT duplicated in the list ══
         forbidden = {it("ctx.collapse_server"), it("ctx.expand_server"),
@@ -246,10 +276,9 @@ try:
         try:
             menu4 = _ctx_row(item1)
             if menu4:
-                for act in menu4.actions():
-                    if act.text() == it("ctx.collect_info"):
-                        act.trigger()
-                        break
+                _collect = find_action(menu4, it("ctx.collect_info"))
+                if _collect is not None:
+                    _collect.trigger()
             app.processEvents()
             check("collect-info action starts a collector with the node data",
                   len(collectors) == 1 and collectors[0]._data is n1.data,

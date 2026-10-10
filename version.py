@@ -11,6 +11,6 @@ Import it flat when running from the root:
 or relatively when the application is used as a package:
     from ..version import APP_VERSION"""
 
-APP_VERSION = "1.9.7"        # application release (startup log, window title)
+APP_VERSION = "1.9.8"        # application release (startup log, window title)
 APP_NAME = "SSH Map"         # base name (window title)
 VERSION_FORMAT = "0.9"       # project JSON format version (+ "background", storage/project.py)

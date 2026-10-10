@@ -284,7 +284,7 @@ check("N8: no setForeground call in ui/sidebar.py code", "setForeground" not in 
 check("N9: no DecorationRole in ui/sidebar.py code", "DecorationRole" not in _sb_code)
 
 # (b) behaviour: a row with tags — a caption in the text, ForegroundRole is not set
-from ui.sidebar import SidebarPanel, CONTEXT_MENU_ITEMS, _BUTTONS
+from ui.sidebar import SidebarPanel, CONTEXT_MENU_ACTIONS, _BUTTONS
 
 
 class _FakeNodeN8:
@@ -293,7 +293,7 @@ class _FakeNodeN8:
         self.status = ""
 
 
-_actions_n8 = {entry[0]: (lambda n: None) for entry in CONTEXT_MENU_ITEMS if entry is not None}
+_actions_n8 = {key: (lambda n: None) for key in CONTEXT_MENU_ACTIONS}
 panel = SidebarPanel(translate_fn=None, actions=_actions_n8)
 fake_nodes = [
     _FakeNodeN8(ServerData(id="n8a", alias="srv-a", host="10.0.0.1", user="u", ip="10.0.0.1",

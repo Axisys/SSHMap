@@ -28,6 +28,7 @@ import i18n
 import modules.local_fs_worker as LFW
 import modules.sftp_tab as STAB
 import modules.sftp_worker as SW
+from modules.sftp_pane_listing import ACTIVE_PANE_MARK
 from modules.sftp_tab import (SOURCE_LOCAL, SftpTab, _SftpRowItem, clamp_viewer_max_bytes,
                               format_size, preview_block_reason, resolve_viewer_max_bytes,
                               row_name, row_path, save_viewer_max_bytes)
@@ -538,7 +539,8 @@ check("§3 a LOCAL pane names THIS machine; a pane nobody identified keeps the s
       f"local={_lpane.header_text()!r} remote={_tab4.panes[0].header_text()!r}")
 _tab.set_session_info(key="followup", label="alpha", host="192.0.2.55", port=22, user="root")
 check("§3 the session's ALIAS wins the moment the container is identified",
-      _rpane.header_text() == "alpha" and _rpane.header_label.text() == "alpha",
+      _rpane.header_text() == "alpha"
+      and _rpane.header_label.text() == _rpane.header_text_marked(),
       _rpane.header_text())
 _tab.set_session_info(key="followup", label="", host="192.0.2.55", port=22, user="root")
 check("§3 ...and `user@host` is the fallback when it was never identified",
@@ -570,7 +572,8 @@ try:
     _tab.retranslate()
     _ru_text = _lpane.header_label.text()
     check("§3 a language switch re-texts the line through the pane's own key",
-          _ru_text == i18n.t("sftp.local.this_computer") and _ru_text != _en_text,
+          _ru_text.replace(ACTIVE_PANE_MARK, "", 1).strip()
+          == i18n.t("sftp.local.this_computer") and _ru_text != _en_text,
           f"en={_en_text!r} ru={_ru_text!r}")
 finally:
     i18n.set_language(_prev_lang or "en")
@@ -578,7 +581,7 @@ finally:
 _tab.refresh_theme()
 check("§3 a theme switch re-styles the line through the ONE registry key",
       theme_qss.style("status.sftp_row") in _lpane.header_label.styleSheet()
-      and _lpane.header_label.text() == _lpane.header_text(),
+      and _lpane.header_label.text() == _lpane.header_text_marked(),
       _lpane.header_label.styleSheet()[:60])
 check("§3 the single-pane views carry the line too (the session the pane belongs to)",
       len(_tab4.panes) == 1 and _tab4.panes[0].source_header_label() is not None)
@@ -599,7 +602,7 @@ check("the follow-up's four keys exist in EVERY language",
           for k in ("settings.tab.files", "settings.files.max_bytes",
                     "settings.files.max_bytes_warning", "sftp.viewer.truncated")))
 check("the i18n pin counts the slot's four keys (the v1.8 elevated pane's 20, the v1.8.1 trust "
-      "surface's 41 and the ONE of v1.8.1.1) and v1.8.2 adds SIXTEEN: the library file — the History door, the backup ring and the import/export pair — and v1.8.3 adds TWENTY-THREE: the Plugins window (its chrome, its three columns and its export) and v1.8.4 adds TEN: the whole-map layout, the reverse traversal and the inode fact, and v1.9 adds FOUR: the production-tag guard — its title, the broadcast sentence and the paste sentence — and the notice of a checked selection that has left the map, and v1.9.1 adds ELEVEN: the reconnect and its `tmux attach`; v1.9.3 adds THIRTEEN: the command dialog's ten keys and the reader's encoding three; v1.9.6 adds THREE: the command guard's two sentences and the refusal line",
-      EXPECTED_I18N_KEYS == 915 + 4 + 6 + 20 + 41 + 1 + 16 + 23 + 10 + 4 + 11 + 13 + 3 + 12 and releases_at_least(EXPECTED_APP_VERSION, "1.7.5"),
+      "surface's 41 and the ONE of v1.8.1.1) and v1.8.2 adds SIXTEEN: the library file — the History door, the backup ring and the import/export pair — and v1.8.3 adds TWENTY-THREE: the Plugins window (its chrome, its three columns and its export) and v1.8.4 adds TEN: the whole-map layout, the reverse traversal and the inode fact, and v1.9 adds FOUR: the production-tag guard — its title, the broadcast sentence and the paste sentence — and the notice of a checked selection that has left the map, and v1.9.1 adds ELEVEN: the reconnect and its `tmux attach`; v1.9.3 adds THIRTEEN: the command dialog's ten keys and the reader's encoding three; v1.9.6 adds THREE: the command guard's two sentences and the refusal line; v1.9.8 adds THIRTEEN: the two `Clear` asks with their hints and their title, the `Diagnostics ▸` submenu with its imperative row, the session tab's identity line, the two source-switch tooltips and the three fields of the Settings dialog's font row",
+      EXPECTED_I18N_KEYS == 915 + 4 + 6 + 20 + 41 + 1 + 16 + 23 + 10 + 4 + 11 + 13 + 3 + 12 + 13 and releases_at_least(EXPECTED_APP_VERSION, "1.7.5"),
       f"{EXPECTED_I18N_KEYS} / {EXPECTED_APP_VERSION}")
 finish()

@@ -152,8 +152,11 @@ QTabBar::tab {{
 QTabBar::tab:selected {{
     background-color: {t.surface_alt};
 }}
+/* v1.9.8 (task 5): an INACTIVE tab label keeps the primary ink — the muted tone the audit
+   measured was too close to the surface behind it, and the selected BACKGROUND is what tells the
+   two apart. */
 QTabBar::tab:!selected {{
-    color: {t.text_muted};
+    color: {t.text_primary};
 }}
 QHeaderView::section {{
     background-color: {t.base_bg};
@@ -287,8 +290,49 @@ QToolButton#UndoOfferButton:hover {{
     text-decoration: underline;
 }}
 """,
-    "status.sftp_row": lambda t: f"color: {t.text_muted}; padding: 2px 0;",    "status.terminal_row": lambda t: f"color: {t.text_muted}; padding: 4px 0;",
-    "status.terminal_bold": lambda t: f"font-weight: bold; color: {t.text_primary};",
+    "status.sftp_row": lambda t: f"color: {t.text_muted}; padding: 2px 0;",    "status.terminal_row": lambda t: f"color: {t.text_muted}; padding: 4px 0;",    "status.terminal_bold": lambda t: f"font-weight: bold; color: {t.text_primary};",
+    # v1.9.8 (task 3): the terminal's two CORNER controls (Split Terminal / Files Commander) and
+    # the session tab's close mark. The shipped buttons wore the global QPushButton rule, which
+    # paints no :checked state at all — a checkable control looked the same on and off. The padding
+    # stays TIGHT on purpose: the corner sits on the session tab bar, whose width is part of the
+    # terminal window's own 640 px floor.
+    "corner.button": lambda t: f"""
+QPushButton {{
+    background-color: {t.surface_alt};
+    color: {t.text_primary};
+    border: 1px solid {t.surface_alt};
+    border-radius: 4px;
+    padding: 2px 6px;
+}}
+QPushButton:hover {{
+    border: 1px solid {t.accent};
+}}
+QPushButton:checked {{
+    background-color: {t.accent_strong};
+    color: {t.canvas_bg};
+    border: 1px solid {t.accent_strong_hover};
+}}
+""",
+    # v1.9.8 (task 4): the source switch of a Files pane (`Server | Local | Elevated`). The
+    # INACTIVE state is what a user has to read — the platform's auto-raised QToolButton left it
+    # too close to the surface it sits on — so the ink is explicit and the ACTIVE state is the
+    # strong accent with a frame of its own. The padding stays TIGHT on purpose: this row sets the
+    # pane's minimum width, which the terminal window's own floor is built on.
+    "sftp.source_button": lambda t: f"""
+QToolButton {{
+    color: {t.text_primary};
+    background-color: transparent;
+    border: 1px solid transparent;
+    padding: 1px 3px;
+}}
+QToolButton:hover {{
+    border: 1px solid {t.accent};
+}}
+QToolButton:checked {{
+    color: {t.accent_strong};
+    border: 1px solid {t.accent_strong};
+}}
+""",
     # dialog separators and headings
     "separator": lambda t: f"color: {t.surface_alt};",
     "heading": lambda t: f"font-weight: bold; color: {t.text_primary};",

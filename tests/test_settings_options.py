@@ -326,12 +326,12 @@ clear_cfg()
 # 5. Item #5: the sidebar button block + the "View → Sidebar" menu item
 # ════════════════════════════════════════════════════════════
 print("== sidebar buttons ==")
-from ui.sidebar import SidebarPanel, _BUTTONS, CONTEXT_MENU_ITEMS
+from ui.sidebar import SidebarPanel, _BUTTONS, CONTEXT_MENU_ACTIONS
 
 # v1.3.3.3: the action keys of the panel's own context menu (it refuses to build without
 # a callback for every entry) — read from the module, never a frozen list.
 panel = SidebarPanel(translate_fn=i18n.t, actions={
-    e[0]: (lambda n, _k=e[0]: None) for e in CONTEXT_MENU_ITEMS if e is not None})
+    key: (lambda n, _k=key: None) for key in CONTEXT_MENU_ACTIONS})
 panel.show()
 app.processEvents()
 panel.set_buttons_visible(False)

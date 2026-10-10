@@ -547,7 +547,7 @@ print("== §7 release state + i18n parity ==")
 _NEW_KEYS = ("guard.command.text", "guard.command.broadcast", "plugins.command.guard_refused")
 check("§7 the release moved past v1.9.6 and the pin counts the guard's THREE new keys "
       "plus v1.9.7's TWELVE",
-      releases_at_least(EXPECTED_APP_VERSION, "1.9.6") and EXPECTED_I18N_KEYS == 1064 + 3 + 12,
+      releases_at_least(EXPECTED_APP_VERSION, "1.9.6") and EXPECTED_I18N_KEYS == 1064 + 3 + 12 + 13,
       f"{EXPECTED_APP_VERSION} {EXPECTED_I18N_KEYS}")
 langs = load_i18n_langs(ROOT)
 _missing = {code: [k for k in _NEW_KEYS if not str(data.get(k) or "").strip()]

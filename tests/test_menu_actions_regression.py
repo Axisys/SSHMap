@@ -285,7 +285,7 @@ check("the action is a permanent Edit-menu item (a context menu is rebuilt on ev
       len(edit_status) == 1
       and edit_status[0] in mw._hotkey_targets.get("node.check_status", []))
 check("the sidebar context menu composition gained 'check_status'",
-      any(e is not None and e[0] == "check_status" for e in SB.CONTEXT_MENU_ITEMS),
+      "check_status" in SB.CONTEXT_MENU_ACTIONS,
       str(SB.CONTEXT_MENU_ITEMS))
 
 # The GUI thread is never blocked: start_round() only builds the target list and starts

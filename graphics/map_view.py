@@ -61,6 +61,11 @@ except ImportError:
     except ImportError:  # flat layout without ui/unmanaged — no row is ever gated
         unmanaged = None
 
+try:  # v1.9.8 (ROADMAP v1.9.8, task 2): the ONE order of the server menu (the sidebar reads it too)
+    from ..ui import server_menu
+except ImportError:  # flat layout: the ui/ directory itself is on sys.path
+    from ui import server_menu
+
 
 if TYPE_CHECKING:
     from ..graphics.map_scene import MapScene
@@ -1162,6 +1167,199 @@ class MapView(QGraphicsView):
         else:
             super().contextMenuEvent(event)
 
+    def _node_menu_builders(self, win, win_node):
+        """The card menu's rows as `{key: builder(menu)}` — the shared table decides the sequence.
+
+        Each builder keeps the SHIPPED body of its row (the unmanaged gate, the closure over the
+        node, the window's duck-typed method); what `ui/server_menu.py` owns is WHEN it runs and
+        which section it lands in. A row whose builder is absent is simply not offered — that is
+        how a surface-only row stays declared instead of being levelled onto the other menu.
+        """
+        builders = {}
+
+        def quick_launch(menu):
+            # v1.0RC4: Quick launch — the FIRST item (above "Connect via SSH").
+            # Submenu: node.data.quick_launch items + separator + "Configure…".
+            # No items — only "Configure…" (discoverability). The hasattr pattern is
+            # the same as for the other actions: MapView doesn't know about MainWindow.
+            if hasattr(win, "_run_quick_launch_entry") or \
+                    hasattr(win, "_open_quick_launch_dialog"):
+                ql_entries = list(getattr(win_node.data, "quick_launch", None) or [])
+                ql_sub = menu.addMenu(_t("ctx.quick_launch"))
+                for e in ql_entries:
+                    if not hasattr(win, "_run_quick_launch_entry"):
+                        break
+                    act_ql = ql_sub.addAction(str(e.get("name") or e.get("value") or "?"))
+                    # v1.6.5 (ROADMAP task 4): a COMMAND entry is an SSH verb and is refused
+                    # for an unmanaged card; a URL entry stays — the browser needs no shell
+                    # on that host. The gate asks the ENTRY's type, not the row's.
+                    if str(e.get("type", "url")).strip().lower() == "command":
+                        _gate_row(act_ql, "ql_command", win_node, "ctx.quick_launch")
+
+                    def _ql(checked=False, n=win_node, en=e):  # checked — a bool from triggered
+                        w = self.window()
+                        if hasattr(w, "_run_quick_launch_entry"):
+                            w._run_quick_launch_entry(n, en)
+
+                    act_ql.triggered.connect(_ql)
+                if ql_entries:
+                    ql_sub.addSeparator()
+                if hasattr(win, "_open_quick_launch_dialog"):
+                    act_qc = ql_sub.addAction(_t("ql.configure"))
+
+                    def _ql_cfg(checked=False, n=win_node):  # checked — a bool from triggered
+                        w = self.window()
+                        if hasattr(w, "_open_quick_launch_dialog"):
+                            w._open_quick_launch_dialog(n)
+
+                    act_qc.triggered.connect(_ql_cfg)
+                menu.addSeparator()  # Quick launch is separated from the node's "main" menu
+
+        def ssh(menu):
+            if hasattr(win, "_connect_ssh_to_selected"):
+                act_ssh = menu.addAction(_t("ctx.ssh_connect"))
+                # v0.8.1: the first parameter is a bool `checked` from QAction.triggered;
+                # without it PySide calls _ssh(True), clobbering the win_node closure
+                # (crash in MainWindow._select_node: 'bool' object has no attribute 'setSelected').
+                def _ssh(checked=False, n=win_node):
+                    w = self.window()
+                    w._select_node(n)          # the SSH dialog takes the selected node
+                    w._connect_ssh_to_selected()
+
+                act_ssh.triggered.connect(_ssh)
+                # v1.6.5 (ROADMAP task 4): the whole SSH family of the node menu is
+                # DISABLED (with the reason in the tooltip) for an unmanaged card.
+                _gate_row(act_ssh, "ssh", win_node, "ctx.ssh_connect")
+
+        def external(menu):
+            # v0.8.2: connection in the OS system terminal
+            if hasattr(win, "_connect_ssh_external"):
+                act_ext = menu.addAction(_t("ctx.ssh_external"))
+
+                def _ssh_ext(checked=False, n=win_node):  # checked — a bool from triggered
+                    w = self.window()
+                    w._select_node(n)
+                    w._connect_ssh_external(n)
+
+                act_ext.triggered.connect(_ssh_ext)
+                _gate_row(act_ext, "external", win_node, "ctx.ssh_external")
+
+        def connect_to(menu):
+            # "Connect to…" — the ROW the discovered gesture needed. Shift+dragging from a card has
+            # created connections since v0.7 and opens the dialog PRE-FILLED, yet the colleagues who
+            # asked for "drawing connections" never found it: the undiscoverability WAS the defect. This
+            # row is ONE more entry point of the SAME call, so there is no new dialog, no new command and
+            # no new undo path. It is NOT gated for an unmanaged card — drawing a link needs no login.
+            if hasattr(win, "_add_connection"):
+                act_conn_to = menu.addAction(_t("ctx.connect_to"))
+
+                def _connect_to(checked=False, n=win_node):  # checked — a bool from triggered
+                    w = self.window()
+                    w._select_node(n)
+                    w._add_connection(default_source_id=n.data.id)
+
+                act_conn_to.triggered.connect(_connect_to)
+
+        def copy_ip(menu):
+            if hasattr(win, "_copy_node_info"):
+                act_ip = menu.addAction(_t("ctx.copy_ip"))
+                act_ip.triggered.connect(
+                    lambda _=False, n=win_node: self.window()._copy_node_info(n, "ip"))
+
+        def copy_hostname(menu):
+            if hasattr(win, "_copy_node_info"):
+                act_host = menu.addAction(_t("ctx.copy_hostname"))
+                act_host.triggered.connect(
+                    lambda _=False, n=win_node: self.window()._copy_node_info(n, "hostname"))
+
+        def edit(menu):
+            if hasattr(win, "_edit_node"):
+                act_edit = menu.addAction(_t("ctx.edit_server"))
+                act_edit.triggered.connect(lambda _=False, n=win_node: self.window()._edit_node(n))
+
+        def ping(menu):
+            if hasattr(win, "_ping_node"):
+                act_ping = menu.addAction(_t("ctx.ping"))
+                act_ping.triggered.connect(lambda _=False, n=win_node: self.window()._ping_node(n))
+                # v1.6.5 (ROADMAP task 5): the ICMP check is the ONE network call an
+                # unmanaged card may make — it stays in the menu, disabled until the card
+                # opted in (with the refusal sentence saying so).
+                _gate_row(act_ping, "ping", win_node, "ctx.ping")
+
+        def check_status(menu):
+            # "Check statuses now" — one on-demand round for the SELECTION (the clicked node when
+            # nothing is selected). The probes stay off the GUI thread (`StatusChecker.start_round` →
+            # `_ProbeThread`); the action is registered (an empty default) and appears in the sidebar
+            # menu too.
+            if hasattr(win, "_check_statuses_now"):
+                act_status = menu.addAction(_t("ctx.check_status"))
+                act_status.triggered.connect(
+                    lambda _=False, n=win_node: self.window()._check_statuses_now(n))
+                _gate_row(act_status, "check_status", win_node, "ctx.check_status")
+
+        def diagnose(menu):
+            # "Diagnose Offline…" (v1.9.8: the imperative the review asked for) — the on-demand
+            # reachability report (DNS → TCP → banner → ICMP ping) of THIS node; its sentence lands
+            # in the card tooltip, the status bar and the activity list.
+            if hasattr(win, "_diagnose_node"):
+                act_diag = menu.addAction(_t("ctx.diagnose_offline"))
+                act_diag.triggered.connect(
+                    lambda _=False, n=win_node: self.window()._diagnose_node(n))
+                _gate_row(act_diag, "diagnose", win_node, "ctx.diagnose_offline")
+
+        def collect_info(menu):
+            # v0.9: automatic server-info collection (Linux) over SSH.
+            # v1.5.3 (ROADMAP task 2): the row now starts the BOUNDED BATCH — the selection
+            # when several cards are selected, this node otherwise (`_collect_info_many`),
+            # so one entry covers "gather information for these" and "for this one".
+            if hasattr(win, "_collect_info_many"):
+                act_info = menu.addAction(_t("ctx.collect_info"))
+                act_info.triggered.connect(
+                    lambda _=False, n=win_node: self.window()._collect_info_many(node=n))
+                _gate_row(act_info, "collect_info", win_node, "ctx.collect_info")
+
+        def collapse(menu):
+            # v0.8.4 (former DESIGN.md §D): collapse/expand the badge
+            if hasattr(win_node, "toggle_collapsed"):
+                act_col = menu.addAction(
+                    _t("ctx.expand_server") if getattr(win_node.data, "collapsed", False)
+                    else _t("ctx.collapse_server"))
+                act_col.triggered.connect(lambda _=False, n=win_node: self._toggle_and_mark(n))
+
+        def duplicate(menu):
+            if hasattr(win, "_duplicate_node"):
+                # v0.9.3: node duplication (copy of fields + keyring password under a new id)
+                act_dup = menu.addAction(_t("ctx.duplicate_server"))
+                act_dup.triggered.connect(
+                    lambda _=False, n=win_node: self.window()._duplicate_node(n))
+
+        def delete(menu):
+            if hasattr(win, "_remove_node_guarded"):
+                act_delnode = menu.addAction(_t("ctx.delete_server"))
+                act_delnode.triggered.connect(
+                    lambda _=False, n=win_node: self.window()._remove_node_guarded(n))
+
+        def diagnostics(menu):
+            """The `Diagnostics ▸` submenu — the table's four verbs in the table's order.
+
+            The rows gate individually (each refuses on an unmanaged card with its own sentence),
+            so the group is a SECTION and not a policy; the sidebar builds the same group from the
+            same declaration.
+            """
+            sub = menu.addMenu(_t("ctx.diagnostics"))
+            for key, _i18n_key in server_menu.DIAGNOSTIC_ITEMS:
+                builder = builders.get(key)
+                if builder is not None:
+                    builder(sub)
+
+        builders.update(quick_launch=quick_launch, ssh=ssh, external=external,
+                        connect_to=connect_to, copy_ip=copy_ip, copy_hostname=copy_hostname,
+                        edit=edit, ping=ping, check_status=check_status, diagnose=diagnose,
+                        collect_info=collect_info, collapse=collapse, duplicate=duplicate,
+                        delete=delete, diagnostics=diagnostics)
+        return builders
+
+
     def build_context_menu(self, scene_pos):
         """The node/note/arrow/empty-space context menu for a scene point.
 
@@ -1223,130 +1421,21 @@ class MapView(QGraphicsView):
                     scene.remove_note(n.note_id)
             act_del.triggered.connect(_del_note)
 
-        # ── v0.7.3: node context menu ──────────────────────────
+        # ── v0.7.3: node context menu — the ROW ORDER is the ONE shared declaration ──
+        # `ui/server_menu.py` holds the sequence, the sections and the rows each surface offers;
+        # the sidebar row menu reads the SAME table, so the two menus of one server can never
+        # disagree about grouping, order or case again (AGENTS.md §4.x).
         if node is not None:
             win_node = node  # local reference for closures
-            # v1.0RC4: Quick launch — the FIRST item (above "Connect via SSH").
-            # Submenu: node.data.quick_launch items + separator + "Configure…".
-            # No items — only "Configure…" (discoverability). The hasattr pattern is
-            # the same as for the other actions: MapView doesn't know about MainWindow.
-            if hasattr(win, "_run_quick_launch_entry") or \
-                    hasattr(win, "_open_quick_launch_dialog"):
-                ql_entries = list(getattr(win_node.data, "quick_launch", None) or [])
-                ql_sub = menu.addMenu(_t("ctx.quick_launch"))
-                for e in ql_entries:
-                    if not hasattr(win, "_run_quick_launch_entry"):
-                        break
-                    act_ql = ql_sub.addAction(str(e.get("name") or e.get("value") or "?"))
-                    # v1.6.5 (ROADMAP task 4): a COMMAND entry is an SSH verb and is refused
-                    # for an unmanaged card; a URL entry stays — the browser needs no shell
-                    # on that host. The gate asks the ENTRY's type, not the row's.
-                    if str(e.get("type", "url")).strip().lower() == "command":
-                        _gate_row(act_ql, "ql_command", win_node, "ctx.quick_launch")
-                    def _ql(checked=False, n=win_node, en=e):  # checked — a bool from triggered
-                        w = self.window()
-                        if hasattr(w, "_run_quick_launch_entry"):
-                            w._run_quick_launch_entry(n, en)
-                    act_ql.triggered.connect(_ql)
-                if ql_entries:
-                    ql_sub.addSeparator()
-                if hasattr(win, "_open_quick_launch_dialog"):
-                    act_qc = ql_sub.addAction(_t("ql.configure"))
-                    def _ql_cfg(checked=False, n=win_node):  # checked — a bool from triggered
-                        w = self.window()
-                        if hasattr(w, "_open_quick_launch_dialog"):
-                            w._open_quick_launch_dialog(n)
-                    act_qc.triggered.connect(_ql_cfg)
-                menu.addSeparator()  # Quick launch is separated from the node's "main" menu
-            if hasattr(win, "_connect_ssh_to_selected"):
-                act_ssh = menu.addAction(_t("ctx.ssh_connect"))
-                # v0.8.1: the first parameter is a bool `checked` from QAction.triggered;
-                # without it PySide calls _ssh(True), clobbering the win_node closure
-                # (crash in MainWindow._select_node: 'bool' object has no attribute 'setSelected').
-                def _ssh(checked=False, n=win_node):
-                    w = self.window()
-                    w._select_node(n)          # the SSH dialog takes the selected node
-                    w._connect_ssh_to_selected()
-                act_ssh.triggered.connect(_ssh)
-                # v1.6.5 (ROADMAP task 4): the whole SSH family of the node menu is
-                # DISABLED (with the reason in the tooltip) for an unmanaged card.
-                _gate_row(act_ssh, "ssh", win_node, "ctx.ssh_connect")
-            # v0.8.2: connection in the OS system terminal
-            if hasattr(win, "_connect_ssh_external"):
-                act_ext = menu.addAction(_t("ctx.ssh_external"))
-                def _ssh_ext(checked=False, n=win_node):  # checked — a bool from triggered
-                    w = self.window()
-                    w._select_node(n)
-                    w._connect_ssh_external(n)
-                act_ext.triggered.connect(_ssh_ext)
-                _gate_row(act_ext, "external", win_node, "ctx.ssh_external")
-            # "Connect to…" — the ROW the discovered gesture needed. Shift+dragging from a card has
-            # created connections since v0.7 and opens the dialog PRE-FILLED, yet the colleagues who
-            # asked for "drawing connections" never found it: the undiscoverability WAS the defect. This
-            # row is ONE more entry point of the SAME call, so there is no new dialog, no new command and
-            # no new undo path. It is NOT gated for an unmanaged card — drawing a link needs no login.
-            if hasattr(win, "_add_connection"):
-                act_conn_to = menu.addAction(_t("ctx.connect_to"))
-                def _connect_to(checked=False, n=win_node):  # checked — a bool from triggered
-                    w = self.window()
-                    w._select_node(n)
-                    w._add_connection(default_source_id=n.data.id)
-                act_conn_to.triggered.connect(_connect_to)
-            if hasattr(win, "_edit_node"):
-                act_edit = menu.addAction(_t("ctx.edit_server"))
-                act_edit.triggered.connect(lambda _=False, n=win_node: self.window()._edit_node(n))
-            # v0.9: automatic server-info collection (Linux) over SSH.
-            # v1.5.3 (ROADMAP task 2): the row now starts the BOUNDED BATCH — the selection
-            # when several cards are selected, this node otherwise (`_collect_info_many`),
-            # so one entry covers "gather information for these" and "for this one".
-            if hasattr(win, "_collect_info_many"):
-                act_info = menu.addAction(_t("ctx.collect_info"))
-                act_info.triggered.connect(
-                    lambda _=False, n=win_node: self.window()._collect_info_many(node=n))
-                _gate_row(act_info, "collect_info", win_node, "ctx.collect_info")
-            # v0.8.4 (former DESIGN.md §D): collapse/expand the badge
-            if hasattr(win_node, "toggle_collapsed"):
-                act_col = menu.addAction(
-                    _t("ctx.expand_server") if getattr(win_node.data, "collapsed", False)
-                    else _t("ctx.collapse_server"))
-                act_col.triggered.connect(lambda _=False, n=win_node: self._toggle_and_mark(n))
-            menu.addSeparator()
-            if hasattr(win, "_copy_node_info"):
-                act_ip = menu.addAction(_t("ctx.copy_ip"))
-                act_ip.triggered.connect(lambda _=False, n=win_node: self.window()._copy_node_info(n, "ip"))
-                act_host = menu.addAction(_t("ctx.copy_hostname"))
-                act_host.triggered.connect(lambda _=False, n=win_node: self.window()._copy_node_info(n, "hostname"))
-                act_ping = menu.addAction(_t("ctx.ping"))
-                act_ping.triggered.connect(lambda _=False, n=win_node: self.window()._ping_node(n))
-                # v1.6.5 (ROADMAP task 5): the ICMP check is the ONE network call an
-                # unmanaged card may make — it stays in the menu, disabled until the card
-                # opted in (with the refusal sentence saying so).
-                _gate_row(act_ping, "ping", win_node, "ctx.ping")
-            # "Check statuses now" — one on-demand round for the SELECTION (the clicked node when nothing
-            # is selected). The probes stay off the GUI thread (`StatusChecker.start_round` →
-            # `_ProbeThread`); the action is registered (an empty default) and appears in the sidebar menu
-            # too. "Why is it offline?" — the on-demand reachability report (DNS → TCP → banner → ICMP
-            # ping) of THIS node; its sentence lands in the card tooltip, the status bar and the activity list.
-            if hasattr(win, "_diagnose_node"):
-                act_diag = menu.addAction(_t("ctx.diagnose"))
-                act_diag.triggered.connect(
-                    lambda _=False, n=win_node: self.window()._diagnose_node(n))
-                _gate_row(act_diag, "diagnose", win_node, "ctx.diagnose")
-            if hasattr(win, "_check_statuses_now"):
-                act_status = menu.addAction(_t("ctx.check_status"))
-                act_status.triggered.connect(
-                    lambda _=False, n=win_node: self.window()._check_statuses_now(n))
-                _gate_row(act_status, "check_status", win_node, "ctx.check_status")
-            menu.addSeparator()
-            if hasattr(win, "_duplicate_node"):
-                # v0.9.3: node duplication (copy of fields + keyring password under a new id)
-                act_dup = menu.addAction(_t("ctx.duplicate_server"))
-                act_dup.triggered.connect(
-                    lambda _=False, n=win_node: self.window()._duplicate_node(n))
-            if hasattr(win, "_remove_node_guarded"):
-                act_delnode = menu.addAction(_t("ctx.delete_server"))
-                act_delnode.triggered.connect(
-                    lambda _=False, n=win_node: self.window()._remove_node_guarded(n))
+            builders = self._node_menu_builders(win, win_node)
+            for row in server_menu.rows(server_menu.CARD):
+                if row is None:
+                    menu.addSeparator()
+                    continue
+                builder = builders.get(row[0])
+                if builder is not None:
+                    builder(menu)
+
             # ── the plugin rows (`PLUGINS.md` §3) ─────────────────────────────────
             # A plugin's `extend_node_context_menu(menu, nodes)` is called synchronously on the
             # GUI thread (200 ms budget, "never throws") with the live QMenu and the narrowed node

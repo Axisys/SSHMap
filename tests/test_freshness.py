@@ -408,7 +408,7 @@ check("§2 the gather action has a permanent Edit-menu item (the hotkey target r
           for a in _win.findChildren(QAction))
       and _win._hotkey_targets.get("node.collect_info"))
 check("§2 the sidebar row menu carries the gather row",
-      any(e is not None and e[0] == "collect_info" for e in SB.CONTEXT_MENU_ITEMS)
+      "collect_info" in SB.CONTEXT_MENU_ACTIONS
       and "collect_info" in _win.sidebar._actions)
 _src_map = open(os.path.join(ROOT, "graphics", "map_view.py"), encoding="utf-8").read()
 check("§2 the map's node context menu carries it too (ONE method, two surfaces)",
@@ -660,13 +660,13 @@ check("§3 a NEW probe result drops the old explanation (it described another st
 
 check("§3 the diagnose action is a registry action with an EMPTY default",
       "node.diagnose" in HR.action_ids() and HR.default_sequence("node.diagnose") == ""
-      and HR.HOTKEY_ACTIONS["node.diagnose"]["label"] == "ctx.diagnose")
+      and HR.HOTKEY_ACTIONS["node.diagnose"]["label"] == "ctx.diagnose_offline")
 check("§3 the sidebar row menu carries the diagnose row",
-      any(e is not None and e[0] == "diagnose" for e in SB.CONTEXT_MENU_ITEMS)
+      "diagnose" in SB.CONTEXT_MENU_ACTIONS
       and "diagnose" in _win.sidebar._actions)
 _src_map = open(os.path.join(ROOT, "graphics", "map_view.py"), encoding="utf-8").read()
 check("§3 the map's node context menu carries it too (ONE method, two surfaces)",
-      'ctx.diagnose' in _src_map and "_diagnose_node" in _src_map)
+      'ctx.diagnose_offline' in _src_map and "_diagnose_node" in _src_map)
 
 # the per-node guard: a second report for the same node while the first runs is refused
 class _NullSignal:

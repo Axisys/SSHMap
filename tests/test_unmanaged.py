@@ -96,9 +96,26 @@ def managed_data(**kw) -> ServerData:
     return ServerData(**base)
 
 
+#: The submenus a walk entered — a collected Python wrapper takes the C++ submenu and its rows with
+#: it (Qt gotcha #9), so every walk holds what it touched for the rest of the file.
+_KEPT_MENUS = []
+
+
 def labels_of(menu) -> dict:
-    """{action text: QAction} of a QMenu (the context-menu checks read the live widget)."""
-    return {a.text(): a for a in menu.actions()}
+    """{action text: QAction} of a QMenu and its SUBMENUS (the context-menu checks read the widget).
+
+    v1.9.8: the diagnostic verbs are one `Diagnostics ▸` group on both surfaces, so the walk has to
+    enter the submenus — and HOLD each one it enters, or the row it just found is deleted under it.
+    """
+    out = {}
+    for action in menu.actions():
+        out[action.text()] = action
+        sub = action.menu()
+        if sub is not None:
+            _KEPT_MENUS.append(sub)
+            _KEPT_MENUS.append(action)
+            out.update(labels_of(sub))
+    return out
 
 
 def expanded_height(node) -> int:
@@ -428,7 +445,7 @@ _other = win.scene.add_server(managed_data(id="gate-2", alias="mine", host="10.8
                                            x=900.0, y=0.0))
 app.processEvents()
 _gated_labels = [_t("ctx.ssh_connect"), _t("ctx.ssh_external"), _t("ctx.collect_info"),
-                 _t("ctx.check_status"), _t("ctx.diagnose"), _t("ctx.ping")]
+                 _t("ctx.check_status"), _t("ctx.diagnose_offline"), _t("ctx.ping")]
 
 # ── the MAP's context menu ───────────────────────────────────────────────────
 _map_menu = win.view.build_context_menu(_node.card_rect_scene().center())
@@ -797,8 +814,8 @@ check("§8 the i18n pin moved by the ELEVEN keys of this release and by the ELEV
       " v1.7.4rc2 adds 1: the refusal of a move that would cross the two sources, and"
       " v1.8.1 adds 41: the host-key question and its manager window, the credential prompt of the"
       " second factor and of a key's passphrase, and the endpoint-scope sentences, and v1.8.1.1 adds"
-      " ONE: the send identity sentence and v1.8.2 adds SIXTEEN: the library file — the History door, the backup ring and the import/export pair — and v1.8.3 adds TWENTY-THREE: the Plugins window (its chrome, its three columns and its export) and v1.8.4 adds TEN: the whole-map layout, the reverse traversal and the inode fact, and v1.9 adds FOUR: the production-tag guard — its title, the broadcast sentence and the paste sentence — and the notice of a checked selection that has left the map, and v1.9.1 adds ELEVEN: the reconnect and its `tmux attach`; v1.9.3 adds THIRTEEN: the command dialog's ten keys and the reader's encoding three; v1.9.6 adds THREE: the command guard's two sentences and the refusal line; v1.9.7 adds TWELVE: the dialog's four section titles, the four example placeholders, the required-field hint, the key-file tooltip and the two footer words",
-      EXPECTED_I18N_KEYS == 811 + 17 + 13 + 5 + 8 + 9 + 4 + 3 + 4 + 4 + 19 + 17 + 1 + 4 + 6 + 20 + 41 + 1 + 16 + 23 + 10 + 4 + 11 + 13 + 3 + 12,
+      " ONE: the send identity sentence and v1.8.2 adds SIXTEEN: the library file — the History door, the backup ring and the import/export pair — and v1.8.3 adds TWENTY-THREE: the Plugins window (its chrome, its three columns and its export) and v1.8.4 adds TEN: the whole-map layout, the reverse traversal and the inode fact, and v1.9 adds FOUR: the production-tag guard — its title, the broadcast sentence and the paste sentence — and the notice of a checked selection that has left the map, and v1.9.1 adds ELEVEN: the reconnect and its `tmux attach`; v1.9.3 adds THIRTEEN: the command dialog's ten keys and the reader's encoding three; v1.9.6 adds THREE: the command guard's two sentences and the refusal line; v1.9.8 adds THIRTEEN: the two `Clear` asks with their hints and their title, the `Diagnostics ▸` submenu with its imperative row, the session tab's identity line, the two source-switch tooltips and the three fields of the Settings dialog's font row; v1.9.7 adds TWELVE: the dialog's four section titles, the four example placeholders, the required-field hint, the key-file tooltip and the two footer words",
+      EXPECTED_I18N_KEYS == 811 + 17 + 13 + 5 + 8 + 9 + 4 + 3 + 4 + 4 + 19 + 17 + 1 + 4 + 6 + 20 + 41 + 1 + 16 + 23 + 10 + 4 + 11 + 13 + 3 + 12 + 13,
       str(EXPECTED_I18N_KEYS))
 _missing = {code: [k for k in NEW_KEYS if not str(data.get(k) or "").strip()]
             for code, data in LANGS.items()}

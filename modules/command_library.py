@@ -27,6 +27,16 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+try:  # v1.9.8 (task 3): the vector icon set of the header's icon-only buttons
+    from ..ui.icons import refresh_button_icon
+except ImportError:
+    try:
+        from ui.icons import refresh_button_icon
+    except ImportError:  # a stripped build — the buttons keep their text
+        def refresh_button_icon(button, name):  # noqa: N802 — stub with the shipped signature
+            return False
+
+
 try:  # v1.2.5: the central theme (the terminal_page/terminal_dock pattern)
     from ..ui import theme
 except ImportError:
@@ -251,6 +261,10 @@ COMMANDS_BACKUPS_MAX = 100
 
 #: The longest NAME the History door pre-fills out of a row (the first line of its command).
 SUGGESTED_NAME_MAX = 60
+
+#: How wide the panel's Name column may grow when it is measured from the content (v1.9.8): a very
+#: long name is the tooltip's job, not a column that pushes the command off the panel.
+CMDLIB_NAME_COLUMN_MAX = 280
 
 #: The machine reasons of `read_library_file()` / `export_library_file()` — data, never a UI string
 #: (the language pair's shape: the caller renders them in its own language).
@@ -769,7 +783,9 @@ class CommandLibraryPanel(QWidget):
         # the actions stay on the panel, because a dying Python QAction wrapper destroys its QMenu
         # (Qt gotcha #9). The button's own label is a glyph — nothing to translate.
         self._file_btn = QToolButton()
-        self._file_btn.setText("…")
+        # v1.9.8 (task 3): the icon-only buttons of this header carry a GLYPH and a tooltip — the
+        # shipped "…" was a text character no icon walk could re-theme.
+        refresh_button_icon(self._file_btn, "menu_dots")
         self._file_btn.setToolTip(t("terminal.cmdlib.file_menu_tooltip"))
         self._file_btn.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
         self._file_menu = QMenu(self._file_btn)
@@ -848,6 +864,14 @@ class CommandLibraryPanel(QWidget):
                 widget.update()
             except RuntimeError:
                 continue
+        # v1.9.8 (task 3): the header's two painted ICONS follow the theme too — a pixmap is a
+        # value, so the tone has to be re-applied, not only the widget repainted.
+        try:
+            self._collapse_btn.setIcon(QIcon())
+            self._collapse_btn.setIcon(_diamond_icon())
+            refresh_button_icon(self._file_btn, "menu_dots")
+        except RuntimeError:
+            pass  # Qt teardown — the buttons are already destroyed
 
     def retranslate(self):
         """v1.3.3.1: re-text the panel in the current language.
@@ -983,12 +1007,31 @@ class CommandLibraryPanel(QWidget):
             for e in by_cat[cat]:
                 child = QTreeWidgetItem([e["name"], e["command"]])
                 child.setData(0, Qt.ItemDataRole.UserRole, e["id"])
+                # v1.9.8 (task 3): the row's FULL text travels as its tooltip — an elided name was
+                # unreadable without opening Edit (the command is the second half of the same fact).
+                child.setToolTip(0, str(e["name"]))
+                child.setToolTip(1, str(e["command"]))
                 if not e.get("enabled", True):
                     child.setForeground(0, muted)   # disabled — muted
                     child.setForeground(1, muted)
                 top.addChild(child)
         self.tree.expandAll()
+        self._fit_name_column()
         self._apply_filter()
+
+    def _fit_name_column(self):
+        """Size the Name column from the CONTENT (the shipped seed needs 120–288 px).
+
+        The literal 100 px this replaces elided every one of the five seeded commands; the cap
+        keeps a very long name from pushing the command column off the panel, and the second
+        column keeps the rest of the width. Never raises.
+        """
+        try:
+            self.tree.resizeColumnToContents(0)
+            if int(self.tree.columnWidth(0)) > CMDLIB_NAME_COLUMN_MAX:
+                self.tree.setColumnWidth(0, CMDLIB_NAME_COLUMN_MAX)
+        except RuntimeError:
+            pass  # Qt teardown — the tree is already destroyed
 
     def _entry_for_item(self, item):
         """The live entry (from self._by_id) by the id from item.data; None — a category/none."""

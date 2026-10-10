@@ -21,6 +21,17 @@ from PySide6.QtWidgets import (
     QSplitter, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget,
 )
 
+try:  # the window's own stylesheets are the ONE registry (ui/theme_qss.py, AGENTS.md §4.6)
+    from ..ui import theme_qss
+except ImportError:
+    try:
+        from ui import theme_qss
+    except ImportError:
+        try:
+            import theme_qss  # type: ignore
+        except ImportError:  # a stripped build — the captions keep the application style
+            theme_qss = None
+
 try:  # the manager is the MODEL of this window (the panel never imports the window module)
     from ..modules import plugin_manager as PM
 except ImportError:
@@ -82,6 +93,14 @@ KIND_PLUGIN_STATUS = "plugin_status"
 #: The level shown for a `ctx.status()` row — the activity ring's own spelling of "the interface
 #: said so" (`modules/activity_log.py` owns the vocabulary; a missing module costs the fallback).
 LEVEL_STATUS = getattr(AL, "LEVEL_STATUS", "UI")
+
+#: The stamp of an event row — the activity ring's OWN renderer and format (date included).
+STAMP_FORMAT = getattr(AL, "STAMP_FORMAT", "%Y-%m-%d %H:%M:%S")
+#: The width of the stamp column: the full `STAMP_FORMAT` needs it whatever the rows hold.
+STAMP_COLUMN_WIDTH = 152
+#: How wide a CONTENT-measured column may grow (a long plugin or host name is a tooltip's job,
+#: not a column that pushes its neighbours off the pane).
+MEASURED_COLUMN_MAX = 240
 
 
 def _t(key: str, **kw) -> str:
@@ -220,10 +239,21 @@ class PluginEvent:
         self.text = str(text or "")
         self.detail = str(detail or "")
 
-    def time_text(self, fmt: str = "%H:%M:%S") -> str:
-        """The clock time of the event (the first column). Never raises."""
+    def time_text(self, fmt: str = None) -> str:
+        """The stamp of the event — the DATE and the clock, through the activity ring's renderer.
+
+        ONE renderer for the two panels (`modules/activity_log.py: stamp_text`): the ring and this
+        window list the same kind of fact, so a row (and the export built from the rows) may not
+        spell a stamp two ways.
+        """
+        renderer = getattr(AL, "stamp_text", None)
+        if callable(renderer):
+            try:
+                return str(renderer(self.timestamp, fmt) if fmt else renderer(self.timestamp))
+            except Exception:  # noqa: BLE001 — a broken renderer falls back to the format below
+                pass
         try:
-            return time.strftime(fmt, time.localtime(self.timestamp))
+            return time.strftime(fmt or STAMP_FORMAT, time.localtime(self.timestamp))
         except (ValueError, OSError):
             return ""
 
@@ -314,8 +344,14 @@ class PluginsPanel(QDialog):
 
     # ── the assembly ──────────────────────────────────────────────────────────
 
-    def _make_tree(self, columns: int) -> QTreeWidget:
-        """A flat, read-only tree of `columns` columns (the window lists, it never edits)."""
+    def _make_tree(self, columns: int, stretch_last: bool = True) -> QTreeWidget:
+        """A flat, read-only tree of `columns` columns (the window lists, it never edits).
+
+        `stretch_last` is OFF for the two short-column tables (the plugin list and the server
+        list): their columns are MEASURED from the content, so a literal width can never cut a
+        version or a port. The event table keeps it — its message column is the one that must
+        take every pixel left.
+        """
         tree = QTreeWidget(self)
         tree.setColumnCount(columns)
         tree.setRootIsDecorated(False)
@@ -324,20 +360,17 @@ class PluginsPanel(QDialog):
         tree.setAllColumnsShowFocus(True)
         tree.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         tree.setSelectionMode(QTreeWidget.SelectionMode.ExtendedSelection)
-        tree.header().setStretchLastSection(True)
+        tree.header().setStretchLastSection(bool(stretch_last))
         return tree
 
-    def _column(self, caption_attr: str, tree: QTreeWidget, empty_attr: str,
-                widths=()) -> QWidget:
-        """One column of the splitter: a caption, the tree and its empty-state sentence."""
+    def _column(self, caption_attr: str, tree: QTreeWidget, empty_attr: str) -> QWidget:
+        """One column of the splitter: a SECTION title, the tree and its empty-state sentence."""
         holder = QWidget(self)
         box = QVBoxLayout(holder)
         box.setContentsMargins(0, 0, 0, 0)
         caption = QLabel(holder)
         setattr(self, caption_attr, caption)
         box.addWidget(caption)
-        for index, width in enumerate(widths):
-            tree.setColumnWidth(index, width)
         box.addWidget(tree, 1)
         empty = QLabel(holder)
         empty.setWordWrap(True)
@@ -346,6 +379,34 @@ class PluginsPanel(QDialog):
         box.addWidget(empty)
         return holder
 
+    @staticmethod
+    def _fit_columns(tree: QTreeWidget, measure: int, cap: int = MEASURED_COLUMN_MAX) -> None:
+        """Size the first `measure` columns from their CONTENT (capped); never raises.
+
+        The literal widths this replaces were guesses: the audit measured a 60 px `Version` and a
+        50 px `Port` sized for the shortest possible value. A column nobody measured cuts the
+        value a user came to read; the cap keeps a long name from pushing its neighbours away.
+        """
+        try:
+            for index in range(max(0, int(measure))):
+                tree.resizeColumnToContents(index)
+                if int(tree.columnWidth(index)) > int(cap):
+                    tree.setColumnWidth(index, int(cap))
+        except RuntimeError:
+            pass  # Qt teardown — the tree is already destroyed
+
+    def _apply_caption_style(self):
+        """Style the three captions as SECTION titles (the ONE registry, not a literal QSS)."""
+        for caption in (getattr(self, "plugin_caption", None), getattr(self, "server_caption", None),
+                        getattr(self, "event_caption", None)):
+            if caption is None:
+                continue
+            try:
+                if theme_qss is not None:
+                    caption.setStyleSheet(theme_qss.style("heading"))
+            except RuntimeError:
+                continue  # Qt teardown — the caption is already destroyed
+
     def _build_ui(self):
         """Build the three columns and the button row (the chrome is re-texted by `retranslate()`)."""
         layout = QVBoxLayout(self)
@@ -353,23 +414,24 @@ class PluginsPanel(QDialog):
         layout.addWidget(self.splitter, 1)
 
         # ── the plugins (the persisted enable switch is the row's own checkmark) ──
-        self.plugin_tree = self._make_tree(2)
+        self.plugin_tree = self._make_tree(2, stretch_last=False)
         self.plugin_tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.plugin_tree.customContextMenuRequested.connect(self._on_plugin_menu_requested)
         self.plugin_tree.itemChanged.connect(self._on_plugin_item_changed)
         self.splitter.addWidget(self._column("plugin_caption", self.plugin_tree,
-                                            "plugin_empty", (160, 60)))
+                                            "plugin_empty"))
 
         # ── the servers (a checked row is a run target; none checked = the whole registry) ──
-        self.server_tree = self._make_tree(4)
+        self.server_tree = self._make_tree(4, stretch_last=False)
         self.server_tree.itemChanged.connect(self._on_server_item_changed)
         self.splitter.addWidget(self._column("server_caption", self.server_tree,
-                                            "server_empty", (105, 115, 65, 50)))
+                                             "server_empty"))
 
         # ── the events (the session ring, newest first — the Activity panel's four cells) ──
         self.event_tree = self._make_tree(4)
+        self.event_tree.setColumnWidth(0, STAMP_COLUMN_WIDTH)
         self.splitter.addWidget(self._column("event_caption", self.event_tree,
-                                            "event_empty", (66, 70, 130)))
+                                             "event_empty"))
         try:
             # The EVENT pane takes the largest share: the message column is the one a user reads.
             self.splitter.setSizes([225, 335, 560])
@@ -380,6 +442,11 @@ class PluginsPanel(QDialog):
         self.run_btn = QPushButton(self)
         self.run_btn.clicked.connect(self._on_run_clicked)
         row.addWidget(self.run_btn)
+        # The shipped tooltip as an INLINE hint: a disabled Run button beside a sentence that says
+        # why is readable without hovering (`plugins.window.checked_hint`, no new string).
+        self.run_hint = QLabel(self)
+        self.run_hint.setWordWrap(False)
+        row.addWidget(self.run_hint)
         row.addStretch(1)
         self.clear_btn = QPushButton(self)
         self.clear_btn.clicked.connect(self.clear)
@@ -427,8 +494,9 @@ class PluginsPanel(QDialog):
             self.event_caption.setText(_t("plugins.window.events"))
             self.run_btn.setText(_t("plugins.window.run"))
             self.run_btn.setToolTip(_t("plugins.window.checked_hint"))
+            self.run_hint.setText(_t("plugins.window.checked_hint"))
             self.clear_btn.setText(_t("plugins.window.clear"))
-            self.clear_btn.setToolTip(_t("plugins.window.clear"))
+            self.clear_btn.setToolTip(_t("plugins.window.clear_hint"))
             self.export_btn.setText(_t("plugins.window.export"))
             self.export_btn.setToolTip(_t("plugins.window.export"))
             self.plugin_empty.setText(_t("plugins.empty"))
@@ -446,6 +514,12 @@ class PluginsPanel(QDialog):
                                              _t("plugins.window.col.message")])
         except RuntimeError:
             return  # Qt teardown — nothing to re-text
+        if theme_qss is not None:
+            try:
+                self.run_hint.setStyleSheet(theme_qss.style("status.muted"))
+            except RuntimeError:
+                pass  # Qt teardown — the hint is already destroyed
+        self._apply_caption_style()
 
     # ── the model (the manager is the ONLY source of records and nodes) ────────
 
@@ -540,6 +614,7 @@ class PluginsPanel(QDialog):
             except RuntimeError:
                 pass
             self._building = False
+        self._fit_columns(self.plugin_tree, 2)
         self._toggle_empty(self.plugin_tree, self.plugin_empty)
         self._sync_run_enabled()
 
@@ -575,6 +650,7 @@ class PluginsPanel(QDialog):
             except RuntimeError:
                 pass
             self._building = False
+        self._fit_columns(self.server_tree, 4)
         self._toggle_empty(self.server_tree, self.server_empty)
         self._sync_run_enabled()
 
@@ -658,11 +734,17 @@ class PluginsPanel(QDialog):
             pass  # Qt teardown
 
     def _sync_run_enabled(self) -> None:
-        """The global Run button follows the menu item's rule: a capable plugin AND servers."""
+        """The global Run button follows the menu item's rule: a capable plugin AND servers.
+
+        The shipped TOOLTIP is mirrored by the inline hint beside the button, and both are shown
+        exactly while the button is disabled — a dead control always says why it is dead.
+        """
         try:
             capable = any(PM is not None and PM.HOOK_RUN_ON_NODES in (getattr(rec, "hooks", ()) or ())
                           and bool(getattr(rec, "ok", False)) for rec in self._manager_records())
-            self.run_btn.setEnabled(bool(capable) and bool(self._manager_nodes()))
+            enabled = bool(capable) and bool(self._manager_nodes())
+            self.run_btn.setEnabled(enabled)
+            self.run_hint.setVisible(not enabled)
         except RuntimeError:
             pass  # Qt teardown
 
@@ -804,7 +886,19 @@ class PluginsPanel(QDialog):
         return self.ring.newest_first()
 
     def clear(self):
-        """Clear the session HISTORY (the ring itself, not only the rows)."""
+        """Clear the session HISTORY (the ring itself, not only the rows) — after ONE question.
+
+        The ring is memory-only and nothing else is affected, but it is the window's whole record
+        of what the plugins did, so emptying it is a decision rather than a stray click.
+        """
+        try:
+            reply = QMessageBox.question(
+                self, _t("dialog.confirm_clear"), _t("plugins.window.clear_confirm"),
+                QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+        except RuntimeError:
+            return  # Qt teardown — nothing to ask and nothing to clear
+        if reply != QMessageBox.Yes:
+            return
         self.ring.clear()
         self.refresh_events()
 

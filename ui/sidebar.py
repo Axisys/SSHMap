@@ -47,6 +47,11 @@ except ImportError:
     except ImportError:  # flat layout without ui/status_shape — the v1.4.x round dot
         status_shape = None
 
+try:  # v1.9.8 (ROADMAP v1.9.8, task 2): the ONE order of the server menu (the card reads it too)
+    from . import server_menu
+except ImportError:
+    from ui import server_menu
+
 try:  # v1.6.5 (ROADMAP task 6): the ONE predicate behind the Status cell of the table
     from ..models.server import is_unmanaged as _is_unmanaged
 except ImportError:
@@ -73,37 +78,38 @@ except ImportError:
         unmanaged = None
 
 
-# Context menu action keys (order and separators — ROADMAP v0.9.6, item 1).
-# "Card" actions are deliberately NOT duplicated (ROADMAP #2): the drag
-# connection and panel collapse/expand live only in the map context, where
-# they make sense.
-CONTEXT_MENU_ITEMS = (
-    ("ssh", "ctx.ssh_connect"),
-    ("external", "ctx.ssh_external"),
-    # v1.6.8 (ROADMAP task 1): "Connect to…" — the row that makes the map's drawing
-    # gesture reachable. It sits with the two SSH rows because all three answer "connect
-    # this server to something"; it is NOT a login verb (it only fills a dialog), so it
-    # is deliberately absent from `ui/unmanaged.GATED_ACTIONS`.
-    ("connect_to", "ctx.connect_to"),
-    None,  # separator
-    ("edit", "ctx.edit_server"),
-    None,
-    ("copy_ip", "ctx.copy_ip"),
-    ("copy_hostname", "ctx.copy_hostname"),
-    ("ping", "ctx.ping"),
-    ("collect_info", "ctx.collect_info"),
-    # v1.3.3.3 (ROADMAP task 5): the on-demand status round — the same entry point as
-    # on the map; the row's node is the fallback when nothing is selected.
-    ("check_status", "ctx.check_status"),
-    # v1.5.3 (ROADMAP task 3): "why is it offline?" — the on-demand reachability report
-    # (DNS → TCP → banner → ICMP ping). It sits next to the status round because it is the
-    # question that round raises: a red row, and no answer beyond "offline".
-    ("diagnose", "ctx.diagnose"),
-    None,
-    ("reveal", "ctx.reveal_on_map"),
-    None,
-    ("delete", "ctx.delete_server"),
-)
+# Context menu action keys. The ROW ORDER and the sections are the ONE shared declaration
+# (`ui/server_menu.py`) the map's card menu reads too, so the two menus of one server cannot
+# disagree about sequence, grouping or case. The row set is the table's own (`SIDEBAR`), the
+# diagnostic verbs are one `Diagnostics ▸` submenu and Quick Launch has its own builder (its
+# callbacks are optional, and it owns the separator under it).
+def _sidebar_menu_items() -> tuple:
+    """`CONTEXT_MENU_ITEMS` from the shared table — separators included, Quick Launch excluded.
+
+    The Quick Launch submenu is built by `_fill_quick_launch()` (its two callbacks are OPTIONAL,
+    so the row cannot be a required action), and that builder owns the separator under it.
+    """
+    out = []
+    for row in server_menu.rows(server_menu.SIDEBAR):
+        if row is not None and row[0] == "quick_launch":
+            continue
+        if row is None and not out:
+            continue          # the separator under Quick Launch is that builder's own
+        if row is None and out[-1] is None:
+            continue          # a boundary the filtered row left empty is not a section
+        out.append(row)
+    return tuple(out)
+
+
+CONTEXT_MENU_ITEMS = _sidebar_menu_items()
+
+#: The callback keys the panel REQUIRES: the rows of `CONTEXT_MENU_ITEMS` plus the rows of the
+#: `Diagnostics ▸` submenu — they are rendered INSIDE that group, so they are not top-level
+#: entries of the tuple above, and a consumer that forgot one would silently lose a row.
+CONTEXT_MENU_ACTIONS = tuple(
+    [entry[0] for entry in CONTEXT_MENU_ITEMS
+     if entry is not None and entry[0] != server_menu.DIAGNOSTICS_KEY]
+    + [key for key, _i18n_key in server_menu.DIAGNOSTIC_ITEMS])
 
 # Panel buttons: (attribute, icon, i18n key, fallback) — order as in the
 # original _setup_ui.
@@ -601,7 +607,8 @@ class SidebarPanel(QWidget):
         :param translate_fn: i18n callback (key, **kw) -> str; None — i18n
             unavailable (strings stay the English fallback literals from construction).
         :param actions: {action key: callable(node)} for the context menu;
-            all keys from CONTEXT_MENU_ITEMS are required.
+            every key of `CONTEXT_MENU_ACTIONS` is required (the `Diagnostics ▸` group's four
+            rows included).
         :param show_title: whether to create the "Servers" title (MainWindow
             passes _i18n_available — earlier the label was created only when
             i18n was available).
@@ -609,8 +616,7 @@ class SidebarPanel(QWidget):
         super().__init__(parent)
         self._translate = translate_fn
         self._actions = dict(actions or {})
-        missing = [entry[0] for entry in CONTEXT_MENU_ITEMS
-                   if entry is not None and entry[0] not in self._actions]
+        missing = [key for key in CONTEXT_MENU_ACTIONS if key not in self._actions]
         if missing:
             raise ValueError(f"SidebarPanel: no callbacks for actions {missing}")
 
@@ -1333,7 +1339,7 @@ class SidebarPanel(QWidget):
     # ── Context menu (composition v0.9.6; the QMenu object is created by MainWindow) ─────
 
     def fill_context_menu(self, menu, node) -> None:
-        """Fill the QMenu with the node's action items (order — ROADMAP v0.9.6).
+        """Fill the QMenu with the node's action items — the order is the SHARED declaration.
 
         `menu` is created by MainWindow (QMenu — module-level global in
         main_window; this keeps the test seam for monkeypatching the menu
@@ -1343,6 +1349,9 @@ class SidebarPanel(QWidget):
         v1.0RC4: first item — the "Quick Launch" submenu (if the consumer
         passed the ql_entry/ql_configure callbacks; without them the menu is
         as in v0.9.6 — backward-compat for old calling code).
+
+        v1.9.8 (task 2): the sequence, the sections and the row set come from `ui/server_menu.py`
+        (the card menu reads the SAME table); the diagnostic verbs are one `Diagnostics ▸` submenu.
         """
         self._fill_quick_launch(menu, node)
         for entry in CONTEXT_MENU_ITEMS:
@@ -1350,6 +1359,9 @@ class SidebarPanel(QWidget):
                 menu.addSeparator()
                 continue
             action_key, i18n_key = entry
+            if action_key == server_menu.DIAGNOSTICS_KEY:
+                self._fill_diagnostics(menu, node)
+                continue
             label = self._tr(i18n_key)
             act = menu.addAction(label)
             callback = self._actions[action_key]
@@ -1360,6 +1372,24 @@ class SidebarPanel(QWidget):
             # context menu asks (`ui/unmanaged.py` owns the table and the sentence), so the
             # two menus can never disagree about which verb needs a login.
             self._gate_row(act, action_key, node, label)
+
+    def _fill_diagnostics(self, menu, node) -> None:
+        """The `Diagnostics ▸` submenu — the table's four verbs, each with its OWN gate.
+
+        The rows belong to the session (`ping`, `check_status`, `diagnose`, `collect_info` of
+        `ui/server_menu.py: DIAGNOSTIC_ITEMS`), so the card menu builds the same group in the same
+        order; a row without a callback is skipped rather than shown dead.
+        """
+        sub = menu.addMenu(self._tr(server_menu.label_key(server_menu.DIAGNOSTICS_KEY)))
+        for action_key, i18n_key in server_menu.DIAGNOSTIC_ITEMS:
+            callback = self._actions.get(action_key)
+            if callback is None:
+                continue
+            label = self._tr(i18n_key)
+            act = sub.addAction(label)
+            act.triggered.connect(lambda checked=False, n=node, cb=callback: cb(n))
+            self._gate_row(act, action_key, node, label)
+        return sub
 
     def _gate_row(self, act, action: str, node, label: str) -> bool:
         """Disable ONE row the unmanaged gate refuses (v1.6.5; False — it was left alone)."""

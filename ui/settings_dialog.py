@@ -626,6 +626,11 @@ class SettingsDialog(QDialog):
         # live without a restart (MainWindow: QApplication.setFont on OK and at startup).
         ui_cfg = load_ui_settings()
         self.ui_font_family_edit = QLineEdit(ui_cfg["font_family"])
+        # v1.9.8 (task 5): the ONE field of the tab that EXPECTS a font name says so — a bare box
+        # was all a user saw (the audit's finding), so it gains a placeholder and the rule in words.
+        self.ui_font_family_edit.setPlaceholderText(
+            _t("settings.general.ui_font_family_placeholder"))
+        self.ui_font_family_edit.setToolTip(_t("settings.general.ui_font_family_hint"))
         self._lbl_ui_font_family = QLabel(_t("settings.general.ui_font_family"))
         form.addRow(self._lbl_ui_font_family, self.ui_font_family_edit)
         # 0 = the system size (specialValueText); the validator range is 6..72
@@ -633,6 +638,9 @@ class SettingsDialog(QDialog):
         self.ui_font_size_spin.setRange(0, 72)
         self.ui_font_size_spin.setValue(ui_cfg["font_size"] or 0)
         self.ui_font_size_spin.setSpecialValueText(_t("settings.ui_font_system"))
+        # v1.9.8 (task 5): the "0 = system" rule left the LABEL (which now spells the control the
+        # way the Terminal tab does) and lives in the tooltip of the field it describes.
+        self.ui_font_size_spin.setToolTip(_t("settings.general.ui_font_size_hint"))
         self._lbl_ui_font_size = QLabel(_t("settings.general.ui_font_size"))
         form.addRow(self._lbl_ui_font_size, self.ui_font_size_spin)
 
@@ -2116,8 +2124,12 @@ class SettingsDialog(QDialog):
 
         # v1.1.1: UI font + sidebar buttons ("General" tab)
         self._lbl_ui_font_family.setText(_t("settings.general.ui_font_family"))
+        self.ui_font_family_edit.setPlaceholderText(
+            _t("settings.general.ui_font_family_placeholder"))
+        self.ui_font_family_edit.setToolTip(_t("settings.general.ui_font_family_hint"))
         self._lbl_ui_font_size.setText(_t("settings.general.ui_font_size"))
         self.ui_font_size_spin.setSpecialValueText(_t("settings.ui_font_system"))
+        self.ui_font_size_spin.setToolTip(_t("settings.general.ui_font_size_hint"))
         self.sidebar_buttons_chk.setText(_t("settings.general.sidebar_buttons"))
 
         # v1.2.2: the display mode ("Terminal" tab)

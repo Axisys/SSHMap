@@ -137,12 +137,12 @@ class MenubarMixin:
                               "node.check_status")
         # The two on-demand answers: "Gather information" — one bounded batch for the SELECTION
         # (or the whole map), off the GUI thread, reusing the `ctx.collect_info` label so the
-        # context menus and this permanent Edit item read the same; "Why is it offline?" — the
+        # context menus and this permanent Edit item read the same; "Diagnose Offline…" — the
         # reachability report (DNS → TCP → banner → ping), whose sentence lands in the card
         # tooltip, the status bar and the activity history. Both are PERMANENT items.
         self._add_menu_action(edit_menu, "ctx.collect_info", self._collect_info_many,
                               "node.collect_info")
-        self._add_menu_action(edit_menu, "ctx.diagnose", self._diagnose_node,
+        self._add_menu_action(edit_menu, "ctx.diagnose_offline", self._diagnose_node,
                               "node.diagnose")
 
         # Export menu — the ONE home of everything that LEAVES the application. It is a

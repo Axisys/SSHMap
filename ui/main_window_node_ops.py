@@ -623,7 +623,7 @@ class NodeOpsMixin:
         # administers has no banner to read, so the whole DNS → TCP → banner family is
         # refused. The ONE thing an unmanaged card may be asked is the ICMP half, and it
         # has its own opt-in (the ping of task 5, which names itself a manual result).
-        if self._refuse_unmanaged(target, "ctx.diagnose"):
+        if self._refuse_unmanaged(target, "ctx.diagnose_offline"):
             return False
         data = target.data
         sid = str(data.id)

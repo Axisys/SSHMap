@@ -32,7 +32,7 @@ from PySide6.QtWidgets import (QApplication, QLabel, QPushButton, QTabWidget,  #
 from PySide6.QtGui import QAction  # noqa: E402
 
 import modules.ssh_terminal as ST  # noqa: E402
-from modules.terminal_page import TerminalSessionPage  # noqa: E402
+from modules.terminal_page import TerminalSessionPage, session_tab_tooltip  # noqa: E402
 from modules.terminal_dock import TerminalDockContent, TerminalsDock  # noqa: E402
 from models.server import ServerData  # noqa: E402
 import ui.main_window as MW  # noqa: E402
@@ -213,7 +213,7 @@ app.processEvents()
 check("the switch to ru reached the terminal window title",
       has_cyrillic(win.windowTitle()), win.windowTitle())
 check("the switch reached the window's tab-close tooltip",
-      win.session_tabs.tabToolTip(0) == i18n.t("terminal.tab_close_tooltip"),
+      win.session_tabs.tabToolTip(0) == session_tab_tooltip(page, i18n.t),
       win.session_tabs.tabToolTip(0))
 check("the switch reached the page's [Terminal | Files] titles",
       page.tabs.tabText(0) == i18n.t("sftp.tab_terminal")
@@ -248,14 +248,16 @@ check("after ru NOT ONE container string stays in the old language (no ASCII-onl
       not ru_leftovers, str(ru_leftovers)[:400])
 check("so the ru texts really differ from the en texts",
       all(i18n.t(k) == v for k, v in
-          (("terminal.tab_close_tooltip", win.session_tabs.tabToolTip(0)),
+          (("terminal.tab_close_tooltip", win.session_tabs.tabToolTip(0).splitlines()[0]),
            ("sftp.up", page.sftp_tab.btn_up.text()),
            ("terminal.cmdlib.add", win.cmdlib_panel.add_btn.text()))))
 
 mw._switch_language("en")
 app.processEvents()
 check("a second switch back (ru → en) restores the tab-close tooltip",
-      win.session_tabs.tabToolTip(0) == read_lang("en")["terminal.tab_close_tooltip"],
+      win.session_tabs.tabToolTip(0) == session_tab_tooltip(page, i18n.t)
+      and win.session_tabs.tabToolTip(0).splitlines()[0]
+      == read_lang("en")["terminal.tab_close_tooltip"],
       win.session_tabs.tabToolTip(0))
 check("a second switch back restores the SFTP buttons",
       page.sftp_tab.btn_up.text() == read_lang("en")["sftp.up"]
@@ -347,7 +349,7 @@ mw2._switch_language("ru")
 app.processEvents()
 check("MainWindow._apply_ui_translations() walks _terminal_windows (the terminal-font twin path)",
       win2.page.tabs.tabText(1) == i18n.t("sftp.tab_files")
-      and win2.session_tabs.tabToolTip(0) == i18n.t("terminal.tab_close_tooltip"),
+      and win2.session_tabs.tabToolTip(0) == session_tab_tooltip(win2.page, i18n.t),
       win2.page.tabs.tabText(1))
 check("the window-mode title follows the language as well",
       has_cyrillic(win2.windowTitle()), win2.windowTitle())
@@ -850,8 +852,8 @@ check("the pin counts the keys of the SHIPPED release (v1.5.2 added THIRTEEN —
       " — 925 + 20 + 41 + 1 + 16 = 1003, and v1.8.3 adds TWENTY-THREE: the Plugins window — its "
       "title and the three column captions, its three buttons, the door of the Plugins menu, the "
       "checked-servers hint, the two empty sentences and the twelve column headers of its tables"
-      " — 1003 + 23 = 1026, and v1.8.4 adds TEN: the whole-map layout, the reverse traversal and the inode fact, and v1.9 adds FOUR: the production-tag guard — its title, the broadcast sentence and the paste sentence — and the notice of a checked selection that has left the map, and v1.9.1 adds ELEVEN: the reconnect and its `tmux attach`; v1.9.3 adds THIRTEEN: the command dialog's ten keys and the reader's encoding three; v1.9.6 adds THREE: the command guard's two sentences and the refusal line",
-      EXPECTED_I18N_KEYS == 863 + 4 + 3 + 4 + 4 + 19 + 17 + 1 + 4 + 6 + 20 + 41 + 1 + 16 + 23 + 10 + 4 + 11 + 13 + 3 + 12,
+      " — 1003 + 23 = 1026, and v1.8.4 adds TEN: the whole-map layout, the reverse traversal and the inode fact, and v1.9 adds FOUR: the production-tag guard — its title, the broadcast sentence and the paste sentence — and the notice of a checked selection that has left the map, and v1.9.1 adds ELEVEN: the reconnect and its `tmux attach`; v1.9.3 adds THIRTEEN: the command dialog's ten keys and the reader's encoding three; v1.9.6 adds THREE: the command guard's two sentences and the refusal line; v1.9.8 adds THIRTEEN: the two `Clear` asks with their hints and their title, the `Diagnostics ▸` submenu with its imperative row, the session tab's identity line, the two source-switch tooltips and the three fields of the Settings dialog's font row; v1.9.7 adds TWELVE: the four section titles of the Add Server dialog, its four example placeholders, the required-field hint, the key-file tooltip and the two footer words; v1.9.8 adds THIRTEEN: the two `Clear` asks with their two hints and their one title, the `Diagnostics ▸` submenu with its imperative row, the session tab's identity line, the two source-switch tooltips and the three fields of the Settings dialog's font row",
+      EXPECTED_I18N_KEYS == 863 + 4 + 3 + 4 + 4 + 19 + 17 + 1 + 4 + 6 + 20 + 41 + 1 + 16 + 23 + 10 + 4 + 11 + 13 + 3 + 12 + 13,
       str(EXPECTED_I18N_KEYS))
 check_release_state(ROOT)
 for _code in i18n_lang_codes(ROOT):

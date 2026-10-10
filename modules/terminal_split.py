@@ -9,8 +9,46 @@ the same construct instead of one of them keeping the furniture on the window. T
 floor arithmetic and the owner rule are `DOCUMENTATION.md` §14g; the contract is `AGENTS.md` §4.3.
 """
 from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QAction
+from PySide6.QtGui import QAction, QIcon
 from PySide6.QtWidgets import QSplitter, QPushButton, QVBoxLayout, QWidget
+
+try:  # v1.9.8 (task 3): the vector icon set (the split button wears its own glyph)
+    from ..ui.icons import get_icon
+except ImportError:
+    try:
+        from ui.icons import get_icon
+    except ImportError:  # a stripped build — the buttons stay text-only
+        def get_icon(name):
+            from PySide6.QtGui import QIcon
+            return QIcon()
+
+try:  # v1.9.8 (task 3): the ONE registry of the widget stylesheets (the corner controls' feedback)
+    from ..ui import theme_qss
+except ImportError:
+    try:
+        from ui import theme_qss
+    except ImportError:  # a stripped build — the global QPushButton rule stands
+        theme_qss = None
+
+
+def apply_corner_style(*buttons) -> int:
+    """Apply the ONE corner-button stylesheet to the checkable corner controls (never raises).
+
+    The `ui/theme_qss.py` pattern: `style()` at construction and `refresh()` from a theme walk, so a
+    QSS string is never a value captured once (`AGENTS.md` §4.6). Returns how many were styled.
+    """
+    if theme_qss is None:
+        return 0
+    done = 0
+    for button in buttons:
+        if button is None:
+            continue
+        try:
+            theme_qss.refresh(button, "corner.button")
+            done += 1
+        except RuntimeError:
+            continue  # Qt teardown — this button is already destroyed
+    return done
 
 
 def get_translator():
@@ -134,10 +172,30 @@ class TerminalSplit:
         btn = QPushButton(t("terminal.split"))
         btn.setCheckable(True)
         btn.setToolTip(t("terminal.split_tooltip"))
+        # v1.9.8 (task 3): the corner control wears its own GLYPH beside the label, and the theme's
+        # own hover/checked feedback comes from the ONE registry (`ui/theme_qss.py: corner.button`).
+        try:
+            btn.setIcon(get_icon("split"))
+        except RuntimeError:
+            pass  # Qt teardown — the button is already gone
+        apply_corner_style(btn)
         btn.clicked.connect(self.on_button_clicked)
         act.toggled.connect(self.on_toggled)
         self.act, self.btn = act, btn
         return act, btn
+
+    def refresh_theme(self):
+        """Re-apply the corner control's own stylesheet and glyph (a theme switch). Never raises.
+
+        The `AGENTS.md` §4.6 rule for a QSS captured at construction: the string follows the ACTIVE
+        theme, and the painted icon is re-applied because a widget keeps its own render of it.
+        """
+        try:
+            self.btn.setIcon(QIcon())
+            self.btn.setIcon(get_icon("split"))
+        except (RuntimeError, AttributeError):
+            pass  # Qt teardown — the button is already destroyed
+        apply_corner_style(self.btn)
 
     def retranslate(self):
         """Re-text the action and its button (one label, one tooltip, two views). Never raises."""

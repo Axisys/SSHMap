@@ -50,10 +50,10 @@ HOTKEY_ACTIONS: Dict[str, dict] = {
     # REUSES `ctx.collect_info` (the sidebar/map context-menu row), so one entry point has
     # one name and no new string; no hotkey out of the box, like its neighbours.
     "node.collect_info":    {"label": "ctx.collect_info",    "default": ""},
-    # v1.5.3 (ROADMAP task 3): "Why is it offline?" — the on-demand reachability report
+    # v1.5.3 (ROADMAP task 3): "Diagnose Offline…" — the on-demand reachability report
     # (DNS → TCP → SSH banner → ICMP ping) of the selected node. The sentence reaches the
     # card tooltip, the status bar and the activity history; assignable, no key by default.
-    "node.diagnose":        {"label": "ctx.diagnose",        "default": ""},
+    "node.diagnose":        {"label": "ctx.diagnose_offline", "default": ""},
     # View
     "view.fit_map":         {"label": "view.fit_map",        "default": "Ctrl+Shift+F"},
     "view.find_on_map":     {"label": "view.find_on_map",    "default": "Ctrl+F"},

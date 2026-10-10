@@ -819,6 +819,15 @@ class SSHTerminalWindow(QMainWindow):
         # v1.6.4 (ROADMAP task 4): the activity mark is a PIXMAP — a VALUE (§4.6): re-render it
         # in the new theme tone instead of leaving the old colour on the tab.
         refresh_session_activity(self)
+        # v1.9.8 (task 3): the tab-bar CORNER's two controls (the split button and the Files
+        # Commander) own a stylesheet and a glyph each — both are values of the ACTIVE theme.
+        for corner in (getattr(self, "split", None), getattr(self, "commander", None)):
+            hook = getattr(corner, "refresh_theme", None)
+            if callable(hook):
+                try:
+                    hook()
+                except RuntimeError:
+                    pass  # Qt teardown — the control is already destroyed
         # v1.7.1: the Files panel's hand-painted chrome (its strip and its fold button).
         files_panel = getattr(self, "files_panel", None)
         if files_panel is not None:

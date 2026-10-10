@@ -17,7 +17,7 @@ import posixpath
 
 from PySide6.QtCore import (QCoreApplication, QEvent, QMimeData, QSize,
                             QStringListModel, Qt, QUrl, Signal)
-from PySide6.QtGui import QAction, QDrag, QFontDatabase
+from PySide6.QtGui import QDrag, QFontDatabase, QIcon
 from PySide6.QtWidgets import (
     QApplication, QCheckBox, QCompleter, QFileDialog, QHBoxLayout, QInputDialog,
     QLabel, QLineEdit, QMenu, QMessageBox, QPlainTextEdit, QPushButton, QSplitter,
@@ -50,6 +50,15 @@ except ImportError:
         from ui import focus_ring
     except ImportError:  # flat layout: the ui/ directory itself is on sys.path
         focus_ring = None
+
+try:  # v1.9.8 (task 3): the vector glyph of the Files Commander corner control
+    from ..ui.icons import get_icon
+except ImportError:
+    try:
+        from ui.icons import get_icon
+    except ImportError:  # a stripped build — the corner button stays text-only
+        def get_icon(name):
+            return QIcon()
 
 try:  # v1.3.1: the operation kinds THIS module still queues and the task payload readers
     from .sftp_worker import (KIND_DELETE, KIND_MKDIR, KIND_RENAME, NAME_ERROR_UNSAFE,
@@ -790,6 +799,12 @@ class _ButtonRow(QWidget):
         return QSize(BUTTONS_BAR_MIN_WIDTH, height)
 
 
+try:  # v1.9.8: the corner control of the two-pane view (its own module — the facade's budget)
+    from .sftp_commander_corner import CommanderCorner
+except ImportError:  # flat launch from the project root
+    from sftp_commander_corner import CommanderCorner
+
+
 class _SourceSwitch(QWidget):
     """The `Server | Local | Elevated` control of the pane's address row (v1.7.4rc1, LOCAL_PANE.md §4).
 
@@ -824,7 +839,26 @@ class _SourceSwitch(QWidget):
             button.clicked.connect(lambda _checked=False, s=source: self._on_clicked(s))
             row.addWidget(button)
         self.btn_elevated.setToolTip(_t(ELEVATED_SOURCE_TOOLTIP))
+        # v1.9.8 (task 4): all THREE states say what they read — the elevated one had its tooltip
+        # while its two neighbours had none, and a toggle without one is a riddle.
+        self.btn_server.setToolTip(_t("sftp.local.server_tooltip"))
+        self.btn_local.setToolTip(_t("sftp.local.local_tooltip"))
+        self._apply_switch_style()
         self.apply(SOURCE_REMOTE)
+
+    def _apply_switch_style(self):
+        """Give the three states the declared contrast (`sftp.source_button`). Never raises.
+
+        The inactive state of a source toggle is the one a user has to READ (the audit's finding),
+        so the ink and the checked state come from the ONE registry instead of the platform style.
+        """
+        if theme_qss is None:
+            return
+        for button in (self.btn_server, self.btn_local, self.btn_elevated):
+            try:
+                theme_qss.refresh(button, "sftp.source_button")
+            except RuntimeError:
+                continue  # Qt teardown — this button is already destroyed
 
     def _on_clicked(self, source: str):
         if source == self._source:
@@ -870,9 +904,15 @@ class _SourceSwitch(QWidget):
             self.btn_local.setText(_t("sftp.local.local"))
             self.btn_elevated.setText(_t(ELEVATED_SOURCE_LABEL))
             self.btn_elevated.setToolTip(_t(ELEVATED_SOURCE_TOOLTIP))
+            self.btn_server.setToolTip(_t("sftp.local.server_tooltip"))
+            self.btn_local.setToolTip(_t("sftp.local.local_tooltip"))
             self.apply(self._source)
         except RuntimeError:
             pass  # Qt teardown
+
+    def refresh_theme(self):
+        """Re-apply the three states' stylesheet after a theme switch (v1.9.8, task 4)."""
+        self._apply_switch_style()
 
 
 def _sync_source_switch(switch, source: str, enabled: bool = True, available: bool = True):
@@ -1028,6 +1068,9 @@ class _SftpPane(SftpPaneWalkMixin, SftpPaneListingMixin, SftpPaneViewerMixin,
         self._elevation_pending = False
         self._handshake = None
         self._waiting = True   # no provider bound yet: the shipped "waiting for connection" state
+        #: v1.9.8 (task 4): is this the ACTIVE pane? The header line carries the mark beside the
+        #: source (`header_text_marked()`), written by `set_active()` through `_sync_header()`.
+        self._active = False
 
         t = _t
         outer = QVBoxLayout(self)
@@ -1275,13 +1318,22 @@ class _SftpPane(SftpPaneWalkMixin, SftpPaneListingMixin, SftpPaneViewerMixin,
             pass  # Qt teardown / a bare pane in a unit test — never raises
 
     def set_active(self, on: bool):
-        """Draw (or drop) the focus ring of the ACTIVE pane. Never raises."""
-        if self._ring is None:
-            return
+        """Draw (or drop) the focus ring of the ACTIVE pane — and MARK ITS HEADER (v1.9.8, task 4).
+
+        The ring alone was the whole cue: a thin border a user has to hunt for. The header line
+        carries the pane's source, so the mark lands exactly where the pane names itself
+        (`header_text_marked()`, the ONE writer of that label). Never raises.
+        """
+        self._active = bool(on)
+        if self._ring is not None:
+            try:
+                self._ring.set_active(bool(on))
+            except RuntimeError:
+                pass  # Qt teardown — the tree is already destroyed
         try:
-            self._ring.set_active(bool(on))
-        except RuntimeError:
-            pass  # Qt teardown — the tree is already destroyed
+            self._sync_header()
+        except (RuntimeError, AttributeError):
+            pass  # Qt teardown — the header is already destroyed
 
     # ── Worker binding (the container calls these) ───────────────────────
 
@@ -1583,7 +1635,8 @@ class _SftpPane(SftpPaneWalkMixin, SftpPaneListingMixin, SftpPaneViewerMixin,
         if switch is not None:
             try:
                 _apply_status_style(switch.lbl, "status.sftp_row")
-            except RuntimeError:
+                switch.refresh_theme()
+            except (RuntimeError, AttributeError):
                 pass  # Qt teardown — the switch is already gone
         if self._ring is not None:
             try:
@@ -1722,96 +1775,6 @@ class _SftpPane(SftpPaneWalkMixin, SftpPaneListingMixin, SftpPaneViewerMixin,
         or reports a message (task_error)."""
         if task_id is not None:
             self._op_tasks[task_id] = kind
-
-
-class CommanderCorner(QWidget):
-    """v1.7rc1 (ROADMAP v1.7rc1, task 3): the tab-bar corner control of the two-pane view.
-
-    ONE checkable QAction (`sftp.commander`) drives a BUTTON in the corner of the session
-    tab bar next to the split button — the `act_split` pattern: the action is the single
-    source of truth and the button is a view of it, so the checkmark and the pane state can
-    never diverge.
-
-    The control belongs to the CONTAINER (the corner is the tab bar's), while the STATE is
-    the SESSION's (each `SftpTab` knows whether it shows two panes): the container calls
-    `set_state()` whenever the active session changes, and the action is DISABLED while the
-    active session has no Files tab (a split pane). The corner holds exactly TWO controls —
-    the split button and this one — and the Files panel of the WINDOW is NOT a third: since
-    v1.7.1.1 that mode is a SETTING (`terminal_files_mode`, the settings hub's "Files display
-    mode"), so the pair keeps the floor the window's own minimum width is built on and this
-    action is disabled only while the panel is on for another reason (the panel mode is
-    single-pane). Never raises — the corner is chrome.
-    """
-
-    def __init__(self, parent=None, split_button=None):
-        super().__init__(parent)
-        self.setObjectName("sftpCommanderCorner")
-        row = QHBoxLayout(self)
-        row.setContentsMargins(0, 0, 0, 0)
-        row.setSpacing(4)
-
-        self.act = QAction(_t("sftp.commander"), self)
-        self.act.setCheckable(True)
-        self.act.setToolTip(_t("sftp.commander_tooltip"))
-        self.btn = QPushButton(_t("sftp.commander"))
-        self.btn.setCheckable(True)
-        self.btn.setToolTip(_t("sftp.commander_tooltip"))
-        self.btn.clicked.connect(self._on_button_clicked)
-        self.act.toggled.connect(self._sync_button)
-        if split_button is not None:
-            row.addWidget(split_button)
-        row.addWidget(self.btn)
-        self.set_enabled(False)   # until a session tells us what it has
-
-    def _on_button_clicked(self, _checked=False):
-        """The BUTTON asks the ACTION (one source of truth), exactly like `btn_split`."""
-        self.act.setChecked(bool(self.btn.isChecked()))
-
-    def _sync_button(self, checked=None):
-        """Keep the button in step with the action WITHOUT re-entering the slot."""
-        try:
-            if checked is None:
-                checked = bool(self.act.isChecked())
-            self.btn.blockSignals(True)
-            self.btn.setChecked(bool(checked))
-            self.btn.blockSignals(False)
-        except RuntimeError:
-            pass  # Qt teardown — the button is gone
-
-    def is_commander(self) -> bool:
-        """The action's state — the ONE answer the container reads."""
-        return bool(self.act.isChecked())
-
-    def set_enabled(self, on: bool):
-        """Enable/disable both views (a session without a Files tab disables the action)."""
-        on = bool(on)
-        try:
-            self.act.setEnabled(on)
-            self.btn.setEnabled(on)
-        except RuntimeError:
-            pass  # Qt teardown
-
-    def set_state(self, on: bool):
-        """Show a session's mode WITHOUT reporting it back (the `_set_split_action_checked`
-        discipline: the action's signals stay blocked, so the container is never re-entered)."""
-        on = bool(on)
-        try:
-            self.act.blockSignals(True)
-            self.act.setChecked(on)
-            self.act.blockSignals(False)
-        except RuntimeError:
-            pass  # Qt teardown
-        self._sync_button(on)
-
-    def retranslate(self):
-        """Re-text the label and the tooltip of both views (one key each)."""
-        try:
-            self.act.setText(_t("sftp.commander"))
-            self.act.setToolTip(_t("sftp.commander_tooltip"))
-            self.btn.setText(_t("sftp.commander"))
-            self.btn.setToolTip(_t("sftp.commander_tooltip"))
-        except RuntimeError:
-            pass  # Qt teardown — the corner is already destroyed
 
 
 class SftpTab(QWidget):
@@ -2990,7 +2953,8 @@ MODULE_FACADE_SEAMS = (
     ElevatedHandshake, ask_elevation, SftpWorker, register_orphan_sftp_worker,
     # ── the cluster facts the waves moved OUT of this module and RE-EXPORTS: the shipped surface a
     # ── caller and the suite read on `modules.sftp_tab` (`PANE_SHORTCUTS`, the cap's range, the
-    # ── measured freeze slope) stays importable HERE ──
+    # ── measured freeze slope, the tab-bar corner control) stays importable HERE ──
     PANE_SHORTCUTS, PANE_HINTS, HINT_SEPARATOR, VIEWER_MAX_BYTES_STEP, VIEWER_MAX_BYTES_WARN,
     VIEWER_FREEZE_MS_PER_MB, viewer_freeze_seconds,
+    CommanderCorner,
 )

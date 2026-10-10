@@ -20,7 +20,7 @@ ROOT, WORK = bootstrap()  # BEFORE the app module imports (the HOME isolation + 
 
 from PySide6.QtCore import Qt, QPointF, QPoint
 from PySide6.QtGui import QWheelEvent
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QTabBar, QToolButton
 
 app = QApplication(sys.argv)
 
@@ -32,8 +32,9 @@ from modules.terminal_screen import (SCROLL_MODE_DEFAULT, SCROLL_MODE_LIVE, SCRO
                                      TerminalScreen, resolve_scroll_mode)
 from modules.terminal_widget import (CURSOR_STYLE_DEFAULT, FONT_SIZE_MAX, FONT_SIZE_MIN,
                                      TerminalWidget)
-from modules.terminal_page import (ACTIVITY_ICON_PX, TerminalSessionPage,
-                                   activity_tab_icon, render_session_activity)
+from modules.terminal_page import (ACTIVITY_ICON_PX, SESSION_STATE_OFFLINE, SESSION_STATE_ONLINE,
+                                   TerminalSessionPage, activity_tab_icon, render_session_activity,
+                                   session_identity, session_mark_status, session_tab_icon)
 from modules.terminal_dock import TerminalDockContent
 
 from _fakes import FakeSSHThread as _FakeThread
@@ -304,10 +305,11 @@ _win = ST.SSHTerminalWindow(_node_a, None)
 _win.add_session(_node_b)
 app.processEvents()
 _pa, _pb = _win.session_tabs.widget(0), _win.session_tabs.widget(1)
-check("§4 both tabs carry the FIXED icon slot from birth (a mark can never resize a tab)",
-      not icon_has_ink(_win.session_tabs.tabIcon(0))
-      and not icon_has_ink(_win.session_tabs.tabIcon(1)),
-      "fresh tabs render an empty slot")
+check("§4 both tabs carry a FIXED icon slot from birth (a mark can never resize a tab)",
+      not _win.session_tabs.tabIcon(0).isNull()
+      and not _win.session_tabs.tabIcon(1).isNull()
+      and session_mark_status(_pa) == SESSION_STATE_ONLINE,
+      f"state={session_mark_status(_pa)!r}")
 
 _win.session_tabs.setCurrentIndex(1)   # beta is on screen
 app.processEvents()
@@ -317,34 +319,63 @@ app.processEvents()
 check("§4 output on a NON-VISIBLE session marks its tab (the window container)",
       _pa.has_activity is True and _pb.has_activity is False,
       f"a={_pa.has_activity} b={_pb.has_activity}")
-check("§4 the mark is DRAWN (a filled dot) and the VISIBLE tab keeps its empty slot",
+check("§4 the mark is DRAWN (a filled dot) and REPLACES the state mark of that tab",
       icon_has_ink(_win.session_tabs.tabIcon(0))
-      and not icon_has_ink(_win.session_tabs.tabIcon(1)),
-      "tab 0 marked, tab 1 not")
+      and session_tab_icon(_pa) is activity_tab_icon(True)
+      and session_tab_icon(_pb) is not activity_tab_icon(True),
+      "tab 0 marked, tab 1 unmarked")
 check("§4 the mark leaves the tab WIDTH unchanged (the slot was already there)",
       _win.session_tabs.tabBar().tabRect(0).width() == _width_before,
       f"{_width_before} -> {_win.session_tabs.tabBar().tabRect(0).width()}")
-check("§4 the TOOLTIP is the mark's second channel",
-      _win.session_tabs.tabToolTip(0) == i18n.t("terminal.tab_new_output")
-      and _win.session_tabs.tabToolTip(1) == i18n.t("terminal.tab_close_tooltip"),
-      f"{_win.session_tabs.tabToolTip(0)!r} / {_win.session_tabs.tabToolTip(1)!r}")
+check("§4 the TOOLTIP is the mark's second channel — and it NAMES the session's identity",
+      _win.session_tabs.tabToolTip(0) == f"{i18n.t('terminal.tab_new_output')}\n"
+                                         f"{i18n.t('terminal.tab_identity', identity='root@10.98.1.1')}"
+      and _win.session_tabs.tabToolTip(1) == f"{i18n.t('terminal.tab_close_tooltip')}\n"
+                                             f"{i18n.t('terminal.tab_identity', identity='root@10.98.1.2')}"
+      and session_identity(_pa) == "root@10.98.1.1",
+      f"{_win.session_tabs.tabToolTip(0)!r}")
 
 _pa._on_output(b"more output\r\n")
 check("§4 a second chunk does not stack a second mark (the state is a bool)",
-      _pa.has_activity is True and _win.session_tabs.tabToolTip(0)
-      == i18n.t("terminal.tab_new_output"))
+      _pa.has_activity is True and _win.session_tabs.tabToolTip(0).startswith(
+          i18n.t("terminal.tab_new_output")))
 
 _win.session_tabs.setCurrentIndex(0)   # focus the marked tab
 app.processEvents()
-check("§4 focusing the tab CLEARS the mark and restores the ordinary tooltip",
-      _pa.has_activity is False and not icon_has_ink(_win.session_tabs.tabIcon(0))
-      and _win.session_tabs.tabToolTip(0) == i18n.t("terminal.tab_close_tooltip"),
+check("§4 focusing the tab CLEARS the mark and returns the STATE mark + the ordinary tooltip",
+      _pa.has_activity is False and session_tab_icon(_pa) is not activity_tab_icon(True)
+      and session_mark_status(_pa) == SESSION_STATE_ONLINE
+      and _win.session_tabs.tabToolTip(0).startswith(i18n.t("terminal.tab_close_tooltip")),
       f"{_pa.has_activity} / {_win.session_tabs.tabToolTip(0)!r}")
 
 _pa._on_output(b"while visible\r\n")
 app.processEvents()
 check("§4 output on the VISIBLE session never marks it (the rule's other half)",
-      _pa.has_activity is False and not icon_has_ink(_win.session_tabs.tabIcon(0)))
+      _pa.has_activity is False and session_tab_icon(_pa) is not activity_tab_icon(True))
+
+# v1.9.8 (task 3): the STATE a tab shows — the card's own declaration, so a dead channel is a
+# triangle (the offline shape) and a failure the session survived is the warn ring.
+_pa._session_ended = True
+render_session_activity(_win.session_tabs, _pa, i18n.t)
+check("§4 a CLOSED channel switches the tab's mark to the offline shape (the card's vocabulary)",
+      session_mark_status(_pa) == SESSION_STATE_OFFLINE
+      and icon_has_ink(_win.session_tabs.tabIcon(0)))
+check("§4 ...and the identity survives it (the tooltip is the shipped second channel)",
+      i18n.t("terminal.tab_identity", identity="root@10.98.1.1")
+      in _win.session_tabs.tabToolTip(0))
+_pa._session_ended = False
+_pa._last_error = "auth failed"
+check("§4 a FAILURE the session survived reads as `warn`; a fresh connect clears it",
+      session_mark_status(_pa) == "warn"
+      and (setattr(_pa, "_last_error", ""), session_mark_status(_pa) == SESSION_STATE_ONLINE)[-1],
+      session_mark_status(_pa))
+_close_btn = _win.session_tabs.tabBar().tabButton(0, QTabBar.ButtonPosition.RightSide)
+check("§4 the tab's close glyph is the icon set's own (never the style's red cross)",
+      isinstance(_close_btn, QToolButton) and not _close_btn.icon().isNull()
+      and _close_btn.toolTip() == i18n.t("terminal.tab_close_tooltip"),
+      f"{type(_close_btn).__name__}")
+check("§4 ...and `tabsClosable` stays TRUE (the shipped close contract two suites pin)",
+      _win.session_tabs.tabsClosable() is True)
 
 _win.close()
 app.processEvents()
@@ -361,13 +392,14 @@ _da._on_output(b"tail -f keeps talking\r\n")
 app.processEvents()
 check("§4 the DOCK marks a non-visible session too (one rule, both containers)",
       _da.has_activity is True and icon_has_ink(_dock.session_tabs.tabIcon(0))
-      and _dock.session_tabs.tabToolTip(0) == i18n.t("terminal.tab_new_output")
+      and _dock.session_tabs.tabToolTip(0).startswith(i18n.t("terminal.tab_new_output"))
       and _dock.session_tabs.tabBar().tabRect(0).width() == _dock_width,
       f"{_da.has_activity} / {_dock.session_tabs.tabToolTip(0)!r}")
 _dock.session_tabs.setCurrentIndex(0)
 app.processEvents()
-check("§4 the dock clears the mark when its tab is focused",
-      _da.has_activity is False and not icon_has_ink(_dock.session_tabs.tabIcon(0)),
+check("§4 the dock clears the mark when its tab is focused (the STATE mark returns)",
+      _da.has_activity is False and session_tab_icon(_da) is not activity_tab_icon(True)
+      and session_mark_status(_da) == SESSION_STATE_ONLINE,
       str(_da.has_activity))
 check("§4 the container answers the ONE visibility question (session_is_visible)",
       _dock.session_is_visible(_da) is True and _dock.session_is_visible(_db) is False)

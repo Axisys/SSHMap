@@ -358,8 +358,13 @@ check("§6 the sentences the contract QUOTES really exist (the document is not a
            "sftp.elevated.working", "sftp.elevated.header", "sftp.elevated.lost"))
       and CONTRACT_TEXT.count("sftp.elevated.") >= 6)
 
-check("§6 no sentence of the elevated family leaked into the local pane's family (18 keys)",
-      len([k for k in LANGS["en"] if k.startswith("sftp.local.")]) == 18)
+check("§6 no sentence of the elevated family leaked into the local pane's family "
+      "(18 sentences + v1.9.8's two switch tooltips)",
+      len([k for k in LANGS["en"]
+           if k.startswith("sftp.local.") and not k.endswith("_tooltip")]) == 18
+      and len([k for k in LANGS["en"] if k.startswith("sftp.local.")]) == 20
+      and all(LANGS["en"][k] and "elevated" not in k for k in LANGS["en"]
+              if k.startswith("sftp.local.")))
 
 # ════════════════════════════════════════════════════════════
 print("== 7. the refactor boundary — what does NOT move (ELEVATED_PANE.md §7) ==")

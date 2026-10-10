@@ -41,8 +41,44 @@ SOURCE_STATUS_BAR = "status bar"
 #: The level filter keys of the panel (`ui/activity_panel.py` renders the captions).
 LEVEL_KEYS = ("all", "info", "warning", "error", "status")
 
+#: The stamp of a row — the DATE is part of it: a post-incident review reads a history,
+#: and a clock time alone cannot say which day a line belongs to (the two panels share it).
+STAMP_FORMAT = "%Y-%m-%d %H:%M:%S"
+
+#: The filter key of a logging level (the SECOND half of `matches_level`: the panel renders a
+#: level CELL through the same vocabulary its filter uses).
+LEVEL_FILTER_KEYS = {"INFO": "info", "WARNING": "warning", "ERROR": "error", "CRITICAL": "error"}
+
 #: A repeat of the same fact inside this window is a COUNTER, not a new event.
 REPEAT_WINDOW_S = 2.0
+
+
+def stamp_text(timestamp, fmt: str = STAMP_FORMAT) -> str:
+    """ONE timestamp → the row's stamp cell (the PURE renderer the two panels share). Never raises.
+
+    A local time with the DATE in it: the activity ring and the Plugins window's session ring
+    both list facts a reader returns to after the fact, and a bare clock time cannot say which
+    day a line belongs to.
+    """
+    try:
+        return time.strftime(fmt or STAMP_FORMAT, time.localtime(float(timestamp)))
+    except (TypeError, ValueError, OSError):
+        return ""
+
+
+def level_key(event) -> str:
+    """The panel's FILTER key of an event — the ONE mapping of a level onto that vocabulary.
+
+    PURE, and the mirror image of `matches_level()`: the filter goes key → predicate, this goes
+    event → key, so the cell a user reads and the filter that shows it can never spell a level
+    differently. A status-bar message is its own family; an unknown logging level is "info".
+    """
+    if event is None:
+        return "all"
+    if str(getattr(event, "family", FAMILY_LOG)) == FAMILY_STATUS \
+            or str(getattr(event, "level", "")) == LEVEL_STATUS:
+        return "status"
+    return LEVEL_FILTER_KEYS.get(str(getattr(event, "level", "")).upper(), "info")
 
 
 class ActivityEvent:
@@ -76,12 +112,9 @@ class ActivityEvent:
         self.family = str(family or FAMILY_LOG)
         self.repeats = int(repeats)
 
-    def time_text(self, fmt: str = "%H:%M:%S") -> str:
-        """The clock time of the event (the panel's first column). Never raises."""
-        try:
-            return time.strftime(fmt, time.localtime(self.timestamp))
-        except (ValueError, OSError):
-            return ""
+    def time_text(self, fmt: str = STAMP_FORMAT) -> str:
+        """The stamp of the event — DATE and clock (the panel's first column). Never raises."""
+        return stamp_text(self.timestamp, fmt)
 
     def is_status(self) -> bool:
         """True for a status-bar message (the second tap)."""

@@ -23,7 +23,7 @@ app = QApplication(sys.argv)
 
 import i18n
 import modules.ssh_terminal as ST
-from modules.terminal_page import TerminalSessionPage
+from modules.terminal_page import TerminalSessionPage, session_tab_tooltip
 from models.server import ServerData
 import ui.main_window as MW
 
@@ -125,9 +125,9 @@ check("the content of the dock: a QTabWidget of the sessions (session_tabs, 1 ta
 check("the content of the dock: the tabs are closable (the cross on the tab)",
       content.session_tabs.tabsClosable() is True)
 page_a = content.session_tabs.widget(0)
-check("the tab — a TerminalSessionPage; the title = the alias of the node; the tooltip terminal.tab_close_tooltip",
+check("the tab — a TerminalSessionPage; the title = the alias of the node; the shipped tooltip",
       isinstance(page_a, TerminalSessionPage) and content.session_tabs.tabText(0) == "alpha"
-      and content.session_tabs.tabToolTip(0) == i18n.t("terminal.tab_close_tooltip"),
+      and content.session_tabs.tabToolTip(0) == session_tab_tooltip(page_a, i18n.t),
       repr(content.session_tabs.tabText(0)))
 check("the page is bound to the host (the content of the dock): close_terminal → close_page",
       page_a._host_window is content)

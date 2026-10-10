@@ -326,6 +326,9 @@ panelS.status_message.connect(lambda text, ms: msgs.append((text, ms)))
 
 item = find_child(panelS.tree, "Disk usage")
 check("the seed 'Disk usage' is in the tree", item is not None)
+# The panel MEASURES its Name column from the content (`_fit_name_column`), so the rows settle on the
+# next event-loop pass — one `processEvents()` here is the layout the user always sees before clicking.
+app.processEvents()
 double_click_item(panelS.tree, item)
 app.processEvents()
 check("a double click → the exact bytes (df -h\\n)", chS.sent == [b"df -h\n"], repr(chS.sent))

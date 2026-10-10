@@ -549,10 +549,10 @@ check("the panel's file menu carries the three actions and stays alive on the pa
       and panel._file_menu.parent() is not None
       and panel.act_import_library.text() == i18n.t("terminal.cmdlib.import"),
       str([a.text() for a in panel._file_menu.actions()]))
-check("the file menu's tooltip and the button are set (the glyph needs no translation)",
+check("the file menu's tooltip and the ICON-ONLY button are set (the glyph IS the label)",
       panel._file_btn.toolTip() == i18n.t("terminal.cmdlib.file_menu_tooltip")
       and panel._file_btn.menu() is panel._file_menu
-      and panel._file_btn.text() == "…")
+      and panel._file_btn.text() == "" and not panel._file_btn.icon().isNull())
 
 
 # ════════════════════════════════════════════════════════════════════════════

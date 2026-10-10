@@ -204,6 +204,9 @@ class _FakePage:
     def _set_status_text(self, text):
         self.status_writes.append(text)
 
+    def _note_tab_state(self):
+        """The tab re-render a state change asks for (v1.9.8) — a fake page has no tab strip."""
+
     def close_terminal(self):
         self.closed += 1
 

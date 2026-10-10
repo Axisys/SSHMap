@@ -38,6 +38,15 @@ except ImportError:
 SORT_DEFAULT_COLUMN = 0
 SORT_COLUMNS = (0, 1, 2)   # Name | Size | Modified — the three real sort keys of the pane
 
+#: v1.9.8 (task 4): the cell of a column that does not apply to a row — a folder has no Size and
+#: no Modified of its own. A DASH, and deliberately not an i18n key: it is a typographic mark
+#: ("not applicable"), the same in every language, like the ".." row's own name.
+DIR_CELL = "—"
+
+#: v1.9.8 (task 4): the mark the ACTIVE pane carries on its header line, beside its source. The
+#: keyboard's pane has to be readable at a glance, and the thin focus ring alone was not.
+ACTIVE_PANE_MARK = "▸"
+
 
 class SftpPaneListingMixin:
     """The listing, its navigation and its address bar (mixed into `_SftpPane`)."""
@@ -277,10 +286,13 @@ class SftpPaneListingMixin:
         item.setData(0, self.ISDIR_ROLE, bool(entry["is_dir"]))
         item.setData(0, self.SIZE_ROLE, int(entry.get("size") or 0))
         item.setData(0, self.MTIME_ROLE, int(entry.get("mtime") or 0))
-        item.setText(1, "" if entry["is_dir"]
-                    else host_attr(self, "format_size")(entry.get("size")))
-        item.setText(2, "" if entry["is_dir"]
-                    else host_attr(self, "format_mtime")(entry.get("mtime")))
+        # v1.9.8 (task 4): a DIRECTORY's Size and Modified cells carry the declared dash — an empty
+        # cell reads as "not measured", while a dash says "this column does not apply to a folder".
+        is_dir = bool(entry["is_dir"])
+        item.setText(1, DIR_CELL if is_dir
+                     else host_attr(self, "format_size")(entry.get("size")))
+        item.setText(2, DIR_CELL if is_dir
+                     else host_attr(self, "format_mtime")(entry.get("mtime")))
         self._apply_preview_marker(item, full)   # v1.3.1.1: "no preview" markers
         return item
 
@@ -389,6 +401,19 @@ class SftpPaneListingMixin:
             return str(host)
         return _t("sftp.waiting_connection")
 
+    def header_text_marked(self) -> str:
+        """The header as it is DISPLAYED: the ACTIVE pane's mark plus the source text (v1.9.8).
+
+        The mark is the pane's own state (`_active`, written by `_PANE.set_active()`), and it is
+        prepended HERE rather than written into the label by the caller, so the ONE writer of the
+        header (`_sync_header()`) can never drop it.
+        """
+        try:
+            text = self.header_text()
+        except (AttributeError, RuntimeError, TypeError):
+            return ""
+        return f"{ACTIVE_PANE_MARK} {text}" if bool(getattr(self, "_active", False)) else text
+
     def _sync_header(self):
         """Show the SOURCE of this pane in its header line (the ONE writer of the widget). Never raises."""
         label = getattr(self, "header_label", None)
@@ -399,7 +424,7 @@ class SftpPaneListingMixin:
         except (AttributeError, RuntimeError, TypeError):
             return
         try:
-            label.setText(text)
+            label.setText(self.header_text_marked())
             label.setToolTip(text)
         except RuntimeError:
             pass  # Qt teardown — the label is already gone

@@ -555,8 +555,8 @@ check_i18n_parity(LANGS)
 check_i18n_format(LANGS)
 check("§6 the pin counts the shipped keys (the v1.9 line's 1040 + ELEVEN of v1.9.1 "
       "+ THIRTEEN of v1.9.3: the command dialog and the reader's encoding + THREE of "
-      "v1.9.6: the command guard + TWELVE of v1.9.7: the Add Server form)",
-      EXPECTED_I18N_KEYS == 1040 + 11 + 13 + 3 + 12, f"{EXPECTED_I18N_KEYS}")
+      "v1.9.6: the command guard + TWELVE of v1.9.7: the Add Server form + THIRTEEN of v1.9.8: the two `Clear` asks, the `Diagnostics ▸` submenu with its imperative row, the session tab's identity line, the two source-switch tooltips and the Settings dialog's font row)",
+      EXPECTED_I18N_KEYS == 1040 + 11 + 13 + 3 + 12 + 13, f"{EXPECTED_I18N_KEYS}")
 check("§6 the pin names this release or a LATER one (the file describes v1.9.1)",
       releases_at_least("1.9.1"), EXPECTED_APP_VERSION)
 _NEW_KEYS = ("terminal.reconnect", "terminal.reconnect_tooltip", "terminal.reconnecting",

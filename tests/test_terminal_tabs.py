@@ -23,7 +23,7 @@ app = QApplication(sys.argv)
 
 import i18n
 import modules.ssh_terminal as ST
-from modules.terminal_page import TerminalSessionPage
+from modules.terminal_page import TerminalSessionPage, session_tab_tooltip
 from models.server import ServerData
 import ui.main_window as MW
 
@@ -88,8 +88,9 @@ check("the window: the first tab is a TerminalSessionPage (the v1.2 compat: win.
       and w1.session_tabs.widget(0) is w1.page)
 check("the tab title is the node alias", w1.session_tabs.tabText(0) == "struct",
       repr(w1.session_tabs.tabText(0)))
-check("the tab tooltip is terminal.tab_close_tooltip",
-      w1.session_tabs.tabToolTip(0) == i18n.t("terminal.tab_close_tooltip"),
+check("the tab tooltip is the session's own renderer (the state sentence + the identity)",
+      w1.session_tabs.tabToolTip(0) == session_tab_tooltip(w1.page, i18n.t)
+      and w1.session_tabs.tabToolTip(0).splitlines()[0] == i18n.t("terminal.tab_close_tooltip"),
       repr(w1.session_tabs.tabToolTip(0)))
 p1 = w1.page
 check("the page is bound to the host (set_host_window)", p1._host_window is w1)

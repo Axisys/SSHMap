@@ -509,6 +509,70 @@ def _draw_bookmarks(p):
     p.drawPath(path)
 
 
+def _draw_split(p):
+    """v1.9.8 (task 3): the SPLIT TERMINAL — one frame with a second pane BELOW the first.
+
+    The pane the action opens appears under the session, so the frame is divided by a HORIZONTAL
+    line (the divider is drawn inside the frame's stroke, which is what keeps the two panes apart
+    at toolbar size).
+    """
+    frame = QPainterPath()
+    frame.addRoundedRect(QRectF(3.0, 4.0, 14.0, 12.0), 1.6, 1.6)
+    p.drawPath(frame)
+    divider = QPainterPath()
+    divider.moveTo(3.6, 10.0)
+    divider.lineTo(16.4, 10.0)
+    p.drawPath(divider)
+
+
+def _draw_files(p):
+    """v1.9.8 (task 3): the FILES COMMANDER — two panes side by side (the two-pane view).
+
+    A vertical divider splits the frame and each half carries a file hint: one short line at the
+    top (a name) over a longer one (its row). The glyph says "two listings", which is exactly what
+    the action turns on.
+    """
+    frame = QPainterPath()
+    frame.addRoundedRect(QRectF(2.6, 4.0, 14.8, 12.0), 1.6, 1.6)
+    p.drawPath(frame)
+    divider = QPainterPath()
+    divider.moveTo(10.0, 4.6)
+    divider.lineTo(10.0, 15.4)
+    p.drawPath(divider)
+    for left, right in ((4.6, 8.2), (11.6, 15.2)):
+        for y in (7.4, 10.4):
+            row = QPainterPath()
+            row.moveTo(float(left), float(y))
+            row.lineTo(float(right), float(y))
+            p.drawPath(row)
+
+
+def _draw_close(p):
+    """v1.9.8 (task 3): the session tab's CLOSE mark — a thin X in the theme's own ink.
+
+    The style's stock tab-close glyph is a hard red cross, which reads as an ALERT for a routine
+    control; this drawer replaces it with the same monochrome stroke every other icon wears.
+    """
+    cross = QPainterPath()
+    cross.moveTo(6.4, 6.4)
+    cross.lineTo(13.6, 13.6)
+    cross.moveTo(13.6, 6.4)
+    cross.lineTo(6.4, 13.6)
+    p.drawPath(cross)
+
+
+def _draw_menu_dots(p):
+    """v1.9.8 (task 3): a "…" MENU mark — three dots, for an icon-only menu button.
+
+    A glyph the ellipsis character cannot be: an icon-only QToolButton whose text is "…" has no
+    shape of its own in the icon set, so a theme switch and an icon walk could not reach it.
+    """
+    for x in (6.2, 10.0, 13.8):
+        dot = QPainterPath()
+        dot.addEllipse(QPointF(float(x), 10.0), 1.15, 1.15)
+        p.drawPath(dot)
+
+
 _DRAWERS = {
     "new": _draw_new,
     "open": _draw_open,
@@ -544,6 +608,12 @@ _DRAWERS = {
     # v1.4rc3 (plugin foundation): the puzzle glyph of the "Plugins" menu items and
     # of the plugin section of the command palette.
     "plugin": _draw_plugin,
+    # v1.9.8 (task 3): the terminal's two corner controls, the session tab's close mark and the
+    # icon-only menu button of the Commands panel.
+    "split": _draw_split,
+    "files": _draw_files,
+    "close": _draw_close,
+    "menu_dots": _draw_menu_dots,
 }
 
 

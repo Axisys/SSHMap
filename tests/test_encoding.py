@@ -363,10 +363,9 @@ check("§3 a reset returns the card to the idle dot (state, never a stale shape)
       node._status_dot.brush().color().name())
 
 # The SIDEBAR: the row marker is drawn by the same module and differs per status.
-from ui.sidebar import SidebarPanel, CONTEXT_MENU_ITEMS  # noqa: E402
+from ui.sidebar import SidebarPanel, CONTEXT_MENU_ACTIONS  # noqa: E402
 
-_panel = SidebarPanel(actions={entry[0]: (lambda *_a: None)
-                               for entry in CONTEXT_MENU_ITEMS if entry is not None})
+_panel = SidebarPanel(actions={key: (lambda *_a: None) for key in CONTEXT_MENU_ACTIONS})
 _icons = {status: _panel._status_dot_icon(status) for status in STATUSES}
 _digests = {status: hashlib.sha256(_icons[status].pixmap(16, 16).toImage().bits().tobytes())
             .hexdigest()[:12] for status in STATUSES}

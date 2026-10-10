@@ -310,22 +310,22 @@ _pane_named = _tab_named.panes[0]
 check("§3 a local pane's HEADER LINE names its source (`header_text()`), never the remote waiting line",
       _pane_l.header_text() == i18n.t("sftp.local.this_computer")
       and _pane_l.header_text() != i18n.t("sftp.waiting_connection")
-      and _pane_l.header_label.text() == _pane_l.header_text()
+      and _pane_l.header_label.text() == _pane_l.header_text_marked()
       and '"sftp.local.this_computer"' in PANE_SRC,
       _pane_l.header_text())
 check("§3 ...while a pane of an UNIDENTIFIED container keeps the shipped waiting wording",
       _pane_r.header_text() == i18n.t("sftp.waiting_connection")
-      and _pane_r.header_label.text() == _pane_r.header_text(),
+      and _pane_r.header_label.text() == _pane_r.header_text_marked(),
       _pane_r.header_text())
 check("§3 ...and falls back to `user@host` when the session has no alias",
       _pane_named.header_text() == "root@192.0.2.10"
-      and _pane_named.header_label.text() == "root@192.0.2.10",
+      and _pane_named.header_label.text() == _pane_named.header_text_marked(),
       _pane_named.header_text())
 _tab_named.set_session_info(key="contract-named", label="contract", host="192.0.2.10",
                             port=22, user="root")
 check("§3 ...and the ALIAS wins, re-read the moment the session is identified",
       _pane_named.header_text() == "contract"
-      and _pane_named.header_label.text() == "contract",
+      and _pane_named.header_label.text() == _pane_named.header_text_marked(),
       _pane_named.header_text())
 check("§3 the pane's SOURCE HEADER LINE is CARRIED (the v1.7.5 clause shipped with its widget)",
       "header_label" in CONTRACT and "the pane's FIRST row" in CONTRACT
@@ -649,8 +649,8 @@ check("§9 the version pin is the release this audit ships with",
       releases_at_least(EXPECTED_APP_VERSION, "1.7.4"), EXPECTED_APP_VERSION)
 check("§9 the i18n pin counts the shipped keys (the local pane's 18 + the v1.7.5 slot's 4 + "
       "the v1.7.5.1 slot's 6 + the v1.8 elevated pane's 20 + the v1.8.1 trust surface's 41 + the ONE "
-      "of v1.8.1.1) and v1.8.2 adds SIXTEEN: the library file — the History door, the backup ring and the import/export pair — and v1.8.3 adds TWENTY-THREE: the Plugins window (its chrome, its three columns and its export) and v1.8.4 adds TEN: the whole-map layout, the reverse traversal and the inode fact, and v1.9 adds FOUR: the production-tag guard — its title, the broadcast sentence and the paste sentence — and the notice of a checked selection that has left the map, and v1.9.1 adds ELEVEN: the reconnect and its `tmux attach`; v1.9.3 adds THIRTEEN: the command dialog's ten keys and the reader's encoding three; v1.9.6 adds THREE: the command guard's two sentences and the refusal line",
-      EXPECTED_I18N_KEYS == 897 + 17 + 1 + 4 + 6 + 20 + 41 + 1 + 16 + 23 + 10 + 4 + 11 + 13 + 3 + 12, str(EXPECTED_I18N_KEYS))
+      "of v1.8.1.1) and v1.8.2 adds SIXTEEN: the library file — the History door, the backup ring and the import/export pair — and v1.8.3 adds TWENTY-THREE: the Plugins window (its chrome, its three columns and its export) and v1.8.4 adds TEN: the whole-map layout, the reverse traversal and the inode fact, and v1.9 adds FOUR: the production-tag guard — its title, the broadcast sentence and the paste sentence — and the notice of a checked selection that has left the map, and v1.9.1 adds ELEVEN: the reconnect and its `tmux attach`; v1.9.3 adds THIRTEEN: the command dialog's ten keys and the reader's encoding three; v1.9.6 adds THREE: the command guard's two sentences and the refusal line; v1.9.8 adds THIRTEEN: the two `Clear` asks with their hints and their title, the `Diagnostics ▸` submenu with its imperative row, the session tab's identity line, the two source-switch tooltips and the three fields of the Settings dialog's font row",
+      EXPECTED_I18N_KEYS == 897 + 17 + 1 + 4 + 6 + 20 + 41 + 1 + 16 + 23 + 10 + 4 + 11 + 13 + 3 + 12 + 13, str(EXPECTED_I18N_KEYS))
 check("§9 VERSION_FORMAT did NOT move (a path is never written into a project)",
       __import__("version").VERSION_FORMAT == "0.9")
 check("§9 no new dependency was added for the local pane (the four pinned ones)",
@@ -665,7 +665,8 @@ check("§9 the contract carries its own acceptance for this slot (the audit is n
       and "ROADMAP.md` losing the" in CONTRACT)
 check("§9 the LOCAL ERROR table is the contract's, read back clause by clause",
       all(key.startswith("sftp.local.") for key in _CODE_TABLE.values())
-      and len([k for k in LANGS["en"] if k.startswith("sftp.local.")]) == 18,
+      and len([k for k in LANGS["en"]
+               if k.startswith("sftp.local.") and not k.endswith("_tooltip")]) == 18,
       f"{len([k for k in LANGS['en'] if k.startswith('sftp.local.')])} keys")
 
 _tab2.release()

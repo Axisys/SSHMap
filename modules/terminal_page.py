@@ -64,6 +64,23 @@ except ImportError:
     except ImportError:  # flat layout: the ui/ directory itself is on sys.path
         theme_qss = None
 
+try:  # v1.9.8 (task 3): the DECLARED status shapes — the session tab's state mark (the card's own)
+    from ..ui import status_shape
+except ImportError:
+    try:
+        from ui import status_shape
+    except ImportError:  # flat layout without ui/status_shape — the transparent slot stands
+        status_shape = None
+
+try:  # v1.9.8 (task 3): the vector icons (the tab's close glyph and the state mark's fallback)
+    from ..ui.icons import refresh_button_icon
+except ImportError:
+    try:
+        from ui.icons import refresh_button_icon
+    except ImportError:  # a stripped build — the close button keeps the style's own glyph
+        def refresh_button_icon(button, name):  # noqa: N802 — stub with the shipped signature
+            return False
+
 # The page's CLUSTERS (the facade over the mixins): the Files-widget handover and the two bridges —
 # the SFTP task family and the OSC 7 follow. A mixin resolves a facade global at call time
 # (`host_attr`, `MODULE_FACADE_SEAMS` below) and never imports this module. The OSC 7 constants and
@@ -138,9 +155,107 @@ FONT_SIZE_SAVE_DEBOUNCE_MS = 600
 #: The size of the mark (px) — the fixed icon slot of every tab title.
 ACTIVITY_ICON_PX = 10
 
-#: `(on, tone)` → QIcon. A pixmap is a VALUE (§4.6): the key carries the theme tone, so a
-#: theme switch repaints the mark instead of keeping the old colour.
+#: `(on, tone)` / `(state, token, tone)` → QIcon. A pixmap is a VALUE (§4.6): the key carries the
+#: theme tone, so a theme switch repaints the mark instead of keeping the old colour.
 _activity_icon_cache = {}
+
+# ── the session's STATE and IDENTITY on its tab (v1.9.8, task 3) ─────────────
+# The tab's fixed icon slot carries the session's STATE in the CARD's declaration
+# (`ui/status_shape.py` + the `status_colors` palette) while it sets no ACTIVITY mark, and the
+# shipped tooltip — the tab's second channel — names the identity `user@ip:port` beside the alias,
+# so one of eight shells says which account and which endpoint it stands for.
+
+#: The session states a tab can show, in the status vocabulary the cards already use.
+SESSION_STATE_ONLINE = "online"     # the channel is up (the shipped "connected" state)
+SESSION_STATE_WARN = "warn"         # a failure answered, the session was kept (v1.9.1's re-arm)
+SESSION_STATE_OFFLINE = "offline"   # the channel is closed
+
+
+def session_mark_status(page) -> str:
+    """The DECLARED status token of one session ("" — nothing to show, the empty slot).
+
+    PURE and duck-typed: a page carrying the shipped state fields (`_session_ended` for a closed
+    channel, `last_error` for a failure it survived, `_shut_down` for a torn-down page) answers one
+    of the three states; anything else answers "" so a bare test stub keeps the transparent slot.
+    """
+    try:
+        if getattr(page, "_shut_down", False):
+            return ""
+        if bool(getattr(page, "_session_ended", False)):
+            return SESSION_STATE_OFFLINE
+        if str(getattr(page, "last_error", "") or ""):
+            return SESSION_STATE_WARN
+    except RuntimeError:
+        return ""
+    if hasattr(page, "_session_ended"):
+        return SESSION_STATE_ONLINE
+    return ""
+
+
+def session_state_icon(status: str) -> QIcon:
+    """The status mark of a session state — the SHAPE and the COLOUR of the cards.
+
+    The declaration is `ui/status_shape.py` over `theme.status_colors` (the `ui/sidebar.py` row
+    marker's own source), so a state reads the same on a tab, in the list and on the map. The icon
+    is cached per `(status, tone)` — a pixmap is a VALUE (`AGENTS.md` §4.6). Never raises.
+    """
+    token = str(status or "")
+    if not token:
+        return activity_tab_icon(False)
+    tone = ""
+    try:
+        colors = getattr(theme, "STATUS_COLORS", None) or {}
+        tone = str(colors.get(token) or getattr(theme, "DOT_IDLE", "") or "")
+    except (AttributeError, TypeError):
+        tone = ""
+    key = ("state", token, tone)
+    icon = _activity_icon_cache.get(key)
+    if icon is not None:
+        return icon
+    try:
+        if status_shape is not None:
+            icon = status_shape.shape_icon(token, tone or None, ACTIVITY_ICON_PX)
+        else:
+            icon = activity_tab_icon(True)
+    except Exception:  # noqa: BLE001 — a mark is cosmetic: it may never break a container
+        icon = activity_tab_icon(False)
+    _activity_icon_cache[key] = icon
+    return icon
+
+
+def session_identity(page) -> str:
+    """The `user@ip:port` line of a session ("" — the page has no identified endpoint).
+
+    The IP is preferred over the host NAME (the cards' own rule: `ip or host`), and a missing user
+    or port leaves the shorter form rather than a dangling `@` or `:`.
+    """
+    data = getattr(page, "server_data", None)
+    if data is None:
+        return ""
+    try:
+        host = str(getattr(data, "ip", "") or getattr(data, "host", "") or "")
+        user = str(getattr(data, "user", "") or "")
+        port = getattr(data, "port", "") or ""
+    except RuntimeError:
+        return ""
+    if not host:
+        return ""
+    text = f"{user}@{host}" if user else host
+    try:
+        number = int(port)
+    except (TypeError, ValueError):
+        number = 0
+    return f"{text}:{number}" if number else text
+
+
+def session_tab_icon(page) -> QIcon:
+    """The ONE icon of a session tab: the activity mark while it is set, else the STATE mark."""
+    try:
+        if bool(getattr(page, "has_activity", False)):
+            return activity_tab_icon(True)
+    except RuntimeError:
+        return activity_tab_icon(False)
+    return session_state_icon(session_mark_status(page))
 
 
 def activity_tab_icon(on: bool) -> QIcon:
@@ -179,44 +294,90 @@ def activity_tab_icon(on: bool) -> QIcon:
 
 
 def session_tab_tooltip(page, t) -> str:
-    """The tab tooltip of ONE session — the activity sentence plus the REMOTE title.
+    """The tab tooltip of ONE session — the state sentence, the IDENTITY and the REMOTE title.
 
-    The tooltip is the shipped SECOND channel of the activity mark (marked → "new output", otherwise
-    "close session"), and v1.7.2 adds the title the remote program set over `OSC 0`/`OSC 2` as its
-    own line: the tab TEXT stays the node alias, so this is where "which of my eight shells is this?"
-    is answered. A page without a remote title (or without the property) gets the shipped sentence
-    alone. Never raises.
+    The tooltip is the shipped SECOND channel of the tab (marked → "new output", otherwise "close
+    session") and v1.7.2 added the title the remote program set over `OSC 0`/`OSC 2` as its own line:
+    the tab TEXT stays the node alias, so this is where "which of my eight shells is this?" is
+    answered. v1.9.8 (task 3) adds the session's IDENTITY (`user@ip:port`) beside that alias — the
+    account and the endpoint are what tell two shells of one host apart. Every line is optional, so
+    an unidentified page keeps the shipped sentence alone. Never raises.
     """
     head = t("terminal.tab_new_output") if getattr(page, "has_activity", False) \
         else t("terminal.tab_close_tooltip")
+    lines = [head]
+    identity = session_identity(page)
+    if identity:
+        lines.append(t("terminal.tab_identity", identity=identity))
     try:
         remote = str(getattr(page, "remote_title", "") or "").strip()
     except RuntimeError:
         remote = ""      # Qt teardown — the page is already gone
-    if not remote:
-        return head
-    return f"{head}\n{t('terminal.tab_remote_title', title=remote)}"
+    if remote:
+        lines.append(t("terminal.tab_remote_title", title=remote))
+    return "\n".join(lines)
+
+
+def install_tab_close(tabs, index: int, page, t) -> bool:
+    """Give ONE tab the theme's own CLOSE mark (v1.9.8, task 3) — and keep `tabsClosable` intact.
+
+    The style's stock tab-close glyph is a hard red cross: measured on this checkout it paints
+    `rgb(215, 55, 39)`, which reads as an ALERT for a control a user presses all day. A QToolButton
+    with the icon set's monochrome "close" drawer replaces it while `tabsClosable()` stays True (the
+    shipped contract two suites pin) — the click re-emits `tabCloseRequested`, so the container's ONE
+    close path is untouched. Returns whether a button was installed. Never raises.
+    """
+    try:
+        from PySide6.QtWidgets import QTabBar, QToolButton
+    except Exception:  # noqa: BLE001 — no Qt: nothing to install
+        return False
+    try:
+        existing = tabs.tabBar().tabButton(index, QTabBar.ButtonPosition.RightSide)
+        button = existing if isinstance(existing, QToolButton) else QToolButton(tabs)
+        button.setAutoRaise(True)
+        button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        button.setToolTip(t("terminal.tab_close_tooltip"))
+        refresh_button_icon(button, "close")
+        if button is not existing:
+            button.clicked.connect(
+                lambda _checked=False, p=page: _emit_tab_close(tabs, p))
+            tabs.tabBar().setTabButton(index, QTabBar.ButtonPosition.RightSide, button)
+        return True
+    except RuntimeError:
+        return False      # Qt teardown — the tab strip is already gone
+
+
+def _emit_tab_close(tabs, page) -> None:
+    """Re-emit the container's ONE close signal for `page` (the shipped close path). Never raises."""
+    try:
+        index = tabs.indexOf(page)
+        if index >= 0:
+            tabs.tabCloseRequested.emit(index)
+    except RuntimeError:
+        pass  # Qt teardown — the tab (or the container) is already gone
 
 
 def render_session_activity(tabs, page, t) -> bool:
-    """Draw (or clear) the activity mark + the tooltip of ONE session's tab. Never raises.
+    """Render the THREE marks of ONE session's tab: the icon, the tooltip, the close glyph.
 
     `tabs` is a container's QTabWidget, `page` a `TerminalSessionPage`, `t` the translator.
     A page without a tab (the SPLIT PANE) answers False — it has no tab strip to mark, and the
     amber frame of the pane is the multi-input's own channel, not this one's.
 
-    The tooltip is the mark's SECOND channel: while marked it says what the dot means, an
-    unmarked tab carries the ordinary "close session" text back, and a remote title travels on
-    its own line (`session_tab_tooltip()`). Re-applying is idempotent, so the same helper serves
-    the first paint, the clear-on-focus, a language switch, a theme switch and a title change.
+    The ICON is the fixed slot of the tab (v1.6.4: the width may never change): the ACTIVITY mark
+    while the session produced unseen output, otherwise the session's STATE mark in the card's own
+    declaration (`session_tab_icon()`). The tooltip is the mark's SECOND channel (the state sentence,
+    the identity and the remote title), and the close glyph is replaced with the theme's own. 
+    Re-applying is idempotent, so the same helper serves the first paint, the clear-on-focus, a
+    language switch, a theme switch and a title change.
     """
     try:
         index = tabs.indexOf(page)
         if index < 0:
             return False
-        on = bool(getattr(page, "has_activity", False))
-        tabs.setTabIcon(index, activity_tab_icon(on))
+        tabs.setTabIcon(index, session_tab_icon(page))
         tabs.setTabToolTip(index, session_tab_tooltip(page, t))
+        install_tab_close(tabs, index, page, t)
         return True
     except RuntimeError:
         return False   # Qt teardown — the tab strip is already gone
@@ -436,6 +597,9 @@ class TerminalSessionPage(TerminalFilesPanelMixin, TerminalPageSftpMixin, Termin
         # v1.9.1: the session's SECOND state — `closed_signal` has arrived, so `reconnect()` may
         # run (a live session is never re-armed). The re-arm clears it; `shutdown()` ends the page.
         self._session_ended = False
+        # v1.9.8 (task 3): the session's last FAILURE ("" — none): the reader behind the tab's WARN
+        # state, written by `_show_error()` and cleared by the connect that answers it.
+        self._last_error = ""
         # The SPLIT marker — the page was created as the second pane of a terminal window
         # (`add_session(split=True)`), NOT as a tab. `MainWindow._terminal_windows` keeps it for the green
         # dot and the multi-input provider, while the `terminal_max_open` limit and
@@ -713,11 +877,13 @@ class TerminalSessionPage(TerminalFilesPanelMixin, TerminalPageSftpMixin, Termin
         self._initial_cmd_conn = None
         if self._initial_command:
             self._initial_cmd_conn = thread.connected_signal.connect(self._send_initial_command)
+        # v1.9.8 (task 3): a session that CONNECTED clears its last failure and re-renders its tab
+        # (the state mark of the fixed icon slot).
+        thread.connected_signal.connect(self._on_connected_state)
         thread.start()
 
     def can_reconnect(self) -> bool:
         """May this page be re-armed? — the ONE state reader of the Reconnect row (v1.9.1).
-
         True exactly when `closed_signal` has arrived and the page is still alive: a LIVE session
         is never re-armed (the row is disabled) and a page whose `shutdown()` ran has no host left
         to report to. A container reads this at the moment it builds a menu, so the state is never
@@ -726,6 +892,11 @@ class TerminalSessionPage(TerminalFilesPanelMixin, TerminalPageSftpMixin, Termin
         if getattr(self, "_shut_down", False):
             return False
         return bool(getattr(self, "_session_ended", False))
+
+    @property
+    def last_error(self) -> str:
+        """The session's last failure ("" — none): the reader behind the tab's WARN state (v1.9.8)."""
+        return str(getattr(self, "_last_error", "") or "")
 
     def reconnect(self) -> bool:
         """Bring THIS session back — the ONE re-arm path (v1.9.1, `AGENTS.md` §4.3).
@@ -1309,6 +1480,9 @@ class TerminalSessionPage(TerminalFilesPanelMixin, TerminalPageSftpMixin, Termin
             # v1.6.3: the cwd follow's hook — an orphan thread must not install it after
             # the page is gone (the same reason the Quick Launch connection is dropped).
             _dissig(thread.connected_signal, self._on_connected_for_follow)
+            # v1.9.8 (task 3): the state mark's own slot — an orphan thread must not re-render a
+            # tab of a page that is gone.
+            _dissig(thread.connected_signal, self._on_connected_state)
             # Quick Launch — only if the connection was made (the Connection object from __init__)
             if getattr(self, "_initial_cmd_conn", None) is not None:
                 try:
@@ -1646,9 +1820,17 @@ class TerminalSessionPage(TerminalFilesPanelMixin, TerminalPageSftpMixin, Termin
         """
         return self._session_status
 
+    def _on_connected_state(self):
+        """`connected_signal`: clear the recorded failure and re-render the tab (v1.9.8, task 3)."""
+        self._last_error = ""
+        self._note_tab_state()
+
     def _show_error(self, error: str):
         t = get_translator()
+        # v1.9.8 (task 3): the failure is the tab's WARN state — recorded (a reader) and announced.
+        self._last_error = str(error or "")
         self._set_status_text(f"{t('terminal.error_prefix')} {error}")
+        self._note_tab_state()
         box = _st_module().QMessageBox   # test seam (ST.QMessageBox)
         box.critical(
             self._host_window,
@@ -1664,6 +1846,23 @@ class TerminalSessionPage(TerminalFilesPanelMixin, TerminalPageSftpMixin, Termin
         # v1.4.7 follow-up: one write — `_set_status_text` IS the bridge now (the line
         # and the host's status surface were two writes of the same text before).
         self._set_status_text(get_translator()("terminal.session_closed"))
+        # v1.9.8 (task 3): the tab's STATE mark follows the same fact.
+        self._note_tab_state()
+
+    def _note_tab_state(self) -> None:
+        """Tell the host to re-render this session's tab after a STATE change (v1.9.8, task 3).
+
+        The shipped hook is the activity mark's own (`session_activity_changed`); a state change
+        (connected / closed / an error) is the other half of what the tab's fixed icon slot shows.
+        Duck-typed and quiet, exactly like `set_activity()`. Never raises.
+        """
+        host = getattr(self, "_host_window", None)
+        hook = getattr(host, "session_activity_changed", None)
+        if callable(hook):
+            try:
+                hook(self)
+            except RuntimeError:
+                pass   # Qt teardown — no tab strip left to mark
 
     # ── v1.0RC4: Quick Launch ───────────────────────────────────────────────
 

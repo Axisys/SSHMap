@@ -527,10 +527,29 @@ check("§4 ...and it is not a second status bar: no progress bar, no current-sta
       panel.has_live_surface() is False and panel.findChildren(QProgressBar) == []
       and not isinstance(panel, type(win.statusBar())))
 
-# Clear: the ring itself, not only the view.
-panel.clear()
+# Clear: the ring itself, not only the view — and ONE question first (the ask is the guard the
+# ring's reader needs: emptying the history costs their place in it). The dialog is stubbed by the
+# module-attribute pattern (`tests/README` convention), never shown.
+from PySide6.QtWidgets import QMessageBox as _QMB  # noqa: E402
+
+_asks = []
+_real_question = _QMB.question
+_QMB.question = staticmethod(lambda *a, **k: (_asks.append(a), _QMB.No)[1])
+try:
+    panel.clear()
+finally:
+    _QMB.question = _real_question
+check("§4 Clear ASKS first and a refusal keeps the history",
+      len(_asks) == 1 and len(AL.get_activity_buffer()) > 0 and panel.row_count() > 0,
+      f"asks={len(_asks)} rows={panel.row_count()}")
+QMB_YES = staticmethod(lambda *a, **k: (_asks.append(a), _QMB.Yes)[1])
+_QMB.question = QMB_YES
+try:
+    panel.clear()
+finally:
+    _QMB.question = _real_question
 check("§4 Clear empties the HISTORY (the ring), not only the rows",
-      len(AL.get_activity_buffer()) == 0 and panel.row_count() == 0)
+      len(_asks) == 2 and len(AL.get_activity_buffer()) == 0 and panel.row_count() == 0)
 
 # The retranslate: the CHROME follows the language, the event LINES do not.
 AL.get_activity_buffer().append("a line that stays English", level="INFO", source="tests.panel")
