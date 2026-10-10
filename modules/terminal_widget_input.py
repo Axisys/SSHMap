@@ -3,8 +3,9 @@
 `TerminalInputMixin` owns the ONE input point of a session: the xterm key table (`keyPressEvent` with
 `_F_KEY_SEQUENCES`), the `Tab`/`Shift+Tab` interception and the `ShortcutOverride` claim
 (`event` / `_CLAIMED_KEYS` / `_owns_shortcut`), the bracketed paste, `send_macro()` and the multi-input
-broadcast (`_send` / `_resolve_multi_hub` / `_multi_*` / the per-session exclusion). Nothing here may
-raise into the session and nothing may truncate.
+broadcast (`_send` / `_resolve_multi_hub` / `_multi_*` / the per-session exclusion) — plus the
+FORWARD-ONLY line buffer and the command guard's question at its `Enter` (`AGENTS.md` §4.30). Nothing
+here may raise into the session and nothing may truncate.
 
 Contract — `AGENTS.md` §4.3; mechanism — `DOCUMENTATION.md` §14a, §64.
 """
@@ -12,10 +13,20 @@ Contract — `AGENTS.md` §4.3; mechanism — `DOCUMENTATION.md` §14a, §64.
 from PySide6.QtCore import QEvent, Qt
 from PySide6.QtWidgets import QApplication
 
+try:  # v1.9.6: the command guard — the PURE classifier and the ONE dialog of a submission
+    from .command_guard import confirm_broadcast as _guard_confirm_broadcast
+    from .command_guard import needs_confirmation as _guard_needs_confirmation
+except ImportError:
+    from command_guard import confirm_broadcast as _guard_confirm_broadcast  # type: ignore
+    from command_guard import needs_confirmation as _guard_needs_confirmation  # type: ignore
+
 try:  # AGENTS.md §4.1: the ONE seam for a facade global — a mixin never imports the facade module
     from ..ui.mixin_support import host_attr
 except ImportError:
     from ui.mixin_support import host_attr
+
+#: The bound of the forward-only line buffer (a guard, not a log: the line's TAIL is what matters).
+GUARD_LINE_MAX_CHARS = 4096
 
 # xterm sequences for F1–F12 (the xterm table: DOCUMENTATION.md §14a):
 # F1–F4 — SS3 (\x1bOP…\x1bOS), F5–F12 — CSI (\x1b[15~ … \x1b[24~).
@@ -85,6 +96,9 @@ class TerminalInputMixin:
                 if not (mod & Qt.KeyboardModifier.ControlModifier
                         or mod & Qt.KeyboardModifier.MetaModifier) \
                         and self.terminal_thread is not None:
+                    # v1.9.6: an interception that never reaches keyPressEvent kills the line too
+                    # (the completion below is not something a forward-only buffer can follow).
+                    self._guard_line_invalidate()
                     self._send(b"\t" if key == Qt.Key.Key_Tab else b"\x1b[Z")
                     e.accept()
                     return True
@@ -150,6 +164,17 @@ class TerminalInputMixin:
             return
         key = event.key()
         mod = event.modifiers()
+
+        # v1.9.6: the forward-only line buffer behind the multi-input command guard. Printable text
+        # is appended, and every other key (a control combination, an arrow, a page key, Esc, an
+        # F-key) INVALIDATES the line — a readline edit can never be mistaken for one (the declared
+        # false negative); a mouse report invalidates it too (`_send_mouse`).
+        if not (mod & Qt.KeyboardModifier.ControlModifier and mod & Qt.KeyboardModifier.AltModifier):
+            typed = event.text()
+            if typed and typed.isprintable():
+                self._guard_line_type(typed)
+            elif key not in (Qt.Key.Key_Return, Qt.Key.Key_Enter, Qt.Key.Key_Backspace):
+                self._guard_line_invalidate()
 
         if mod & Qt.KeyboardModifier.ControlModifier:
             # the AltGr guard (DOCUMENTATION.md §14a): the Ctrl+Alt combinations (on Windows
@@ -229,9 +254,14 @@ class TerminalInputMixin:
             return
 
         if key in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+            # v1.9.6: the SUBMISSION boundary of a multi-input line — a refusal swallows the Enter.
+            if not self._guard_submit():
+                event.accept()
+                return
             self._send(b"\r")
             return
         if key == Qt.Key.Key_Backspace:
+            self._guard_line_backspace()
             self._send(b"\x7f")
             return
         # Tab/Shift+Tab: on the REAL events they are intercepted earlier — in event()
@@ -314,6 +344,66 @@ class TerminalInputMixin:
                 hub.set_active(False)
         except Exception:
             pass  # the hub is mid-teardown — the key simply does not go to the shell
+
+    # ── v1.9.6: the forward-only line buffer and the SUBMISSION guard (AGENTS.md §4.30) ──
+    def _guard_line_reset(self):
+        """Start a NEW line: the buffer is empty and trustworthy again (a submit, an allowed one)."""
+        self._guard_line = ""
+        self._guard_line_ok = True
+
+    def _guard_line_invalidate(self):
+        """The line can no longer be reconstructed — it is dropped and stays UNGUARDED until submit.
+
+        The declared FALSE NEGATIVE of this door: a history recall, a completion, a cursor move or
+        any control key edits the line on the sessions without this canvas seeing WHAT was edited,
+        so guessing would be worse than staying silent.
+        """
+        self._guard_line = ""
+        self._guard_line_ok = False
+
+    def _guard_line_type(self, text: str):
+        """Append PRINTABLE text to the forward-only buffer (a killed line stays killed)."""
+        if self._guard_line_ok and text:
+            self._guard_line = (self._guard_line + text)[-GUARD_LINE_MAX_CHARS:]
+
+    def _guard_line_backspace(self):
+        """Backspace pops the last character — an erasure stays forward-only and trustworthy."""
+        if self._guard_line_ok and self._guard_line:
+            self._guard_line = self._guard_line[:-1]
+
+    def _guard_submit(self) -> bool:
+        """The guard's question at the `Enter` of a multi-input line: may this line be SUBMITTED?
+
+        False — the user refused a destructive line: the Enter is swallowed and NOTHING else is
+        injected (the text is already on every session — the broadcast is keystroke-by-keystroke —
+        and a `Ctrl+C` on the user's behalf would kill a foreground program on a host that was not
+        at a prompt: refused by decision). The buffer is KEPT on a refusal, so a second Enter asks
+        again instead of slipping through. True — the line goes out and a new one starts here.
+        """
+        line = self._guard_line if self._guard_line_ok else ""
+        if not line or not self._multi_active():
+            self._guard_line_reset()
+            return True
+        allowed = self._guard_line_allows(line)
+        if allowed:
+            self._guard_line_reset()
+        return allowed
+
+    def _guard_line_allows(self, line: str) -> bool:
+        """ONE `guard.command.broadcast` question about a typed line; a guard that cannot ask REFUSES.
+
+        The count is the hub's OWN `participant_count()` — the sessions this Enter really reaches —
+        and the policy is the module's (CONFIG, ON by default: §4.30).
+        """
+        try:
+            hub = self._resolve_multi_hub()
+            count = int(hub.participant_count()) if hub is not None else 0
+            token = _guard_needs_confirmation(line)
+            if not token:
+                return True
+            return bool(_guard_confirm_broadcast(line, token, count=count, parent=self))
+        except Exception:  # noqa: BLE001 — a guard that cannot answer must never wave a line through
+            return False
 
     def _send(self, data: bytes):
         """The SINGLE point where the user input is sent (v1.2.3, ROADMAP task 1).

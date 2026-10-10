@@ -30,6 +30,11 @@ except ImportError:  # a flat launch from inside modules/
     from plugin_context import (PluginNode, build_context,  # type: ignore
                                 node_record, node_records, run_result_from_dict)
 
+try:  # v1.9.6: the command guard — the PURE classifier and the ONE dialog of the run's boundary
+    from modules.command_guard import confirm as command_confirm, needs_confirmation
+except ImportError:  # a flat launch from inside modules/
+    from command_guard import confirm as command_confirm, needs_confirmation  # type: ignore
+
 
 # ── The contract constants (the discovery half of the frozen API v1) ──────────────
 
@@ -385,6 +390,9 @@ class PluginManager(QObject):
     hook_timeout = Signal(str, str, int)          # (plugin_id, hook, budget_ms)
     command_result = Signal(str, str, dict)       # (plugin_id, node_id, result)
     command_finished = Signal(str, list)          # (plugin_id, results)
+    # v1.9.6: the command guard refused the run before a runner existed — (plugin_id, token, node
+    # count). A refusal is a RESULT, so `command_finished` fires with an EMPTY list beside it.
+    command_refused = Signal(str, str, int)
     # The manager marshals a command start onto ITS OWN thread. The receiver context of a signal
     # connected to a plain Python callable is the thread that calls `connect()` (gotcha #20), so a
     # runner built inside a `run_on_nodes` worker posts its per-node results into a thread WITHOUT an
@@ -405,6 +413,11 @@ class PluginManager(QObject):
         self._nodes: Dict[str, PluginNode] = {}      # the map as plugin node records
         self._node_facts: Dict[str, dict] = {}       # internal-only facts (key_path)
         self._running_commands = 0
+        # v1.9.6: the verdict of the LAST run's boundary (the command guard), read through
+        # `last_command_refusal()` — the ONE answer a synchronous caller and the core door get.
+        self._last_run_refused = False
+        self._last_refusal_token = ""
+        self._last_refusal_count = 0
         # v1.4: the marshalling of `ctx.run_command` onto this object's thread (see the
         # signal's own comment): a direct call from the GUI thread, a queued one from a
         # plugin's worker — the runner is ALWAYS built where the event loop lives.
@@ -718,6 +731,11 @@ class PluginManager(QObject):
         from a GUI-thread command — and a runner built in a thread without an event loop
         would deliver its per-node results nowhere (AGENTS.md §7 gotcha #20). From the GUI
         thread the signal is a direct call, so nothing about the ordinary path changed.
+
+        v1.9.6: the command guard answers a DIRECT caller honestly — the boundary runs inside the
+        emit, so the verdict is already known and `False` means "the user refused this run". From a
+        plugin WORKER the emit is queued and the answer stays True ("accepted"): that plugin learns
+        the outcome through `command_refused` and its own `on_finished` (PLUGINS.md §5).
         """
         records = node_records(nodes)
         if not records or not str(command or "").strip():
@@ -733,7 +751,32 @@ class PluginManager(QObject):
                                         budget)
         except RuntimeError:
             return False      # Qt teardown — the signal has no receiver left
+        if QThread.currentThread() is self.thread():
+            return not self._last_run_refused
         return True
+
+    def last_command_refusal(self) -> tuple:
+        """`(token, node_count)` of the last run the command guard REFUSED — `()` for anything else.
+
+        The core door asks this instead of guessing why a start answered False (the module owns no
+        i18n: the caller renders the sentence from these two facts).
+        """
+        if not self._last_run_refused:
+            return ()
+        return (self._last_refusal_token, self._last_refusal_count)
+
+    def _guard_parent(self):
+        """The WIDGET the guard's dialog hangs on — the manager's own parent when it is one.
+
+        The manager is a `QObject` and `QMessageBox(QObject)` is a `TypeError` (which the guard reads
+        as "cannot ask" and would REFUSE every command), so the modal parent is resolved by duck
+        typing and `None` — legal Qt — is the honest fallback. Never raises.
+        """
+        try:
+            parent = self.parent()
+        except Exception:  # noqa: BLE001 — a dead C++ parent under teardown
+            return None
+        return parent if hasattr(parent, "windowFlags") else None
 
     def _start_command_run(self, plugin_id: str, records: list, command: str,
                            on_result, on_finished, timeout: float) -> bool:
@@ -743,7 +786,41 @@ class PluginManager(QObject):
         `PluginCommandRunner` are connected in THIS thread (the rule that makes their
         delivery work at all), the worker joins the managed registry and the plugin's
         callbacks are wrapped so a plugin's own exception can never reach the host.
+
+        v1.9.6: the FIRST statement is the command guard — the command string is FINAL here and a
+        dialog may only open on this thread, which is exactly where the hop put the run. ONE
+        `confirm()` per RUN (never per node), the node count NAMED in it, and a refusal builds NO
+        runner and opens NO connection: the manager emits `command_refused` and fires
+        `command_finished` with an EMPTY list, so a plugin's `on_finished` still runs (a refusal is
+        a RESULT, not a silence — PLUGINS.md §5). Rule — AGENTS.md §4.30.
         """
+        self._last_run_refused = False
+        self._last_refusal_token = ""
+        self._last_refusal_count = 0
+        token = needs_confirmation(command)
+        if token and not command_confirm(command, token, count=len(records),
+                                         plugin_id=str(plugin_id or ""),
+                                         parent=self._guard_parent()):
+            self._last_run_refused = True
+            self._last_refusal_token = token
+            self._last_refusal_count = len(records)
+            _log_line("warning", f"plugin {plugin_id!r}: run_command was REFUSED by the user "
+                                 f"({token}, {len(records)} node(s)) — no connection was opened")
+            try:
+                self.command_refused.emit(str(plugin_id or ""), token, len(records))
+            except RuntimeError:
+                pass
+            try:
+                self.command_finished.emit(str(plugin_id or ""), [])
+            except RuntimeError:
+                pass
+            if callable(on_finished):
+                try:
+                    on_finished([])
+                except BaseException as exc:  # noqa: BLE001 — the plugin's own callback
+                    self._report_hook_error(str(plugin_id or ""), "run_command.on_finished", exc)
+            return False
+
         try:
             from modules.plugin_runner import PluginCommandRunner
         except ImportError:  # a flat launch from inside modules/

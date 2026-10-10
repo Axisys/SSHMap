@@ -908,8 +908,8 @@ check("the i18n pin counts the SHIPPED release (897 + the 17 of v1.7.4rc1 + the 
       " truncation notice + the 6 of v1.7.5.1 + the 20 of v1.8: the elevated pane + the 41 of"
       " v1.8.1: the trust surface, and v1.8.1.1 adds ONE: the send identity sentence) and v1.8.2 adds SIXTEEN: the library file — the History door, the backup ring and the import/export pair"
       " — and v1.8.3 adds TWENTY-THREE: the Plugins window (its chrome, its three columns and its"
-      " export) and v1.8.4 adds TEN: the whole-map layout, the reverse traversal and the inode fact, and v1.9 adds FOUR: the production-tag guard — its title, the broadcast sentence and the paste sentence — and the notice of a checked selection that has left the map, and v1.9.1 adds ELEVEN: the reconnect and its `tmux attach`; v1.9.3 adds THIRTEEN: the command dialog's ten keys and the reader's encoding three",
-      EXPECTED_I18N_KEYS == 897 + 17 + 1 + 4 + 6 + 20 + 41 + 1 + 16 + 23 + 10 + 4 + 11 + 13, str(EXPECTED_I18N_KEYS))
+      " export) and v1.8.4 adds TEN: the whole-map layout, the reverse traversal and the inode fact, and v1.9 adds FOUR: the production-tag guard — its title, the broadcast sentence and the paste sentence — and the notice of a checked selection that has left the map, and v1.9.1 adds ELEVEN: the reconnect and its `tmux attach`; v1.9.3 adds THIRTEEN: the command dialog's ten keys and the reader's encoding three; v1.9.6 adds THREE: the command guard's two sentences and the refusal line",
+      EXPECTED_I18N_KEYS == 897 + 17 + 1 + 4 + 6 + 20 + 41 + 1 + 16 + 23 + 10 + 4 + 11 + 13 + 3, str(EXPECTED_I18N_KEYS))
 check("VERSION_FORMAT did NOT move (a path is never written into a project)",
       __import__("version").VERSION_FORMAT == "0.9")
 check("no new dependency was added for the local pane (the four pinned ones)",

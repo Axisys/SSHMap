@@ -197,6 +197,32 @@ try:
           win._open_plugin_command_dialog() is False
           and win.statusBar().currentMessage() == _t("plugins.command.failed"),
           repr(win.statusBar().currentMessage()))
+
+    # v1.9.6: a False start caused by the COMMAND GUARD has its OWN sentence — the door reads the
+    # manager's verdict instead of blaming the start (and never claims "sent to N servers").
+    MW.ask_plugin_command = lambda nodes, parent=None, timeout_s=None: "rm -rf /var"
+    win._plugin_manager.plugin_run_command = _real_run      # the REAL boundary, guard included
+    _pm = sys.modules["modules.plugin_manager"]
+    _orig_gate = _pm.command_confirm
+    _pm.command_confirm = lambda command, token, **kw: False
+    try:
+        win.statusBar().clearMessage()
+        panel.clear()
+        check("§2 a command the guard REFUSED says which refusal it was (not `command.failed`)",
+              win._open_plugin_command_dialog() is False
+              and win.statusBar().currentMessage() == _t("plugins.command.guard_refused",
+                                                         token="rm -rf", count=1),
+              repr(win.statusBar().currentMessage()))
+        check("§2 ...so the status line never claims 'sent to N servers' about a refused run",
+              win.statusBar().currentMessage()
+              != _t("plugins.command.status.started", count=1))
+        check("§2 ...and the refusal is a row of the Plugins window's ring (a result, not a silence)",
+              any("Run refused" in row[3] for row in panel.event_rows())
+              and any("0 node(s)" in row[3] for row in panel.event_rows()),
+              str(panel.event_rows()[:2]))
+    finally:
+        _pm.command_confirm = _orig_gate
+        win._plugin_manager.plugin_run_command = _fake_run
 finally:
     MW.ask_plugin_command = _real_ask
     win._plugin_manager.plugin_run_command = _real_run
@@ -266,8 +292,9 @@ check("§4 the two placeholders survive in every language (a count and a budget)
           and "{count}" in data["plugins.command.status.started"]
           and "{seconds}" in data["plugins.command.note"] for data in _LANGS.values()),
       str({c: _LANGS[c]["plugins.command.note"] for c in _LANGS}))
-check("§4 the release moved, the SCHEMA did not and the pin counts the thirteen new keys",
-      releases_at_least(EXPECTED_APP_VERSION, "1.9.3") and EXPECTED_I18N_KEYS == 1051 + 10 + 3
+check("§4 the release moved, the SCHEMA did not and the pin counts the thirteen new keys "
+      "(plus v1.9.6's three: the command guard)",
+      releases_at_least(EXPECTED_APP_VERSION, "1.9.3") and EXPECTED_I18N_KEYS == 1051 + 10 + 3 + 3
       and __import__("version").VERSION_FORMAT == "0.9", str(EXPECTED_I18N_KEYS))
 check_i18n_parity(_LANGS)
 check_i18n_format(_LANGS)

@@ -328,7 +328,19 @@ class PluginMixin:
                 self.log.warning(f"Command run failed: {e}")
             started = False
         if not started:
-            self._show_plugin_status(self.t("plugins.command.failed"), 8000)
+            # v1.9.6: a False start has TWO meanings now — the command guard refused the run (the
+            # token and the count are the manager's own facts) or the start really failed. The
+            # status line can never claim "sent to N servers" about a run the user refused.
+            refusal = ()
+            try:
+                refusal = tuple(self._plugin_manager.last_command_refusal() or ())
+            except Exception:  # noqa: BLE001 — an older manager without the reader
+                refusal = ()
+            if len(refusal) == 2:
+                self._show_plugin_status(self.t("plugins.command.guard_refused",
+                                                token=str(refusal[0]), count=int(refusal[1])), 8000)
+            else:
+                self._show_plugin_status(self.t("plugins.command.failed"), 8000)
             return False
         self._reveal_plugins_window()
         self._show_plugin_status(self.t("plugins.command.status.started", count=len(nodes)), 8000)
@@ -439,6 +451,9 @@ class PluginMixin:
             self._plugin_manager.plugins_changed.connect(self._refresh_plugins_window)
             self._plugin_manager.command_result.connect(self._on_plugin_command_result)
             self._plugin_manager.command_finished.connect(self._on_plugin_command_finished)
+            # v1.9.6: the command guard's refusal — ONE ring row and ONE status line, so a run the
+            # user refused is as readable as a run that happened (AGENTS.md §4.30).
+            self._plugin_manager.command_refused.connect(self._on_plugin_command_refused)
             # The plugin's OWN words: `ctx.log()` is its report and `ctx.status()` the sentence it
             # asked the interface to show — a window that ran a plugin must show both, or a run
             # reads as a bare `exit 0`.
@@ -506,6 +521,17 @@ class PluginMixin:
             panel.record_run_finished(plugin_id, len(payloads or []))
         except Exception:  # noqa: BLE001
             pass
+
+    def _on_plugin_command_refused(self, plugin_id: str, token: str, count: int):
+        """v1.9.6: the command guard refused a run → ONE ring row + ONE status line. Never raises."""
+        panel = getattr(self, "plugins_panel", None)
+        if panel is not None:
+            try:
+                panel.record_run_refused(plugin_id, token, count)
+            except Exception:  # noqa: BLE001 — a diagnostic row must never break a refusal
+                pass
+        self._show_plugin_status(self.t("plugins.command.guard_refused",
+                                        token=str(token), count=int(count)), 8000)
 
     def _on_plugin_message(self, plugin_id: str, message: str):
         """`ctx.log()` → ONE row of the session ring (the plugin's OWN words, verbatim).

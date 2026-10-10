@@ -73,6 +73,8 @@ OUTPUT_KEEP = 2000
 KIND_RUN_STARTED = "run_started"
 KIND_RUN_RESULT = "run_result"
 KIND_RUN_FINISHED = "run_finished"
+#: v1.9.6: the command guard REFUSED a run before a runner existed (a result, not a silence).
+KIND_RUN_REFUSED = "run_refused"
 #: The plugin's OWN words: a `ctx.log()` line and a `ctx.status()` sentence (v1.8.3).
 KIND_PLUGIN_MESSAGE = "plugin_message"
 KIND_PLUGIN_STATUS = "plugin_status"
@@ -172,6 +174,13 @@ def run_result_line(label, payload) -> tuple:
 def run_finished_line(label, count) -> tuple:
     """The END of one plugin's run → `(level, source, text, detail)` in ENGLISH. PURE."""
     return ("INFO", str(label or "?"), f"Run finished: {label or '?'} — {int(count)} node(s)", "")
+
+
+def run_refused_line(label, token, count) -> tuple:
+    """The command guard's REFUSAL of one run → `(level, source, text, detail)` in ENGLISH. PURE."""
+    name = str(label or "?")
+    return ("WARNING", name,
+            f"Run refused: {name} — '{str(token or '?')}' on {int(count)} server(s)", "")
 
 
 def plugin_events_text(events) -> str:
@@ -746,6 +755,14 @@ class PluginsPanel(QDialog):
         """The end of one plugin's run → ONE summary row (the count of the nodes it walked)."""
         level, source, text, detail = run_finished_line(self._plugin_label(plugin_id), count)
         event = self.ring.append(KIND_RUN_FINISHED, level, source, text, detail)
+        if event is not None:
+            self.sync_events()
+        return event
+
+    def record_run_refused(self, plugin_id, token, count) -> "PluginEvent":
+        """v1.9.6: the command guard refused a run → ONE row (a refusal is a result, not a silence)."""
+        level, source, text, detail = run_refused_line(self._plugin_label(plugin_id), token, count)
+        event = self.ring.append(KIND_RUN_REFUSED, level, source, text, detail)
         if event is not None:
             self.sync_events()
         return event

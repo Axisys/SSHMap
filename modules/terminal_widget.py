@@ -580,6 +580,10 @@ class TerminalWidget(TerminalInputMixin, TerminalMouseMixin, TerminalFindMixin,
         # v1.9: the PRODUCTION-TAG guard of a multi-line paste — the owning page installs it (it knows
         # the node's tags and the words); None — no policy installed, the paste goes ahead.
         self.guard_hook = None
+        # v1.9.6: the FORWARD-ONLY line buffer of the multi-input command guard — the text typed
+        # since the last submit, and whether it can still be trusted (an editing key kills it).
+        self._guard_line = ""
+        self._guard_line_ok = True
 
         self._bg_color = QColor(self._palette["default_bg"])
         self._cursor_color = QColor(self.CURSOR_COLOR)

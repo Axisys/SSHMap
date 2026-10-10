@@ -111,6 +111,7 @@ of the file itself.
 | `test_canvas_truth.py` | — | v1.6.3 — the canvas at the cell: the glyph grid, the mouse the TUI asks for, the Files tab that answers back. |
 | `test_chrome.py` | — | v1.5rc4 — Density, focus & findability: the chrome answers the same questions as the map. |
 | `test_collapse.py` | — | Server card collapsing v0.8.4 (former DESIGN.md §D) (former tests/smoke_collapse.py). |
+| `test_command_guard.py` | — | v1.9.6 — the command guard: the PURE classifier, the policy, the ONE dialog and its doors. |
 | `test_command_library.py` | — | Terminal macros: the command/script library of the terminal panel. |
 | `test_command_library_file.py` | — | v1.8.2 — the command library as a first-class FILE: the door, the ring and the import/export pair. |
 | `test_connections.py` | — | Connections: Bézier arrows, types, edge-to-edge, drag mode (former smoke_test.py §6b "v0.7"). |

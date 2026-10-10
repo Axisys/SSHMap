@@ -139,6 +139,9 @@ class TerminalMouseMixin:
         """
         if self.terminal_thread is None:
             return
+        # v1.9.6: a mouse report is not text this canvas typed — the forward-only line buffer of the
+        # multi-input command guard can no longer be trusted (AGENTS.md §4.30).
+        self._guard_line_invalidate()
         cols, lines = self.tscreen.columns, self.tscreen.lines
         col = max(1, min(int(col), cols))
         row = max(1, min(int(row), lines))

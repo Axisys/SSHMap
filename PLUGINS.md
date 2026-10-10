@@ -163,6 +163,18 @@ connection fails simply reports the error in its own result. `timeout` (seconds,
 thread, so this holds whether `run_command` is called from a palette command (the GUI
 thread) or from a `run_on_nodes` hook (a worker thread).
 
+**`run_command()` and the command guard.** A command that looks destructive — judged by the
+core's own token table (`modules/command_guard.py`, CONFIG-only policy `guard_commands` of
+`~/.sshmap/config.json`, ON by default) — asks the USER once per CALL before a runner or a
+connection exists; the dialog names the matched token, the command and the number of servers.
+A refusal is NOT an error: the call ends with an EMPTY result list, `on_finished([])` still
+fires (and the core reports the same fact to the application), so a plugin that renders its
+results keeps working. It is ONE question per CALL, never per node: the ordinary way to ask
+once for a whole fleet is to pass every node in ONE `nodes` list, while a plugin that loops
+one node per call asks once per call. The guard is a confirmation and never a sandbox. From a
+`run_on_nodes` WORKER the call keeps answering `True` ("accepted"): the question is asked on
+the core's thread, and the outcome reaches that plugin through `on_finished`.
+
 A **node record** exposed to plugins is exactly `{id, alias, host, port, user}` plus the
 plugin's own data; a plugin that needs more asks the core for a service, it does not
 reach for the model.

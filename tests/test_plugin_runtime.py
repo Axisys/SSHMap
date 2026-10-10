@@ -256,6 +256,39 @@ check("the refused calls never reached the transport",
       len(_TRANSPORT_CALLS) == 2, str(len(_TRANSPORT_CALLS)))
 restore_runner_seams()
 
+# v1.9.6: the command guard at the SAME boundary — a destructive command asks ONCE per RUN and a
+# refusal builds no runner and opens no connection (the token and the count travel by signal).
+_guard_refused = collect(mgr.command_refused)
+_guard_finished = collect(mgr.command_finished)
+_guard_calls = []
+_orig_guard_confirm = PM.command_confirm
+PM.command_confirm = lambda command, token, **kw: (
+    _guard_calls.append((command, token, kw.get("count"))), False)[1]
+patch_transport()
+patch_credentials()
+_TRANSPORT_CALLS.clear()
+_guard_cb = []
+try:
+    _destructive = PC.PluginContext("runner", core=mgr).run_command(
+        [node_tuple("good"), node_tuple("bad", host="bad-1")], "rm -rf /var/log",
+        on_finished=lambda results: _guard_cb.append(results))
+finally:
+    PM.command_confirm = _orig_guard_confirm
+    restore_runner_seams()
+check("v1.9.6: a destructive command asks ONE question and a refusal answers False",
+      _destructive is False and _guard_calls == [("rm -rf /var/log", "rm -rf", 2)],
+      f"{_destructive} {_guard_calls}")
+check("v1.9.6: …no connection is opened and no runner is built at all",
+      _TRANSPORT_CALLS == [] and mgr.active_workers() == [] and mgr.running_commands() == 0,
+      f"{_TRANSPORT_CALLS} {mgr.active_workers()} {mgr.running_commands()}")
+check("v1.9.6: `command_refused` carries the plugin id, the token and the node count",
+      _guard_refused == [("runner", "rm -rf", 2)], str(_guard_refused))
+check("v1.9.6: a refusal is a RESULT — `command_finished` and the plugin's OWN callback fire empty",
+      _guard_finished == [("runner", [])] and _guard_cb == [[]],
+      f"{_guard_finished} {_guard_cb}")
+check("v1.9.6: the manager records the verdict for the core door (last_command_refusal)",
+      mgr.last_command_refusal() == ("rm -rf", 2), str(mgr.last_command_refusal()))
+
 # The runner itself: the direct seam (transport + credentials injected).
 _direct = []
 _runner = PR.PluginCommandRunner([PC.node_record(node_tuple("d1")), PC.node_record(node_tuple("d2"))],
