@@ -160,6 +160,11 @@ class ServerNode(QGraphicsItemGroup):
 
     MIN_NODE_WIDTH = 180
     MIN_NODE_HEIGHT = 130
+    #: v1.9.7 (ROADMAP task 1): the COMPACT density's OWN floor. `MIN_NODE_HEIGHT` is the
+    #: info plaque's floor and never the compact card's; this is the expanded formula with the
+    #: plaque gone (`58 + 12`), and it stays above what the compact layout really paints (the
+    #: host block ends at ≈57). A badge never enters either floor — the FREE BAND rule.
+    COMPACT_NODE_HEIGHT = 70
     # v0.8.4 (former DESIGN.md §D): collapsed badge height — a single line:
     # [icon] alias @host … [●status][SSH dot][▾chevron]
     COLLAPSED_HEIGHT = 46
@@ -827,7 +832,7 @@ class ServerNode(QGraphicsItemGroup):
 
     def _state_pen(self):
         if self._selected:
-            return QPen(self.COLOR_SELECTED, 3)
+            return self._selection_pen()
         # v0.9.8: map-search match — accent frame (below the selection:
         # the current search result is selected and "glowing" amber at the same time).
         if self._search_matched:
@@ -841,6 +846,17 @@ class ServerNode(QGraphicsItemGroup):
         if status_color is not None:
             return QPen(status_color, 2)
         return QPen(Qt.transparent, 2)
+
+    def _selection_pen(self) -> QPen:
+        """The SELECTED frame — the declared dashed amber pen the group draws with too.
+
+        The status and hover frames stay SOLID, so selection is told apart by its PATTERN as well
+        as by its width; the pattern and the width are `ui/theme.py`'s ONE declaration (§4.6).
+        """
+        pen = QPen(self.COLOR_SELECTED, theme.SELECTION_FRAME_WIDTH)
+        pen.setStyle(Qt.PenStyle.CustomDashLine)
+        pen.setDashPattern([float(v) for v in theme.SELECTION_DASH_PATTERN])
+        return pen
 
     def _apply_visual_state(self):
         self._bg.setPen(self._state_pen())
@@ -1039,6 +1055,48 @@ class ServerNode(QGraphicsItemGroup):
             pass  # Qt teardown — the item is already destroyed
 
     # ── v1.6.6 (ROADMAP task 7): the DATA mount of the collected facts ───────────
+
+    def _info_lines(self) -> list:
+        """The info plaque's lines for the CURRENT data — the ONE builder both densities measure.
+
+        An UNMANAGED card has NO hardware lines BY CONSTRUCTION — nothing was ever collected from a
+        box this user does not administer, so the OS / CPU / RAM / DISK family is not painted; what
+        IDENTIFIES the neighbour stays (its address and the comment). The COMPACT density hides the
+        plaque but measures it, so the width is the ordinary card's (`AGENTS.md` §4.21).
+        """
+        lines = []
+        if not self.unmanaged:
+            # The OS line carries the OS ALONE: the CPU model does not ride it (`f"{os} · {model}"` was
+            # elided away — the line is elided to the card width and at the measured 360 px cap the OS
+            # name alone already overflows, so the model never reached the card). The line that already
+            # owns the CPU fact is built from `cpu` and `cpu_model` in that order under the empty-field
+            # rule (an empty field adds no line), so the line count and the measured height do not move.
+            if getattr(self.data, "os_name", ""):
+                lines.append(self.data.os_name)
+            cpu_text = " · ".join(
+                part for part in (self.data.cpu, getattr(self.data, "cpu_model", "")) if part)
+            if cpu_text: lines.append(f"CPU: {cpu_text}")
+            if self.data.ram: lines.append(f"RAM: {self.data.ram}")
+            # The capacity line — the chosen DEVICE's figure when the card names one, the plain
+            # figure otherwise; the name is composed here, never stored into `disk` (v1.7.1.2).
+            disk_line = self._disk_line()
+            if disk_line: lines.append(disk_line)
+            # The DATA mount — the SECOND filesystem, and the one the capacity question is usually about.
+            disk_mount_line = self._disk_mount_line()
+            if disk_mount_line: lines.append(disk_mount_line)
+        if self.data.ip: lines.append(f"IP: {self.data.ip}")
+        if self.data.ssh_port != 22: lines.append(f"SSH:{self.data.ssh_port}")
+        # UI polish: no emoji prefix on the comment (a consistent style without emoji)
+        if self.data.comment: lines.append(self.data.comment)
+        return lines
+
+    def _empty_info_text(self) -> str:
+        """What the plaque says with no line to show — a STATEMENT, never a promise (v1.6.5).
+
+        An unmanaged card says WHAT IT IS rather than claiming that no data was collected yet
+        (a collection that will never happen for this card).
+        """
+        return _t("node.unmanaged.status") if self.unmanaged else _t("node.no_data")
 
     def _disk_line(self) -> str:
         """The `DISK` info line — the chosen DEVICE's figure, or the plain figure (v1.7.1.2).
@@ -1257,40 +1315,7 @@ class ServerNode(QGraphicsItemGroup):
         alias_text = self.data.alias or "Unnamed"
         host_text = f"@{self.data.host}"
 
-        info_lines = []
-        # An UNMANAGED card has NO hardware lines BY CONSTRUCTION — nothing was ever collected from a box
-        # this user does not administer, so the OS / CPU / RAM / DISK family is not painted at all. What
-        # IDENTIFIES the neighbour stays: its address and the COMMENT (the "what is this box for" line).
-        # The measured height formula (`58 + info + 12`) and the `MIN_NODE_HEIGHT` floor are untouched —
-        # they follow the lines that remain (`AGENTS.md` §4.21).
-        unmanaged = self.unmanaged
-        if not unmanaged:
-            # The OS line carries the OS ALONE: the CPU model does not ride it (`f"{os} · {model}"` was
-            # elided away — the line is elided to the card width and at the measured 360 px cap the OS
-            # name alone already overflows, so the model never reached the card). The line that already
-            # owns the CPU fact is built from `cpu` and `cpu_model` in that order under the empty-field
-            # rule (an empty field adds no line), so the line count and the measured height do not move.
-            if getattr(self.data, "os_name", ""):
-                info_lines.append(self.data.os_name)
-            cpu_text = " · ".join(
-                part for part in (self.data.cpu, getattr(self.data, "cpu_model", "")) if part)
-            if cpu_text: info_lines.append(f"CPU: {cpu_text}")
-            if self.data.ram: info_lines.append(f"RAM: {self.data.ram}")
-            # The capacity line — the chosen DEVICE's figure when the card names one, the plain
-            # figure otherwise; the name is composed here, never stored into `disk` (v1.7.1.2).
-            disk_line = self._disk_line()
-            if disk_line: info_lines.append(disk_line)
-            # The DATA mount — the SECOND filesystem, and the one the capacity question is usually about.
-            # ONE more info line, built from the measured pair, so the measured height formula
-            # (`58 + info + 12`) follows the line count exactly as it always has; the info freshness
-            # covers it for free (it is a collected fact with the same date) and the COMPACT density drops
-            # it with the rest of the block. `LIST_COLUMNS` is untouched: not an inventory column.
-            disk_mount_line = self._disk_mount_line()
-            if disk_mount_line: info_lines.append(disk_mount_line)
-        if self.data.ip: info_lines.append(f"IP: {self.data.ip}")
-        if self.data.ssh_port != 22: info_lines.append(f"SSH:{self.data.ssh_port}")
-        # UI polish: no emoji prefix on the comment (a consistent style without emoji)
-        if self.data.comment: info_lines.append(self.data.comment)
+        info_lines = self._info_lines()
 
         fm_alias = QFontMetrics(self._alias.font())
         fm_host = QFontMetrics(self._host_label.font())
@@ -1299,11 +1324,7 @@ class ServerNode(QGraphicsItemGroup):
         def _set_texts(a_text, h_text, i_lines):
             self._alias.setPlainText(a_text)
             self._host_label.setPlainText(h_text)
-            # v1.6.5: an unmanaged card with nothing to show says WHAT IT IS instead of
-            # claiming that no data was collected yet ("no data collected yet" would be a
-            # promise of a collection that will never happen for this card).
-            empty = _t("node.unmanaged.status") if unmanaged else _t("node.no_data")
-            self._info.setPlainText("\n".join(i_lines) if i_lines else empty)
+            self._info.setPlainText("\n".join(i_lines) if i_lines else self._empty_info_text())
 
         def _needed_width() -> int:
             """Width formula as before the fix: right edge of content + 24 px."""
@@ -1492,12 +1513,11 @@ class ServerNode(QGraphicsItemGroup):
     def _update_appearance_compact(self):
         """The COMPACT card: alias, host and the status marks — no info plaque (v1.6, task 2).
 
-        Why it is a mode of its own instead of "hide two items": the WIDTH of a card is
-        computed from its content (the longest info line stretches it), so a dense map
-        needs the info block to leave the measurement as well as the paint. The measured
-        HEIGHT formula of the expanded card (`58 + info + 12`) holds here with an EMPTY
-        info block — one `58 + 0 + 12` against the same `MIN_NODE_HEIGHT` floor — and the
-        FREE BAND rule is untouched: a badge never enters the height.
+        The plaque leaves the PAINT but never the MEASUREMENT: the width comes from the SAME
+        content as the ordinary layout (`_info_lines()`), so this mode may not elide an
+        identifier earlier than the ordinary card does. What makes the card shorter is
+        `COMPACT_NODE_HEIGHT`, the mode's OWN floor — the FREE BAND rule is untouched (a badge
+        never enters the height).
         """
         self._show_compact()
         self._info_tip_full = ""
@@ -1509,11 +1529,16 @@ class ServerNode(QGraphicsItemGroup):
         fm_host = QFontMetrics(self._host_label.font())
         self._alias.setPlainText(alias_text)
         self._host_label.setPlainText(host_text)
+        # The hidden plaque still carries the text the width formula measures (never painted).
+        _lines = self._info_lines()
+        self._info.setPlainText("\n".join(_lines) if _lines else self._empty_info_text())
         overhead = max(0.0, self._alias.boundingRect().width()
                        - fm_alias.horizontalAdvance(alias_text))
         alias_right = self._alias.pos().x() + self._alias.boundingRect().width()
         host_right = self._host_label.pos().x() + self._host_label.boundingRect().width()
-        width = self._clamp_width(max(alias_right, host_right) + 24)
+        content_right = max(alias_right, host_right,
+                            self.INFO_X + self._info.boundingRect().width())
+        width = self._clamp_width(int(content_right + 24))
         label_max = max(int(width - self.LABEL_X - self.DOT_ZONE_LEFT - self.ELIDE_GAP - overhead), 1)
 
         if fm_alias.horizontalAdvance(alias_text) > label_max:
@@ -1529,8 +1554,7 @@ class ServerNode(QGraphicsItemGroup):
         else:
             self._host_label.setToolTip("")
 
-        needed_height = 58 + 0 + 12          # the SAME formula with an empty info block
-        self._set_geometry(width, max(int(needed_height), self.MIN_NODE_HEIGHT))
+        self._set_geometry(width, self.COMPACT_NODE_HEIGHT)
 
         self._status_dot.setPos(self._current_width - 46, 23)
         self._ssh_status.setPos(self._current_width - 24, 23)

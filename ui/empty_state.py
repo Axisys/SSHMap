@@ -1,11 +1,11 @@
 # -*- coding: utf-8 -*-
 """The first-run empty state of the map (DOCUMENTATION.md §36): a floating card over the canvas
-with the vector "server" icon, a title and the THREE doors that start the work — "Add your first
-server" (the AddServer dialog), "Open the example map" and "Open an existing map" (`open_map_requested`).
+with the vector "server" icon, a title and the FOUR doors that start the work — "Add your first
+server" (the AddServer dialog), the TXT import, "Open an existing map" and "Open the example map".
 
-The two labels of the import line are not copies: they are the translated File-menu strings themselves
-(`file.import_servers` / `file.import_ssh_config`), so a re-worded menu item can never leave a stale hint
-behind. The command palette is named by its LIVE hotkey (`palette_hotkey()` reads the action registry).
+The import buttons are not copies: they carry the translated File-menu strings themselves
+(`file.import_servers` / `file.import_ssh_config`), so a re-worded menu item can never leave a stale
+label behind. The command palette is named by its LIVE hotkey (`palette_hotkey()` reads the registry).
 
 Pinned: it NEVER blocks the canvas — the card is `WA_TransparentForMouseEvents` (a click reaches the map),
 so the buttons are SIBLINGS of the card, placed under it by `place()`; it is bound to the SERVER COUNT of
@@ -99,6 +99,8 @@ class EmptyStateOverlay(QWidget):
     Signals:
         add_server_requested — the "Add your first server" button was clicked (the
         window opens the AddServer dialog through its ordinary path);
+        import_requested — v1.9.7: the TXT import was clicked (the window runs its
+        ORDINARY File → Import Servers from TXT… path);
         open_map_requested — v1.5.6: "Open an existing map" was clicked (the window
         runs its ORDINARY project-open path — the File → Open entry point);
         example_requested — v1.5rc3: "Open the example map" was clicked (the window
@@ -106,6 +108,9 @@ class EmptyStateOverlay(QWidget):
     """
 
     add_server_requested = Signal()
+    #: v1.9.7 (ROADMAP task 6): the TXT import — a DOOR of its own, never a phrase inside
+    #: `empty.state.import_hint` that the user has to find in a paragraph.
+    import_requested = Signal()
     #: v1.5.6 (ROADMAP task 2): the third door — an existing project file on disk.
     open_map_requested = Signal()
     #: v1.5rc3 (ROADMAP task 1): the second way out of an empty map — the demo project.
@@ -142,6 +147,16 @@ class EmptyStateOverlay(QWidget):
         if theme_qss is not None:
             theme_qss.refresh(self.btn_add_first, "empty_state.button")
         self.btn_add_first.hide()
+
+        # v1.9.7 (ROADMAP task 6): "Import Servers from TXT…" is a BUTTON beside the others — the
+        # same door the File menu opens, and its label IS that menu item's live string (never a
+        # copy), so the first screen cannot offer an action as a phrase the user has to find.
+        self.btn_import = QPushButton(_t("file.import_servers"), self._view)
+        self.btn_import.setObjectName("EmptyStateImportButton")
+        self.btn_import.setMinimumHeight(self.BUTTON_H)
+        self.btn_import.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_import.clicked.connect(self.import_requested)
+        self.btn_import.hide()
 
         # v1.5.6 (ROADMAP task 2): "Open an existing map" — the door BETWEEN the two:
         # a user who already saved a project must not travel through File → Open to find
@@ -184,10 +199,12 @@ class EmptyStateOverlay(QWidget):
         return _t("empty.state.title")
 
     def hint_text(self) -> str:
-        """The import line — built from the REAL File-menu labels (never a copy)."""
-        return _t("empty.state.import_hint",
-                  import_txt=_t("file.import_servers"),
-                  import_ssh=_t("file.import_ssh_config"))
+        """The import line — built from the REAL File-menu label (never a copy).
+
+        v1.9.7 (ROADMAP task 6): the TXT half left the sentence for a button of its own; what
+        remains names the SSH-config import, whose menu label fills `{import_ssh}`.
+        """
+        return _t("empty.state.import_hint", import_ssh=_t("file.import_ssh_config"))
 
     def palette_text(self) -> str:
         """v1.5rc3 (ROADMAP task 4): the palette and the cheat-sheet line.
@@ -212,18 +229,20 @@ class EmptyStateOverlay(QWidget):
     def retranslate(self):
         """Re-read the strings (language switch)."""
         self.btn_add_first.setText(_t("empty.state.add_first"))
+        self.btn_import.setText(_t("file.import_servers"))
         self.btn_open_map.setText(_t("empty.state.open_map"))
         self.btn_example.setText(_t("example.open"))
         self.update()
 
     def buttons(self) -> tuple:
-        """The three doors of the first screen, in reading order (v1.5.6).
+        """The four doors of the first screen, in reading order (v1.5.6, v1.9.7).
 
         ONE declaration: `place()`, `set_state_visible()` and the raise/focus walks all
-        read THIS tuple, so a fourth door would be added in one place. The order is the
-        story the screen tells — add a server, open a saved map, look at the example.
+        read THIS tuple, so a fifth door would be added in one place. The order is the
+        story the screen tells — add a server, import a list of them, open a saved map,
+        look at the example.
         """
-        return (self.btn_add_first, self.btn_open_map, self.btn_example)
+        return (self.btn_add_first, self.btn_import, self.btn_open_map, self.btn_example)
 
     # ── Visibility ───────────────────────────────────────────────────────────
 
@@ -257,12 +276,12 @@ class EmptyStateOverlay(QWidget):
     # ── Geometry ─────────────────────────────────────────────────────────────
 
     def place(self, view_w: int, view_h: int) -> None:
-        """Center the card (a bit above the middle) and put the THREE buttons under it.
+        """Center the card (a bit above the middle) and put the FOUR buttons under it.
 
         Called by the window on every view resize — the same split as the minimap
         and the legend: the window owns the placement, the widget owns its painting.
         The buttons share ONE row in the order of `buttons()`: the primary action first,
-        then "open an existing map", then the example. They are squeezed into the card
+        then the imports, then the example. They are squeezed into the card
         when the view is narrow (their labels elide — a QPushButton elides its own text).
         """
         title_fm = QFontMetrics(self._title_font)
@@ -276,7 +295,7 @@ class EmptyStateOverlay(QWidget):
         widths = [max(btn.sizeHint().width(), self.BUTTON_MIN_W) for btn in buttons]
         gaps = self.GAP * (len(buttons) - 1)
         row_hint = sum(widths) + gaps
-        # The row of THREE full labels is what a wide window shows, so the card is wide
+        # The row of FOUR full labels is what a wide window shows, so the card is wide
         # enough for it (the sentences are measured too — a long hint still wins).
         width = max(max_text_w, row_hint, self.MIN_WIDTH) + 2 * self.PADDING_X
         # The card must stay INSIDE the view (the map can be as narrow as 240 px): the

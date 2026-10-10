@@ -179,8 +179,7 @@ class LayoutMixin:
         # v0.7: drag mode for creating a connection (Shift+drag a node) — a status-bar hint
         self.view.connect_drag_started.connect(
             lambda: self.statusBar().showMessage(self.t("hint.connect_drag")))
-        self.view.connect_drag_finished.connect(
-            lambda: self.statusBar().showMessage(self.t("status.ready")))
+        self.view.connect_drag_finished.connect(self._show_ready_status)
 
         # v1.2.4.1 (task 1): the map container [strip | view]. The strip — at the left
         # edge (splitter-handle side: target state [sidebar | map-strip]);
@@ -257,15 +256,9 @@ class LayoutMixin:
         # because its default corner (LEFT|TOP) yields to the plaque by stepping below it.
         self._setup_bookmarks_panel()
 
-        # Status bar
-        if self._i18n_available:
-            try:
-                from i18n import t as __t
-                self.statusBar().showMessage(__t("status.ready"))
-            except Exception:
-                pass
-        else:
-            self.statusBar().showMessage("Ready. Double-click for node properties.")
+        # Status bar — v1.9.7 (ROADMAP task 6): the idle sentence comes from ONE composer and is
+        # EMPTY while the map holds no card (the first screen owns that moment).
+        self._show_ready_status()
 
         # UI polish: permanent indicators on the right of the status bar — node/
         # connection/status counters and the zoom percentage (updated from MapView.zoomChanged).

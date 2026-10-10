@@ -208,12 +208,15 @@ check("density(compact): the alias and the host stay on the card (non-empty, bot
       and bool(_rich._alias.toPlainText().strip())
       and _rich._host_label.toPlainText().startswith("@"),
       f"{_rich._alias.toPlainText()!r} / {_rich._host_label.toPlainText()!r}")
-check("density(compact): the width follows the name/host only (never the info block)",
-      _compact_size[0] <= _normal_size[0] and _compact_size[0] >= _rich.MIN_NODE_WIDTH,
+check("density(compact): the height is the mode's OWN floor (COMPACT_NODE_HEIGHT, v1.9.7)",
+      _compact_size[1] == _rich.COMPACT_NODE_HEIGHT
+      and _compact_size[1] < _normal_size[1],
       f"{_normal_size} -> {_compact_size}")
-check("density(compact): the height is the SAME formula with an empty info block "
-      "(58 + 0 + 12, floored by MIN_NODE_HEIGHT)",
-      _compact_size[1] == max(58 + 0 + 12, _rich.MIN_NODE_HEIGHT), str(_compact_size[1]))
+check("density(compact): the width is measured from the SAME content as the ordinary card "
+      "(the mode may not elide an identifier earlier)",
+      _compact_size[0] >= _normal_size[0] and _compact_size[0] >= _rich.MIN_NODE_WIDTH
+      and _rich._alias.toPlainText() and _rich._host_label.toPlainText(),
+      f"{_normal_size} -> {_compact_size}")
 check("density: the switch rides the ordinary refresh walk (refresh_theme re-lays the card out)",
       _rich.density() == "compact")
 

@@ -194,7 +194,7 @@ class I18nMixin:
         except (AttributeError, RuntimeError):
             pass  # Qt teardown / a splitter without handles
         try:
-            self.statusBar().showMessage(self.t("status.ready"))
+            self._show_ready_status()
         except RuntimeError:
             pass  # Qt teardown — the status bar is already destroyed
 

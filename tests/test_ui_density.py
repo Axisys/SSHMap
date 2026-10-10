@@ -224,10 +224,15 @@ check("the ONE interactive piece is a SIBLING (a child of the view, not of the c
 check("the button carries the v1.4.5 label", 
       overlay.btn_add_first.text() == i18n.t("empty.state.add_first"),
       overlay.btn_add_first.text())
-check("the hint line points at the REAL File-menu labels (never a copy)",
-      i18n.t("file.import_servers") in overlay.hint_text()
-      and i18n.t("file.import_ssh_config") in overlay.hint_text(),
+check("the hint line points at the REAL File-menu label of the SSH-config import (never a copy)",
+      i18n.t("file.import_ssh_config") in overlay.hint_text()
+      and i18n.t("file.import_servers") not in overlay.hint_text(),
       overlay.hint_text())
+check("v1.9.7: the TXT import is a BUTTON of its own, labelled with the File-menu string",
+      overlay.btn_import.isVisible()
+      and overlay.btn_import.text() == i18n.t("file.import_servers")
+      and overlay.btn_import in overlay.buttons(),
+      overlay.btn_import.text())
 check("the card is placed inside the view (a floating child, not a scene item)",
       0 <= overlay.x() and overlay.x() + overlay.width() <= win.view.width()
       and not any(it is overlay for it in win.scene.items()))
@@ -279,9 +284,10 @@ check("removing the last server shows it again", overlay.is_state_visible())
 i18n.set_language("ru")
 win._apply_ui_translations()
 app.processEvents()
-check("the hint follows a language switch",
+check("the hint follows a language switch (the import door with it)",
       overlay.btn_add_first.text() == i18n.t("empty.state.add_first")
-      and i18n.t("file.import_servers") in overlay.hint_text(),
+      and i18n.t("file.import_ssh_config") in overlay.hint_text()
+      and overlay.btn_import.text() == i18n.t("file.import_servers"),
       overlay.hint_text())
 i18n.set_language("en")
 win._apply_ui_translations()
@@ -686,9 +692,9 @@ check("status.counts lost its status figures (they are widgets of their own now)
       and "{servers}" in langs["en"]["status.counts"]
       and all("{count}" in langs[c][f"statusbar.filter.{s}"]
               for c in langs for s in ("online", "warn", "offline")))
-check("the import hint carries both placeholders in every language",
-      all("{import_txt}" in langs[c]["empty.state.import_hint"]
-          and "{import_ssh}" in langs[c]["empty.state.import_hint"] for c in langs))
+check("the import hint carries ONE placeholder now — the TXT half is a button (v1.9.7)",
+      all("{import_ssh}" in langs[c]["empty.state.import_hint"]
+          and "{import_txt}" not in langs[c]["empty.state.import_hint"] for c in langs))
 check_i18n_parity(langs)
 check_release_state(ROOT)
 

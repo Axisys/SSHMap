@@ -243,8 +243,10 @@ class StatusBarMixin:
         self._apply_map_dimming()
         if announce:
             try:
-                self.statusBar().showMessage(
-                    self.t("statusbar.problems.active") if active else self.t("status.ready"))
+                if active:
+                    self.statusBar().showMessage(self.t("statusbar.problems.active"))
+                else:
+                    self._show_ready_status()
             except Exception:  # noqa: BLE001 — the hint must not break the lens
                 pass
         return True
@@ -283,6 +285,34 @@ class StatusBarMixin:
             pass  # Qt teardown — the chip is already destroyed
         return count
 
+    def _status_ready_text(self) -> str:
+        """The bar's idle sentence — EMPTY while the map holds no card (v1.9.7, ROADMAP task 6).
+
+        The sentence names the node-properties gesture, and a hint for a node that is not there is
+        exactly what the first screen must not say: an empty map shows the first-run hint on the
+        canvas instead. ONE composer, so every restore path answers the same question.
+        """
+        try:
+            if len(list(self.scene.nodes())) == 0:
+                return ""
+        except (AttributeError, RuntimeError):
+            pass  # the scene is not built yet / already destroyed — the sentence still stands
+        if getattr(self, "_i18n_available", False):
+            return self.t("status.ready")
+        return "Ready. Double-click for node properties."
+
+    def _show_ready_status(self):
+        """Post the idle sentence, or CLEAR the bar when the map has nothing to point at."""
+        try:
+            bar = self.statusBar()
+        except (AttributeError, RuntimeError):
+            return  # Qt teardown — the bar is already destroyed
+        text = self._status_ready_text()
+        if text:
+            bar.showMessage(text)
+        else:
+            bar.clearMessage()
+
     def _update_counts_label(self):
         """UI polish: the permanent counters of the status bar.
 
@@ -313,3 +343,5 @@ class StatusBarMixin:
         # attention — a TOTAL like the three status counters beside it, never the view.
         self._sync_problems_chip()
         self._sync_empty_state()
+        # v1.9.7 (ROADMAP task 6): the minimap leaves an empty map and returns with the first card.
+        self._sync_minimap_visibility()

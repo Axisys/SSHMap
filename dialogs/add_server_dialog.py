@@ -27,7 +27,7 @@ except ImportError:
 from PySide6.QtWidgets import (
     QDialog, QFormLayout, QLineEdit, QPushButton, QSpinBox,
     QFileDialog, QDialogButtonBox, QHBoxLayout, QVBoxLayout,
-    QLabel, QComboBox, QCheckBox, QWidget,
+    QLabel, QComboBox, QCheckBox, QGroupBox, QWidget,
 )
 
 
@@ -156,21 +156,43 @@ class AddServerDialog(QDialog):
         main_layout.addWidget(sep)
         main_layout.addSpacing(6)
 
-        # ── Server properties form ──
-        layout = QFormLayout()
+        # ── Server properties: FOUR declared sections (v1.9.7, ROADMAP task 4) ──
+        # Sixteen flat rows became four named groups, so the critical path (who the card is, then
+        # the connection it needs) is reachable in one pass. The order is the reading order: the
+        # form is grouped, never re-ordered, and the profile block above keeps its place.
+        self.identity_group = QGroupBox(self.t("server.section.identity"))
+        self.identity_form = QFormLayout(self.identity_group)
+        self.connection_group = QGroupBox(self.t("server.section.connection"))
+        self.connection_form = QFormLayout(self.connection_group)
+        self.hardware_group = QGroupBox(self.t("server.section.hardware"))
+        self.hardware_form = QFormLayout(self.hardware_group)
+        self.notes_group = QGroupBox(self.t("server.section.notes"))
+        self.notes_form = QFormLayout(self.notes_group)
 
         self.alias = QLineEdit()
+        self.alias.setPlaceholderText(
+            self.t("server.alias_hint") if self._i18n_available else "e.g. staging-web-01")
         self.host = QLineEdit()
+        self.host.setPlaceholderText(
+            self.t("server.host_hint") if self._i18n_available else "e.g. 192.168.3.52")
         self.user = QLineEdit()  # auto-filled from profile, editable for manual override
+        self.user.setPlaceholderText(
+            self.t("server.user_hint") if self._i18n_available else "e.g. root")
         self.password = QLineEdit()
+        # The password field deliberately carries NO placeholder: a hint that vanishes on focus,
+        # inside a masked field, reads worse than no hint at all (ROADMAP task 3).
         self.password.setEchoMode(QLineEdit.Password)
         self.key_path = QLineEdit()
+        self.key_path.setPlaceholderText(
+            self.t("server.key_hint") if self._i18n_available else "e.g. ~/.ssh/id_ed25519")
         self.port = QSpinBox()
         self.port.setValue(22)
         self.port.setRange(1, 65535)
 
-        layout.addRow(self.t("server.alias"), self.alias)
-        layout.addRow(self.t("server.host"), self.host)
+        # The two fields that identify the card carry the REQUIRED marker; the placeholder is a
+        # hint, never a substitute for the label (ROADMAP task 3).
+        self.identity_form.addRow(self._required_label("server.alias"), self.alias)
+        self.identity_form.addRow(self._required_label("server.host"), self.host)
 
         # The KIND of the card and its ONE opt-in. "Unmanaged server (no SSH access)": the card describes a
         # box this user does not administer, so the credential fields below are disabled AND cleared, the
@@ -184,7 +206,7 @@ class AddServerDialog(QDialog):
             self.t("dialog.unmanaged.tooltip") if self._i18n_available
             else "No credentials are stored, the card is never probed and its menu has no SSH verbs.")
         self.unmanaged.toggled.connect(self._on_unmanaged_toggled)
-        layout.addRow("", self.unmanaged)
+        self.connection_form.addRow("", self.unmanaged)
 
         self.unmanaged_ping = QCheckBox(
             self.t("dialog.unmanaged_ping") if self._i18n_available
@@ -192,20 +214,30 @@ class AddServerDialog(QDialog):
         self.unmanaged_ping.setToolTip(
             self.t("dialog.unmanaged_ping.tooltip") if self._i18n_available
             else "One ICMP ping, on request, from the card's menu. The answer is a manual note — never a status.")
-        layout.addRow("", self.unmanaged_ping)
+        self.connection_form.addRow("", self.unmanaged_ping)
 
-        layout.addRow(self.t("server.user"), self.user)
-        layout.addRow(self.t("server.password"), self.password)
-        layout.addRow(self.t("server.port"), self.port)
+        self.connection_form.addRow(self.t("server.user"), self.user)
+        self.connection_form.addRow(self.t("server.password"), self.password)
+        self.connection_form.addRow(self.t("server.port"), self.port)
 
         # Key path button (UI polish: emojis removed from the i18n server.key value)
         key_btn = QPushButton(self.t("server.key"))
+        key_btn.setToolTip(
+            self.t("server.key_tooltip") if self._i18n_available
+            else "Pick the private key file this server authenticates with.")
         key_btn.clicked.connect(self._select_key_file)
         self.key_btn = key_btn   # v1.6.5: the credential family is disabled as ONE group
         key_hbox = QHBoxLayout()
         key_hbox.addWidget(self.key_path)
         key_hbox.addWidget(key_btn)
-        layout.addRow("", key_hbox)
+        self.connection_form.addRow(self.t("server.key_label"), key_hbox)
+
+        # v1.9.7 (ROADMAP task 4): the footer says what its buttons DO — `Save` closes and writes,
+        # `Save & connect` names the second action's promise in its tooltip.
+        self.ssh_connect_btn = QPushButton(
+            self.t("ssh.connect") if self._i18n_available else "Connect via SSH")
+        self.ssh_connect_btn.setToolTip(self._save_and_connect_hint())
+        self.ssh_connect_btn.clicked.connect(self._on_connect_ssh)
 
         self.os_name = QLineEdit()  # v0.9: OS (manual or auto-collected)
         self.cpu = QLineEdit()
@@ -259,7 +291,7 @@ class AddServerDialog(QDialog):
         self.disk_device.setEditable(True)
         self.disk_device.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
         _device_hint = (self.t("server.disk_device_hint") if self._i18n_available
-                        else "device (sda) — the choice wins")
+                        else "Device (sda)")
         self.disk_device.setPlaceholderText(_device_hint)
         if self.disk_device.lineEdit() is not None:
             # An EDITABLE combo paints its own line edit, which carries its own placeholder.
@@ -279,27 +311,36 @@ class AddServerDialog(QDialog):
         device_hbox.addWidget(self._disk_device_arrow)
         device_hbox.addWidget(self.disk, 3)
 
-        layout.addRow(self.t("server.os"), self.os_name)
-        layout.addRow(self.t("server.cpu"), self.cpu)
-        layout.addRow(self.t("server.ram"), self.ram)
-        layout.addRow(self.t("server.disk"), self.disk_device_row)
-        layout.addRow(self.t("server.disk_mount"), self.disk_mount_row)
-        layout.addRow(self.t("server.ip"), self.ip)
-        layout.addRow(self.t("server.comment"), self.comment)
-        layout.addRow(self.t("server.tags") if self._i18n_available else "Tags:", self.tags_edit)
+        self.hardware_form.addRow(self.t("server.os"), self.os_name)
+        self.hardware_form.addRow(self.t("server.cpu"), self.cpu)
+        self.hardware_form.addRow(self.t("server.ram"), self.ram)
+        self.hardware_form.addRow(self.t("server.disk"), self.disk_device_row)
+        self.hardware_form.addRow(self.t("server.disk_mount"), self.disk_mount_row)
 
-        main_layout.addLayout(layout)
+        self.notes_form.addRow(self.t("server.ip"), self.ip)
+        self.notes_form.addRow(self.t("server.comment"), self.comment)
+        self.notes_form.addRow(self.t("server.tags") if self._i18n_available else "Tags:",
+                               self.tags_edit)
 
-        # v0.9.5.6: "Connect via SSH" button — on the left; OK/Cancel — on the right
+        for _group in (self.identity_group, self.connection_group,
+                       self.hardware_group, self.notes_group):
+            main_layout.addWidget(_group)
+
+        # v0.9.5.6: "Connect via SSH" button — on the left; Save/Cancel — on the right
         # (QDialogButtonBox keeps the standard order).
         btn_row = QHBoxLayout()
-        self.ssh_connect_btn = QPushButton(
-            self.t("ssh.connect") if self._i18n_available else "Connect via SSH")
-        self.ssh_connect_btn.clicked.connect(self._on_connect_ssh)
-
         btns = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         btns.accepted.connect(self._on_ok)
         btns.rejected.connect(self.reject)
+        self.buttons = btns
+        # The footer's own word: `Save` (the dialog writes the card) beside `Cancel`; the second
+        # action's promise is the TOOLTIP, so "does OK connect?" stops being a question.
+        _save = btns.button(QDialogButtonBox.Ok)
+        if _save is not None:
+            _save.setText(self.t("btn.save") if self._i18n_available else "Save")
+        _cancel = btns.button(QDialogButtonBox.Cancel)
+        if _cancel is not None:
+            _cancel.setText(self.t("btn.cancel") if self._i18n_available else "Cancel")
 
         btn_row.addWidget(self.ssh_connect_btn)
         btn_row.addStretch()
@@ -311,6 +352,22 @@ class AddServerDialog(QDialog):
         # disabled (it only means something for an unmanaged card). Applied ONCE here, after
         # every widget the state touches exists; `_load_data()` re-applies it for an edit.
         self._apply_unmanaged_state(self.unmanaged.isChecked())
+
+    def _required_label(self, key: str) -> QLabel:
+        """A form label carrying the REQUIRED marker (`*`) and the tooltip that says what it marks.
+
+        The marker is the label's own suffix — never a new key: the label key stays the ONE home of
+        the field's name (`server.alias` / `server.host`), and the rule behind the star is the ONE
+        sentence of `server.required_hint`.
+        """
+        label = QLabel(f"{self.t(key)} *")
+        label.setToolTip(self.t("server.required_hint") if self._i18n_available
+                         else "Required: the card is identified by its alias and its address.")
+        return label
+
+    def _save_and_connect_hint(self) -> str:
+        """What the `Connect via SSH` button really does: it SAVES the card and then connects."""
+        return self.t("btn.save_and_connect") if self._i18n_available else "Save & connect"
 
     def _on_unmanaged_toggled(self, checked: bool) -> None:
         """v1.6.5 (ROADMAP task 1): the kind of the card changed.
@@ -375,7 +432,8 @@ class AddServerDialog(QDialog):
             label = self.t("ssh.connect") if self._i18n_available else "Connect via SSH"
             try:
                 button.setEnabled(not checked)
-                button.setToolTip(self._refusal(label) if checked else "")
+                button.setToolTip(self._refusal(label) if checked
+                                  else self._save_and_connect_hint())
             except RuntimeError:
                 pass
 

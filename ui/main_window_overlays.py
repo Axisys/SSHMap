@@ -249,7 +249,7 @@ class OverlaysMixin:
         self._map_search_index = -1
         self._apply_map_dimming()
         try:
-            self.statusBar().showMessage(self.t("status.ready"))
+            self._show_ready_status()
         except Exception:  # noqa: BLE001 — the status bar is cosmetic on teardown
             pass
 
@@ -370,6 +370,13 @@ class OverlaysMixin:
 
         self.empty_state = EmptyStateOverlay(self.view)
         self.empty_state.add_server_requested.connect(self._add_server)
+        # v1.9.7 (ROADMAP task 6): the TXT import is a DOOR of the first screen now. The widget
+        # only emits; the file dialog and the import belong to the window, and the door is the
+        # ORDINARY File → Import Servers from TXT… path, so every downstream rule is shared.
+        try:
+            self.empty_state.import_requested.connect(self._import_servers_from_txt)
+        except (RuntimeError, AttributeError):
+            pass  # a stripped build without the signal — the other doors still work
         # v1.5.6 (ROADMAP task 2): the THIRD door of the first screen — an existing
         # project file. The widget only emits; the dialog and the load belong to the
         # window, and the door is the ORDINARY project-open path (the same one File → Open

@@ -92,9 +92,10 @@ check("§1 the panel has a fixed size that fits the view",
       mini.width() == mini.DEFAULT_WIDTH and mini.height() == mini.DEFAULT_HEIGHT
       and view.width() >= mini.width() and view.height() >= mini.height(),
       f"mini={mini.width()}x{mini.height()} view={view.width()}x{view.height()}")
-check("§1 visible by default (no ui_minimap key in the config)",
-      read_cfg({}).get("ui_minimap") is None and win._minimap_enabled is True and mini.isVisible(),
-      f"enabled={win._minimap_enabled} visible={mini.isVisible()}")
+check("§1 the key is on by default; the EMPTY map keeps the panel OFF (v1.9.7, two questions)",
+      read_cfg({}).get("ui_minimap") is None and win._minimap_enabled is True
+      and win.minimap.isVisible() is False and win.minimap.isHidden(),
+      f"enabled={win._minimap_enabled} visible={win.minimap.isVisible()}")
 check("§1 the empty map draws the empty panel (no content, no crash)",
       mini.item_count() == 0 and mini.fit() is None and mini.content_rect().isEmpty(),
       f"items={mini.item_count()} fit={mini.fit()}")
@@ -212,9 +213,14 @@ check("§1 a saved ui_minimap=false builds the window with the panel OFF",
 close_window(win_cfg)
 write_cfg({"ui_minimap": "yes"})   # a broken value: not a bool
 win_bad = new_window()
-check("§1 a broken ui_minimap value falls back to the default (visible)",
-      win_bad._minimap_enabled is True and win_bad.minimap.isVisible() is True,
+check("§1 a broken ui_minimap value falls back to the default (the KEY is on)",
+      win_bad._minimap_enabled is True and win_bad.minimap.isHidden() is True,
       f"enabled={win_bad._minimap_enabled}")
+add_node(win_bad.scene, "mm-first", 0, 0)
+win_bad._update_counts_label()
+check("§1 …and the panel returns with the first card WITHOUT the sync writing the preference",
+      win_bad.minimap.isVisible() and read_cfg({}).get("ui_minimap") == "yes",
+      f"visible={win_bad.minimap.isVisible()} cfg={read_cfg({})}")
 close_window(win_bad)
 clear_cfg()
 
@@ -515,9 +521,12 @@ clear_cfg()
 write_cfg({"ui_minimap_collapsed": True})
 win_fold = new_window()
 check("§1b a saved ui_minimap_collapsed=True builds the window with a FOLDED strip",
-      win_fold.minimap.is_collapsed() and win_fold.minimap.width() == win_fold.minimap.HEADER_W
-      and win_fold.minimap.isVisible(),
+      win_fold.minimap.is_collapsed() and win_fold.minimap.width() == win_fold.minimap.HEADER_W,
       f"collapsed={win_fold.minimap.is_collapsed()} w={win_fold.minimap.width()}")
+add_node(win_fold.scene, "mm-fold", 0, 0)
+win_fold._update_counts_label()
+check("§1b …and the folded strip is on screen once the map holds a card (v1.9.7)",
+      win_fold.minimap.isVisible(), f"visible={win_fold.minimap.isVisible()}")
 write_cfg({"ui_minimap_collapsed": "yes"})   # a broken value: not a bool
 win_bad_fold = new_window()
 check("§1b a broken ui_minimap_collapsed value falls back to the default (unfolded)",

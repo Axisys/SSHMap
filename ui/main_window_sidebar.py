@@ -152,7 +152,7 @@ class SidebarMixin:
                     self.t("statusbar.filter.active",
                            status=self.t(f"legend.status.{self._status_filter}")))
             else:
-                self.statusBar().showMessage(self.t("status.ready"))
+                self._show_ready_status()
         except Exception:  # noqa: BLE001 — the hint must not break the filter
             pass
 

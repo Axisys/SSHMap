@@ -1073,7 +1073,7 @@ class NodeGroup(QGraphicsObject):
     #      a single hit object, the standard drag works over the whole frame area) ──
 
     def _state_colors(self):
-        """(pen_color, pen_width, fill, title_color) for the current state.
+        """(pen_color, pen_width, fill, title_color, pen_style) for the current state.
 
         v1.5.4 (ROADMAP task 1): in the ORDINARY state the frame takes the colour of the
         group's WORST member status when that is a problem (`warn` / `offline`) — the
@@ -1082,34 +1082,43 @@ class NodeGroup(QGraphicsObject):
         greyscale print and a colour-vision deficiency read it too. Selection and hover
         are INTERACTIONS and always win over the aggregate; a group without trouble (or
         without members) keeps its violet frame exactly as before.
+
+        v1.9.7 (ROADMAP task 7): the SELECTED frame is the card's OWN decision — the amber
+        `selection_amber` at `theme.SELECTION_FRAME_WIDTH`, DASHED at the declared
+        `theme.SELECTION_DASH_PATTERN` — so the two surfaces mark a selection ONE way.
         """
         if self.isSelected():
-            return (self.COLOR_SELECTED, 2.5, self.COLOR_FILL_SELECTED,
-                    QColor(theme.GROUP_TITLE_SELECTED))
+            return (self.COLOR_SELECTED, theme.SELECTION_FRAME_WIDTH, self.COLOR_FILL_SELECTED,
+                    QColor(theme.GROUP_TITLE_SELECTED), Qt.PenStyle.CustomDashLine)
         if self._hover:
             color = QColor(self.COLOR_HOVER)
             color.setAlpha(170)
-            return (color, 2.0, self.COLOR_FILL_HOVER, QColor(theme.GROUP_TITLE_HOVER))
+            return (color, 2.0, self.COLOR_FILL_HOVER, QColor(theme.GROUP_TITLE_HOVER),
+                    Qt.PenStyle.SolidLine)
         worst = self.worst_member_status()
         if worst in PROBLEM_STATUSES:
             status_color = theme.STATUS_COLORS.get(worst)
             if status_color:
-                return (QColor(status_color), 2.0, self.COLOR_FILL, self.COLOR_TITLE)
-        return (self.COLOR_BORDER, 1.5, self.COLOR_FILL, self.COLOR_TITLE)
+                return (QColor(status_color), 2.0, self.COLOR_FILL, self.COLOR_TITLE,
+                        Qt.PenStyle.SolidLine)
+        return (self.COLOR_BORDER, 1.5, self.COLOR_FILL, self.COLOR_TITLE,
+                Qt.PenStyle.SolidLine)
 
     def paint(self, painter: QPainter, option, widget=None):
         w, h = self._width, self._height
         if w <= 2 or h <= 2:
             return
-        pen_color, pen_width, fill, title_color = self._state_colors()
+        pen_color, pen_width, fill, title_color, pen_style = self._state_colors()
 
         path = QPainterPath()
         # A 1 px inset — the frame is entirely inside the boundingRect (Qt clips to it)
         path.addRoundedRect(1.0, 1.0, w - 2.0, h - 2.0, self.CORNER_RADIUS, self.CORNER_RADIUS)
 
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
-        pen = QPen(pen_color, pen_width)
+        pen = QPen(pen_color, pen_width, pen_style)
         pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+        if pen_style == Qt.PenStyle.CustomDashLine:
+            pen.setDashPattern([float(v) for v in theme.SELECTION_DASH_PATTERN])
         painter.setPen(pen)
         painter.setBrush(QBrush(fill))
         painter.drawPath(path)

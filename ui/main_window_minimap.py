@@ -43,8 +43,43 @@ class MinimapMixin:
         # so a window restored FOLDED still keeps the band on the right edge it hangs from.
         self._minimap_width = int(MinimapWidget.DEFAULT_WIDTH)
         self.minimap.set_collapsed(bool(self._minimap_collapsed))
-        self.minimap.setVisible(bool(self._minimap_enabled))
+        self._sync_minimap_visibility()
         self._position_minimap()
+
+    def _minimap_wanted(self) -> bool:
+        """The panel's visibility asks TWO questions (v1.9.7, ROADMAP task 6).
+
+        The user's key AND "the map holds at least one card": a minimap of nothing navigates
+        nowhere, so an empty canvas hides the panel WITHOUT touching the saved preference —
+        `ui_minimap` keeps whatever the user chose, and the panel returns with the first card.
+        """
+        if not bool(getattr(self, "_minimap_enabled", True)):
+            return False
+        try:
+            return len(list(self.scene.nodes())) > 0
+        except (AttributeError, RuntimeError):
+            return True   # the scene is not built yet / gone — the key alone decides
+
+    def _sync_minimap_visibility(self):
+        """Apply the two questions to the panel (idempotent, never throws).
+
+        The comparison is `isHidden()` — the EXPLICIT state this method owns. `isVisible()` is
+        false for every child of a window that has not been shown yet, and reading it here would
+        leave the panel's own decision unset (it would appear with the window).
+        """
+        mini = getattr(self, "minimap", None)
+        if mini is None:
+            return
+        try:
+            wanted = self._minimap_wanted()
+            if mini.isHidden() == (not wanted):
+                return   # already in the wanted state — a hidden parent is not a decision
+            mini.setVisible(wanted)
+            if wanted:
+                self._position_minimap()
+                mini.refresh()   # hidden while the map changed — rebuild the layer
+        except RuntimeError:
+            pass  # Qt teardown — the panel is already destroyed
 
     def _read_minimap_settings(self):
         """`ui_minimap*` from the config → (visible, collapsed, position|None).
@@ -111,16 +146,19 @@ class MinimapMixin:
             pass
 
     def _toggle_minimap(self, checked: bool):
-        """v1.4.2: show/hide the minimap + persist `ui_minimap` (a merge write)."""
+        """v1.4.2: show/hide the minimap + persist `ui_minimap` (a merge write).
+
+        v1.9.7 (ROADMAP task 6): the item writes the PREFERENCE; what is on screen is the two
+        questions of `_minimap_wanted()` — so a user on an empty map is not shown a panel with
+        nothing in it, and the choice they made is waiting for the first card.
+        """
         mini = getattr(self, "minimap", None)
         if mini is None:
             return
         visible = bool(checked)
+        self._minimap_enabled = visible
         try:
-            mini.setVisible(visible)
-            if visible:
-                self._position_minimap()
-                mini.refresh()   # the panel may have been hidden while the map changed
+            self._sync_minimap_visibility()
         except RuntimeError:
             return  # Qt teardown — the panel is already destroyed
         self._save_minimap_config({"ui_minimap": visible})

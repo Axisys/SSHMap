@@ -161,33 +161,36 @@ print("== §2 the third door of the first screen: an existing map ==")
 
 win = make_main()
 _overlay = win.empty_state
-check("§2 a fresh empty window shows the hint with THREE doors (ONE declaration)",
-      _overlay.is_state_visible() and len(_overlay.buttons()) == 3
-      and _overlay.buttons() == (_overlay.btn_add_first, _overlay.btn_open_map,
-                                 _overlay.btn_example))
+check("§2 a fresh empty window shows the hint with FOUR doors (ONE declaration, v1.9.7)",
+      _overlay.is_state_visible() and len(_overlay.buttons()) == 4
+      and _overlay.buttons() == (_overlay.btn_add_first, _overlay.btn_import,
+                                 _overlay.btn_open_map, _overlay.btn_example))
 check("§2 the new button carries the new key (and never the raw key as its text)",
       _overlay.btn_open_map.text() == _t("empty.state.open_map")
       and _overlay.btn_open_map.text() not in ("", "empty.state.open_map"),
       _overlay.btn_open_map.text())
-check("§2 all three are visible with the hint (one visibility walk)",
+check("§2 all four are visible with the hint (one visibility walk)",
       all(b.isVisible() for b in _overlay.buttons()))
 
 _add_geo = _overlay.btn_add_first.geometry()
+_imp_geo = _overlay.btn_import.geometry()
 _open_geo = _overlay.btn_open_map.geometry()
 _ex_geo = _overlay.btn_example.geometry()
-check("§2 the new door sits BETWEEN the two (the primary action, then it, then the demo)",
-      _add_geo.right() <= _open_geo.left() and _open_geo.right() <= _ex_geo.left(),
-      f"{_add_geo} {_open_geo} {_ex_geo}")
-check("§2 the three share ONE row (the same top and height) and stay inside the card",
-      len({g.top() for g in (_add_geo, _open_geo, _ex_geo)}) == 1
-      and len({g.height() for g in (_add_geo, _open_geo, _ex_geo)}) == 1
+check("§2 the imported door sits BETWEEN the primary action and the saved map",
+      _add_geo.right() <= _imp_geo.left() and _imp_geo.right() <= _open_geo.left()
+      and _open_geo.right() <= _ex_geo.left(),
+      f"{_add_geo} {_imp_geo} {_open_geo} {_ex_geo}")
+check("§2 the four share ONE row (the same top and height) and stay inside the card",
+      len({g.top() for g in (_add_geo, _imp_geo, _open_geo, _ex_geo)}) == 1
+      and len({g.height() for g in (_add_geo, _imp_geo, _open_geo, _ex_geo)}) == 1
       and _ex_geo.right() <= _overlay.geometry().right()
       and _add_geo.left() >= _overlay.geometry().left(),
       f"card={_overlay.geometry()}")
-check("§2 the WIDE card is measured for the three full labels (not one of them)",
-      _overlay.width() >= (_add_geo.width() + _open_geo.width() + _ex_geo.width()
-                           + 2 * _overlay.GAP),
-      f"card={_overlay.width()} row={_add_geo.width()}+{_open_geo.width()}+{_ex_geo.width()}")
+check("§2 the WIDE card is measured for the four full labels (not one of them)",
+      _overlay.width() >= (_add_geo.width() + _imp_geo.width() + _open_geo.width()
+                           + _ex_geo.width() + 3 * _overlay.GAP),
+      f"card={_overlay.width()} row={_add_geo.width()}+{_imp_geo.width()}"
+      f"+{_open_geo.width()}+{_ex_geo.width()}")
 
 # The narrow view: the row shares what there is and the card never leaves the canvas.
 win.resize(420, 420)
@@ -199,8 +202,8 @@ check("§2 a narrow view shares the row instead of overflowing the card",
       all(g.width() > 0 for g in _geos)
       and all(g.left() >= 0 and g.right() <= _overlay.width() for g in _geos),
       f"card={_overlay.width()} row={_geos}")
-check("§2 ...and the three still stay in the same ORDER (the layout never reorders them)",
-      _geos[0].right() <= _geos[1].left() and _geos[1].right() <= _geos[2].left(),
+check("§2 ...and the FOUR still stay in the same ORDER (the layout never reorders them)",
+      all(a.right() <= b.left() for a, b in zip(_geos, _geos[1:])),
       str(_geos))
 win.resize(1100, 760)
 app.processEvents()

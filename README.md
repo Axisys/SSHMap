@@ -17,7 +17,7 @@ Desktop application (Python + PySide6): an interactive map of your IT infrastruc
 - A group folds into a grid of badges (undoable) and its frame carries the worst member status as a shape plus the counts (`Offline 2 · Warn 1`). "Arrange group" lines the members up (vertical line, horizontal line, rows of N) in one undo step without resizing the frame - a card pushed outside leaves the group, and Ctrl+Z brings the whole arrangement back. **"Arrange Map…"** on the empty map does the same for the whole top level: each group moves as one unit with its members, the free cards fill in around them, one undo step.
 - Multi-selection (Ctrl+click, rubber band), group drag, connect/delete selected and **bulk edit** of tags, comment and quick launch in one undo step. Per-server quick launch opens a URL in the browser or sends a command as the first line of an SSH session. Tags filter the sidebar; the primary tag colours the icon and is written on the card - the environment is never a colour alone.
 - **See what depends on a card**: `Ctrl`+click highlights it together with every node whose connections lead to it (the transitive answer to *"what breaks if I stop this one?"*) and recedes the rest, with the count in the status bar. `Ctrl`+click again, plain-click another card or `Esc` clears - a view change, nothing moves, nothing lands in the undo stack.
-- A density switch (Comfortable / Compact) keeps hundreds of nodes readable (the compact card keeps alias, host and status marks and drops the information block); several connections between the same pair draw as parallel arcs.
+- A density switch (Comfortable / Compact) keeps hundreds of nodes readable: the compact card drops the information block **and** is genuinely shorter (its own height floor), while the name and the address elide exactly as they do on the full card; several connections between the same pair draw as parallel arcs. A selected card (and a selected group) is marked by a **dashed** amber frame, so a highlight is never mistaken for a `Warn` status.
 - Minimap, legend and an **Export** menu holding everything that leaves the application: "Copy Map as Image", PNG, JPEG, PDF, SVG and `.drawio` - print-friendly by default (a light page, high-contrast lines), "use the current theme" is a one-click opt-out. "Save Documentation Image…" writes a fixed 1600×900 @2× poster; the two data reports below sit in the same menu.
 - **Bookmarks**: the links the team uses - a wiki, a dashboard, a hypervisor's console - in one panel: filter as you type, open on double click or Enter, edit in place, reorder, remove. Stored in `~/.sshmap/bookmarks.json`, outside every project - a shared map never carries another machine's links.
 
@@ -68,7 +68,8 @@ Desktop application (Python + PySide6): an interactive map of your IT infrastruc
 
 ### Projects & data
 - One JSON project file (`.json` / `.sshmap`); a recent-files list, a project dropped onto the window, autosave with a ring of backups - an unreadable file offers its newest autosave or backup instead of dead ends.
-- The first screen has three doors: add your first server, **open an existing map**, or open the example map.
+- The first screen has four doors: add your first server, **import a list from a text file**, open an existing map, or open the example map. The minimap and the "double-click for node properties" hint stay away while the map is empty.
+- The Add/Edit Server form is four sections - *Identity*, *Connection*, *Hardware (optional)*, *Notes* - with example placeholders on the fields you meet first, the alias and the host marked as required, a labelled private-key row, and a footer whose `Save` and *Save & connect* say exactly what each one does.
 - Bulk import from a text file (one host per line) and from `~/.ssh/config` (`Include` recursion, checkbox picker); DNS resolves off the GUI thread; a whole import is one undo step.
 - SSH profiles with passwords in the OS keyring - never in a project file.
 
@@ -210,7 +211,7 @@ PySide6 / Qt 6 gotchas worth knowing before writing UI code:
 | `dialogs/` | Add/edit dialogs, connect, profiles, backups, imports, export options |
 | `ui/` | Main window and mixins, sidebar, theme, palette, panels, settings, hotkeys, icons |
 | `i18n/` | `en` (reference), `ru`, `zh`, `de` - one JSON file per language |
-| `tests/` | 141 test files, the parallel runner and the harness - map in `tests/INDEX.md` |
+| `tests/` | 142 test files, the parallel runner and the harness - map in `tests/INDEX.md` |
 | `examples/plugins/` | Eight working example plugins, one lesson each, not installed and never auto-discovered (table: `examples/README.md`) |
 | `third_party/pyte/`, `third_party/pyte-patches/` | The managed pyte 0.8.2 fork: sdist plus explicit patches, provenance in the patches' `MANIFEST.md` |
 | `docs/` | The map image above, rendered from the example map |
